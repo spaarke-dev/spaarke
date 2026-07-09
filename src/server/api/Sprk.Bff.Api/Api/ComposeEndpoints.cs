@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Compose;
 
@@ -14,6 +15,13 @@ namespace Sprk.Bff.Api.Api;
 /// </summary>
 public static class ComposeEndpoints
 {
+    // FR-25 (task 051): the reader is a pure, stateless byte[]->record transform (same shape as
+    // DocxAnnotationWriter). Instantiated directly here rather than DI-registered, keeping this
+    // task's footprint scoped to ComposeEndpoints.cs + the new reader file only (no edits to the
+    // shared IComposeService/ComposeService/ComposeModule.cs orchestration surface, which a
+    // parallel task may be touching in this shared worktree).
+    private static readonly DocxAnnotationReader AnnotationReader = new();
+
     /// <summary>
     /// Maps all Compose endpoints under <c>/api/compose</c>.
     /// </summary>
@@ -125,6 +133,24 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status412PreconditionFailed)
             .Produces(StatusCodes.Status422UnprocessableEntity)
             .Produces(StatusCodes.Status423Locked)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        // (10) POST /api/compose/document/{documentSpeId}/pull-annotations — FR-25 (task 051):
+        // download the CURRENT SPE bytes and parse them for native w:comment/w:ins/w:del
+        // (DocxAnnotationReader), returning the structured payload the Compose UI uses to
+        // re-anchor prior annotations after a Word-for-Web round-trip (task 054 consumes it).
+        // Deterministic Open XML parse — no AI dispatch (ADR-039/ADR-013); SPE I/O stays behind
+        // the SpeFileStore/ISpeFileOperations facade (ADR-007). This is the READ direction;
+        // push-annotations (above) is the WRITE direction.
+        group.MapPost("/document/{documentSpeId}/pull-annotations", PullAnnotations)
+            .WithName("ComposePullAnnotations")
+            .WithSummary("Parse the current SPE document for w:comment/w:ins/w:del and return the structured annotation payload for re-anchoring")
+            .RequireRateLimiting("ai-context")
+            .Produces<PullAnnotationsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
         return routes;
@@ -272,6 +298,97 @@ public static class ComposeEndpoints
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 detail: "An unexpected error occurred while pushing annotations.");
+        }
+    }
+
+    // FR-25 (task 051): download the current SPE bytes and parse them (DocxAnnotationReader) for
+    // native w:comment/w:ins/w:del, returning the structured payload for re-anchoring. Read-only —
+    // no SPE write, no ETag, no AI dispatch (ADR-013/ADR-039). SPE I/O stays behind the
+    // ISpeFileOperations facade (ADR-007), matching the download half of Load/PushAnnotations.
+    private static async Task<IResult> PullAnnotations(
+        string documentSpeId,
+        [FromBody] PullAnnotationsBody? body,
+        ISpeFileOperations spe,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.DriveId)) return BadRequest("driveId is required in the request body.");
+        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+
+        logger.LogInformation(
+            "Compose pull-annotations: tenant={TenantId} drive={DriveId} item={DocumentSpeId} TraceId={TraceId}",
+            body.TenantId, body.DriveId, documentSpeId, httpContext.TraceIdentifier);
+
+        try
+        {
+            var stream = await spe.DownloadFileAsUserAsync(httpContext, body.DriveId, documentSpeId, ct)
+                .ConfigureAwait(false);
+
+            if (stream is null)
+            {
+                logger.LogWarning(
+                    "Compose pull-annotations: SPE drive-item not found or unreadable. TraceId={TraceId}",
+                    httpContext.TraceIdentifier);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Document Not Found",
+                    detail: $"SPE drive-item '{documentSpeId}' was not found or is unreadable.",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+            }
+
+            byte[] sourceBytes;
+            await using (stream.ConfigureAwait(false))
+            {
+                using var buffer = new MemoryStream();
+                await stream.CopyToAsync(buffer, ct).ConfigureAwait(false);
+                sourceBytes = buffer.ToArray();
+            }
+
+            // Pure parse — zero annotations returns empty lists, not an error (FR-25 negative
+            // criterion). A malformed/non-DOCX stream throws DocxAnnotationException, caught below.
+            var result = AnnotationReader.Read(sourceBytes);
+
+            return Results.Ok(new PullAnnotationsResponse(
+                DocumentSpeId: documentSpeId,
+                DriveId: body.DriveId,
+                Comments: result.Comments,
+                Revisions: result.Revisions,
+                CorrelationId: httpContext.TraceIdentifier));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (DocxAnnotationException ex) when (ex.Kind == DocxAnnotationErrorKind.MalformedDocument)
+        {
+            logger.LogWarning(ex, "Compose pull-annotations: malformed DOCX. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Malformed Document",
+                detail: "The stored document could not be read as a valid .docx; no annotations were extracted.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            logger.LogWarning(ex, "Compose pull-annotations: OBO denied. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Forbidden",
+                detail: "Caller lacks SPE ACL read permission for this drive-item.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.3");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose pull-annotations: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while pulling annotations.");
         }
     }
 
@@ -809,4 +926,19 @@ public sealed record PromoteComposeDocumentResponse(
     [property: JsonPropertyName("sessionId")] string SessionId,
     [property: JsonPropertyName("documentRecordId")] Guid? DocumentRecordId,
     [property: JsonPropertyName("wasCreated")] bool WasCreated,
+    [property: JsonPropertyName("correlationId")] string CorrelationId);
+
+/// <summary>Request body for <c>POST /api/compose/document/{id}/pull-annotations</c> (FR-25).</summary>
+public sealed record PullAnnotationsBody(
+    [property: JsonPropertyName("driveId")] string DriveId,
+    [property: JsonPropertyName("tenantId")] string TenantId);
+
+/// <summary>Response shape for <c>POST /api/compose/document/{id}/pull-annotations</c> (FR-25) —
+/// the structured comments + revisions <see cref="DocxAnnotationReader"/> recovered from the
+/// current SPE bytes, for the Compose UI to re-anchor (task 054).</summary>
+public sealed record PullAnnotationsResponse(
+    [property: JsonPropertyName("documentSpeId")] string DocumentSpeId,
+    [property: JsonPropertyName("driveId")] string? DriveId,
+    [property: JsonPropertyName("comments")] IReadOnlyList<RecoveredComment> Comments,
+    [property: JsonPropertyName("revisions")] IReadOnlyList<RecoveredRevision> Revisions,
     [property: JsonPropertyName("correlationId")] string CorrelationId);

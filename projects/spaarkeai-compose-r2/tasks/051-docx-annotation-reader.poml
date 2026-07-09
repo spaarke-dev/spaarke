@@ -3,7 +3,7 @@
     <title>FR-25 DocxAnnotationReader (parse w:comment/w:ins/w:del) + pull endpoint</title>
     <phase>5 Word</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
@@ -12,9 +12,9 @@
     <deps>006</deps>
     <tags>bff-api,api,spe,docx</tags>
     <estimated-effort>1.5-2 days</estimated-effort>
-    <assigned>unassigned</assigned>
-    <started></started>
-    <completed></completed>
+    <assigned>sonnet-5</assigned>
+    <started>2026-07-09</started>
+    <completed>2026-07-09</completed>
   </metadata>
 
   <prompt>
@@ -123,4 +123,29 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-09. NEW `DocxAnnotationReader` (Services/Compose/) parses w:comment +
+    CommentRangeStart/End (author/date/id/commentText/anchorText/paragraphHint, multi-paragraph
+    anchor walk per Spike 6 EDGE-R4) and w:ins/w:del (author/date/text via DeletedText not Text
+    per EDGE-R1; w:date normalized to UTC per EDGE-R2). Pure byte[]->record transform, zero I/O,
+    zero AI reach, zero new package (DocumentFormat.OpenXml already a dep since task 050).
+    Instantiated directly in ComposeEndpoints.cs (not DI-registered) to keep this task's footprint
+    to exactly: NEW DocxAnnotationReader.cs, MODIFIED ComposeEndpoints.cs (route addition only,
+    existing routes preserved), NEW DocxAnnotationReaderTests.cs (9 tests) — no edits to
+    IComposeService/ComposeService/ComposeModule.cs, honoring the shared-worktree write boundary.
+    New `POST /api/compose/document/{documentSpeId}/pull-annotations` downloads current SPE bytes
+    via ISpeFileOperations facade (ADR-007), parses via the reader, returns structured
+    comments+revisions; RequireAuthorization() inherited from the group (ADR-008); malformed DOCX
+    -> 400 ProblemDetails, empty document -> empty payload (200), SPE 404 -> 404, OBO denial ->
+    403. Build: 0 errors. Tests: 9/9 new, 224/224 Compose suite green. ADR-013 Compose facade
+    architecture test: 2/2 green (no AI-internal injection). ADR-007 Graph-isolation architecture
+    test has 1 PRE-EXISTING failure in unrelated files (Services/Communication/*,
+    Infrastructure/Errors/ProblemDetailsHelper.cs, Api/Office/Errors/OfficeProblemDetail.cs) —
+    confirmed via git status these files were not touched by this task. Publish size: 49.75 MB
+    compressed incl. PDBs (baseline 49.63 MB, delta +0.12 MB — negligible, no new package).
+    `dotnet list package --vulnerable --include-transitive`: 1 pre-existing HIGH
+    (Microsoft.Kiota.Abstractions, transitive via Microsoft.Graph) — zero new packages added by
+    this task, csproj untouched.
+  </notes>
 </task>

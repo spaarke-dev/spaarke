@@ -22,7 +22,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 007 | Spike 7 — SPE checkout vs Word-for-Web open collision UX | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 008 | Spike 8 — docx-benchmark harness baseline | 0 Spikes | 🟢 | 005 | 🔲 | STANDARD | sonnet | high |
 | 010 | FR-01 wire 1a "Browse / open file" → transient mount | 1 Entry | 🟢 | 000 | ✅ | FULL | sonnet | high |
-| 011 | FR-02 wire 1a "Search for Document" → reuse 1c load path | 1 Entry | 🟢 | none | 🔲 | FULL | sonnet | high |
+| 011 | FR-02 wire 1a "Search for Document" → reuse 1c load path | 1 Entry | 🟢 | none | ✅ | FULL | sonnet | high |
 | 012 | FR-03 1b upload → transient mount (flip send_workspace_artifact + feed bytes) | 1 Entry | 🟢 | none | ✅ | FULL | opus | high |
 | 013 | FR-05 create-on-save pipeline — extend PromoteIfEphemeralAsync (container/profile/indexing) | 1 Entry | 🟢 | none | 🛑 | FULL | opus | xhigh |
 | 014 | FR-05 optional parent-association prompt (Tier 2c dialog integration) | 1 Entry | 🟡 | 013 | 🔲 | FULL | sonnet | high |
@@ -49,7 +49,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 046 | FR-13 dispatch wiring (compose_selection_offer choreography + direct dispatchConsumer) | 4 Catalog | 🟢 | 016,030 | 🔲 | FULL | opus | high |
 | 047 | Deploy catalog rows to Dataverse (mirror-first) | 4 Catalog | 🟢 | 045 | 🔲 | STANDARD | sonnet | high |
 | 050 | FR-24 DocxAnnotationWriter (comments + track changes, edge cases) + push endpoint | 5 Word | 🟢 | 005 | ✅ | FULL | opus | xhigh |
-| 051 | FR-25 DocxAnnotationReader (parse w:comment/w:ins/w:del) + pull endpoint | 5 Word | 🟢 | 006 | 🔲 | FULL | sonnet | high |
+| 051 | FR-25 DocxAnnotationReader (parse w:comment/w:ins/w:del) + pull endpoint | 5 Word | 🟢 | 006 | ✅ | FULL | sonnet | high |
 | 052 | FR-26 SPE webhook subscription + BackgroundService renewal + delta query | 5 Word | 🟢 | none | ✅ | FULL | opus | high |
 | 053 | FR-26 webhooks/spe-doc-changed + check-changes endpoints | 5 Word | 🟢 | 052 | 🔲 | FULL | sonnet | high |
 | 054 | FR-27 return-from-Word re-anchoring (bands ≥0.85/0.6–0.85/<0.6) + conflict banner | 5 Word | 🟢 | 051,006 | 🔲 | FULL | opus | high |
