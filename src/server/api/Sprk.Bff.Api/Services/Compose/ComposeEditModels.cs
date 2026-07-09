@@ -206,3 +206,32 @@ public sealed record ComposeEditBatchResult(
     [property: JsonPropertyName("applied")] IReadOnlyList<AppliedEdit> Applied,
     [property: JsonPropertyName("skipped")] IReadOnlyList<SkippedEdit> Skipped,
     [property: JsonPropertyName("validationErrors")] IReadOnlyList<EditValidationError> ValidationErrors);
+
+// ---------------------------------------------------------------------------
+// FR-21 (task 022) — result model for ComposeEditTransaction.Execute / .Rollback.
+// BFF-authored (not LLM-facing), so this uses the BFF's normal camelCase JSON convention
+// (see file header).
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// Outcome of <see cref="ComposeEditTransaction.Execute"/> (or a subsequent
+/// <see cref="ComposeEditTransaction.Rollback"/>). Wraps <see cref="ComposeEditBatchResult"/>
+/// with explicit snapshot/commit semantics (task 022 / FR-21; Spike 3 §5.2):
+/// <list type="bullet">
+/// <item><see cref="Snapshot"/> is the pre-batch document — captured BEFORE
+/// <see cref="ComposeEditBatch.Apply"/> runs. Strings are immutable in .NET, so holding this
+/// reference IS the snapshot; no deep clone is needed (unlike adeu's DOM <c>cloneNode</c>,
+/// Spike 3 §5.2 note 2).</item>
+/// <item><see cref="Committed"/> <c>false</c> means <see cref="DocumentText"/> equals
+/// <see cref="Snapshot"/> byte-identically — either because the underlying batch's FATAL
+/// validation gate rolled back automatically (task 021 / FR-20), or because a caller invoked
+/// <see cref="ComposeEditTransaction.Rollback"/> after inspecting a committed result.</item>
+/// <item><see cref="Batch"/> is the underlying FR-20 result (Applied/Skipped/ValidationErrors)
+/// for full reporting, even when the transaction itself was later rolled back.</item>
+/// </list>
+/// </summary>
+public sealed record ComposeEditTransactionResult(
+    [property: JsonPropertyName("committed")] bool Committed,
+    [property: JsonPropertyName("documentText")] string DocumentText,
+    [property: JsonPropertyName("snapshot")] string Snapshot,
+    [property: JsonPropertyName("batch")] ComposeEditBatchResult Batch);

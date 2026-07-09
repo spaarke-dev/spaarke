@@ -3,7 +3,7 @@
     <title>FR-21 ComposeEditTransaction (snapshot/rollback)</title>
     <phase>2 LLM Editing Patterns</phase>
     <gate>green</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
@@ -104,4 +104,16 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Implemented as a thin wrapper: ComposeEditTransaction(ComposeEditBatch batch) with Execute(documentText, edits, validation)
+    -> ComposeEditTransactionResult, plus caller-requested Rollback(ComposeEditTransactionResult) for post-commit abort.
+    Snapshot = plain string reference (no clone needed; strings immutable, ComposeEditBatch always builds a NEW string on apply).
+    DI: ComposeEditBatch + ComposeEditTransaction both registered AddSingleton in ComposeModule.AddComposeModule (both stateless;
+    no per-operation instance fields). Build green; full Compose test filter: 70/70 pass (63 prior + 7 new). Publish size delta
+    (this task only, via git-stash before/after): 46.45 MB -> 46.46 MB compressed incl. PDBs (+0.01 MB) -- well under 60 MB ceiling.
+    ADR-013/ADR-010 clean by construction (verified via code-review + grep). Follow-up for task 025 NetArchTest: ComposeEditTransaction
+    should join the same Tier-1 facade-boundary guard as ComposeEditBatch/ComposeEditValidator (assert no Services/Ai/* references
+    from Services/Compose/*).
+  </notes>
 </task>

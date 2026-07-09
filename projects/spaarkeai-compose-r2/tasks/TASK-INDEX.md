@@ -31,7 +31,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 017 | Deploy — BFF + SpaarkeAi (entry paths) + verify 1a/1b/1c mount | 1 Entry | 🟢 | 010,011,012,013,015 | 🔲 | STANDARD | sonnet | high |
 | 020 | FR-19 IComposeEditValidator + POST /edit-batch/validate | 2 LLM | 🟢 | 002 | ✅ | FULL | sonnet | xhigh |
 | 021 | FR-20 ComposeEditBatch (4-phase pipeline) | 2 LLM | 🟢 | 003 | ✅ | FULL | sonnet | high |
-| 022 | FR-21 ComposeEditTransaction (snapshot/rollback) | 2 LLM | 🟢 | 021 | 🔲 | FULL | sonnet | high |
+| 022 | FR-21 ComposeEditTransaction (snapshot/rollback) | 2 LLM | 🟢 | 021 | ✅ | FULL | sonnet | high |
 | 023 | FR-22 SemanticAppendixGenerator + CriticMarkup read direction | 2 LLM | 🟢 | 004 | ✅ | FULL | sonnet | high |
 | 024 | FR-23 enriched compose-selection/compose-document scope descriptions | 2 LLM | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 025 | Unit tests for Services/Compose LLM services (NFR-05/08 + NetArchTest) | 2 LLM | 🟢 | 020,021,022,023 | 🔲 | STANDARD | sonnet | high |

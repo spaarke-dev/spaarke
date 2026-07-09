@@ -26,6 +26,8 @@ public static class ComposeModule
         // R2 W1 edit/annotation services — pure deterministic text logic (ADR-013:
         // NO AI-internal injection; stateless concretes registered per ADR-010).
         services.AddSingleton<IComposeEditValidator, ComposeEditValidator>();   // FR-19 (task 020)
+        services.AddSingleton<ComposeEditBatch>();                              // FR-20 (task 021)
+        services.AddSingleton<ComposeEditTransaction>();                       // FR-21 (task 022) — snapshot/rollback wrapper; holds no per-operation instance state (see class remarks), safe as a singleton
         services.AddSingleton<SemanticAppendixGenerator>();                     // FR-22 (task 023)
         services.AddSingleton<CriticMarkupRenderer>();                          // FR-22 (task 023)
 
