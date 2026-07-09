@@ -257,6 +257,91 @@ public class OriginClassificationEvalSuiteTests
     }
 
     // =========================================================================
+    // 2b. Task 044 (gate G-R2-A) — the newly-OBSERVABLE gate outcomes, asserted on the REAL engine.
+    //     These document the operator-ratified behaviors the live gate now drives from
+    //     (tier × completeness × confidence): execute-no-dialog / draft-no-dialog / elicit / confirm.
+    //     Deterministic hard-equality on ConfirmationPolicyEngine.Evaluate (never an LLM judge).
+    // =========================================================================
+
+    /// <summary>
+    /// The happy path (task 044): a confident + complete Tier-2b create resolves to
+    /// <see cref="GateOutcome.ExecuteWithUndo"/> — NO confirmation dialog. FAILS if the engine is
+    /// perturbed to confirm a clear, complete low-risk request.
+    /// </summary>
+    [Fact]
+    public void PolicyV2_ConfidentCompleteTier2bCreate_ExecutesWithUndo_NoDialog()
+    {
+        var decision = ConfirmationPolicyEngine.Evaluate(new PolicyEvaluationContext
+        {
+            RiskProfile = new GateRiskProfile { DeclaredTier = GateRiskTier.Tier2b, Reversible = true, RecordOfTruthImpact = true },
+            Origin = new GateOriginRequest { Source = GateRequestSource.UserUtterance, UtteranceEnumeratesCapability = true },
+            ArgsComplete = true,
+        });
+
+        decision.Outcome.Should().Be(GateOutcome.ExecuteWithUndo,
+            "a clear+complete low-risk (2b) request executes with an Undo affordance — no dialog (operator primary goal)");
+    }
+
+    /// <summary>
+    /// Task 044: a Tier-1 email DRAFT executes (drafts) with no dialog — the review-and-send handoff
+    /// is the gate, never an auto-send. FAILS if a Tier-1 draft is confirmed or escalated.
+    /// </summary>
+    [Fact]
+    public void PolicyV2_EmailDraftTier1_Executes_NoDialog()
+    {
+        var decision = ConfirmationPolicyEngine.Evaluate(new PolicyEvaluationContext
+        {
+            RiskProfile = new GateRiskProfile { DeclaredTier = GateRiskTier.Tier1, Reversible = true },
+            Origin = new GateOriginRequest { Source = GateRequestSource.UserUtterance, UtteranceEnumeratesCapability = true },
+            ArgsComplete = true,
+        });
+
+        decision.Outcome.Should().Be(GateOutcome.Execute,
+            "an email draft is Tier 1 — it executes (drafts); the human's review-and-send is the gate, not a dialog");
+    }
+
+    /// <summary>
+    /// Task 044: incomplete required args on a Tier-2b create resolve to <see cref="GateOutcome.Elicit"/>
+    /// — the agent asks one natural question, it does NOT execute or suspend. FAILS if the engine
+    /// confirms or executes an incomplete request.
+    /// </summary>
+    [Fact]
+    public void PolicyV2_IncompleteArgsTier2b_Elicits()
+    {
+        var decision = ConfirmationPolicyEngine.Evaluate(new PolicyEvaluationContext
+        {
+            RiskProfile = new GateRiskProfile { DeclaredTier = GateRiskTier.Tier2b, Reversible = true, RecordOfTruthImpact = true },
+            Origin = new GateOriginRequest { Source = GateRequestSource.UserUtterance, UtteranceEnumeratesCapability = true },
+            ArgsComplete = false,
+        });
+
+        decision.Outcome.Should().Be(GateOutcome.Elicit,
+            "incomplete args ⇒ elicit (a natural question), then re-evaluate — never a scary confirm and never execution");
+        decision.Overlays.Decisive.Should().Be(GateOverlay.IncompleteArgs);
+    }
+
+    /// <summary>
+    /// Task 044: an irreversible record-of-truth mutation (delete/supersede) is ESCALATED by
+    /// <see cref="RiskTierResolver"/> from a declared 2b to Tier 4 and ALWAYS confirms — regardless
+    /// of a confident, complete request. FAILS if authoring under-declaration lets it auto-execute.
+    /// </summary>
+    [Fact]
+    public void PolicyV2_IrreversibleRecordOfTruth_EscalatesToTier4_ConfirmDialog()
+    {
+        var decision = ConfirmationPolicyEngine.Evaluate(new PolicyEvaluationContext
+        {
+            // Declared 2b, but irreversible + record-of-truth ⇒ factor floor escalates to Tier 4.
+            RiskProfile = new GateRiskProfile { DeclaredTier = GateRiskTier.Tier2b, Reversible = false, RecordOfTruthImpact = true },
+            Origin = new GateOriginRequest { Source = GateRequestSource.UserUtterance, UtteranceEnumeratesCapability = true },
+            ArgsComplete = true,
+        });
+
+        decision.Tier.Should().Be(GateRiskTier.Tier4, "irreversible + record-of-truth escalates 2b → Tier 4 (fail-closed)");
+        decision.Outcome.Should().Be(GateOutcome.ConfirmDialog,
+            "an irreversible in-system mutation always confirms, even on a confident, complete request");
+    }
+
+    // =========================================================================
     // 3. Net-new-coverage dedupe vs the golden-utterance + resourcefulness suites
     // =========================================================================
 

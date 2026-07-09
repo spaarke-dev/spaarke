@@ -3210,6 +3210,36 @@ public record ChatSseActionConfirmationData(
     string Summary,
     IReadOnlyDictionary<string, string> Parameters);
 
+/// <summary>
+/// SSE presentation payload for an INLINE AUTO-EXECUTED side effect (spaarke-ai-architecture-redesign-r2
+/// task 044, gate G-R2-A). Emitted by <see cref="Sprk.Bff.Api.Services.Ai.Chat.SideEffectGateAIFunction"/>
+/// AFTER the deterministic Confirmation Policy v2 engine resolved the invocation to
+/// <c>Execute</c> / <c>ExecuteWithUndo</c> and the tool ran WITHOUT a confirmation dialog — the
+/// counterpart to <see cref="ChatSseActionConfirmationData"/> for the no-dialog path. It carries the
+/// task-035 <see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.OutcomeCard"/>'s user-facing projection:
+/// the audience-split user sentence, the SERVER-composed record link (the Undo target for a reversible
+/// Tier 2a/2b create, or the review-and-send record for a Tier-1 email draft — never a model-invented
+/// URL, ADR-040/NFR-07), and the declared affordance chips (e.g. Undo). Store-before-render: the
+/// referenced <c>loop@t{n}</c> ledger output is persisted BEFORE this event is emitted. Field names
+/// mirror <see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.OutcomeCardView"/> so Compose r2 consumes
+/// the same shape it already renders on the gate-resolve HTTP response.
+/// </summary>
+/// <param name="ActionName">The executed tool's LLM-facing function name (identifier only).</param>
+/// <param name="Status">Terminal disposition token (<c>succeeded</c> / <c>partial</c> / <c>failed</c>).</param>
+/// <param name="UserSummary">User-facing outcome sentence (rendered verbatim; never the internal detail).</param>
+/// <param name="LinkUrl">Server-composed record/deep link (Undo target / email review-and-send record); null when none.</param>
+/// <param name="LinkLabel">Human-readable link label; null when no link.</param>
+/// <param name="NextSteps">Declared affordance chip labels (e.g. <c>Undo</c>) the surface may render.</param>
+/// <param name="LedgerOutputKey">The stored <c>loop@t{n}</c> ledger key this card renders (ADR-040 store-before-render).</param>
+public record ChatSseActionOutcomeData(
+    string ActionName,
+    string Status,
+    string UserSummary,
+    string? LinkUrl,
+    string? LinkLabel,
+    IReadOnlyList<string> NextSteps,
+    string LedgerOutputKey);
+
 /// <summary>Request body for <c>POST /sessions/{sessionId}/gates/{gateId}/resolve</c>.</summary>
 /// <param name="Approved">True = confirm and execute the suspended invocation; false = reject it.</param>
 public record GateResolveRequest(bool Approved);

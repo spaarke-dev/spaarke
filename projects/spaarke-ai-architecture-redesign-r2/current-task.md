@@ -9,15 +9,15 @@
 
 | Field | Value |
 |---|---|
-| **Progress** | **27 of 53 tasks complete** — foundation + Wave J + Wave K (033/034/035/036/038) + 043 ADR-041 done → **G-R2-A CODE-COMPLETE** |
+| **Progress** | **28 of 53 tasks complete** — G-R2-A FUNCTIONALLY COMPLETE (incl. 044 live gate wiring); only deploy + 049 operator UAT remain to close the gate |
 | **Done** | Phase 0 (001–004), all A0 contracts (010–016), test-repair (021), triple-twin hoist (020), D-F0 (030/031), Wave J (032/037/039/040/041/042, merged master PR #595), **Wave K: 033 origin-eval, 034 gate pre-suspend, 035 Completion Engine, 036 job-aware completion, 038 trace view (2026-07-09)** |
 | **Status** | Wave J MERGED to master (PR #595, `c21529f80`). Wave K (033/034/035/036/038) committed on branch, VERIFIED GREEN: build 0 errors (3 projects), eval-gate + trace/ledger/persistence suites **107 passed / 0 failed**, publish ~46.48 MB (< 60). **TraceEvent view seam PUBLISHED — only 057 memory.write remains before the 017 Compose-UNBLOCKED milestone.** |
 | **Branch** | `work/spaarke-ai-architecture-redesign-r2` — Wave K (033/034/035/036/038) committed, NOT yet merged (Wave J already on master). |
 | **Next Action** | **G-R2-A is CODE-COMPLETE (030–043 all done).** Two forks: (A) **Memory wave M** — build-ahead is dependency-clear now (050 dep 016✅ → 051/052; 053 Binder dep 015✅ — ALSO the writer for 038's dark `AppendContextFingerprintAsync` fingerprint seam → 054 dep 002✅+053; 055/056/**057 memory.write** dep 016✅ = the LAST Compose seam; 060–065). (B) **task 049 G-R2-A browser UAT** — OPERATOR-ONLY gate on spaarkedev1, never auto-run; its pass promotes ADR-041 Proposed→Accepted. Recommend: push/merge Wave K, then start memory wave M build-ahead while operator schedules the 049 UAT. |
 
 ### 🔔 G-R2-A gate + open items for operator
-- **Task 049 (G-R2-A browser UAT)** is an operator-only gate (spaarkedev1). Its pass flips ADR-041 Proposed→Accepted. Cannot be auto-run.
-- **ConfirmationPolicyEngine 0-core-call-sites** open item (from 034) — still needs an operator decision (accept-as-Compose-seam / wire-up task / deferral). Now documented in ADR-041's "Known open item" section.
+- **ConfirmationPolicyEngine 0-core-call-sites — RESOLVED 2026-07-09 by task 044** (operator ruled (b) wire-up; re-scoped to risk+ambiguity after escalation). Engine now LIVE on the core gate. Model: agent asks when torn (layer 1); gate confirms only high-risk/irreversible + optional dispatchUncertain backstop; clear+complete low-risk → execute+Undo no-dialog; email = draft + review/send deep link (NO auto-send in r2, deferred). Confirmation model captured in memory `confirmation-model-ambiguity-not-origin`.
+- **NEXT to close G-R2-A**: (1) DEPLOY G-R2-A code (Wave J+K+044) + create-matter catalog seed (DEF-003/#593) to spaarkedev1; (2) author task 049 UAT script; (3) **operator runs the 10-scenario browser UAT on spaarkedev1** — pass flips ADR-041 Proposed→Accepted. Cannot be auto-run.
 - **Task 053 (Binder)** is the intended writer for task 038's dark-landed `SessionContextFingerprint` seam (`AppendContextFingerprintAsync`) — sequence 053 to wire it.
 
 ### 🔔 OPEN ITEM (surfaced by task 034, needs operator decision) — ConfirmationPolicyEngine has 0 core call-sites
