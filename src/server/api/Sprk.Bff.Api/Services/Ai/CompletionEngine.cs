@@ -113,6 +113,45 @@ public static class CompletionEngine
     }
 
     /// <summary>
+    /// Composes an <see cref="OutcomeCard"/> for the INLINE gate AUTO-EXECUTE path — a Tier 0/1/2a/2b
+    /// side-effect the deterministic Confirmation Policy v2 engine resolved to
+    /// <see cref="GateOutcome.Execute"/> / <see cref="GateOutcome.ExecuteWithUndo"/> and that
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Chat.SideEffectGateAIFunction"/> ran WITHOUT a confirmation
+    /// dialog (spaarke-ai-architecture-redesign-r2 task 044, gate G-R2-A). Mirror of
+    /// <see cref="ComposeForGateResume"/> (same store-before-render contract, same audience-split
+    /// summary, same server-composed link) but carries the DECLARED affordance chips the auto-execute
+    /// disposition offers — the Undo chip for a reversible Tier 2a/2b create, or the review/send chip
+    /// for a Tier-1 email draft handed off to the human. No Binding rides this path (the gate stores
+    /// under the reserved <c>loop</c> binding), so chips are passed explicitly rather than mapped from
+    /// <see cref="Binding.ChipTransitions"/>.
+    /// </summary>
+    /// <param name="ledgerOutputKey">The stored <c>loop@t{n}</c> key (store-before-render — non-empty).</param>
+    /// <param name="userFacing">The user-facing outcome sentence (rendered verbatim).</param>
+    /// <param name="internalDetail">Optional model/internal-facing detail (never shown to the user).</param>
+    /// <param name="link">Optional server-composed record link (Undo target / email review-and-send record).</param>
+    /// <param name="nextSteps">Declared affordance chips (e.g. the Undo chip) the surface may render.</param>
+    /// <param name="traceRef">Optional trace correlation id; defaults to the ledger key when null.</param>
+    public static OutcomeCard ComposeForGateAutoExecute(
+        string ledgerOutputKey,
+        string userFacing,
+        string? internalDetail = null,
+        OutcomeCardLink? link = null,
+        IReadOnlyList<NextStepChip>? nextSteps = null,
+        string? traceRef = null)
+    {
+        return OutcomeCard.ForStoredOutcome(
+            ledgerOutputKey: ledgerOutputKey,
+            status: OutcomeStatus.Succeeded,
+            summary: new OutcomeSummary(
+                string.IsNullOrWhiteSpace(userFacing) ? "Completed." : userFacing,
+                internalDetail),
+            link: link,
+            nextSteps: nextSteps ?? Array.Empty<NextStepChip>(),
+            completion: OutcomeCompletion.SingleShot(),
+            traceRef: traceRef ?? ledgerOutputKey);
+    }
+
+    /// <summary>
     /// Composes a JOB-AWARE <see cref="OutcomeCard"/> for a side-effect backed by an async job
     /// aggregate (document creation / analysis / indexing / Compose save-back). Delegates to the
     /// task-036 <see cref="JobAwareOutcomeProjection.ForJobAwareOutcome"/> so the operation-level

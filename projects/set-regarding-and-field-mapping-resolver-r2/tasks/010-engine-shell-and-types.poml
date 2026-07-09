@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Rewrite FieldMappingService engine shell (context-agnostic)</title>
+    <phase>1: Client Engine</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>012,013,014</blocks>
+    <tags>frontend, react, typescript, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core shared-lib abstraction rewrite; modifies .ts; architectural.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authoring the core engine abstraction + its contract (result shape, injection, graceful-degradation model) — the architectural spine every later task builds on.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches FieldMappingService.ts + FieldMappingTypes.ts only; task 011 touches PolymorphicResolverService + the wizard services — no overlap.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Replace the stubbed FieldMappingService.ts (PCF-WebApi-bound, every Dataverse method returns []) with a
+    working, context-agnostic engine SHELL: depends only on IDataService + authenticatedFetch; fetches the
+    profile via ONE call to the existing BFF GET /api/v1/field-mappings/profiles/{source}/{target}; returns
+    { profileFound, fieldsMapped, warnings }; never throws. Do NOT implement the per-type apply logic yet
+    (tasks 012-013) — provide the shell, the BFF fetch + graceful 404, and the result contract. Align
+    FieldMappingTypes.ts to the extended BFF DTO (mappingType/defaultValue/expression/isRequired/compatibilityMode).
+  </prompt>
+
+  <role>SPAARKE shared-lib developer. Expert in context-agnostic TypeScript (ADR-012) + the @spaarke/ui-components service conventions.</role>
+
+  <goal>FieldMappingService.ts is context-agnostic (no ComponentFramework import), makes exactly one BFF call, returns a typed result and never throws, and FieldMappingTypes.ts matches the extended DTO. Per-type apply logic is stubbed with clear seams for tasks 012-013.</goal>
+
+  <context>
+    <background>Today's FieldMappingService.ts is dead code built on ComponentFramework.WebApi (violates ADR-012) with every Dataverse method stubbed. The real query path is the BFF endpoint (single call, rules $expand-ed). This task establishes the correct spine; the apply engines land next.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/FieldMappingTypes.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Context-agnostic: NO ComponentFramework / PCF types. Depend on IDataService + AuthenticatedFetchFn (see EntityCreationService for the injected-fetch shape).</constraint>
+    <constraint source="project">Exactly ONE BFF call per apply: GET /api/v1/field-mappings/profiles/{sourceEntity}/{targetEntity}. 404 → return { profileFound: false, fieldsMapped: [], warnings: [] } (graceful no-op, mirror applyResolverFields NFR-06 handling).</constraint>
+    <constraint source="project">The engine NEVER throws. All failure paths append a warning and continue.</constraint>
+    <constraint source="project">Public entrypoint signature (proposed): applyFieldMappings(args: { sourceEntity, sourceId, targetEntity, payload, dataService, authenticatedFetch, bffBaseUrl }) → Promise&lt;{ profileFound, fieldsMapped, warnings }&gt;. Match the WizardHostProps-injected inputs so services can call it directly.</constraint>
+    <constraint source="project">Do NOT add a source===target guard anywhere (same-entity support, task 014).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+    </files>
+    <patterns>
+      <pattern name="graceful-blank apply" location="src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts">applyResolverFields — never-throw, warnings-based result the engine mirrors.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the current FieldMappingService.ts + FieldMappingTypes.ts and the extended FieldMappingRuleDto (task 002) to lock the DTO shape.</step>
+    <step order="2">Rewrite FieldMappingTypes.ts: profile + rule interfaces matching the BFF DTO (mappingType, defaultValue, expression, isRequired, compatibilityMode); a MappingResult type { profileFound, fieldsMapped, warnings }.</step>
+    <step order="3">Rewrite FieldMappingService.ts: context-agnostic class/function; single authenticatedFetch call to the profiles endpoint; parse into typed profile+rules; 404/no-profile → graceful no-op result.</step>
+    <step order="4">Add clearly-marked seams (a per-rule dispatch switch on mappingType) where tasks 012-013 will implement Copy/Default/Concat/Template. For now, unknown/unimplemented types append a warning and skip.</step>
+    <step order="5">Ensure the barrel exports still resolve; run the shared-lib typecheck/build.</step>
+    <step order="6">Update TASK-INDEX.md: mark 010 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the injected IDataService/authenticatedFetch contract cannot express a needed call without a PCF type, STOP and escalate (ADR-012 tension) rather than importing ComponentFramework.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build/typecheck the shared library</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/FieldMappingTypes.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FieldMappingService.ts contains no ComponentFramework/PCF import.</criterion>
+    <criterion testable="true">Calling the engine with no matching profile (BFF 404) returns { profileFound:false } and does not throw.</criterion>
+    <criterion testable="true">The engine makes exactly one BFF call per invocation.</criterion>
+    <criterion testable="true">FieldMappingTypes.ts models mappingType/defaultValue/expression/isRequired/compatibilityMode.</criterion>
+    <criterion testable="true">Shared-lib typecheck/build passes.</criterion>
+    <criterion testable="true">No source===target guard exists.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md FR-01, FR-02, FR-09, design.md §4.1. Apply engines: tasks 012 (Copy incl. lookup), 013 (Default/Concat/Template).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

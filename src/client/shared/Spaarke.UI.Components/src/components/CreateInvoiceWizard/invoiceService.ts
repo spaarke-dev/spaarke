@@ -27,8 +27,13 @@ import type { AssociationResult } from '../AssociateToStep/types';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IUploadProgress, AuthenticatedFetchFn, IAdditionalBind } from '../../services/EntityCreationService';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
-import { applyResolverFields, findNavProp } from '../../services/PolymorphicResolverService';
-import type { INavPropEntry } from '../../services/PolymorphicResolverService';
+import {
+  applyResolverFields,
+  findNavProp,
+  discoverNavProps,
+  _resetNavPropCacheForTests,
+} from '../../services/PolymorphicResolverService';
+import { applyFieldMappings } from '../../services/FieldMappingService';
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -43,59 +48,18 @@ export interface ICreateInvoiceResult {
 }
 
 // ---------------------------------------------------------------------------
-// Metadata discovery (same pattern as WorkAssignmentService/EventService)
+// Metadata discovery — shared `discoverNavProps` (PolymorphicResolverService),
+// consolidated 2026-07-09 (task 011, Path A). Previously a private per-service copy.
 // ---------------------------------------------------------------------------
 
-const _navPropCache: Record<string, INavPropEntry[]> = {};
-
-async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEntry[]> {
-  if (_navPropCache[entityLogicalName]) {
-    return _navPropCache[entityLogicalName];
-  }
-
-  try {
-    const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLogicalName}')/ManyToOneRelationships` +
-      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
-
-    const resp = await fetch(url, { credentials: 'include' });
-    if (!resp.ok) {
-      console.warn(`[InvoiceService] Nav-prop discovery failed for ${entityLogicalName}:`, resp.status);
-      return [];
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const json: any = await resp.json();
-    const rels: Array<{
-      ReferencingAttribute: string;
-      ReferencingEntityNavigationPropertyName: string;
-      ReferencedEntity: string;
-    }> =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (json as any).value ?? [];
-
-    const entries: INavPropEntry[] = rels.map(r => ({
-      columnName: r.ReferencingAttribute,
-      navPropName: r.ReferencingEntityNavigationPropertyName,
-      referencedEntity: r.ReferencedEntity,
-    }));
-
-    console.info(
-      `[InvoiceService] Nav-props for ${entityLogicalName}:`,
-      entries.map(e => `${e.columnName} -> ${e.navPropName} (${e.referencedEntity})`)
-    );
-    _navPropCache[entityLogicalName] = entries;
-    return entries;
-  } catch (err) {
-    console.warn(`[InvoiceService] Nav-prop discovery error for ${entityLogicalName}:`, err);
-    return [];
-  }
-}
-
-/** @internal — for tests, reset the module-level nav-prop cache between cases. */
+/**
+ * @internal — for tests, reset the shared module-level nav-prop cache between
+ * cases. Now delegates to the shared `_resetNavPropCacheForTests`; clears the
+ * whole shared cache (superset of the previous `sprk_invoice`/`sprk_document`
+ * clear — safe for test isolation).
+ */
 export function _resetInvoiceServiceNavPropCacheForTests(): void {
-  delete _navPropCache['sprk_invoice'];
-  delete _navPropCache['sprk_document'];
+  _resetNavPropCacheForTests();
 }
 
 // ---------------------------------------------------------------------------
@@ -165,6 +129,8 @@ export class InvoiceService {
   private readonly _dataService: IDataService;
   private readonly _entityService: EntityCreationService;
   private readonly _tenantId: string;
+  private readonly _authenticatedFetch: AuthenticatedFetchFn;
+  private readonly _bffBaseUrl: string;
 
   constructor(
     dataService: IDataService,
@@ -178,6 +144,8 @@ export class InvoiceService {
   ) {
     this._tenantId = tenantId ?? '';
     this._dataService = dataService;
+    this._authenticatedFetch = authenticatedFetch;
+    this._bffBaseUrl = bffBaseUrl;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     const webApiAdapter = {
       createRecord: async (entityName: string, data: Record<string, unknown>) => {
@@ -226,7 +194,7 @@ export class InvoiceService {
     // -- Step 1: Create Dataverse record -------------------------------------
     let invoiceId: string;
 
-    const navProps = await _discoverNavProps('sprk_invoice');
+    const navProps = await discoverNavProps('sprk_invoice');
 
     const entity: Record<string, unknown> = {
       sprk_name: form.name.trim(),
@@ -303,6 +271,25 @@ export class InvoiceService {
         association.recordName,
         hint
       );
+
+      // Field-mapping engine (task 022) — apply the configured {host -> Invoice}
+      // field-mapping profile (if any) onto the SAME payload, after resolver
+      // fields and before createRecord. Graceful no-op when no profile is
+      // configured (profileFound:false) — mirrors applyResolverFields' NFR-06
+      // no-op contract; the engine never throws. Target field names are NEVER
+      // hard-coded here — they come from the seeded profile/rules (task 030).
+      const mappingResult = await applyFieldMappings({
+        sourceEntity: association.entityType,
+        sourceId: _cleanGuid(association.recordId),
+        targetEntity: 'sprk_invoice',
+        payload: entity,
+        dataService: this._dataService,
+        authenticatedFetch: this._authenticatedFetch,
+        bffBaseUrl: this._bffBaseUrl,
+      });
+      if (mappingResult.warnings.length > 0) {
+        warnings.push(...mappingResult.warnings);
+      }
     }
 
     try {
@@ -336,7 +323,7 @@ export class InvoiceService {
         );
       } else if (uploadResult.uploadedFiles.length > 0) {
         try {
-          const docNavProps = await _discoverNavProps('sprk_document');
+          const docNavProps = await discoverNavProps('sprk_document');
 
           // Primary bind: the newly-created Invoice.
           const invoiceNavProp = findNavProp(docNavProps, 'sprk_invoice', 'invoice');

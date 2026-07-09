@@ -129,7 +129,9 @@ export interface DailyBriefingAppProps {
  */
 function bulletToNotificationItem(bullet: NarrativeBulletResult, generatedAtUtc?: string): NotificationItem {
   const narrative = bullet.narrative ?? '';
-  // Trim narrative to fit sprk_todo.subject (200 char default limit).
+  // Trim narrative to fit sprk_todo.sprk_name (200-char default max length; slice to 197 so
+  // the appended "..." keeps the stored value ≤ 200). The created To Do maps this title to
+  // sprk_name in useInlineTodoCreate (R5 task 037 / FR-C8).
   const title = narrative.length > 197 ? `${narrative.slice(0, 197)}...` : narrative;
   return {
     id: bullet.itemIds?.[0] ?? bullet.primaryEntityId ?? '',

@@ -122,6 +122,7 @@ This directory contains practical guides for deploying, configuring, administeri
 | [WORKSPACE-ENTITY-CREATION-GUIDE.md](WORKSPACE-ENTITY-CREATION-GUIDE.md) | Entity creation wizards: SPE upload, Dataverse records, AI analysis, follow-on actions | 2026-04-05 | — | — |
 | [WORKSPACE-AI-PREFILL-GUIDE.md](WORKSPACE-AI-PREFILL-GUIDE.md) | AI pre-fill process, playbook integration, extraction scopes | 2026-03-23 | — | — |
 | [HOW-TO-ADD-SDAP-TO-NEW-ENTITY.md](HOW-TO-ADD-SDAP-TO-NEW-ENTITY.md) | Adding SDAP document support to a new Dataverse entity | 2026-03-31 | — | — |
+| [FIELD-MAPPING-ADMIN-GUIDE.md](FIELD-MAPPING-ADMIN-GUIDE.md) | Authoring `sprk_fieldmappingprofile`/`sprk_fieldmappingrule` records in the native MDA form (no PCF): all four mapping types, `sprk_expression` template syntax, seeded attorney-matrix worked example | 2026-07-09 | — | New |
 
 ### Dataverse
 

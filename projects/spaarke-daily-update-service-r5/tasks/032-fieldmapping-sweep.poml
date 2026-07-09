@@ -3,7 +3,7 @@
   <metadata>
     <title>Sweep playbook fieldMappings for string→Choice; restore sprk_documenttype to Profile Document node</title>
     <phase>B: Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>none</blocks>

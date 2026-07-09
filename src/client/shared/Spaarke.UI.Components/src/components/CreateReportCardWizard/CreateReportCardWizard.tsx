@@ -477,7 +477,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
       onFinish: async (context: IFinishContext): Promise<IWizardSuccessConfig> => {
         const association = context.association;
 
-        const reportCardService = new ReportCardService(dataService);
+        const reportCardService = new ReportCardService(dataService, authFetch ?? fetch.bind(window), bffBaseUrl ?? '');
 
         const result = await reportCardService.createReportCard(formValuesRef.current, association);
 

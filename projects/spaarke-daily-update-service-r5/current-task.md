@@ -9,10 +9,17 @@
 
 | Field | Value |
 |---|---|
-| **Project** | spaarke-daily-update-service-r5 (26 tasks; **11 done + full UI redesign done**) |
-| **Branch** | `work/spaarke-daily-update-service-r5` — pushed to origin (HEAD `ed6c513ae`) |
-| **Status** | Design loop complete; **awaiting operator go/no-go on `/merge-to-master`** |
-| **Next Action** | Operator decides: run `/merge-to-master` (see ⚠️ caveats below) OR continue remaining tasks (012/016/031/032/036/037/038/002/017/024/090) |
+| **Project** | spaarke-daily-update-service-r5 (26 tasks; **19 done**) |
+| **Branch** | `work/spaarke-daily-update-service-r5` — merged to master once (PR #590, e5e43c97c); **6 post-merge commits local, NOT pushed**: `c3b49e46a` `3390067b3` `585d9ceab` `e76ee15ce` `634bf64a9` `78ccb9c5b` |
+| **Status** | ALL executable code/eval/data tasks DONE. This session: 002, 012 (+live MCP retirement), 036, 037, 015, 031, 032 (MCP restore), 016. Dataverse MCP confirmed authorized. |
+| **Next Action** | Only operator/live-env tasks remain: **017/024/038** (Azure deploy + browser UAT on spaarkedev1), **022** (operator harness sign-off), **021/023** (design — done via live loop, formalize at wrap), **090** (wrap, deps deploys). None doable autonomously here. Decide: push the 6 commits to origin? Re-merge to master? |
+
+### ✅ Done ledger (TASK-INDEX): 001,002,010,011,012,013,014,015,016,020,030,031,032,033,034,035,036,037,040 (19). 🔲 remaining: 017,021,022,023,024,038,090 (all need operator/live env).
+
+### Session progress (post-merge hardening)
+- **002 ✅** (@odata.bind audit): report `notes/odata-bind-audit.md`; 0 fixes (only provable violation is operator-deferred EventDetailSidePane), 1 deferred, 10 needs-verification (recorded not guessed — no live Dataverse metadata). Escalation: casing inconsistencies (`sprk_outputtypeid` vs `sprk_OutputTypeId`) need metadata pass → suggest /defer at 090.
+- **012 ✅** (retire BRIEF-NARRATE-CHANNEL): const + comment cleared (grep-zero under src/), scope-index entry removed, composite description fixed. Build 0 err; 61+223 tests green; publish 45.13 MB. **DEFERRED**: live Dataverse Action-row retirement (id dc3533c0-…) → Phase A deploy task 017 (MCP unauthorized this session). Notes: `notes/012-channel-action-retirement.md`.
+- Committed `c3b49e46a` (local; not pushed).
 
 ### ⚠️ Pending decision — `/merge-to-master`
 Operator asked to commit → push (both DONE) → merge. Before merging, they must weigh: **master auto-deploys**, and this branch is a **mid-project checkpoint** (11/26 tasks) with a **partially-tested-only redesign** (reviewed in the `/prototype` harness with MOCK data, **no browser UAT on spaarkedev1** — which the project's own gate rule requires). Merge is defensible (accuracy verified, redesign cohesive) but ships un-UAT'd. **Get explicit go before running `/merge-to-master`.**

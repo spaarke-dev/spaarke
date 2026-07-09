@@ -13,7 +13,9 @@ import type { ILookupItem } from '../../types/LookupTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { IWebApiLike } from '../../types/WebApiLike';
 import { EntityCreationService } from '../../services/EntityCreationService';
-import { applyResolverFields } from '../../services/PolymorphicResolverService';
+import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import { applyResolverFields, discoverNavProps } from '../../services/PolymorphicResolverService';
+import { applyFieldMappings } from '../../services/FieldMappingService';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -24,58 +26,23 @@ export interface ICreateEventResult {
   eventName?: string;
   success: boolean;
   errorMessage?: string;
+  /** Non-fatal warnings (e.g. field-mapping profile fetch failures). Empty when none. */
+  warnings: string[];
 }
 
 // ---------------------------------------------------------------------------
 // Metadata discovery
 // ---------------------------------------------------------------------------
 
+// Nav-prop discovery is provided by the shared `discoverNavProps`
+// (PolymorphicResolverService) — consolidated 2026-07-09 (task 011, Path A).
+// The local `NavPropEntry` shape below is structurally identical to the shared
+// `INavPropEntry` returned by `discoverNavProps`, so `_findNavProp` accepts it.
+
 interface NavPropEntry {
   columnName: string;
   navPropName: string;
   referencedEntity: string;
-}
-
-const _navPropCache: Record<string, NavPropEntry[]> = {};
-
-async function _discoverNavProps(entityLogicalName: string): Promise<NavPropEntry[]> {
-  if (_navPropCache[entityLogicalName]) {
-    return _navPropCache[entityLogicalName];
-  }
-
-  try {
-    const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLogicalName}')/ManyToOneRelationships` +
-      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
-
-    const resp = await fetch(url, { credentials: 'include' });
-    if (!resp.ok) {
-      console.warn(`[EventService] Nav-prop discovery failed for ${entityLogicalName}:`, resp.status);
-      return [];
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const json: any = await resp.json();
-    const rels: Array<{
-      ReferencingAttribute: string;
-      ReferencingEntityNavigationPropertyName: string;
-      ReferencedEntity: string;
-    }> =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (json as any).value ?? [];
-
-    const entries: NavPropEntry[] = rels.map(r => ({
-      columnName: r.ReferencingAttribute,
-      navPropName: r.ReferencingEntityNavigationPropertyName,
-      referencedEntity: r.ReferencedEntity,
-    }));
-
-    _navPropCache[entityLogicalName] = entries;
-    return entries;
-  } catch (err) {
-    console.warn(`[EventService] Nav-prop discovery error for ${entityLogicalName}:`, err);
-    return [];
-  }
 }
 
 function _findNavProp(entries: NavPropEntry[], referencedEntity: string, columnHint?: string): string | undefined {
@@ -196,7 +163,18 @@ function _toWebApiLike(dataService: IDataService): IWebApiLike {
 // ---------------------------------------------------------------------------
 
 export class EventService {
-  constructor(private readonly _dataService: IDataService) {}
+  constructor(
+    private readonly _dataService: IDataService,
+    /**
+     * Injected BFF-authenticated fetch. Optional — only required to activate the
+     * Field Mapping Framework engine (task 020, spec FR-12). Lookup-only callers
+     * (e.g. searchEventTypes) may omit it. When absent, the engine call is a
+     * graceful no-op — identical to today's behavior.
+     */
+    private readonly _authenticatedFetch?: AuthenticatedFetchFn,
+    /** BFF API base URL. See {@link _authenticatedFetch}. */
+    private readonly _bffBaseUrl?: string
+  ) {}
 
   /**
    * Search sprk_eventtype_ref records by name fragment.
@@ -251,7 +229,8 @@ export class EventService {
     regardingEntityName?: string,
     options?: { getCurrentUserId?: () => string | null }
   ): Promise<ICreateEventResult> {
-    const navProps = await _discoverNavProps('sprk_event');
+    const warnings: string[] = [];
+    const navProps = await discoverNavProps('sprk_event');
 
     const entity: Record<string, unknown> = {
       sprk_eventname: formValues.eventName.trim(),
@@ -393,6 +372,27 @@ export class EventService {
         formValues.regardingRecordName,
         hint
       );
+
+      // Field Mapping Framework (spec FR-12, task 020): apply the configured
+      // {parent -> sprk_event} mapping profile (if any) onto the create payload.
+      // Runs AFTER applyResolverFields (regarding fields already written) and
+      // BEFORE createRecord, on the SAME payload object. The engine never
+      // throws and is a graceful no-op when no profile exists or the BFF deps
+      // are unavailable (e.g. a lookup-only construction site) -- no behavior
+      // change in either case. No source===target guard (same-entity mapping
+      // is a supported scenario per ADR-024/design.md §10).
+      if (this._authenticatedFetch && this._bffBaseUrl) {
+        const mappingResult = await applyFieldMappings({
+          sourceEntity: regardingEntityName,
+          sourceId: formValues.regardingRecordId,
+          targetEntity: 'sprk_event',
+          payload: entity,
+          dataService: this._dataService,
+          authenticatedFetch: this._authenticatedFetch,
+          bffBaseUrl: this._bffBaseUrl,
+        });
+        warnings.push(...mappingResult.warnings);
+      }
     }
 
     try {
@@ -401,6 +401,7 @@ export class EventService {
         eventId: id,
         eventName: formValues.eventName.trim(),
         success: true,
+        warnings,
       };
     } catch (err) {
       console.error('[EventService] createRecord error:', err);
@@ -410,6 +411,7 @@ export class EventService {
       return {
         success: false,
         errorMessage: `Failed to create event record: ${message}`,
+        warnings,
       };
     }
   }

@@ -352,7 +352,11 @@ public static class FieldMappingEndpoints
     /// <summary>
     /// Maps a Dataverse FieldMappingRuleEntity to a DTO.
     /// </summary>
-    private static FieldMappingRuleDto MapRuleEntityToDto(FieldMappingRuleEntity entity)
+    /// <remarks>
+    /// Internal (not private) so the test assembly (InternalsVisibleTo, see .csproj) can exercise
+    /// the projection directly without reflection — see FieldMappingRuleProjectionTests.
+    /// </remarks>
+    internal static FieldMappingRuleDto MapRuleEntityToDto(FieldMappingRuleEntity entity)
     {
         return new FieldMappingRuleDto
         {
@@ -361,7 +365,40 @@ public static class FieldMappingEndpoints
             SourceFieldType = MapFieldTypeToString(entity.SourceFieldType),
             TargetField = entity.TargetField ?? string.Empty,
             TargetFieldType = MapFieldTypeToString(entity.TargetFieldType),
-            Priority = entity.ExecutionOrder
+            Priority = entity.ExecutionOrder,
+            MappingType = MapMappingTypeToString(entity.MappingType),
+            DefaultValue = entity.DefaultValue,
+            Expression = entity.Expression,
+            IsRequired = entity.IsRequired,
+            CompatibilityMode = MapCompatibilityModeToString(entity.CompatibilityMode)
+        };
+    }
+
+    /// <summary>
+    /// Maps the sprk_mapping_type int choice to its string representation.
+    /// </summary>
+    private static string MapMappingTypeToString(int mappingType)
+    {
+        return mappingType switch
+        {
+            0 => "Copy",
+            1 => "Default",
+            2 => "Concat",
+            3 => "Template",
+            _ => "Copy"
+        };
+    }
+
+    /// <summary>
+    /// Maps the sprk_compatibilitymode int choice to its string representation.
+    /// </summary>
+    private static string MapCompatibilityModeToString(int compatibilityMode)
+    {
+        return compatibilityMode switch
+        {
+            0 => "Strict",
+            1 => "Resolve",
+            _ => "Strict"
         };
     }
 
@@ -706,7 +743,11 @@ public static class FieldMappingEndpoints
     /// <summary>
     /// Applies a single mapping rule to transform a source value for the target field.
     /// </summary>
-    private static FieldMappingResultDto ApplyMappingRule(
+    /// <remarks>
+    /// Internal (not private) so the test assembly (InternalsVisibleTo, see .csproj) can exercise
+    /// the push-path engine helper directly without reflection — see FieldMappingRuleProjectionTests.
+    /// </remarks>
+    internal static FieldMappingResultDto ApplyMappingRule(
         FieldMappingRuleDto rule,
         Dictionary<string, object?> sourceValues,
         Dictionary<string, object?> updatePayload)

@@ -743,14 +743,20 @@ public class FieldMappingRuleEntity
     /// <summary>Target field type</summary>
     public int TargetFieldType { get; set; }
 
+    /// <summary>Mapping type: Copy (0), Default (1), Concat (2), Template (3) — sprk_mapping_type</summary>
+    public int MappingType { get; set; }
+
     /// <summary>Compatibility mode: Strict (0), Resolve (1)</summary>
     public int CompatibilityMode { get; set; }
 
     /// <summary>Is required (fail if source is empty)</summary>
     public bool IsRequired { get; set; }
 
-    /// <summary>Default value when source is empty</summary>
+    /// <summary>Default value when source is empty (Default/Constant literal) — sprk_defaultvalue</summary>
     public string? DefaultValue { get; set; }
+
+    /// <summary>Concat/Template format string (nullable; unused for Copy/Default) — sprk_expression</summary>
+    public string? Expression { get; set; }
 
     /// <summary>Is cascading source (triggers secondary mappings)</summary>
     public bool IsCascadingSource { get; set; }

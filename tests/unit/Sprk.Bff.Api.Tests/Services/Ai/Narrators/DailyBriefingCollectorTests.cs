@@ -849,6 +849,95 @@ public sealed class DailyBriefingCollectorTests
         items[2].Name.Should().Be("Zeta Matter");
     }
 
+    [Fact]
+    public async Task CollectHighPriorityAsync_FansOutOverSpecArray_EachEntityKeepsItsQueryIntent()
+    {
+        // Guards the R5 task 036 refactor (7 named QueryHighPriority*Async wrappers collapsed
+        // into the HighPriorityEntitySpec[] fan-out): the collapse MUST preserve, per entity,
+        // the exact entity name + projected columns + flag filter + state filter + owner
+        // scoping the named wrapper carried. This captures every QueryExpression the collapsed
+        // path issues and pins each entity's intent so a future spec edit can't silently drift
+        // one entity (drop a column, lose the To Do owner-scope, or state-filter the event).
+        var capturedQueries = new List<QueryExpression>();
+        var entityMock = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entityMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((q, _) => capturedQueries.Add(q))
+            .ReturnsAsync(new EntityCollection());
+
+        var resolverMock = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        var sut = new DailyBriefingCollector(
+            entityMock.Object,
+            resolverMock.Object,
+            NullLogger<DailyBriefingCollector>.Instance);
+
+        // Act
+        await sut.CollectHighPriorityAsync(SystemUserId, CancellationToken.None);
+
+        // Assert — all 7 flagged entities queried exactly once.
+        var byEntity = capturedQueries.ToDictionary(q => q.EntityName);
+        byEntity.Keys.Should().BeEquivalentTo(new[]
+        {
+            "sprk_matter", "sprk_project", "sprk_invoice", "sprk_document",
+            "sprk_workassignment", "sprk_event", "sprk_todo",
+        });
+
+        // Per-entity expected projected columns (id + name + description + due-date columns).
+        // The generic query always ALSO projects sprk_highpriority, sprk_monitor, modifiedon.
+        AssertHighPriorityQuery(byEntity["sprk_matter"],
+            new[] { "sprk_matterid", "sprk_mattername", "sprk_matterdescription" }, stateFiltered: true, ownerScoped: false);
+        AssertHighPriorityQuery(byEntity["sprk_project"],
+            new[] { "sprk_projectid", "sprk_projectname", "sprk_description" }, stateFiltered: true, ownerScoped: false);
+        AssertHighPriorityQuery(byEntity["sprk_invoice"],
+            new[] { "sprk_invoiceid", "sprk_name", "sprk_description" }, stateFiltered: true, ownerScoped: false);
+        AssertHighPriorityQuery(byEntity["sprk_document"],
+            new[] { "sprk_documentid", "sprk_documentname", "sprk_documentdescription" }, stateFiltered: true, ownerScoped: false);
+        AssertHighPriorityQuery(byEntity["sprk_workassignment"],
+            new[] { "sprk_workassignmentid", "sprk_name", "sprk_description", "sprk_responseduedate" }, stateFiltered: true, ownerScoped: false);
+        // Event: NOT state-filtered (includeStateFilter:false) and carries BOTH due-date columns.
+        AssertHighPriorityQuery(byEntity["sprk_event"],
+            new[] { "sprk_eventid", "sprk_eventname", "sprk_eventdescription", "sprk_finalduedate", "sprk_duedate" }, stateFiltered: false, ownerScoped: false);
+        // To Do: owner-scoped to SystemUserId (R7 W12 per-user scoping preserved by ScopeToOwner).
+        AssertHighPriorityQuery(byEntity["sprk_todo"],
+            new[] { "sprk_todoid", "sprk_name", "sprk_description", "sprk_duedate" }, stateFiltered: true, ownerScoped: true);
+    }
+
+    // Pins one entity's high-priority QueryExpression to the intent its former named wrapper
+    // carried: projected columns, the HighPriority-OR-Monitor flag group, the optional
+    // statecode filter, and the optional owninguser scoping.
+    private static void AssertHighPriorityQuery(
+        QueryExpression query,
+        string[] expectedColumns,
+        bool stateFiltered,
+        bool ownerScoped)
+    {
+        query.ColumnSet.Columns.Should().Contain(expectedColumns);
+        query.ColumnSet.Columns.Should().Contain(new[] { "sprk_highpriority", "sprk_monitor", "modifiedon" });
+
+        // Flag filter: a nested OR group of sprk_highpriority=true / sprk_monitor=true.
+        var flagGroup = query.Criteria.Filters.Should()
+            .ContainSingle(f => f.FilterOperator == LogicalOperator.Or).Subject;
+        flagGroup.Conditions.Select(c => c.AttributeName)
+            .Should().BeEquivalentTo(new[] { "sprk_highpriority", "sprk_monitor" });
+
+        // statecode=0 present iff the entity opts into the state filter.
+        var stateConditions = query.Criteria.Conditions.Where(c => c.AttributeName == "statecode");
+        if (stateFiltered) stateConditions.Should().ContainSingle();
+        else stateConditions.Should().BeEmpty();
+
+        // owninguser present iff the entity is owner-scoped (To Do), pinned to SystemUserId.
+        var ownerConditions = query.Criteria.Conditions.Where(c => c.AttributeName == "owninguser").ToList();
+        if (ownerScoped)
+        {
+            ownerConditions.Should().ContainSingle();
+            ownerConditions[0].Values.Should().ContainSingle().Which.Should().Be(SystemUserId);
+        }
+        else
+        {
+            ownerConditions.Should().BeEmpty();
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // TL;DR scaffolding wiring (R5 task 013 / FR-A4) — the collector attaches
     // deterministically-computed TldrFacts onto the request it hands the narrator.

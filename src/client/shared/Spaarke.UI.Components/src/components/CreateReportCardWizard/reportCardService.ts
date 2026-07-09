@@ -37,8 +37,14 @@
 import type { ICreateReportCardFormState } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AssociationResult } from '../AssociateToStep/types';
-import { applyResolverFields, findNavProp } from '../../services/PolymorphicResolverService';
-import type { INavPropEntry } from '../../services/PolymorphicResolverService';
+import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import {
+  applyResolverFields,
+  findNavProp,
+  discoverNavProps,
+  _resetNavPropCacheForTests,
+} from '../../services/PolymorphicResolverService';
+import { applyFieldMappings } from '../../services/FieldMappingService';
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -56,55 +62,18 @@ export interface ICreateReportCardResult {
 // Metadata discovery (same pattern as WorkAssignmentService/InvoiceService)
 // ---------------------------------------------------------------------------
 
-const _navPropCache: Record<string, INavPropEntry[]> = {};
+// Nav-prop discovery is provided by the shared `discoverNavProps`
+// (PolymorphicResolverService) — consolidated 2026-07-09 (task 011, Path A).
+// Previously a private per-service copy.
 
-async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEntry[]> {
-  if (_navPropCache[entityLogicalName]) {
-    return _navPropCache[entityLogicalName];
-  }
-
-  try {
-    const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLogicalName}')/ManyToOneRelationships` +
-      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
-
-    const resp = await fetch(url, { credentials: 'include' });
-    if (!resp.ok) {
-      console.warn(`[ReportCardService] Nav-prop discovery failed for ${entityLogicalName}:`, resp.status);
-      return [];
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const json: any = await resp.json();
-    const rels: Array<{
-      ReferencingAttribute: string;
-      ReferencingEntityNavigationPropertyName: string;
-      ReferencedEntity: string;
-    }> =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (json as any).value ?? [];
-
-    const entries: INavPropEntry[] = rels.map(r => ({
-      columnName: r.ReferencingAttribute,
-      navPropName: r.ReferencingEntityNavigationPropertyName,
-      referencedEntity: r.ReferencedEntity,
-    }));
-
-    console.info(
-      `[ReportCardService] Nav-props for ${entityLogicalName}:`,
-      entries.map(e => `${e.columnName} -> ${e.navPropName} (${e.referencedEntity})`)
-    );
-    _navPropCache[entityLogicalName] = entries;
-    return entries;
-  } catch (err) {
-    console.warn(`[ReportCardService] Nav-prop discovery error for ${entityLogicalName}:`, err);
-    return [];
-  }
-}
-
-/** @internal — for tests, reset the module-level nav-prop cache between cases. */
+/**
+ * @internal — for tests, reset the shared module-level nav-prop cache between
+ * cases. Delegates to the shared `_resetNavPropCacheForTests` (clears the whole
+ * shared cache — a superset of the previous `sprk_reportcard` clear; safe for
+ * test isolation).
+ */
 export function _resetReportCardServiceNavPropCacheForTests(): void {
-  delete _navPropCache['sprk_reportcard'];
+  _resetNavPropCacheForTests();
 }
 
 // ---------------------------------------------------------------------------
@@ -171,9 +140,20 @@ const RESOURCE_LOOKUPS: readonly IResourceLookupConfig[] = [
 
 export class ReportCardService {
   private readonly _dataService: IDataService;
+  private readonly _authenticatedFetch: AuthenticatedFetchFn;
+  private readonly _bffBaseUrl: string;
 
-  constructor(dataService: IDataService) {
+  /**
+   * @param authenticatedFetch Injected BFF-authenticated fetch — required so the
+   *   field-mapping engine (task 022) can fetch the {host -> Report Card}
+   *   profile. Mirrors the injected shape already used by
+   *   `InvoiceService`/`WorkAssignmentService`.
+   * @param bffBaseUrl BFF API base URL, same convention as the sibling services.
+   */
+  constructor(dataService: IDataService, authenticatedFetch: AuthenticatedFetchFn, bffBaseUrl: string) {
     this._dataService = dataService;
+    this._authenticatedFetch = authenticatedFetch;
+    this._bffBaseUrl = bffBaseUrl;
   }
 
   /**
@@ -197,7 +177,7 @@ export class ReportCardService {
   ): Promise<ICreateReportCardResult> {
     const warnings: string[] = [];
 
-    const navProps = await _discoverNavProps('sprk_reportcard');
+    const navProps = await discoverNavProps('sprk_reportcard');
 
     const entity: Record<string, unknown> = {
       sprk_name: form.name.trim(),
@@ -251,6 +231,26 @@ export class ReportCardService {
         association.recordName,
         hint
       );
+
+      // Field-mapping engine (task 022) — apply the configured {host -> Report
+      // Card} field-mapping profile (if any) onto the SAME payload, after
+      // resolver fields and before createRecord. Graceful no-op when no
+      // profile is configured (profileFound:false) — mirrors
+      // applyResolverFields' NFR-06 no-op contract; the engine never throws.
+      // Target field names are NEVER hard-coded here — they come from the
+      // seeded profile/rules (task 030).
+      const mappingResult = await applyFieldMappings({
+        sourceEntity: association.entityType,
+        sourceId: _cleanGuid(association.recordId),
+        targetEntity: 'sprk_reportcard',
+        payload: entity,
+        dataService: this._dataService,
+        authenticatedFetch: this._authenticatedFetch,
+        bffBaseUrl: this._bffBaseUrl,
+      });
+      if (mappingResult.warnings.length > 0) {
+        warnings.push(...mappingResult.warnings);
+      }
     }
 
     let reportCardId: string;

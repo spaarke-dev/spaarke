@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>BFF tests + publish-size + push regression for DTO extension</title>
+    <phase>0: BFF Contract + Schema Extension</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>010</blocks>
+    <tags>bff-api, testing, unit-test, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>TEST-MODIFYING + bff-api; §10 requires test update + publish-size verification on BFF-touching tasks.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test authoring + mechanical verification against an existing test project.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Verifies task 002 output; blocks the engine.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add/extend unit tests for the field-mapping rule DTO projection (mappingType/expression/defaultValue/
+    isRequired/compatibilityMode), measure BFF publish size delta, run a CVE scan, and prove the existing
+    UpdateRelatedButton push path still deserializes correctly after the additive DTO change.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in xUnit + the Sprk.Bff.Api.Tests conventions (ADR-038 integration-heavy pyramid).</role>
+
+  <goal>Tests cover the new rule-DTO fields; the push path is proven unaffected; publish size + CVE status are reported in task notes.</goal>
+
+  <context>
+    <background>§10 BFF Hygiene requires test update + publish-size verification for every BFF-touching task. The push endpoint (PushFieldMappingsAsync) shares MapRuleEntityToDto — the additive fields must not break its existing deserialization/behavior (spec FR-16).</background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Follow the KEEP-path test categories; do NOT add Mock&lt;HttpMessageHandler&gt;, DI-registration, or ctor null-check tests.</constraint>
+    <constraint source="project">Publish-size ceiling ≤60 MB compressed; report absolute size + delta vs baseline (~49.63 MB incl. PDBs). Expected delta ≈ 0 (DTO fields only).</constraint>
+    <constraint source="project">Do NOT modify the push endpoint's behavior — this task only proves it still works.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add/extend a test asserting MapRuleEntityToDto (or the endpoint response) populates mappingType/defaultValue/expression/isRequired/compatibilityMode from a representative rule entity.</step>
+    <step order="2">Add/confirm a test that the push path (PushFieldMappingsAsync) still produces correct results with rules carrying the new fields (no deserialization break).</step>
+    <step order="3">dotnet test the Sprk.Bff.Api.Tests project — all green.</step>
+    <step order="4">Run: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ ; measure compressed size; record absolute + delta in notes.</step>
+    <step order="5">Run dotnet list package --vulnerable --include-transitive ; confirm no new HIGH CVE; record in notes.</step>
+    <step order="6">Update TASK-INDEX.md: mark 003 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish, list packages</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (new/updated field-mapping DTO tests)</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r2/notes/ (publish-size + CVE report)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A test asserts all five new rule-DTO fields project correctly.</criterion>
+    <criterion testable="true">A test proves the push path works with the extended rule shape.</criterion>
+    <criterion testable="true">dotnet test passes.</criterion>
+    <criterion testable="true">Publish size reported with delta vs baseline; ≤60 MB; notes updated.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE introduced.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Ref: spec.md FR-16, NFR-01, NFR-07.
+
+    Completed 2026-07-09. Added tests/unit/Sprk.Bff.Api.Tests/Api/FieldMappings/FieldMappingRuleProjectionTests.cs
+    (15 tests) covering MapRuleEntityToDto projection of the 5 new rule-DTO fields (all 4 MappingType
+    branches + unknown-int fallback, DefaultValue/Expression/IsRequired passthrough, both CompatibilityMode
+    branches + unknown-int fallback) and 2 push-path regression tests proving ApplyMappingRule still maps
+    source-to-target correctly (Mapped + Skipped cases) when the rule carries the new fields.
+
+    Code-review found MapRuleEntityToDto/ApplyMappingRule were private static, forcing a reflection seam
+    (existing precedent: ChatEndpointsAttachmentsTests.cs). Found a cleaner seam: Sprk.Bff.Api.Tests already
+    has InternalsVisibleTo, so both methods were changed private -> internal static (accessibility-only,
+    zero behavior change) in FieldMappingEndpoints.cs, and the test calls them directly — no reflection,
+    fully B8-compliant per tests/CLAUDE.md.
+
+    dotnet test tests/unit/Sprk.Bff.Api.Tests: 7662 passed, 0 failed, 101 skipped (pre-existing skips),
+    Total 7763 — confirmed on 2 consecutive full runs after the accessibility change (one transient
+    single-test flake in an intermediate run self-resolved on re-run; unrelated to this task's files).
+
+    Publish size (dotnet publish -c Release, compressed via Compress-Archive -CompressionLevel Optimal):
+    49.60 MB incl. PDBs (baseline ~49.63 MB, delta ~-0.03 MB) / 45.73 MB excl. PDBs (baseline 45.87 MB,
+    delta ~-0.14 MB) -- both essentially flat vs baseline as expected (DTO fields + accessibility change
+    only, no new packages). Well under the 60 MB ceiling.
+
+    CVE scan (dotnet list package --vulnerable --include-transitive on Sprk.Bff.Api): 1 HIGH-severity
+    finding, Microsoft.Kiota.Abstractions 1.21.2 (transitive via Microsoft.Graph). Confirmed PRE-EXISTING:
+    `git diff origin/master...HEAD --stat -- '**/*.csproj'` is empty for this branch -- no package
+    references were touched by tasks 001/002/003. Not a new CVE introduced by this task.
+
+    Quality gates: code-review (1 finding -- B8 reflection seam -- remediated per above) and adr-check
+    (0 violations; 1 pre-existing Warning noted -- test file lives at tests/unit/Sprk.Bff.Api.Tests/Api/FieldMappings/,
+    matching 100% of sibling FieldMapping tests in this project, which predates the tests/CLAUDE.md six-KEEP-path
+    reorg referenced as "after task 050 path reorganization completes"; out of scope for this task to relocate
+    the whole legacy test tree) both re-run clean after the fix.
+
+    See notes/task-003-notes.md for the full report.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

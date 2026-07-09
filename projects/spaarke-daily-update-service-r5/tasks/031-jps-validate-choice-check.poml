@@ -3,7 +3,7 @@
   <metadata>
     <title>jps-validate Step 7.7: flag type:"string" fieldMappings targeting Choice columns</title>
     <phase>B: Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>none</blocks>
