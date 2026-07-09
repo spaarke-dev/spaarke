@@ -1,0 +1,115 @@
+<task id="032" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-18 serial action queueing in ConversationPane</title>
+    <phase>3 Inline Editing UX</phase>
+    <gate>green</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>phase3-ui</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend,react,testing</tags>
+    <estimated-effort>high</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make rapidly-invoked Compose AI actions run one at a time in dispatch order in the ConversationPane. When the user
+    fires Compare then Draft in quick succession, each must stream to completion before the next starts — producing two
+    ordered, non-interleaved streams and ordered ledger writes (owner decision: serial queue, not parallel). This is a
+    predictability guarantee for ledger ordering (design §2.3/§7, spec FR-18).
+  </prompt>
+
+  <role>
+    Frontend developer expert in React async state, streaming (SSE) consumption, and queue/serialization patterns.
+  </role>
+
+  <goal>
+    A serial action queue in ConversationPane that accepts inbound `compose_action_request` dispatches, enqueues them in
+    arrival order, and executes them strictly one-at-a-time (each streams to completion before the next dispatch begins),
+    yielding ordered non-interleaved streams + ordered ledger writes. RTL/behavioral tests prove ordering under rapid-fire.
+  </goal>
+
+  <context>
+    <background>
+      ConversationPane is a thin host (≤300 lines) delegating behavior to focused sibling hooks (useInjectionQueue,
+      useEventBatch, useCommandRouting, etc.). Add the serial queue as a new focused hook (`useSerialActionQueue.ts`) rather
+      than inflating the host. It consumes `compose_action_request` events (from FR-14 / task 030's toolbar) and drives them
+      through the existing `dispatchConsumer` seam serially. This task is parallel-safe with 030/031 (different files:
+      ConversationPane vs ComposeEditor).
+    </background>
+    <relevant-files>
+      <file change="create">src/solutions/SpaarkeAi/src/components/conversation/useSerialActionQueue.ts</file>
+      <file change="modify">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (wire the serial queue hook)</file>
+      <file change="reference">src/solutions/SpaarkeAi/src/components/conversation/useInjectionQueue.ts (existing queue hook pattern to mirror)</file>
+      <file change="reference">src/solutions/SpaarkeAi/src/components/conversation/useEventBatch.ts (existing PaneEventBus batch consumption)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">FR-14 toolbar — emits the `compose_action_request` events this queue serializes (contract dependency, not file dependency).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-030">Consume the typed `compose_action_request` discriminant from PaneEventBus; no `any` payloads.</constraint>
+    <constraint source="ADR-040">Serial execution guarantees ordered ledger writes (storage precedes rendering); the queue must NOT let a later action's ledger write land before an earlier one's.</constraint>
+    <constraint source="project">Dispatch through the shipped session-dispatch seam (`dispatchConsumer` → `/dispatch`); no new endpoint, no client-side routing (ADR-039).</constraint>
+    <constraint source="project">ConversationPane stays a thin host — behavior lives in the new focused hook, not the host component (matches the task-045 decomposition rule in the file header).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>React serial async queue; SSE stream completion gating; PaneEventBus consumption; ordered ledger writes</topic>
+    <files>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>projects/spaarkeai-compose-r2/design.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Serial action queue" location="spec.md FR-18 / design.md §2.3">Rapidly-invoked actions run one at a time in dispatch order; each streams to completion before the next starts.</pattern>
+      <pattern name="Focused queue hook" location="src/solutions/SpaarkeAi/src/components/conversation/useInjectionQueue.ts">Existing per-concern hook pattern the serial queue should mirror.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    NEW hook `useSerialActionQueue.ts`. (1) Existing — `useInjectionQueue` manages context-injection ordering, not
+    dispatch serialization of streaming AI actions; `useEventBatch` batches events but does not gate on stream completion.
+    (2) Extension — the serialization concern (await stream-N complete before starting stream-N+1) is distinct; folding it
+    into an existing hook would conflate batching with execution-gating. (3) Cost-of-doing-nothing — without it, firing
+    Compare then Draft interleaves two SSE streams and produces out-of-order ledger writes, breaking FR-18's ordering bar.
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Context check. Load ADR-030/040 + design §2.3 + the existing conversation hooks.</step>
+    <step order="1">Implement `useSerialActionQueue`: a FIFO queue of `compose_action_request` items; a single in-flight worker that awaits the current dispatch's stream-completion (and its ledger write) before dequeuing the next.</step>
+    <step order="2">Drive each item through the existing `dispatchConsumer` seam; expose queue state (pending count, in-flight id) for UI affordance if needed.</step>
+    <step order="3">Handle edge cases: an errored/aborted action must still release the queue (no deadlock); a duplicate rapid dispatch is enqueued in order.</step>
+    <step order="4">Wire the hook into ConversationPane (thin — just consume the event source + mount the hook).</step>
+    <step order="5">Write behavioral tests proving ordering under rapid-fire; `npm run build`; report.</step>
+  </steps>
+
+  <ui-tests>
+    <ui-test name="serial ordering under rapid-fire">Firing Compare then Draft in quick succession produces two streams that do NOT interleave — the second dispatch does not begin until the first stream completes; assert dispatch/stream order.</ui-test>
+    <ui-test name="ordered ledger writes">The ledger-write side effects occur in dispatch order (earlier action's write precedes the later action's) — assert the recorded write order matches enqueue order.</ui-test>
+    <ui-test name="error releases the queue">An action that errors/aborts mid-stream still allows the next queued action to run (NEGATIVE: no deadlock on failure).</ui-test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/useSerialActionQueue.ts</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (wire hook)</output>
+    <output type="test">useSerialActionQueue behavioral tests (co-located)</output>
+    <output type="report">Task completion report incl. bundle impact</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Firing two actions (e.g., Compare then Draft) in quick succession produces two ordered, non-interleaved streams — the second does not start until the first completes.</criterion>
+    <criterion testable="true">Ledger writes occur in dispatch order; a later action's write never precedes an earlier action's (ADR-040 ordering).</criterion>
+    <criterion testable="true">An errored or aborted in-flight action releases the queue so subsequent actions still run (NEGATIVE: no deadlock).</criterion>
+    <criterion testable="true">The queue consumes the typed `compose_action_request` discriminant and dispatches only through the shipped `dispatchConsumer` seam (no new endpoint/routing).</criterion>
+    <criterion testable="true">ConversationPane remains a thin host (logic in `useSerialActionQueue`); `npm run build` green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

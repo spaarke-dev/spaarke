@@ -1,0 +1,90 @@
+<task id="080" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>R1 spec.md amendment (two Word-native non-goals to "shipped in R2")</title>
+    <phase>8 Wrap</phase>
+    <gate>startable-now</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <tags>docs</tags>
+    <fr>ADR-Tension Path-B</fr>
+  </metadata>
+
+  <prompt>
+    Amend the R1 spec.md two Word-native non-goals — "Tracked changes round-trip with Word — never" and
+    "Comments stored as Word `w:comment` elements — never" — to reflect that R2 SHIPS them. Per CLAUDE.md §6.5
+    Path B (ADR/non-goal amendment) and the R2 design.md §10 + spec.md ADR Tensions actions, these non-goals
+    were over-pruned at R1; R2 delivers Word-native track changes + comments via the Open XML SDK DOCX shuttle
+    (FR-24/FR-25). This is a documentation-only edit that closes the Path-B tension.
+  </prompt>
+
+  <role>
+    Technical writer / developer maintaining Spaarke project specs, familiar with the CLAUDE.md §6.5 ADR
+    Conflict Resolution Protocol (Path B).
+  </role>
+
+  <goal>
+    The two R1 spec.md non-goal lines (and the parallel R1 CLAUDE.md MUST NOT lines, if in scope) are amended
+    from "never" to "deferred to / shipped in R2", each citing R2 FR-24/FR-25 and the Path-B resolution. No code
+    changes. A note records that the amendment was filed at R2 closeout per design.md §10 Actions.
+  </goal>
+
+  <context>
+    <background>
+      R1 spec.md §Out of Scope lines 49-50 declare the two Word-native non-goals as "never". R2's design.md §10
+      ADR Tensions and spec.md ADR Tensions both flag these as Path-B amendments to be filed at R2 closeout.
+      The R1 CLAUDE.md also carries matching MUST NOT rules ("MUST NOT store comments as Word w:comment in R1",
+      "MUST NOT support tracked-changes round-trip"). Amend the non-goals; annotate the R1 MUST NOT rules as
+      R1-scoped, superseded by R2.
+    </background>
+    <relevant-files>
+      <file path="projects/spaarkeai-compose-r1/spec.md" role="edit">Lines 49-50 (Out of Scope non-goals) + line 185 (MUST NOT store comments) — amend "never" to "shipped in R2 (FR-24/FR-25)".</file>
+      <file path="projects/spaarkeai-compose-r1/CLAUDE.md" role="edit">MUST NOT rules for tracked-changes round-trip + w:comment storage — annotate as R1-scoped, superseded by R2.</file>
+      <file path="projects/spaarkeai-compose-r2/design.md" role="reference">§10 ADR Tensions (both Path-B rows) + Actions.</file>
+      <file path="projects/spaarkeai-compose-r2/spec.md" role="reference">ADR Tensions section (Path-B rows) + Actions line.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">Documentation-only; independently startable. May be filed anytime during R2; TASK-INDEX places it in the wrap phase.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="charter-6.5">This is a Path-B amendment — the R1 non-goal decision is no longer correct as written; amend it with rationale, do NOT silently violate it.</constraint>
+    <constraint source="project">Documentation-only edit. Do NOT change any R1 code or R2 code in this task.</constraint>
+    <constraint source="project">Each amended line cites the R2 FR that ships the capability (FR-24 push / FR-25 pull) and references the Path-B resolution.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read R1 spec.md lines 49-50 + 185 and the R1 CLAUDE.md MUST NOT rules for the two Word-native non-goals.</step>
+    <step order="2">Amend each "never" non-goal to state R2 ships it, citing FR-24 (push annotations) / FR-25 (pull annotations) and the CLAUDE.md §6.5 Path-B resolution.</step>
+    <step order="3">Annotate the R1 CLAUDE.md MUST NOT rules as R1-scoped and superseded by R2 (do not delete R1 history — mark superseded).</step>
+    <step order="4">Confirm the R2 design.md §10 / spec.md ADR Tensions "Actions" note is satisfied (amendment filed).</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-compose-r1/spec.md — two non-goals amended</output>
+    <output type="docs">projects/spaarkeai-compose-r1/CLAUDE.md — matching MUST NOT rules annotated superseded</output>
+    <output type="docs">projects/spaarkeai-compose-r2/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">R1 spec.md "Tracked changes round-trip — never" is amended to "shipped in R2 (FR-24/FR-25)" with Path-B citation.</criterion>
+    <criterion testable="true">R1 spec.md "Comments stored as w:comment — never" is amended to "shipped in R2 (FR-24/FR-25)" with Path-B citation.</criterion>
+    <criterion testable="true">The parallel R1 CLAUDE.md MUST NOT rules are annotated as R1-scoped / superseded by R2.</criterion>
+    <criterion testable="true">No code files are modified in this task (docs-only, grep-verified).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

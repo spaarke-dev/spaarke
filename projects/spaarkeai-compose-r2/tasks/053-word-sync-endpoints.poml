@@ -1,0 +1,126 @@
+<task id="053" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-26 webhooks/spe-doc-changed + check-changes endpoints</title>
+    <phase>5 Word</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W3-Word</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>052</deps>
+    <tags>bff-api,api,spe,azure</tags>
+    <estimated-effort>1.5 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement the two FR-26 inbound endpoints on top of the task-052 subscription/delta substrate:
+    `POST /api/compose/webhooks/spe-doc-changed` (the SPE/Graph change-notification receiver —
+    handles the Graph validation-token handshake, validates the notification, and enqueues delta +
+    re-anchor work) and `POST /api/compose/document/{spe-id}/check-changes` (an explicit poll variant
+    that compares the stored etag vs the current SPE etag — the fallback when the webhook fails or for
+    testing). The webhook receiver drives `SpeSyncOrchestrator` (task 052) to enumerate changed
+    driveItems; task 054 consumes the change signal to re-anchor. Note: the file-overlap in
+    `ComposeEndpoints.cs` with tasks 050/051/055 means this task is NOT parallel-safe against them —
+    serialize the `ComposeEndpoints.cs` edits.
+  </prompt>
+
+  <role>
+    .NET 8 Minimal API developer familiar with Graph webhook receivers (validation-token echo,
+    clientState verification), background job enqueue, and the Spaarke SPE facade + Redis etag state.
+  </role>
+
+  <goal>
+    Two authorized Compose endpoints: a webhook receiver that completes the Graph subscription
+    validation handshake, verifies inbound notifications, and enqueues delta/re-anchor work via the
+    orchestrator; and a poll endpoint that returns whether the SPE file changed (stored vs current
+    etag). Matching unit tests cover the validation handshake, a valid change notification, an
+    invalid/unauthenticated notification (rejected), and the etag-unchanged / etag-changed poll cases.
+  </goal>
+
+  <context>
+    <background>
+      design §2.5 + §12.2. FR-26 ships BOTH webhook + poll variants in R2 (spec Assumptions). The
+      poll endpoint is the honest fallback when the webhook is unreliable (Risk R6). The webhook
+      receiver must handle Graph's subscription-validation GET/POST token echo and verify the
+      notification (clientState / signing) before doing work.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — add POST /webhooks/spe-doc-changed + POST /document/{spe-id}/check-changes (SERIALIZE edits vs tasks 050/051/055)</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Services/Compose/SpeSyncOrchestrator.cs — task 052; drive delta enumeration + etag comparison from these endpoints</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ — existing webhook HMAC/clientState validation (Communication/EmailProcessing webhooks) to mirror for notification verification</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs — enqueue pattern for downstream re-anchor work (if async)</file>
+      <file role="design">projects/spaarkeai-compose-r2/design.md §2.5, §12.2</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="052" status="pending">SPE subscription + delta + Redis etag state. The webhook receiver + poll both call `SpeSyncOrchestrator`; without 052 there is nothing to drive.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008 / NFR-04">Both endpoints under the `/api/compose` group. The poll endpoint uses `.RequireAuthorization()`. The webhook receiver: the Graph subscription-validation handshake is anonymous by Graph's contract, but every notification MUST be verified via clientState/signing before any work — mirror the existing Communication/EmailProcessing webhook auth. Document the auth model explicitly (this is a security-sensitive endpoint — escalate the auth decision if ambiguous per CLAUDE.md §6).</constraint>
+    <constraint source="ADR-007">No `Microsoft.Graph` types in the endpoint or `Services/Compose/`; drive everything through `SpeSyncOrchestrator` + the SPE facade.</constraint>
+    <constraint source="ADR-009">Etag comparison reads the Redis-stored etag from task 052; no `IMemoryCache`.</constraint>
+    <constraint source="ADR-013 / NFR-05">No AI-internal injection.</constraint>
+    <constraint source="ADR-029 / CLAUDE.md §10">Report publish-size + CVE for this BFF-touching task. State Placement Justification.</constraint>
+    <constraint source="NFR-08">Matching unit tests in `tests/unit/Sprk.Bff.Api.Tests/`.</constraint>
+    <constraint source="project (file overlap)">Serialize `ComposeEndpoints.cs` edits against tasks 050/051/055 — rebase onto their route additions rather than editing concurrently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph webhook receiver handshake + verification; poll fallback; endpoint auth</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/spe-integration/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Webhook verification" location="src/server/api/Sprk.Bff.Api/Infrastructure/Auth/">
+        Existing Communication/EmailProcessing webhook HMAC + clientState validation — reuse the verification approach; do not invent a new scheme.
+      </pattern>
+      <pattern name="Compose endpoint group" location="src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs">
+        Follow the established `.WithName/.WithSummary/.Produces` convention; the webhook receiver additionally handles the validation-token query echo.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Confirm task 052 merged. Declare FULL rigor; load knowledge files; state Placement Justification + the webhook auth model.</step>
+    <step order="1" name="Webhook receiver">Add `POST /api/compose/webhooks/spe-doc-changed`: complete the Graph validation-token echo; verify clientState/signing on notifications (mirror existing webhook auth); on a valid `updated` notification, call `SpeSyncOrchestrator` to enumerate changed driveItems and enqueue/flag re-anchor work.</step>
+    <step order="2" name="Poll endpoint">Add `POST /api/compose/document/{spe-id}/check-changes`: `.RequireAuthorization()`; compare Redis-stored etag vs current SPE etag via the orchestrator; return changed/unchanged (+ changed-item info).</step>
+    <step order="3" name="Unit tests">Validation-token handshake echoes correctly; a signed valid notification triggers enumeration; an unsigned/invalid notification is rejected without doing work; poll returns unchanged when etags match and changed when they differ.</step>
+    <step order="4" name="Verify">Build + tests; publish-size/CVE; NetArchTest facade check; update TASK-INDEX.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (spe-doc-changed + check-changes routes)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ — webhook receiver + poll endpoint tests</output>
+    <output type="report">Publish-size delta; CVE; Placement Justification + webhook auth model note</output>
+  </outputs>
+
+  <justification>
+    <existing>No existing Compose change-detection endpoint. The endpoints are thin routes delegating to task-052's `SpeSyncOrchestrator`; no new service.</existing>
+    <extension>These are endpoints (not new components) reusing the existing `ComposeEndpoints.cs` group + existing webhook-verification infrastructure — the minimal surface to expose FR-26's inbound legs.</extension>
+    <cost-of-doing-nothing>Without the receiver, Graph has nowhere to deliver `updated` notifications — return-from-Word never fires. Without the poll fallback, a webhook outage (Risk R6) silently drops all change detection with no recovery path. FR-26 acceptance depends on both.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">`POST /api/compose/webhooks/spe-doc-changed` completes the Graph subscription-validation token echo.</criterion>
+    <criterion testable="true">A verified `updated` notification causes `SpeSyncOrchestrator` to enumerate changed driveItems and enqueue/flag re-anchor work.</criterion>
+    <criterion testable="true">Negative: an unsigned/invalid-clientState notification is rejected (no delta work performed).</criterion>
+    <criterion testable="true">`POST /api/compose/document/{spe-id}/check-changes` requires authorization and returns unchanged when stored etag == current etag, changed otherwise.</criterion>
+    <criterion testable="true">No `Microsoft.Graph` type in the endpoints/`Services/Compose/`; etag read from Redis (ADR-009).</criterion>
+    <criterion testable="true">Matching unit tests pass; BFF build green; publish-size + CVE reported; webhook auth model documented.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

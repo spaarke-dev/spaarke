@@ -1,0 +1,130 @@
+<task id="020" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-19 IComposeEditValidator + POST /edit-batch/validate</title>
+    <phase>2 LLM Editing Patterns</phase>
+    <gate>green</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+    <parallel-group>phase2-llm</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>002</deps>
+    <tags>bff-api,api,testing</tags>
+    <estimated-effort>xhigh</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the deterministic edit-validation engine that underpins every inline AI edit in Compose R2.
+    The LLM proposes a structured edit (`target_text` / `new_text` / `match_mode`); this validator resolves
+    the `target_text` against the current document and REFUSES ambiguity with an actionable, copy-pasteable
+    error instead of silently applying the wrong match. This is the adeu `match_mode` pattern
+    (design §6.1) — collapsing the LLM's job to find-and-replace, which LLMs do reliably, while the
+    engine owns correctness. It is exposed at `POST /api/compose/edit-batch/validate` so the client can
+    pre-validate a proposed edit before it is dispatched or materialized.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Minimal APIs, deterministic text processing, and SharePoint-Embedded-backed
+    document services. You write small, well-tested pure services with numbered edge-case comments (`// EDGE-N:` per design §6.1).
+  </role>
+
+  <goal>
+    A pure, DI-minimal `IComposeEditValidator` in `src/server/api/Sprk.Bff.Api/Services/Compose/` that:
+    (a) supports `match_mode` = `strict` | `first` | `all`; (b) returns structured ambiguity errors carrying match count,
+    up to 5 example matches with surrounding context, and a copy-pasteable resolution hint; (c) is exposed at
+    `POST /api/compose/edit-batch/validate` (RequireAuthorization). Full unit coverage of the closed acceptance set below,
+    build green, publish size measured and reported.
+  </goal>
+
+  <context>
+    <background>
+      FR-19 is the foundation of the Phase 2 LLM-pattern engine (FR-20 ComposeEditBatch and FR-21 ComposeEditTransaction
+      build on this validator). Spike 2 (task 002) validated `match_mode` + structured ambiguity errors against 5 sample edits;
+      its notes in `notes/spikes/` are the reference approach. No AI internals are involved — this is deterministic text
+      resolution over document plaintext supplied by the caller (the validator does NOT reach the model).
+    </background>
+    <relevant-files>
+      <file change="create">src/server/api/Sprk.Bff.Api/Services/Compose/IComposeEditValidator.cs</file>
+      <file change="create">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditValidator.cs</file>
+      <file change="create">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditModels.cs</file>
+      <file change="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file change="reference">projects/spaarkeai-compose-r2/notes/spikes/ (Spike 2 output — match_mode + ambiguity error shape)</file>
+      <file change="reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (existing Compose service — DI + endpoint wiring conventions)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">Spike 2 — edit validator match_mode + ambiguity errors (informs the error shape + band tuning).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Services/Compose/ MUST NOT inject `IOpenAiClient`, executor types, or `IConsumerRoutingService`. The validator is pure deterministic text logic; it reaches NO AI internals. Tier-1 NetArchTest enforces this (verified in task 025).</constraint>
+    <constraint source="ADR-001">Endpoint uses the Minimal API `MapGroup`/`MapPost` pattern already established in ComposeEndpoints.cs — no controllers, no Azure Functions.</constraint>
+    <constraint source="ADR-008">Authorization via endpoint filter / `RequireAuthorization()` — not middleware.</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 — endpoint requires authorization (NFR-04); no health/ping exemption applies here.</constraint>
+    <constraint source="ADR-010">DI minimalism — register ONLY `IComposeEditValidator`; internal helpers (match resolver, context extractor) need not be DI-registered.</constraint>
+    <constraint source="ADR-038">Integration-heavy pyramid; NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor null-check tests. Test the validator through its public contract with real inputs.</constraint>
+    <constraint source="project">BFF publish size ≤ 60 MB compressed (NFR-01). Measure with `dotnet publish -c Release` and report absolute + delta in task notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deterministic text edit validation; match_mode; structured error contracts; Minimal API endpoints</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r2/design.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="match_mode validator" location="design.md §6.1">LLM specifies match precision; engine refuses ambiguity with an actionable error (match count, 5 examples with context, copy-pasteable resolution).</pattern>
+      <pattern name="Minimal API Compose route group" location="src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs">Follow the existing `/api/compose/` MapGroup + RequireAuthorization conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    NEW service `IComposeEditValidator`. (1) Existing — nothing in `Services/Compose/` performs match_mode-aware
+    edit resolution; `ComposeService` handles load/save/promote only (verified by Glob of Services/Compose/*). (2) Extension —
+    cannot extend `ComposeService`: that is the SPE-facing document lifecycle service; edit validation is a distinct,
+    pure, reusable concern consumed by FR-20/21. (3) Cost-of-doing-nothing — without it, a `target_text` that matches
+    multiple spans is silently applied to the wrong one (the exact failure FR-19 exists to prevent); FR-20 batch application
+    has no correctness gate and offset drift becomes undetectable.
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Context check. Load ADRs + constraints listed in knowledge. Read Spike 2 notes for the locked error shape.</step>
+    <step order="1">Define `ComposeEditModels.cs`: the request (`documentText`, list of proposed edits each with `target_text`/`new_text`/`match_mode`) and the structured result/error types (match count, up to 5 `MatchExample { offset, contextBefore, matched, contextAfter }`, resolution hint). Mirror the Draft-Alternative payload shape from HANDOFF §1 (`target_text`/`new_text`/`match_mode`/`rationale`/`sources`) so validate consumes the same contract the catalog action emits.</step>
+    <step order="2">Implement `ComposeEditValidator` resolving each edit's `target_text`: `strict` requires exactly one match (else ambiguity/no-match error); `first` resolves the earliest match; `all` resolves every match. Extract ≤5 example spans with surrounding context for ambiguous results.</step>
+    <step order="3">Handle the negative/edge cases in the acceptance set with `// EDGE-N:` comments (ambiguous multi-match, empty `target_text`, no-match, overlapping edits within one batch, whitespace/normalization).</step>
+    <step order="4">Add `POST /api/compose/edit-batch/validate` to ComposeEndpoints.cs (MapPost under the `/api/compose` group, `RequireAuthorization()`), calling the validator and returning 200 with the structured result or 422 with the structured ambiguity error.</step>
+    <step order="5">Register `IComposeEditValidator` in DI (single registration; keep additions minimal per ADR-010).</step>
+    <step order="6">Write unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeEditValidatorTests.cs` covering the closed acceptance set (positive + all negatives).</step>
+    <step order="7">Build (`dotnet build src/server/api/Sprk.Bff.Api/`); run tests; measure publish size and report absolute + delta.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/IComposeEditValidator.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditValidator.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditModels.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (add validate route)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeEditValidatorTests.cs</output>
+    <output type="report">Task completion report incl. publish-size absolute + delta</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Given a `target_text` with exactly one match and `match_mode=strict`, the validator returns a single resolved match with correct offset.</criterion>
+    <criterion testable="true">Given a `target_text` that matches multiple spans with `match_mode=strict`, the validator returns a structured ambiguity error with match count and ≤5 example matches each carrying surrounding context and a copy-pasteable resolution hint (NEGATIVE: ambiguous match — no silent wrong-match).</criterion>
+    <criterion testable="true">Given `match_mode=first` on a multi-match `target_text`, the validator resolves the earliest match deterministically; `match_mode=all` resolves every occurrence.</criterion>
+    <criterion testable="true">Given an empty/whitespace-only `target_text`, the validator returns a structured validation error, not a match (NEGATIVE: empty selection).</criterion>
+    <criterion testable="true">Given a `target_text` with zero matches, the validator returns a structured no-match error including a nearest-candidate hint where one exists.</criterion>
+    <criterion testable="true">Given two edits in one batch whose resolved spans overlap, the validator flags the overlap in the structured result (NEGATIVE: overlap) rather than returning conflicting resolutions.</criterion>
+    <criterion testable="true">`POST /api/compose/edit-batch/validate` returns 200 with the structured result on success and 422 with the structured ambiguity/validation error on failure; the route enforces `RequireAuthorization()`.</criterion>
+    <criterion testable="true">`ComposeEditValidator` injects zero AI internals (`IOpenAiClient`/executor/`IConsumerRoutingService`); `dotnet build` is green; publish size ≤ 60 MB reported with delta.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,85 @@
+<task id="006" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Spike 6 — reverse round-trip (Word edit → webhook → read); tune re-anchor bands</title>
+    <phase>0 Spikes</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>043, 051, 054</blocks>
+    <tags>bff-api, docx, spe</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Exploratory spike — throwaway reader + webhook trace recorded as a spike note, not the production DocxAnnotationReader/webhook service. STANDARD per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded reverse round-trip validation over documented SPE webhook + Open XML SDK read APIs. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W0b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Prove the DOCX reverse path: a Word for Web user adds a comment + a tracked change to the SPE-hosted document; an SPE webhook fires on the update; the BFF reads the incoming .docx with Open XML SDK and recovers the added &lt;w:comment&gt; / &lt;w:ins&gt; / &lt;w:del&gt; WITH correct author and date. Use the results to characterise text-drift and inform the return-from-Word re-anchor confidence bands (starting default ≥0.85 auto / 0.6–0.85 flag / &lt;0.6 orphan). This validates round-trip validity before FR-25/FR-26/FR-27 (tasks 051/053/054) build the production reader + webhook + re-anchoring. Deliverable is a spike note with the observed author/date fidelity and empirically-informed band recommendations.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with SPE webhook subscriptions + delta query, Open XML SDK read APIs (parsing w:comment / w:ins / w:del with author/date), and drift-resistant text anchoring.
+  </role>
+
+  <goal>
+    A spike note at projects/spaarkeai-compose-r2/notes/spikes/spike-6-word-roundtrip.md that unlocks the FR-25/26/27 decision: round-trip validity — confirmed BFF recovery of Word-added comments/track-changes with correct author/date after a webhook fires, PLUS an empirical recommendation for the re-anchor confidence bands (whether ≥0.85 / 0.6–0.85 / &lt;0.6 hold or need adjustment).
+  </goal>
+
+  <context>
+    <background>
+      Design §6.2 + §2.5 (return from Word) + §13 Spike 6 + spec FR-27. Compose detects the new SPE version, reads Word's native annotations, and re-anchors prior Compose annotations to the drifted text using confidence bands. This spike proves the reverse path and empirically tunes the bands before tasks 051/053/054. Decision unlocked (design §13): round-trip validity. It builds on Spike 5's forward-path document.
+    </background>
+    <relevant-files>
+      <file purpose="target-service-dir">src/server/api/Sprk.Bff.Api/Services/Compose/ — where production DocxAnnotationReader / SpeSyncOrchestrator land (tasks 051/052/053); spike prototypes under notes/spikes/</file>
+      <file purpose="spe-facade">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs — SPE read/delta seam (facade over Microsoft.Graph)</file>
+      <file purpose="webhook-bg-pattern">src/server/api/Sprk.Bff.Api/Services/Compose/StaleCheckoutSweeperHostedService.cs — BackgroundService reference pattern for webhook renewal (ADR-001)</file>
+      <file purpose="spike-5-note">projects/spaarkeai-compose-r2/notes/spikes/spike-5-openxml-write.md — the forward-path document this spike round-trips</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="not-started">Requires the Spike-5 SPE-hosted annotated document to edit in Word and round-trip back.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">No Microsoft.Graph types above the SpeFileStore / Infrastructure facade — webhook + delta + read go through the facade.</constraint>
+    <constraint source="ADR-001">Webhook subscription renewal in production is a BackgroundService, not an Azure Function — the spike prototypes with that pattern in mind (StaleCheckoutSweeperHostedService is the reference).</constraint>
+    <constraint source="ADR-009">Redis-first for webhook / etag / re-anchor state — the spike notes what state must be Redis-held in production.</constraint>
+    <constraint source="project">Throwaway reader/webhook trace — production services are FR-25/26/27 (tasks 051/053/054); deliverable is a spike note under notes/spikes/.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>docx/open-xml-read, spe/webhooks, ai/text-anchoring</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + load">Load this task, project CLAUDE.md, Spike-5 note, and the knowledge files.</step>
+    <step order="1" name="Edit in Word">Open the Spike-5 SPE document in Word for Web; add a comment + a tracked change; save.</step>
+    <step order="2" name="Observe webhook">Confirm the SPE webhook fires on update and a delta query surfaces the changed driveItem.</step>
+    <step order="3" name="Read annotations">BFF reads the incoming .docx via Open XML SDK; recover w:comment / w:ins / w:del with author + date.</step>
+    <step order="4" name="Characterise drift + bands">Measure how prior anchors map onto the edited text; assess whether the ≥0.85 / 0.6–0.85 / &lt;0.6 bands hold; recommend adjustments.</step>
+    <step order="5" name="Write spike note">Record round-trip validity, author/date fidelity, and band recommendations for FR-25/26/27.</step>
+  </steps>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/spikes/spike-6-word-roundtrip.md</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The BFF recovers the Word-added comment + track-change with correct author and date after the webhook fires — the round-trip-validity decision the spike unlocks (design §13).</criterion>
+    <criterion testable="true">The spike note gives an empirical recommendation on the re-anchor confidence bands (≥0.85 auto / 0.6–0.85 flag / &lt;0.6 orphan hold or adjust).</criterion>
+    <criterion testable="true">The note records which webhook / etag / re-anchor state must be Redis-held in production (ADR-009) and that renewal is a BackgroundService (ADR-001).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,98 @@
+<task id="044" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-11 compose-defined-terms Action + Binding (overflow trigger → Context)</title>
+    <phase>4 Catalog</phase>
+    <status>blocked</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>045</blocks>
+    <tags>dataverse, ai, azure-openai, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production catalog row on the closed ADR-039 catalog; schema-validation gate + ADR-039/040 compliance; overflow-menu trigger + Context-pane render honoring the audit-only rule. FULL per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prompt + schema authoring reusing the Spike-1 pattern; document-wide read capability, no disposition. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-catalog-rows</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author the `compose-defined-terms` capability as an Action row + Click-path Binding row (ADR-039), mirror-first under infra/dataverse/, dispatched through the shipped session-dispatch seam (NO new endpoint). The Action performs full defined-terms extraction — detecting defined terms and flagging inconsistent usage across the document — and returns `{terms: [{term, definitionSpan, usages: [{span, consistent, note}]}], inconsistencies: [{term, detail}]}` (FR-11). It is document-wide (NOT selection-based): triggered from the selection-popover "More actions…" overflow (or a small doc-level command), and its output renders READ-ONLY in the Context pane (reference display honoring the audit-only Context rule). Consumes the `compose-document` JPS scope. Ships with eval cases in task 045.
+  </prompt>
+
+  <role>
+    AI platform developer fluent in JPS Action authoring, the ADR-039 Action+Binding catalog model, the SpaarkeAi three-pane Context (audit-only) contract, and OpenAiFunctionSchemaValidator constraints.
+  </role>
+
+  <goal>
+    A deployable `compose-defined-terms` Action row (defined-terms-extraction SystemPrompt + OutputSchemaJson + Temperature + ModelDeploymentId) and its Click-path Binding row, authored mirror-first through the core's hoisted description source, consuming `compose-document`, triggered from the overflow menu, rendering read-only in the Context pane, returning schema `{terms: [{term, definitionSpan, usages: [{span, consistent, note}]}], inconsistencies: [{term, detail}]}` passing OpenAiFunctionSchemaValidator with no property-level boolean `required`. Zero new routes; eval-ready for task 045.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-11 + design §7 (Catalog Roster row 6, overflow trigger → Context read-only) + owner clarification (defined-terms UX = overflow-menu trigger → Context-pane read-only output). Document-wide, so it is triggered from the "More actions…" overflow (or a doc-level command), NOT the selection toolbar. Output is a reference display in the Context pane — the Context pane stays a non-input, audit-only surface (FR-28/FR-32). Note: the schema carries a `consistent` boolean-TYPE field on each usage; that is a boolean value type and is legal — it is the property-level boolean `required` KEYWORD that is banned. Consumes the R1 `compose-document` scope.
+    </background>
+    <relevant-files>
+      <file purpose="input-schema-mirror-NEW">infra/dataverse/inputschemas/compose-defined-terms.input.schema.json — NEW input-schema mirror (proposed actionCode compose-defined-terms; confirm via jps-action-create)</file>
+      <file purpose="output-schema-mirror-NEW">infra/dataverse/outputschemas/compose-defined-terms.schema.json — NEW OutputSchemaJson mirror `{terms[], inconsistencies[]}`</file>
+      <file purpose="binding-mirror-EXTEND">infra/dataverse/sprk_playbookconsumer-rows.json — EXTEND: Click-path Binding row (consumerType compose-defined-terms / consumerCode default; overflow-menu / doc-level trigger)</file>
+      <file purpose="overflow-trigger">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — the "More actions…" overflow that dispatches this doc-level action (registration-extensible, FR-14)</file>
+      <file purpose="context-pane-readonly">@spaarke/legal-workspace Context pane — the read-only defined-terms display target (audit-only; never an input surface)</file>
+      <file purpose="exemplar-input">infra/dataverse/inputschemas/sum-chat-v1.input.schema.json — schema shape to copy</file>
+      <file purpose="dispatch-seam">src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts — Click-path seam (no new route)</file>
+      <file purpose="spike-1-pattern">projects/spaarkeai-compose-r2/notes/spikes/spike-1-action-schema.md — validated prompt/schema pattern</file>
+      <file purpose="hoist-source">infra/dataverse/ — the core's hoisted description mirror; author the row's description through it</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="not-started">Requires the Spike-1 validated Action prompt/schema pattern.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Action row + Binding row; the Binding is the ONLY routing config. NO new dispatch endpoint; NO string-key routing. Mirror-first through the core's hoisted description source. Eval cases gate the change. OutputSchemaJson MUST pass OpenAiFunctionSchemaValidator — property-level boolean `required` KEYWORD BANNED (the `consistent` boolean-type field is legal; it is a value, not the required keyword).</constraint>
+    <constraint source="ADR-040">Dispatched output is ledger-written by the seam; no parallel cache.</constraint>
+    <constraint source="project">The Context pane is audit-only — the defined-terms output is a READ-ONLY reference display, never an interactive input surface (FR-28/FR-32). Triggered from the overflow menu / doc-level command, NOT selection-based.</constraint>
+    <constraint source="ADR-038">Golden + dispatch eval families ≥5 each ship with the row (task 045).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/jps-action-authoring, ai/output-schema-validation, ui/context-pane-audit-only</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + gate">Load task, project CLAUDE.md, HANDOFF doc, Spike-1 note, knowledge files. CONFIRM core Phase A0 published the triple-twin hoist + dispatch seam before authoring.</step>
+    <step order="1" name="Author Action row">Via jps-action-create, author a full defined-terms-extraction SystemPrompt + OutputSchemaJson `{terms: [{term, definitionSpan, usages: [{span, consistent (boolean value), note}]}], inconsistencies: [{term, detail}]}`, Temperature, ModelDeploymentId. Write mirrors under infra/dataverse/ through the hoisted source.</step>
+    <step order="2" name="Author Binding row">Add the Click-path Binding row (consumerType compose-defined-terms, consumerCode default, toolDescription) consuming `compose-document`; mark the trigger as the overflow-menu / doc-level command and the output surface as the Context pane (read-only).</step>
+    <step order="3" name="Validate schema">jps-validate: OutputSchemaJson passes OpenAiFunctionSchemaValidator; confirm the `consistent` field is a boolean-type value and there is NO property-level boolean `required` keyword anywhere.</step>
+    <step order="4" name="Verify dispatch + Context-render path">Confirm the Binding resolves through the shipped seam (zero new routes) and the output renders read-only in the Context pane (no input affordance).</step>
+  </steps>
+
+  <outputs>
+    <output type="config">infra/dataverse/inputschemas/compose-defined-terms.input.schema.json</output>
+    <output type="config">infra/dataverse/outputschemas/compose-defined-terms.schema.json</output>
+    <output type="config">infra/dataverse/sprk_playbookconsumer-rows.json (Binding row added)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A `compose-defined-terms` Action row exists mirror-first with OutputSchemaJson exactly `{terms: [{term, definitionSpan, usages: [{span, consistent, note}]}], inconsistencies: [{term, detail}]}` (closed set).</criterion>
+    <criterion testable="true">A Click-path Binding row (consumerType compose-defined-terms / consumerCode default) consumes `compose-document`, is triggered from the overflow menu / doc-level command (NOT selection-based), and is the only routing config.</criterion>
+    <criterion testable="true">The output renders READ-ONLY in the Context pane; the Context pane remains a non-input, audit-only surface.</criterion>
+    <criterion testable="true">OutputSchemaJson passes OpenAiFunctionSchemaValidator; the `consistent` boolean-type field is legal; NO property-level boolean `required` keyword exists.</criterion>
+    <criterion testable="true">Dispatch resolves through the shipped seam and adds zero new BFF routes; row is eval-ready for task 045.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Consumes core Phase A0 triple-twin description hoist + session-dispatch/invoke seam per notes/HANDOFF-core-r2-A0-contract-requirements.md §7. If the published contract differs from the proposed shape, STOP and reconcile — do not adapt silently.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

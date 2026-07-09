@@ -1,0 +1,103 @@
+<task id="062" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-33 compaction over ledger + cross-version persistence (DocumentId+MatterId)</title>
+    <phase>6 Memory</phase>
+    <gate>startable-now</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>061</dependencies>
+    <tags>bff-api, testing</tags>
+    <fr>FR-33</fr>
+  </metadata>
+
+  <prompt>
+    Ensure long Compose sessions use the compacted digest over ledger outputs, and that session state binds to
+    `DocumentId + MatterId` (NOT to a specific DOCX version) so it survives Word handoffs. Reopening a document
+    after a Word round-trip restores prior decisions + annotations. This rides the redesign-r1 compacted-digest
+    mechanism (task 002 — digest compaction generalized to cover outputs, keys verbatim) — Compose consumes it,
+    it does not invent a new compaction path.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the ADR-040 ledger, the redesign-r1 compacted-digest mechanism, and the
+    ChatSession DocumentId binding in Sprk.Bff.Api.
+  </role>
+
+  <goal>
+    Compose session state is keyed by `DocumentId + MatterId` and survives a DOCX version change; long sessions
+    render from the compacted digest over ledger outputs; workspace-scope memory items are excluded from the
+    conversation-window compaction by design. Tests prove a version change does not reset session state and the
+    digest keys survive verbatim.
+  </goal>
+
+  <context>
+    <background>
+      design.md §8: "Compaction — the compacted digest over ledger outputs handles long sessions. Cross-version
+      persistence — bound to DocumentId + MatterId, NOT to a specific DOCX version. Survives Word handoffs."
+      This task wires Compose sessions to that binding + digest so return-from-Word (Phase 5) restores context.
+      Depends on task 061's ledger-query surface for reading prior action history into the restored view.
+    </background>
+    <relevant-files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs" role="reference">Compacted digest over ledger outputs (redesign-r1 task 002) — the compaction mechanism Compose consumes.</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs" role="edit">Session rebind + DocumentId binding; ensure keying by DocumentId+MatterId, version-independent.</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs" role="reference">Session payload persistence; confirm cross-version key stability.</file>
+      <file path="projects/spaarkeai-compose-r2/design.md" role="spec">§8 Compaction + Cross-version persistence paragraphs.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="061" status="pending">Action-history ledger query — the restored view reads prior actions from it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-040">Compaction operates over ledger outputs (the compacted digest); no parallel session cache; keys survive verbatim in the digest.</constraint>
+    <constraint source="ADR-015">Memory-tier retention: workspace-scope memory items live outside the conversation window and are unaffected by compaction.</constraint>
+    <constraint source="ADR-013">`Services/Compose/` reaches the ledger/digest via allowed seams only (Tier-1 NetArchTest).</constraint>
+    <constraint source="spec">Session state binds to `DocumentId + MatterId`, NOT to a DOCX version; reopening after a Word round-trip restores prior decisions + annotations.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the compacted-digest mechanism in ChatHistoryManager; confirm it already covers ledger outputs and keys survive verbatim.</step>
+    <step order="2">Verify/adjust the Compose session key to `DocumentId + MatterId` so a new DOCX version (Word save) does not create a new session or reset state.</step>
+    <step order="3">On session load after a version change, restore prior decisions + annotations (via task 061 query + task 060 annotations) into the resumed view.</step>
+    <step order="4">Confirm workspace-scope memory items are excluded from conversation-window compaction (they persist independently).</step>
+    <step order="5">Add tests: version change preserves session state; long session renders from the digest; digest keys survive verbatim.</step>
+    <step order="6">Verify build + report publish-size delta (expected ~0).</step>
+  </steps>
+
+  <justification>
+    <existing>Overlaps with the redesign-r1 compacted-digest mechanism and the ChatSession DocumentId binding. Verified both exist.</existing>
+    <extension>Extends existing binding/digest by keying Compose sessions version-independently and consuming the existing digest — no new compaction path or store.</extension>
+    <cost-of-doing-nothing>Without DocumentId+MatterId keying, a Word save (new DOCX version) resets the session — the user loses all prior decisions and annotations on return-from-Word, defeating the memory-continuity moat.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — DocumentId+MatterId keying + restore</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/CrossVersionSessionPersistenceTests.cs</output>
+    <output type="docs">projects/spaarkeai-compose-r2/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Compose session state is keyed by `DocumentId + MatterId`, independent of DOCX version.</criterion>
+    <criterion testable="true">A DOCX version change (Word save) does not reset or fork the session (test-verified).</criterion>
+    <criterion testable="true">Long sessions render from the compacted digest over ledger outputs; digest keys survive verbatim.</criterion>
+    <criterion testable="true">Workspace-scope memory items are unaffected by conversation-window compaction.</criterion>
+    <criterion testable="true">Reopening after a Word round-trip restores prior decisions + annotations; unit tests green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

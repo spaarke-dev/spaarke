@@ -1,0 +1,94 @@
+<task id="047" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Deploy catalog rows to Dataverse (mirror-first)</title>
+    <phase>4 Catalog</phase>
+    <status>blocked</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>045</dependencies>
+    <blocks>082</blocks>
+    <tags>deploy, dataverse, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment of already-authored, already-eval-gated catalog rows via the deterministic mirror-first upsert; no new design surface. STANDARD per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deterministic seed/upsert + verification of the five Action + five Binding rows; no architectural decision. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-deploy</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy the five R2 Action rows (`sprk_analysisaction`) and five Binding rows (`sprk_playbookconsumer`) to Dataverse from their infra/dataverse/ mirrors using the redesign-r1 mirror-first, name-keyed upsert workflow (direction of truth: mirror → table). This is deploy-only: the rows were authored in 040–044 and eval-gated in 045. Verify each row lands with its OutputSchemaJson intact, the Bindings resolve through the shipped session-dispatch seam, and the deployed schemas still pass OpenAiFunctionSchemaValidator on the target environment. NO new BFF endpoint is introduced by this deploy.
+  </prompt>
+
+  <role>
+    Dataverse deployment engineer fluent in the redesign-r1 catalog-governance mirror-first upsert (name-keyed, portable lookups), Dataverse MCP / PAC CLI, and the OpenAiFunctionSchemaValidator catalog contract.
+  </role>
+
+  <goal>
+    Five `sprk_analysisaction` Action rows and five `sprk_playbookconsumer` Binding rows deployed to the target Dataverse environment from their infra/dataverse/ mirrors, each verified present with correct OutputSchemaJson, disposition (compose-draft-alternative), scope binding, and Click-path resolution through the shipped seam. Post-deploy schema validation green; deploy introduces zero new routes.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-12/FR-13 + design §7.4 (authoring pipeline: mirror-first, name-keyed upsert; `Seed-JpsActions.ps1` is RETIRED — do not look for it). The five rows were authored mirror-first (040–044) through the core's triple-twin hoisted description source and eval-gated (045). This task pushes mirror → table and verifies. The BA catalog editor (PlaybookBuilder) or Dataverse MCP are the authoring/deploy surfaces.
+    </background>
+    <relevant-files>
+      <file purpose="action-input-mirrors">infra/dataverse/inputschemas/ — the five NEW Action input-schema mirrors (expl-clause, cmp-playbook, draft-alt, sum-wordchg, def-terms) to deploy</file>
+      <file purpose="action-output-mirrors">infra/dataverse/outputschemas/ — the five NEW OutputSchemaJson mirrors to deploy</file>
+      <file purpose="binding-mirror">infra/dataverse/sprk_playbookconsumer-rows.json — the five NEW Binding rows to upsert (name-keyed; portable actionCode/playbookName lookups resolved per environment)</file>
+      <file purpose="binding-upsert-workflow">infra/dataverse/sprk_playbookconsumer-rows.json ($comment) — the export/diff/seed workflow (Seed-PlaybookConsumers.ps1 -Export / -DiffOnly / default seed); direction of truth: table ← mirror for deploy</file>
+      <file purpose="eval-gate">tests/integration/contract/Eval/golden-utterances.json — the eval coverage (task 045) that gated these rows; must be green pre-deploy</file>
+      <file purpose="dispatch-endpoint-REUSE">src/server/api/Sprk.Bff.Api/Api/Ai/DispatchSessionEndpoint.cs — the existing dispatch surface the Bindings resolve through (no new endpoint from this deploy)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="045" status="blocked">Requires eval coverage (golden + dispatch ≥5) green for all five rows before deploy.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Bindings are the ONLY routing config; deploy adds NO new dispatch endpoint and NO string-key routing. Rows deploy mirror-first (mirror → table), name-keyed upsert. Deployed OutputSchemaJson MUST still pass OpenAiFunctionSchemaValidator — property-level boolean `required` BANNED.</constraint>
+    <constraint source="ADR-040">Deployed rows dispatch through the ledger-writing seam; the compose-draft-alternative Binding carries the `compose` disposition.</constraint>
+    <constraint source="project">Engine FROZEN — deploy only the five Action + five Binding rows; NO sprk_analysisplaybook records. Do not restore any retired seeding script.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/catalog-governance, ai/output-schema-validation, deploy/mirror-first</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Pre-deploy gate">CONFIRM core Phase A0 published the triple-twin hoist + dispatch seam; CONFIRM tasks 040–045 complete and the eval suite is green. Load project CLAUDE.md + HANDOFF doc. If any precondition is unmet, STOP.</step>
+    <step order="1" name="Diff mirrors vs target">Run the export/diff (`Seed-PlaybookConsumers.ps1 -DiffOnly` for Bindings; equivalent Action diff) against the target environment to confirm the five rows are net-new and no unrelated drift will be written.</step>
+    <step order="2" name="Deploy Action rows">Upsert the five `sprk_analysisaction` rows (SystemPrompt, OutputSchemaJson, Temperature, ModelDeploymentId, InputSchema) from the infra/dataverse/ mirrors via the mirror-first workflow (name-keyed).</step>
+    <step order="3" name="Deploy Binding rows">Upsert the five `sprk_playbookconsumer` Binding rows from sprk_playbookconsumer-rows.json (portable actionCode/playbookName lookups resolved per environment; compose-draft-alternative disposition = `compose`).</step>
+    <step order="4" name="Verify rows landed">Query the target environment: confirm all five Actions + five Bindings exist with correct OutputSchemaJson, scope bindings (compose-selection / compose-document), and disposition; re-run OpenAiFunctionSchemaValidator on the deployed schemas.</step>
+    <step order="5" name="Verify dispatch">Confirm each Binding resolves through POST /api/ai/chat/sessions/{id}/dispatch (no new route); a smoke dispatch per row returns a schema-valid result.</step>
+  </steps>
+
+  <outputs>
+    <output type="deploy">Five sprk_analysisaction Action rows deployed to the target Dataverse environment</output>
+    <output type="deploy">Five sprk_playbookconsumer Binding rows deployed to the target Dataverse environment</output>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/deploy/047-catalog-deploy-verification.md (row-landed + schema-valid + dispatch-smoke evidence)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">All five sprk_analysisaction rows are present on the target environment with correct SystemPrompt / OutputSchemaJson / Temperature / ModelDeploymentId / InputSchema, deployed mirror-first (mirror → table).</criterion>
+    <criterion testable="true">All five sprk_playbookconsumer Binding rows are present, name-keyed, resolving through the shipped session-dispatch seam; the compose-draft-alternative Binding carries the `compose` disposition.</criterion>
+    <criterion testable="true">Deployed OutputSchemaJson pass OpenAiFunctionSchemaValidator on the target environment with no property-level boolean `required`.</criterion>
+    <criterion testable="true">A per-row smoke dispatch through POST /api/ai/chat/sessions/{id}/dispatch returns a schema-valid result; deploy adds zero new BFF routes.</criterion>
+    <criterion testable="true">No sprk_analysisplaybook record was created; no retired seeding script was restored.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Consumes core Phase A0 triple-twin description hoist + session-dispatch/invoke seam per notes/HANDOFF-core-r2-A0-contract-requirements.md §7. If the published contract differs from the proposed shape, STOP and reconcile — do not adapt silently.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,117 @@
+<task id="011" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-02 wire 1a "Search for Document" -&gt; reuse 1c load path</title>
+    <phase>1 Entry</phase>
+    <status>not-started</status>
+    <estimated-hours>12</estimated-hours>
+    <effort>high</effort>
+    <dependencies>none</dependencies>
+    <blocks>017</blocks>
+    <tags>frontend</tags>
+    <rigor-hint reason="Modifies .tsx; user-visible entry path; FULL per TASK-INDEX">FULL</rigor-hint>
+    <model-tier reason="Frontend wiring reusing the proven 1c load path; no new backend surface">sonnet</model-tier>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe reason="Shares ComposeWorkspace.tsx + ComposeEmptyState with 010/012 — serialize 010 -&gt; 011 -&gt; 012 to avoid edit collisions">false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    The empty state's "Search for Document" button is a no-op today: `ComposeEmptyState` exposes an
+    `onSearchRequested` callback and `ComposeWorkspace` routes it to `handleSearchRequested`, but the
+    handler only fires a fallback bus event with zero subscribers. Wire it: clicking Search opens a
+    Spaarke Document lookup; selecting a real `sprk_document` loads it through the EXISTING, working 1c
+    load path — `GET /api/compose/documents/{documentSpeId}` -&gt; `ComposeService.LoadAsync` (OBO SPE) ->
+    `docxBytes` mount. The result is identical to 1c (refresh-surviving, a real loaded document with a
+    `documentRecordId`). This is FR-02 from spec.md. Do NOT build a new load path — reuse 1c.
+  </prompt>
+
+  <role>
+    React/TypeScript developer fluent in Fluent UI v9 and the Spaarke Document search + Compose load
+    surfaces. You compose two existing pieces (a Document lookup + the 1c load path); you build no new
+    backend endpoint.
+  </role>
+
+  <goal>
+    Clicking "Search for Document" opens a Spaarke Document lookup; selecting a `sprk_document` mounts
+    it via the existing `GET /api/compose/documents/{speId}` load path, producing a fully loaded,
+    refresh-surviving document identical to the 1c "Open in Compose" outcome. Renders in light and dark
+    mode; all fetches go through `@spaarke/auth`.
+  </goal>
+
+  <context>
+    <background>
+      1c works today (design.md §5): ribbon "Open in Compose" -&gt; launch resolver -&gt; ComposeWorkspace
+      -&gt; `GET /api/compose/documents/{speId}` -&gt; `docxBytes` -&gt; `docxToTipTapHtml` -&gt; `setContent`.
+      FR-02 reuses that exact load leg but reaches it from an in-workspace Document lookup instead of the
+      ribbon. The only new UI is the lookup/picker surface; the load is the proven path.
+    </background>
+    <relevant-files>
+      <file purpose="wire-callback" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file purpose="button-source" edit="maybe">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEmptyState.tsx</file>
+      <file purpose="load-endpoint" edit="false">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file purpose="load-service" edit="false">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+    </relevant-files>
+    <notes>
+      In ComposeWorkspace.tsx the BFF Load is issued around line 243 (`GET /api/compose/documents/{speId}?driveId&amp;tenantId&amp;documentRecordId&amp;displayName`) and its result flows into `state.docxBytes` (~line 320). FR-02's Search handler resolves the picked document's speId/driveId/tenantId/recordId and drives that same load. Reuse the existing SemanticSearch/Document-search surface referenced in ComposeEmptyState's header comment rather than authoring a new search UI where possible.
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">No new AI dispatch or load endpoint — reuse `GET /api/compose/documents/{speId}`; the Document lookup is a data query, not a dispatch.</constraint>
+    <constraint source="ADR-028">All fetches (search query + load) use `@spaarke/auth`; never a raw Bearer header.</constraint>
+    <constraint source="ADR-021">Lookup/picker + empty state are Fluent v9 + dark mode; no v8, no hardcoded colors.</constraint>
+    <constraint source="ADR-031">The load transition honors `determineStage()` — a Search-loaded document reaches the loaded-document stage (unlike 010's transient stage).</constraint>
+    <constraint source="project">Search yields a REAL loaded document (with `documentRecordId`), identical to 1c — not a transient mount.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose/entry-paths, fluent-v9, dataverse-lookup, auth</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <justification component="Document-lookup Search handler (extends existing handler + reuses 1c load)">
+    <existing>ComposeWorkspace has `handleSearchRequested` + the 1c load leg; a Spaarke Document search surface already exists (SemanticSearch/Document search).</existing>
+    <extension>Compose the existing search surface with the existing load leg; no new endpoint or service.</extension>
+    <cost-of-doing-nothing>Without it the Search button is dead: a user with no ribbon context cannot open an existing Spaarke Document from the workspace (FR-02 unmet; 1a Search leg of the entry-path success criterion fails).</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Load spec.md FR-02. Read ComposeWorkspace.tsx (load leg ~line 243), ComposeEmptyState.tsx, and confirm the existing Document-search surface to reuse.</step>
+    <step order="1">Implement the Search handler: open the Spaarke Document lookup; on selection, resolve speId/driveId/tenantId/recordId/displayName for the chosen `sprk_document`.</step>
+    <step order="2">Drive the existing `GET /api/compose/documents/{speId}` load leg with those params via `@spaarke/auth`; let its result populate `docxBytes` exactly as 1c does.</step>
+    <step order="3">Verify the loaded document is refresh-surviving and carries `documentRecordId` (loaded stage, not transient).</step>
+    <step order="4">Add ui-tests; `npm run build` the package; run affected tests.</step>
+    <step order="5">Run code-review + adr-check (Step 9.5). Update TASK-INDEX + current-task.md.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="code" optional="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEmptyState.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/__tests__/ComposeWorkspace.search.test.tsx</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test name="search-opens-lookup">Clicking "Search for Document" opens the Spaarke Document lookup surface.</ui-test>
+    <ui-test name="select-loads-via-1c">Selecting a document issues a `GET /api/compose/documents/{speId}` load (auth header from @spaarke/auth) and mounts the returned bytes; result carries a `documentRecordId`.</ui-test>
+    <ui-test name="dark-mode">Lookup + empty state render correctly in dark mode (ADR-021).</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Clicking "Search for Document" opens a Spaarke Document lookup.</criterion>
+    <criterion testable="true">Selecting a `sprk_document` loads it via the existing `GET /api/compose/documents/{speId}` path and mounts it in the editor.</criterion>
+    <criterion testable="true">The loaded document is refresh-surviving and identical in behavior to the 1c "Open in Compose" outcome (has `documentRecordId`, loaded stage).</criterion>
+    <criterion testable="true">All fetches carry an `@spaarke/auth` token; no raw Bearer header appears (ADR-028).</criterion>
+    <criterion testable="true">No new BFF endpoint is added (route audit clean) — reuse only (ADR-039).</criterion>
+    <criterion testable="true">Lookup + empty state render correctly in light and dark mode (ADR-021).</criterion>
+    <criterion testable="true">(negative) Dismissing the lookup without a selection leaves the empty state unchanged.</criterion>
+    <criterion testable="true">`npm run build` succeeds; ui-tests pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

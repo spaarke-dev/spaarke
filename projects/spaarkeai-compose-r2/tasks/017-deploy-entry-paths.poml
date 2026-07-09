@@ -1,0 +1,97 @@
+<task id="017" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Deploy — BFF + SpaarkeAi (entry paths) + verify 1a/1b/1c mount</title>
+    <phase>1 Entry</phase>
+    <status>not-started</status>
+    <estimated-hours>12</estimated-hours>
+    <effort>high</effort>
+    <dependencies>010,011,012,013,015</dependencies>
+    <blocks>none</blocks>
+    <tags>deploy,bff-api,frontend</tags>
+    <rigor-hint reason="Deployment + browser verification; STANDARD per TASK-INDEX (no new code surface)">STANDARD</rigor-hint>
+    <model-tier reason="Deterministic deploy + verification via existing skills; no architectural decisions">sonnet</model-tier>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe reason="Deploy step must run after 010/011/012/013/015 land and their builds are green; not parallel with its own dependencies">false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy the entry-path work: the BFF (`Sprk.Bff.Api`) with the activated upload endpoint + create-on-save
+    pipeline, and the SpaarkeAi code page + Compose components with the wired Browse/Search/upload mounts.
+    Then BROWSER-VERIFY on the target environment that all three entry paths mount a file: 1a Browse (local
+    picker -&gt; transient mount), 1a Search (Document lookup -&gt; 1c load), 1b upload (Assistant upload -&gt; "open
+    in Compose" -&gt; content visible), and confirm 1c still mounts (regression). This is a deployment +
+    verification task — no new feature code. Uses the established deploy skills; steps are prescriptive.
+  </prompt>
+
+  <role>
+    Release/deployment engineer fluent in the Spaarke BFF deploy (`bff-deploy`), the SpaarkeAi code-page
+    deploy (`code-page-deploy`), and browser verification (`ui-test`). You deploy already-built, reviewed
+    artifacts and verify behavior; you do not add features.
+  </role>
+
+  <goal>
+    BFF + SpaarkeAi deployed to the target environment; a browser click-through confirms 1a Browse, 1a
+    Search, 1b upload each mount a `.docx`, and 1c still mounts (no regression); publish-size and CVE
+    posture recorded for the BFF deploy.
+  </goal>
+
+  <context>
+    <background>
+      Entry-path tasks 010 (Browse), 011 (Search), 012 (upload), 013 (create-on-save), 015 (fidelity) must
+      be complete + merged. This task deploys their combined result and executes the browser verification
+      that the entry-path success criterion (spec §Success Criteria #2: "all three entry paths mount a file")
+      requires — a green test does not substitute for the browser check.
+    </background>
+    <relevant-files>
+      <file purpose="bff-deploy-skill" edit="false">.claude/skills/bff-deploy/SKILL.md</file>
+      <file purpose="code-page-deploy-skill" edit="false">.claude/skills/code-page-deploy/SKILL.md</file>
+      <file purpose="ui-test-skill" edit="false">.claude/skills/ui-test/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">Deployed BFF endpoints (incl. activated `POST /api/compose/upload`) apply `RequireAuthorization()` — verify authz is enforced post-deploy.</constraint>
+    <constraint source="bff-hygiene">Record the deployed BFF compressed publish-size (vs the 49.63 MB baseline, ≤60 MB ceiling) and the CVE scan result per §10.</constraint>
+    <constraint source="project">Browser verification on the target environment is mandatory — a passing curl/green test does NOT satisfy the entry-path mount check.</constraint>
+    <constraint source="project">Deploy only reviewed, merged artifacts from 010/011/012/013/015; do not deploy uncommitted work.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deploy/bff, deploy/code-page, ui-verification</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Confirm 010, 011, 012, 013, 015 are all status=complete and merged; the BFF + Spaarke.Compose.Components + SpaarkeAi builds are green.</step>
+    <step order="1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; record the compressed publish-size vs the 49.63 MB baseline (HARD ceiling 60 MB) and run `dotnet list package --vulnerable --include-transitive`.</step>
+    <step order="2">Invoke the `bff-deploy` skill to deploy `Sprk.Bff.Api` to the target App Service.</step>
+    <step order="3">Invoke the `code-page-deploy` skill to build + deploy the SpaarkeAi code page (with the wired Compose components).</step>
+    <step order="4">Invoke the `ui-test` skill to browser-verify each entry path on the target environment: 1a Browse mounts a local `.docx`; 1a Search loads a `sprk_document`; 1b upload "open in Compose" shows content; 1c "Open in Compose" still mounts (regression).</step>
+    <step order="5">Verify the activated `POST /api/compose/upload` enforces auth (unauthenticated call rejected).</step>
+    <step order="6">Record verification evidence in notes/; update TASK-INDEX + current-task.md.</step>
+  </steps>
+
+  <outputs>
+    <output type="deploy">Deployed Sprk.Bff.Api (target App Service)</output>
+    <output type="deploy">Deployed SpaarkeAi code page</output>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/017-entry-path-deploy-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Sprk.Bff.Api and the SpaarkeAi code page are deployed to the target environment from merged artifacts.</criterion>
+    <criterion testable="true">Browser verification confirms 1a Browse mounts a local `.docx` as a transient draft.</criterion>
+    <criterion testable="true">Browser verification confirms 1a Search loads a `sprk_document` via the 1c load path.</criterion>
+    <criterion testable="true">Browser verification confirms 1b upload "open in Compose" shows the file content (no empty tab).</criterion>
+    <criterion testable="true">1c "Open in Compose" still mounts (no regression).</criterion>
+    <criterion testable="true">The activated `POST /api/compose/upload` rejects unauthenticated calls (401/403).</criterion>
+    <criterion testable="true">Deployed BFF compressed publish-size is recorded (≤60 MB) and the CVE scan shows no new HIGH severity.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

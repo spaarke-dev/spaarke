@@ -1,0 +1,93 @@
+<task id="071" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-34 D-F3 UI ack-on-frame-id</title>
+    <phase>7 Coord</phase>
+    <status>blocked</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>070</dependencies>
+    <blocks></blocks>
+    <tags>frontend, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements the D-F3 UI-ack contract — makes UI claims structurally truthful (the r1 R2-D finding: model claimed UI actions that never happened). Correctness-critical seam across PaneEventBus + server wait. FULL per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Applies the published D-F3 ack contract to the already-activated flows (task 070); bounded correctness change, not a new architecture. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase7-coord</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Upgrade the six coordinated flows' PaneEventBus `correlationId`s (activated in task 070) to the core D-F3 UI-ack contract: UI-affecting tool results (open Compose tab, apply-edit rendering, navigation) complete ONLY on a client acknowledgment event referencing the emitted frame id, or FAIL HONESTLY on timeout. The correlationId is no longer just a trace key — it becomes the ack token the server waits on. This closes the r1 R2-D finding where the model claimed UI actions that never happened. Consume the published D-F3 contract as-is (no local variant).
+  </prompt>
+
+  <role>
+    Senior React/TypeScript + BFF developer fluent in the PaneEventBus contract (ADR-030), the shipped session-dispatch SSE seam (ADR-033), and honest-failure UX patterns.
+  </role>
+
+  <goal>
+    UI-affecting tool results across the six flows complete only on a client ack event referencing the emitted frame id, and fail honestly (user-visible, no false "done") on timeout. PaneEventBus correlationIds carry the ack token the server waits on. A claimed UI action that did not happen fails honestly. The implementation consumes the published core D-F3 contract with no local variant.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-34 (ack half) + design §3 (UI-action-acknowledgment note) + HANDOFF §8 (D-F3 UI-ack contract: PaneEventBus correlationIds upgrade to ack tokens the server waits on). Builds directly on task 070's activated choreography — 070 leaves correlationIds as trace keys; this task upgrades them. BLOCKED until core Phase A0 publishes the D-F3 ack contract.
+    </background>
+    <relevant-files>
+      <file purpose="event-bus">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts — upgrade correlationId to the ack-token contract on the UI-affecting discriminants</file>
+      <file purpose="assistant-pane">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx — emit the client ack event referencing the frame id on UI completion (open tab, apply-edit render, navigation)</file>
+      <file purpose="workspace-editor">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — ack the apply-edit render (the pending track-change materialized) referencing the frame id</file>
+      <file purpose="sse-seam">src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts — the SSE frame source whose frame id the ack references (ADR-033 side channel)</file>
+      <file purpose="server-wait">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs — the server side that waits on the ack token / times out honestly (consume the published D-F3 wait, do not invent one)</file>
+      <file purpose="choreography-base">projects/spaarkeai-compose-r2/tasks/070-coordinate-six-flows.poml — the activated flows this task upgrades</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="070" status="not-started">Requires the six activated coordinated flows (correlationIds as trace keys) to upgrade to ack tokens.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-030">The ack rides the typed PaneEventBus correlationId (no `any` payloads); the UI-affecting discriminants gain the ack-token semantics.</constraint>
+    <constraint source="ADR-033">The frame id the ack references comes from the established DocumentStreamWriter / SSE side channel — no new interface.</constraint>
+    <constraint source="project">Consume the published core D-F3 ack contract as-is — NO local variant (charter §3.4). Failure on timeout is HONEST + user-visible; never a silent or false "done".</constraint>
+    <constraint source="ADR-021">Any honest-failure UI is Fluent v9 + dark mode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ui/pane-event-bus, ai/sse-side-channel, ui/honest-failure</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + gate">Load task, project CLAUDE.md, HANDOFF §8, design §3, task 070 output. CONFIRM core Phase A0 published the D-F3 ack contract before starting.</step>
+    <step order="1" name="Upgrade correlationId to ack token">On the UI-affecting PaneEventBus discriminants (open tab, apply-edit render, navigation), upgrade correlationId to the D-F3 ack-token semantics.</step>
+    <step order="2" name="Emit client ack">Emit the client ack event referencing the emitted frame id when the UI action actually completes (tab opened, redline rendered, navigation done).</step>
+    <step order="3" name="Honest timeout">Wire the server-side wait to complete only on ack or fail honestly on timeout (user-visible, no false success); consume the published D-F3 wait.</step>
+    <step order="4" name="Verify honest failure">Simulate a UI action that does not happen; confirm it fails honestly (no false "done") and a real completion acks correctly.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts (ack-token upgrade)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (ack emit on UI completion)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (apply-edit render ack)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">UI-affecting tool results (open Compose tab, apply-edit render, navigation) complete ONLY on a client ack event referencing the emitted frame id.</criterion>
+    <criterion testable="true">On timeout, the result FAILS HONESTLY (user-visible, no false "done") — a claimed UI action that did not happen does not report success.</criterion>
+    <criterion testable="true">PaneEventBus correlationIds carry the ack token the server waits on; payloads remain typed (no `any`).</criterion>
+    <criterion testable="true">The implementation consumes the published core D-F3 contract with no local variant; the frame id source is the ADR-033 SSE side channel.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Consumes core Phase A0 D-F3 UI-ack contract per notes/HANDOFF-core-r2-A0-contract-requirements.md §8. If the published contract differs from the proposed shape, STOP and reconcile — do not adapt silently.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
