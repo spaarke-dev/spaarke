@@ -111,13 +111,13 @@ See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md) for the 
 - **FR-04 draft-into-editor (task 016)** — `ComposeDisposition v1` present → **DONE** (BFF half + frontend integration merged to master 2026-07-08/09).
 - **FR-15 custom marks (031)** — **DONE** 2026-07-09 (insertion/deletion/commentAnchor).
 - **Catalog rows 040-044 + 045 + 046 + 047** — **UNBLOCKED 2026-07-09**: core **task 020 (triple-twin description hoist) published to master** (`78073ae03`; SEAM-STATUS row 020 = ✅ published). Catalog rows are now authorable/startable. Respect intra-wave order: 040-044 (Actions+Bindings) → 045 (eval cases ≥5 each) → 047 (deploy mirror-first). **Owner hygiene still binds**: NO version suffix in action codes / Binding names / mirror filenames.
-- FR-16 pending-redline (033), FR-17 undo/replace (034) — contract present; 031 (custom marks) done; still need the compose-disposition ledger **WRITE** (core **task 010**) before they can materialize.
+- **Compose-disposition ROUTING PROMOTION applied by compose-r2 2026-07-09** — `BindingDisposition.Compose` (Binding.cs) + `ToLedgerValue` → `"compose"` + the `OutputRouter` pass-through case (store-before-render, like informational). Core task 010 published the CONTRACT only and deferred this; it was then **unscheduled in redesign-r2**, so compose-r2 applied it (31 router/compose tests green; see redesign-r2 message in `notes/`). A Binding may now declare `sprk_disposition = compose`. **UNBLOCKS 042** (draft-alternative), **033** (FR-16 pending-redline), **034** (FR-17 undo/replace).
+- **FR-34 UI-ack (071)** — core **task 037 (D-F3 ack) ✅ landed 2026-07-09**; 071 startable (dep 070). Core **032 gate engine ✅** also landed → GateDecision v2 (association picker) live.
 
 **STILL BLOCKED on further CORE work** (contract shape alone is insufficient):
-- **FR-34 UI-ack (071)** — needs core **task 037 (D-F3 ack)**, 🔲 pending.
 - **FR-30 memory.write (063)** — MemoryItem shape present, but the `memory.write` tool impl (core **task 057**) 🔲 pending.
 - **FR-32 trace hosting (064)** — TraceEvent shape present, but the D-F4 view (core **task 038**) 🔲 pending.
-- **FR-05 association / FR-28 push-save confirm** — GateDecision v2 shape present; the gate ENGINE (core **task 032**) 🔲 pending.
+- **FR-05 association / FR-28 push-save confirm** — GateDecision v2 shape + the gate **ENGINE (core task 032) ✅ landed 2026-07-09** (ConfirmationPolicyEngine, 7 tiers). Producer-side unblocked; the live gate-call-site origin wiring is Compose's 055/034/042 work.
 
 Core flips SEAM-STATUS to "ALL SEAMS PUBLISHED — Compose UNBLOCKED" when its **task 017** completes (after 020/037). Until then, consume the frozen shapes but check SEAM-STATUS for the impl-half a given task needs.
 

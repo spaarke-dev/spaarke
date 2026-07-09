@@ -64,6 +64,30 @@ public class OutputRouterTests
     }
 
     [Fact]
+    public async Task RouteAsync_ComposeDisposition_StoresComposeEntryThenReturnsIt()
+    {
+        // ComposeDisposition v1 seam (spaarkeai-compose-r2 — production routing promotion of the
+        // task-010 contract): compose is a PASS-THROUGH like informational, NOT a loud-NotSupported
+        // stub. The compose SessionOutput is stored (store-before-render, ADR-040) carrying the
+        // Compose-owned structured-edit payload OPAQUELY, and the client re-materializes it from
+        // the ledger (compose-outputs read endpoint + ComposeDisposition SSE frame ledger_ref).
+        var session = BuildSession();
+        var binding = BuildBinding() with { Disposition = BindingDisposition.Compose };
+        var output = ParseJson("""{"new_text":"sixty (60) days' written notice","match_mode":"strict"}""");
+
+        var routed = await CreateSut().RouteAsync(session, binding, output);
+
+        _sessionManager.PersistedSessions.Should().ContainSingle();
+        var persisted = _sessionManager.PersistedSessions[0].Outputs!.Single();
+        routed.Entry.Should().BeSameAs(persisted);
+        // ToLedgerValue mapped BindingDisposition.Compose → the "compose" ledger vocabulary member.
+        routed.Entry.Disposition.Should().Be(ComposeDisposition.DispositionValue);
+        routed.Entry.Key.Should().Be(SessionLedger.BuildOutputKey(BindingId.ToString(), 1));
+        // The router stores the Compose-owned payload verbatim — it never parses it.
+        routed.Entry.Payload.GetProperty("new_text").GetString().Should().Be("sixty (60) days' written notice");
+    }
+
+    [Fact]
     public async Task RouteAsync_AppendsToExistingOutputs_NeverMutatesOrDrops()
     {
         var existing = BuildOutput("earlier-binding", turn: 1);
