@@ -418,6 +418,8 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       handleSearchContacts,
       handleSearchOrganizations,
       handleSearchUsers,
+      handleSearchMatterTypes,
+      handleSearchPracticeAreas,
       onClose,
       authFetch,
       bffBaseUrl,
