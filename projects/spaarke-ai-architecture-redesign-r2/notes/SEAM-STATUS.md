@@ -6,7 +6,7 @@
 
 ## Overall status
 
-🟡 **IN PROGRESS (2026-07-09)** — **all 6 A0 contract shapes green** + **020 hoist ✅, 037 UI-ack ✅, 032 gate engine ✅** (Wave J parallel batch merged 2026-07-09). Remaining for full seam publication: the impl halves **038** (trace view) + **057** (memory.write), then the **017** milestone. Header flips to ✅ **ALL SEAMS PUBLISHED — Compose UNBLOCKED** when task **017** completes (after 038/057 land). *Compose can bind to all 6 green contract shapes + the live GateDecision v2 engine (association picker) + UI-ack coordinator now; full publication = merge to master.*
+🟡 **IN PROGRESS (2026-07-09)** — **all 6 A0 contract shapes green** + **020 hoist ✅, 037 UI-ack ✅, 032 gate engine ✅** (Wave J parallel batch merged 2026-07-09). Remaining for full seam publication: **only 057** (memory.write) — **038 trace view ✅ published 2026-07-09**. Header flips to ✅ **ALL SEAMS PUBLISHED — Compose UNBLOCKED** when task **017** completes (after 057 lands — the last remaining seam). *Compose can bind to all 6 green contract shapes + the live GateDecision v2 engine (association picker) + UI-ack coordinator now; full publication = merge to master.*
 
 ## Protocol
 
@@ -24,7 +24,7 @@
 | `OutcomeCard v1` (hosts job state + next-step chips) | **011** | FR-05, FR-28 | ✅ **contract green** (10/10 tests) | branch (merge pending) 2026-07-08 |
 | `GateDecision v2` / Policy v2 Tier 2c (**hosts parent-association picker**) | **012** + **032** | FR-05 (association prompt), FR-28 (push/save confirm) | ✅ **contract + engine green** (34/34 contract; **engine 032 ✅ 2026-07-09** — ConfirmationPolicyEngine PRODUCER, 7 tiers + E-1..E-6, 138/138 gate suite; producer-side unblocked — Compose r2 consumes the engine PRODUCER + contract now. ⚠️ **Core live-wiring status (corrected 2026-07-09 by task 034):** the engine has 0 core production call-sites — 034 = pre-suspend ValidateChat (NOT engine wiring), 042 reused the existing gated path. Wiring the engine into the core's own live gate is UNASSIGNED in the current WBS (see current-task open item / operator decision). This does NOT affect the Compose seam — Compose consumes the engine directly.) | branch (merge pending) 2026-07-09 |
 | `MemoryItem v1` + `memory.write` (AI-initiated, provenance-tagged) | **016** + **057** | FR-30 (persist AI-derived insights) | ✅ **contract green** (10/10; memory.write 057 pending) | branch (merge pending) 2026-07-08 |
-| `TraceEvent v1` + D-F4 view (**host-embeddable**) | **013** + **038** | FR-32 (Context-pane trace hosting) | ✅ **contract green** (7/7; view 038 pending) | branch (merge pending) 2026-07-08 |
+| `TraceEvent v1` + D-F4 view (**host-embeddable**) | **013** + **038** | FR-32 (Context-pane trace hosting) | ✅ **contract + view published** (7/7 contract; **view 038 ✅ 2026-07-09** — ISessionTraceReader facade + GET /sessions/{id}/trace read surface + host-embeddable ExecutionTraceWidget + honest narration; Compose FR-32 unblocked) | branch (merge pending) 2026-07-09 |
 | Triple-twin description hoist (single authored source) | **020** | FR-12 (catalog-row authoring quality) | ✅ **published** (Model 1; parity test + health-check) | branch (merge pending) 2026-07-08 |
 | D-F3 UI-ack contract (ack tokens over correlationId) | **037** | FR-34 (UI ack) | ✅ **published** (IUiActionAckCoordinator PublicContracts facade; frameId ack after tab materializes; honest 8s Timeout; 12/12 tests) | branch (merge pending) 2026-07-09 |
 
