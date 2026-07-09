@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | W0 ✅ + **W1 wave ✅ COMPLETE** (020/021/023/024/052 integrated, build + 63 Compose tests green, committed). NEXT: 022 (dep 021 ✅) then 025 (dep 020/021/022/023) to close Phase 2 |
+| **Task** | W0 ✅ + W1 ✅. **Merged master 2026-07-08 → A0 contract seams now in worktree** (04f90caea, pushed). Build+63 tests green post-merge. |
 | **Step** | — |
-| **Status** | W1 done + committed (96d334761 + 021 commit). Phase 2 LLM services: 020/021/023/024 done; 022/025 remain |
-| **Next Action** | Execute **022** (FR-21 ComposeEditTransaction — wraps ComposeEditBatch.Apply with snapshot/rollback; register `ComposeEditBatch` + transaction in ComposeModule when 022 needs it). Then **025** (consolidated NetArchTest facade verification + coverage). ⛔ tasks wait on core A0. |
+| **Status** | 11 tasks done. A0 contract SHAPES landed (6 frozen). Phase 2: 022/025 remain. Newly unblocked: **016** (FR-04). |
+| **Next Action** | Two open fronts: (a) finish Phase 2 — **022** (ComposeEditTransaction) → **025** (NetArchTest+coverage); (b) A0 unblocked **016** (FR-04 draft-into-editor — consumes `Services/Ai/PublicContracts/ComposeDisposition.cs`, now present). NOTE: catalog tasks 040-044/045/047 still blocked on **core task 020 (triple-twin hoist, 🔲)**; 071 on **core 037 (UI-ack)**; 063 on **core 057 (memory.write)**; 064 on **core 038 (D-F4 view)**. See SEAM-STATUS.md. |
 
 ### Files Modified This Session
 - `notes/spikes/spike-0-dispatch-path.md` - Created - Spike 0 (dispatch seam confirmed; `compose_action_request` correction)

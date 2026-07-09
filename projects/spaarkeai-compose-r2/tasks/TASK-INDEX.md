@@ -27,7 +27,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 013 | FR-05 create-on-save pipeline — extend PromoteIfEphemeralAsync (container/profile/indexing) | 1 Entry | 🟢 | none | 🔲 | FULL | opus | xhigh |
 | 014 | FR-05 optional parent-association prompt (Tier 2c dialog integration) | 1 Entry | 🟡 | 013 | 🔲 | FULL | sonnet | high |
 | 015 | FR-06a upload fidelity branch (original-if-unedited) | 1 Entry | 🟢 | 013 | 🔲 | FULL | sonnet | high |
-| 016 | FR-04 draft-into-editor via compose disposition | 1 Entry | 🔴 | 000 | ⛔ | FULL | opus | high |
+| 016 | FR-04 draft-into-editor via compose disposition | 1 Entry | 🟢 | 000 | 🔲 | FULL | opus | high |
 | 017 | Deploy — BFF + SpaarkeAi (entry paths) + verify 1a/1b/1c mount | 1 Entry | 🟢 | 010,011,012,013,015 | 🔲 | STANDARD | sonnet | high |
 | 020 | FR-19 IComposeEditValidator + POST /edit-batch/validate | 2 LLM | 🟢 | 002 | ✅ | FULL | sonnet | xhigh |
 | 021 | FR-20 ComposeEditBatch (4-phase pipeline) | 2 LLM | 🟢 | 003 | ✅ | FULL | sonnet | high |
@@ -90,7 +90,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 
 ## Blocked-on-core-A0 (⛔) — authored/executed post-A0
 
-016, 033, 034, 040, 041, 042, 043, 044, 045, 046, 047, 063, 064, 071, 082, 090.
+016 UNBLOCKED (A0 ComposeDisposition landed 2026-07-08). Still core-gated: 040-044/045/047 (core task 020 triple-twin hoist), 071 (core 037 UI-ack), 063 (core 057 memory.write), 064 (core 038 D-F4 view); 033/034/046 gated by non-core deps (031/016/030); 082/090 terminal. See SEAM-STATUS.md.
 
 These get full POML authoring finalized once core A0 contract shapes are confirmed (the handoff doc is the input). 082 (flagship gate) + 090 (wrap-up) are terminal — they require the full chain.
 

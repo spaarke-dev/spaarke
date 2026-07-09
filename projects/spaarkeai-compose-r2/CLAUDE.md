@@ -105,14 +105,20 @@ See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md) for the 
 
 ### 🚨 Core Phase A0 dependency (READ before starting a gated task)
 
-These tasks are **BLOCKED** until core R2 (`spaarke-ai-architecture-redesign-r2`) publishes Phase A0 contracts — the core has **no worktree yet**:
-- Phase 4 (all 5 catalog rows) — needs `invoke`/dispatch seam + triple-twin hoist + eval-gate
-- FR-04 draft-into-editor, FR-16 pending-redline, FR-17 undo/replace — need `ComposeDisposition v1` + SSE frame
-- FR-05 OutcomeCard, FR-28 completion — need `JobAwareCompletionState v1` / `OutcomeCard v1`
-- FR-30 memory writes — need `memory.write` gated tool; FR-32 trace — needs `TraceEvent v1` / D-F4 view
-- FR-34 UI ack — needs D-F3 ack contract
+**UPDATE 2026-07-08**: core R2 merged the **6 A0 contract SHAPES to master** (now in this worktree at `Services/Ai/PublicContracts/`: `ComposeDisposition`, `OutcomeCard`, `GateDecisionV2`, `TraceEvent`, `JobAwareCompletionState`, `MemoryItem`, + `ContextEnvelope`). Contracts are frozen and consumable. Status board: [`../spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md`](../spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md).
 
-**Do NOT build these against a guessed contract shape.** Start with the independent tracks (Phase 0 spikes, Phase 2 LLM services, Phase 5 DOCX shuttle, entry-path wiring, create-on-save). Confirm core timing before opening a gated task.
+**NOW UNBLOCKED** (contract shape present):
+- **FR-04 draft-into-editor (task 016)** — `ComposeDisposition v1` present → startable now.
+- FR-16 pending-redline (033), FR-17 undo/replace (034) — contract present; gated only by their non-core deps (031 custom marks, 016).
+
+**STILL BLOCKED on further CORE work** (contract shape alone is insufficient):
+- **Catalog rows 040-044 + 045 + 047** — need core **task 020 (triple-twin description hoist)**, still 🔲 pending. Do NOT author catalog rows until 020 lands.
+- **FR-34 UI-ack (071)** — needs core **task 037 (D-F3 ack)**, 🔲 pending.
+- **FR-30 memory.write (063)** — MemoryItem shape present, but the `memory.write` tool impl (core **task 057**) 🔲 pending.
+- **FR-32 trace hosting (064)** — TraceEvent shape present, but the D-F4 view (core **task 038**) 🔲 pending.
+- **FR-05 association / FR-28 push-save confirm** — GateDecision v2 shape present; the gate ENGINE (core **task 032**) 🔲 pending.
+
+Core flips SEAM-STATUS to "ALL SEAMS PUBLISHED — Compose UNBLOCKED" when its **task 017** completes (after 020/037). Until then, consume the frozen shapes but check SEAM-STATUS for the impl-half a given task needs.
 
 ---
 
