@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-09 (by context-handoff)
+> **Last Updated**: 2026-07-09 (by context-handoff — pre-compact, parallel-wave plan captured)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,19 +10,37 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Phase 3+4 progressing. **DONE this session**: 031 (custom marks), catalog 040/041/043/044, **compose-disposition routing promotion**. |
+| **Task** | Phase 3+4. **DONE + MERGED TO MASTER** (`7f5e592c4`, 2026-07-09): 031 marks, catalog 040/041/043/044, compose-disposition routing promotion + task-035 OutcomeCard reconciliation. Branch clean, 0 ahead of master, main repo synced. |
 | **Step** | — (between tasks) |
-| **Status** | Branch `work/spaarkeai-compose-r2` is **8 commits ahead of origin/master, NOT pushed/merged** (last merge to master was 016/030/032 @ `978333245`; everything since is branch-only). Master merged into branch 2026-07-09 (Wave J: core 032 gate engine + 037 UI-ack). BFF builds clean; 31 router/compose tests green. |
-| **Next Action** | **PUSH + MERGE to master** (8 commits: 031, catalog wave, routing promotion, gating, handoff) — Path B direct (master unprotected) per merge-to-master; verify build then `git push origin HEAD:master` + sync main repo. THEN 042 (draft-alternative, now routable) or 033 (pending-redline). |
+| **Status** | **All prior work merged to master.** redesign-r2 coordination CLOSED: they APPROVED the routing promotion + I applied their one required fix (compose case returns `Outcome = outcome`, task 035). Also merged core Wave K (038 trace view + 035 completion engine). 200 unit tests + 23 router tests green. |
+| **Next Action** | **DISPATCH PARALLEL WAVE** (user-requested): 042 + 033 + others. See "Parallel wave plan" below. Then serialize 034 after 033. |
 
-### 🔑 Newest work — compose-disposition routing promotion (2026-07-09), commit `540760eac`
-Core task 010 published the ComposeDisposition CONTRACT only + deferred the routing write; it was **unscheduled in redesign-r2**, so compose-r2 applied it: `BindingDisposition.Compose=100000006` (Binding.cs) + `ToLedgerValue`→"compose" + `OutputRouter` pass-through case (like Informational). **Unblocks 042/033/034.** Handoff for the redesign-r2 team: [`notes/HANDOFF-to-redesign-r2-compose-routing-promotion.md`](notes/HANDOFF-to-redesign-r2-compose-routing-promotion.md) (asks: confirm pass-through modeling; add sprk_disposition option-set value 100000006; don't re-implement).
+### ▶️ NEXT: Parallel wave plan (user asked to run 042 + 033 + any safe parallels)
+Analysis of newly-unblocked tasks (parallel-safe flag / deps / files / build-system):
+| Task | Tier | parallel-safe | Files (footprint) | Build | Notes |
+|---|---|---|---|---|---|
+| **042** draft-alternative | opus | **true** | `infra/dataverse/actions|inputschemas|outputschemas/compose-draft-alternative.*` + Binding row in `sprk_playbookconsumer-rows.json` | none (JSON) | 5th catalog row. **Binding now declares `disposition=compose` (100000006)** — routing live. Follow the compose catalog template (see 040 `.action.json`). Output schema per POML. Owner hygiene: no `@v1`. |
+| **033** pending-redline | opus | **false** | `ComposeEditor.tsx` + NEW `widgets/hooks/usePendingRedline.ts` | npm | Materialize pending redlines from ledger using the 031 marks + compose-outputs read. parallel-safe=false (shares ComposeEditor) → **run in MAIN SESSION**. |
+| **034** undo/replace | opus | false | `usePendingRedline.ts` (shared w/033) + `useEditSupersession.ts` | npm | **dep 033 → serialize AFTER 033.** |
+| **050** DocxAnnotationWriter | opus/xhigh | true | BFF `Services/Compose` (C#) | dotnet | Word writer (hard). Disjoint. |
+| **051** DocxAnnotationReader | sonnet | true | BFF (C#) | dotnet | Disjoint. |
+| **060** anchored annotations | sonnet | true | (verify files before adding — likely ComposeWorkspace/BFF) | ? | deps none. Check footprint. |
+| **061** action history via ledger | sonnet | true | BFF (C#) | dotnet | deps none. Disjoint. |
+| **064** context-pane trace | sonnet | true | frontend Context pane | npm | core 038 landed → unblocked. |
 
-### Session commits (branch-only, ahead of master)
-`e345867a0` 031 marks · `d08df09e8` merge master · `a5a920f2d` gating (020 unblock) · `911a1ee9d` catalog 040/041/043/044 · (master-merge Wave J) · `540760eac` routing promotion · handoff-ref fill.
+**Build-contention rule** (shared worktree): NO concurrent `dotnet build`; NO concurrent `npm build`. So a safe wave = at most 1 dotnet-building task + 1 npm-building task + unlimited no-build (catalog JSON) tasks, running as sub-agents that write DISJOINT files; MAIN SESSION runs the consolidated build/test after.
+
+**RECOMMENDED SAFE WAVE (3-way):**
+- **Sub-agent A → 042** (catalog JSON, no build, parallel-safe=true)
+- **Sub-agent B → 061** (action-history-ledger, BFF/dotnet, sonnet, deps none, disjoint) *(or 050 writer if you prefer the Word push next)*
+- **MAIN SESSION → 033** (pending-redline, ComposeEditor/npm, opus, parallel-safe=false)
+Then **034** after 033 (shares usePendingRedline.ts). Each task STILL runs via `task-execute` (FULL rigor; 042/033 also test-touching/opus). Cap 6 agents. After the wave: main session `dotnet build` + `npm run build`/typecheck + jest.
+
+### Merged-to-master commit trail (2026-07-09)
+`540760eac` routing promotion · (Wave K merge) · `7f5e592c4` task-035 OutcomeCard reconciliation (HEAD/master). Earlier: `978333245` 016/030/032 · catalog wave · gating.
 
 ### Still core-gated (not startable)
-042/033/034 NOW unblocked (routing promotion). 071 unblocked (core 037 ✅). Still blocked: 063 (core 057 memory.write), 064 (core 038 D-F4 view). 045 (eval) needs 042 first; 047 (deploy) needs 045.
+**042/033/034/064/060/061 NOW unblocked.** 071 needs 070 (070 deps 030/031 done → 070 startable but parallel-safe=false). Still blocked: **063** (core 057 memory.write — LAST A0 seam before the 017 "Compose UNBLOCKED" milestone). 045 (eval) needs 042; 047 (deploy) needs 045; 034 needs 033.
 
 ### ⬇️ Prior-session history below (016/030/032 integration wave — 2026-07-08)
 
