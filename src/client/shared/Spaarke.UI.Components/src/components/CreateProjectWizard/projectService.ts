@@ -24,7 +24,7 @@ import {
   type IUserBuCascadeDefaults,
   type AuthenticatedFetchFn,
 } from '../../services/EntityCreationService';
-import { discoverNavProps } from '../../services/PolymorphicResolverService';
+import { discoverNavProps, cleanGuid } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
 
 // ---------------------------------------------------------------------------
@@ -358,7 +358,7 @@ export class ProjectService {
     for (const lk of lookups) {
       const navProp = _findNavProp(navProps, lk.referencedEntity, lk.columnHint);
       if (navProp) {
-        entity[`${navProp}@odata.bind`] = `/${lk.entitySet}(${lk.guid})`;
+        entity[`${navProp}@odata.bind`] = `/${lk.entitySet}(${cleanGuid(lk.guid)})`;
       } else {
         console.warn(
           `[ProjectService] No nav-prop found for ${lk.label} (referenced entity: ${lk.referencedEntity}) — skipping lookup binding`

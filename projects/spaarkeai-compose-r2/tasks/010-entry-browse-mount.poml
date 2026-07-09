@@ -2,7 +2,7 @@
   <metadata>
     <title>FR-01 wire 1a "Browse / open file" -&gt; transient mount</title>
     <phase>1 Entry</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>12</estimated-hours>
     <effort>high</effort>
     <dependencies>000</dependencies>
@@ -120,4 +120,35 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Implemented 2026-07-09. Browse now opens a hidden native `&lt;input type="file" accept=".docx,...">`
+    (triggered via ref from `handleBrowseRequested`), reads the pick via `FileReader.readAsArrayBuffer`,
+    and dispatches the EXISTING `mountTransient` reducer action (same seam FR-03/task 012 uses for
+    Assistant uploads) + `setIsDirty(true)`. No new mount path, no BFF call, no `sprk_document` create —
+    verified by test asserting `authenticatedFetch` is never invoked. `ComposeEmptyState.tsx` was NOT
+    modified (its existing `onBrowseRequested` prop was sufficient). The stale no-op `compose_browse_requested`
+    PaneEventBus dispatch (zero subscribers, not part of any typed contract) was removed from
+    `handleBrowseRequested` in favor of the real mount; `handleSearchRequested`'s bus dispatch is untouched
+    (out of scope — task 011).
+
+    Deviation from POML: test file placed at `src/widgets/ComposeWorkspace.browse.test.tsx` (co-located,
+    matching the sibling `ComposeWorkspace.upload.test.tsx` convention and this package's `jest.config.js`,
+    which documents co-located `*.test.tsx` — NOT a `__tests__/` subfolder) rather than the
+    `widgets/__tests__/...` path in `&lt;outputs>`.
+
+    Verification: `tsc --noEmit` clean; `npm run build` (tsc emit) clean; full package jest suite
+    5 suites / 46 tests passed (6 new + 40 pre-existing, zero regressions). `npm run lint` cannot run
+    (package has no `eslint.config.js` yet — pre-existing gap, not introduced by this task).
+
+    Discovered (not fixed, out of edit scope — ComposeEditor.tsx is edit="false" for this task):
+    `ComposeEditor`'s `docxBytes` import effect unconditionally calls `onDirtyChange(false)` after a
+    successful mammoth conversion, including for a pointerless/transient mount. Since Browse's
+    `setIsDirty(true)` fires synchronously at dispatch time but the mammoth conversion resolves async
+    afterward, a REAL (unmocked) mount could have `isDirty` flip back to false shortly after mount —
+    same latent behavior the already-merged FR-03/task-012 upload path relies on, so not a regression
+    from this task, but it bears on this task's "dirty after mount" acceptance criterion. Recommend a
+    defer/issue-tracking entry to verify live and, if confirmed, patch `ComposeEditor` to skip the
+    dirty-reset when `documentRef.speDriveItemId` is empty (transient marker).
+  </notes>
 </task>

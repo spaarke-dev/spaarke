@@ -40,7 +40,7 @@ import {
   type IFieldMappingRule,
   type IMappingResult,
 } from '../types/FieldMappingTypes';
-import { discoverNavProps, findNavProp } from './PolymorphicResolverService';
+import { discoverNavProps, findNavProp, cleanGuid } from './PolymorphicResolverService';
 
 /**
  * Inputs to {@link applyFieldMappings}. Deliberately matches the
@@ -473,17 +473,8 @@ async function applyCopyLookup(rule: IFieldMappingRule, ctx: IRuleApplyContext):
   }
 
   const entitySet = _resolveEntitySetForReferent(referentEntity);
-  ctx.payload[`${navProp}@odata.bind`] = `/${entitySet}(${_cleanGuidForBind(guid)})`;
+  ctx.payload[`${navProp}@odata.bind`] = `/${entitySet}(${cleanGuid(guid)})`;
   ctx.fieldsMapped.push(rule.targetField);
-}
-
-/**
- * Strip braces + lowercase a GUID for `@odata.bind` URLs. Mirrors the private
- * `_cleanGuid` helper in `CreateInvoiceWizard/invoiceService.ts` (not exported
- * there, so duplicated here minimally per task 012's constraint).
- */
-function _cleanGuidForBind(id: string): string {
-  return id.replace(/[{}]/g, '').toLowerCase();
 }
 
 /**

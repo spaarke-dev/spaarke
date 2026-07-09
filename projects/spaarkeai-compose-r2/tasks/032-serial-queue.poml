@@ -3,7 +3,7 @@
     <title>FR-18 serial action queueing in ConversationPane</title>
     <phase>3 Inline Editing UX</phase>
     <gate>green</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
@@ -112,4 +112,46 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Verified 2026-07-09 (not re-authored): `useSerialActionQueue.ts` +
+    `ConversationPane.tsx` wiring + co-located `useSerialActionQueue.test.ts`
+    were already delivered in commit 189f972f6 ("feat(compose-r2): integrate
+    016/030/032 frontend"). This pass re-validated rather than rewrote:
+
+    - Contract correction confirmed in code: no `compose_action_request`
+      PaneEventBus discriminant exists or was introduced. The hook accepts a
+      locally-typed `ComposeActionRequest` (id + bindingId + args) and
+      serializes calls into the shipped `dispatchConsumer` seam directly
+      (ADR-039 Click path) — matches the corrected design.md Spike-0 finding.
+    - `npm install --legacy-peer-deps --no-audit --no-fund` (fresh
+      node_modules) + `npx jest src/components/conversation`: 17 suites / 235
+      tests green, incl. all 4 `useSerialActionQueue` behavioral tests
+      (ordering under rapid-fire, ordered dispatch/ledger-write proxy via
+      call order, error-releases-queue no-deadlock, FIFO across 3+ requests,
+      verbatim arg forwarding).
+    - `npm run typecheck`: 0 surface-owned errors (65 pre-existing shared-lib
+      errors deferred to Phase B, unrelated to this task).
+    - `npm run build` (full production build incl. ribbon bundles): green.
+    - Quality gates (code-review + adr-check, Step 9.5): no Critical/Warning
+      ADR violations against ADR-030 (no PaneEventBus channel touched — bus
+      not used by this hook at all), ADR-039 (dispatchConsumer seam only, no
+      new endpoint/routing), or ADR-040 (sequential await on
+      dispatchConsumer's Promise is sufficient ordering proof — the Promise
+      is documented to resolve only after the terminal SSE chunk, i.e. after
+      the server has already written the ledger entry per storage-precedes-
+      rendering). No `any` payloads; ADR-015-safe structural-only logging.
+    - Observations (non-blocking): (1) `ConversationPane.tsx` is 391 lines,
+      over the file header's stated ≤300-line budget — this predates task
+      032 (341 lines before the integration commit; grew from the combined
+      016+030+032 integration, not from this task's ~45-line queue wiring
+      alone). (2) The cross-pane hand-off from this queue's `enqueue` to the
+      FR-14 toolbar in `ComposeWorkspace` (mounted separately in `App.tsx`)
+      is not yet wired — explicitly documented in the hook's own JSDoc as a
+      follow-on wiring decision independent of this task's ordering
+      guarantee, consistent with the POML's task-030 "contract dependency,
+      not file dependency" framing.
+
+    No code changes made this pass — verification only.
+  </notes>
 </task>

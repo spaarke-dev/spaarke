@@ -73,13 +73,19 @@ import type { ComposeActionEnqueue } from './ComposeAiToolbar';
 // cannot resolve). Matches the SpaarkeAi `useWorkspaceLayouts` adapter pattern
 // (documented in `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`).
 import {
-  useDispatchPaneEvent,
   usePaneEvent,
   type WorkspacePaneEvent,
   type ContextPaneEvent,
   type ConversationPaneEvent,
 } from '@spaarke/ai-widgets/events';
 import { authenticatedFetch } from '@spaarke/auth';
+// FR-02 (task 011): "Search for Document" opens the standard Dataverse lookup dialog
+// (Xrm.Utility.lookupObjects) scoped to `sprk_document`, then resolves the picked
+// record's SPE pointer via Xrm.WebApi.retrieveRecord — the SAME two Xrm primitives
+// `DataverseLookupField` and the 1c ribbon launcher (`DocumentComposeLaunch.ts`)
+// already use. No new lookup UI, no new BFF endpoint (ADR-039: this is a data query,
+// not a dispatch).
+import { createXrmNavigationService, createXrmDataService, type LookupResult } from '@spaarke/ui-components';
 
 import { ComposeToolbar } from './ComposeToolbar';
 import { ComposeEmptyState } from './ComposeEmptyState';
@@ -96,6 +102,18 @@ import type {
 
 // Re-export types for backwards-compatible consumer imports.
 export type { ComposeCheckoutStatus, ComposeWorkspaceState, ComposeWorkspaceAction } from './ComposeWorkspace.types';
+
+// ---------------------------------------------------------------------------
+// FR-02 (task 011) — `sprk_document` field constants for the Search lookup
+// ---------------------------------------------------------------------------
+// Mirrors the field constants in `src/solutions/SpaarkeAi/src/ribbon/DocumentComposeLaunch.ts`
+// (the 1c ribbon launcher) — same schema, same resolution shape. Update both if the
+// schema is ever renamed.
+const SEARCH_FIELD_DOCUMENT_ID = 'sprk_documentid';
+const SEARCH_FIELD_GRAPH_ITEM_ID = 'sprk_graphitemid';
+const SEARCH_FIELD_DRIVE_ID = 'sprk_graphdriveid';
+const SEARCH_FIELD_DISPLAY_NAME = 'sprk_filename';
+const SEARCH_DOCUMENT_SELECT = `?$select=${SEARCH_FIELD_DOCUMENT_ID},${SEARCH_FIELD_GRAPH_ITEM_ID},${SEARCH_FIELD_DRIVE_ID},${SEARCH_FIELD_DISPLAY_NAME}`;
 
 // ---------------------------------------------------------------------------
 // FR-04 draft-into-editor — render-follows-store types + seams (task 016)
@@ -225,6 +243,13 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
   },
+  // FR-01 (task 010): the native file input backing "Browse / open file" is never
+  // visually rendered — it is triggered programmatically via a ref. `display: none`
+  // is layout, not color, so this is ADR-021-compliant (semantic tokens govern color;
+  // this token-free rule governs visibility only).
+  hiddenBrowseInput: {
+    display: 'none',
+  },
   loadingState: {
     display: 'flex',
     flex: 1,
@@ -263,8 +288,21 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // Imperative editor ref for save (TipTap → DOCX bytes).
   const editorRef = React.useRef<ComposeEditorHandle | null>(null);
 
-  // Stable PaneEventBus dispatch.
-  const busDispatch = useDispatchPaneEvent();
+  // FR-01 (task 010): hidden native file input backing "Browse / open file". Triggered
+  // programmatically from handleBrowseRequested; see the input element rendered below.
+  const browseFileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  // -------------------------------------------------------------------------
+  // FR-02 (task 011) — Search-resolved drive id override
+  // -------------------------------------------------------------------------
+  // The `driveId` PROP reflects whichever document launched this workspace mount (the
+  // 1c ribbon/launch-context document, or "" for a bare empty-state mount — see
+  // composeEditor.registration.ts). A Search-selected `sprk_document` can live in a
+  // DIFFERENT SPE drive than that prop. `searchResolvedDriveId` overrides it so the
+  // EXISTING Load/Save leg (same endpoint, same effect) keys off the correct drive for
+  // whichever document is actually loaded — no new load path is introduced.
+  const [searchResolvedDriveId, setSearchResolvedDriveId] = React.useState<string | null>(null);
+  const effectiveDriveId = searchResolvedDriveId ?? driveId;
 
   // FR-04 render-follows-store bookkeeping (task 016). `lastMaterializedKey` makes
   // materialization idempotent across refresh + duplicate Flow-5 signals (never double-apply
@@ -328,12 +366,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       });
       return;
     }
-    if (!driveId) {
+    if (!effectiveDriveId) {
       // Half-provisioned document (missing SPE drive pointer) — not a host
       // misconfiguration. Route back to the empty state; the informational
       // banner below explains the situation. (Normally unreachable — the
-      // initial-load effect gates requestLoad on driveId — but defensive for
-      // any other dispatch path.)
+      // initial-load effect gates requestLoad on driveId, and the Search flow
+      // (FR-02/task 011) gates on the resolved SPE pointer before dispatching
+      // requestLoad — but defensive for any other dispatch path.)
       dispatch({ kind: 'reset' });
       return;
     }
@@ -343,7 +382,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
     (async () => {
       try {
-        const qs = new URLSearchParams({ driveId, tenantId });
+        const qs = new URLSearchParams({ driveId: effectiveDriveId, tenantId });
         if (docRef.sprkDocumentId) qs.set('documentRecordId', docRef.sprkDocumentId);
         if (docRef.fileName) qs.set('displayName', docRef.fileName);
 
@@ -403,7 +442,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.status, state.documentRef?.speDriveItemId, bffBaseUrl, driveId, tenantId]);
+  }, [state.status, state.documentRef?.speDriveItemId, bffBaseUrl, effectiveDriveId, tenantId]);
 
   // -------------------------------------------------------------------------
   // Multi-tab BroadcastChannel hook — owns "focus-me" + "force-closed" signaling
@@ -454,7 +493,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const triggerSave = React.useCallback(async (): Promise<void> => {
     if (state.status !== 'loaded') return;
     if (!state.documentRef || !editorRef.current) return;
-    if (!bffBaseUrl || !driveId || !tenantId) {
+    if (!bffBaseUrl || !effectiveDriveId || !tenantId) {
       dispatch({
         kind: 'saveFailed',
         errorMessage: 'Cannot save — BFF base URL or SPE configuration missing.',
@@ -481,7 +520,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          driveId,
+          driveId: effectiveDriveId,
           tenantId,
           sessionId: state.sessionId,
           content: base64Content,
@@ -534,7 +573,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const message = err instanceof Error ? err.message : String(err);
       dispatch({ kind: 'saveFailed', errorMessage: `Save failed: ${message}` });
     }
-  }, [state.status, state.documentRef, state.sessionId, bffBaseUrl, driveId, tenantId]);
+  }, [state.status, state.documentRef, state.sessionId, bffBaseUrl, effectiveDriveId, tenantId]);
 
   // Keyboard shortcut: Ctrl/Cmd+S → save.
   React.useEffect(() => {
@@ -682,32 +721,66 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, [state.status, state.sessionId]);
 
   // -------------------------------------------------------------------------
-  // Empty-state handlers — additive workspace-channel dispatch
+  // FR-02 (task 011) — Search for Document -> reuse the 1c BFF Load path
   // -------------------------------------------------------------------------
+  // Opens the standard Dataverse lookup dialog (Xrm.Utility.lookupObjects) scoped to
+  // `sprk_document`, resolves the picked record's SPE pointer (Xrm.WebApi.retrieveRecord
+  // — same fields as the 1c ribbon launcher, `DocumentComposeLaunch.ts`), then dispatches
+  // `requestLoad` so the EXISTING `GET /api/compose/documents/{speId}` effect above mounts
+  // it — identical to 1c (refresh-surviving, carries `documentRecordId`, reaches the
+  // 'loaded' stage). No new load path, no new endpoint (ADR-039).
+  const performDocumentSearch = React.useCallback(async (): Promise<void> => {
+    let lookupResults: LookupResult[];
+    try {
+      const navigationService = createXrmNavigationService();
+      lookupResults = await navigationService.openLookup({ entityType: 'sprk_document' });
+    } catch (err) {
+      // No Dataverse-hosted context (e.g. a standalone non-MDA host) — the standard
+      // lookup dialog is unavailable. Fail soft: leave the empty state as-is.
+      // eslint-disable-next-line no-console
+      console.warn('[ComposeWorkspace] Document lookup unavailable in this host context:', err);
+      return;
+    }
 
-  const handleBrowseRequested = React.useCallback((): void => {
-    onBrowseRequested?.();
-    busDispatch(
-      'workspace',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      {
-        type: 'compose_browse_requested',
-        timestamp: new Date().toISOString(),
-      } as any
-    );
-  }, [onBrowseRequested, busDispatch]);
+    if (lookupResults.length === 0) return; // user dismissed the lookup — empty state unchanged
+    const picked = lookupResults[0];
+
+    let record: Record<string, unknown>;
+    try {
+      const dataService = createXrmDataService();
+      record = await dataService.retrieveRecord('sprk_document', picked.id, SEARCH_DOCUMENT_SELECT);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      dispatch({ kind: 'loadFailed', errorMessage: `Failed to resolve the selected document: ${message}` });
+      return;
+    }
+
+    const speDriveItemId = record[SEARCH_FIELD_GRAPH_ITEM_ID] as string | undefined;
+    const speDriveId = record[SEARCH_FIELD_DRIVE_ID] as string | undefined;
+    const fileName = (record[SEARCH_FIELD_DISPLAY_NAME] as string | undefined) ?? picked.name;
+
+    if (!speDriveItemId || !speDriveId) {
+      // Half-provisioned document (missing SPE drive pointer) — mirrors the 1c ribbon
+      // launcher's same guard (issue #572 Defect 1).
+      dispatch({
+        kind: 'loadFailed',
+        errorMessage: `"${picked.name}" isn't fully provisioned in SharePoint Embedded (missing drive pointer). Pick another document.`,
+      });
+      return;
+    }
+
+    setSearchResolvedDriveId(speDriveId);
+    dispatch({
+      kind: 'requestLoad',
+      documentRef: { speDriveItemId, sprkDocumentId: picked.id, fileName },
+      sessionId: initialSessionId ?? '',
+    });
+  }, [initialSessionId]);
 
   const handleSearchRequested = React.useCallback((): void => {
     onSearchRequested?.();
-    busDispatch(
-      'workspace',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      {
-        type: 'compose_search_requested',
-        timestamp: new Date().toISOString(),
-      } as any
-    );
-  }, [onSearchRequested, busDispatch]);
+    void performDocumentSearch();
+  }, [onSearchRequested, performDocumentSearch]);
 
   // -------------------------------------------------------------------------
   // Editor-side callbacks
@@ -723,6 +796,46 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   const handleImportWarnings = React.useCallback((warnings: Array<{ type: string; message: string }>): void => {
     dispatch({ kind: 'importWarnings', warnings });
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // FR-01 (task 010) — Browse local-file transient mount
+  // -------------------------------------------------------------------------
+  // Browse opens a local `.docx` picker and mounts the picked file's bytes into the
+  // editor as a TRANSIENT working draft via the same `docxBytes` seam FR-03/task 012
+  // uses for Assistant-uploaded files (`mountTransient` reducer action). No
+  // `sprk_document` is created and no BFF round-trip occurs (ADR-040) — persistence
+  // happens on first Save (create-on-save, FR-05/task 013).
+  const handleBrowseRequested = React.useCallback((): void => {
+    onBrowseRequested?.();
+    browseFileInputRef.current?.click();
+  }, [onBrowseRequested]);
+
+  const handleBrowseFileSelected = React.useCallback((event: React.ChangeEvent<HTMLInputElement>): void => {
+    const file = event.target.files?.[0] ?? null;
+    // Reset the input value so re-selecting the same file still fires a change event.
+    event.target.value = '';
+    if (!file) return; // user cancelled the picker — empty state unchanged, nothing mounts
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (!(result instanceof ArrayBuffer)) return;
+      // A Browse mount has no SPE drive — clear any stale Search-resolved drive id
+      // (FR-02/task 011) so a later Save doesn't key off the WRONG drive.
+      setSearchResolvedDriveId(null);
+      dispatch({ kind: 'mountTransient', docxBytes: result, fileName: file.name });
+      // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
+      // (create-on-save, task 013) is enabled immediately.
+      setIsDirty(true);
+    };
+    reader.onerror = () => {
+      dispatch({
+        kind: 'loadFailed',
+        errorMessage: `Failed to read "${file.name}". The file may be corrupted or unreadable.`,
+      });
+    };
+    reader.readAsArrayBuffer(file);
   }, []);
 
   // -------------------------------------------------------------------------
@@ -784,6 +897,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         }
         if (ac.signal.aborted) return;
 
+        // An upload mount has no SPE drive — clear any stale Search-resolved drive id
+        // (FR-02/task 011) so a later Save doesn't key off the WRONG drive.
+        setSearchResolvedDriveId(null);
         dispatch({
           kind: 'mountTransient',
           docxBytes: bytes.buffer,
@@ -832,6 +948,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       data-compose-checkout-status={state.checkoutStatus}
       data-testid="compose-workspace"
     >
+      {/*
+        FR-01 (task 010): hidden native file input backing "Browse / open file".
+        Always mounted (not gated on status === 'empty') so the ref stays stable
+        across the empty -> loaded transition triggered by a successful pick.
+      */}
+      <input
+        ref={browseFileInputRef}
+        type="file"
+        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        className={styles.hiddenBrowseInput}
+        onChange={handleBrowseFileSelected}
+        data-testid="compose-workspace-browse-file-input"
+        aria-hidden="true"
+        tabIndex={-1}
+      />
+
       {/* Empty state — Path A/B picker */}
       {state.status === 'empty' ? (
         <>

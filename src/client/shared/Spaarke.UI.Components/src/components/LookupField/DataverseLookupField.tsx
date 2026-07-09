@@ -41,6 +41,7 @@ import { DismissRegular, SearchRegular } from '@fluentui/react-icons';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { INavigationService } from '../../types/serviceInterfaces';
 import { LookupField } from './LookupField';
+import { cleanGuid } from '../../services/PolymorphicResolverService';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -203,8 +204,10 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
     try {
       const results = await navigationService.openLookup({ entityType });
       if (results.length > 0) {
-        // Use first result (allowMultiSelect defaults to false)
-        onChange({ id: results[0].id, name: results[0].name });
+        // Use first result (allowMultiSelect defaults to false).
+        // cleanGuid defensively (the adapter already normalizes at the platform
+        // boundary; belt-and-suspenders for any INavigationService impl that doesn't).
+        onChange({ id: cleanGuid(results[0].id), name: results[0].name });
       }
       // If results is empty the user cancelled — preserve existing value
     } finally {

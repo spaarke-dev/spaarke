@@ -49,6 +49,30 @@ export { ComposeEmptyState } from './widgets/ComposeEmptyState';
 export type { ComposeEmptyStateProps } from './widgets/ComposeEmptyState';
 export { ComposeConflictDialog } from './widgets/ComposeConflictDialog';
 
+// -------------------------------------------------------------------------
+// Return-from-Word re-anchoring (FR-27 / task 054)
+// -------------------------------------------------------------------------
+export { ComposeReanchorBanner } from './widgets/ComposeReanchorBanner';
+export type { ComposeReanchorBannerProps } from './widgets/ComposeReanchorBanner';
+export { ComposeReanchorConflictPanel } from './widgets/ComposeReanchorConflictPanel';
+export type { ComposeReanchorConflictPanelProps } from './widgets/ComposeReanchorConflictPanel';
+export { useComposeReanchor } from './widgets/useComposeReanchor';
+export type {
+  UseComposeReanchorOptions,
+  UseComposeReanchorResult,
+  ReanchorRequestArgs,
+} from './widgets/useComposeReanchor';
+export type {
+  ReanchorBand,
+  ReanchoredAnnotation,
+  ReanchorSummary,
+  ReanchorAnnotationsResponse,
+  PriorAnchorInput,
+  ComposeReanchorReadyEvent,
+  ReanchorResolution,
+  ReanchorResolutionDecision,
+} from './widgets/ComposeReanchor.types';
+
 // Reducer / state types
 export { composeWorkspaceReducer, INITIAL_STATE } from './widgets/ComposeWorkspace.types';
 export type {

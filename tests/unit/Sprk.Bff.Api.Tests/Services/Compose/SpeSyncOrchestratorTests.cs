@@ -260,6 +260,86 @@ public class SpeSyncOrchestratorTests
     }
 
     // =========================================================================
+    // ResolveContainerIdForDriveIdAsync — task-053 webhook receiver's reverse lookup
+    // =========================================================================
+
+    [Fact]
+    public async Task ResolveContainerIdForDriveIdAsync_WhenDriveIdIsTracked_ReturnsOwningContainerId()
+    {
+        // Arrange — a healthy subscription tracks ContainerId -> DriveId in the Redis index
+        var sut = await ArrangeHealthySubscriptionAsync();
+
+        // Act — a Graph notification only carries the driveId (via its resource path); the
+        // task-053 webhook receiver reverse-resolves it back to the tracked containerId
+        var resolved = await sut.ResolveContainerIdForDriveIdAsync(DriveId);
+
+        // Assert
+        resolved.Should().Be(ContainerId);
+    }
+
+    [Fact]
+    public async Task ResolveContainerIdForDriveIdAsync_WhenDriveIdIsUntracked_ReturnsNull()
+    {
+        // Arrange — a healthy subscription for the (different) tracked container/drive pair
+        var sut = await ArrangeHealthySubscriptionAsync();
+
+        // Act — a notification for a driveId this BFF instance never subscribed
+        var resolved = await sut.ResolveContainerIdForDriveIdAsync("b!some-other-untracked-drive");
+
+        // Assert — the webhook receiver treats this as "ignore", not an error
+        resolved.Should().BeNull();
+    }
+
+    // =========================================================================
+    // check-changes poll scenario (task 053) — same substrate as the webhook, filtered to
+    // one document. The endpoint's Changed/Unchanged decision is entirely EnumerateChangesAsync's
+    // net-change set filtered by ItemId; these tests pin that exact FR-26 acceptance scenario.
+    // =========================================================================
+
+    [Fact]
+    public async Task EnumerateChangesAsync_ForCheckChangesPoll_ReportsUnchangedWhenEtagMatchesStored()
+    {
+        // Arrange — item-1 already observed at etag-1 (first round persists it)
+        var sut = await ArrangeHealthySubscriptionAsync();
+        _facade.Setup(f => f.EnumerateDriveDeltaAsync(DriveId, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpeDeltaResult(
+                new[] { new SpeDriveChange("item-1", "contract.docx", "etag-1", false) }, "T1"));
+        await sut.EnumerateChangesAsync(ContainerId);
+
+        // Act — poll again; Graph's delta still reports item-1 at the SAME etag (no real change)
+        _facade.Setup(f => f.EnumerateDriveDeltaAsync(DriveId, "T1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpeDeltaResult(
+                new[] { new SpeDriveChange("item-1", "contract.docx", "etag-1", false) }, "T2"));
+        var netChanges = await sut.EnumerateChangesAsync(ContainerId);
+
+        // Assert — the check-changes endpoint's filter (netChanges.FirstOrDefault(c => c.ItemId == speId))
+        // finds no match for item-1 => "unchanged"
+        netChanges.Should().NotContain(c => c.ItemId == "item-1");
+    }
+
+    [Fact]
+    public async Task EnumerateChangesAsync_ForCheckChangesPoll_ReportsChangedWhenEtagDiffersFromStored()
+    {
+        // Arrange — item-1 already observed at etag-1
+        var sut = await ArrangeHealthySubscriptionAsync();
+        _facade.Setup(f => f.EnumerateDriveDeltaAsync(DriveId, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpeDeltaResult(
+                new[] { new SpeDriveChange("item-1", "contract.docx", "etag-1", false) }, "T1"));
+        await sut.EnumerateChangesAsync(ContainerId);
+
+        // Act — poll again; Graph's delta now reports item-1 saved in Word for Web (new etag)
+        _facade.Setup(f => f.EnumerateDriveDeltaAsync(DriveId, "T1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpeDeltaResult(
+                new[] { new SpeDriveChange("item-1", "contract.docx", "etag-2", false) }, "T2"));
+        var netChanges = await sut.EnumerateChangesAsync(ContainerId);
+
+        // Assert — the check-changes endpoint's filter finds item-1 in the net-change set => "changed"
+        var match = netChanges.Should().ContainSingle(c => c.ItemId == "item-1").Subject;
+        match.ETag.Should().Be("etag-2");
+        match.Deleted.Should().BeFalse();
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 

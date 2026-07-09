@@ -59,6 +59,7 @@ import {
 } from './matterService';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { useAiPrefill, type IResolvedPrefillFields } from '../../hooks/useAiPrefill';
+import { cleanGuid } from '../../services/PolymorphicResolverService';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -341,8 +342,10 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
       } else {
         // Lookup resolved: set both id and name fields
         // e.g., matterTypeName -> { id, name } -> set matterTypeId + matterTypeName
+        // Normalize the resolved lookup id at ingestion so a brace-wrapped GUID
+        // (from an Xrm-sourced resolver) never reaches the create @odata.bind.
         const idKey = key.replace(/Name$/, 'Id');
-        (fields as Record<string, string>)[idKey] = value.id;
+        (fields as Record<string, string>)[idKey] = cleanGuid(value.id);
         (fields as Record<string, string>)[key] = value.name;
       }
     }
