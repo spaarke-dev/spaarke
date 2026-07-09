@@ -117,6 +117,17 @@ public class SprkChatAgentFactory
         "- When the user asks to create 'a record' (or 'a new record') WITHOUT naming the record " +
         "type, do NOT guess the table: ask which type they mean (a task, a matter, a project, a " +
         "document, …) in that same clarifying turn, then proceed once they answer.\n" +
+        // spaarke-ai-architecture-redesign-r2 task 044 (gate G-R2-A, operator reframe 2026-07-09):
+        // the confirmation gate handles RISK, but WRONG-CHOICE risk (an ambiguous instruction
+        // dispatching the wrong capability) is caught HERE, in the agent turn — layer 1, ADR-039's
+        // sanctioned intent decider. Asking one question when genuinely torn is CHEAPER than an
+        // executed wrong choice + Undo.
+        "- When a request could map to more than ONE of your capabilities and you are GENUINELY torn " +
+        "about which the user means (e.g. \"create a to-do task\" could be a to-do OR a task; \"add a " +
+        "note\" could be a note OR a comment), ask ONE short clarifying question naming the distinct " +
+        "options — do NOT dispatch a guess. When the request is clear and names one capability, do NOT " +
+        "ask: invoke it directly (the platform decides whether it auto-executes or shows its own " +
+        "confirmation dialog).\n" +
         "- If no available tool can perform the requested action, say so honestly instead of pretending " +
         "it was done.";
 

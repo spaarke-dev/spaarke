@@ -1,7 +1,12 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat.Gate;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -108,6 +113,7 @@ public sealed class SideEffectGateAIFunction : AIFunction
     private readonly string _sessionId;
     private readonly ILogger _logger;
     private readonly Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? _sseWriter;
+    private readonly Func<bool>? _dispatchUncertaintyProbe;
 
     /// <param name="inner">The wrapped side-effecting tool (typed-handler adapter).</param>
     /// <param name="declaredClass">The row's declared <c>sprk_sideeffectclass</c> that fired the gate.</param>
@@ -121,6 +127,19 @@ public sealed class SideEffectGateAIFunction : AIFunction
     /// <c>action_confirmation</c> presentation event (client ActionConfirmationDialog,
     /// task 032 rewire). Null on surfaces without a chat SSE stream — the grounded
     /// suspension message still reaches the user via the model's turn text.</param>
+    /// <param name="dispatchUncertaintyProbe">
+    /// OPTIONAL gate-side ambiguity/low-confidence backstop (spaarke-ai-architecture-redesign-r2
+    /// task 044). When supplied and it returns <c>true</c>, the Policy v2 evaluation treats the
+    /// invocation as a NON-confident capability selection (origin ⇒ Inferred) AND fires the
+    /// dispatch-uncertain overlay, forcing a confirmation dialog even on an otherwise
+    /// execute-eligible low-risk request. It is the OPTIONAL backstop ON TOP of the primary
+    /// ambiguity decider — the agent turn asking a clarifying question BEFORE any tool call
+    /// (layer 1, ADR-039's sanctioned decider). Production wires <c>null</c> today (no live
+    /// low-confidence producer reaches this gate; genuine capability ambiguity is diverted upstream
+    /// by layer 1), so the overlay honestly stays unfired — the gate HONORS a real signal when one
+    /// exists rather than hardcoding it. Threading a real producer (routing candidate-match count /
+    /// content-safety fail-open) is the documented follow-on.
+    /// </param>
     public SideEffectGateAIFunction(
         AIFunction inner,
         ToolSideEffectClass declaredClass,
@@ -128,7 +147,8 @@ public sealed class SideEffectGateAIFunction : AIFunction
         string tenantId,
         string sessionId,
         ILogger logger,
-        Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter = null)
+        Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter = null,
+        Func<bool>? dispatchUncertaintyProbe = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _declaredClass = declaredClass;
@@ -137,6 +157,7 @@ public sealed class SideEffectGateAIFunction : AIFunction
         _sessionId = !string.IsNullOrWhiteSpace(sessionId) ? sessionId : throw new ArgumentException("sessionId required", nameof(sessionId));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _sseWriter = sseWriter;
+        _dispatchUncertaintyProbe = dispatchUncertaintyProbe;
     }
 
     /// <summary>The wrapped inner function (exposed for projection fingerprinting + tests).</summary>
@@ -190,12 +211,13 @@ public sealed class SideEffectGateAIFunction : AIFunction
         // exactly as before. Validation that cannot PROVE doom (returns valid, OR faults) falls
         // through to the safe suspend floor, so a call whose failure is not certain at
         // validation time keeps its legitimate confirm dialog (the escalation-trigger boundary).
-        if (_inner is ToolHandlerToAIFunctionAdapter validatingAdapter)
+        var adapter = _inner as ToolHandlerToAIFunctionAdapter;
+        if (adapter is not null)
         {
             ToolValidationResult preValidation;
             try
             {
-                preValidation = validatingAdapter.ValidateForGate(arguments);
+                preValidation = adapter.ValidateForGate(arguments);
             }
             catch (Exception ex)
             {
@@ -215,57 +237,35 @@ public sealed class SideEffectGateAIFunction : AIFunction
             }
         }
 
-        var gateId = $"confirmation-{Guid.NewGuid():N}";
-        var argsJson = arguments is { Count: > 0 }
-            ? JsonSerializer.Serialize(arguments.ToDictionary(a => a.Key, a => a.Value))
-            : "{}";
+        // === FR-A1-03 (task 044) — DETERMINISTIC CONFIRMATION POLICY v2 =====================
+        // The pre-suspend validation above proved the call is not DOOMED (R5-E honest-❌ path stays
+        // ahead of everything). Now the deterministic ConfirmationPolicyEngine decides HOW the
+        // invocation resolves — execute (no dialog) / execute-with-Undo / draft-and-handoff /
+        // elicit / confirm / honest-block — from REAL signals: catalog-declared risk tier
+        // (RiskTierResolver over the row's sprk_configuration.riskProfile DATA), argument
+        // completeness (declared required[] vs supplied args), and the ambiguity/confidence slot
+        // (operator reframe 2026-07-09 — NOT the E-1..E-6 authorization-provenance machinery). The
+        // engine REPLACES the old declared-class-only "always suspend" decision: it is now the
+        // single top-level decider on this live path (there is no parallel decider left to disagree).
+        var decision = EvaluatePolicy(adapter, arguments);
 
-        // ADR-040: pending marker + resumable payload land FIRST (SuspendInvocationAsync
-        // writes the ledger marker before storing the payload; if the marker cannot land
-        // it throws and this invocation aborts loudly — never executes).
-        var suspended = await pendingManager.SuspendInvocationAsync(
-            new PendingInvocation
-            {
-                GateId = gateId,
-                Kind = PendingPlanManager.GateKindConfirmation,
-                SessionId = _sessionId,
-                TenantId = _tenantId,
-                ToolId = Name,
-                SideEffectClass = PendingPlanManager.ToLedgerSideEffectClass(_declaredClass),
-                Risk = "none",
-                ArgsJson = argsJson,
-                Title = Name,
-            },
-            cancellationToken).ConfigureAwait(false);
-
-        // NFR-07: identifiers + counts only — never argument values.
         _logger.LogInformation(
-            "[FR-P2-02][gate] side-effecting invocation suspended — gateId={GateId} tool={ToolName} " +
-            "declaredClass={DeclaredClass} argCount={ArgCount} session={SessionId}",
-            suspended.GateId, Name, _declaredClass, arguments?.Count ?? 0, _sessionId);
+            "[FR-A1-03][gate] policy decision — tool={ToolName} tier={Tier} origin={Origin} " +
+            "completeness={Completeness} outcome={Outcome} session={SessionId}",
+            Name, decision.Tier, decision.Origin, decision.Completeness, decision.Outcome, _sessionId);
 
-        // Presentation AFTER storage (ADR-040). actionId carries the gate id — the client
-        // ActionConfirmationDialog resolves it via POST /gates/{gateId}/resolve (task 032).
-        if (_sseWriter is not null)
+        return decision.Outcome switch
         {
-            await _sseWriter(
-                new Api.Ai.ChatSseEvent(
-                    "action_confirmation",
-                    null,
-                    new Api.Ai.ChatSseActionConfirmationData(
-                        ActionId: suspended.GateId,
-                        ActionName: Name,
-                        Summary: BuildUserSummary(arguments),
-                        Parameters: new Dictionary<string, string>())),
-                cancellationToken).ConfigureAwait(false);
-        }
+            GateOutcome.Execute or GateOutcome.ExecuteWithUndo =>
+                await ExecuteInlineAsync(scope, adapter, decision, arguments, cancellationToken).ConfigureAwait(false),
 
-        // Grounded turn instruction: the model must relay the pending state honestly.
-        return $"ACTION SUSPENDED FOR USER CONFIRMATION: '{Name}' performs a side effect " +
-               $"(declared class: {PendingPlanManager.ToLedgerSideEffectClass(_declaredClass)}) and was " +
-               "NOT executed. A confirmation request has been presented to the user. Do NOT call this " +
-               "tool again this turn, do NOT assume it succeeded, and do NOT fabricate its result. " +
-               "Tell the user the action is awaiting their explicit confirmation.";
+            GateOutcome.Elicit => RenderElicit(adapter, arguments),
+
+            GateOutcome.HonestBlock => RenderHonestBlock(),
+
+            // ConfirmDialog (and any fail-closed default) → the existing suspend MECHANISM.
+            _ => await SuspendForConfirmationAsync(pendingManager, arguments, cancellationToken).ConfigureAwait(false),
+        };
     }
 
     /// <summary>
@@ -345,4 +345,447 @@ public sealed class SideEffectGateAIFunction : AIFunction
             ? $"The assistant requested the side-effecting action '{Name}'. Confirm to proceed or reject to cancel."
             : $"The assistant requested the side-effecting action '{Name}' ({argsSummary}). Confirm to proceed or reject to cancel.";
     }
+
+    // =====================================================================================
+    // FR-A1-03 (task 044) — Confirmation Policy v2 wiring (execute / elicit / confirm / block)
+    // =====================================================================================
+
+    /// <summary>
+    /// Assembles the <see cref="PolicyEvaluationContext"/> from REAL signals and asks the
+    /// deterministic <see cref="ConfirmationPolicyEngine"/> for the outcome. Every input is
+    /// structural DATA — there is no model judgment expressible here (ADR-039).
+    /// <list type="bullet">
+    ///   <item><b>Tier</b> — the catalog row's declared <c>sprk_configuration.riskProfile</c>
+    ///   (task-020 seed DATA) via <see cref="GateRiskProfile.FromConfiguration"/> →
+    ///   <see cref="RiskTierResolver"/>. Absent/unparseable ⇒ FAIL-CLOSED: a conservative Tier 2b
+    ///   profile + Inferred origin, which the engine projects to a confirmation dialog (today's safe
+    ///   floor for an un-migrated write/communicate row) — never an auto-execute.</item>
+    ///   <item><b>Completeness</b> — the declared JSON-schema <c>required[]</c> vs the LLM-supplied
+    ///   argument keys.</item>
+    ///   <item><b>Origin / confidence</b> — the operator reframe (2026-07-09): a gate-reaching
+    ///   typed-handler call is a COMMITTED capability selection by the agent turn (ADR-039's
+    ///   sanctioned decider); genuine capability ambiguity is diverted to a clarifying question
+    ///   BEFORE any tool call (layer 1). So the request is a confident (Explicit) selection IFF the
+    ///   row declares real execute-eligible risk DATA AND no low-confidence backstop fired —
+    ///   otherwise fail-closed Inferred. The origin slot is fed by this real
+    ///   (declared-risk × ambiguity) confidence, NOT by parsed authorization provenance.</item>
+    /// </list>
+    /// </summary>
+    private GateDecisionV2 EvaluatePolicy(ToolHandlerToAIFunctionAdapter? adapter, AIFunctionArguments arguments)
+    {
+        var declaredProfile = adapter is null ? null : TryParseRiskProfile(adapter.Tool.Configuration);
+        var profile = declaredProfile ?? new GateRiskProfile { DeclaredTier = GateRiskTier.Tier2b };
+
+        var argsComplete = adapter is null || ArgsComplete(adapter.Tool.JsonSchema, arguments);
+
+        // OPTIONAL ambiguity/low-confidence backstop — HONORED from the injected probe when a
+        // producer supplies one; honestly false in production today (layer 1 covers ambiguity).
+        // NOT hardcoded — the value flows from the probe, so a real signal flips the outcome and
+        // the integration proof fails if this were faked to a constant.
+        var dispatchUncertain = _dispatchUncertaintyProbe?.Invoke() ?? false;
+
+        var confident = declaredProfile is not null && !dispatchUncertain;
+        var origin = new GateOriginRequest
+        {
+            Source = GateRequestSource.UserUtterance,
+            UtteranceEnumeratesCapability = confident,
+        };
+
+        return ConfirmationPolicyEngine.Evaluate(new PolicyEvaluationContext
+        {
+            RiskProfile = profile,
+            Origin = origin,
+            ArgsComplete = argsComplete,
+            DispatchUncertain = dispatchUncertain,
+            // No live content-safety / safety-perimeter producer is threaded to THIS gate today: a
+            // Prompt-Shields BLOCKED turn yield-breaks upstream and never reaches the loop, and a
+            // fail-OPEN degradation is not yet propagated here. These stay false honestly; the
+            // overlay plumbing already honors a real signal (documented follow-on to thread one).
+            ContentSafetyFlagged = false,
+            SafetyPerimeterDegraded = false,
+            // First evaluation of a fresh invocation — no gate id yet ⇒ ConfirmationState = None
+            // (the ADR-040 "no second ask" applies on the resume path, not this first pass).
+            Ledger = null,
+            GateId = null,
+        });
+    }
+
+    /// <summary>
+    /// The EXECUTE leg (Policy v2 <see cref="GateOutcome.Execute"/> / <see cref="GateOutcome.ExecuteWithUndo"/>):
+    /// runs the wrapped tool NOW — no confirmation dialog — under the loop's live OBO turn (exactly
+    /// as a non-gated read executes). ADR-040 store-before-render: the executed outcome is persisted
+    /// as a <c>loop@t{n}</c> <see cref="SessionOutput"/> BEFORE the task-035 <see cref="OutcomeCard"/>
+    /// is composed + emitted. Carries the declared affordance — an Undo chip for a reversible
+    /// Tier 2a/2b create, or the review-and-send record link for a Tier-1 email DRAFT (which is
+    /// DRAFTED, never sent; the human's review-and-send at the linked record is the gate, r2).
+    /// </summary>
+    private async Task<object?> ExecuteInlineAsync(
+        AsyncServiceScope scope,
+        ToolHandlerToAIFunctionAdapter? adapter,
+        GateDecisionV2 decision,
+        AIFunctionArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        object? raw;
+        try
+        {
+            raw = await _inner.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+
+        // The wrapped adapter returns a ToolResult on success (or an error envelope on a failed
+        // handler). An unsuccessful/unexpected result is relayed AS-IS to the model — no card, no
+        // fabricated success (D-F0 / no_fabrication).
+        if (raw is not ToolResult result || !result.Success)
+        {
+            _logger.LogWarning(
+                "[FR-A1-03][gate] auto-execute did not complete successfully — tool={ToolName} session={SessionId}; " +
+                "relaying the tool's own outcome (no OutcomeCard, no fabricated success).",
+                Name, _sessionId);
+            return raw ?? $"ACTION NOT COMPLETED — '{Name}' executed but reported no result. Relay the outcome honestly.";
+        }
+
+        // Store-before-render (ADR-040): persist the loop@t{n} ledger output first.
+        var sessionManager = scope.ServiceProvider.GetService<ChatSessionManager>();
+        var ledgerKey = sessionManager is null
+            ? null
+            : await AppendSessionOutputAsync(sessionManager, result, cancellationToken).ConfigureAwait(false);
+
+        var isEmail = _declaredClass == ToolSideEffectClass.Communicate;
+        var userFacing = TypedHandlerResumeExecutor.ExtractUserSummary(result) ?? result.Summary ?? "Done.";
+        var record = TypedHandlerResumeExecutor.ExtractCreatedRecord(result);
+        var recordUrl = record is null ? null : BuildRecordUrl(scope, record);
+
+        OutcomeCardLink? link = recordUrl is null
+            ? null
+            : OutcomeCardLink.ServerComposed(recordUrl, isEmail ? "Review and send" : "Open record", "record");
+
+        var chips = new List<NextStepChip>();
+        if (decision.Outcome == GateOutcome.ExecuteWithUndo)
+        {
+            // Declared Undo affordance for a reversible Tier 2a/2b create (the OutcomeCard NextStep
+            // chip is the platform's declared-affordance vocabulary; the compensating delete is the
+            // existing dataverse.delete_record capability the surface wires to this chip).
+            chips.Add(new NextStepChip("Undo", "invoke_capability"));
+        }
+
+        // Compose + emit the OutcomeCard only when the ledger write succeeded (store-before-render).
+        if (!string.IsNullOrWhiteSpace(ledgerKey))
+        {
+            var card = CompletionEngine.ComposeForGateAutoExecute(
+                ledgerOutputKey: ledgerKey!,
+                userFacing: userFacing,
+                internalDetail: result.Summary,
+                link: link,
+                nextSteps: chips);
+
+            if (_sseWriter is not null)
+            {
+                var view = card.Render();
+                await _sseWriter(
+                    new Api.Ai.ChatSseEvent(
+                        "action_outcome",
+                        null,
+                        new Api.Ai.ChatSseActionOutcomeData(
+                            ActionName: Name,
+                            Status: view.Status.ToString().ToLowerInvariant(),
+                            UserSummary: view.UserSummary,
+                            LinkUrl: view.LinkUrl,
+                            LinkLabel: view.LinkLabel,
+                            NextSteps: view.NextStepLabels,
+                            LedgerOutputKey: card.LedgerOutputKey)),
+                    cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        _logger.LogInformation(
+            "[FR-A1-03][gate] side-effecting invocation AUTO-EXECUTED (no dialog) — tool={ToolName} " +
+            "outcome={Outcome} declaredClass={DeclaredClass} ledgerKey={LedgerKey} session={SessionId}",
+            Name, decision.Outcome, _declaredClass, ledgerKey, _sessionId);
+
+        // Grounded turn text — the model relays the honest outcome. For email the invariant is
+        // DRAFT + HANDOFF: the system NEVER sent it; the link (relayed verbatim) opens the record
+        // for the human to review, edit, and send themselves.
+        if (isEmail)
+        {
+            var linkText = recordUrl is null ? string.Empty : $" Review and send it here: [Review and send]({recordUrl}).";
+            return $"EMAIL DRAFTED (NOT SENT): '{Name}' prepared a draft email for the user to review, edit, " +
+                   $"and send themselves — the system did NOT send anything.{linkText} Tell the user the draft " +
+                   "is ready for their review and send; do NOT say it was sent, and do NOT fabricate a send.";
+        }
+
+        var undoText = decision.Outcome == GateOutcome.ExecuteWithUndo
+            ? " An Undo affordance is available on the outcome if they want to reverse it."
+            : string.Empty;
+        var openText = recordUrl is null ? string.Empty : $" [Open record]({recordUrl}).";
+        return $"ACTION EXECUTED: '{Name}' completed. {userFacing}{openText}{undoText} Relay this outcome to the " +
+               "user honestly; only relay links exactly as written, and do NOT fabricate anything further.";
+    }
+
+    /// <summary>
+    /// The ELICIT leg (Policy v2 <see cref="GateOutcome.Elicit"/>): the required args are incomplete
+    /// for a Tier ≥ 2 side effect. The tool is NEITHER executed NOR suspended — the model asks the
+    /// user ONE natural question for the missing detail(s), then re-invokes with complete args (which
+    /// re-evaluates from the top). No suspend marker is written (this is not a scary confirm; it is a
+    /// natural elicitation — the operator's "incomplete args ⇒ elicit" ruling).
+    /// </summary>
+    private object? RenderElicit(ToolHandlerToAIFunctionAdapter? adapter, AIFunctionArguments arguments)
+    {
+        var missing = adapter is null ? new List<string>() : MissingRequired(adapter.Tool.JsonSchema, arguments);
+        var missingText = missing.Count > 0 ? $" The following required detail(s) are missing: {string.Join(", ", missing)}." : string.Empty;
+
+        _logger.LogInformation(
+            "[FR-A1-03][gate] invocation ELICITS (incomplete args) — tool={ToolName} missingCount={Count} session={SessionId}",
+            Name, missing.Count, _sessionId);
+
+        return $"ACTION NEEDS MORE INFORMATION — '{Name}' was NOT executed and NOT suspended because required " +
+               $"details are missing.{missingText} Ask the user ONE natural question to supply the missing detail(s), " +
+               "then re-invoke the tool with complete arguments. Do NOT fabricate values and do NOT claim the action happened.";
+    }
+
+    /// <summary>
+    /// The fail-closed HONEST-BLOCK leg (Policy v2 <see cref="GateOutcome.HonestBlock"/>): the engine
+    /// could not resolve a safe outcome. The tool does NOT execute; an honest block is relayed.
+    /// </summary>
+    private object? RenderHonestBlock()
+    {
+        _logger.LogWarning(
+            "[FR-A1-03][gate] invocation HONEST-BLOCKED (fail-closed) — tool={ToolName} session={SessionId}",
+            Name, _sessionId);
+
+        return $"ACTION CANNOT RUN — '{Name}' could not be evaluated to a safe outcome and was NOT executed. " +
+               "Tell the user honestly; do not retry and do not fabricate a result.";
+    }
+
+    /// <summary>
+    /// The CONFIRM leg (Policy v2 <see cref="GateOutcome.ConfirmDialog"/>): the existing suspension
+    /// MECHANISM (unchanged from task 037). ADR-040: the pending Gate marker + resumable payload land
+    /// BEFORE the <c>action_confirmation</c> presentation renders; a marker that cannot land aborts
+    /// the invocation loudly (never executes).
+    /// </summary>
+    private async Task<object?> SuspendForConfirmationAsync(
+        PendingPlanManager pendingManager,
+        AIFunctionArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        var gateId = $"confirmation-{Guid.NewGuid():N}";
+        var argsJson = arguments is { Count: > 0 }
+            ? JsonSerializer.Serialize(arguments.ToDictionary(a => a.Key, a => a.Value))
+            : "{}";
+
+        var suspended = await pendingManager.SuspendInvocationAsync(
+            new PendingInvocation
+            {
+                GateId = gateId,
+                Kind = PendingPlanManager.GateKindConfirmation,
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                ToolId = Name,
+                SideEffectClass = PendingPlanManager.ToLedgerSideEffectClass(_declaredClass),
+                Risk = "none",
+                ArgsJson = argsJson,
+                Title = Name,
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "[FR-P2-02][gate] side-effecting invocation suspended — gateId={GateId} tool={ToolName} " +
+            "declaredClass={DeclaredClass} argCount={ArgCount} session={SessionId}",
+            suspended.GateId, Name, _declaredClass, arguments?.Count ?? 0, _sessionId);
+
+        if (_sseWriter is not null)
+        {
+            await _sseWriter(
+                new Api.Ai.ChatSseEvent(
+                    "action_confirmation",
+                    null,
+                    new Api.Ai.ChatSseActionConfirmationData(
+                        ActionId: suspended.GateId,
+                        ActionName: Name,
+                        Summary: BuildUserSummary(arguments),
+                        Parameters: new Dictionary<string, string>())),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        return $"ACTION SUSPENDED FOR USER CONFIRMATION: '{Name}' performs a side effect " +
+               $"(declared class: {PendingPlanManager.ToLedgerSideEffectClass(_declaredClass)}) and was " +
+               "NOT executed. A confirmation request has been presented to the user. Do NOT call this " +
+               "tool again this turn, do NOT assume it succeeded, and do NOT fabricate its result. " +
+               "Tell the user the action is awaiting their explicit confirmation.";
+    }
+
+    /// <summary>
+    /// Appends the executed result as an addressable <c>loop@t{n}</c> ledger output (ADR-040
+    /// store-before-render) — the SAME reserved <c>loop</c> binding + monotonic turn scheme
+    /// <see cref="TypedHandlerResumeExecutor"/> uses on the confirm-resume path. Best-effort: a
+    /// write failure after a real side effect degrades to a loud log (never masks the executed
+    /// effect behind a 5xx).
+    /// </summary>
+    private async Task<string?> AppendSessionOutputAsync(
+        ChatSessionManager sessionManager,
+        ToolResult result,
+        CancellationToken ct)
+    {
+        try
+        {
+            var session = await sessionManager.GetSessionAsync(_tenantId, _sessionId, ct).ConfigureAwait(false);
+            if (session is null)
+            {
+                _logger.LogWarning(
+                    "[FR-A1-03][gate] session vanished before ledger output write — tool={ToolName} session={SessionId}",
+                    Name, _sessionId);
+                return null;
+            }
+
+            var turn = (session.Outputs is { Count: > 0 } ? session.Outputs.Max(o => o.Turn) : 0) + 1;
+            var payload = result.Data ?? JsonSerializer.SerializeToElement(new { summary = result.Summary ?? string.Empty });
+            var capped = SessionLedger.CapInlinePayload(payload.Clone());
+
+            var entry = new SessionOutput
+            {
+                Key = SessionLedger.BuildOutputKey("loop", turn),
+                BindingId = "loop",
+                UcId = Name,
+                Turn = turn,
+                Disposition = _declaredClass == ToolSideEffectClass.Communicate ? "email" : "record",
+                Payload = capped.Payload,
+                CreatedAt = DateTimeOffset.UtcNow,
+            };
+
+            var appended = new List<SessionOutput>(session.Outputs ?? Array.Empty<SessionOutput>()) { entry };
+            await sessionManager.UpdateSessionCacheAsync(session with { Outputs = appended }, ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "[FR-A1-03][gate] ledger output stored — key={Key} ucid={UcId} disposition={Disposition} session={SessionId}",
+                entry.Key, entry.UcId, entry.Disposition, _sessionId);
+
+            return entry.Key;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[FR-A1-03][gate] ledger output write failed AFTER execution — tool={ToolName} session={SessionId}",
+                Name, _sessionId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Composes the server-side MDA entityrecord deep link for a handler-reported created/updated
+    /// record (the review-and-send record for an email draft; the Undo target for a create). Null
+    /// when the Dataverse environment URL is unavailable — link enrichment degrades, the outcome
+    /// still renders. Server-composed only (never a model-invented URL — NFR-07 / ADR-040).
+    /// </summary>
+    private string? BuildRecordUrl(AsyncServiceScope scope, ToolCreatedRecord record)
+    {
+        var envUrl = scope.ServiceProvider.GetService<IOptions<DataverseOptions>>()?.Value?.EnvironmentUrl;
+        if (string.IsNullOrWhiteSpace(envUrl) ||
+            string.IsNullOrWhiteSpace(record.EntityLogicalName) ||
+            record.RecordId == Guid.Empty)
+        {
+            return null;
+        }
+
+        return $"{envUrl.TrimEnd('/')}/main.aspx?pagetype=entityrecord&etn={record.EntityLogicalName}&id={record.RecordId:D}";
+    }
+
+    /// <summary>
+    /// Parses the catalog row's declared risk profile from its <c>sprk_configuration</c> JSON string
+    /// (the raw column value). Null (⇒ fail-closed confirm) when the config is absent/blank, is not a
+    /// JSON object, declares no <c>riskProfile</c> block, or declares an invalid tier token — an
+    /// authoring slip can never let a write auto-execute.
+    /// </summary>
+    private static GateRiskProfile? TryParseRiskProfile(string? configurationJson)
+    {
+        if (string.IsNullOrWhiteSpace(configurationJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(configurationJson);
+            return GateRiskProfile.FromConfiguration(doc.RootElement);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (FormatException)
+        {
+            // Present-but-invalid tier token ⇒ fail-closed (treated as no declared profile ⇒ confirm).
+            return null;
+        }
+    }
+
+    /// <summary>True when every declared required arg is present + non-empty (Policy v2 overlay 3 input).</summary>
+    private static bool ArgsComplete(string? jsonSchema, AIFunctionArguments arguments) =>
+        MissingRequired(jsonSchema, arguments).Count == 0;
+
+    /// <summary>
+    /// The declared <c>required[]</c> arg names that are absent or empty in the LLM-supplied
+    /// arguments. An unparseable/absent schema declares nothing required ⇒ empty (complete).
+    /// </summary>
+    private static List<string> MissingRequired(string? jsonSchema, AIFunctionArguments arguments)
+    {
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(jsonSchema))
+        {
+            return missing;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonSchema);
+            if (!doc.RootElement.TryGetProperty("required", out var required) ||
+                required.ValueKind != JsonValueKind.Array)
+            {
+                return missing;
+            }
+
+            foreach (var item in required.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                var name = item.GetString();
+                if (string.IsNullOrEmpty(name))
+                {
+                    continue;
+                }
+
+                if (arguments is null || !arguments.TryGetValue(name, out var value) || IsEmptyArg(value))
+                {
+                    missing.Add(name);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Malformed schema ⇒ declare nothing missing (completeness is not the doomed-call gate;
+            // a truly-broken schema fails the handler's own ValidateChat pre-suspend).
+            return new List<string>();
+        }
+
+        return missing;
+    }
+
+    /// <summary>A supplied arg counts as ABSENT when it is null, an empty/whitespace string, or a JSON null/empty string.</summary>
+    private static bool IsEmptyArg(object? value) => value switch
+    {
+        null => true,
+        string s => string.IsNullOrWhiteSpace(s),
+        JsonElement { ValueKind: JsonValueKind.Null } => true,
+        JsonElement { ValueKind: JsonValueKind.String } el => string.IsNullOrWhiteSpace(el.GetString()),
+        _ => false,
+    };
 }

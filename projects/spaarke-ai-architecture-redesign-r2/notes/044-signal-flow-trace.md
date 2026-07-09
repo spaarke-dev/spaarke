@@ -1,75 +1,92 @@
-# Task 044 — Signal-Flow Trace: wiring `ConfirmationPolicyEngine` into the live core gate
+# Task 044 — Signal-Flow Trace: `ConfirmationPolicyEngine` LIVE on the core gate
 
-> **Status**: **ESCALATION — task blocked at Step 0 (real-signal trace) per its own `<escalation>` trigger.**
-> **Author**: task-execute (opus @ xhigh), 2026-07-09
-> **Purpose**: Deliverable #2 of task 044. Documents the REAL source of every `PolicyEvaluationContext` input the live gate would need to feed `ConfirmationPolicyEngine.Evaluate`. One input — **origin** — has **no producer anywhere in `src/`**, which is the escalation the task pre-authorized ("do NOT ship an always-Inferred default and call it done").
-
----
-
-## 0. Where the gate is invoked (the call-site map)
-
-- **Wrap-site**: `SprkChatAgentFactory.CreateAgentAsync` lines 673–682 — every projected typed-handler tool whose `sprk_analysistool` row declares `write`/`communicate` (`PendingPlanManager.RequiresConfirmation`) is wrapped in `SideEffectGateAIFunction`.
-- **Live decision**: `SideEffectGateAIFunction.InvokeCoreAsync` (`SideEffectGateAIFunction.cs:158`) — fires when the LLM invokes that wrapped tool **inside the agent-turn loop** (`ChatEndpoints` POST `/sessions/{id}/messages` → `agent.SendMessageAsync`). Today it decides **suspend-vs-execute purely by declared class** (the wrap-site `RequiresConfirmation` filter) and **always suspends** every write/communicate into `PendingPlanManager.SuspendInvocationAsync`.
-- **Structural fact about this call-site**: it is reached **only on the text path**. Click-path invocations (`invoke(bindingId, args)`) go through `SessionDispatchOrchestrator` / `BindingCapabilityTool`, **never** through `SideEffectGateAIFunction`. So the *one* origin the classifier can label `Explicit` "by construction" — `GateRequestSource.Click` — **cannot occur here**.
+> **Status**: **DELIVERED** (opus @ xhigh, 2026-07-09). The engine is now the single top-level decider on the live core gate path, driven by REAL (tier × completeness × confidence) signals under the operator's 2026-07-09 reframe.
+> **Supersedes**: the prior ESCALATION version of this note (the origin-provenance blocker), archived below in §7. The re-scope removed the E-1..E-6 origin-producer dependency from the happy path; NO E-1..E-6 producer, `SessionGate.Origin` field, proposal-ledger, or utterance re-parse was built.
 
 ---
 
-## 1. Per-input REAL-source trace
+## 0. The reframe (why the happy path is no longer blocked)
 
-| Engine input (`PolicyEvaluationContext`) | REAL source reachable from the call-site? | Where it comes from |
+The prior attempt correctly escalated: making an **`Explicit` origin** observable at this gate has no production producer and can't be built ADR-039-cleanly. The operator reframed the problem (2026-07-09):
+
+- The gate decides **RISK**, not authorization provenance.
+- **WRONG-CHOICE risk** (an ambiguous instruction → wrong capability) is caught by **LAYER 1** — the agent turn asking a clarifying question BEFORE any tool call (ADR-039's sanctioned intent decider), not by the gate.
+- The `origin`/`confidence` slot the engine consumes is fed by the real **(declared-risk-DATA × ambiguity)** confidence, NOT by parsed authorization provenance.
+
+So the happy path rides entirely on **TIER + COMPLETENESS**, both already real. The engine is reused **as-is** (tier table + overlay precedence unchanged); only the gate call-site wiring is new.
+
+---
+
+## 1. Per-input REAL source (as wired at `SideEffectGateAIFunction.InvokeCoreAsync` → `EvaluatePolicy`)
+
+| Engine input (`PolicyEvaluationContext`) | REAL source (delivered) | Fake-if-absent? |
 |---|---|---|
-| **Risk tier** (`RiskProfile` → `RiskTierResolver.Resolve`) | ✅ **REAL & wireable** | `adapter.Tool.Configuration` (the `sprk_configuration` JSON on `AnalysisTool`, `IScopeResolverService.cs:772`) → `GateRiskProfile.FromConfiguration(...)` → `RiskTierResolver.Resolve`. Catalog DATA (ADR-039). The `adapter` (`ToolHandlerToAIFunctionAdapter`) is the inner function of the gate and exposes `.Tool`. |
-| **Completeness** (`ArgsComplete`) | ✅ **REAL & wireable** | The tool's declared JSON schema `required[]` (`adapter.Tool.JsonSchema`) vs the LLM-supplied `AIFunctionArguments` keys at `InvokeCoreAsync`; or `adapter.ValidateForGate(arguments)` (already called for the 034 pre-suspend check). |
-| **Overlay: `DispatchUncertain`** | ⚠️ **Structurally N/A here (honestly false)** | The loop-as-dispatcher has no dispatcher-confidence signal for a direct typed-handler tool call (the LLM simply calls the tool). `false` is the honest value, not a stub — but it is never `true` on this path, so E-6 cannot be exercised at this gate. |
-| **Overlay: `ContentSafetyFlagged` / `SafetyPerimeterDegraded`** | ⚠️ **Signal EXISTS but is NOT threaded here** | `SafetyPipelineMiddleware` / `AgentContentSafetyMiddleware` compute shield-degradation + content-safety per turn, but the result is **not** propagated to `SideEffectGateAIFunction`. Threading it is additional (bounded) work; **not** the blocker. |
-| **Ledger status** (`Ledger` + `GateId` → `GetCurrentGateStatus`) | ✅ **REAL & wireable** | `ChatSessionManager.GetSessionAsync(...).Gates` (resolvable from the gate's fresh scope, same as `PendingPlanManager`). ADR-040 append-only ledger. |
-| **ORIGIN** (`Origin` → `RequestOriginClassifier.Classify`) | ❌ **NO REAL PRODUCER ANYWHERE IN `src/`** | See §2. This is the blocker. |
+| **Risk tier** (`RiskProfile` → `RiskTierResolver.Resolve`) | ✅ `adapter.Tool.Configuration` (raw `sprk_configuration` JSON string) → `JsonDocument.Parse` → `GateRiskProfile.FromConfiguration` → `RiskTierResolver`. Catalog DATA (task-020 seed; the email row already declares `riskProfile.tier=1`). **Absent/unparseable/invalid-tier ⇒ fail-closed** (conservative Tier-2b + Inferred ⇒ ConfirmDialog = today's safe floor). | No — an un-migrated write can never auto-execute. |
+| **Completeness** (`ArgsComplete`) | ✅ declared JSON-schema `required[]` (from `adapter.Tool.JsonSchema`) vs the LLM-supplied `AIFunctionArguments` keys (present + non-empty). | No. |
+| **Origin / confidence** (`Origin` → `RequestOriginClassifier.Classify`) | ✅ DERIVED, not a buried constant: `Source=UserUtterance`, `UtteranceEnumeratesCapability = (declaredProfile != null && !dispatchUncertain)`. A gate-reaching typed-handler call is a COMMITTED capability selection by the agent turn; genuine ambiguity is diverted by layer 1 upstream. So `Explicit` **iff** the row declares real execute-eligible risk DATA AND no low-confidence signal fired — else fail-closed `Inferred`. | No — a null profile forces `Inferred`; a fired uncertainty signal forces `Inferred`. Origin=Explicit is INSUFFICIENT alone: tier must independently be a declared 2a/2b for auto-execute. |
+| **Overlay: `DispatchUncertain`** | ✅ HONORED from an injected `Func<bool>? dispatchUncertaintyProbe` on the gate. **Production wires `null` today** (no live low-confidence producer reaches this gate; layer 1 covers ambiguity) → honestly unfired. The plumbing is real: a real signal flips the outcome, proven by the integration test that injects `() => true` and observes a confirm. | No — the value flows from the probe; the anti-shim test FAILS if it were hardcoded false. |
+| **Overlay: `ContentSafetyFlagged` / `SafetyPerimeterDegraded`** | ⚠️ `false` (honest). A Prompt-Shields BLOCKED turn `yield break`s upstream and never reaches the loop; a fail-OPEN degradation is not yet propagated here. The overlay plumbing already honors a real signal — threading a producer is the documented follow-on (bounded). | Honest false, never a positive-verdict fabrication. |
+| **Ledger status** | First evaluation of a fresh invocation ⇒ `GateId=null` ⇒ `ConfirmationState=None` (ADR-040 "no second ask" applies on the resume path, not this first pass). | n/a |
+
+**No escalation was warranted**: TIER and COMPLETENESS are both real and sourceable (the escalation trigger was scoped to "tier or completeness cannot be sourced" — they can). The `dispatchUncertain` backstop lacking a strong live producer is explicitly NOT an escalation condition (layer 1 covers ambiguity).
 
 ---
 
-## 2. Origin has no producer — the blocker (evidence)
+## 2. How the engine drives behavior (the branch, `SideEffectGateAIFunction`)
 
-`RequestOriginClassifier.Classify(GateOriginRequest)` is fail-closed: it returns `Explicit` **only** via one of five structural facts, and returns `Inferred` for everything else. Each Explicit-producing fact was traced to its would-be producer:
+`InvokeCoreAsync`: fail-closed store resolution → **034 pre-suspend validation (KEPT, ahead of everything — R5-E honest ❌ + zero writes)** → `EvaluatePolicy` → switch on `GateDecisionV2.Outcome`:
 
-| Classifier branch → `Explicit` | Required structural fact | Producer in `src/`? |
-|---|---|---|
-| `Source == Click` | Click-path invocation reaches this gate | ❌ **Impossible** — Clicks route through `SessionDispatchOrchestrator`, not `SideEffectGateAIFunction`. |
-| **E-4** `UtteranceEnumeratesCapability` | "the user's utterance named THIS capability's action verb + its enumerated invocation" — a structural fact from *the dispatch's enumeration* | ❌ **None.** In the loop-as-dispatcher, the LLM's tool selection *is* the enumeration, but distinguishing user-driven from model-added/doc-injected (E-3) requires either a **banned runtime NLP re-parse** (ADR-039 "the model NEVER decides its own request's origin") or a dispatch-enumeration signal that **is not produced for typed handlers**. |
-| **E-1** bare-affirmation → `PrecedingProposal{count:1, complete:true}` | The immediately-preceding model turn's proposal, recorded structurally | ❌ **None.** No ledger entry records model proposals. `SessionGate`, `SessionOutput`, `SessionToolChain`, `SessionWidgetEvent`, `SessionContextFingerprint` — none carry a proposal/concrete-action-count. `ElicitationTurnRouter.ClassifyBareAffirmation` gives the *affirmation* half deterministically, but the *proposal* half has no data. |
-| **E-5** elicitation-answer → `OriginalRequestOrigin` | The original request's origin, recorded on its Gate ledger entry | ❌ **None.** `SessionGate` (`SessionLedgerEntries.cs:269`) has **no `origin` field**. There is nothing to inherit. |
-| **E-2** model-initiated → `PriorExplicitForSameCapabilityArgs` | A prior Explicit classification for the same `(capability, args)` + a "user-turn-since" flag | ❌ **None.** Nothing records prior origin or the `(capability,args)` identity / user-turn-since flag. |
+- `Execute` / `ExecuteWithUndo` → `ExecuteInlineAsync`: runs `_inner.InvokeAsync` (same OBO turn as a read), **store-before-render** a `loop@t{n}` `SessionOutput` (ADR-040), compose the task-035 `OutcomeCard` via `CompletionEngine.ComposeForGateAutoExecute` (Undo chip for reversible 2a/2b; server-composed record link), emit an `action_outcome` SSE, and return a grounded honesty-framed turn text. **Email (Communicate) = DRAFT + HANDOFF**: the draft executes (Tier 1), the OutcomeCard + grounded text carry the `entityrecord` review-and-send deep link, and the text says **NOT SENT** — the system never sends (auto-send deferred past r2).
+- `Elicit` → `RenderElicit`: names the missing required arg(s); NOT executed, NOT suspended; the agent asks one question then re-invokes.
+- `ConfirmDialog` (and fail-closed default) → `SuspendForConfirmationAsync`: the **unchanged** task-037 suspend mechanism (pending marker before `action_confirmation` render, ADR-040).
+- `HonestBlock` → `RenderHonestBlock`.
 
-**Repo-wide confirmation**: `grep` for `GateOriginRequest | PolicyEvaluationContext | ConfirmationPolicyEngine | RequestOriginClassifier | GateProposalContext` across all of `src/` returns **only the definition files themselves** (`Services/Ai/Chat/Gate/*`) plus doc-comment mentions in `SideEffectGateAIFunction` / `PendingPlanManager` / `ElicitationTurnRouter`. **Zero live producers. Zero call-sites of `.Evaluate`.** This matches ADR-041's own "Known open item" (`docs/adr/ADR-041-…md:94–96`): the engine "currently has 0 core production call-sites."
+**Replace-not-shadow**: the old declared-class-only "always suspend" decision is gone — `EvaluatePolicy` → engine is the single top-level decider. The declared-class filter survives ONLY at the wrap-site (`SprkChatAgentFactory`) as the "is this tool gated at all" selector (unchanged), which is orthogonal to the outcome decision.
 
-**The engine's unit test proves the gap by construction**: `ConfirmationPolicyEngineTests` builds `GateOriginRequest { Source = UserUtterance, UtteranceEnumeratesCapability = true }` **by hand** (`ConfirmationPolicyEngineTests.cs:48–52`). The Explicit signal exists **only** as a hand-set test literal — exactly the faked origin the task says the live integration tests must *not* rely on.
+**Layer 1** (`SprkChatAgentFactory.SideEffectHonestyDirective`): a new clause instructs the agent to ask ONE clarifying question when genuinely torn between capabilities, and to invoke directly when the request is clear — no new steering mechanism (extends the single directive, ADR-039/§11).
 
 ---
 
-## 3. Consequence — why honest wiring cannot satisfy the acceptance criteria
+## 3. Integration proof (real gate path, engine NOT mocked)
 
-Fed only the signals that are real, `RequestOriginClassifier.Classify` returns **`Inferred` for 100 %** of invocations at this gate (no Click, no proposal record, no ledger origin, no enumeration signal, and re-deriving one is ADR-039-banned). The engine would therefore project:
+`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ConfirmationPolicyGateLiveDecisionTests.cs` — real `SideEffectGateAIFunction` over the real `ConfirmationPolicyEngine`/`RiskTierResolver`, real `PendingPlanManager` + `ChatSessionManager` over the in-memory cache, real adapter over a spy handler:
 
-- Tier 2a/2b → **`ConfirmDialog`** (never `ExecuteWithUndo`) — **identical** to today's always-suspend floor for the write/communicate tools this gate wraps.
-- Tier 3/4 → `ConfirmDialog` (same as today).
-- Incomplete args → `Elicit` (the one new behavior — but the typed-handler gate has no elicitation surface; elicitation lives on the Binding `capture_mode` path).
+1. clear+complete Tier-2b create → executes, no `action_confirmation`, no pending marker, `action_outcome` with an **Undo** chip, one `loop@t{n}` output.
+2. email (Communicate, Tier-1) → drafts, `action_outcome` link label "Review and send" + `etn=sprk_communication`, grounded text "NOT SENT", no dialog, no pending marker.
+3. ambiguity (layer 1) → `SideEffectHonestyDirective` contains the "GENUINELY torn → clarifying question → do NOT dispatch a guess" clause (the mechanism; behavior is golden-utterance eval).
+4. incomplete args → "NEEDS MORE INFORMATION", names the missing arg, no execute, no pending marker.
+5. irreversible (2b escalated to Tier 4 via `RiskTierResolver`) → exactly one pending marker + one `action_confirmation`, no execute.
+6a. no declared riskProfile → fail-closed confirm, no execute.
+6b. **ANTI-SHIM**: the SAME Tier-2b tool as (1) but `dispatchUncertaintyProbe: () => true` → confirms instead of executing (proves the ambiguity signal is honored, not faked — this test fails if the signal were hardcoded).
+7. R5-E hard block → honest ❌ + affordance verbatim, `validation-failed` marker, **zero** `loop@t{n}` outputs (zero writes).
 
-So the headline acceptance criterion — **"explicit + complete Tier-2b executes with NO dialog," proven on the real gate path** (POML Step 4 test (i) / acceptance criterion 3) — **cannot be produced by any real signal.** The only way to make that test pass would be to **hardcode/default origin to `Explicit`**, which the operator mandate and the task's `no-shim` constraint explicitly forbid. Per the task's `<escalation>` trigger, the correct action is to **STOP and escalate**, not ship an always-Inferred (or hardcoded-Explicit) default.
-
----
-
-## 4. What the real origin producers would require (scope for the escalation)
-
-To make an `Explicit` origin observable end-to-end at this gate, ONE of these new producers must exist (all beyond "wire the already-built engine into the existing gate"):
-
-1. **Turn-provenance envelope threading** — carry a structural `GateRequestSource` from the request boundary (`ChatEndpoints`) through `CreateAgentAsync` into the gate. For the text path this still only distinguishes `UserUtterance` vs `ModelInitiated`; it does **not** by itself yield E-4 Explicit.
-2. **A deterministic dispatch-enumeration signal** for typed-handler tools (which capability the *user's utterance* enumerated) — without a banned model re-parse this needs a structured selection record the loop does not emit today.
-3. **Proposal recording in the ADR-040 ledger** (a new `SessionProposal`-shaped entry with concrete-action-count + args-complete) to make **E-1** deterministic, **plus** a `GateRequestOrigin` field on `SessionGate` to make **E-5/E-2** inheritance real.
-4. **A frontend/Click marker** on the chat message envelope (out of this task's scope; a client change) so a user-confirmed proposal arrives as a structural Click.
-
-Any of 1–4 is a distinct build with its own design + tests — not a call-site rewire.
+Plus deterministic engine-outcome cases in the origin eval family suite (`OriginClassificationEvalSuiteTests`, joins the same `Category=GoldenUtteranceEval` merge gate): `PolicyV2_ConfidentCompleteTier2bCreate_ExecutesWithUndo_NoDialog`, `…EmailDraftTier1_Executes_NoDialog`, `…IncompleteArgsTier2b_Elicits`, `…IrreversibleRecordOfTruth_EscalatesToTier4_ConfirmDialog`.
 
 ---
 
-## 5. Recommendation
+## 4. Files changed
 
-Resolve via **CLAUDE.md §6.5** (see the task report). ADR-041's own known-open-item enumerates the three legitimate resolutions: *accept-as-Compose-consumed-seam / add a wire-up (producer) task / documented deferral*. Recommended: **split** — (a) a small task that wires the **REAL** inputs (tier + completeness + ledger + overlay threading) so the engine becomes the single decider with a **fail-closed `Inferred`** floor (behavior-preserving; removes the "two deciders" risk), and (b) a **producer task** (item 3 above: proposal-ledger entry + `SessionGate.Origin` field + turn-provenance threading) that makes `Explicit` real and lets the FR-A1-03 browser-UAT "explicit executes with no dialog" become observable. Item (b) is the actual content behind the task's headline; it was not in the WBS.
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SideEffectGateAIFunction.cs` — engine wiring + execute/elicit/confirm/honest-block branch; `dispatchUncertaintyProbe` ctor param; inline execute + `loop@t{n}` output + OutcomeCard + `action_outcome` SSE + record-link builder.
+- `src/server/api/Sprk.Bff.Api/Services/Ai/CompletionEngine.cs` — `ComposeForGateAutoExecute` (Undo/handoff chips over the same store-before-render contract).
+- `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` — `ChatSseActionOutcomeData` SSE payload.
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs` — layer-1 clarify-when-torn directive clause.
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ConfirmationPolicyGateLiveDecisionTests.cs` (new) + `tests/integration/contract/Eval/OriginClassificationEvalSuiteTests.cs` (4 added facts).
+
+---
+
+## 5. Follow-ons (documented, not shims)
+
+- Thread a real `dispatchUncertain` producer (routing candidate-match count / content-safety fail-open) so the backstop can fire in production. The gate already honors it; only the producer is deferred.
+- Client render of the `action_outcome` SSE + Undo executor wiring (the `dataverse.delete_record` compensating capability) — Compose r2 consumes the `OutcomeCard` contract this gate now emits.
+
+---
+
+## 6. Constraints honored
+
+034 pre-suspend validation (R5-E honest ❌, zero writes) preserved ahead of the decision · R5-E hard block preserved · Tier-0/1 free reads (D-F0(b)) · fail-closed default (unknown/uncertain → confirm) · engine reused as-is (no projector edits) · no E-1..E-6 producer / origin field / utterance re-parse built · email never auto-sent.
+
+---
+
+## 7. Archived escalation (prior attempt — for provenance)
+
+The prior version of this note documented that `RequestOriginClassifier`'s `Explicit` verdict had no production producer (no Click path to this gate, no proposal ledger, no `SessionGate.Origin`, and deriving it from the utterance is ADR-039-banned), so honest wiring resolved 100% `Inferred` and the "explicit executes no-dialog" criterion could not be met without a hardcode. That analysis drove the operator's 2026-07-09 reframe (this note), which severs the origin slot from authorization provenance and rebinds it to (declared-risk × ambiguity) confidence — making the happy path ride on the already-real tier + completeness signals. The E-1..E-6 machinery remains in the codebase (exercised by the origin eval family on constructed inputs) but is NOT a producer dependency of the live gate.
