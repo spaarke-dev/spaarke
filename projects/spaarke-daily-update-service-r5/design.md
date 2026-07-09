@@ -1,6 +1,6 @@
 # Spaarke Daily Update Service R5 — Design Charter
 
-> **Status**: DRAFT v0.1 — 2026-07-08, for operator review → `/design-to-spec`
+> **Status**: DRAFT v0.2 — 2026-07-08, operator review complete (§6 resolved) → ready for `/design-to-spec`
 > **Authors**: R7 W12 UAT feedback capture (operator, 2026-07-01/02, verbatim in [`notes/inbound-from-r7/`](notes/inbound-from-r7/)) + Claude Fable 5 drafting with post-r1-close reconciliation
 > **Predecessor**: [`spaarke-daily-update-service-r4`](../spaarke-daily-update-service-r4/) (hallucination Round 1) · R7 W12 widget cutover (Round 2a prompt tightening)
 > **Scope ruling (operator, 2026-07-08)**: ALL substantive Daily Briefing work was REMOVED from `spaarke-ai-architecture-redesign-r2` — **this project owns the entire briefing surface**, including hallucination remediation. There is no r2-core "Wave 0" briefing fix wave.
@@ -35,9 +35,10 @@ Around that core, R5 carries the accumulated briefing backlog: the Monitored-For
 
 | Gate | The user can now… |
 |---|---|
-| **G-R5-A (Trustworthy briefing)** | Open the Daily Briefing and every item-level line — title, sender, date, regarding record, link, reason chip — is **fact-derived from the source record** and always correct (click any link: it matches the text). The TL;DR remains a synthesized 2–3 sentence summary (counts, themes, top action) that never names an item it can't anchor, and low-groundedness output visibly warns or is withheld. Zero cross-item pairing is *structurally impossible*, not prompt-discouraged. |
-| **G-R5-B (Monitored-For)** | Flag a record as monitored **with a reason** ("Awaiting reply", "Regulatory deadline"…) on any of the 7 entities; the briefing's priority section shows the reason as an actionable color-coded chip and ranks by it; the TL;DR synthesizes by reason ("5 awaiting reply, 2 regulatory deadlines this week"). |
-| **G-R5-C (Hardening)** | Invisible but binding: the collaborator-scope fix (assigned attorneys see their matters again), the Event side-pane Add-to-ToDo fix, Choice-field writes that stop 500ing, tests over the fragile client surfaces, and the collector de-duplicated. |
+| **G-R5-A (Trustworthy briefing)** | Open the Daily Briefing and every item-level line — title, sender, date, regarding record, link — is **fact-derived from the source record** and always correct (click any link: it matches the text). The TL;DR remains a synthesized 2–3 sentence summary (counts, themes, top action) built on **deterministically-computed facts** — it never asserts a data point (count, date, record) that isn't computed from source, and never names an item it can't anchor (non-resolving anchors are dropped). Zero cross-item pairing is *structurally impossible*, not prompt-discouraged. |
+| **G-R5-D (Appealing briefing)** | Open the Daily Briefing and it *looks like a product someone designed* — visual hierarchy, spacing, typography, section rhythm, and reason/priority affordances are deliberate and pleasant, not the current flat/unappealing layout. Redesigned via the `/prototype` workflow (Fluent v9 + ADR-021 tokens, light + dark), operator-approved in the harness before production wiring. |
+| ~~**G-R5-B (Monitored-For)**~~ | **DEFERRED (operator, 2026-07-08)** — prerequisites + other considerations; not the material issue. Re-scoped to a later round (see D-3, §6 Q3/Q4). |
+| **G-R5-C (Hardening)** | Invisible but binding: the collaborator-scope fix (assigned attorneys see their matters again), Choice-field writes that stop 500ing, tests over the fragile client surfaces, and the collector de-duplicated. |
 
 Browser rule carried from r1 verbatim: gates are operator-executed browser UAT on spaarkedev1; curl/tests/logs never satisfy them.
 
@@ -53,16 +54,24 @@ Browser rule carried from r1 verbatim: gates are operator-executed browser UAT o
 
 **What we lose + mitigation** (from the note, accepted): cross-item synthesis lives ONLY in the TL;DR/takeaways; deterministic rows may be styled prose-like ("Contract review for Smith Industries due 4/28") without losing determinism.
 
-### D-2. TL;DR stays LLM — with a real gate, not vibes
+### D-2. TL;DR stays LLM — but on a 100%-accuracy standard, not a probabilistic gate (operator reframe, 2026-07-08)
+
+**Operator ruling**: there is **no groundedness threshold**. We cannot tell a user they have tasks, due dates, or new records unless it is 100% accurate — whether a data point exists is not a probabilistic question. The LLM does not *decide* what exists; it surfaces the most important of the already-true items and adds narrative. Correctness is **by construction, not by score**.
 
 Three layers on the one surface that remains generated:
-1. **Structured output**: TL;DR + takeaways emit against a schema (counts/themes/action slots + optional `itemRefs[]`); any named anchor must carry an `itemId` that resolves — the widget drops non-resolving anchors (note 01 Round-2c "structured schema output", applied narrowly).
-2. **Groundedness policy — threshold → action**: now that `GroundednessCheckService` actually runs (§0.3), below threshold X the rendered TL;DR carries a visible grounding warning; below Y it is withheld in favor of the deterministic counts line. Low-groundedness events feed the eval suite as regression candidates. (The mechanism lives in the platform's `Services/Ai`; r5 is its first policy consumer — thresholds set here. Coordination: §6.)
-3. **Eval family** (note 01 test cases, formalized): mixed-item corpus / aggregation-preference / grounding round-trip / TL;DR-abstraction cases join the golden-utterance suite as merge gates (NFR-06). The deterministic channel renderer gets *unit* tests instead — that's the point.
+1. **Deterministic factual scaffolding**: every fact the TL;DR rests on — counts, dates, record names, "you have N …" — is **computed deterministically from the source records and handed to the LLM as ground truth**. The LLM composes the 2–3 sentence prose and prioritizes; it never introduces a fact of its own.
+2. **Binary anchor resolution** (replaces the old threshold policy): TL;DR + takeaways emit against a schema (counts/themes/action slots + `itemRefs[]`); any named anchor must carry an `itemId` that resolves against `items[]` — the widget **drops** non-resolving anchors. There is no warn/withhold band. `GroundednessCheckService` is **demoted** from a user-facing gate to an eval/telemetry signal only (it never decides what the user sees).
+3. **Eval family** (note 01 test cases, formalized): mixed-item corpus / aggregation-preference / grounding round-trip / TL;DR-abstraction cases join the golden-utterance suite as merge gates (NFR-06) — this is how the 100% standard is *proven*. The deterministic channel renderer gets *unit* tests instead — that's the point.
 
-### D-3. Monitored-For schema (note 02 — adopted with the note's recommendations)
+### D-3. Monitored-For schema (note 02 — **DEFERRED, operator, 2026-07-08**)
 
-Global Choice `sprk_monitorreason` + `sprk_monitornotes` (Memo) on the 7 entities (**Primary + Notes** model); **Replace** `sprk_monitor` with backfill-to-`Other` and Boolean retirement in a follow-up release after validation. Value list = the note's 9 candidates, **operator confirms before schema deploy** (§7 Q3). Downstream: collector reads the choice label directly; `HighPrioritySection` reason chip becomes the color-coded label with reason-severity ranking; `items[]` exposes reason to the TL;DR. Change tracking per entity = operator call (§7 Q4). New-surface justification (CLAUDE.md §11): the existing Boolean cannot carry the *why*; the concrete failing behavior is a reason chip that reads "Monitor" — undocumented watchfulness that can't be ranked, filtered, or synthesized. Deploy via `dataverse-create-schema`; backfill script one-time.
+**Deferred to a later round.** There are prerequisites and other considerations to work through, and this is not the material Daily Briefing issue — R5 focuses on accuracy (and now appearance, D-8). The design below is preserved as the starting point for that future round; **nothing here is built in R5**, and no `sprk_monitor*` schema is deployed.
+
+<details><summary>Preserved future-round design (not in R5 scope)</summary>
+
+Global Choice `sprk_monitorreason` + `sprk_monitornotes` (Memo) on the 7 entities (**Primary + Notes** model); retire `sprk_monitor` with backfill-to-`Other` in a follow-up release after validation. Value list, change-tracking-per-entity, and the reason-chip rendering all move with it. Deploy via `dataverse-create-schema`; backfill script one-time.
+
+</details>
 
 ### D-4. Choice-coercion fix (note 06 — **re-targeted**: runtime + validator, canvas track obsolete)
 
@@ -83,6 +92,18 @@ The incident class is structurally mitigated: both deploy pipelines now ship **m
 
 R4/R7's shipped decisions stand (temperature 0, `EntityNameValidator`, mini-report cards, rotating emoji, prompt-tightened Action rows remain until D-1 retires the channel row). The briefing stays on the **coded-composite + catalog-Action** architecture — no new playbooks, no new dispatch mechanisms, no manifest tables (ADR-039 posture).
 
+### D-8. Visual redesign via `/prototype` (operator add, 2026-07-08 — co-headline with D-1)
+
+**Decision**: the Daily Briefing UI is **redesigned**, not just made accurate. The current layout is flat and unappealing; R5 treats visual quality as a first-class deliverable (gate **G-R5-D**). Design happens **in the prototype harness first, production wiring second**:
+
+1. **Prototype in `spaarke-prototype`** — scaffold a harness for the briefing widget (`prototype-harness-setup` for a production component: the `Spaarke.DailyBriefing.Components` shared lib) with HMR + mocked briefing data (`prototype-harness-extend` for any entity factories/presets needed). Iterate on hierarchy, spacing, typography, section rhythm, priority/reason affordances, empty/loading/error states, light **and** dark — against realistic mixed-item data (reuse the D-2 eval corpus as harness fixtures so design and accuracy share ground truth).
+2. **Operator-approved in the harness** before any production change — screenshots / live harness review is the sign-off, mirroring the browser-UAT rule.
+3. **Port to production** — the approved design lands in the shared lib components (`HighPrioritySection`, channel sections, TL;DR block) under Fluent v9 + **ADR-021 design tokens** (no hard-coded colors; dark-mode verified). Determinism (D-1) and anchor resolution (D-2) are preserved — redesign changes presentation, never the fact contract.
+
+**Constraint (CLAUDE.md §11 reuse-first)**: redesign **extends the existing** `Spaarke.DailyBriefing.Components` surface — no parallel component tree. Net-new components only where an archetype in `BUILD-A-NEW-WORKSPACE-WIDGET.md` genuinely has no home for the pattern. **Non-goal**: no new widget framework, no layout-engine work, no scope beyond the briefing's own surfaces.
+
+**Sequencing note**: D-8 design can proceed in parallel with D-1/D-2 backend work (harness uses mocked data), but production port lands **after** D-1's deterministic view-model is stable, so the redesign renders against the final data shape — not the retired channel-narration shape.
+
 ---
 
 ## 4. Explicit non-goals
@@ -90,8 +111,10 @@ R4/R7's shipped decisions stand (temperature 0, `EntityNameValidator`, mini-repo
 - **No LLM channel narration rescue attempts** — Round 3 of prompt engineering is not a track; Track A is the decision (fallback = §7 Q2 ruling, not silent drift).
 - **No new briefing entry paths** — the coded/event path stands as r1 left it.
 - **No Compose/assistant scope** — Compose r2 and the r2 core own theirs; r5 touches only briefing surfaces (+ the two cross-cutting fixes D-4/D-5 explicitly listed).
-- **No multi-language choice-label localization** unless the operator opts in (note 02 test 4 → deferred by default).
-- **No `sprk_monitor` Boolean deletion in this release** — retirement is the validated follow-up step (D-3).
+- **No Monitored-For schema work in this release** — the entire `sprk_monitorreason`/`sprk_monitornotes` scope (D-3) is deferred to a later round per operator ruling (2026-07-08).
+- **No groundedness threshold / warn-withhold band** — rejected per the D-2 operator reframe; correctness is by construction (deterministic facts + binary anchor resolution), not by score.
+- **No EventDetailSidePane fix** — the side-pane is not currently in use; its `@odata.bind` one-liner is deferred (the repo-wide OData grep audit still runs and fixes any *in-use* occurrences).
+- **No new widget framework or layout engine** (D-8) — the redesign extends the existing `Spaarke.DailyBriefing.Components` surface only; it is a visual/UX redesign, not an architecture change.
 
 ---
 
@@ -107,20 +130,23 @@ R4/R7's shipped decisions stand (temperature 0, `EntityNameValidator`, mini-repo
 
 ---
 
-## 6. Open questions FOR THE OPERATOR (answer before /design-to-spec)
+## 6. Operator decisions (RESOLVED 2026-07-08)
 
-1. **TL;DR groundedness thresholds (D-2)**: warn-below-X / withhold-below-Y — set at spec time from a short measurement pass over real briefings, or pick starting values now and tune in UAT? *Recommend: measurement pass first (1 task), thresholds ratified at G-R5-A.*
-2. **Deterministic-prose fallback (D-1)**: if UAT finds the deterministic channel rows too flat, the documented fallback is Track B (LLM bullets constrained to `{itemId, phrasing}` with widget-side resolution). Pre-approve the fallback or require a fresh ruling? *Recommend: pre-approve — it keeps the structural guarantee either way.*
-3. **Monitored-For value list (D-3)**: confirm/edit the 9 candidate reasons before schema deploy. *The list in note 02 is a first-cut, not your authored list.*
-4. **Change tracking per entity (D-3)**: audit on Matter/Project/Invoice yes, Event/Todo no — confirm? 
-5. **EventDetailSidePane one-liner (D-5)**: ship immediately as a standalone fix PR (it's a shipped-broken feature), or hold for the r5 sweep? *Recommend: standalone now.*
+1. **TL;DR groundedness thresholds (D-2)** → **No thresholds.** We cannot report tasks/dates/records to a user unless 100% accurate; existence is not probabilistic. The LLM surfaces the most important already-true items and adds narrative only. D-2 rewritten to deterministic factual scaffolding + binary anchor resolution; `GroundednessCheckService` demoted to eval/telemetry signal.
+2. **Deterministic-prose fallback (D-1)** → whatever preserves the 100%-accuracy standard; the structural guarantee is non-negotiable.
+3. **Monitored-For value list (D-3)** → **Deferred** with all of D-3.
+4. **Change tracking per entity (D-3)** → moot (D-3 deferred); no change tracking needed for Event/Todo regardless.
+5. **EventDetailSidePane one-liner (D-5)** → **Deferred** — the side-pane is not currently in use.
+6. **Visual redesign (D-8, operator add)** → **In scope, co-headline.** The briefing is unappealing today; redesign it via the `/prototype` harness workflow, operator-approved in the harness, then ported to the existing shared-lib components under Fluent v9 + ADR-021 tokens.
+
+**Scope after these rulings**: R5 = **accuracy core** (D-1 + reframed D-2 + eval family) + **visual redesign** (D-8, `/prototype`-driven) + the **full D-4/D-5 hardening sweep** (Choice-coercion, collaborator-scope, collector de-dup, client-helper tests, `QueryHighPriority*` collapse, primary-contact cache, OData convention doc + grep audit) + D-6 deploy convention. The sweep is kept in one project deliberately so the debt items are not lost track of (operator, 2026-07-08). **Deferred**: all of D-3 Monitored-For, the EventDetailSidePane one-liner.
 
 ---
 
 ## 7. What /design-to-spec should produce
 
 - FRs grouped by G-R5-A/B/C with **browser UAT scripts as acceptance criteria**; the note-01 test cases and note-02/06 test cases become FR acceptance lines.
-- Phase shape (suggested): **Phase 0** quick fixes (D-5 one-liner if not already shipped, grep audit) → **Phase A** deterministic Activity Notes + TL;DR gate (D-1/D-2, the headline) → **Phase B** Monitored-For schema + rendering (D-3) → **Phase C** coercion + tech-debt sweep (D-4/D-5) → wrap-up with `/test-diet` + `/defer`.
+- Phase shape (suggested): **Phase 0** quick fixes (OData convention doc + repo-wide grep audit) → **Phase A** deterministic Activity Notes + deterministic-fact TL;DR + eval family (D-1/D-2, the accuracy headline) → **Phase D (parallel with A)** `/prototype` visual redesign in the harness → operator sign-off → production port after A's view-model stabilizes (D-8, the appearance headline) → **Phase B** Choice-coercion + tech-debt sweep (D-4/D-5, EventDetailSidePane one-liner excluded) → wrap-up with `/test-diet` + `/defer`. (Monitored-For phase removed — D-3 deferred.)
 - Rigor: code tasks FULL; `tests/**`-touching TEST-MODIFYING; schema tasks reference `dataverse-create-schema`; the `jps-validate` extension is a main-session task (skill-directive hot path).
 - NFRs carried: eval-suite green merge gate; publish-size per-task verification; NFR-07; grep-zero retirement verification for `BRIEF-NARRATE-CHANNEL` consumers; ADR-021 dark-mode checks on widget changes.
 - Before-and-after evidence obligations: token-count reduction per briefing run (054 metering), zero cross-pairing on the mixed-item corpus, collaborator-scope smoke.

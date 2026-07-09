@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -77,6 +78,7 @@ public class PlaybookExecutionTests
             new UpdateRecordNodeExecutor(
                 mockTemplateEngine.Object,
                 mockDataverseService.Object,
+                Mock.Of<IServiceScopeFactory>(),
                 Mock.Of<ILogger<UpdateRecordNodeExecutor>>()),
             new DeliverOutputNodeExecutor(
                 mockTemplateEngine.Object,
@@ -154,6 +156,7 @@ public class PlaybookExecutionTests
             new UpdateRecordNodeExecutor(
                 mockTemplateEngine.Object,
                 mockDataverseService2.Object,
+                Mock.Of<IServiceScopeFactory>(),
                 Mock.Of<ILogger<UpdateRecordNodeExecutor>>()),
             new DeliverOutputNodeExecutor(
                 mockTemplateEngine.Object,
@@ -553,6 +556,7 @@ public class PlaybookExecutionTests
         var executor = new UpdateRecordNodeExecutor(
             templateEngineMock.Object,
             Mock.Of<IDataverseService>(),
+            Mock.Of<IServiceScopeFactory>(),
             loggerMock.Object);
 
         var recordId = Guid.NewGuid();
@@ -578,6 +582,7 @@ public class PlaybookExecutionTests
         var executor = new UpdateRecordNodeExecutor(
             templateEngineMock.Object,
             Mock.Of<IDataverseService>(),
+            Mock.Of<IServiceScopeFactory>(),
             loggerMock.Object);
 
         var context = CreateNodeContext(ExecutorType.UpdateRecord, @"{""recordId"":""abc"",""fields"":{}}");

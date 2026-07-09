@@ -11,8 +11,8 @@
 //   Playbook node                | Code below
 //   -----------------------------|-------------------------------------------
 //   GenerateTldr                 | Load tldrAction → LLM call with full request payload
-//   GenerateChannelNarratives    | Load channelAction → Task.WhenAll over req.Channels
-//   ValidateEntityNames          | Build allowList from req → scrub combined narrative
+//   GenerateChannelNarratives    | REMOVED (R5 task 010, FR-A3) — see amendment below
+//   ValidateEntityNames          | Build allowList from req → scrub the TLDR (sole LLM output)
 //   ReturnResponse               | return new DailyBriefingNarrateResponse {...}
 //
 // The Start node (just binds the request to scope `start`) and LoadKnowledge node
@@ -24,11 +24,33 @@
 // (sprk_workflowclass = "DailyBriefingNarrator") via DailyBriefingCompositeService.
 // The Binding table decides; there is no engine fallback (NFR-08 hard cutover).
 //
+// R5 AMENDMENT (task 010, FR-A3, 2026-07-08) — per-channel LLM narrate leg REMOVED.
+// R4 and R7 W12 tried prompt-steering to stop cross-item hallucination and failed; the
+// per-channel narrate LLM call (BRIEF-NARRATE-CHANNEL) was the primary hallucination
+// source. Channel/section content is now built DETERMINISTICALLY from the collector's
+// req.Channels view model (BuildDeterministicBullet below) — one bullet per source item,
+// zero LLM authorship, so cross-item hallucination is structurally impossible on this leg.
+// The TL;DR call remains the SOLE LLM invocation per briefing run. ChannelActionCode +
+// the BRIEF-NARRATE-CHANNEL catalog Action are left in place (unused) — retirement is a
+// separate task (012); this change only removes the call path.
+//
+// R5 AMENDMENT (task 013, FR-A4, 2026-07-08) — TL;DR call now receives DETERMINISTIC
+// SCAFFOLDING, not a raw data dump. Previously the TL;DR payload was the raw
+// categories/priorityItems/channels/totalNotificationCount blob (every item, every field,
+// across every channel) — the LLM could in principle "count" or "date" things itself from
+// that payload. It now receives DailyBriefingCollector.BuildTldrFacts's TldrFactsDto: a
+// small, purpose-built ground-truth object (totalNotificationCount, categoryCounts,
+// priorityItemCount, keyDates[], recordNames[]) computed deterministically in C#. The LLM
+// composes prose + prioritizes ONLY over these provided facts; it must never introduce a
+// fact absent from them (BRIEF-NARRATE-TLDR system prompt updated to instruct this — see
+// projects/spaarke-daily-update-service/notes/playbooks/actions/brief-narrate-tldr.action.json).
+//
 // References:
 //   - projects/spaarke-ai-platform-unification-r7/notes/spikes/narrator-spike-plan.md
 //   - projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-t116-narrate-systematic-assessment.md
 //   - projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json
 //   - Action JPS bodies: projects/spaarke-daily-update-service/notes/playbooks/actions/brief-narrate-*.action.json
+//   - projects/spaarke-daily-update-service-r5/spec.md FR-A3; tasks/010-remove-per-channel-narrate-leg.poml
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -59,6 +81,13 @@ namespace Sprk.Bff.Api.Services.Ai.Narrators;
 public class DailyBriefingNarrator : ICodedWorkflow
 {
     private const string TldrActionCode = "BRIEF-NARRATE-TLDR";
+
+    /// <summary>
+    /// R5 task 010 (FR-A3): the per-channel LLM narrate call path that consumed this code
+    /// was REMOVED — channel content is now deterministic (see <see cref="BuildDeterministicBullet"/>).
+    /// Left in place intentionally (dead-but-present); retiring the const + the
+    /// BRIEF-NARRATE-CHANNEL catalog Action row is a separate task (012).
+    /// </summary>
     private const string ChannelActionCode = "BRIEF-NARRATE-CHANNEL";
 
     private static readonly JsonSerializerOptions InputSerializerOptions = new()
@@ -149,8 +178,10 @@ public class DailyBriefingNarrator : ICodedWorkflow
     }
 
     /// <summary>
-    /// Execute the /narrate workflow end-to-end. Loads Actions from Dataverse, calls the LLM
-    /// once for TL;DR + once per channel, validates groundedness, returns the assembled response.
+    /// Execute the /narrate workflow end-to-end. Loads the TL;DR Action from Dataverse and
+    /// calls the LLM EXACTLY ONCE (R5 task 010, FR-A3 — the per-channel LLM leg was removed;
+    /// channel content is now deterministic), scrubs the TL;DR against a grounded allow-list,
+    /// returns the assembled response.
     /// </summary>
     public virtual async Task<DailyBriefingNarrateResponse> NarrateAsync(
         DailyBriefingNarrateRequest req,
@@ -174,13 +205,15 @@ public class DailyBriefingNarrator : ICodedWorkflow
                 $"DailyBriefingNarrator: Action {TldrActionCode} has no OutputSchemaJson.");
         }
 
-        var tldrPayload = new
-        {
-            categories = req.Categories,
-            priorityItems = req.PriorityItems,
-            channels = req.Channels,
-            totalNotificationCount = req.TotalNotificationCount
-        };
+        // R5 task 013 (FR-A4): the TL;DR call receives ONLY deterministically-computed ground-
+        // truth facts — never the raw categories/priorityItems/channels dump (that dumped every
+        // record and gave the LLM room to "count" or "date" things itself). Prefer the
+        // scaffolding the collector already stamped onto the request (req.TldrFacts, the primary
+        // path via DailyBriefingCollector.BuildNarrateRequest); fall back to computing it here —
+        // still pure C#, still deterministic, never delegated to the LLM — for callers that
+        // construct a DailyBriefingNarrateRequest directly (the legacy /narrate leg, or a test
+        // driving NarrateAsync without going through the collector).
+        var tldrPayload = req.TldrFacts ?? DailyBriefingCollector.BuildTldrFacts(req);
         var tldrRaw = await CallLlmStructuredAsync(
             actionCode: TldrActionCode,
             systemPrompt: tldrAction.SystemPrompt,
@@ -193,56 +226,25 @@ public class DailyBriefingNarrator : ICodedWorkflow
             ?? throw new InvalidOperationException(
                 $"DailyBriefingNarrator: TLDR LLM returned unparseable JSON (length={tldrRaw.Length}).");
 
-        // ── Step 3 (playbook node: GenerateChannelNarratives) — fan-out over channels ──
-        var channelAction = await _actions.GetActionByCodeAsync(ChannelActionCode, ct)
-            ?? throw new InvalidOperationException(
-                $"DailyBriefingNarrator: Action {ChannelActionCode} not found in Dataverse.");
+        // ── Step 3 (was playbook node: GenerateChannelNarratives) — REMOVED (R5 task 010,
+        // FR-A3). Channel content is now built DETERMINISTICALLY, straight from the
+        // collector's req.Channels view model — one bullet per source item, no LLM call,
+        // so cross-item hallucination is structurally impossible on this leg. See the file
+        // header "R5 AMENDMENT" note for the full rationale.
+        var channelNarrations = req.Channels
+            .Select(ch => new ChannelNarrationResult
+            {
+                Category = ch.Category,
+                Bullets = ch.Items.Select(BuildDeterministicBullet).ToArray()
+            })
+            .ToArray();
 
-        if (string.IsNullOrWhiteSpace(channelAction.OutputSchemaJson))
-        {
-            throw new InvalidOperationException(
-                $"DailyBriefingNarrator: Action {ChannelActionCode} has no OutputSchemaJson.");
-        }
-
-        // ── R7 Wave 12 T132 — TLDR ↔ Activity Notes consistency ──
-        // Chain the TLDR result as an additional input to per-channel narrative generation.
-        // Operator UAT requirement (wave12 plan §2.1): items mentioned in TLDR.keyTakeaways
-        // or TLDR.topAction MUST have corresponding details in Activity Notes bullets.
-        //
-        // The TLDR is computed FIRST (above). We pass its summary / keyTakeaways / topAction
-        // into each per-channel call as a `tldr` payload field so the LLM can ensure its
-        // narrative bullets cover TLDR-referenced items.
-        //
-        // The BRIEF-NARRATE-CHANNEL Action's `sprk_systemprompt` is amended to instruct
-        // the LLM to use this `tldr` input as a coverage requirement (operator-tunable
-        // surface — preserves the no-hardcoded-LLM-behavior-in-C# rule from §G Home A).
-        var tldrContextForChannels = new
-        {
-            summary = tldr.Summary,
-            keyTakeaways = tldr.KeyTakeaways,
-            topAction = tldr.TopAction
-        };
-
-        var channelTasks = req.Channels.Select(async ch =>
-        {
-            var channelPayload = new { channel = ch.Label, items = ch.Items, tldr = tldrContextForChannels };
-            var channelRaw = await CallLlmStructuredAsync(
-                actionCode: ChannelActionCode,
-                systemPrompt: channelAction.SystemPrompt,
-                inputPayload: channelPayload,
-                outputSchemaJson: channelAction.OutputSchemaJson!,
-                temperature: channelAction.Temperature,
-                ct);
-
-            var llmOut = JsonSerializer.Deserialize<ChannelLlmOutput>(channelRaw, OutputDeserializerOptions)
-                ?? new ChannelLlmOutput { Channel = ch.Label, Narrative = Array.Empty<string>() };
-            return (ch, llmOut);
-        });
-        var channels = await Task.WhenAll(channelTasks);
-
-        // ── Step 4 (playbook node: ValidateEntityNames) — defense-in-depth scrub ──
+        // ── Step 4 (playbook node: ValidateEntityNames) — defense-in-depth scrub over the
+        // TL;DR text, the ONLY remaining LLM output in this pipeline. Channel narrations are
+        // sourced verbatim from source records (above) and therefore cannot hallucinate — no
+        // scrub needed there.
         var allowList = BuildAllowList(req);
-        var candidateText = BuildCandidateText(tldr, channels.Select(c => c.llmOut));
+        var candidateText = BuildTldrCandidateText(tldr);
         var scrub = _scrubber.Scrub(candidateText, allowList);
         if (scrub.RemovedTerms.Count > 0)
         {
@@ -260,15 +262,10 @@ public class DailyBriefingNarrator : ICodedWorkflow
             Tldr = tldr with
             {
                 CategoryCount = req.Categories.Length,
-                PriorityItemCount = req.PriorityItems.Length
+                PriorityItemCount = req.PriorityItems.Length,
+                ItemRefs = BuildTldrItemRefs(req, tldr)
             },
-            ChannelNarratives = channels.Select(c => new ChannelNarrationResult
-            {
-                Category = c.ch.Category,
-                Bullets = c.llmOut.Narrative
-                    .Select(n => EnrichBulletWithEntityRefs(n, c.ch.Items))
-                    .ToArray()
-            }).ToArray(),
+            ChannelNarratives = channelNarrations,
             GeneratedAtUtc = DateTimeOffset.UtcNow,
             // Mirror the original playbook design's _validationMetadata sidecar.
             // Only emit when the scrubber actually removed something — null otherwise so
@@ -346,307 +343,130 @@ public class DailyBriefingNarrator : ICodedWorkflow
             .ToArray();
 
     /// <summary>
-    /// Equivalent of the playbook's candidateText expression:
-    ///   join '\n\n' tldrResult.summary tldrResult.keyTakeaways tldrResult.topAction
-    ///               (join '\n' (flatten (map channelNarrationResults 'narrative')))
-    /// Done as straight string.Join. Compiler enforces field names.
+    /// Candidate text for the entity-name scrub — the TL;DR is the ONLY remaining LLM
+    /// output in this pipeline (R5 task 010, FR-A3), so this is now just the TL;DR's own
+    /// fields. Channel narrations are built from source records (<see cref="BuildDeterministicBullet"/>)
+    /// and are excluded — they cannot hallucinate.
     /// </summary>
-    private static string BuildCandidateText(TldrResult tldr, IEnumerable<ChannelLlmOutput> channels) =>
-        string.Join("\n\n",
-            tldr.Summary,
-            string.Join("\n", tldr.KeyTakeaways),
-            tldr.TopAction,
-            string.Join("\n", channels.SelectMany(c => c.Narrative)));
+    private static string BuildTldrCandidateText(TldrResult tldr) =>
+        string.Join("\n\n", tldr.Summary, string.Join("\n", tldr.KeyTakeaways), tldr.TopAction);
 
     /// <summary>
-    /// Enrich a single LLM-emitted narrative bullet with per-bullet entity link metadata.
-    /// Matches the narrative text against the channel's input items by `regardingName` OR
-    /// `title` (case-insensitive substring; names must be ≥3 chars to avoid noise).
-    ///
-    /// Output:
-    ///   - <c>ItemIds</c>: every input item whose name appears in the narrative
-    ///   - <c>PrimaryEntityType/Id/Name</c>: click-through target for the widget.
-    ///     Resolution order (R7 Wave 12 task 135):
-    ///       1. First match whose <c>RegardingId</c> is populated → navigate to that
-    ///          regarding record (matter or project). This is the dominant case across
-    ///          all 6 entity types — the collector projection sets RegardingId to the
-    ///          parent matter/project GUID (or to self for Matter/Project rows).
-    ///       2. First match whose <c>SourceEntityType</c> is populated → navigate to
-    ///          the source record itself (orphan fallback — e.g., a Task with no
-    ///          sprk_regardingmatter, a To Do with no regarding). Without this fallback
-    ///          orphan bullets render with no link in the widget (NarrativeBullet hides
-    ///          the link node when primaryEntityType/Id are empty).
-    ///       3. First match overall → name-only fallback (no link).
-    ///
-    /// If no match is found, returns a bullet with text only (widget renders as plain text).
-    /// This is best-effort post-processing; the LLM does not emit per-bullet IDs.
+    /// R5 task 014 (FR-A5): deterministic anchor-to-item grounding pass for the TL;DR — NEVER
+    /// asked of or trusted from the LLM. <see cref="TldrFactsDto"/> (the TL;DR call's entire
+    /// input) carries no item ids at all (only aggregated names/dates, by FR-A4 design), so the
+    /// model structurally cannot know a real <c>itemId</c>; having it emit one would either be a
+    /// fabrication or a guaranteed-empty field. Instead: for every channel item whose
+    /// <c>RegardingName</c> or <c>Title</c> appears VERBATIM (case-insensitive, matches the
+    /// widget's own <c>NarrativeCitedText.buildSegments</c> matching rule) in the TL;DR's own
+    /// <see cref="TldrResult.Summary"/> / <see cref="TldrResult.KeyTakeaways"/> / <see
+    /// cref="TldrResult.TopAction"/> text, pair that matched span with the item's id. Uses the
+    /// SAME candidate-name universe as <see cref="BuildAllowList"/> (RegardingName ahead of
+    /// Title) so the entity-scrub allow-list and the itemRefs grounding agree on what counts as
+    /// "named". <see cref="PriorityItemDto"/> carries no <c>Id</c> — its titles are excluded (no
+    /// item to link to), which is correct: an unlinkable name simply gets no itemRefs entry and
+    /// the widget renders it unlinked (binary resolution, no fallback fabrication).
     /// </summary>
-    private static NarrativeBulletDto EnrichBulletWithEntityRefs(
-        string narrativeText,
-        ChannelItemDto[] channelItems)
+    private static TldrItemRefDto[] BuildTldrItemRefs(DailyBriefingNarrateRequest req, TldrResult tldr)
     {
-        if (string.IsNullOrWhiteSpace(narrativeText) || channelItems is null || channelItems.Length == 0)
+        var candidateText = string.Join("\n", tldr.Summary, string.Join("\n", tldr.KeyTakeaways), tldr.TopAction);
+        if (string.IsNullOrWhiteSpace(candidateText))
         {
-            return new NarrativeBulletDto { Narrative = narrativeText ?? string.Empty };
+            return [];
         }
 
-        var matches = new List<ChannelItemDto>();
-        foreach (var item in channelItems)
+        var refs = new List<TldrItemRefDto>();
+        var linkedItemIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var channel in req.Channels)
         {
-            if (TextMentionsName(narrativeText, item.RegardingName) ||
-                TextMentionsName(narrativeText, item.Title))
+            foreach (var item in channel.Items)
             {
-                matches.Add(item);
+                if (string.IsNullOrEmpty(item.Id) || !linkedItemIds.Add(item.Id))
+                {
+                    continue; // no id to link to, or this item already matched once
+                }
+
+                var anchor = MatchesVerbatim(candidateText, item.RegardingName)
+                    ? item.RegardingName
+                    : MatchesVerbatim(candidateText, item.Title)
+                        ? item.Title
+                        : null;
+
+                if (anchor is not null)
+                {
+                    refs.Add(new TldrItemRefDto { AnchorText = anchor, ItemId = item.Id });
+                }
             }
         }
 
-        // R7 W12 feedback items 2/3/4 (2026-07-01) — build per-bullet references[]
-        // for widget-side inline citations. Two categories:
-        //   - Mentioned refs: item's RegardingName or Title appears in the narrative
-        //     text. Widget wraps the name in a clickable Link (opens modal).
-        //   - Implicit refs: bullet aggregates additional channel items whose names
-        //     don't appear in text (LLM said "several others" instead of naming).
-        //     Widget renders as trailing [N] citations.
-        //
-        // Coverage rule: when the LLM emits aggregated statements ("several to-dos
-        // added recently"), the collector's channel items provide the ground truth.
-        // If the LLM mentioned only ONE item explicitly but the channel has 5 items,
-        // we surface all 5 — mentioned=true for the named one, mentioned=false for
-        // the other 4. Operator can click any of them.
-        var references = BuildBulletReferences(narrativeText, matches, channelItems);
-
-        if (matches.Count == 0)
-        {
-            return new NarrativeBulletDto
-            {
-                Narrative = narrativeText,
-                References = references,
-            };
-        }
-
-        var itemIds = matches
-            .Select(m => m.Id)
-            .Where(id => !string.IsNullOrEmpty(id))
-            .ToArray();
-
-        // Tier 1 — first match with a usable RegardingId (matter/project link).
-        // Dominant case across all 6 entity types when the source row has a
-        // regarding matter (or is a self-regarding Matter/Project row).
-        var primaryByRegarding = matches.FirstOrDefault(m => !string.IsNullOrEmpty(m.RegardingId));
-        if (primaryByRegarding is not null)
-        {
-            return new NarrativeBulletDto
-            {
-                Narrative = narrativeText,
-                ItemIds = itemIds,
-                PrimaryEntityType = primaryByRegarding.RegardingEntityType ?? string.Empty,
-                PrimaryEntityId = primaryByRegarding.RegardingId ?? string.Empty,
-                PrimaryEntityName = primaryByRegarding.RegardingName ?? string.Empty,
-                References = references,
-            };
-        }
-
-        // Tier 2 — orphan fallback (R7 Wave 12 task 135). Use the source entity
-        // type + the bullet's own Id + Title so the widget can navigate to the
-        // source record (e.g., a Task with no regarding matter still gets a
-        // clickable link to its sprk_event row).
-        var primaryBySource = matches.FirstOrDefault(m =>
-            !string.IsNullOrEmpty(m.SourceEntityType) && !string.IsNullOrEmpty(m.Id));
-        if (primaryBySource is not null)
-        {
-            return new NarrativeBulletDto
-            {
-                Narrative = narrativeText,
-                ItemIds = itemIds,
-                PrimaryEntityType = primaryBySource.SourceEntityType ?? string.Empty,
-                PrimaryEntityId = primaryBySource.Id ?? string.Empty,
-                PrimaryEntityName = !string.IsNullOrEmpty(primaryBySource.Title)
-                    ? primaryBySource.Title
-                    : (primaryBySource.RegardingName ?? string.Empty),
-                References = references,
-            };
-        }
-
-        // Tier 3 — neither regarding nor source-entity-type usable. Widget will
-        // hide the link node; bullet still renders text + actions.
-        var primary = matches[0];
-        return new NarrativeBulletDto
-        {
-            Narrative = narrativeText,
-            ItemIds = itemIds,
-            PrimaryEntityType = primary.RegardingEntityType ?? string.Empty,
-            PrimaryEntityId = primary.RegardingId ?? string.Empty,
-            PrimaryEntityName = primary.RegardingName ?? string.Empty,
-            References = references,
-        };
+        return refs.ToArray();
     }
 
     /// <summary>
-    /// R7 W12 feedback items 2/3/4 — build the References array for a bullet.
-    /// Combines two sources:
-    ///   1. Explicit mentions (RegardingName or Title appears in narrativeText) →
-    ///      <c>Mentioned=true</c>, widget renders name as inline Link.
-    ///   2. Implicit refs from remaining <paramref name="channelItems"/> whose
-    ///      names don't appear in text — <c>Mentioned=false</c>, widget renders
-    ///      as trailing <c>[N]</c> citations.
-    ///
-    /// Each reference resolves to a click-through target using the same tiered
-    /// logic as the primary entity (regarding first, then source entity type).
-    /// Dedupes by target (EntityType + EntityId) so a single record cited by
-    /// both RegardingName and Title only produces one reference.
-    ///
-    /// Ordering: mentioned refs by first-appearance in text (left-to-right),
-    /// then implicit refs by channel-items order. Index numbers reflect this
-    /// order so trailing [1][2][3] citations line up with the narrative reading.
+    /// Verbatim (case-insensitive) substring match, min length 3 — mirrors the widget's
+    /// <c>NarrativeCitedText.buildSegments</c> guard against false-positive matches on short
+    /// tokens like "of"/"a".
     /// </summary>
-    private static NarrativeBulletReferenceDto[] BuildBulletReferences(
-        string narrativeText,
-        IReadOnlyList<ChannelItemDto> matches,
-        ChannelItemDto[] channelItems)
-    {
-        if (channelItems is null || channelItems.Length == 0)
-        {
-            return Array.Empty<NarrativeBulletReferenceDto>();
-        }
-
-        // (a) Score matches by first-appearance in narrative text so inline
-        //     links render in reading order. Items not found in text get
-        //     int.MaxValue and sort last.
-        var scored = matches
-            .Select(m => new
-            {
-                Item = m,
-                Position = FirstMentionIndex(narrativeText, m),
-            })
-            .OrderBy(x => x.Position)
-            .ToList();
-
-        // (b) Add channel items that WEREN'T mentioned — implicit refs.
-        var mentionedIds = new HashSet<string>(
-            matches.Select(m => m.Id).Where(id => !string.IsNullOrEmpty(id)),
-            StringComparer.OrdinalIgnoreCase);
-        var implicitItems = channelItems
-            .Where(ci => !string.IsNullOrEmpty(ci.Id) && !mentionedIds.Contains(ci.Id))
-            .ToList();
-
-        var references = new List<NarrativeBulletReferenceDto>();
-        var seenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        int index = 1;
-
-        foreach (var scoredMatch in scored)
-        {
-            var refDto = BuildReferenceFor(scoredMatch.Item, index, mentioned: true);
-            var targetKey = refDto.EntityType + "|" + refDto.EntityId;
-            if (string.IsNullOrEmpty(refDto.EntityId) || seenTargets.Add(targetKey))
-            {
-                references.Add(refDto);
-                index++;
-            }
-        }
-
-        foreach (var implicitItem in implicitItems)
-        {
-            var refDto = BuildReferenceFor(implicitItem, index, mentioned: false);
-            var targetKey = refDto.EntityType + "|" + refDto.EntityId;
-            if (string.IsNullOrEmpty(refDto.EntityId) || seenTargets.Add(targetKey))
-            {
-                references.Add(refDto);
-                index++;
-            }
-        }
-
-        return references.ToArray();
-    }
+    private static bool MatchesVerbatim(string text, string candidate) =>
+        !string.IsNullOrWhiteSpace(candidate) &&
+        candidate.Length >= 3 &&
+        text.Contains(candidate, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Build a NarrativeBulletReferenceDto for one channel item using the same
-    /// tiered click-target logic as the primary entity resolver: regarding first,
-    /// then source entity type, then bare fields as fallback.
+    /// R5 task 010 (FR-A3): build one <see cref="NarrativeBulletDto"/> DIRECTLY from a single
+    /// source item — no LLM call, no free-text matching. Each channel item maps 1:1 to a
+    /// bullet, so cross-item hallucination (R4 / R7 W12's unresolved failure mode) is
+    /// structurally impossible: the bullet can only say what the source record says.
     /// </summary>
-    private static NarrativeBulletReferenceDto BuildReferenceFor(ChannelItemDto item, int index, bool mentioned)
+    /// <remarks>
+    /// Preserves the same 3-tier click-through resolution the pre-R5 LLM-narrative-matching
+    /// path used (R7 Wave 12 task 135), now applied directly to the single source item instead
+    /// of a text-matched set:
+    ///   1. <c>RegardingId</c> populated → navigate to the regarding record (matter/project;
+    ///      dominant case — the collector sets RegardingId to the parent, or to self for
+    ///      self-regarding Matter/Project rows).
+    ///   2. No RegardingId but <c>SourceEntityType</c> + <c>Id</c> populated → orphan fallback,
+    ///      navigate to the source record itself (e.g., a Task/To Do with no regarding matter).
+    ///   3. Neither usable → plain bullet, no link (widget hides the link node).
+    /// </remarks>
+    private static NarrativeBulletDto BuildDeterministicBullet(ChannelItemDto item)
     {
-        string entityType;
-        string entityId;
-        string entityName;
+        var itemIds = string.IsNullOrEmpty(item.Id) ? Array.Empty<string>() : new[] { item.Id };
 
+        // Tier 1 — regarding record (matter/project link). Dominant case.
         if (!string.IsNullOrEmpty(item.RegardingId))
         {
-            entityType = item.RegardingEntityType ?? string.Empty;
-            entityId = item.RegardingId ?? string.Empty;
-            entityName = item.RegardingName ?? string.Empty;
-        }
-        else if (!string.IsNullOrEmpty(item.SourceEntityType) && !string.IsNullOrEmpty(item.Id))
-        {
-            entityType = item.SourceEntityType ?? string.Empty;
-            entityId = item.Id ?? string.Empty;
-            entityName = !string.IsNullOrEmpty(item.Title) ? item.Title : (item.RegardingName ?? string.Empty);
-        }
-        else
-        {
-            entityType = item.RegardingEntityType ?? string.Empty;
-            entityId = item.RegardingId ?? string.Empty;
-            entityName = item.RegardingName ?? string.Empty;
+            return new NarrativeBulletDto
+            {
+                Narrative = item.Title,
+                ItemIds = itemIds,
+                PrimaryEntityType = item.RegardingEntityType ?? string.Empty,
+                PrimaryEntityId = item.RegardingId ?? string.Empty,
+                PrimaryEntityName = item.RegardingName ?? string.Empty,
+            };
         }
 
-        return new NarrativeBulletReferenceDto
+        // Tier 2 — orphan fallback: navigate to the source record itself.
+        if (!string.IsNullOrEmpty(item.SourceEntityType) && !string.IsNullOrEmpty(item.Id))
         {
-            Index = index,
-            EntityType = entityType,
-            EntityId = entityId,
-            EntityName = entityName,
-            Mentioned = mentioned,
+            return new NarrativeBulletDto
+            {
+                Narrative = item.Title,
+                ItemIds = itemIds,
+                PrimaryEntityType = item.SourceEntityType ?? string.Empty,
+                PrimaryEntityId = item.Id ?? string.Empty,
+                PrimaryEntityName = !string.IsNullOrEmpty(item.Title)
+                    ? item.Title
+                    : (item.RegardingName ?? string.Empty),
+            };
+        }
+
+        // Tier 3 — neither usable. Plain bullet, no link.
+        return new NarrativeBulletDto
+        {
+            Narrative = item.Title,
+            ItemIds = itemIds,
         };
-    }
-
-    /// <summary>
-    /// Returns the character index of the first mention of a channel item in
-    /// <paramref name="narrativeText"/>, or int.MaxValue if not mentioned.
-    /// Checks RegardingName first, then Title. Case-insensitive, ≥3-char guard.
-    /// </summary>
-    private static int FirstMentionIndex(string narrativeText, ChannelItemDto item)
-    {
-        int regardingIdx = NameIndex(narrativeText, item.RegardingName);
-        int titleIdx = NameIndex(narrativeText, item.Title);
-        int best = int.MaxValue;
-        if (regardingIdx >= 0 && regardingIdx < best) best = regardingIdx;
-        if (titleIdx >= 0 && titleIdx < best) best = titleIdx;
-        return best;
-    }
-
-    private static int NameIndex(string narrativeText, string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name) || name.Length < 3) return -1;
-        return narrativeText.IndexOf(name, StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>
-    /// Returns true if the narrative text contains the entity name. Ignores names &lt; 3 chars
-    /// to avoid false positives on common short tokens (e.g., "A", "Of"). Case-insensitive.
-    /// </summary>
-    private static bool TextMentionsName(string narrativeText, string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name) || name.Length < 3) return false;
-        return narrativeText.Contains(name, StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>
-    /// Shape the BRIEF-NARRATE-CHANNEL LLM emits per iteration. Local DTO — the wire
-    /// contract for what we return to the widget is mapped onto ChannelNarrationResult
-    /// in the response composition above.
-    /// </summary>
-    internal sealed record ChannelLlmOutput
-    {
-        [JsonPropertyName("channel")]
-        public string Channel { get; init; } = string.Empty;
-
-        [JsonPropertyName("narrative")]
-        public string[] Narrative { get; init; } = Array.Empty<string>();
-
-        [JsonPropertyName("itemCount")]
-        public int ItemCount { get; init; }
-
-        [JsonPropertyName("bulletCount")]
-        public int BulletCount { get; init; }
     }
 }

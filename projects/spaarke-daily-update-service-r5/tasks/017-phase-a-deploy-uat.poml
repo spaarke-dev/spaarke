@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Deploy BFF + Daily Briefing code page to spaarkedev1 for G-R5-A browser UAT</title>
+    <phase>A: Accuracy core</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>090</blocks>
+    <tags>deploy, bff-api, azure</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Deployment task touching BFF + code page (deploy/bff-api tags); irreversible environment change requiring FULL rigor + prescriptive sequence (Step 3.5.5 FULL triggers).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical deploy following the bff-deploy + code-page-deploy skills with an explicit ordered sequence; no novel design (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys the full Phase A stack; must run after 016 and is the gate for G-R5-A UAT; single deploy target.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the BFF (Sprk.Bff.Api) and the Daily Briefing code page to spaarkedev1 so the operator can run the G-R5-A browser UAT. Capture before/after per-run token metering (task-054 metering) as gate evidence and confirm publish size is within the ≤60 MB ceiling. Per NFR-06.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer + release engineer. Follow ADRs and deployment constraints strictly. Expert in the bff-deploy and code-page-deploy procedures and spaarkedev1 conventions.
+  </role>
+
+  <goal>
+    BFF deployed to spaarkedev1 App Service; the Daily Briefing code page deployed to Dataverse; a browser UAT script for G-R5-A present for the operator to execute; before/after per-run token counts captured in notes; publish size measured and reported within the ≤60 MB ceiling. The gate itself (G-R5-A) is operator-executed browser UAT — this task prepares and evidences it, it does not self-certify the gate.
+  </goal>
+
+  <context>
+    <background>
+      G-R5-A is operator-executed browser UAT on spaarkedev1 (NFR-07 — curl/tests/logs never satisfy a gate). This task deploys the Phase A stack and assembles the evidence: token before/after (task-054 metering shows the per-run reduction from removing the per-channel LLM leg), zero cross-pairing (from task 016), and publish size. Master-sync-first is the binding deploy convention (FR-E1).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/index.ts</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/010-publish-size.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">The gate G-R5-A is operator-executed browser UAT on spaarkedev1. This task deploys + prepares the UAT script + captures evidence; it MUST NOT mark the gate satisfied by tests/logs/curl (NFR-07).</constraint>
+    <constraint source="project">Capture before/after per-run token counts (task-054 metering) in notes as gate evidence (NFR-06). The "before" is the pre-R5 per-run count; the "after" is the post-Phase-A count showing the per-run reduction.</constraint>
+    <constraint source="ADR-029">Measure BFF publish size (compressed) and report absolute + diff vs 49.63 MB baseline (incl PDBs). HARD STOP if ≥60 MB. Escalation if ≥+5 MB single-task delta or ≥55 MB cumulative.</constraint>
+    <constraint source="project">Apply master-sync-first (FR-E1): confirm the branch is not behind origin/master before deploying; a one-line branch-behind warning must fire from any touched deploy script.</constraint>
+    <constraint source="root-CLAUDE.md-§10">BFF-touching: state placement decision; confirm no new HIGH CVE before deploy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="BFF + code-page deploy to spaarkedev1" location=".claude/skills/bff-deploy/SKILL.md">
+        Follow bff-deploy for the App Service deployment and code-page-deploy for the Dataverse web-resource deployment; master-sync-first per FR-E1.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run /conflict-check (r2-core Services/Ai overlap) and confirm the branch is not behind origin/master (master-sync-first, FR-E1).</step>
+    <step order="2">Confirm no new HIGH-severity CVE (dotnet list package --vulnerable --include-transitive).</step>
+    <step order="3">Run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/; measure compressed size; confirm ≤60 MB; record absolute + diff vs 49.63 MB baseline in notes.</step>
+    <step order="4">Deploy the BFF to spaarkedev1 App Service via the bff-deploy skill.</step>
+    <step order="5">Build (npm run build:prod) and deploy the Daily Briefing code page to Dataverse via the code-page-deploy skill.</step>
+    <step order="6">Capture before/after per-run token counts (task-054 metering) into notes/017-token-metering.md.</step>
+    <step order="7">Write the G-R5-A browser UAT script (operator-executed) into notes/017-uat-script-g-r5-a.md, referencing the zero-cross-pairing evidence from task 016.</step>
+    <step order="8">Update TASK-INDEX.md: task 017 completed. Record deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If publish size measures ≥60 MB (HARD STOP) or the single-task delta is ≥+5 MB, STOP and escalate per root CLAUDE.md §6 / ADR-029 before deploying. Also STOP if the branch is behind origin/master and a clean sync is not possible.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish BFF</tool>
+    <tool name="npm">Build code page</tool>
+    <tool name="terminal">Run deploy skills / conflict-check</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/017-token-metering.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/017-uat-script-g-r5-a.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/017-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The BFF is deployed to spaarkedev1 App Service (deployment confirmed in notes).</criterion>
+    <criterion testable="true">The Daily Briefing code page is deployed to Dataverse (deployment confirmed in notes).</criterion>
+    <criterion testable="true">A G-R5-A browser UAT script (operator-executed) is present in notes/, referencing the zero-cross-pairing evidence.</criterion>
+    <criterion testable="true">Before/after per-run token counts are captured in notes, showing the per-run reduction.</criterion>
+    <criterion testable="true">Publish size is measured and reported within the ≤60 MB ceiling (absolute + diff vs 49.63 MB baseline); no new HIGH CVE.</criterion>
+    <criterion testable="true">The gate is NOT self-certified by tests/logs/curl; G-R5-A remains operator-executed browser UAT.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md NFR-06 / NFR-07 and plan.md Phase A.deploy. Gates G-R5-A/C are operator browser UAT on spaarkedev1; G-R5-D is operator harness sign-off. This task blocks the wrap-up (090). Master-sync-first is the binding convention (FR-E1).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist and FULL-rigor Step 9.5 gates; deployment steps are prescriptive (exact sequence binding).
+    </protocol>
+  </execution>
+</task>

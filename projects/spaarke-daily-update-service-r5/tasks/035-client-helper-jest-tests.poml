@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Jest tests for buildSegments, isEmptyResponse, useInlineTodoCreate, actionToBadge/reasonToLabel</title>
+    <phase>B: Hardening</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Modifies tests/** for existing client surfaces (TEST-MODIFYING override → code-review + adr-check unconditionally); no production code change, adds tests at KEEP paths (Step 3.5.5 STANDARD + TEST-MODIFYING).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test authoring for four existing, well-understood helpers with clear edge cases; mechanical (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add Jest tests for four fragile client helpers in Spaarke.DailyBriefing.Components that shipped without coverage: NarrativeCitedText.buildSegments (segment splitter, @107), useBriefingRender.isEmptyResponse (@60), useInlineTodoCreate (primary-contact wiring hook), and HighPrioritySection.actionToBadge (@158) + reasonToLabel (@213). Cover edge cases including empty input, missing itemId, and malformed segments. Per FR-C6. NOTE: the R7 note referenced a helper named classifyDueDate that does NOT exist — do not write tests for it; the real HighPrioritySection helpers are actionToBadge/reasonToLabel.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in Jest + React Testing Library, the Spaarke.DailyBriefing.Components test conventions, and Fluent v9 client helpers.
+  </role>
+
+  <goal>
+    Jest test files exist at the repo's KEEP test path (src/client/shared/Spaarke.DailyBriefing.Components/test/) for all four helpers — buildSegments, isEmptyResponse, useInlineTodoCreate, and actionToBadge + reasonToLabel — each covering the happy path plus the named edge cases. No test references a non-existent classifyDueDate. All new tests pass under the existing jest runner.
+  </goal>
+
+  <context>
+    <background>
+      R7 W12 shipped these helpers without tests (notes/inbound-from-r7/03 item 2). buildSegments is a regex-based inline-citation segment splitter (regression-prone); isEmptyResponse decides the "no data" render state (partial-data edge cases); useInlineTodoCreate wires retrieveMultipleRecords → sprk_AssignedTo@odata.bind (failure paths untested); actionToBadge/reasonToLabel map High-Priority action/reason enums to badges/labels. The R7 note mislabeled the date classifier as classifyDueDate — the actual client helpers are actionToBadge/reasonToLabel/formatShortDate/formatRelative; the date classifier lives server-side as ClassifyAction and is out of scope here.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeCitedText.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingRender.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useInlineTodoCreate.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/test/</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/03-code-review-followups.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Test ONLY these four surfaces: NarrativeCitedText.buildSegments (@107), useBriefingRender.isEmptyResponse (@60), useInlineTodoCreate (the primary-contact wiring hook), HighPrioritySection.actionToBadge (@158) + reasonToLabel (@213). Do NOT author a test for classifyDueDate — it does not exist in the codebase; the R7 note's name was wrong.</constraint>
+    <constraint source="project">New test files land at the repo's existing KEEP path src/client/shared/Spaarke.DailyBriefing.Components/test/ using the existing naming convention (*.test.ts / *.test.tsx), mirroring existing tests there (e.g. NarrativeBullet.test.tsx, useBriefingActions.test.ts). Do NOT create a new __tests__/ directory.</constraint>
+    <constraint source="project">Required edge cases: buildSegments → empty input string, malformed/overlapping segment, a segment with a missing/unresolvable itemId. isEmptyResponse → fully-empty response AND partial-data present. useInlineTodoCreate → a createTodo path where the primary-contact lookup returns no record (missing itemId / no contact) and the failure path. actionToBadge/reasonToLabel → each mapped enum value plus an unknown/undefined value falling back safely.</constraint>
+    <constraint source="ADR-038">New tests land at KEEP paths and follow the test-shape rules (no Mock&lt;HttpMessageHandler&gt;-equivalent anti-patterns; test observable behavior of the helpers, not implementation trivia). These are MAINTAIN-class unit tests for shipped, non-trivial logic.</constraint>
+    <constraint source="project">Do NOT modify the production helper files — this task adds tests only. If a helper is untestable as written (e.g. not exported), the minimum change is exporting it; note any such change explicitly.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/03-code-review-followups.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing DailyBriefing jest tests" location="src/client/shared/Spaarke.DailyBriefing.Components/test/">
+        Mirror the setup/mocking style of the existing tests in this folder (NarrativeBullet.test.tsx for components, useBriefingActions.test.ts / useInlineTodoCreate.computeDueDate.test.ts for hooks) — same import paths, render/renderHook helpers, and mock conventions.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the four helpers to enumerate their branches and public signatures: buildSegments (NarrativeCitedText.tsx:107), isEmptyResponse (useBriefingRender.ts:60), useInlineTodoCreate.ts, actionToBadge (HighPrioritySection.tsx:158) + reasonToLabel (HighPrioritySection.tsx:213). Confirm which are exported; note any needing an export.</step>
+    <step order="2">Read 1-2 existing tests in the test/ folder to match the runner config, imports, and mock style.</step>
+    <step order="3">Write test/NarrativeCitedText.buildSegments.test.ts (or .tsx) covering happy path + empty input + malformed/overlapping segment + missing itemId.</step>
+    <step order="4">Write test/useBriefingRender.isEmptyResponse.test.ts covering empty response + partial-data-present.</step>
+    <step order="5">Write test/useInlineTodoCreate.test.ts (renderHook) covering the primary-contact resolve path, the no-record/missing-itemId path, and the failure path — mocking retrieveMultipleRecords.</step>
+    <step order="6">Write test/HighPrioritySection.badges.test.ts covering each actionToBadge and reasonToLabel mapped value plus an unknown/undefined fallback.</step>
+    <step order="7">Run the jest suite for the package; confirm all new tests pass and no test targets classifyDueDate.</step>
+    <step order="8">Update TASK-INDEX.md task 035 → completed; record any deviations (incl. any export-only production change) in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Run jest for the Spaarke.DailyBriefing.Components package</tool>
+    <tool name="terminal">Search helper sources</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/NarrativeCitedText.buildSegments.test.tsx</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/useBriefingRender.isEmptyResponse.test.ts</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/useInlineTodoCreate.test.ts</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/HighPrioritySection.badges.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Jest tests exist at the KEEP path (src/client/shared/Spaarke.DailyBriefing.Components/test/) for buildSegments, isEmptyResponse, useInlineTodoCreate, and actionToBadge + reasonToLabel.</criterion>
+    <criterion testable="true">buildSegments tests cover empty input, a malformed/overlapping segment, and a segment with a missing/unresolvable itemId; all pass.</criterion>
+    <criterion testable="true">isEmptyResponse tests cover the fully-empty response AND a partial-data-present case; both pass.</criterion>
+    <criterion testable="true">useInlineTodoCreate tests cover the primary-contact resolve path, a no-record/missing-itemId path, and a failure path (retrieveMultipleRecords mocked); all pass.</criterion>
+    <criterion testable="true">actionToBadge and reasonToLabel tests cover each mapped enum value plus an unknown/undefined value that falls back safely; all pass.</criterion>
+    <criterion testable="true">No test file references classifyDueDate; the jest suite for the package passes.</criterion>
+    <criterion testable="true">No production helper file is modified except (if strictly necessary) adding an export, which is noted in notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-C6, plan.md Phase B.6, notes/inbound-from-r7/03 item 2. The R7 note's classifyDueDate is a naming error — corrected here to actionToBadge/reasonToLabel per the verified code map. Test folder is test/ (not __tests__/). Existing companion test useInlineTodoCreate.computeDueDate.test.ts shows the hook's test style.
+
+    COMPLETED 2026-07-08. 4 new test files at test/ (36 tests total, all passing): NarrativeCitedText.buildSegments.test.ts (7), useBriefingRender.isEmptyResponse.test.ts (8), useInlineTodoCreate.test.ts (6), HighPrioritySection.badges.test.ts (15). Export-only production change (minimal, per constraint): added `export` keyword to buildSegments, isEmptyResponse, actionToBadge, reasonToLabel (previously module-private) — zero behavior change, verified via git-stash A/B comparison against the package's pre-existing (unrelated) 3 test failures in legalWorkspaceSectionRegistry.test.ts + ActivityNotesSection.callbacks.test.tsx. Full deviation record: notes/task-035-client-helper-jest-tests.md. Quality gates (code-review + adr-check, TEST-MODIFYING override): both clean, no findings.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. TEST-MODIFYING rigor: code-review + adr-check run unconditionally at Step 9.5. Follow task-execute for the pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

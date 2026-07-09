@@ -153,12 +153,9 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     // emphasis on three-dot menu for future tools).
     expect(screen.getByRole('button', { name: /More actions/i })).toBeInTheDocument();
 
-    // R7 W12 task 134: primary visible 'Add To Do' Checkmark button is present
-    // as a sibling BEFORE the menu trigger (operator MVP, wave12 plan §2.1).
-    // Distinct aria-label "Add To Do" — NOT "Add to To Do" (which is the
-    // SubRowTodo per-item button label) — so per-bullet vs per-sub-row
-    // targeting is unambiguous for tests and screen readers.
-    expect(screen.getByRole('button', { name: /^Add To Do$/i })).toBeInTheDocument();
+    // R5 task 021 (2026-07-09): "Add to To Do" moved INTO the overflow menu —
+    // the row no longer renders a standalone Add To Do button (menu closed → absent).
+    expect(screen.queryByRole('button', { name: /^Add To Do$/i })).toBeNull();
 
     // The inline 5-icon row (pre-R4) had buttons with these aria-labels
     // rendered. With the menu CLOSED, the menu-only aria-labels MUST NOT
@@ -175,7 +172,7 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     expect(screen.queryByRole('button', { name: /^Dismiss$/i })).toBeNull();
   });
 
-  it('OverflowMenu_Shows5Actions: open the menu and assert 5 MenuItems in canonical post-task-134 order (AC-18a)', () => {
+  it('OverflowMenu_Shows6Actions: open the menu and assert 6 MenuItems with "Add to To Do" first (task 021)', () => {
     const props = baseProps({
       itemIds: ['n-1'],
       onCheck: jest.fn(),
@@ -186,16 +183,16 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
 
     openOverflowMenu();
 
-    // Fluent v9 MenuItems have role="menuitem". Collect them in DOM order and
-    // assert the canonical labels match the post-task-134 sequence.
-    // ("Add to To Do" is now a primary visible button, NOT a menu item.)
+    // Fluent v9 MenuItems have role="menuitem". R5 task 021: "Add to To Do" is
+    // now the FIRST menu item (moved from a standalone button into the menu).
     const menuItems = screen.getAllByRole('menuitem');
-    expect(menuItems).toHaveLength(5);
+    expect(menuItems).toHaveLength(6);
     const labels = menuItems.map(el => (el.textContent ?? '').trim());
     expect(labels).toEqual([
       'Mark as read',
       'Remove from briefing',
       'Keep on briefing for 7 more days',
+      'Add to To Do',
       'Dismiss',
       'Open record',
     ]);
@@ -256,7 +253,14 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     const fs = require('fs') as typeof import('fs');
     const path = require('path') as typeof import('path');
     const componentsDir = path.resolve(__dirname, '../src/components');
-    const filesToScan = ['NarrativeBullet.tsx', 'SubRow.tsx', 'SubRowLink.tsx', 'SubRowTodo.tsx', 'SubRowDismiss.tsx'];
+    const filesToScan = [
+      'NarrativeBullet.tsx',
+      'NarrativeCitedText.tsx',
+      'SubRow.tsx',
+      'SubRowLink.tsx',
+      'SubRowTodo.tsx',
+      'SubRowDismiss.tsx',
+    ];
     const hexColorRe = /[\s:'"(]#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/;
 
     const offenders: string[] = [];
@@ -320,7 +324,7 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     expect(onKeep).toHaveBeenCalledWith('n-1', 604800);
   });
 
-  it('PrimaryAddToDoButton_CallsExistingPath: clicking the primary Add To Do Checkmark button invokes onAddToTodo(itemIds) — preserves ADR-024 useInlineTodoCreate path (AC-18c / task 134)', () => {
+  it('AddToDoMenuItem_CallsExistingPath: the overflow "Add to To Do" menu item invokes onAddToTodo(itemIds) — preserves ADR-024 useInlineTodoCreate path (task 021)', () => {
     const onAddToTodo = jest.fn();
     const props = baseProps({
       itemIds: ['n-1', 'n-2'],
@@ -332,23 +336,21 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     });
     renderWith(props);
 
-    // Task 134: Add To Do is now a PRIMARY VISIBLE Button with aria-label
-    // "Add To Do" — NOT a menu item. The overflow menu is not opened in this
-    // test because the primary button is reachable directly.
-    const addToDoButton = screen.getByRole('button', { name: /^Add To Do$/i });
+    // R5 task 021: Add to To Do is now the first overflow-menu item. Open the
+    // menu and click it (role="menuitem" — distinct from the aggregated
+    // sub-row's role="button" "Add to To Do", so this targets the bullet-level action).
+    openOverflowMenu();
     act(() => {
-      fireEvent.click(addToDoButton);
+      fireEvent.click(screen.getByRole('menuitem', { name: /^Add to To Do$/i }));
     });
 
     // ADR-024 regression-free invariant: the parent's `onAddToTodo` callback
-    // signature is unchanged (receives the full itemIds array). The parent
-    // (DailyBriefingApp) owns `useInlineTodoCreate` + `TODO_REGARDING_CATALOG`
-    // wiring; this component only invokes the prop unchanged.
+    // signature is unchanged (receives the full itemIds array).
     expect(onAddToTodo).toHaveBeenCalledTimes(1);
     expect(onAddToTodo).toHaveBeenCalledWith(['n-1', 'n-2']);
   });
 
-  it('PrimaryAddToDoButton_DisabledWhenCreated: button is disabled when isTodoCreated=true (no duplicate creates, task 134)', () => {
+  it('AddToDoMenuItem_DisabledWhenCreated: the "Added to To Do" menu item is disabled when isTodoCreated=true (no duplicate creates, task 021)', () => {
     const onAddToTodo = jest.fn();
     const props = baseProps({
       itemIds: ['n-1'],
@@ -360,15 +362,16 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     });
     renderWith(props);
 
-    const addToDoButton = screen.getByRole('button', { name: /^Add To Do$/i }) as HTMLButtonElement;
-    expect(addToDoButton.disabled).toBe(true);
+    openOverflowMenu();
+    const item = screen.getByRole('menuitem', { name: /Added to To Do/i });
+    expect(item).toHaveAttribute('aria-disabled', 'true');
     act(() => {
-      fireEvent.click(addToDoButton);
+      fireEvent.click(item);
     });
     expect(onAddToTodo).not.toHaveBeenCalled();
   });
 
-  it('PrimaryAddToDoButton_DisabledWhenPending: button is disabled when isTodoPending=true (no double-fire, task 134)', () => {
+  it('AddToDoMenuItem_DisabledWhenPending: the "Adding to To Do…" menu item is disabled when isTodoPending=true (no double-fire, task 021)', () => {
     const onAddToTodo = jest.fn();
     const props = baseProps({
       itemIds: ['n-1'],
@@ -380,10 +383,11 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     });
     renderWith(props);
 
-    const addToDoButton = screen.getByRole('button', { name: /^Add To Do$/i }) as HTMLButtonElement;
-    expect(addToDoButton.disabled).toBe(true);
+    openOverflowMenu();
+    const item = screen.getByRole('menuitem', { name: /Adding to To Do/i });
+    expect(item).toHaveAttribute('aria-disabled', 'true');
     act(() => {
-      fireEvent.click(addToDoButton);
+      fireEvent.click(item);
     });
     expect(onAddToTodo).not.toHaveBeenCalled();
   });
@@ -654,4 +658,120 @@ describe('NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)', 
   // Case 6: aggregated Dismiss is now in the overflow menu — covered by
   //         OverflowMenu_DismissCallsParentCascade (above).
   // -------------------------------------------------------------------------
+});
+
+// ---------------------------------------------------------------------------
+// Tests — R5 task 011 (FR-A1): deterministic, single-item row rendering.
+//
+// Task 010 removed the per-channel LLM narrate call; `narrative` is now
+// built server-side directly from the source item's own `Title` field
+// (DailyBriefingNarrator.BuildDeterministicBullet). This task removed
+// NarrativeBullet's `references[]` prop (an LLM-narrative-era multi-mention
+// mechanism) and NarrativeCitedText's dependency on any externally supplied
+// reference list. These tests assert:
+//   - The regarding-name link click resolves to the SAME item's own
+//     primaryEntityType/primaryEntityId (the "link target equals the item's
+//     server-composed link" acceptance criterion).
+//   - Two independently rendered rows (as ActivityNotesSection renders one
+//     <NarrativeBullet> per bullet in a map) never bleed fields into each
+//     other, even when both are mounted in the same container at once.
+// ---------------------------------------------------------------------------
+
+describe('NarrativeBullet — R5 task 011 deterministic single-item rendering (FR-A1)', () => {
+  afterEach(() => {
+    uninstallXrm();
+  });
+
+  it('regarding-name link (non-inlined case) invokes onOpenRecord with THIS row primaryEntityType/primaryEntityId — the item named in the row', () => {
+    const onOpenRecord = jest.fn();
+    // Narrative deliberately does NOT contain the regarding name, so the
+    // separate link line renders (the common production case — item titles
+    // rarely restate the regarding record's own display name).
+    const props = baseProps({
+      narrative: 'Review motion to dismiss.',
+      primaryEntityName: 'Acme Matter',
+      primaryEntityType: 'sprk_matter',
+      primaryEntityId: '11111111-1111-1111-1111-111111111111',
+      onOpenRecord,
+    });
+    renderWith(props);
+
+    const link = screen.getByRole('link', { name: /Acme Matter/i });
+    fireEvent.click(link);
+
+    expect(onOpenRecord).toHaveBeenCalledTimes(1);
+    expect(onOpenRecord).toHaveBeenCalledWith('sprk_matter', '11111111-1111-1111-1111-111111111111');
+  });
+
+  it('regarding-name mentioned inline in the narrative renders as a single inline link (no duplicate separate link line)', () => {
+    const onOpenRecord = jest.fn();
+    const props = baseProps({
+      narrative: 'Review motion to dismiss for Acme Matter.',
+      primaryEntityName: 'Acme Matter',
+      primaryEntityType: 'sprk_matter',
+      primaryEntityId: '11111111-1111-1111-1111-111111111111',
+      onOpenRecord,
+    });
+    renderWith(props);
+
+    // Exactly ONE link resolves to the entity — never two (inline + separate).
+    const links = screen.getAllByRole('link', { name: /Acme Matter/i });
+    expect(links).toHaveLength(1);
+
+    fireEvent.click(links[0]);
+    expect(onOpenRecord).toHaveBeenCalledWith('sprk_matter', '11111111-1111-1111-1111-111111111111');
+  });
+
+  it('two rows rendered together (as ActivityNotesSection renders one NarrativeBullet per bullet) never cross-pair fields — cross-item pairing is structurally impossible', () => {
+    const onOpenRecordA = jest.fn();
+    const onOpenRecordB = jest.fn();
+
+    const propsA = baseProps({
+      itemIds: ['item-a'],
+      narrative: 'Draft the settlement letter.',
+      primaryEntityName: 'Widget Co Matter',
+      primaryEntityType: 'sprk_matter',
+      primaryEntityId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      onOpenRecord: onOpenRecordA,
+    });
+    const propsB = baseProps({
+      itemIds: ['item-b'],
+      narrative: 'File the amended complaint.',
+      primaryEntityName: 'Gadget Inc Project',
+      primaryEntityType: 'sprk_project',
+      primaryEntityId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      onOpenRecord: onOpenRecordB,
+    });
+
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <NarrativeBullet {...propsA} />
+        <NarrativeBullet {...propsB} />
+      </FluentProvider>
+    );
+
+    // Both rows' own text is visible.
+    expect(screen.getByText(/Draft the settlement letter/i)).toBeInTheDocument();
+    expect(screen.getByText(/File the amended complaint/i)).toBeInTheDocument();
+
+    // Row A's link resolves to Row A's entity — never Row B's.
+    fireEvent.click(screen.getByRole('link', { name: /Widget Co Matter/i }));
+    expect(onOpenRecordA).toHaveBeenCalledWith('sprk_matter', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+    expect(onOpenRecordB).not.toHaveBeenCalled();
+
+    // Row B's link resolves to Row B's entity — never Row A's.
+    fireEvent.click(screen.getByRole('link', { name: /Gadget Inc Project/i }));
+    expect(onOpenRecordB).toHaveBeenCalledWith('sprk_project', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+    expect(onOpenRecordA).toHaveBeenCalledTimes(1); // still just the one call from above
+  });
+
+  it('NarrativeBulletProps has no references[] prop — grep-provable zero LLM-narrative consumption (source scan)', () => {
+    const fs = require('fs') as typeof import('fs');
+    const path = require('path') as typeof import('path');
+    const source = fs.readFileSync(path.resolve(__dirname, '../src/components/NarrativeBullet.tsx'), 'utf8');
+    // The word "references" may only appear inside comments explaining its
+    // REMOVAL — it must never appear as a live prop/destructure/JSX attr.
+    expect(source).not.toMatch(/references\??:\s*NarrativeBulletReferenceResult/);
+    expect(source).not.toMatch(/references=\{/);
+  });
 });

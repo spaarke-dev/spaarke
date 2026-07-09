@@ -1,7 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.DependencyInjection;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.Models;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
 
@@ -43,6 +46,16 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// <para>
 /// Uses IFieldMappingDataverseService (Singleton) to PATCH records via the Dataverse Web API.
 /// </para>
+/// <para>
+/// <b>Metadata-driven coercion (defect-hardening, R5 task 030)</b> — a <c>type:"string"</c> mapping
+/// whose TARGET column is actually Choice/Boolean/Number is coerced against the column's real
+/// Dataverse metadata (resolved via <see cref="Dataverse.MetadataService"/>, which caches the
+/// projected entity metadata for 6h in Redis — see <see cref="Dataverse.MetadataService"/> remarks).
+/// This closes the gap where an AI-authored fieldMapping declares <c>type:"string"</c> but the
+/// rendered value is a Choice label; previously this fell into the verbatim String branch and
+/// Dataverse rejected the PATCH with a 500. An unmatchable Choice label now fails loud with a
+/// descriptive <see cref="FieldCoercionException"/> instead of a silent pass-through.
+/// </para>
 /// </remarks>
 public sealed class UpdateRecordNodeExecutor : INodeExecutor
 {
@@ -50,15 +63,18 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
 
     private readonly ITemplateEngine _templateEngine;
     private readonly IFieldMappingDataverseService _fieldMappingService;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<UpdateRecordNodeExecutor> _logger;
 
     public UpdateRecordNodeExecutor(
         ITemplateEngine templateEngine,
         IFieldMappingDataverseService fieldMappingService,
+        IServiceScopeFactory scopeFactory,
         ILogger<UpdateRecordNodeExecutor> logger)
     {
         _templateEngine = templateEngine;
         _fieldMappingService = fieldMappingService;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -202,13 +218,24 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
 
             if (config.FieldMappings is { Length: > 0 })
             {
-                // NEW PATH: typed field mappings with coercion
+                // NEW PATH: typed field mappings with coercion.
+                // Metadata-driven coercion (R5 task 030): resolve the target entity's column
+                // metadata ONCE per run (not once per field) when at least one mapping declares
+                // type:"string" — String-typed mappings targeting a Choice/Boolean/Number column
+                // are coerced against the real column type instead of passed through verbatim.
+                EntityMetadataDto? entityMetadata = null;
+                if (config.FieldMappings.Any(m => m.Type == FieldMappingType.String))
+                {
+                    entityMetadata = await ResolveEntityMetadataAsync(
+                        config.EntityLogicalName!, cancellationToken).ConfigureAwait(false);
+                }
+
                 foreach (var mapping in config.FieldMappings)
                 {
                     if (string.IsNullOrWhiteSpace(mapping.Field)) continue;
 
                     var renderedValue = _templateEngine.Render(mapping.Value, templateContext);
-                    var coercedValue = CoerceFieldValue(mapping, renderedValue, _logger);
+                    var coercedValue = CoerceFieldValue(mapping, renderedValue, entityMetadata, _logger);
                     updatePayload[mapping.Field] = coercedValue;
                 }
             }
@@ -272,6 +299,24 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
                 },
                 textContent: $"Updated {config.EntityLogicalName} record",
                 metrics: NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+        }
+        catch (FieldCoercionException ex)
+        {
+            // Fail-loud path for an unmatchable Choice label (or missing option-set metadata) —
+            // R5 task 030 / FR-C1. This is a validation-shaped failure caught BEFORE the Dataverse
+            // PATCH is issued, so it never surfaces as the downstream Dataverse 500 the verbatim
+            // pass-through used to produce.
+            _logger.LogWarning(
+                "UpdateRecord node {NodeId} field coercion failed: {ErrorMessage}",
+                context.Node.Id,
+                ex.Message);
+
+            return NodeOutput.Error(
+                context.Node.Id,
+                context.Node.OutputVariable,
+                ex.Message,
+                NodeErrorCodes.ValidationFailed,
+                NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
         }
         catch (Exception ex)
         {
@@ -414,9 +459,22 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
     /// Coerces a rendered template string to the CLR type expected by the
     /// Dataverse OData Web API, based on the field mapping's declared type.
     /// </summary>
+    /// <param name="mapping">The typed field mapping (declared type + optional Choice options).</param>
+    /// <param name="renderedValue">The template-rendered string value.</param>
+    /// <param name="entityMetadata">
+    /// The target entity's cached column metadata (R5 task 030), or <c>null</c> if it was not
+    /// resolved for this run (either no String-typed mapping required it, or resolution failed and
+    /// was logged non-fatally). Only consulted by the <see cref="FieldMappingType.String"/> branch.
+    /// </param>
+    /// <param name="logger">Logger for coercion diagnostics.</param>
+    /// <exception cref="FieldCoercionException">
+    /// Thrown when a <c>type:"string"</c> mapping targets a Choice column and the rendered value
+    /// does not match any option label or numeric option value (R5 task 030 / FR-C1 fail-loud rule).
+    /// </exception>
     private static object? CoerceFieldValue(
         FieldMappingEntry mapping,
         string? renderedValue,
+        EntityMetadataDto? entityMetadata,
         ILogger logger)
     {
         if (string.IsNullOrEmpty(renderedValue))
@@ -425,7 +483,7 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
         switch (mapping.Type)
         {
             case FieldMappingType.String:
-                return renderedValue;
+                return CoerceStringMapping(mapping.Field, renderedValue, entityMetadata, logger);
 
             case FieldMappingType.Choice:
                 if (mapping.Options is null || mapping.Options.Count == 0)
@@ -477,6 +535,165 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
             default:
                 return renderedValue;
         }
+    }
+
+    /// <summary>
+    /// Resolves the target entity's column metadata via the existing <see cref="MetadataService"/>
+    /// (R5 task 030). <see cref="MetadataService"/> is registered Scoped (it depends on the Scoped
+    /// <c>IDataverseService</c>), while this executor is registered Singleton — bridged via
+    /// <see cref="IServiceScopeFactory"/> per the Singleton+Scoped pattern already used by
+    /// <see cref="LookupUserMembershipNodeExecutor"/> and <see cref="AgentServiceNodeExecutor"/>.
+    /// <see cref="MetadataService"/> caches the projected DTO in Redis for 6h (FR-BFF-03), so this
+    /// call is a cache read in the common case, not a fresh Dataverse metadata round-trip.
+    /// </summary>
+    /// <remarks>
+    /// Resolution failures (e.g., transient Dataverse/Redis errors) are logged and treated as
+    /// non-fatal: the caller falls back to verbatim String pass-through for that run, preserving
+    /// the executor's pre-existing behavior rather than blocking the whole record update. This is
+    /// distinct from the FAIL LOUD rule for an unmatchable Choice label once metadata IS available.
+    /// </remarks>
+    private async Task<EntityMetadataDto?> ResolveEntityMetadataAsync(
+        string entityLogicalName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var metadataService = scope.ServiceProvider.GetRequiredService<MetadataService>();
+            return await metadataService.GetMetadataAsync(entityLogicalName, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to resolve column metadata for entity '{Entity}'; type:\"string\" mappings " +
+                "will pass through verbatim for this run",
+                entityLogicalName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Metadata-driven coercion for a <c>type:"string"</c> mapping (R5 task 030 / FR-C1). If the
+    /// target column's real Dataverse metadata type is Choice/Boolean/Number, coerces the rendered
+    /// value accordingly instead of passing it through verbatim. Text/Memo columns (and any field
+    /// not found in <paramref name="entityMetadata"/>, or when metadata resolution was unavailable)
+    /// keep the existing verbatim pass-through behavior.
+    /// </summary>
+    /// <exception cref="FieldCoercionException">
+    /// Thrown when the column is Choice and the rendered value cannot be matched to any option
+    /// label or numeric option value — see <see cref="CoerceChoiceFromMetadata"/>.
+    /// </exception>
+    private static object CoerceStringMapping(
+        string fieldName,
+        string renderedValue,
+        EntityMetadataDto? entityMetadata,
+        ILogger logger)
+    {
+        var attribute = entityMetadata?.Attributes.FirstOrDefault(
+            a => string.Equals(a.LogicalName, fieldName, StringComparison.OrdinalIgnoreCase));
+
+        if (attribute is null)
+        {
+            // No metadata available for this run (resolution failed/skipped) or the field isn't
+            // in the projected attribute list — preserve the original verbatim String behavior.
+            return renderedValue;
+        }
+
+        var trimmed = renderedValue.Trim();
+
+        switch (attribute.AttributeType)
+        {
+            case "Picklist":
+            case "State":
+            case "Status":
+            case "MultiSelectPicklist":
+                return CoerceChoiceFromMetadata(fieldName, trimmed, attribute.OptionSet, logger);
+
+            case "Boolean":
+                // Mirrors the FieldMappingType.Boolean branch above.
+                return trimmed.ToLowerInvariant() switch
+                {
+                    "true" or "yes" or "1" or "on" => true,
+                    "false" or "no" or "0" or "off" => false,
+                    _ => bool.TryParse(trimmed, out var b) ? b : (object)renderedValue
+                };
+
+            case "Integer":
+            case "BigInt":
+            case "Decimal":
+            case "Double":
+            case "Money":
+                // Mirrors the FieldMappingType.Number branch above: int first, then decimal.
+                if (int.TryParse(trimmed, out var intVal)) return intVal;
+                if (decimal.TryParse(trimmed, out var decVal)) return decVal;
+                return renderedValue;
+
+            default:
+                // Text/Memo/etc. — verbatim pass-through (existing behavior preserved).
+                return renderedValue;
+        }
+    }
+
+    /// <summary>
+    /// Resolves a rendered value against a Choice column's real option-set metadata. Mirrors the
+    /// case-insensitive label lookup + numeric-value fallback used by the
+    /// <see cref="FieldMappingType.Choice"/> branch of <see cref="CoerceFieldValue"/> (lines
+    /// 488-514), but sources the valid options from Dataverse metadata instead of the mapping's
+    /// own <c>options</c> map — and FAILS LOUD instead of passing the raw string through, because
+    /// a metadata-confirmed Choice column will otherwise 500 on PATCH (R5 task 030 / FR-C1).
+    /// </summary>
+    /// <exception cref="FieldCoercionException">
+    /// Thrown when the option set is empty, or the trimmed value matches neither an option label
+    /// (case-insensitive) nor a valid numeric option value.
+    /// </exception>
+    private static object CoerceChoiceFromMetadata(
+        string fieldName,
+        string trimmedValue,
+        OptionSetDto? optionSet,
+        ILogger logger)
+    {
+        var options = optionSet?.Options ?? Array.Empty<OptionDto>();
+
+        if (options.Count == 0)
+        {
+            logger.LogWarning(
+                "Choice field '{Field}' has no option-set metadata; cannot coerce type:\"string\" value '{Value}'",
+                fieldName, trimmedValue);
+            throw new FieldCoercionException(
+                $"Field '{fieldName}' is a Choice column with no option-set metadata available; " +
+                $"cannot coerce value '{trimmedValue}'.");
+        }
+
+        // Case-insensitive label lookup — mirrors the FieldMappingType.Choice branch.
+        foreach (var option in options)
+        {
+            if (string.Equals(option.Label, trimmedValue, StringComparison.OrdinalIgnoreCase))
+                return option.Value;
+        }
+
+        // Fallback: AI may have returned the int option value directly (e.g. "100000002").
+        if (int.TryParse(trimmedValue, out var intFallback) &&
+            options.Any(o => o.Value == intFallback))
+            return intFallback;
+
+        var validLabels = string.Join(", ", options.Select(o => o.Label));
+
+        logger.LogWarning(
+            "Choice field '{Field}': value '{Value}' not found in metadata options [{Options}]",
+            fieldName, trimmedValue, validLabels);
+
+        // FAIL LOUD (R5 task 030 / FR-C1) — do NOT return the raw string; the caller (ExecuteAsync)
+        // catches FieldCoercionException and returns a NODE_VALIDATION_FAILED NodeOutput.Error
+        // BEFORE the Dataverse PATCH is issued, instead of letting Dataverse reject it with a 500.
+        throw new FieldCoercionException(
+            $"Field '{fieldName}': value '{trimmedValue}' is not a valid option. " +
+            $"Valid options: {validLabels}.");
     }
 
     // ---------------------------------------------------------------------------
@@ -595,4 +812,23 @@ internal sealed record FieldMappingEntry
     /// E.g. { "pending": 100000000, "complete": 100000002 }.
     /// </summary>
     public Dictionary<string, int>? Options { get; init; }
+}
+
+// ---------------------------------------------------------------------------
+// Metadata-driven coercion failure (R5 task 030 / FR-C1)
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// Thrown by <see cref="UpdateRecordNodeExecutor.CoerceFieldValue"/> (via
+/// <c>CoerceStringMapping</c> / <c>CoerceChoiceFromMetadata</c>) when a <c>type:"string"</c>
+/// mapping's rendered value cannot be resolved against the target column's real Choice metadata.
+/// Caught by <see cref="UpdateRecordNodeExecutor.ExecuteAsync"/> and surfaced as a
+/// <c>NODE_VALIDATION_FAILED</c> <see cref="NodeOutput"/> — the FAIL LOUD contract for an
+/// unmatchable Choice label (never a silent pass-through, never a downstream Dataverse 500).
+/// </summary>
+internal sealed class FieldCoercionException : Exception
+{
+    public FieldCoercionException(string message) : base(message)
+    {
+    }
 }

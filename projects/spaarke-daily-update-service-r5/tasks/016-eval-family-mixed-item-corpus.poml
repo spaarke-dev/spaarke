@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Briefing-accuracy eval family (mixed-item corpus) + deterministic-renderer unit tests + CI merge gate</title>
+    <phase>A: Accuracy core</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>011,013,014</dependencies>
+    <blocks>017</blocks>
+    <tags>testing, integration-test, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>TEST-MODIFYING: touches tests/** and adds an eval family (integration-test tag) — code-review + adr-check run unconditionally per root §8 override row.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Eval-corpus design is judgment-heavy — it defines the correctness contract (what "zero cross-pairing" means as machine-checkable assertions), a new-abstraction/authoring task per Step 3.5.5b opus triggers.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 011/013/014 landing; wires a CI merge gate and adds fixtures/suite consumed by 017.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the briefing-accuracy eval family: a mixed-item corpus that asserts ZERO cross-item pairing (title/regarding/citation always same item), plus aggregation-preference, grounding round-trip, and TL;DR-abstraction cases. Wire the eval suite as a required CI merge gate and add unit tests for the deterministic channel renderer. Per FR-A7 / NFR-02.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer + test architect. Follow ADR-038 test shapes strictly. Expert in the golden-utterance eval harness and the DailyBriefing deterministic pipeline.
+  </role>
+
+  <goal>
+    A briefing-accuracy eval family exists with: (1) a mixed-item corpus asserting zero cross-item pairing including at least one case that would FAIL under the old cross-pairing bug and PASSES now; (2) aggregation-preference cases; (3) grounding round-trip cases (TL;DR facts trace to the deterministic view model); (4) TL;DR-abstraction cases (non-resolving anchor dropped). The eval suite is a required merge gate. The deterministic channel renderer has unit tests. All green.
+  </goal>
+
+  <context>
+    <background>
+      The existing golden-utterances.json schema is dispatch-oriented (cases[] with caseId/family/channel/utterance/context/expected/assertions) and cannot express item-level accuracy assertions. A briefing-accuracy corpus likely needs its own fixture + suite. This family is the machine-verifiable proof that the R5 accuracy work holds and becomes the D-8 harness fixture source (FR-D1). It gates merges per NFR-02.
+    </background>
+    <relevant-files>
+      <file>tests/integration/contract/Eval/golden-utterances.json</file>
+      <file>tests/integration/contract/Eval/GoldenUtteranceEvalSuiteTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs</file>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeCitedText.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">The mixed-item corpus MUST assert ZERO cross-item pairing: for each item, title, regarding record name, and citation/link all originate from the SAME item. Include at least one case constructed so it would FAIL under the pre-R5 cross-pairing bug and PASSES after tasks 011/013/014.</constraint>
+    <constraint source="project">The family MUST include aggregation-preference cases (the briefing prefers an aggregate "you have N …" over enumerating), grounding round-trip cases (every TL;DR fact traces to the deterministic view model), and TL;DR-abstraction cases (a non-resolving anchor is dropped, not warned).</constraint>
+    <constraint source="ADR-038">New tests land at KEEP paths per the 6 KEEP categories. Do NOT add banned shapes (Mock&lt;HttpMessageHandler&gt;, DI-registration-only tests, ctor null-check tests). Integration-heavy pyramid.</constraint>
+    <constraint source="project">The eval suite MUST be a required merge check in CI (NFR-02). Wire it into .github/workflows/sdap-ci.yml as a required gate, not an advisory step.</constraint>
+    <constraint source="project">Add unit tests for the deterministic channel renderer (task-011 output) — a row renders from a single item; the link target equals the item's link.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+    </files>
+    <patterns>
+      <pattern name="Golden-utterance eval suite" location="tests/integration/contract/Eval/GoldenUtteranceEvalSuiteTests.cs">
+        The existing dispatch-oriented suite is the harness precedent. The briefing-accuracy corpus is a NEW fixture + suite (item-level assertions) alongside it — design the schema, don't force-fit the dispatch schema.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm tasks 011/013/014 have landed (deterministic rows, deterministic TL;DR scaffolding, itemRefs[] drop logic) so the corpus can assert against real behavior.</step>
+    <step order="2">Design a briefing-accuracy fixture schema that expresses item-level assertions (per-item title/regarding/citation provenance, aggregate preference, grounding round-trip, anchor drop). If the dispatch schema cannot express these, create a new fixture file + suite (see escalation).</step>
+    <step order="3">Author the mixed-item corpus incl. a case that FAILS under the old cross-pairing bug and PASSES now; add aggregation-preference, grounding round-trip, and TL;DR-abstraction cases.</step>
+    <step order="4">Add unit tests for the deterministic channel renderer (single-item row; link target equals item link).</step>
+    <step order="5">Wire the eval suite as a REQUIRED merge check in .github/workflows/sdap-ci.yml.</step>
+    <step order="6">Run the full suite locally; confirm all green and the merge gate is required.</step>
+    <step order="7">Update TASK-INDEX.md: task 016 completed. Record the schema decision + any deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the existing golden-utterances.json schema cannot express item-level accuracy assertions, STOP and propose a NEW fixture format + suite (documented in notes) rather than force-fitting the dispatch-oriented schema. Present the proposed schema for confirmation before mass-authoring cases.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run the eval + unit suites</tool>
+    <tool name="npm">Run the renderer Jest tests</tool>
+    <tool name="terminal">Edit CI workflow</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/contract/Eval/briefing-accuracy-corpus.json</output>
+    <output type="test">tests/integration/contract/Eval/BriefingAccuracyEvalSuiteTests.cs</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/src/components/__tests__/deterministicRenderer.test.tsx</output>
+    <output type="config">.github/workflows/sdap-ci.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A mixed-item corpus exists asserting zero cross-item pairing, including ≥1 case that would FAIL under the old cross-pairing bug and PASSES now.</criterion>
+    <criterion testable="true">The family includes aggregation-preference, grounding round-trip, and TL;DR-abstraction (non-resolving anchor dropped) cases, all passing.</criterion>
+    <criterion testable="true">The eval suite is a REQUIRED merge check in .github/workflows/sdap-ci.yml (not advisory).</criterion>
+    <criterion testable="true">The deterministic channel renderer has unit tests (single-item row; link target equals item link) that pass.</criterion>
+    <criterion testable="true">No banned test shapes are introduced (ADR-038); new tests land at KEEP paths.</criterion>
+    <criterion testable="true">The full eval + unit suite runs green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-A7 / NFR-02 and plan.md Phase A.7. Depends on 011/013/014. The corpus is reused as D-8 harness fixtures (FR-D1). Existing eval schema fields: caseId/family/channel/utterance/context/expected/assertions (dispatch-oriented) — item-level accuracy likely needs a new fixture per the plan Risk register. TEST-MODIFYING rigor applies.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute; because this task touches tests/**, run the TEST-MODIFYING Step 9.5 gates (code-review + adr-check) unconditionally.
+    </protocol>
+  </execution>
+</task>

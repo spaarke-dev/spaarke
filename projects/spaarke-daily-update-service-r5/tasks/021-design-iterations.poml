@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Produce 2-3 Daily Briefing design variants in the harness honoring the UX parameters (FR-D2)</title>
+    <phase>D: Visual redesign</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022</blocks>
+    <tags>frontend, fluent-ui, design</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Frontend implementation work (builds real Fluent v9 variant renders in the harness) plus open-ended visual/UX design judgment.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Open-ended visual/UX design judgment — synthesizing a glanceable, non-report briefing layout from stated UX parameters is exactly the ambiguous, judgment-heavy work that warrants the top tier.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Iterative design in the single shared harness from task 020; not independently parallelizable.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    In the task-020 harness, produce 2-3 distinct Daily Briefing design variants that honor the operator's UX
+    parameters (Fluent v9 + Power Apps MDA alignment; a glanceable answer to "what are the most important things I
+    need to be aware of"; NOT a report/table; every point easily navigable to its detail; TL;DR and "Critical Today"
+    prominently surfaced; concise value-adding narration). Anchor the look on the existing HighPrioritySection.tsx
+    mini-report-card pattern and Fluent v9 design tokens. Capture screenshots (light + dark) of each variant into
+    notes/design/. This is FR-D2; it feeds the operator sign-off gate in task 022.
+  </prompt>
+
+  <role>
+    SPAARKE platform frontend/UX developer. Expert in Fluent UI v9 design language, Power Apps model-driven-app visual
+    conventions, information-density/glanceability design, and the existing Spaarke.DailyBriefing.Components component
+    set (HighPrioritySection mini-report cards, TldrSection, item renderers).
+  </role>
+
+  <goal>
+    2 to 3 distinct, runnable design variants of the Daily Briefing exist as selectable states in the task-020
+    harness, each satisfying all six UX parameters below, none using a columns/rows table paradigm, each with the
+    TL;DR and a "Critical Today" section prominently surfaced, and each item carrying a working navigation affordance
+    to its detail record. Light + dark screenshots of every variant are archived in
+    projects/spaarke-daily-update-service-r5/notes/design/.
+  </goal>
+
+  <context>
+    <background>
+      The current Daily Briefing UI is flat. R5 redesigns it in the harness before touching production (spec D-8).
+      The operator provided UX parameters instead of a reference product (spec Owner Clarifications: "Visual
+      north-star = none; use stated UX parameters"). This task explores 2-3 concrete visual directions against those
+      parameters so the operator can pick one at the task-022 gate. The existing HighPrioritySection.tsx mini-report
+      cards (R7 W12) are the anchor pattern — the deterministic-card precedent the redesign extends — and
+      RecordHeaderShell.tsx is the reference for Fluent v9 header/summary composition and token usage.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/TldrSection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/SubRowLink.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx</file>
+      <file>(spaarke-prototype repo) the task-020 Daily Briefing harness</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/design/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every variant MUST satisfy ALL SIX UX parameters (operator-authored, binding): (1) Fluent UI v9 design system + components, visually aligned with Power Apps model-driven apps; (2) purpose = a GLANCEABLE answer to "what are the most important things I need to be aware of" across the system; (3) NOT a report/dashboard — no columns/rows table paradigm; visuals (charts/badges/icons) only where they convey information better than text; (4) every briefing point is EASILY NAVIGABLE to its detail record; (5) TL;DR and "Critical Today" (the user-facing framing of the High-Priority section) are prominently surfaced/highlighted; (6) narration is concise, succinct, value-adding — makes the point, not verbose.</constraint>
+    <constraint source="project">Anchor the visual direction concretely: mirror the HighPrioritySection.tsx mini-report-card pattern and use Fluent v9 design tokens (spacing/typography/color) as in RecordHeaderShell.tsx. Do NOT invent an ad-hoc house style detached from these anchors, and do NOT treat "clean/modern" as the spec.</constraint>
+    <constraint source="ADR-021">All variant styling uses Fluent v9 semantic tokens (no hard-coded hex). Each variant MUST render correctly in both light and dark.</constraint>
+    <constraint source="project">Work ONLY in the spaarke-prototype harness. Do NOT modify production Spaarke.DailyBriefing.Components source in this task — the port is task 023. Variants may compose/restyle within the harness (wrapper components, harness-local styling) to explore the direction without committing production changes.</constraint>
+    <constraint source="project">"Critical Today" is the user-facing LABEL for the existing High-Priority section (presentation/naming only) — do NOT introduce a new data surface or change the underlying data contract.</constraint>
+    <constraint source="project">Produce at least 2 and at most 3 variants. Each must be a distinct visual direction (not a trivial color swap of another).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/prototype-harness-extend/SKILL.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>projects/spaarke-daily-update-service-r5/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Mini-report card (Critical Today anchor)" location="src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx">
+        Deterministic per-item card with action badge + reason label + nav affordance; the anchor pattern for the "Critical Today" surface.
+      </pattern>
+      <pattern name="Fluent v9 header/summary composition" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx">
+        Token-driven spacing/typography/surface composition aligned to Power Apps MDA; reference for the TL;DR summary block.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read HighPrioritySection.tsx and RecordHeaderShell.tsx to internalize the mini-report-card pattern and Fluent v9 token usage that anchor the direction.</step>
+    <step order="2">Sketch 2-3 distinct layout directions on paper/notes that each answer "what matters most, glanceably" — e.g. (a) a TL;DR hero band + Critical Today card strip + collapsed channel groups; (b) a prioritized single-column "feed of what matters" with a pinned TL;DR and Critical Today at top; (c) a compact summary-tiles-over-detail direction. Record the intent of each in notes/design/variants-brief.md.</step>
+    <step order="3">Implement each variant as a selectable harness state, composing/restyling the real briefing content with Fluent v9 tokens; ensure TL;DR and "Critical Today" are visually dominant and each item has a working nav affordance (link/button to its detail record) wired to the harness mock nav.</step>
+    <step order="4">Verify each variant against the six UX parameters (glanceable, MDA-aligned, not a table, easy nav, TL;DR+Critical Today prominent, concise narration); revise any variant that regresses a parameter.</step>
+    <step order="5">Capture light AND dark screenshots of each variant into projects/spaarke-daily-update-service-r5/notes/design/ (one subfolder per variant).</step>
+    <step order="6">Write projects/spaarke-daily-update-service-r5/notes/design/variants-brief.md summarizing each variant, how it satisfies each of the six parameters, and its trade-offs — for the operator to review at task 022.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the six UX parameters cannot be jointly satisfied for a given direction (e.g. "glanceable" and "every point navigable to detail" appear to conflict for the data volume), STOP and surface the tension to the operator per root CLAUDE.md §6 rather than silently dropping a parameter.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Run the harness (npm run dev) for live iteration</tool>
+    <tool name="terminal">Run shell commands / capture screenshots</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">(spaarke-prototype repo) 2-3 Daily Briefing design variants as selectable harness states</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/design/variants-brief.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/design/ (light + dark screenshots per variant)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Between 2 and 3 distinct design variants exist as selectable states in the task-020 harness (distinct directions, not color swaps).</criterion>
+    <criterion testable="true">Each variant satisfies all six UX parameters, and variants-brief.md documents parameter-by-parameter how each variant meets them.</criterion>
+    <criterion testable="true">No variant uses a columns/rows table paradigm.</criterion>
+    <criterion testable="true">In every variant the TL;DR and the "Critical Today" section are visually prominent/highlighted relative to the rest of the briefing.</criterion>
+    <criterion testable="true">In every variant, each briefing item has a working navigation affordance to its detail record (harness mock nav resolves).</criterion>
+    <criterion testable="true">Each variant renders correctly in both light and dark; light + dark screenshots of every variant are archived in notes/design/.</criterion>
+    <criterion testable="true">No production Spaarke.DailyBriefing.Components source file in this repo is modified by this task.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Each variant renders">
+      <steps>
+        <step>Select each design variant in turn in the harness</step>
+        <step>Verify the briefing renders (TL;DR, Critical Today, item rows) for each variant with no console errors</step>
+      </steps>
+      <expected>All 2-3 variants render cleanly.</expected>
+    </test>
+    <test name="TL;DR and Critical Today prominent">
+      <steps>
+        <step>For each variant, visually confirm the TL;DR block and the "Critical Today" section are surfaced above/emphasized relative to channel/section rows</step>
+      </steps>
+      <expected>TL;DR and Critical Today read as the most prominent elements in every variant.</expected>
+    </test>
+    <test name="Item navigation affordance works">
+      <steps>
+        <step>For each variant, activate an item's nav affordance (click its link/button)</step>
+        <step>Verify the harness mock navigation fires to the correct detail record id for that item</step>
+      </steps>
+      <expected>Every item navigates to its own detail record; no dead affordances.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle each variant to dark mode</step>
+        <step>Verify background colors adapt (no white surfaces in dark mode)</step>
+        <step>Verify text colors adapt (no black text in dark mode)</step>
+        <step>Verify badges/icons use Fluent v9 semantic tokens, not hard-coded hex</step>
+      </steps>
+      <expected>All variants use Fluent UI v9 semantic tokens per ADR-021 in both themes.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    This is the divergent-exploration step — resist collapsing to one favorite early; the operator picks at task 022.
+    Anchor every variant on the HighPrioritySection mini-report-card pattern + RecordHeaderShell token usage so the
+    directions stay Fluent-v9/MDA-aligned rather than drifting to a generic house style. Keep narration copy in the
+    variants short and value-adding per parameter 6.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
