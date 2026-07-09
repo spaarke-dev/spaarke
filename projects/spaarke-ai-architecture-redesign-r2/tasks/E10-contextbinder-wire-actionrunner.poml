@@ -1,0 +1,90 @@
+<task id="AIR2-E10" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>ContextBinder input-resolution + wire ActionRunner to it (Phase E Move 1 — canonical input resolution, compose B2)</title>
+    <status>not-started</status>
+    <phase>Phase E — AI Execution Foundation</phase>
+    <gate>Phase-E gate</gate>
+    <estimated-effort>2 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Highest-blast-radius foundation task: builds the platform input-resolution abstraction and rewires the canonical completion engine (ActionRunner) onto it. Must not regress the shipped chat-summarize file path. Requires strongest reasoning + rigorous vertical-slice verification.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Brownfield: build a new abstraction (ContextBinder) + rewire the canonical engine + establish a new test category, without regressing shipped behavior.</effort-reason>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, ai, execution-foundation, context-binder, input-resolution, adr-043, end-to-end, no-shim</tags>
+    <dependencies>ADR-043 (execution spine — E-00, Proposed), task 015 (ContextEnvelope v1 frozen contract), task 038 (AppendContextFingerprintAsync dark seam — this task becomes its writer). Re-scopes task 053 (ContextBinder) — 053 was a not-started memory-wave stub; this IS the canonical build.</dependencies>
+  </metadata>
+
+  <prompt>
+    Build `ContextBinder` as THE platform input-resolution abstraction and wire the canonical completion engine (`ActionRunner`) onto it, per ADR-043 (Move 1). Today `ActionRunner.RunAsync(action, DocumentText, …)` takes literal document text and errors if empty (`ActionRunner.cs:78`); the Action's declared `selectionText`/`documentText`/`changesText`/`ledger_resolution` inputs are ignored; `PromptSchemaRenderer.runtimeInput`/`## Input` exists but the dispatch path never feeds it. This task makes `ActionRunner` resolve an Action's DECLARED inputs into `ContextEnvelope` slices via `ContextBinder`, rendered through `## Input`.
+
+    ADR-043 BINDING RULES (read the concise ADR): resolve declared input via ContextBinder → ContextEnvelope slices → runtimeInput/## Input; realize ADR-040 read-by-reference (`ledger_resolution`); NO transitional runtimeInput-only straddle — build against the frozen ContextEnvelope (task 015) contract directly; no engine reads hardcoded session state.
+
+    ABSOLUTE QUALITY MANDATE (operator): NO dead-ends, shims, pseudocode, or incomplete paths. "Works end to end and is observable," not "code written." The definition-of-done is a VERTICAL-SLICE test (ADR-043 governance), NOT a contract-shape test.
+
+    NON-REGRESSION (critical): the shipped chat-summarize path (file input → LLM → informational output) MUST keep working byte-for-behavior. Existing dispatch + summarize tests stay green. This is a rewire onto a superset abstraction, not a behavior change for the file path.
+  </prompt>
+
+  <role>Senior BFF engineer fluent in ADR-039 dispatch, ADR-040 ledger/ledger_resolution, the ActionRunner/PromptSchemaRenderer completion path, the frozen ContextEnvelope contract (task 015), and the SessionDispatchOrchestrator dispatch seam.</role>
+
+  <goal>
+    `ContextBinder` resolves an Action's declared inputs into TWO roles: grounding CONTEXT → `ContextEnvelope` slices (host record / schema / ledger tail / memory refs), and the Action's `sprk_inputschema`-typed OPERAND (`selectionText`/`changesText`/`documentText`/`ledger_resolution`) → the single-source `## Input` producer. `ActionRunner` consumes context-via-envelope + operand-via-`## Input` instead of raw `DocumentText`; the no-file hard stop is relaxed so an args-text Action (no session file) dispatches end-to-end. A NEW `tests/integration/seam/**` vertical-slice test proves: a dispatch Action with a non-file operand → ContextBinder resolves → ActionRunner runs → `SessionOutput` stored (ADR-040) → rendered/frame; plus a golden `## Input`-format assertion. The shipped file-input summarize path is unregressed. ContextBinder also becomes the production writer for task-038's dark `AppendContextFingerprintAsync` (ids/counts only, NFR-07). The shared seam is designed to fit all three completion consumers (ActionRunner now; node engine + narrator replica in E-12).
+  </goal>
+
+  <inputs>
+    <file purpose="adr">docs/adr/ADR-043-ai-capability-execution-spine.md + .claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+    <file purpose="envelope-contract">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (ContextEnvelope v1, task 015 — frozen; do NOT redefine)</file>
+    <file purpose="canonical-engine">src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs (+ IActionRunner.cs)</file>
+    <file purpose="renderer">src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs (runtimeInput / ## Input seam — already used by the node engine)</file>
+    <file purpose="dispatch">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs (the DocumentText assembly + fileIds resolution to replace)</file>
+    <file purpose="fingerprint-seam">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (AppendContextFingerprintAsync — task 038 dark writer seam)</file>
+  </inputs>
+
+  <constraint source="design-against-ALL-consumers (anti-recurrence — operator-directed 2026-07-09)">The `ContextBinder` + single-source `## Input` producer MUST be designed as a shared seam validated against ALL THREE completion consumers UPFRONT — (1) `ActionRunner` (this task's cutover), (2) `AiCompletionNodeExecutor`'s existing `inputBinding`/`runtimeInput` shape (E-12 migrates it — read it, do NOT reshape the abstraction to ActionRunner alone), (3) `DailyBriefingNarrator`'s hand-replicated `## Input` format (E-12 retires the replica onto this producer). Building the "shared" abstraction fitted to ActionRunner only, then reshaping it in E-12, is a recurrence of the exact "built to the first consumer" disease Phase E cures — FORBIDDEN. Prove in the trace note that the seam covers all three shapes before cutting over ActionRunner. Do NOT modify AiCompletionNodeExecutor or DailyBriefingNarrator in THIS task (phased cutover for regression safety) — but the abstraction you build MUST already fit them.</constraint>
+    <constraint source="context-vs-operand (b, operator-settled 2026-07-09)">ContextBinder resolves TWO roles: grounding CONTEXT → ContextEnvelope slices (frozen task-015, unchanged — NOT a home for the operand); the Action's `sprk_inputschema`-typed OPERAND (selectionText/changesText/documentText/ledger_resolution) → the `## Input` channel. The operand is NOT an envelope slice (volatile + per-action-typed vs. the envelope's stable platform-standard shape). "One input model" = ONE ContextBinder resolving both roles.</constraint>
+    <constraint source="## Input single-source + frozen format (per daily-briefing finding)">`## Input` (PromptSchemaRenderer Layer 2) is a single-source producer; ActionRunner consumes it (does not re-implement it). Its output format (indentation, key order, casing, null handling) is a FROZEN contract — add a golden-string `## Input`-format assertion to tests/integration/seam/** so any format change fails the build loudly (protects DailyBriefingNarrator's replica until E-12 retires it).</constraint>
+    <constraint source="ADR-043">One input-resolution model; ContextBinder → context(envelope) + operand(## Input). No runtimeInput-only straddle.</constraint>
+    <constraint source="ADR-040">Inputs resolved by reference where declared (`ledger_resolution` reads prior SessionOutputs by key). No engine reads surface/screen state. Store-before-render preserved.</constraint>
+    <constraint source="ADR-039">Input resolution is deterministic over declared schema — no runtime model judgment of what the input is. Closed catalog unchanged.</constraint>
+    <constraint source="non-regression">The shipped chat-summarize FILE path must stay green (file → DocumentText slice → LLM → informational). Prove with the existing summarize/dispatch tests + a file-path seam test.</constraint>
+    <constraint source="def-of-done">Definition-of-done = a `tests/integration/seam/**` vertical-slice test (consumer input → dispatch → stored SessionOutput → render). Establish the seam/** category (it doesn't exist yet). A contract-shape test is NOT sufficient.</constraint>
+    <constraint source="bff-hygiene">Load .claude/constraints/bff-extensions.md. ADR-013 facade (ContextBinder in PublicContracts or a clean seam). Report publish-size delta (baseline ~46.49 MB compressed incl PDB; ceiling 60 MB) + no new HIGH CVE.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Trace ALL consumers + establish the seam category">Trace the current input assembly (SessionDispatchOrchestrator DocumentText/fileIds → ActionRunner.RunAsync) AND read the two other completion consumers the shared seam must fit: AiCompletionNodeExecutor's inputBinding/runtimeInput shape + DailyBriefingNarrator's hand-replicated ## Input format. Record in notes/E10-shared-seam-design.md how the ContextBinder + ## Input producer covers all three shapes (anti-recurrence proof). Create the tests/integration/seam/** category (test project + README noting it's the ADR-043 vertical-slice KEEP category).</step>
+    <step order="1" name="Build ContextBinder (two roles)">ContextBinder resolves an Action's declared inputs into: (a) grounding CONTEXT → ContextEnvelope slices (host record/schema, ledger tail, memory refs — reuse the frozen task-015 contract); (b) the sprk_inputschema-typed OPERAND (selection/document/changes text from dispatch args; ledger_resolution from the ledger by key, ADR-040) → the single-source ## Input producer. The operand is NOT an envelope slice.</step>
+    <step order="2" name="Single-source the ## Input producer + wire ActionRunner">Establish ONE ## Input producer (PromptSchemaRenderer Layer 2) that ActionRunner consumes for the operand; do not re-implement it. ActionRunner consumes context-via-envelope + operand-via-## Input instead of raw DocumentText; relax the no-file hard stop (ActionRunner.cs:78) so an args-text Action with no session file runs. The file path resolves to a document-operand (unregressed). Freeze the ## Input output format + add the golden assertion.</step>
+    <step order="3" name="Wire the fingerprint writer">ContextBinder writes the ContextEnvelope fingerprint via ChatSessionManager.AppendContextFingerprintAsync (task 038's dark seam) — ids/counts only (NFR-07), store-before-render.</step>
+    <step order="4" name="Vertical-slice proof">Add tests/integration/seam/** tests: (i) an args-text (non-file) dispatch Action → ContextBinder resolves selectionText → ActionRunner runs → SessionOutput stored → rendered (the compose-B2 shape, proven on the real path); (ii) the shipped file-input summarize path still resolves + runs + stores (non-regression); (iii) a ledger_resolution input resolves a prior SessionOutput by reference. Plus unit tests for ContextBinder resolution.</step>
+    <step order="5" name="Gates">Existing summarize/dispatch/eval suites green; code-review + adr-check (Step 9.5). Publish size + CVE.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build + test</tool>
+    <tool name="git">commit is MAIN-SESSION only — report proposed TASK-INDEX/current-task changes, do not commit yourself</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">ContextBinder (input-resolution abstraction) + ActionRunner wired to it + relaxed no-file stop</output>
+    <output type="code">tests/integration/seam/** category (new) + the ADR-043 vertical-slice tests</output>
+    <output type="code">ContextBinder wired as the task-038 fingerprint writer</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ContextBinder resolves an Action's declared inputs (selection/document/changes/fileIds/ledger_resolution) into ContextEnvelope slices (frozen task-015 contract, not redefined).</criterion>
+    <criterion testable="true">ActionRunner consumes the envelope via ## Input; the no-file hard stop is relaxed so an args-text Action dispatches end-to-end. There is NO transitional runtimeInput-only path — the envelope is the input contract.</criterion>
+    <criterion testable="true">A tests/integration/seam/** vertical-slice test proves an args-text Action end-to-end (input → dispatch → stored SessionOutput → render) on the REAL path — the ADR-043 definition-of-done. The category is established.</criterion>
+    <criterion testable="true">NON-REGRESSION: the shipped chat-summarize file-input path stays green (existing summarize/dispatch tests + a file-path seam test).</criterion>
+    <criterion testable="true">ledger_resolution input resolves a prior SessionOutput by reference (ADR-040); ContextBinder writes the fingerprint via AppendContextFingerprintAsync (ids/counts only).</criterion>
+    <criterion testable="true">AiCompletionNodeExecutor is NOT touched (E-12 owns the node-engine convergence with daily-briefing coordination).</criterion>
+    <criterion testable="true">Build 0 errors; eval families green; publish &lt; 60 MB; no new HIGH CVE; code-review + adr-check clean.</criterion>
+    <criterion testable="true">NEGATIVE / anti-shim: no hardcoded/session-state input read remains on the wired path; no TODO/NotImplemented/pseudocode; the args-text vertical-slice test would FAIL if input resolution were stubbed.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If designing the shared ContextBinder + ## Input producer reveals that the three completion consumers (ActionRunner / node engine inputBinding / narrator ## Input replica) have IRRECONCILABLE input shapes that no single seam can fit, STOP and escalate per §6.5 — do NOT fit the seam to ActionRunner alone and defer the mismatch to E-12.</trigger>
+    <trigger>If wiring ActionRunner cannot avoid regressing the file-input summarize path, STOP and escalate rather than shipping a behavior change to the shipped path.</trigger>
+    <trigger>If the operand genuinely cannot render through the existing `## Input`/PromptSchemaRenderer seam without changing its frozen output format (breaking the DailyBriefingNarrator replica), STOP and escalate — a format change is an operator decision.</trigger>
+  </escalation>
+</task>

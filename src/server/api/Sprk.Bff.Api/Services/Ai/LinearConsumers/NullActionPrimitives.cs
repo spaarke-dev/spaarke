@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Ai.Context;
 
 namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 
@@ -66,6 +67,17 @@ public sealed class NullActionRunner : IActionRunner
         DocumentText documentText,
         LinearRunContext context,
         CancellationToken cancellationToken)
+        => FailFast(context);
+
+    /// <inheritdoc />
+    public Task<JsonElement> RunAsync(
+        AnalysisAction action,
+        BoundInputs inputs,
+        LinearRunContext context,
+        CancellationToken cancellationToken)
+        => FailFast(context);
+
+    private Task<JsonElement> FailFast(LinearRunContext? context)
     {
         _logger.LogDebug(
             "NullActionRunner.RunAsync invoked while AI feature is disabled (errorCode={ErrorCode}, consumerType={ConsumerType}).",
