@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/compose-draft-alternative.schema.json",
+  "title": "Compose — Draft Alternative — Output Schema (compose-draft-alternative)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='compose-draft-alternative' (spaarkeai-compose-r2 task 042, FR-09). MIRRORS VERBATIM the outputSchema baked into infra/dataverse/actions/compose-draft-alternative.action.json (the systemPrompt/schema author surface). The STRUCTURED-EDIT PAYLOAD (adeu Pattern §6.1) that becomes the opaque SessionOutput.Payload written under the `compose` disposition before render (ADR-040). Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required array, no anyOf/oneOf/discriminator; match_mode is a closed set via the `enum` keyword (NOT a property-level boolean required, which is FORBIDDEN).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["target_text", "new_text", "match_mode", "rationale", "sources"],
+  "$comment-required": "Object-level required array only — property-level boolean 'required' is FORBIDDEN (OpenAiFunctionSchemaValidator). match_mode's closed set is expressed via the `enum` keyword.",
+  "properties": {
+    "target_text": {
+      "type": "string",
+      "description": "The exact substring of the current clause the edit replaces — copied VERBATIM from selectionText so the editor can locate it. The whole selection when rewriting it as a unit.",
+      "maxLength": 16000
+    },
+    "new_text": {
+      "type": "string",
+      "description": "The proposed replacement clause language — self-contained, drafting-ready contract prose (no placeholders, no commentary, no markup). Inserted as a pending track-change.",
+      "maxLength": 16000
+    },
+    "match_mode": {
+      "type": "string",
+      "description": "How the editor locates target_text: 'strict' (replace the whole selection — default), 'first' (first occurrence of a fragment), or 'all' (every occurrence, e.g. a defined-term change).",
+      "enum": ["strict", "first", "all"]
+    },
+    "rationale": {
+      "type": "string",
+      "description": "Concise plain-language explanation of WHY this alternative is better (≤1 short paragraph, ≤1500 chars) — names the concrete improvement, not a generic justification.",
+      "maxLength": 1500
+    },
+    "sources": {
+      "type": "array",
+      "description": "Grounding for the proposal — each entry is { type, id, snippet }. Empty array when the retrieval layer supplied no grounding — never fabricated.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "id", "snippet"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "The source kind (e.g. 'playbook', 'precedent', 'clause').",
+            "maxLength": 80
+          },
+          "id": {
+            "type": "string",
+            "description": "The retrieval-layer identifier for the source — never fabricated."
+          },
+          "snippet": {
+            "type": "string",
+            "description": "A SHORT supporting excerpt from the source.",
+            "maxLength": 1000
+          }
+        }
+      }
+    }
+  }
+}
