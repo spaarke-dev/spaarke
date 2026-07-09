@@ -137,6 +137,12 @@ public class DailyBriefingCollector : ICodedWorkflow
     // per wave12 §4 — config-table-with-rules is interpreter).
     private const int PerChannelMaxRows = 50;
 
+    // R5 task 013 (FR-A4) — TL;DR scaffolding aggregation caps. The TL;DR call's ground-truth
+    // payload MUST aggregate, not dump every source record (ADR-015 data minimization) — these
+    // caps bound RecordNames/KeyDates regardless of how many rows a channel returns.
+    internal const int TldrFactsMaxRecordNames = 20;
+    internal const int TldrFactsMaxKeyDates = 6;
+
     private readonly IGenericEntityService _entityService;
     private readonly IMembershipResolverService _membershipResolver;
     private readonly ILogger<DailyBriefingCollector> _logger;
@@ -1205,12 +1211,75 @@ public class DailyBriefingCollector : ICodedWorkflow
         var total = upcomingTasks.Length + overdueTasks.Length + documents.Length
                   + matters.Length + projects.Length + todos.Length;
 
-        return new DailyBriefingNarrateRequest
+        var request = new DailyBriefingNarrateRequest
         {
             Categories = categories,
             PriorityItems = priorityItems,
             TotalNotificationCount = total,
             Channels = channels,
+        };
+
+        // R5 task 013 (FR-A4): stamp the deterministic TL;DR scaffolding onto the request here,
+        // while the view model is freshly assembled — this is the collector's "Layer 1" fact
+        // computation the narrator's TL;DR call consumes as ground truth (never computed by the
+        // LLM). See BuildTldrFacts for the aggregation rules.
+        return request with { TldrFacts = BuildTldrFacts(request) };
+    }
+
+    /// <summary>
+    /// R5 task 013 (FR-A4) — compute the TL;DR's factual scaffolding DETERMINISTICALLY from the
+    /// already-assembled request view model (categories/priorityItems/channels/total, themselves
+    /// sourced deterministically from Dataverse records above). This is the ONLY payload the
+    /// TL;DR LLM call receives as ground truth (see <see cref="DailyBriefingNarrator"/>'s
+    /// tldrPayload construction) — every count/date/name the TL;DR asserts traces back to this
+    /// method, never to LLM invention.
+    /// </summary>
+    /// <remarks>
+    /// Pure, static, and side-effect-free — callable from the collector (the primary path, via
+    /// <see cref="BuildNarrateRequest"/> above) AND from <see cref="DailyBriefingNarrator"/> as a
+    /// deterministic fallback for callers that construct a <see cref="DailyBriefingNarrateRequest"/>
+    /// directly without going through the collector (e.g. the legacy <c>/narrate</c> leg, or a
+    /// test driving the narrator in isolation) — both call sites reach the exact same computation,
+    /// so the ground-truth facts are identical regardless of entry path (ADR-039 Binding decides
+    /// dispatch; this method is what decides FACTS, and it decides them the same way everywhere).
+    /// Aggregates rather than dumps (ADR-015): RecordNames/KeyDates are capped
+    /// (<see cref="TldrFactsMaxRecordNames"/> / <see cref="TldrFactsMaxKeyDates"/>) so a
+    /// large channel cannot blow the TL;DR call's token budget.
+    /// </remarks>
+    internal static TldrFactsDto BuildTldrFacts(DailyBriefingNarrateRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Key dates: sourced from PriorityItems only — those are already the curated top-N
+        // most-urgent items (top overdue + top upcoming, see BuildNarrateRequest above), so
+        // their due dates ARE the "key dates" the TL;DR should be able to cite. Channel items
+        // (ChannelItemDto) don't carry a due-date field at all (only CreatedOn), so there is no
+        // additional due-date signal to mine there.
+        var keyDates = request.PriorityItems
+            .Where(p => p.DueDate.HasValue)
+            .Select(p => new TldrKeyDateDto { RecordName = p.Title, Date = p.DueDate!.Value })
+            .Take(TldrFactsMaxKeyDates)
+            .ToArray();
+
+        // Record names: the bounded set of names the TL;DR is permitted to reference. Priority-
+        // item titles first (already curated + most likely to be worth naming), then the
+        // regarding/record names surfaced across channels — deduplicated and capped so a
+        // 50-row channel does not dump every record name into the LLM call.
+        var recordNames = request.PriorityItems.Select(p => p.Title)
+            .Concat(request.Channels.SelectMany(ch => ch.Items.Select(i => i.RegardingName)))
+            .Concat(request.Channels.SelectMany(ch => ch.Items.Select(i => i.Title)))
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(TldrFactsMaxRecordNames)
+            .ToArray();
+
+        return new TldrFactsDto
+        {
+            TotalNotificationCount = request.TotalNotificationCount,
+            CategoryCounts = request.Categories,
+            PriorityItemCount = request.PriorityItems.Length,
+            KeyDates = keyDates,
+            RecordNames = recordNames,
         };
     }
 

@@ -655,6 +655,19 @@ public record DailyBriefingNarrateRequest
     /// <summary>Per-channel notification items for narrative generation.</summary>
     [JsonPropertyName("channels")]
     public ChannelNarrationInput[] Channels { get; init; } = [];
+
+    /// <summary>
+    /// R5 task 013 (FR-A4): deterministically-computed TL;DR scaffolding — the ONLY ground-
+    /// truth facts (counts, dates, record names) the TL;DR LLM call may assert. Computed by
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.BuildTldrFacts"/>
+    /// from Categories/PriorityItems/Channels/TotalNotificationCount above — never by the LLM.
+    /// Optional on the wire (nullable) for backward compatibility with callers that supply the
+    /// legacy request shape without it (e.g. the direct <c>/narrate</c> leg); <see
+    /// cref="Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingNarrator"/> computes it
+    /// deterministically as a fallback when absent — still pure C#, never delegated to the LLM.
+    /// </summary>
+    [JsonPropertyName("tldrFacts")]
+    public TldrFactsDto? TldrFacts { get; init; }
 }
 
 /// <summary>
@@ -721,6 +734,56 @@ public record ChannelItemDto
     /// <summary>ISO 8601 timestamp when the item was created.</summary>
     [JsonPropertyName("createdOn")]
     public string CreatedOn { get; init; } = "";
+}
+
+/// <summary>
+/// Deterministically-computed ground-truth facts for the TL;DR LLM call (R5 task 013, FR-A4).
+/// Every field is computed in C# from source records — the LLM composes prose and prioritizes
+/// OVER these facts; it must never invent a count, date, or name absent from this payload. This
+/// IS the input payload the TL;DR call receives (replaces the earlier raw
+/// categories/priorityItems/channels dump — see <see
+/// cref="Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.BuildTldrFacts"/>). See
+/// docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md for the two-layer pattern this
+/// implements (Layer 1 = this scaffolding; Layer 2 = the "## Input" prompt section).
+/// </summary>
+public sealed record TldrFactsDto
+{
+    /// <summary>Total notification count across all channels — the "you have N ..." figure.</summary>
+    [JsonPropertyName("totalNotificationCount")]
+    public int TotalNotificationCount { get; init; }
+
+    /// <summary>Per-category notification counts (same values as the request's top-level Categories field — aggregated, not itemized).</summary>
+    [JsonPropertyName("categoryCounts")]
+    public NotificationCategoryDto[] CategoryCounts { get; init; } = [];
+
+    /// <summary>Count of priority (most-urgent) items surfaced to the briefing.</summary>
+    [JsonPropertyName("priorityItemCount")]
+    public int PriorityItemCount { get; init; }
+
+    /// <summary>Bounded set of labeled dates (record name + date) the TL;DR may reference for urgency framing. Sourced from PriorityItems' due dates only — already curated to the most urgent items.</summary>
+    [JsonPropertyName("keyDates")]
+    public TldrKeyDateDto[] KeyDates { get; init; } = [];
+
+    /// <summary>
+    /// Bounded, deduplicated set of record names the TL;DR is permitted to reference by name.
+    /// Capped (see <see cref="Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.TldrFactsMaxRecordNames"/>)
+    /// so a large channel does not dump every record into the TL;DR call's token budget
+    /// (ADR-015 data-minimization / aggregation).
+    /// </summary>
+    [JsonPropertyName("recordNames")]
+    public string[] RecordNames { get; init; } = [];
+}
+
+/// <summary>A single labeled due-date fact: which record, and when it's due.</summary>
+public sealed record TldrKeyDateDto
+{
+    /// <summary>Name of the record the date belongs to (verbatim from the source record).</summary>
+    [JsonPropertyName("recordName")]
+    public string RecordName { get; init; } = "";
+
+    /// <summary>The due date itself.</summary>
+    [JsonPropertyName("date")]
+    public DateTimeOffset Date { get; init; }
 }
 
 /// <summary>

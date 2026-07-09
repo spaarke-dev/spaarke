@@ -674,4 +674,203 @@ public sealed class DailyBriefingCollectorTests
         request.Categories.Should().Contain(c => c.Name == "Matters" && c.Count == 2);
         request.Categories.Should().Contain(c => c.Name == "To Dos" && c.Count == 1);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // TL;DR scaffolding wiring (R5 task 013 / FR-A4) — the collector attaches
+    // deterministically-computed TldrFacts onto the request it hands the narrator.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CollectAsync_AttachesTldrFacts_MatchingTheRequestsOwnDeterministicViewModel()
+    {
+        // Arrange — same fixture as CollectAsync_CategoriesAndTotalCountMatchActualItems: 2
+        // matter rows, 1 todo row.
+        var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
+        {
+            ["sprk_matter"] = MembershipWith("sprk_matter", MatterId1, MatterId2),
+        });
+
+        var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>
+        {
+            ["sprk_matter"] = new EntityCollection(new List<Entity>
+            {
+                MakeMatterEntity(MatterId1, "Matter Alpha"),
+                MakeMatterEntity(MatterId2, "Matter Beta"),
+            }),
+            ["sprk_todo"] = new EntityCollection(new List<Entity>
+            {
+                MakeTodoEntity(TodoId1, "Send agenda")
+            })
+        });
+
+        var sut = new DailyBriefingCollector(
+            entityMock.Object,
+            resolverMock.Object,
+            NullLogger<DailyBriefingCollector>.Instance);
+
+        // Act
+        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+
+        // Assert — TldrFacts is populated (not the LLM's job to fill it in) and every count
+        // traces back EXACTLY to the same view model the request itself carries — this is the
+        // "TL;DR asserts only deterministic facts" contract at the collector boundary.
+        request.TldrFacts.Should().NotBeNull(
+            because: "the collector must stamp deterministic scaffolding onto every request it builds (R5 FR-A4)");
+        request.TldrFacts!.TotalNotificationCount.Should().Be(request.TotalNotificationCount);
+        request.TldrFacts.CategoryCounts.Should().BeEquivalentTo(request.Categories);
+        request.TldrFacts.PriorityItemCount.Should().Be(request.PriorityItems.Length);
+    }
+}
+
+/// <summary>
+/// R5 task 013 (FR-A4) — pure unit tests for <see cref="DailyBriefingCollector.BuildTldrFacts"/>,
+/// the deterministic-fact computation the TL;DR LLM call consumes as ground truth. No Dataverse
+/// I/O, no LLM — <c>BuildTldrFacts</c> is a pure static function over an already-built
+/// <see cref="DailyBriefingNarrateRequest"/> view model, so these tests assert its output
+/// (counts/dates/names) equals the deterministic view-model values it was built FROM, across
+/// multiple fixtures (single-category and multi-category) — the direct proof for the "TL;DR
+/// asserts only deterministic facts" acceptance criterion.
+/// </summary>
+[Trait("status", "task-013-r5")]
+public sealed class DailyBriefingTldrFactsTests
+{
+    [Fact]
+    public void BuildTldrFacts_SingleCategoryFixture_CountsAndDatesMatchViewModel()
+    {
+        var dueDate = new DateTimeOffset(2026, 7, 10, 0, 0, 0, TimeSpan.Zero);
+        var request = new DailyBriefingNarrateRequest
+        {
+            Categories = [new NotificationCategoryDto { Name = "Overdue Tasks", Count = 2, UnreadCount = 2 }],
+            PriorityItems =
+            [
+                new PriorityItemDto { Category = "Tasks", Title = "Review engagement letter", DueDate = dueDate },
+                new PriorityItemDto { Category = "Tasks", Title = "File motion" }
+            ],
+            TotalNotificationCount = 2,
+            Channels =
+            [
+                new ChannelNarrationInput
+                {
+                    Category = "overdue-tasks",
+                    Label = "Overdue Tasks",
+                    Items =
+                    [
+                        new ChannelItemDto { Id = "1", Title = "Review engagement letter", RegardingName = "Acme Matter" },
+                        new ChannelItemDto { Id = "2", Title = "File motion", RegardingName = "Acme Matter" }
+                    ]
+                }
+            ]
+        };
+
+        var facts = DailyBriefingCollector.BuildTldrFacts(request);
+
+        // Counts trace back EXACTLY to the request's own deterministic view model.
+        facts.TotalNotificationCount.Should().Be(request.TotalNotificationCount);
+        facts.CategoryCounts.Should().BeEquivalentTo(request.Categories);
+        facts.PriorityItemCount.Should().Be(request.PriorityItems.Length);
+
+        // Only the PriorityItem that actually HAS a due date produces a KeyDate — and the date
+        // value equals the deterministic view-model value verbatim.
+        facts.KeyDates.Should().ContainSingle();
+        facts.KeyDates[0].RecordName.Should().Be("Review engagement letter");
+        facts.KeyDates[0].Date.Should().Be(dueDate);
+
+        // RecordNames carries the priority-item titles + channel record names — the TL;DR's
+        // allow-list of names it may reference.
+        facts.RecordNames.Should().Contain(new[] { "Review engagement letter", "File motion", "Acme Matter" });
+    }
+
+    [Fact]
+    public void BuildTldrFacts_MultiCategoryFixture_CountsAndDatesMatchViewModelAcrossChannels()
+    {
+        var overdueDate = new DateTimeOffset(2026, 6, 20, 0, 0, 0, TimeSpan.Zero);
+        var upcomingDate = new DateTimeOffset(2026, 7, 12, 0, 0, 0, TimeSpan.Zero);
+        var request = new DailyBriefingNarrateRequest
+        {
+            Categories =
+            [
+                new NotificationCategoryDto { Name = "Overdue Tasks", Count = 1, UnreadCount = 1 },
+                new NotificationCategoryDto { Name = "Upcoming Tasks", Count = 1, UnreadCount = 1 },
+                new NotificationCategoryDto { Name = "Documents", Count = 3, UnreadCount = 3 }
+            ],
+            PriorityItems =
+            [
+                new PriorityItemDto { Category = "Tasks", Title = "Respond to opposing counsel", DueDate = overdueDate },
+                new PriorityItemDto { Category = "Tasks", Title = "Prepare deposition outline", DueDate = upcomingDate }
+            ],
+            TotalNotificationCount = 5,
+            Channels =
+            [
+                new ChannelNarrationInput
+                {
+                    Category = "overdue-tasks", Label = "Overdue Tasks",
+                    Items = [new ChannelItemDto { Id = "e1", Title = "Respond to opposing counsel", RegardingName = "Beta Matter" }]
+                },
+                new ChannelNarrationInput
+                {
+                    Category = "upcoming-tasks", Label = "Upcoming Tasks",
+                    Items = [new ChannelItemDto { Id = "e2", Title = "Prepare deposition outline", RegardingName = "Beta Matter" }]
+                },
+                new ChannelNarrationInput
+                {
+                    Category = "documents", Label = "Documents",
+                    Items =
+                    [
+                        new ChannelItemDto { Id = "d1", Title = "Engagement letter.docx", RegardingName = "Beta Matter" },
+                        new ChannelItemDto { Id = "d2", Title = "NDA draft.docx", RegardingName = "Gamma Matter" },
+                        new ChannelItemDto { Id = "d3", Title = "Cover letter.docx", RegardingName = "Gamma Matter" }
+                    ]
+                }
+            ]
+        };
+
+        var facts = DailyBriefingCollector.BuildTldrFacts(request);
+
+        facts.TotalNotificationCount.Should().Be(5);
+        facts.CategoryCounts.Should().HaveCount(3);
+        facts.CategoryCounts.Select(c => c.Name).Should()
+            .BeEquivalentTo(new[] { "Overdue Tasks", "Upcoming Tasks", "Documents" });
+        facts.PriorityItemCount.Should().Be(2);
+
+        // Both priority items have due dates — both surface as KeyDates, verbatim.
+        facts.KeyDates.Should().HaveCount(2);
+        facts.KeyDates.Should().ContainEquivalentOf(
+            new TldrKeyDateDto { RecordName = "Respond to opposing counsel", Date = overdueDate });
+        facts.KeyDates.Should().ContainEquivalentOf(
+            new TldrKeyDateDto { RecordName = "Prepare deposition outline", Date = upcomingDate });
+
+        // RecordNames spans every channel — the TL;DR may reference any record across all 3
+        // categories, not just the priority items.
+        facts.RecordNames.Should().Contain(new[]
+        {
+            "Respond to opposing counsel", "Prepare deposition outline",
+            "Beta Matter", "Gamma Matter",
+            "Engagement letter.docx", "NDA draft.docx", "Cover letter.docx"
+        });
+    }
+
+    [Fact]
+    public void BuildTldrFacts_ChannelWithManyItems_CapsRecordNamesInsteadOfDumpingEveryRecord()
+    {
+        // ADR-015 data-minimization / aggregation constraint: the TL;DR scaffolding must
+        // aggregate, not dump, every source record — a channel with more rows than the cap
+        // must not blow the TL;DR call's token budget.
+        var items = Enumerable.Range(1, 30)
+            .Select(i => new ChannelItemDto { Id = $"n{i}", Title = $"Notification {i}", RegardingName = "Delta Matter" })
+            .ToArray();
+        var request = new DailyBriefingNarrateRequest
+        {
+            Categories = [new NotificationCategoryDto { Name = "Documents", Count = 30, UnreadCount = 30 }],
+            PriorityItems = [],
+            TotalNotificationCount = 30,
+            Channels = [new ChannelNarrationInput { Category = "documents", Label = "Documents", Items = items }]
+        };
+
+        var facts = DailyBriefingCollector.BuildTldrFacts(request);
+
+        // The count fact is still exact (counting is cheap and safe to assert precisely)...
+        facts.TotalNotificationCount.Should().Be(30);
+        // ...but the enumerated name list stays bounded regardless of channel size.
+        facts.RecordNames.Length.Should().BeLessOrEqualTo(DailyBriefingCollector.TldrFactsMaxRecordNames);
+    }
 }

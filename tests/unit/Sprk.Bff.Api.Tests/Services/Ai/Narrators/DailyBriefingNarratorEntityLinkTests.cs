@@ -352,10 +352,83 @@ public sealed class DailyBriefingNarratorEntityLinkTests
         bullets[1].ItemIds.Should().BeEquivalentTo(new[] { regarding.Id });
     }
 
+    // ─── TL;DR scaffolding (R5 task 013 / FR-A4) ─────────────────────────────────────────
+
+    /// <summary>
+    /// The TL;DR LLM call's "## Input" section must carry ONLY deterministically-computed
+    /// facts (TldrFactsDto) equal to the request's own deterministic view model — never the
+    /// raw categories/priorityItems/channels dump, and never a count/date/name the LLM
+    /// computed itself (it can't — the mock never sees the raw request shape at all).
+    /// </summary>
+    [Fact]
+    public async Task NarrateAsync_TldrLlmCallReceivesOnlyDeterministicFacts_MatchingTheRequestsViewModel()
+    {
+        var dueDate = new DateTimeOffset(2026, 7, 9, 0, 0, 0, TimeSpan.Zero);
+        var item1 = new ChannelItemDto
+        {
+            Id = "e1", Title = "Respond to opposing counsel", RegardingName = "Beta Matter", SourceEntityType = "sprk_event"
+        };
+        var item2 = new ChannelItemDto
+        {
+            Id = "d1", Title = "NDA draft.docx", RegardingName = "Gamma Matter", SourceEntityType = "sprk_document"
+        };
+
+        var req = new DailyBriefingNarrateRequest
+        {
+            Categories =
+            [
+                new NotificationCategoryDto { Name = "Overdue Tasks", Count = 1, UnreadCount = 1 },
+                new NotificationCategoryDto { Name = "Documents", Count = 1, UnreadCount = 1 }
+            ],
+            PriorityItems = [new PriorityItemDto { Category = "Tasks", Title = item1.Title, DueDate = dueDate }],
+            TotalNotificationCount = 2,
+            Channels =
+            [
+                new ChannelNarrationInput { Category = "overdue-tasks", Label = "Overdue Tasks", Items = [item1] },
+                new ChannelNarrationInput { Category = "documents", Label = "Documents", Items = [item2] }
+            ]
+        };
+
+        string? capturedPrompt = null;
+        var (actions, llm, scrubber) = BuildBoundaryMocks(onTldrPrompt: p => capturedPrompt = p);
+        var sut = new DailyBriefingNarrator(actions.Object, llm.Object, scrubber.Object,
+            NullLogger<DailyBriefingNarrator>.Instance);
+
+        await sut.NarrateAsync(req, CancellationToken.None);
+
+        capturedPrompt.Should().NotBeNull();
+        var facts = JsonSerializer.Deserialize<TldrFactsDto>(
+            ExtractInputSectionJson(capturedPrompt!),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+        // Counts/dates/names in the LLM's actual input equal the request's own deterministic
+        // view model, verbatim.
+        facts.Should().NotBeNull();
+        facts!.TotalNotificationCount.Should().Be(req.TotalNotificationCount);
+        facts.CategoryCounts.Should().BeEquivalentTo(req.Categories);
+        facts.PriorityItemCount.Should().Be(req.PriorityItems.Length);
+        facts.KeyDates.Should().ContainSingle(d => d.RecordName == item1.Title && d.Date == dueDate);
+        facts.RecordNames.Should().Contain(new[] { item1.Title, item2.Title, "Beta Matter", "Gamma Matter" });
+
+        // Negative half of the contract: the raw per-channel item fields (id/sourceEntityType)
+        // never reach the LLM — only the aggregated facts do.
+        capturedPrompt.Should().NotContain("sourceEntityType",
+            because: "the TL;DR call must receive aggregated facts, not the raw channel item dump (ADR-015)");
+    }
+
+    /// <summary>Extract the JSON body of the "## Input" prompt section CallLlmStructuredAsync appends.</summary>
+    private static string ExtractInputSectionJson(string fullPrompt)
+    {
+        const string marker = "## Input\n\n";
+        var idx = fullPrompt.IndexOf(marker, StringComparison.Ordinal);
+        idx.Should().BeGreaterThanOrEqualTo(0, because: "CallLlmStructuredAsync always appends a \"## Input\" section");
+        return fullPrompt[(idx + marker.Length)..].TrimEnd('\n');
+    }
+
     // ─── Test infrastructure ──────────────────────────────────────────────────────────────
 
     private static (Mock<AnalysisActionService> actions, Mock<IOpenAiClient> llm, Mock<IEntityNameScrubber> scrubber)
-        BuildBoundaryMocks()
+        BuildBoundaryMocks(Action<string>? onTldrPrompt = null)
     {
         var actions = new Mock<AnalysisActionService>(MockBehavior.Loose,
             new HttpClient { BaseAddress = new Uri("https://example.crm.dynamics.com/api/data/v9.2/") },
@@ -377,15 +450,23 @@ public sealed class DailyBriefingNarratorEntityLinkTests
         // post-R5 task 010. Any other invocation (e.g. a resurrected per-channel call)
         // throws MockException and fails the test.
         var llm = new Mock<IOpenAiClient>(MockBehavior.Strict);
-        llm.Setup(c => c.GetStructuredCompletionRawAsync(
+        var setup = llm.Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(),
                 It.IsAny<BinaryData>(),
                 TldrActionCode.Replace('-', '_'),
                 It.IsAny<string?>(),
                 It.IsAny<int?>(),
                 It.IsAny<float?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(tldrJson);
+                It.IsAny<CancellationToken>()));
+        if (onTldrPrompt is not null)
+        {
+            // R5 task 013 (FR-A4): lets callers capture the exact prompt (incl. the "## Input"
+            // JSON section) fed to the TL;DR LLM call, so tests can assert it carries only the
+            // deterministically-computed scaffolding — never a raw record dump.
+            setup.Callback<string, BinaryData, string, string?, int?, float?, CancellationToken>(
+                (prompt, _, _, _, _, _, _) => onTldrPrompt(prompt));
+        }
+        setup.ReturnsAsync(tldrJson);
 
         var scrubber = new Mock<IEntityNameScrubber>(MockBehavior.Loose);
         scrubber.Setup(s => s.Scrub(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>()))

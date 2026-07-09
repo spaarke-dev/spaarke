@@ -154,24 +154,29 @@ export interface ChannelNarrationResult {
 }
 
 export interface NarrativeBulletResult {
+  /**
+   * R5 task 010 (FR-A3): built server-side directly from the source item's
+   * `Title` field (`DailyBriefingNarrator.BuildDeterministicBullet`) —
+   * deterministic, never LLM-authored.
+   */
   narrative: string;
   itemIds: string[];
   primaryEntityType: string;
   primaryEntityId: string;
   primaryEntityName: string;
-  /**
-   * R7 W12 feedback items 2/3/4 (2026-07-01) — per-bullet entity references.
-   * Ordered by first-appearance in narrative text (mentioned refs), then by
-   * channel order (implicit refs). Widget renders:
-   * - `mentioned=true` refs: wrap `entityName` in narrative text as clickable Link.
-   * - `mentioned=false` refs: append trailing `[N]` citations.
-   * Empty array (or field absent) => plain-text bullet, no citations.
-   */
-  references?: NarrativeBulletReferenceResult[];
 }
 
+/**
+ * Reference shape used internally by `NarrativeCitedText`'s deterministic
+ * segment builder (R5 task 011). The R7 W12 per-bullet `references[]` wire
+ * field this type originally mirrored (LLM-narrative multi-mention
+ * citations) is no longer emitted by `BuildDeterministicBullet` and is not
+ * consumed anywhere client-side — this type now exists purely to describe
+ * the single, item-derived candidate `NarrativeCitedText` builds from its
+ * own `regardingName`/`regardingEntityType`/`regardingId` props.
+ */
 export interface NarrativeBulletReferenceResult {
-  /** 1-based citation index for trailing `[N]` markers. */
+  /** 1-based index (retained for `buildSegments` compatibility; always 1 today). */
   index: number;
   /** Dataverse logical name of the target entity (e.g., "sprk_matter"). */
   entityType: string;

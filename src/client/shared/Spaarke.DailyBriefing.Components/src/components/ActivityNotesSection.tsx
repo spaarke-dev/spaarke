@@ -1,6 +1,6 @@
 /**
  * ActivityNotesSection -- renders all channel sections with headings and
- * AI-narrated bullets for the Daily Briefing.
+ * deterministic item-row bullets for the Daily Briefing.
  *
  * Each channel group gets a ChannelHeading followed by NarrativeBullet items.
  * Channel icons are resolved via CHANNEL_REGISTRY + getChannelIcon.
@@ -13,6 +13,15 @@
  *   shows EmptyState directly. Per-bullet sub-list expansion (FR-11/12/13/14)
  *   is REMOVED — /render bullets carry their own primaryEntity* link so
  *   sub-rows are no longer needed.
+ *
+ * R5 task 011 (FR-A1, 2026-07-08): each `bullet` in `channel.bullets` maps
+ * 1:1 to a single source item (task 010 removed the per-channel LLM call —
+ * see `DailyBriefingNarrator.BuildDeterministicBullet`). Every field passed
+ * to `<NarrativeBullet>` below (`narrative`, `primaryEntityName`,
+ * `primaryEntityType`, `primaryEntityId`) is destructured from that SAME
+ * `bullet` object — cross-item pairing is structurally impossible. The prior
+ * `references[]` pass-through (an LLM-narrative-era multi-mention mechanism)
+ * was REMOVED along with `NarrativeBullet`'s `references` prop.
  *
  * Constraints:
  *   - ADR-021: Fluent v9 tokens only, dark mode via semantic tokens
@@ -67,22 +76,18 @@ const useStyles = makeStyles({
 // Props
 // ---------------------------------------------------------------------------
 
-/** Shape of a single narrative bullet within a channel. */
+/**
+ * Shape of a single item row within a channel. R5 task 011 (FR-A1): every
+ * field here is sourced from ONE source item (see file header) — there is no
+ * `references[]` field anymore (the R7 W12 LLM-narrative-era multi-mention
+ * mechanism was removed along with `NarrativeBullet`'s consumption of it).
+ */
 interface ChannelNarrativeBullet {
   narrative: string;
   itemIds: string[];
   primaryEntityType: string;
   primaryEntityId: string;
   primaryEntityName: string;
-  /** R7 W12 feedback items 2/3/4 — passed through to NarrativeBullet for
-   * inline-link + trailing-[N]-citation rendering. Optional for back-compat. */
-  references?: {
-    index: number;
-    entityType: string;
-    entityId: string;
-    entityName: string;
-    mentioned: boolean;
-  }[];
 }
 
 /** Shape of a channel narrative group. */
@@ -92,7 +97,7 @@ interface ChannelNarrative {
 }
 
 export interface ActivityNotesSectionProps {
-  /** Channel narratives with AI-generated bullets grouped by category. */
+  /** Channel groups with deterministic, item-sourced bullets (R5 task 010/011). */
   channelNarratives: ChannelNarrative[];
   /** Callback to add notification IDs to To Do. */
   onAddToTodo: (itemIds: string[]) => void;
@@ -226,7 +231,6 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
                 primaryEntityType={bullet.primaryEntityType}
                 primaryEntityId={bullet.primaryEntityId}
                 itemIds={bullet.itemIds}
-                references={bullet.references}
                 onAddToTodo={onAddToTodo}
                 onDismiss={onDismiss}
                 isTodoCreated={isTodoCreated(firstItemId)}

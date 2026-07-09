@@ -34,6 +34,17 @@
 // the BRIEF-NARRATE-CHANNEL catalog Action are left in place (unused) — retirement is a
 // separate task (012); this change only removes the call path.
 //
+// R5 AMENDMENT (task 013, FR-A4, 2026-07-08) — TL;DR call now receives DETERMINISTIC
+// SCAFFOLDING, not a raw data dump. Previously the TL;DR payload was the raw
+// categories/priorityItems/channels/totalNotificationCount blob (every item, every field,
+// across every channel) — the LLM could in principle "count" or "date" things itself from
+// that payload. It now receives DailyBriefingCollector.BuildTldrFacts's TldrFactsDto: a
+// small, purpose-built ground-truth object (totalNotificationCount, categoryCounts,
+// priorityItemCount, keyDates[], recordNames[]) computed deterministically in C#. The LLM
+// composes prose + prioritizes ONLY over these provided facts; it must never introduce a
+// fact absent from them (BRIEF-NARRATE-TLDR system prompt updated to instruct this — see
+// projects/spaarke-daily-update-service/notes/playbooks/actions/brief-narrate-tldr.action.json).
+//
 // References:
 //   - projects/spaarke-ai-platform-unification-r7/notes/spikes/narrator-spike-plan.md
 //   - projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-t116-narrate-systematic-assessment.md
@@ -194,13 +205,15 @@ public class DailyBriefingNarrator : ICodedWorkflow
                 $"DailyBriefingNarrator: Action {TldrActionCode} has no OutputSchemaJson.");
         }
 
-        var tldrPayload = new
-        {
-            categories = req.Categories,
-            priorityItems = req.PriorityItems,
-            channels = req.Channels,
-            totalNotificationCount = req.TotalNotificationCount
-        };
+        // R5 task 013 (FR-A4): the TL;DR call receives ONLY deterministically-computed ground-
+        // truth facts — never the raw categories/priorityItems/channels dump (that dumped every
+        // record and gave the LLM room to "count" or "date" things itself). Prefer the
+        // scaffolding the collector already stamped onto the request (req.TldrFacts, the primary
+        // path via DailyBriefingCollector.BuildNarrateRequest); fall back to computing it here —
+        // still pure C#, still deterministic, never delegated to the LLM — for callers that
+        // construct a DailyBriefingNarrateRequest directly (the legacy /narrate leg, or a test
+        // driving NarrateAsync without going through the collector).
+        var tldrPayload = req.TldrFacts ?? DailyBriefingCollector.BuildTldrFacts(req);
         var tldrRaw = await CallLlmStructuredAsync(
             actionCode: TldrActionCode,
             systemPrompt: tldrAction.SystemPrompt,

@@ -256,7 +256,14 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     const fs = require('fs') as typeof import('fs');
     const path = require('path') as typeof import('path');
     const componentsDir = path.resolve(__dirname, '../src/components');
-    const filesToScan = ['NarrativeBullet.tsx', 'SubRow.tsx', 'SubRowLink.tsx', 'SubRowTodo.tsx', 'SubRowDismiss.tsx'];
+    const filesToScan = [
+      'NarrativeBullet.tsx',
+      'NarrativeCitedText.tsx',
+      'SubRow.tsx',
+      'SubRowLink.tsx',
+      'SubRowTodo.tsx',
+      'SubRowDismiss.tsx',
+    ];
     const hexColorRe = /[\s:'"(]#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/;
 
     const offenders: string[] = [];
@@ -654,4 +661,120 @@ describe('NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)', 
   // Case 6: aggregated Dismiss is now in the overflow menu — covered by
   //         OverflowMenu_DismissCallsParentCascade (above).
   // -------------------------------------------------------------------------
+});
+
+// ---------------------------------------------------------------------------
+// Tests — R5 task 011 (FR-A1): deterministic, single-item row rendering.
+//
+// Task 010 removed the per-channel LLM narrate call; `narrative` is now
+// built server-side directly from the source item's own `Title` field
+// (DailyBriefingNarrator.BuildDeterministicBullet). This task removed
+// NarrativeBullet's `references[]` prop (an LLM-narrative-era multi-mention
+// mechanism) and NarrativeCitedText's dependency on any externally supplied
+// reference list. These tests assert:
+//   - The regarding-name link click resolves to the SAME item's own
+//     primaryEntityType/primaryEntityId (the "link target equals the item's
+//     server-composed link" acceptance criterion).
+//   - Two independently rendered rows (as ActivityNotesSection renders one
+//     <NarrativeBullet> per bullet in a map) never bleed fields into each
+//     other, even when both are mounted in the same container at once.
+// ---------------------------------------------------------------------------
+
+describe('NarrativeBullet — R5 task 011 deterministic single-item rendering (FR-A1)', () => {
+  afterEach(() => {
+    uninstallXrm();
+  });
+
+  it('regarding-name link (non-inlined case) invokes onOpenRecord with THIS row primaryEntityType/primaryEntityId — the item named in the row', () => {
+    const onOpenRecord = jest.fn();
+    // Narrative deliberately does NOT contain the regarding name, so the
+    // separate link line renders (the common production case — item titles
+    // rarely restate the regarding record's own display name).
+    const props = baseProps({
+      narrative: 'Review motion to dismiss.',
+      primaryEntityName: 'Acme Matter',
+      primaryEntityType: 'sprk_matter',
+      primaryEntityId: '11111111-1111-1111-1111-111111111111',
+      onOpenRecord,
+    });
+    renderWith(props);
+
+    const link = screen.getByRole('link', { name: /Acme Matter/i });
+    fireEvent.click(link);
+
+    expect(onOpenRecord).toHaveBeenCalledTimes(1);
+    expect(onOpenRecord).toHaveBeenCalledWith('sprk_matter', '11111111-1111-1111-1111-111111111111');
+  });
+
+  it('regarding-name mentioned inline in the narrative renders as a single inline link (no duplicate separate link line)', () => {
+    const onOpenRecord = jest.fn();
+    const props = baseProps({
+      narrative: 'Review motion to dismiss for Acme Matter.',
+      primaryEntityName: 'Acme Matter',
+      primaryEntityType: 'sprk_matter',
+      primaryEntityId: '11111111-1111-1111-1111-111111111111',
+      onOpenRecord,
+    });
+    renderWith(props);
+
+    // Exactly ONE link resolves to the entity — never two (inline + separate).
+    const links = screen.getAllByRole('link', { name: /Acme Matter/i });
+    expect(links).toHaveLength(1);
+
+    fireEvent.click(links[0]);
+    expect(onOpenRecord).toHaveBeenCalledWith('sprk_matter', '11111111-1111-1111-1111-111111111111');
+  });
+
+  it('two rows rendered together (as ActivityNotesSection renders one NarrativeBullet per bullet) never cross-pair fields — cross-item pairing is structurally impossible', () => {
+    const onOpenRecordA = jest.fn();
+    const onOpenRecordB = jest.fn();
+
+    const propsA = baseProps({
+      itemIds: ['item-a'],
+      narrative: 'Draft the settlement letter.',
+      primaryEntityName: 'Widget Co Matter',
+      primaryEntityType: 'sprk_matter',
+      primaryEntityId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      onOpenRecord: onOpenRecordA,
+    });
+    const propsB = baseProps({
+      itemIds: ['item-b'],
+      narrative: 'File the amended complaint.',
+      primaryEntityName: 'Gadget Inc Project',
+      primaryEntityType: 'sprk_project',
+      primaryEntityId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      onOpenRecord: onOpenRecordB,
+    });
+
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <NarrativeBullet {...propsA} />
+        <NarrativeBullet {...propsB} />
+      </FluentProvider>
+    );
+
+    // Both rows' own text is visible.
+    expect(screen.getByText(/Draft the settlement letter/i)).toBeInTheDocument();
+    expect(screen.getByText(/File the amended complaint/i)).toBeInTheDocument();
+
+    // Row A's link resolves to Row A's entity — never Row B's.
+    fireEvent.click(screen.getByRole('link', { name: /Widget Co Matter/i }));
+    expect(onOpenRecordA).toHaveBeenCalledWith('sprk_matter', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+    expect(onOpenRecordB).not.toHaveBeenCalled();
+
+    // Row B's link resolves to Row B's entity — never Row A's.
+    fireEvent.click(screen.getByRole('link', { name: /Gadget Inc Project/i }));
+    expect(onOpenRecordB).toHaveBeenCalledWith('sprk_project', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+    expect(onOpenRecordA).toHaveBeenCalledTimes(1); // still just the one call from above
+  });
+
+  it('NarrativeBulletProps has no references[] prop — grep-provable zero LLM-narrative consumption (source scan)', () => {
+    const fs = require('fs') as typeof import('fs');
+    const path = require('path') as typeof import('path');
+    const source = fs.readFileSync(path.resolve(__dirname, '../src/components/NarrativeBullet.tsx'), 'utf8');
+    // The word "references" may only appear inside comments explaining its
+    // REMOVAL — it must never appear as a live prop/destructure/JSX attr.
+    expect(source).not.toMatch(/references\??:\s*NarrativeBulletReferenceResult/);
+    expect(source).not.toMatch(/references=\{/);
+  });
 });
