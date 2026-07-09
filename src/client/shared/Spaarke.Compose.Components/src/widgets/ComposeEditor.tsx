@@ -149,10 +149,7 @@ const SELECTION_DEBOUNCE_MS = 250;
  * in a draft must be escaped to render as literal text rather than markup.
  */
 function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /** Minimum selection length to fire Flow 2 (`compose_selection_offer`). */
@@ -537,7 +534,15 @@ function useSelectionEventDispatch(
  */
 export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditorProps>(
   function ComposeEditor(props, ref) {
-    const { docxBytes, documentRef, bffBaseUrl, sessionId = '', onDirtyChange, onImportWarnings, enqueueComposeAction } = props;
+    const {
+      docxBytes,
+      documentRef,
+      bffBaseUrl,
+      sessionId = '',
+      onDirtyChange,
+      onImportWarnings,
+      enqueueComposeAction,
+    } = props;
 
     const styles = useStyles();
     const dispatch = useDispatchPaneEvent();
@@ -650,7 +655,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // markup; `new_text` is Tier 3 and is NEVER logged.
           const html = newText
             .split(/\r?\n/)
-            .map((line) => `<p>${escapeHtml(line)}</p>`)
+            .map(line => `<p>${escapeHtml(line)}</p>`)
             .join('');
           editor.chain().focus().insertContent(html).run();
           dirtyRef.current = true;
