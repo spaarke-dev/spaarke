@@ -58,6 +58,7 @@ export interface IChatMessagePlanStep {
  * - 'entity_card'         → SprkChatMessageRenderer entity card
  * - 'action_confirmation' → SprkChatMessageRenderer action confirmation card
  * - 'plan_preview'        → PlanPreviewCard (plan gate — task 2F)
+ * - 'outcome_card'        → SprkChatMessageRenderer OutcomeCard (Completion Engine — task 035)
  */
 export interface IChatMessageMetadata {
   /**
@@ -72,6 +73,10 @@ export interface IChatMessageMetadata {
     | 'action_confirmation'
     | 'plan_preview'
     | 'document_status'
+    // spaarke-ai-architecture-redesign-r2 task 035 (FR-A1-06) — structured side-effect
+    // completion card. `data` carries the server OutcomeCard v1 shape; rendered by
+    // SprkChatMessageRenderer via the OutcomeCard component.
+    | 'outcome_card'
     // chat-routing-redesign-r1 task 117b — file-aware playbook options card.
     // Rendered by SprkChatMessageRenderer with click handlers passed from
     // SprkChat (onSelectPlaybook, onOpenLibraryModal) — FR-50 + FR-51.

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Wire engine into event, matter, project services</title>
+    <phase>2: Wire Wizard Services</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>015,011</dependencies>
+    <blocks>040</blocks>
+    <tags>frontend, typescript, integration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .ts service create paths.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical wiring following the engine's public entrypoint + the applyResolverFields adjacency; clear reference.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches eventService/matterService/projectService only; tasks 021/022 touch different service files.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Call the field-mapping engine from createEvent (eventService), and the matter/project service create paths,
+    immediately after applyResolverFields and before createRecord, passing the resolved parent (association) and
+    the payload. Mapping warnings append to the service's existing warnings; no behavior change when no profile exists.
+  </prompt>
+
+  <role>SPAARKE shared-lib developer. Follow the canonical create-method structure.</role>
+
+  <goal>Event/Matter/Project wizard-created records inherit mapped fields at creation when a profile exists; graceful no-op otherwise.</goal>
+
+  <context>
+    <background>Each service creates via: nav-prop discovery → payload → BU cascade → applyResolverFields → createRecord (see invoiceService as the canonical reference). The engine call slots in adjacent to applyResolverFields. WizardHostProps already injects dataService/authenticatedFetch/bffBaseUrl.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/projectService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Call the engine AFTER applyResolverFields and BEFORE createRecord, on the same payload object. sourceEntity/sourceId come from the resolved parent (association.entityType/recordId); targetEntity is the service's own entity.</constraint>
+    <constraint source="project">Engine warnings append to the service's existing warnings array. The engine never throws; do not add try/catch that aborts creation.</constraint>
+    <constraint source="project">No behavior change when the engine returns profileFound:false.</constraint>
+    <constraint source="project">matterService parent may be another matter (same-entity) — pass it through unchanged (no source===target special-casing).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/invoiceService.ts</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    </files>
+    <patterns>
+      <pattern name="create-method structure" location="src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/invoiceService.ts">nav-prop → payload → BU cascade → applyResolverFields → createRecord.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">In eventService.createEvent, after applyResolverFields (or its equivalent regarding block) and before createRecord, call the engine with { sourceEntity, sourceId, targetEntity:'sprk_event', payload:entity, dataService, authenticatedFetch, bffBaseUrl }.</step>
+    <step order="2">Append engine warnings to the result/warnings; do not abort on failure.</step>
+    <step order="3">Repeat for matterService and projectService create paths.</step>
+    <step order="4">Build the shared lib + run the affected service tests.</step>
+    <step order="5">Update TASK-INDEX.md: mark 020 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the shared library</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">eventService.ts, matterService.ts, projectService.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of the 3 services calls the engine after applyResolverFields, before createRecord, on the payload.</criterion>
+    <criterion testable="true">With a matching profile, mapped fields appear on the created record; without one, behavior is unchanged.</criterion>
+    <criterion testable="true">Engine warnings surface in the service's warnings; creation never aborts on a mapping failure.</criterion>
+    <criterion testable="true">Shared-lib build + service tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md FR-12.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

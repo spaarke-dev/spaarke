@@ -394,11 +394,18 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
           context.speContainerId || undefined,
           tenantId
         );
+        // Task 020 (spec FR-12): pass the AssociateToStep selection so
+        // MatterService can drive the Field Mapping Framework engine
+        // (graceful no-op when there's no association or no configured
+        // profile for the pair). MatterService already holds
+        // authenticatedFetch/bffBaseUrl from the constructor above.
         const result = await service.createMatter(
           mergedFormValues,
           context.uploadedFiles,
           followOnActions,
-          cascadeDefaults
+          cascadeDefaults,
+          undefined,
+          context.association
         );
 
         if (result.status === 'error') {
@@ -467,7 +474,11 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         // create the event record linked to the matter via N:1.
         if (context.selectedActions.includes('create-event') && context.followOn.createEventName.trim()) {
           try {
-            const eventService = new EventService(dataService);
+            // Task 020: authenticatedFetch/bffBaseUrl also drive the Field
+            // Mapping Framework engine for this follow-on Event create
+            // (Matter -> Event pair) — see the primary createEvent wiring in
+            // CreateEventWizard.tsx for the full rationale.
+            const eventService = new EventService(dataService, authenticatedFetch, bffBaseUrl);
             const eventFormValues = {
               eventName: context.followOn.createEventName.trim(),
               eventTypeId: context.followOn.createEventTypeId,
@@ -479,6 +490,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
               regardingRecordName: matterName,
             };
             const eventResult = await eventService.createEvent(eventFormValues, 'sprk_matter');
+            if (eventResult.warnings.length > 0) result.warnings.push(...eventResult.warnings);
             if (eventResult.success) {
               console.info('[CreateMatterWizard] Event created and linked to matter:', matterId);
             } else {

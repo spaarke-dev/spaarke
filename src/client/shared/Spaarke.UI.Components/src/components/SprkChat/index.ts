@@ -23,7 +23,21 @@ export type {
   IEntityCardResponse,
   IEntityCardField,
   IActionConfirmationResponse,
+  IOutcomeCardResponse,
 } from './SprkChatMessageRenderer';
+
+// OutcomeCard - structured side-effect completion card (Completion Engine, task 035 / FR-A1-06).
+// Exported for reuse by Compose r2 / SpaarkeAi (render OutcomeCard side effects via one contract).
+export { OutcomeCard, normalizeOutcomeStatus } from './OutcomeCard';
+export type {
+  IOutcomeCard,
+  IOutcomeCardProps,
+  IOutcomeCardLink,
+  INextStepChip,
+  IOutcomeStep,
+  IOutcomeCompletion,
+  OutcomeStatus,
+} from './OutcomeCard';
 
 // PlanPreviewCard - Plan execution gate with step progress (Phase 2F)
 export { PlanPreviewCard } from './PlanPreviewCard';

@@ -406,6 +406,100 @@ export function findNavProp(
 }
 
 // ---------------------------------------------------------------------------
+// Nav-prop discovery (shared) — consolidated 2026-07-09 (task 011, Path A)
+// ---------------------------------------------------------------------------
+
+/**
+ * Module-level cache of discovered ManyToOne nav-props, keyed by entity logical
+ * name. Lifetime = page session. Shared by the array-form wizard services
+ * (Event / Invoice / Project / WorkAssignment / ReportCard / Todo), each of
+ * which previously kept an identical private copy of this cache + discovery fn.
+ *
+ * NOTE: `matterService` intentionally retains its OWN map-form cache + discovery
+ * (a different `Record<string,string>` return shape that feeds its create-payload
+ * path); its convergence onto this function is deferred to a follow-up task.
+ * See `projects/set-regarding-and-field-mapping-resolver-r2/notes/task-011-BLOCKED.md`.
+ */
+const _navPropCache: Record<string, INavPropEntry[]> = {};
+
+/**
+ * Discover the single-valued ManyToOne navigation properties for an entity via
+ * the Dataverse `EntityDefinitions` metadata endpoint. Returns an array of
+ * `{ columnName, navPropName, referencedEntity }` entries for resolution with
+ * {@link findNavProp}. Results are cached per entity for the page lifetime.
+ *
+ * Context-agnostic per ADR-012: uses the host-relative `/api/data/v9.0/...`
+ * fetch already used by the wizard services — no `Xrm.WebApi` / PCF APIs. The
+ * optional `fetchImpl` parameter is a test seam (defaults to the global
+ * `fetch`, resolved at call time); production callers omit it.
+ *
+ * Never throws — returns `[]` on a non-OK response or a fetch error. Callers
+ * treat an empty set as "no nav-prop" and log a warn downstream.
+ *
+ * @param entityLogicalName  e.g. `'sprk_event'`, `'sprk_invoice'`, `'sprk_document'`
+ * @param fetchImpl          Fetch implementation (test seam; default global `fetch`)
+ * @returns                  Array of {@link INavPropEntry}; empty on failure
+ */
+export async function discoverNavProps(
+  entityLogicalName: string,
+  fetchImpl: typeof fetch = globalThis.fetch
+): Promise<INavPropEntry[]> {
+  if (_navPropCache[entityLogicalName]) {
+    return _navPropCache[entityLogicalName];
+  }
+
+  try {
+    const url =
+      `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLogicalName}')/ManyToOneRelationships` +
+      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
+
+    const resp = await fetchImpl(url, { credentials: 'include' });
+    if (!resp.ok) {
+      console.warn(`[PolymorphicResolver] Nav-prop discovery failed for ${entityLogicalName}: HTTP ${resp.status}`);
+      return [];
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const json: any = await resp.json();
+    const rels: Array<{
+      ReferencingAttribute: string;
+      ReferencingEntityNavigationPropertyName: string;
+      ReferencedEntity: string;
+    }> =
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (json as any).value ?? [];
+
+    const entries: INavPropEntry[] = rels.map(r => ({
+      columnName: r.ReferencingAttribute,
+      navPropName: r.ReferencingEntityNavigationPropertyName,
+      referencedEntity: r.ReferencedEntity,
+    }));
+
+    _navPropCache[entityLogicalName] = entries;
+    return entries;
+  } catch (err) {
+    console.warn(`[PolymorphicResolver] Nav-prop discovery error for ${entityLogicalName}:`, err);
+    return [];
+  }
+}
+
+/**
+ * Reset the shared nav-prop cache. Test-only.
+ *
+ * @param entityLogicalName  Optional — clear a single entity's entry; omit to clear all.
+ * @internal
+ */
+export function _resetNavPropCacheForTests(entityLogicalName?: string): void {
+  if (entityLogicalName) {
+    delete _navPropCache[entityLogicalName];
+    return;
+  }
+  for (const k of Object.keys(_navPropCache)) {
+    delete _navPropCache[k];
+  }
+}
+
+// ---------------------------------------------------------------------------
 // High-level: apply resolver fields to an entity payload
 // ---------------------------------------------------------------------------
 

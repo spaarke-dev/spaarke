@@ -149,10 +149,11 @@ public class BusinessSliceDeterminismContractTests
     [Fact]
     public void WriteContractDescription_RenderedFromTwoIndependentInstances_IsByteIdentical()
     {
+        var handoffUrlBuilder = new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com");
         var handler1 = new DataverseCreateRecordHandler(
-            new Mock<IDataverseUserClient>().Object, new Mock<ILogger<DataverseCreateRecordHandler>>().Object);
+            new Mock<IDataverseUserClient>().Object, new Mock<ILogger<DataverseCreateRecordHandler>>().Object, handoffUrlBuilder);
         var handler2 = new DataverseCreateRecordHandler(
-            new Mock<IDataverseUserClient>().Object, new Mock<ILogger<DataverseCreateRecordHandler>>().Object);
+            new Mock<IDataverseUserClient>().Object, new Mock<ILogger<DataverseCreateRecordHandler>>().Object, handoffUrlBuilder);
 
         var description1 = handler1.Metadata.Description;
         var description2 = handler2.Metadata.Description;

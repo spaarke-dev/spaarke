@@ -2,7 +2,7 @@
   <metadata>
     <title>FR-07 compose-explain-clause Action + Binding</title>
     <phase>4 Catalog</phase>
-    <status>blocked</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>045</blocks>

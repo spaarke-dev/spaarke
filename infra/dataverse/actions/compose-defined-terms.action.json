@@ -1,0 +1,58 @@
+{
+  "$comment": "spaarkeai-compose-r2 task 044 (FR-11) — compose-defined-terms Action SEED (systemPrompt home). ACTION-ONLY, no playbook (ADR-039; engine frozen). Mirror-first author surface for sprk_analysisaction (sprk_actioncode=compose-defined-terms); deploy via scripts/Deploy-AnalysisAction.ps1. Whole-document read action: scans for defined terms + usage consistency; renders READ-ONLY in the Context pane (overflow-menu trigger). Consumes the compose-document JPS scope. REVIEW FLAG: definitionSpan/span authored as TEXT SNIPPETS (LLM-reliable), not ProseMirror numeric offsets — the Context pane resolves snippet→position on render. Owner hygiene: actionCode carries NO version suffix.",
+  "actionCode": "compose-defined-terms",
+  "name": "Compose — Defined Terms",
+  "description": "Scan the whole document for defined terms and check usage consistency (FR-11). Read-only: lists each defined term, where it is defined, and each usage (flagging inconsistent uses), plus an inconsistencies summary. Renders read-only in the Context pane. Consumes the compose-document JPS scope; no document mutation.",
+  "actionType": 0,
+  "temperature": 0.1,
+  "systemPrompt": "ROLE: You are the Spaarke Compose defined-terms auditor. You scan a full contract for defined terms (capitalized terms given a definition, e.g. '\"Confidential Information\" means ...') and check that each term is used consistently with its definition throughout the document.\n\nINPUT: a documentText field carrying the full contract text.\n\nINSTRUCTIONS:\n  1. Identify every DEFINED term in the document — a term that is explicitly given a definition (quoted-and-defined, 'means'/'shall mean', or a definitions section entry).\n  2. For each defined term, capture the text snippet where it is defined (definitionSpan) and each place it is USED, judging whether each usage is consistent with the definition.\n  3. Separately, flag inconsistencies — a defined term used in a way that conflicts with its definition, a term used but never defined, or a term defined but never used.\n  4. Emit a JSON object matching the output schema EXACTLY. additionalProperties is false; do not add fields.\n  5. terms: one entry per defined term. term is the defined term itself. definitionSpan is a short TEXT SNIPPET (verbatim quote from the document) where the term is defined. usages is a list of { span (verbatim text snippet of the usage), consistent (boolean — true if the usage matches the definition), note (short explanation, empty string when consistent) }.\n  6. inconsistencies: one entry per problem — { term, detail (a one-sentence description of the inconsistency) }. Empty array when the document's defined terms are all used consistently.\n\nCONSTRAINTS:\n  - Ground everything in the supplied documentText. Use verbatim snippets for spans; do NOT paraphrase the span text. Do NOT invent terms or usages.\n  - This is a READ/AUDIT action: report; do NOT propose edits.\n  - Never echo secrets or content outside the supplied document.",
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["terms", "inconsistencies"],
+    "$comment-required": "Object-level required arrays only — property-level boolean 'required' is FORBIDDEN. NOTE: the 'consistent' field is a boolean VALUE (type: boolean) — that is legal; the ban is on the property-level required KEYWORD, not on boolean-typed fields.",
+    "properties": {
+      "terms": {
+        "type": "array",
+        "description": "One entry per defined term found in the document.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["term", "definitionSpan", "usages"],
+          "properties": {
+            "term": { "type": "string", "description": "The defined term itself (e.g. 'Confidential Information').", "maxLength": 200 },
+            "definitionSpan": { "type": "string", "description": "Verbatim text snippet where the term is defined.", "maxLength": 2000 },
+            "usages": {
+              "type": "array",
+              "description": "Each place the term is used, with a consistency judgment.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["span", "consistent", "note"],
+                "properties": {
+                  "span": { "type": "string", "description": "Verbatim text snippet of the usage.", "maxLength": 2000 },
+                  "consistent": { "type": "boolean", "description": "True if this usage is consistent with the term's definition." },
+                  "note": { "type": "string", "description": "Short explanation of any inconsistency; empty string when consistent.", "maxLength": 500 }
+                }
+              }
+            }
+          }
+        }
+      },
+      "inconsistencies": {
+        "type": "array",
+        "description": "Defined-term problems: inconsistent usage, used-but-undefined, or defined-but-unused. Empty when all defined terms are used consistently.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["term", "detail"],
+          "properties": {
+            "term": { "type": "string", "description": "The term the inconsistency concerns.", "maxLength": 200 },
+            "detail": { "type": "string", "description": "One-sentence description of the inconsistency.", "maxLength": 500 }
+          }
+        }
+      }
+    }
+  }
+}

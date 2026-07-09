@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Project wrap-up — verify, gates, test-diet, close</title>
+    <phase>5: Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020,021,022,030,040,041</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, e2e-test, wrap-up, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final quality gates (code-review + adr-check) + end-to-end verification + test-diet.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Verification + gate orchestration against a defined checklist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task; depends on everything.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Close the project: verify end-to-end inheritance in a live environment (one wizard-created record per mapping
+    type + a same-entity matter→matter case + a no-profile no-op + push regression), run code-review + adr-check,
+    run /test-diet, update README/plan to Complete, write lessons-learned, and run repo-cleanup.
+  </prompt>
+
+  <role>SPAARKE platform developer + reviewer.</role>
+
+  <goal>All graduation criteria checked; quality gates clean or issues resolved; project artifacts finalized.</goal>
+
+  <context>
+    <background>Mandatory wrap-up. Confirms the whole chain (engine + BFF + schema + 7-service wiring + seed + docs) works end-to-end and that BFF/no-plugin/no-PCF invariants hold.</background>
+    <relevant-files>
+      <file>projects/set-regarding-and-field-mapping-resolver-r2/README.md</file>
+      <file>projects/set-regarding-and-field-mapping-resolver-r2/plan.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Verify: one live wizard-created record per mapping type (Copy incl. lookup, Default, Concat, Template) inherits correctly; a matter→matter case; a no-profile pair is an unchanged no-op; UpdateRelatedButton push still works.</constraint>
+    <constraint source="project">Confirm invariants via git diff: no Dataverse plugin/form script, no new PCF, no new BFF endpoint/service/DI/package; BFF change additive-only; publish-size delta reported.</constraint>
+    <constraint source="project">Run /test-diet (project-close gate) and cite the report.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run /code-review + /adr-check across the project's changes; resolve criticals (or document exceptions per §6.5).</step>
+    <step order="2">Live verification: create one record per mapping type via the wizards + a matter→matter case; confirm inheritance in Dataverse; confirm a no-profile pair is unchanged; smoke the push path.</step>
+    <step order="3">Confirm invariants via git diff --stat (no plugin, no new PCF, additive BFF only); report publish-size delta.</step>
+    <step order="4">Run /test-diet; cite the report.</step>
+    <step order="5">Update README.md (Status Complete, criteria checked) + plan.md (milestones ✅); write notes/lessons-learned.md.</step>
+    <step order="6">Run /repo-cleanup; mark all tasks ✅ in TASK-INDEX.md; mark 090 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build/test</tool>
+    <tool name="npm">Build/test</tool>
+    <tool name="terminal">git, verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">Updated README.md, plan.md, notes/lessons-learned.md, notes/test-diet-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All graduation criteria in README.md are checked with evidence.</criterion>
+    <criterion testable="true">code-review + adr-check clean or exceptions documented.</criterion>
+    <criterion testable="true">Live verification passed for all four mapping types + same-entity + no-op + push.</criterion>
+    <criterion testable="true">Invariants confirmed via git diff; publish-size delta reported; /test-diet report cited.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md Success Criteria 1-10.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

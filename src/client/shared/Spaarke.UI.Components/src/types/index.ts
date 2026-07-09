@@ -19,7 +19,9 @@ export { FieldSecurityService } from '../services/FieldSecurityService';
 export { ColumnRendererService } from '../services/ColumnRendererService';
 export { EntityConfigurationService } from '../services/EntityConfigurationService';
 export { CustomCommandFactory } from '../services/CustomCommandFactory';
-export { FieldMappingService } from '../services/FieldMappingService';
+// (FieldMappingService class removed in task 010 — the engine is now the
+// `applyFieldMappings` function exported from the services barrel. Field-mapping
+// TYPES are exported above via `export * from './FieldMappingTypes'`.)
 export {
   EventTypeService,
   eventTypeService,

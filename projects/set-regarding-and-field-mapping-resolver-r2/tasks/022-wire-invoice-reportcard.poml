@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Wire engine into invoice + reportCard services</title>
+    <phase>2: Wire Wizard Services</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>015,011</dependencies>
+    <blocks>040</blocks>
+    <tags>frontend, typescript, integration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .ts service create paths.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical wiring following task 020's pattern; invoiceService is itself the canonical reference.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches invoiceService/reportCardService only.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Wire the field-mapping engine into invoiceService.createInvoice and reportCardService.createReportCard,
+    mirroring task 020 (after applyResolverFields, before createRecord; warnings append; graceful no-op).
+  </prompt>
+
+  <role>SPAARKE shared-lib developer.</role>
+
+  <goal>Invoice and Report Card wizard-created records inherit mapped fields at creation when a profile exists.</goal>
+
+  <context>
+    <background>Both services (merged 2026-07-09) already follow the canonical create-method structure. invoiceService.createInvoice is the reference impl the engine call slots into.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/invoiceService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/reportCardService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Same insertion point + warning-append + graceful no-op contract as task 020. targetEntity is 'sprk_invoice' / 'sprk_reportcard'.</constraint>
+    <constraint source="project">Invoice/ReportCard target field names differ from Matter (Invoice renames attorney/paralegal + has no law-firm; ReportCard renames lawfirm1) — the engine handles this via config; do NOT hard-code field names in the service wiring.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/invoiceService.ts</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Wire invoiceService.createInvoice to the engine (after applyResolverFields, before createRecord).</step>
+    <step order="2">Wire reportCardService.createReportCard to the engine.</step>
+    <step order="3">Build + run affected service tests.</step>
+    <step order="4">Update TASK-INDEX.md: mark 022 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the shared library</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">invoiceService.ts, reportCardService.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both services call the engine after applyResolverFields, before createRecord.</criterion>
+    <criterion testable="true">Mapped fields appear with a matching profile; unchanged behavior otherwise.</criterion>
+    <criterion testable="true">No target field names are hard-coded in the service wiring.</criterion>
+    <criterion testable="true">Build + service tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Ref: spec.md FR-12, FR-13. Completed 2026-07-09 — see notes/task-022-notes.md.
+    ReportCardService's constructor gained required authenticatedFetch/bffBaseUrl
+    params (it previously had none) to mirror InvoiceService/WorkAssignmentService's
+    injected-dependency shape; CreateReportCardWizard.tsx's ReportCardService
+    instantiation was updated accordingly (not a "service file" per the parallel-wave
+    boundary, but necessary for the wiring to be functionally real in production).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

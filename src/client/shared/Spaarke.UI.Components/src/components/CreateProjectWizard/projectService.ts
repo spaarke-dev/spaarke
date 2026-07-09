@@ -18,7 +18,14 @@
 import type { ICreateProjectFormState } from './projectFormTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
-import { EntityCreationService, type IUserBuCascadeDefaults } from '../../services/EntityCreationService';
+import type { AssociationResult } from '../AssociateToStep/types';
+import {
+  EntityCreationService,
+  type IUserBuCascadeDefaults,
+  type AuthenticatedFetchFn,
+} from '../../services/EntityCreationService';
+import { discoverNavProps } from '../../services/PolymorphicResolverService';
+import { applyFieldMappings } from '../../services/FieldMappingService';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -33,79 +40,23 @@ export interface ICreateProjectResult {
   success: boolean;
   /** Human-readable error message (set when success is false). */
   errorMessage?: string;
+  /** Non-fatal warnings (e.g. field-mapping profile fetch failures). Empty when none. */
+  warnings: string[];
 }
 
 // ---------------------------------------------------------------------------
 // Metadata discovery — find correct OData navigation property names
 // ---------------------------------------------------------------------------
 
+// Nav-prop discovery is provided by the shared `discoverNavProps`
+// (PolymorphicResolverService) — consolidated 2026-07-09 (task 011, Path A).
+// The local `NavPropEntry` shape below is structurally identical to the shared
+// `INavPropEntry` returned by `discoverNavProps`, so `_findNavProp` accepts it.
+
 interface NavPropEntry {
   columnName: string;
   navPropName: string;
   referencedEntity: string;
-}
-
-/**
- * Query the Dataverse entity metadata API to discover the actual
- * single-valued navigation property names for lookup columns on an entity.
- *
- * Dataverse uses PascalCase navigation property names (e.g. "sprk_ProjectType")
- * which differ from the lowercase column logical names ("sprk_projecttype").
- * The @odata.bind syntax requires the nav-prop name, not the column name.
- *
- * This enhanced version also discovers the referenced (target) entity for each
- * relationship, enabling lookup matching by target entity instead of column name.
- * This is more robust because column names can vary between entities.
- *
- * Results are cached per entity to avoid repeated metadata calls.
- *
- * @param entityLogicalName - e.g. 'sprk_project'
- * @returns Array of NavPropEntry with column name, nav-prop name, and referenced entity
- */
-const _navPropCache: Record<string, NavPropEntry[]> = {};
-
-async function _discoverNavProps(entityLogicalName: string): Promise<NavPropEntry[]> {
-  if (_navPropCache[entityLogicalName]) {
-    return _navPropCache[entityLogicalName];
-  }
-
-  try {
-    const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLogicalName}')/ManyToOneRelationships` +
-      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
-
-    const resp = await fetch(url, { credentials: 'include' });
-    if (!resp.ok) {
-      console.warn(`[ProjectService] Nav-prop discovery failed for ${entityLogicalName}:`, resp.status);
-      return [];
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const json: any = await resp.json();
-    const rels: Array<{
-      ReferencingAttribute: string;
-      ReferencingEntityNavigationPropertyName: string;
-      ReferencedEntity: string;
-    }> =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (json as any).value ?? [];
-
-    const entries: NavPropEntry[] = rels.map(r => ({
-      columnName: r.ReferencingAttribute,
-      navPropName: r.ReferencingEntityNavigationPropertyName,
-      referencedEntity: r.ReferencedEntity,
-    }));
-
-    console.info(
-      `[ProjectService] Nav-props for ${entityLogicalName}:`,
-      entries.map(e => `${e.columnName} → ${e.navPropName} (→ ${e.referencedEntity})`)
-    );
-    _navPropCache[entityLogicalName] = entries;
-    return entries;
-  } catch (err) {
-    console.warn(`[ProjectService] Nav-prop discovery error for ${entityLogicalName}:`, err);
-    return [];
-  }
 }
 
 /**
@@ -133,7 +84,18 @@ function _findNavProp(entries: NavPropEntry[], referencedEntity: string, columnH
 // ---------------------------------------------------------------------------
 
 export class ProjectService {
-  constructor(private readonly _dataService: IDataService) {}
+  constructor(
+    private readonly _dataService: IDataService,
+    /**
+     * Injected BFF-authenticated fetch. Optional — only required to activate the
+     * Field Mapping Framework engine (task 020, spec FR-12). Lookup-only callers
+     * (searchProjectTypes/searchPracticeAreas/etc.) may omit it. When absent,
+     * the engine call is a graceful no-op — identical to today's behavior.
+     */
+    private readonly _authenticatedFetch?: AuthenticatedFetchFn,
+    /** BFF API base URL. See {@link _authenticatedFetch}. */
+    private readonly _bffBaseUrl?: string
+  ) {}
 
   // ── Lookup search methods ─────────────────────────────────────────────
 
@@ -284,6 +246,13 @@ export class ProjectService {
    * @param cascadeDefaults Optional BU-derived defaults (containerId, searchIndexName).
    *   When omitted/undefined the cascade step is a no-op (legacy behavior). New
    *   wizard call sites pass the resolved value; tests can omit it.
+   * @param association Optional parent record selected via the wizard's
+   *   AssociateToStep (Matter/Account today; same-entity Project parents are
+   *   not precluded — no source===target guard, per ADR-024/design.md §10).
+   *   When supplied, drives the Field Mapping Framework engine (spec FR-12):
+   *   `sourceEntity`/`sourceId` = `association.entityType`/`recordId`. When
+   *   omitted, the engine call is skipped — a graceful no-op identical to
+   *   today's behavior.
    *
    * @see spec.md FR-WIZ-02
    * @see spec.md FR-WIZ-08 (INV-5)
@@ -291,12 +260,13 @@ export class ProjectService {
    */
   async createProject(
     formValues: ICreateProjectFormState,
-    cascadeDefaults?: IUserBuCascadeDefaults
+    cascadeDefaults?: IUserBuCascadeDefaults,
+    association?: AssociationResult | null
   ): Promise<ICreateProjectResult> {
     // Discover correct OData navigation property names from entity metadata.
     // Matches by referenced (target) entity to avoid hardcoding column names
     // which can differ between entities (e.g. sprk_mattertype vs sprk_projecttyperef).
-    const navProps = await _discoverNavProps('sprk_project');
+    const navProps = await discoverNavProps('sprk_project');
 
     // Build entity payload with scalar fields
     const entity: Record<string, unknown> = {
@@ -396,6 +366,29 @@ export class ProjectService {
       }
     }
 
+    const warnings: string[] = [];
+
+    // Field Mapping Framework (spec FR-12, task 020): apply the configured
+    // {parent -> sprk_project} mapping profile (if any) onto the create
+    // payload. Runs AFTER the lookup-binding block above and BEFORE
+    // createRecord, on the SAME payload object. The engine never throws and
+    // is a graceful no-op when there's no association, no profile, or the BFF
+    // deps are unavailable (e.g. a lookup-only construction site) -- no
+    // behavior change in any of those cases. No source===target guard (
+    // same-entity mapping is a supported scenario per ADR-024/design.md §10).
+    if (association?.recordId && association.entityType && this._authenticatedFetch && this._bffBaseUrl) {
+      const mappingResult = await applyFieldMappings({
+        sourceEntity: association.entityType,
+        sourceId: association.recordId,
+        targetEntity: 'sprk_project',
+        payload: entity,
+        dataService: this._dataService,
+        authenticatedFetch: this._authenticatedFetch,
+        bffBaseUrl: this._bffBaseUrl,
+      });
+      warnings.push(...mappingResult.warnings);
+    }
+
     try {
       console.info('[ProjectService] createRecord payload:', JSON.stringify(entity, null, 2));
       // IDataService.createRecord returns Promise<string> (just the id)
@@ -405,6 +398,7 @@ export class ProjectService {
         projectId,
         projectName: formValues.projectName.trim(),
         success: true,
+        warnings,
       };
     } catch (err) {
       console.error('[ProjectService] createRecord error:', err);
@@ -414,6 +408,7 @@ export class ProjectService {
       return {
         success: false,
         errorMessage: `Failed to create project record: ${message}`,
+        warnings,
       };
     }
   }

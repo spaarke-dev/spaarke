@@ -24,8 +24,9 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IUploadProgress, AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
-import { applyResolverFields, findNavProp } from '../../services/PolymorphicResolverService';
+import { applyResolverFields, findNavProp, discoverNavProps } from '../../services/PolymorphicResolverService';
 import type { INavPropEntry } from '../../services/PolymorphicResolverService';
+import { applyFieldMappings } from '../../services/FieldMappingService';
 
 // Re-export shared search helpers for use by step components
 export {
@@ -40,54 +41,10 @@ export {
 // Metadata discovery (same pattern as MatterService/EventService)
 // ---------------------------------------------------------------------------
 
-const _navPropCache: Record<string, INavPropEntry[]> = {};
-
-async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEntry[]> {
-  if (_navPropCache[entityLogicalName]) {
-    return _navPropCache[entityLogicalName];
-  }
-
-  try {
-    const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLogicalName}')/ManyToOneRelationships` +
-      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
-
-    const resp = await fetch(url, { credentials: 'include' });
-    if (!resp.ok) {
-      console.warn(`[WorkAssignmentService] Nav-prop discovery failed for ${entityLogicalName}:`, resp.status);
-      return [];
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const json: any = await resp.json();
-    const rels: Array<{
-      ReferencingAttribute: string;
-      ReferencingEntityNavigationPropertyName: string;
-      ReferencedEntity: string;
-    }> =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (json as any).value ?? [];
-
-    const entries: INavPropEntry[] = rels.map(r => ({
-      columnName: r.ReferencingAttribute,
-      navPropName: r.ReferencingEntityNavigationPropertyName,
-      referencedEntity: r.ReferencedEntity,
-    }));
-
-    console.info(
-      `[WorkAssignmentService] Nav-props for ${entityLogicalName}:`,
-      entries.map(e => `${e.columnName} -> ${e.navPropName} (${e.referencedEntity})`)
-    );
-    _navPropCache[entityLogicalName] = entries;
-    return entries;
-  } catch (err) {
-    console.warn(`[WorkAssignmentService] Nav-prop discovery error for ${entityLogicalName}:`, err);
-    return [];
-  }
-}
-
-// findNavProp, resolveRecordType, buildRecordUrl, applyResolverFields
-// are imported from the shared PolymorphicResolverService.
+// Nav-prop discovery, findNavProp, resolveRecordType, buildRecordUrl,
+// applyResolverFields are imported from the shared PolymorphicResolverService.
+// `discoverNavProps` was consolidated from a private per-service copy on
+// 2026-07-09 (task 011, Path A).
 
 /**
  * Resolve the current Dataverse user ID from the host Xrm global.
@@ -158,6 +115,8 @@ export class WorkAssignmentService {
   private readonly _dataService: IDataService;
   private readonly _entityService: EntityCreationService;
   private readonly _tenantId: string;
+  private readonly _authenticatedFetch: AuthenticatedFetchFn;
+  private readonly _bffBaseUrl: string;
 
   constructor(
     dataService: IDataService,
@@ -172,6 +131,10 @@ export class WorkAssignmentService {
   ) {
     this._tenantId = tenantId ?? '';
     this._dataService = dataService;
+    // Stored (not just forwarded to EntityCreationService) so createWorkAssignment
+    // can call the Field Mapping Framework engine (task 021 / FR-12) directly.
+    this._authenticatedFetch = authenticatedFetch;
+    this._bffBaseUrl = bffBaseUrl;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     // Wrap IDataService to adapt createRecord return type.
     const webApiAdapter = {
@@ -439,7 +402,7 @@ export class WorkAssignmentService {
     // -- Step 1: Create Dataverse record -------------------------------------
     let workAssignmentId: string;
 
-    const navProps = await _discoverNavProps('sprk_workassignment');
+    const navProps = await discoverNavProps('sprk_workassignment');
 
     const entity: Record<string, unknown> = {
       sprk_name: form.name.trim(),
@@ -520,6 +483,23 @@ export class WorkAssignmentService {
           form.recordName,
           refMapping.hint
         );
+
+        // Field-mapping engine (task 021 / FR-12): apply any configured
+        // `sprk_fieldmappingprofile` rules for {parent → sprk_workassignment}
+        // onto the entity payload. Runs AFTER applyResolverFields and BEFORE
+        // createRecord, on the SAME `entity` payload object — never wrapped in
+        // an abort-on-failure try/catch (applyFieldMappings itself never
+        // throws); its warnings append to this method's existing `warnings`.
+        const mappingResult = await applyFieldMappings({
+          sourceEntity: refMapping.refEntity,
+          sourceId: form.recordId,
+          targetEntity: 'sprk_workassignment',
+          payload: entity,
+          dataService: this._dataService,
+          authenticatedFetch: this._authenticatedFetch,
+          bffBaseUrl: this._bffBaseUrl,
+        });
+        warnings.push(...mappingResult.warnings);
       }
     }
 
@@ -571,7 +551,7 @@ export class WorkAssignmentService {
       } else if (uploadResult.uploadedFiles.length > 0) {
         // Discover nav-prop for sprk_document -> sprk_workassignment lookup
         try {
-          const docNavProps = await _discoverNavProps('sprk_document');
+          const docNavProps = await discoverNavProps('sprk_document');
           const waNavProp = _resolveDocNavProp(docNavProps, 'sprk_workassignment');
 
           const createResult = await this._entityService.createDocumentRecords(
@@ -638,7 +618,7 @@ export class WorkAssignmentService {
     eventState: ICreateFollowOnEventState
   ): Promise<{ success: boolean; warning?: string }> {
     try {
-      const navProps = await _discoverNavProps('sprk_event');
+      const navProps = await discoverNavProps('sprk_event');
 
       const entity: Record<string, unknown> = {
         sprk_eventname: eventState.eventName.trim(),

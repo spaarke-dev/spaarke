@@ -133,6 +133,15 @@ public enum BindingDisposition
 
     /// <summary>Delivered as a notification.</summary>
     Notification = 100000005,
+
+    /// <summary>
+    /// Draft-into-editor compose output (ComposeDisposition v1 seam — spaarkeai-compose-r2,
+    /// production routing promotion of the task-010 contract). Rides the existing SSE/ledger
+    /// surface (ADR-039 — no second dispatch protocol); the stored <see cref="Sprk.Bff.Api.Models.Ai.Chat.SessionOutput"/>
+    /// carries the Compose-owned structured-edit payload and the client re-materializes it from
+    /// the ledger (render-follows-store, ADR-040). See <see cref="ComposeDisposition"/>.
+    /// </summary>
+    Compose = 100000006,
 }
 
 /// <summary>

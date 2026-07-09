@@ -95,6 +95,15 @@
     }
   },
   "sprk_configuration": {
-    "_comment": "No method-discriminator dispatch — single LLM-facing function. Reserved for per-environment defaults."
+    "_comment": "No method-discriminator dispatch — single LLM-facing function. Reserved for per-environment defaults.",
+    "_comment_riskprofile": "Confirmation Policy v2 (FR-A1-03, task 032) catalog-declared risk factors — DATA extending sprk_sideeffectclass per policy-v2-origin-classification-decision-tree.md §1. email.draft PREPARES draft text only — no send, no system-of-record mutation ⇒ Tier 1 (draft-only). NOTE: the row's sprk_sideeffectclass stays Communicate (100000002); the CURRENT fail-closed live gate still suspends it. The Policy v2 engine consuming this DATA is where draft-only stops gating — the SEND action (a separate Tier 4 capability) always dialogs. Live behavior is unchanged until the engine is wired at the send/draft call sites (tasks 034/042).",
+    "riskProfile": {
+      "tier": "1",
+      "reversible": true,
+      "externallyVisible": false,
+      "deadlineImpact": false,
+      "confidentialityImpact": false,
+      "recordOfTruthImpact": false
+    }
   }
 }

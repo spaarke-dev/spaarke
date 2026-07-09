@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Wire engine into todo + workAssignment services</title>
+    <phase>2: Wire Wizard Services</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>015,011</dependencies>
+    <blocks>040</blocks>
+    <tags>frontend, typescript, integration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .ts service create paths.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical wiring following task 020's established pattern.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches todoService/workAssignmentService only.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Wire the field-mapping engine into todoService and workAssignmentService create paths, mirroring task 020
+    (call after applyResolverFields, before createRecord; warnings append; graceful no-op with no profile).
+    Note: todoService field-mapping is unrelated to the To Do regarding-catalog (TodoRegardingUpdateBuilder) — do not conflate.
+  </prompt>
+
+  <role>SPAARKE shared-lib developer.</role>
+
+  <goal>To Do and Work Assignment wizard-created records inherit mapped fields at creation when a profile exists.</goal>
+
+  <context>
+    <background>Full-repo consistency (decision 5). workAssignmentService is the canonical create-method reference. todoService field-mapping is orthogonal to the regarding-catalog mechanism (spec §7 note 6).</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/todoService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Same insertion point + warning-append + graceful no-op contract as task 020.</constraint>
+    <constraint source="project">Do NOT touch TodoRegardingUpdateBuilder / TODO_REGARDING_CATALOG — that is a different mechanism.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Wire todoService create path to the engine (after resolver, before createRecord).</step>
+    <step order="2">Wire workAssignmentService create path to the engine.</step>
+    <step order="3">Build + run affected service tests.</step>
+    <step order="4">Update TASK-INDEX.md: mark 021 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the shared library</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">todoService.ts, workAssignmentService.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both services call the engine after the resolver, before createRecord.</criterion>
+    <criterion testable="true">Mapped fields appear with a matching profile; unchanged behavior otherwise.</criterion>
+    <criterion testable="true">Regarding-catalog code is untouched.</criterion>
+    <criterion testable="true">Build + service tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md FR-12, §7 note 6.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

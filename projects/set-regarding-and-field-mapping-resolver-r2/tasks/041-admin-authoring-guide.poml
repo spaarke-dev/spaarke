@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Admin authoring guide (native MDA form + mapping types)</title>
+    <phase>4: Documentation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task; no code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Tutorial synthesis with a worked example.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits docs/guides/ only (a distinct file from task 040).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Write the admin authoring guide: how a maker authors sprk_fieldmappingprofile + sprk_fieldmappingrule
+    records in the native MDA form (no PCF), which mapping types are live, how to write a sprk_expression
+    Concat/Template string, and a worked example (the attorney seed from task 030).
+  </prompt>
+
+  <role>SPAARKE guide writer. Use the docs-guide skill conventions.</role>
+
+  <goal>A published operational guide under docs/guides/ enabling a maker to author field-mapping profiles/rules without developer help.</goal>
+
+  <context>
+    <background>Native Dataverse subgrid-on-form authoring is the chosen surface (design §5 — no admin PCF). The guide documents that flow + the four mapping types + sprk_expression templates + the attorney worked example.</background>
+    <relevant-files>
+      <file>docs/guides/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Native MDA form only — do NOT document or imply a custom admin PCF.</constraint>
+    <constraint source="project">Include a worked example using the actual seeded Matter→Event attorney matrix (task 030), and a Concat/Template sprk_expression example.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+      <file>projects/set-regarding-and-field-mapping-resolver-r2/notes/</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Draft docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md: profile/rule authoring in the MDA form, mapping-type reference, sprk_expression template syntax, attorney worked example, troubleshooting.</step>
+    <step order="2">Cross-link from the architecture doc (task 040) if present.</step>
+    <step order="3">Update TASK-INDEX.md: mark 041 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">File edits</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The guide documents native-form authoring (no PCF), all four mapping types, and sprk_expression syntax.</criterion>
+    <criterion testable="true">It includes a worked example matching the seeded attorney matrix.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md FR-17, design.md §5, §11.
+
+Completed 2026-07-09 · Rigor: MINIMAL · Model: sonnet@high · Verdict: COMPLETED.
+Wrote docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md per docs-guide skill conventions
+(Prerequisites/Quick Reference/Procedure/Configuration/Verification/
+Troubleshooting/Related). Documents native MDA form + subgrid authoring only
+(no PCF referenced or implied); all four sprk_mapping_type values (Copy,
+Default/Constant, Concat, Template) with their exact field requirements;
+sprk_expression {sprk_field} placeholder syntax incl. the unresolved-token
+omit-with-warning behavior (verified against completed task 013's notes/
+constraints, not assumed); the real seeded Matter->Event 8-rule attorney
+matrix from notes/task-030-notes.md (rule-for-rule), plus the Invoice/Report
+Card field-name-divergence note (renames + Invoice's no-lawfirm/no-external-
+internal omissions) so makers don't copy a rule set verbatim across targets.
+Added a docs/guides/INDEX.md entry (Workspace & Entity Creation section).
+Did NOT touch TASK-INDEX.md or current-task.md (out of boundary per
+dispatch). docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md (task 040,
+parallel) did not exist yet at write time; the guide's Related section notes
+this conditionally rather than linking a nonexistent file. See
+notes/task-041-notes.md for full detail.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,18 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for compose-compare-to-playbook (spaarkeai-compose-r2 task 041, FR-08). Normalized OpenAI-function-parameters subset. Consumes the R1 compose-selection JPS scope; selectionText is the load-bearing LLM input, matter/firm playbook entries are supplied by the retrieval layer (not a maker-provided input field). Property-level \"required\": true is FORBIDDEN. No actionId (assigned at deploy, task 047). actionCode carries NO version suffix.",
+  "actionCode": "compose-compare-to-playbook",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["selectionText"],
+    "properties": {
+      "selectionText": {
+        "type": "string",
+        "description": "The selected contract clause to compare against the matter/firm playbook. The clause the attorney highlighted in the Compose editor.",
+        "maxLength": 16000,
+        "elicitation_prompt": "Which clause should I compare to the playbook? Select it in the document first.",
+        "ledger_resolution": "compose.selectionText — the current editor selection dispatched by the FR-14 inline AI toolbar (compose-selection scope). Matter/firm playbook entries are supplied by the retrieval layer at dispatch time."
+      }
+    }
+  }
+}

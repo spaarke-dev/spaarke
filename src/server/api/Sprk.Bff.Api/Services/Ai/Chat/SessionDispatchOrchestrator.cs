@@ -409,7 +409,12 @@ public class SessionDispatchOrchestrator
                 request.TenantId, request.SessionId, binding.BindingId, cancellationToken)
             .ConfigureAwait(false);
 
-        yield return DeserializeResultChunk(routed.Entry.Payload.GetRawText());
+        // ── FR-A1-10 / D-F5 (task 039): explicit render-boundary assertion — the terminal
+        // chunk is built EXCLUSIVELY from the entry ProgressiveRenderGuard confirms was
+        // actually written to the ledger (ADR-040 storage-precedes-rendering), never from
+        // the pre-store `output` local above.
+        var storedEntry = ProgressiveRenderGuard.EnsureStored(routed.Entry);
+        yield return DeserializeResultChunk(storedEntry.Payload.GetRawText());
 
         // ── Next-step chips (G-P1 UAT round-1 Defect 1 fix, 2026-07-05): the dispatched
         // Binding's curated sprk_chiptransitions follow the terminal complete chunk so the

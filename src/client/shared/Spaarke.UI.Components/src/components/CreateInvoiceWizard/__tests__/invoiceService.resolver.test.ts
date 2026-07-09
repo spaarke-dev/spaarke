@@ -185,12 +185,24 @@ function invoicePayload(ds: ReturnType<typeof makeDataService>): Record<string, 
   return p!;
 }
 
-/** Authenticated-fetch stub for the SPE upload PUT — always succeeds. */
+/**
+ * Authenticated-fetch stub, shared by the SPE upload PUT and the field-mapping
+ * engine's profile fetch (task 022 wiring). Branches on URL:
+ *   - field-mapping profile fetch -> 404 ("no profile configured", the
+ *     engine's graceful no-op path) — these tests exercise resolver/manifest
+ *     behavior, not field-mapping application.
+ *   - anything else (the SPE upload PUT) -> the pre-existing success shape.
+ */
 function stubAuthenticatedFetch(): jest.Mock {
-  return jest.fn(async () => ({
-    ok: true,
-    json: async () => ({ id: 'drive-item-1', name: 'invoice.pdf', size: 1024, driveId: 'drive-1' }),
-  })) as unknown as jest.Mock;
+  return jest.fn(async (url: string) => {
+    if (url.includes('/field-mappings/')) {
+      return { ok: false, status: 404, statusText: 'Not Found', text: async () => '' };
+    }
+    return {
+      ok: true,
+      json: async () => ({ id: 'drive-item-1', name: 'invoice.pdf', size: 1024, driveId: 'drive-1' }),
+    };
+  }) as unknown as jest.Mock;
 }
 
 function makeUploadedFile(name = 'invoice.pdf'): IUploadedFile {

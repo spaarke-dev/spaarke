@@ -366,11 +366,17 @@ public sealed class DailyBriefingNarratorEntityLinkTests
         var dueDate = new DateTimeOffset(2026, 7, 9, 0, 0, 0, TimeSpan.Zero);
         var item1 = new ChannelItemDto
         {
-            Id = "e1", Title = "Respond to opposing counsel", RegardingName = "Beta Matter", SourceEntityType = "sprk_event"
+            Id = "e1",
+            Title = "Respond to opposing counsel",
+            RegardingName = "Beta Matter",
+            SourceEntityType = "sprk_event"
         };
         var item2 = new ChannelItemDto
         {
-            Id = "d1", Title = "NDA draft.docx", RegardingName = "Gamma Matter", SourceEntityType = "sprk_document"
+            Id = "d1",
+            Title = "NDA draft.docx",
+            RegardingName = "Gamma Matter",
+            SourceEntityType = "sprk_document"
         };
 
         var req = new DailyBriefingNarrateRequest

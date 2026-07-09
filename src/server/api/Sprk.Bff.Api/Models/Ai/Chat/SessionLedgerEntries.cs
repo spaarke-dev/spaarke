@@ -302,3 +302,49 @@ public sealed record SessionGate
     /// <summary>UTC timestamp the gate was resolved; null while pending.</summary>
     public DateTimeOffset? ResolvedAt { get; init; }
 }
+
+/// <summary>
+/// A no-content fingerprint of the context slices that grounded ONE turn (ADR-040
+/// ContextEnvelope-fingerprint ledger entry; spaarke-ai-architecture-redesign-r2
+/// task AIR2-038 / FR-A1-09, D-F4). This is the context-selection leg of the
+/// decision-traceability trace (request → CONTEXT SLICES → tools → gate → outcome)
+/// that no prior ledger marker recorded: <see cref="SessionToolChain"/> records tool
+/// calls, <see cref="SessionGate"/> records approvals, <see cref="SessionOutput"/>
+/// records results — but "which context slices/memory items were consulted this turn"
+/// had no anchor.
+///
+/// <para>
+/// <b>NFR-07 / ADR-015 BINDING</b>: carries the ContextEnvelope fingerprint IDENTIFIER
+/// and the slice COUNT ONLY — never slice content, never memory-item bodies, never
+/// prompt text. The record is structurally constrained (no free-text member) so
+/// content cannot ride it by construction. It is the STORED form the read projection
+/// (<see cref="Services.Ai.PublicContracts.TraceContextFingerprint"/> →
+/// <see cref="Services.Ai.PublicContracts.TraceEventKind.Context"/>) reads back.
+/// </para>
+///
+/// <para>
+/// <b>Write seam</b>: <see cref="Sprk.Bff.Api.Services.Ai.Chat.ChatSessionManager.AppendContextFingerprintAsync"/>.
+/// The production writer is the Context Binder (FR-B-04 / task 053) once per-turn
+/// ContextEnvelope assembly lands; until then the entry persists round-trip DARK
+/// (same dark-landing convention as the P0 ledger entries — the read projection is
+/// live now so a fingerprint that IS written surfaces immediately in the trace view).
+/// Append-only (ADR-040): never mutated in place.
+/// </para>
+/// </summary>
+public sealed record SessionContextFingerprint
+{
+    /// <summary>1-based session turn the context selection applied to.</summary>
+    public required int Turn { get; init; }
+
+    /// <summary>
+    /// Opaque ContextEnvelope fingerprint id (later: the ContextEnvelope v1 fingerprint,
+    /// FR-A0-01 / task 015). Identifier ONLY — never slice content.
+    /// </summary>
+    public required string FingerprintId { get; init; }
+
+    /// <summary>Number of context slices the fingerprint covered. Count ONLY (NFR-07).</summary>
+    public required int SliceCount { get; init; }
+
+    /// <summary>UTC timestamp the context selection was made / entry was written.</summary>
+    public DateTimeOffset CreatedAt { get; init; }
+}
