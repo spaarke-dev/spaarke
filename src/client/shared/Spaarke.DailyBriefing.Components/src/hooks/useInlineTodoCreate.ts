@@ -197,9 +197,11 @@ export function useInlineTodoCreate(webApi: IWebApi | null, userId?: string): Us
   const [statusMap, setStatusMap] = useState<Map<string, TodoCreateStatus>>(() => new Map());
   const errorsRef = useRef<Map<string, string>>(new Map());
   const createdIdRef = useRef<Map<string, string>>(new Map());
-  // Cache the current user's sprk_primarycontact value. undefined = not looked up yet;
-  // null = looked up + no primary contact configured on the user record.
-  const primaryContactRef = useRef<string | null | undefined>(undefined);
+  // Cache the current user's sprk_primarycontact lookup as an in-flight Promise (R5 task 037
+  // / FR-C8). Caching the PROMISE — not the resolved value — means two createTodo calls that
+  // race before the first resolves await the SAME lookup instead of each firing a duplicate
+  // retrieveRecord. undefined = lookup not started; once set it holds for the hook's lifetime.
+  const primaryContactRef = useRef<Promise<string | null> | undefined>(undefined);
 
   const createTodo = useCallback(
     async (item: NotificationItem): Promise<void> => {
@@ -216,24 +218,29 @@ export function useInlineTodoCreate(webApi: IWebApi | null, userId?: string): Us
       });
 
       try {
-        // R7 W12 feedback item 7 — resolve the current user's sprk_primarycontact
-        // (cached across creates for this hook lifetime). We do the lookup lazily
-        // on first createTodo rather than at hook-mount so consumers that never
-        // add to To Do don't pay the query cost. Fail-soft: if the field is missing
-        // or the query fails, primarycontact stays null and sprk_assignedto is left
-        // unset (the existing pre-item-7 behavior).
-        if (primaryContactRef.current === undefined && userId) {
-          try {
-            const user = await webApi.retrieveRecord('systemuser', userId, '?$select=_sprk_primarycontact_value');
-            const rawContact = (user as Record<string, unknown>)['_sprk_primarycontact_value'];
-            primaryContactRef.current = typeof rawContact === 'string' && rawContact.length > 0 ? rawContact : null;
-          } catch (lookupErr) {
-            console.info(
-              '[useInlineTodoCreate] sprk_primarycontact lookup failed — sprk_assignedto will be left unset:',
-              lookupErr
-            );
-            primaryContactRef.current = null;
-          }
+        // R7 W12 feedback item 7 — resolve the current user's sprk_primarycontact, lazily on
+        // first createTodo (consumers that never add to To Do don't pay the query cost).
+        // R5 task 037 (FR-C8): cache the in-flight PROMISE, not the resolved value, so
+        // concurrent createTodo calls racing before the first resolves await one lookup
+        // instead of each firing a duplicate retrieveRecord. Fail-soft: the lookup resolves to
+        // null on a missing field or a failed query (it never rejects), so caching it for the
+        // hook's lifetime preserves the prior "cache null on failure, no retry" semantics.
+        let primaryContact: string | null = null;
+        if (userId) {
+          const lookup = (primaryContactRef.current ??= (async (): Promise<string | null> => {
+            try {
+              const user = await webApi.retrieveRecord('systemuser', userId, '?$select=_sprk_primarycontact_value');
+              const rawContact = (user as Record<string, unknown>)['_sprk_primarycontact_value'];
+              return typeof rawContact === 'string' && rawContact.length > 0 ? rawContact : null;
+            } catch (lookupErr) {
+              console.info(
+                '[useInlineTodoCreate] sprk_primarycontact lookup failed — sprk_assignedto will be left unset:',
+                lookupErr
+              );
+              return null;
+            }
+          })());
+          primaryContact = await lookup;
         }
 
         // 1. Build the core sprk_todo record (per entity-schema.md + SmartTodo
@@ -264,8 +271,8 @@ export function useInlineTodoCreate(webApi: IWebApi | null, userId?: string): Us
         // "undeclared property … only has property annotations in the payload but no
         // property value was found". Matches the convention used across
         // SmartTodoWidget, SmartToDo, and TodoDetail.
-        if (primaryContactRef.current) {
-          record['sprk_AssignedTo@odata.bind'] = `/contacts(${primaryContactRef.current})`;
+        if (primaryContact) {
+          record['sprk_AssignedTo@odata.bind'] = `/contacts(${primaryContact})`;
         }
 
         // 2. Apply regarding (multi-entity resolution per ADR-024) — only when

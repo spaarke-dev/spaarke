@@ -9,10 +9,15 @@
 
 | Field | Value |
 |---|---|
-| **Project** | spaarke-daily-update-service-r5 (26 tasks; **11 done + full UI redesign done**) |
-| **Branch** | `work/spaarke-daily-update-service-r5` — pushed to origin (HEAD `ed6c513ae`) |
-| **Status** | Design loop complete; **awaiting operator go/no-go on `/merge-to-master`** |
-| **Next Action** | Operator decides: run `/merge-to-master` (see ⚠️ caveats below) OR continue remaining tasks (012/016/031/032/036/037/038/002/017/024/090) |
+| **Project** | spaarke-daily-update-service-r5 (26 tasks; **15 done**) |
+| **Branch** | `work/spaarke-daily-update-service-r5` — merged to master (PR #590, e5e43c97c); post-merge hardening in progress, local commits not yet pushed |
+| **Status** | Code-hardening bucket. This session: 002 ✅, 012 ✅, 036 ✅, 037 ✅. 032 BLOCKED (needs Dataverse MCP). |
+| **Next Action** | Remaining executable-now: **015** (groundedness eval-only) → **031** (jps-validate Step 7.7, `.claude/` main-session) → **016** (eval corpus, opus tier — session is Opus 4.8 so OK). BLOCKED-on-env: 032 (MCP restore), 017/024/038 (deploy + browser UAT), 022 (operator harness sign-off), 090 (wrap, deps deploys). |
+
+### Session progress (post-merge hardening)
+- **002 ✅** (@odata.bind audit): report `notes/odata-bind-audit.md`; 0 fixes (only provable violation is operator-deferred EventDetailSidePane), 1 deferred, 10 needs-verification (recorded not guessed — no live Dataverse metadata). Escalation: casing inconsistencies (`sprk_outputtypeid` vs `sprk_OutputTypeId`) need metadata pass → suggest /defer at 090.
+- **012 ✅** (retire BRIEF-NARRATE-CHANNEL): const + comment cleared (grep-zero under src/), scope-index entry removed, composite description fixed. Build 0 err; 61+223 tests green; publish 45.13 MB. **DEFERRED**: live Dataverse Action-row retirement (id dc3533c0-…) → Phase A deploy task 017 (MCP unauthorized this session). Notes: `notes/012-channel-action-retirement.md`.
+- Committed `c3b49e46a` (local; not pushed).
 
 ### ⚠️ Pending decision — `/merge-to-master`
 Operator asked to commit → push (both DONE) → merge. Before merging, they must weigh: **master auto-deploys**, and this branch is a **mid-project checkpoint** (11/26 tasks) with a **partially-tested-only redesign** (reviewed in the `/prototype` harness with MOCK data, **no browser UAT on spaarkedev1** — which the project's own gate rule requires). Merge is defensible (accuracy verified, redesign cohesive) but ships un-UAT'd. **Get explicit go before running `/merge-to-master`.**

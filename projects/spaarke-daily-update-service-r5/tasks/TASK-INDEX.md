@@ -38,8 +38,8 @@
 | 033 | Collaborator-scope fix + re-flip test | B | ✅ | none | 034 | FULL(TEST-MOD) | sonnet/xhigh | ❌ collector |
 | 034 | Collector de-duplication | B | ✅ | 033 | 036 | FULL | sonnet/high | ❌ collector |
 | 035 | Client-helper jest tests | B | ✅ | none | — | STANDARD(TEST-MOD) | sonnet/high | ✅ Group H |
-| 036 | Collapse 7 QueryHighPriority* helpers | B | 🔲 | 034 | 037 | STANDARD | sonnet/high | ❌ collector |
-| 037 | Promise-cache primary-contact + comment | B | 🔲 | 036 | 038 | STANDARD | sonnet/high | ❌ collector |
+| 036 | Collapse 7 QueryHighPriority* helpers | B | ✅ | 034 | 037 | STANDARD | sonnet/high | ❌ collector |
+| 037 | Promise-cache primary-contact + comment | B | ✅ | 036 | 038 | STANDARD | sonnet/high | ❌ collector |
 | 038 | Phase B deploy + G-R5-C UAT | B | 🔲 | 037,032,035 | 090 | STANDARD | sonnet/high | ❌ deploy |
 | 040 | Deploy convention (master-sync-first) | E | ✅ | none | — | STANDARD | sonnet/high | ✅ Group F |
 | 090 | Project wrap-up | Wrap | 🔲 | 017,024,038,040 | — | FULL | sonnet/high | ❌ main-session |
