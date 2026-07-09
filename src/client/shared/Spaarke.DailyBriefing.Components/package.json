@@ -23,10 +23,15 @@
     "test:coverage": "jest --coverage",
     "test:ci": "jest --ci --coverage --maxWorkers=2"
   },
+  "dependencies": {
+    "@spaarke/auth": "file:../Spaarke.Auth",
+    "@spaarke/ui-components": "file:../Spaarke.UI.Components"
+  },
   "peerDependencies": {
     "@fluentui/react-components": "^9.0.0",
     "@fluentui/react-icons": "^2.0.0",
     "@spaarke/auth": "^2.0.0",
+    "@spaarke/ui-components": "*",
     "react": "^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0",
     "react-dom": "^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0"
   },
