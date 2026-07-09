@@ -19,9 +19,22 @@
 // Editor (Phase 4 task 045 — pre-Phase 7 origin)
 // -------------------------------------------------------------------------
 export { ComposeEditor } from './widgets/ComposeEditor';
-export type { ComposeEditorProps, ComposeEditorHandle, ComposeEditorDocumentRef } from './widgets/ComposeEditor';
+export type {
+  ComposeEditorProps,
+  ComposeEditorHandle,
+  ComposeEditorDocumentRef,
+  ComposeDraftPayload,
+  ComposeDraftProvenance,
+} from './widgets/ComposeEditor';
 export { ComposeFormatToolbar } from './widgets/ComposeFormatToolbar';
 export type { ComposeFormatToolbarProps } from './widgets/ComposeFormatToolbar';
+export {
+  ComposeAiToolbar,
+  registerComposeAiToolbarAction,
+  getComposeAiToolbarActions,
+  __resetComposeAiToolbarActionsForTests,
+} from './widgets/ComposeAiToolbar';
+export type { ComposeAiToolbarProps, ComposeAiToolbarAction, ComposeActionEnqueue } from './widgets/ComposeAiToolbar';
 
 // -------------------------------------------------------------------------
 // Workspace-level widgets (Phase 7 task 091 — moved from SpaarkeAi)

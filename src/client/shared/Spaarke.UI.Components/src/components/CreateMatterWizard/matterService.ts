@@ -735,7 +735,7 @@ export async function searchOrganizationsAsLookup(
 }
 
 // ---------------------------------------------------------------------------
-// User search helper (for SendEmailStep -- lookup systemuser table)
+// User search helper (for the Send Email follow-on -- lookup systemuser table)
 // ---------------------------------------------------------------------------
 
 /**

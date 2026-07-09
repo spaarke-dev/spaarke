@@ -5,22 +5,24 @@
  * Uses WizardShell with 3 static steps + dynamic follow-on steps:
  *   0 — Upload file(s)       (FileUploadZone + UploadedFileList)
  *   1 — Run Analysis          (SummaryResultsStep — AI-generated summary)
- *   2 — Next Steps            (SummaryNextStepsStep — card selection)
- *   3+ — Follow-on steps:
- *        - Send Email          (SummarizeSendEmailStep)
+ *   2 — Next Steps            (shared WizardFollowOns FollowOnGrid — card selection)
+ *   3+ — Follow-on steps (config-driven via FollowOnCardConfig[]):
+ *        - Send Email          (shared SendEmailFollowOnStep + short-summary toggle)
  *        - Create Project      (SummarizeCreateProjectStep)
  *        - Work on Analysis    (SummarizeAnalysisStep)
  *
- * Dynamic steps are injected/removed via shellRef.current.addDynamicStep()
- * / removeDynamicStep(), mirroring the CreateMatter/WizardDialog pattern.
+ * The follow-on card set is expressed as a FollowOnCardConfig[] consumed by the
+ * shared, config-driven FollowOnGrid (design.md §5.9) — NOT a local fork. The
+ * grid injects/removes each dynamic step imperatively at click time via
+ * shellRef.current.addDynamicStep()/removeDynamicStep().
  *
  * This shared library version accepts `authenticatedFetch`, `bffBaseUrl`,
  * `dataService`, and `navigationService` as props — no platform-specific
  * imports are used.
  */
 import * as React from 'react';
-import { Button, MessageBar, MessageBarBody, Text, makeStyles, tokens } from '@fluentui/react-components';
-import { CheckmarkCircleFilled } from '@fluentui/react-icons';
+import { Button, Checkbox, MessageBar, MessageBarBody, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { CheckmarkCircleFilled, MailRegular, FolderAddRegular, ClipboardTaskRegular } from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
 import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
@@ -31,14 +33,8 @@ import { UploadedFileList } from '../FileUpload/UploadedFileList';
 import { searchUsersAsLookup } from '../CreateMatterWizard/matterService';
 
 import { SummaryResultsStep } from './SummaryResultsStep';
-import {
-  SummaryNextStepsStep,
-  FOLLOW_ON_STEP_ID_MAP,
-  FOLLOW_ON_STEP_LABEL_MAP,
-  FOLLOW_ON_CANONICAL_ORDER,
-} from './SummaryNextStepsStep';
-import type { SummaryActionId } from './SummaryNextStepsStep';
-import { SummarizeSendEmailStep, buildSummaryEmailSubject, buildSummaryEmailBody } from './SummarizeSendEmailStep';
+import { FollowOnGrid, SendEmailFollowOnStep } from '../WizardFollowOns';
+import type { FollowOnCardConfig } from '../WizardFollowOns';
 import { SummarizeCreateProjectStep } from './SummarizeCreateProjectStep';
 import { SummarizeAnalysisStep } from './SummarizeAnalysisStep';
 import { streamSummarize } from './summarizeService';
@@ -49,6 +45,37 @@ import type { ICreateProjectFormState } from '../CreateProjectWizard/projectForm
 import { EMPTY_PROJECT_FORM } from '../CreateProjectWizard/projectFormTypes';
 import { ProjectService } from '../CreateProjectWizard/projectService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
+
+// ---------------------------------------------------------------------------
+// Local follow-on identifiers + email template builders
+// ---------------------------------------------------------------------------
+
+/**
+ * The summary-oriented follow-on card ids this wizard offers. These are plain
+ * `FollowOnCardConfig.id` strings — `create-project` / `work-on-analysis` are
+ * intentionally non-canonical (not in the shared {@link FollowOnId} union), and
+ * that is expected: the shared grid accepts any string id (design.md §5.9).
+ */
+export type SummaryActionId = 'send-email' | 'create-project' | 'work-on-analysis';
+
+/** Subject line for the file-summary email. */
+export function buildSummaryEmailSubject(): string {
+  return 'Document Summary';
+}
+
+/** Body for the file-summary email, using the long or short summary. */
+export function buildSummaryEmailBody(summary: string, shortSummary: string, useShort: boolean): string {
+  const summaryContent = useShort ? shortSummary : summary;
+
+  return (
+    `Dear Colleague,\n\n` +
+    `Please find the AI-generated summary of the uploaded documents below.\n\n` +
+    `Kind regards,\n` +
+    `[Your Name]\n\n` +
+    `────────────────────────────────────\n\n` +
+    summaryContent
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -303,102 +330,94 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     setProgressEvents([]);
   }, [fileState.uploadedFiles.length]);
 
-  // ── Skip handler for follow-on steps ────────────────────────────────
-  // Deselecting the action removes the dynamic step, causing the shell
-  // to advance to the next remaining step automatically.
-  const handleSkipAction = React.useCallback((actionId: SummaryActionId) => {
-    setSelectedActions(prev => prev.filter(a => a !== actionId));
-  }, []);
-
-  // ── Sync dynamic steps with selected action cards (via shellRef) ──────
-  const prevSelectedActionsRef = React.useRef<SummaryActionId[]>([]);
-
-  React.useEffect(() => {
-    const prev = prevSelectedActionsRef.current;
-    const next = selectedActions;
-
-    // Add newly selected follow-on steps
-    next.forEach(actionId => {
-      if (!prev.includes(actionId)) {
-        const stepId = FOLLOW_ON_STEP_ID_MAP[actionId];
-        const stepLabel = FOLLOW_ON_STEP_LABEL_MAP[actionId];
-
-        const dynamicConfig: IWizardStepConfig = {
-          id: stepId,
-          label: stepLabel,
-          canAdvance: () => {
-            if (stepId === 'followon-send-email') {
-              return (
-                emailToRef.current.trim() !== '' &&
-                emailSubjectRef.current.trim() !== '' &&
-                emailBodyRef.current.trim() !== ''
-              );
+  // ── Follow-on card set (config-driven, shared WizardFollowOns grid) ───
+  // The summary-oriented card set is expressed as FollowOnCardConfig[] rather
+  // than a fork of the grid (design.md §5.9). FollowOnGrid injects/removes the
+  // dynamic step imperatively at click time via shellRef; each card owns its
+  // step body through `renderStep`, reading dialog form state via refs (the
+  // same stale-closure-proof pattern the prior hand-rolled sync effect used).
+  //
+  // `renderSelectedExtra` carries the "include only short summary" toggle inline
+  // in the grid while Send Email is selected — the slot added specifically for
+  // this wizard, so its summary-specific card stays config, not a grid fork.
+  const followOnCards: FollowOnCardConfig[] = React.useMemo(
+    () => [
+      {
+        id: 'send-email',
+        label: 'Send Email',
+        description: 'Compose and send an email with the file summary.',
+        icon: <MailRegular fontSize={28} />,
+        isSkippable: true,
+        canAdvance: () =>
+          emailToRef.current.trim() !== '' &&
+          emailSubjectRef.current.trim() !== '' &&
+          emailBodyRef.current.trim() !== '',
+        renderSelectedExtra: () => (
+          <Checkbox
+            checked={includeShortSummary}
+            onChange={(_e, data) => setIncludeShortSummary(!!data.checked)}
+            label="Include only short summary in email"
+          />
+        ),
+        renderStep: () => (
+          <SendEmailFollowOnStep
+            title="Send Email"
+            subtitle="Compose an email with the file summary. It will be sent via the system."
+            infoNote="This email will be sent via the BFF communication endpoint."
+            emailTo={emailToRef.current}
+            onEmailToChange={setEmailTo}
+            emailSubject={emailSubjectRef.current}
+            onEmailSubjectChange={setEmailSubject}
+            emailBody={emailBodyRef.current}
+            onEmailBodyChange={setEmailBody}
+            onSearchUsers={handleSearchUsers}
+            headerContent={
+              <Checkbox
+                checked={includeShortSummaryRef.current}
+                onChange={(_e, data) => setIncludeShortSummary(!!data.checked)}
+                label="Include only short summary"
+              />
             }
-            if (stepId === 'followon-create-project') {
-              return projectFormValidRef.current;
-            }
-            return true; // work-on-analysis has no hard requirement
-          },
-          footerActions: (
-            <Button appearance="subtle" onClick={() => handleSkipAction(actionId)}>
-              Skip
-            </Button>
-          ),
-          renderContent: () => {
-            if (stepId === 'followon-send-email') {
-              return (
-                <SummarizeSendEmailStep
-                  emailTo={emailToRef.current}
-                  onEmailToChange={setEmailTo}
-                  emailSubject={emailSubjectRef.current}
-                  onEmailSubjectChange={setEmailSubject}
-                  emailBody={emailBodyRef.current}
-                  onEmailBodyChange={setEmailBody}
-                  onSearchUsers={handleSearchUsers}
-                  includeShortSummary={includeShortSummaryRef.current}
-                  onIncludeShortSummaryChange={setIncludeShortSummary}
-                />
-              );
-            }
-            if (stepId === 'followon-create-project') {
-              return (
-                <SummarizeCreateProjectStep
-                  dataService={dataService!}
-                  uploadedFiles={fileStateRef.current.uploadedFiles}
-                  onValidChange={setProjectFormValid}
-                  onFormValues={setProjectFormValues}
-                  initialFormValues={projectFormValuesRef.current}
-                />
-              );
-            }
-            if (stepId === 'followon-work-on-analysis') {
-              return (
-                <SummarizeAnalysisStep
-                  dataService={dataService!}
-                  navigationService={navigationService}
-                  uploadedFiles={fileStateRef.current.uploadedFiles}
-                  authenticatedFetch={authenticatedFetch}
-                  bffBaseUrl={bffBaseUrl}
-                />
-              );
-            }
-            return <Text size={300}>{stepLabel}</Text>;
-          },
-        };
-
-        shellRef.current?.addDynamicStep(dynamicConfig, FOLLOW_ON_CANONICAL_ORDER);
-      }
-    });
-
-    // Remove deselected follow-on steps
-    prev.forEach(actionId => {
-      if (!next.includes(actionId)) {
-        shellRef.current?.removeDynamicStep(FOLLOW_ON_STEP_ID_MAP[actionId]);
-      }
-    });
-
-    prevSelectedActionsRef.current = next;
-  }, [selectedActions, dataService, navigationService, handleSearchUsers, handleSkipAction]);
+          />
+        ),
+      },
+      {
+        id: 'create-project',
+        label: 'Create Project',
+        description: 'Launch the Create Project wizard with the uploaded files.',
+        icon: <FolderAddRegular fontSize={28} />,
+        isSkippable: true,
+        canAdvance: () => projectFormValidRef.current,
+        renderStep: () => (
+          <SummarizeCreateProjectStep
+            dataService={dataService!}
+            uploadedFiles={fileStateRef.current.uploadedFiles}
+            onValidChange={setProjectFormValid}
+            onFormValues={setProjectFormValues}
+            initialFormValues={projectFormValuesRef.current}
+          />
+        ),
+      },
+      {
+        id: 'work-on-analysis',
+        label: 'Work on Analysis',
+        description: 'Choose a playbook to run analysis on the uploaded files.',
+        icon: <ClipboardTaskRegular fontSize={28} />,
+        isSkippable: true,
+        canAdvance: () => true, // work-on-analysis has no hard requirement
+        renderStep: () => (
+          <SummarizeAnalysisStep
+            dataService={dataService!}
+            navigationService={navigationService}
+            uploadedFiles={fileStateRef.current.uploadedFiles}
+            authenticatedFetch={authenticatedFetch}
+            bffBaseUrl={bffBaseUrl}
+          />
+        ),
+      },
+    ],
+    [dataService, navigationService, authenticatedFetch, bffBaseUrl, handleSearchUsers, includeShortSummary]
+  );
 
   // ── Pre-fill email fields when send-email is selected ─────────────────
   React.useEffect(() => {
@@ -466,7 +485,12 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     }
 
     // ── Create Project via Dataverse ──────────────────────────────────
-    if (currentSelectedActions.includes('create-project') && dataService) {
+    // Guard on projectFormValid: with the shared grid's `isSkippable` Skip the
+    // card stays selected even when skipped (unlike the prior deselect-on-skip
+    // footer button), so only create when the form was actually completed —
+    // matching the original flow, which could never Finish with an invalid
+    // create-project step selected (Finish was disabled by canAdvance).
+    if (currentSelectedActions.includes('create-project') && projectFormValidRef.current && dataService) {
       try {
         const service = new ProjectService(dataService);
         const result = await service.createProject(currentProjectFormValues);
@@ -589,18 +613,22 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
         },
       },
 
-      // Step 2: Next Steps
+      // Step 2: Next Steps (shared, config-driven FollowOnGrid)
       {
         id: 'next-steps',
         label: 'Next Steps',
         canAdvance: () => true,
         isEarlyFinish: () => selectedActions.length === 0,
         renderContent: () => (
-          <SummaryNextStepsStep
-            selectedActions={selectedActions}
-            onSelectionChange={setSelectedActions}
-            includeShortSummary={includeShortSummary}
-            onIncludeShortSummaryChange={setIncludeShortSummary}
+          <FollowOnGrid
+            cards={followOnCards}
+            selected={selectedActions}
+            onSelectionChange={next => setSelectedActions(next as SummaryActionId[])}
+            addDynamicStep={(cfg, order) => shellRef.current?.addDynamicStep(cfg, order)}
+            removeDynamicStep={id => shellRef.current?.removeDynamicStep(id)}
+            title="Next Steps"
+            subtitle="Choose what you'd like to do with the summary results. Select one or more actions, or click Finish to close."
+            emptyHint="No actions selected — click Finish to complete without follow-on steps."
           />
         ),
       },
@@ -612,7 +640,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       summarizeResult,
       summarizeError,
       selectedActions,
-      includeShortSummary,
+      followOnCards,
       progressEvents,
       styles,
       handleFilesAccepted,

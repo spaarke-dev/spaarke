@@ -9,20 +9,19 @@
 // Main component
 export { CreateRecordWizard } from './CreateRecordWizard';
 
-// Follow-on steps UI
-export {
-  NextStepsStep,
-  FOLLOW_ON_STEP_ID_MAP,
-  FOLLOW_ON_STEP_LABEL_MAP,
-  FOLLOW_ON_CANONICAL_ORDER,
-} from './FollowOnSteps';
+// The "Next Steps" follow-on card grid + reusable follow-on steps
+// (AssignWork / CreateEvent / SendEmail / DraftSummary / RecipientField) now
+// live in the shared WizardFollowOns module (design.md §5.9). CreateRecordWizard
+// consumes them directly; the local FollowOnSteps.tsx + those step copies were
+// deleted in task 021. Import follow-on symbols from '@spaarke/ui-components'
+// (the root barrel re-exports WizardFollowOns) or from the WizardFollowOns barrel.
 
-// Step components (for direct use if needed)
-export { AssignWorkFollowOnStep, WORK_ASSIGNMENT_PRIORITY } from './steps/AssignWorkFollowOnStep';
+// Step components still owned here (NOT migrated to WizardFollowOns):
+//   - AssignResourcesStep: legacy "Assign Resources" step with no WizardFollowOns successor.
+// SendEmailStep was retained past task 021 pending CreateWorkAssignmentWizard's (task 023)
+// migration off it — task 023 completed that migration (now uses SendEmailFollowOnStep),
+// so the local copy + its exports were removed here (post-021-wave cleanup, 2026-07-08).
 export { AssignResourcesStep } from './steps/AssignResourcesStep';
-export { CreateEventFollowOnStep } from './steps/CreateEventFollowOnStep';
-export { SendEmailStep } from './steps/SendEmailStep';
-export { RecipientField } from './steps/RecipientField';
 
 // Types
 export type {
@@ -35,16 +34,10 @@ export type {
   IEntityInfoStep,
   IAssociateToStepConfig,
   FollowOnActionId,
-  IRecipientItem,
   SearchCallback,
   AssociationResult,
   EntityTypeOption,
 } from './types';
 
 // Step prop types
-export type { IAssignWorkFollowOnStepProps, WorkAssignmentPriorityValue } from './steps/AssignWorkFollowOnStep';
 export type { IAssignResourcesStepProps } from './steps/AssignResourcesStep';
-export type { ICreateEventFollowOnStepProps } from './steps/CreateEventFollowOnStep';
-export type { ISendEmailStepProps } from './steps/SendEmailStep';
-export type { IRecipientFieldProps } from './steps/RecipientField';
-export type { INextStepsStepProps } from './FollowOnSteps';

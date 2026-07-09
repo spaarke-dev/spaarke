@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="visual-host-create-button-r1">
+  <metadata>
+    <title>WizardRegistry + WizardHostProps + resolveWizard + unknown-key toast</title>
+    <phase>A: Visual Host + Registry + Event</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>012,015,030,040</blocks>
+    <tags>shared-lib, pcf, registry, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New shared-lib module + .tsx; consumed by Visual Host</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New self-contained dispatch module; explicit contract in design §5.3</model-tier-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Create the central WizardRegistry that maps a wizard key to a lazy-loaded wizard component, plus the shared WizardHostProps injection contract and resolveWizard() with entity-fallback + null-on-unknown.</prompt>
+  <role>SPAARKE shared-UI developer. React 18 + Fluent v9. Follow ADR-012 (context-agnostic) + ADR-022.</role>
+  <goal>New components/WizardRegistry/wizardRegistry.ts exporting wizardRegistry (event/invoice/kpi-assessment via React.lazy), the WizardHostProps interface, and resolveWizard(key, fallbackEntity) returning a lazy component or null; exported from the shared-lib root index.</goal>
+
+  <context>
+    <background>Visual Host must stay agnostic to specific wizards (design §5.3, §6.2). Registry keys are dev-defined; maker enters one into sprk_createwizardkey; unknown key → toast (FR-03).</background>
+    <relevant-files>
+      src/client/shared/Spaarke.UI.Components/src/components/WizardRegistry/ (new)
+      src/client/shared/Spaarke.UI.Components/src/index.ts
+      src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.tsx (WizardHostProps model)
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      projects/visual-host-create-button-r1/design.md
+      projects/visual-host-create-button-r1/spec.md
+      src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.tsx
+      src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/CreateEventWizard.tsx
+      src/client/shared/Spaarke.UI.Components/src/index.ts
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Define WizardHostProps modeled on IWorkAssignmentWizardDialogProps (open, onClose, dataService, authenticatedFetch, bffBaseUrl, navigationService?, resolveSpeContainerId?, tenantId?, embedded?, initialAssociation?, lockAssociation?).</step>
+    <step>Create wizardRegistry: Record&lt;string, LazyExoticComponent&gt; with keys event/invoice/kpi-assessment (invoice/kpi wizards may be placeholder lazy imports until 030/040 land — keep event working).</step>
+    <step>Implement resolveWizard(key, fallbackEntity): use key if set; else normalize fallbackEntity (sprk_invoice→invoice, etc.); return null for unknown keys.</step>
+    <step>Export from src/index.ts.</step>
+  </steps>
+
+  <tools>Read, Grep, Edit, Write</tools>
+  <outputs>components/WizardRegistry/wizardRegistry.ts; root index export.</outputs>
+
+  <acceptance-criteria>
+    <criterion>resolveWizard returns the event wizard for key "event" and for fallback "sprk_event".</criterion>
+    <criterion>Unknown key returns null (caller shows toast — verified in task 012).</criterion>
+    <criterion>Wizards are React.lazy (code-split); registry adds &lt; 5 KB to the consuming bundle.</criterion>
+    <criterion>Shared lib builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    🔒 RIGOR LEVEL: FULL — new shared-lib module consumed later by the Visual Host PCF (per rigor-hint + CLAUDE.md §8: new-file shared-lib work, tags include `pcf`).
+
+    Implemented exactly per design.md §5.3:
+
+    - `src/client/shared/Spaarke.UI.Components/src/components/WizardRegistry/wizardRegistry.ts` (new) — `WizardHostProps` interface (open, onClose, dataService, authenticatedFetch: AuthenticatedFetchFn, bffBaseUrl, navigationService?, resolveSpeContainerId?, tenantId?, embedded?, initialAssociation?: AssociationResult, lockAssociation?); `WizardComponent` type alias (`React.LazyExoticComponent&lt;React.ComponentType&lt;WizardHostProps&gt;&gt;`); `wizardRegistry: Record&lt;string, WizardComponent&gt;` with `event`/`invoice`/`kpi-assessment` keys; `resolveWizard(key, fallbackEntity)` (key wins when non-empty/non-whitespace; else normalizes fallbackEntity via an explicit alias map — `sprk_event`→`event`, `sprk_invoice`→`invoice`, `sprk_kpiassessment`→`kpi-assessment` — falling back further to a generic `sprk_` prefix-strip for any future entity; returns `null` for unresolved keys).
+    - `src/client/shared/Spaarke.UI.Components/src/components/WizardRegistry/PlaceholderWizard.tsx` (new) — minimal Fluent v9 Dialog ("Wizard not yet available") conforming to `WizardHostProps`.
+    - `src/client/shared/Spaarke.UI.Components/src/components/WizardRegistry/index.ts` (new) — barrel export.
+    - `src/client/shared/Spaarke.UI.Components/src/components/WizardRegistry/__tests__/wizardRegistry.test.ts` (new) — 10 unit tests covering resolveWizard's key-vs-fallback precedence, entity normalization (incl. the compound `kpi-assessment` case), unknown-key/unknown-entity → null, and registry key-set shape.
+    - `src/client/shared/Spaarke.UI.Components/src/components/index.ts` — added `export * from './WizardRegistry';` (root `src/index.ts` re-exports `./components`, so this satisfies the "export from shared-lib root" requirement without a direct root-index edit).
+
+    **Invoice/kpi-assessment placeholder handling**: `CreateInvoiceWizard` and `CreateKPIAssessmentWizard` don't exist until tasks 030/040. Pointing `React.lazy()` at their future (nonexistent) file paths would break every `tsc` build touching this module, so both registry entries lazy-import a local `./PlaceholderWizard` component instead — a genuinely real module, not a dangling path. `PlaceholderWizard` renders a "not yet available" Fluent Dialog conforming to `WizardHostProps`, so an unexpected mount degrades gracefully rather than crashing. Both the registry doc-comment and the placeholder file header call out, by task number, that 030/040 replace their one registry line with the real `lazy(() => import('../CreateInvoiceWizard/CreateInvoiceWizard'))` / `.../CreateKPIAssessmentWizard` import — `PlaceholderWizard.tsx` itself is left in place afterward for any future bridge need.
+
+    **Lazy/type-assertion pattern**: individual wizard prop interfaces (e.g. `ICreateEventWizardProps`) are on independent migration timelines and don't yet structurally match `WizardHostProps` field-for-field (e.g. `authenticatedFetch`/`resolveSpeContainerId` optionality differs today). Rather than fighting TS structural typing per-entry, a single `toWizardComponent()` helper centralizes one documented `as unknown as WizardComponent` assertion at the registry boundary — the registry guarantees every caller supplies a `WizardHostProps`-shaped object; each wizard reads the subset of fields it needs.
+
+    **Acceptance criteria verified**:
+    1. `resolveWizard('event', null)` → `wizardRegistry.event`; `resolveWizard(undefined, 'sprk_event')` → `wizardRegistry.event`. ✅ (unit tests)
+    2. `resolveWizard('not-a-real-key', null)` → `null`; `resolveWizard(undefined, 'sprk_widget')` → `null`. ✅ (unit tests; toast wiring is task 012's job)
+    3. All three registry entries use `React.lazy()` — genuine code-splitting; no eager imports of any wizard component from this module. ✅
+    4. Shared lib builds clean (`npm run build` / `tsc`, strict mode). ✅ — required first building the sibling `@spaarke/sdap-client` package (`src/client/shared/Spaarke.SdapClient`), whose `dist/` wasn't present in this fresh worktree (`npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build`); this was a pre-existing environment-setup gap unrelated to this task's code, not a regression it introduced.
+
+    **Quality gates** (CLAUDE.md §4, task-execute Step 9.5):
+    - `code-review`: reviewed all 4 new/changed files + the new test file. Lint clean (`npx eslint` on the module — zero errors/warnings). No security/performance findings (pure dispatch logic + a static Dialog). No AI code smells (no single-impl DI interfaces — `WizardHostProps` is a data contract, not a DI seam; no catch-log-rethrow; no null checks on non-nullable types; no restated comments; each function is single-purpose and small). Verdict: Clean.
+    - `adr-check`: ADR-012 (context-agnostic shared library) — confirmed no PCF/Xrm/solution-specific imports (only `react`, `@fluentui/react-components`, and shared-lib-internal types). ADR-021 (Fluent v9) — `PlaceholderWizard` uses `@fluentui/react-components` v9 exclusively, no hard-coded colors. One gap found and closed during review: ADR-012's "MUST NOT export components without tests" had no coverage initially — added `__tests__/wizardRegistry.test.ts` (10 tests, all passing) to close it before marking this task complete. No other violations; no ADR Tensions/exception path needed.
+
+    Files touched: `wizardRegistry.ts`, `PlaceholderWizard.tsx`, `WizardRegistry/index.ts`, `__tests__/wizardRegistry.test.ts` (all new), `components/index.ts` (one-line barrel addition). No changes to `TASK-INDEX.md` or `current-task.md` per orchestrator instruction (010/013/014 running in parallel on the same project).
+  </notes>
+</task>

@@ -18,13 +18,15 @@
  *
  * Steps (with optional associateToStep):
  *   [0] Associate To -- optional; only present when config.associateToStep is set
- *   [1] Add file(s)  -- always skip-able (canAdvance: true)
+ *   [1] Add file(s)  -- always skip-able (canAdvance: true); OMITTED entirely
+ *                       when config.hideFilesStep is true (task 040)
  *   [2] Entity info  -- from config.infoStep
  *   [3] Next Steps   -- follow-on action card selection
  *   [4+] Dynamic     -- Assign Resources, Draft Summary, Send Email
  *
  * Steps (without associateToStep):
- *   [0] Add file(s)  -- always skip-able (canAdvance: true)
+ *   [0] Add file(s)  -- always skip-able (canAdvance: true); OMITTED entirely
+ *                       when config.hideFilesStep is true (task 040)
  *   [1] Entity info  -- from config.infoStep
  *   [2] Next Steps   -- follow-on action card selection
  *   [3+] Dynamic     -- Assign Resources, Draft Summary, Send Email
@@ -34,6 +36,7 @@
  */
 import * as React from 'react';
 import { MessageBar, MessageBarBody, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { PersonRegular, CalendarRegular, MailRegular } from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
 import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
@@ -46,17 +49,19 @@ import type { ILookupItem } from '../../types/LookupTypes';
 import type { ICreateRecordWizardProps, FollowOnActionId, AssociationResult } from './types';
 import { AssociateToStep } from '../AssociateToStep/AssociateToStep';
 
+// Shared, config-driven follow-on module (design.md §5.9). Replaces the local
+// FollowOnSteps.tsx (NextStepsStep) + steps/{AssignWorkFollowOnStep,
+// CreateEventFollowOnStep, SendEmailStep} copies, deleted per task 021. The card
+// grid (FollowOnGrid) drives dynamic step add/remove imperatively at click time,
+// so the previous `selectedActions`-diffing sync effect is no longer needed.
 import {
-  NextStepsStep,
-  FOLLOW_ON_STEP_ID_MAP,
-  FOLLOW_ON_STEP_LABEL_MAP,
-  FOLLOW_ON_CANONICAL_ORDER,
-} from './FollowOnSteps';
-
-import { AssignWorkFollowOnStep, WORK_ASSIGNMENT_PRIORITY } from './steps/AssignWorkFollowOnStep';
-import type { WorkAssignmentPriorityValue } from './steps/AssignWorkFollowOnStep';
-import { CreateEventFollowOnStep } from './steps/CreateEventFollowOnStep';
-import { SendEmailStep } from './steps/SendEmailStep';
+  FollowOnGrid,
+  AssignWorkFollowOnStep,
+  WORK_ASSIGNMENT_PRIORITY,
+  CreateEventFollowOnStep,
+  SendEmailFollowOnStep,
+} from '../WizardFollowOns';
+import type { FollowOnCardConfig, WorkAssignmentPriorityValue } from '../WizardFollowOns';
 
 // ---------------------------------------------------------------------------
 // File reducer
@@ -289,13 +294,6 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   const assignedOutsideCounselNameRef = React.useRef(assignedOutsideCounselName);
   assignedOutsideCounselNameRef.current = assignedOutsideCounselName;
 
-  // -- Search callbacks (from config, with fallbacks) --
-  const searchContacts = config.searchContacts ?? EMPTY_SEARCH;
-  const searchOrganizations = config.searchOrganizations ?? EMPTY_SEARCH;
-  const searchUsers = config.searchUsers ?? EMPTY_SEARCH;
-  const searchMatterTypes = config.searchMatterTypes ?? EMPTY_SEARCH;
-  const searchPracticeAreas = config.searchPracticeAreas ?? EMPTY_SEARCH;
-
   // -- Assign Work change handlers --
   const handleMatterTypeChange = React.useCallback((item: ILookupItem | null) => {
     setAssignWorkMatterTypeId(item?.id ?? '');
@@ -318,170 +316,170 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
     setAssignedOutsideCounselName(item?.name ?? '');
   }, []);
 
-  // -- Sync dynamic steps with selected action cards --
-  const prevSelectedActionsRef = React.useRef<FollowOnActionId[]>([]);
-
+  // -- Apply Assign Work defaults on first 'assign-counsel' selection --
+  // Previously inline in the dynamic-step sync effect. FollowOnGrid now owns the
+  // add/remove of dynamic steps, so this is the only selection-driven side effect
+  // that remains: seed Matter Type / Practice Area from the parent entity form the
+  // first time the Assign Work card is selected (identical behavior to before).
   React.useEffect(() => {
-    const prev = prevSelectedActionsRef.current;
-    const next = selectedActions;
-
-    next.forEach(actionId => {
-      if (!prev.includes(actionId)) {
-        const stepId = FOLLOW_ON_STEP_ID_MAP[actionId];
-        const stepLabel = FOLLOW_ON_STEP_LABEL_MAP[actionId];
-
-        // When Assign Work is first selected, apply defaults from parent entity form
-        if (stepId === 'followon-assign-counsel' && !assignWorkDefaultsApplied && config.getAssignWorkDefaults) {
-          const defaults = config.getAssignWorkDefaults();
-          if (defaults.assignWorkMatterTypeId) {
-            setAssignWorkMatterTypeId(defaults.assignWorkMatterTypeId);
-            setAssignWorkMatterTypeName(defaults.assignWorkMatterTypeName ?? '');
-          }
-          if (defaults.assignWorkPracticeAreaId) {
-            setAssignWorkPracticeAreaId(defaults.assignWorkPracticeAreaId);
-            setAssignWorkPracticeAreaName(defaults.assignWorkPracticeAreaName ?? '');
-          }
-          setAssignWorkDefaultsApplied(true);
-        }
-
-        const dynamicConfig: IWizardStepConfig = {
-          id: stepId,
-          label: stepLabel,
-          canAdvance: () => {
-            if (stepId === 'followon-send-email') {
-              return (
-                emailToRef.current.trim() !== '' &&
-                emailSubjectRef.current.trim() !== '' &&
-                emailBodyRef.current.trim() !== ''
-              );
-            }
-            return true;
-          },
-          renderContent: () => {
-            if (stepId === 'followon-assign-counsel') {
-              const mtVal: ILookupItem | null = assignWorkMatterTypeIdRef.current
-                ? { id: assignWorkMatterTypeIdRef.current, name: assignWorkMatterTypeNameRef.current }
-                : null;
-              const paVal: ILookupItem | null = assignWorkPracticeAreaIdRef.current
-                ? { id: assignWorkPracticeAreaIdRef.current, name: assignWorkPracticeAreaNameRef.current }
-                : null;
-              const attVal: ILookupItem | null = assignedAttorneyIdRef.current
-                ? { id: assignedAttorneyIdRef.current, name: assignedAttorneyNameRef.current }
-                : null;
-              const paraVal: ILookupItem | null = assignedParalegalIdRef.current
-                ? { id: assignedParalegalIdRef.current, name: assignedParalegalNameRef.current }
-                : null;
-              const ocVal: ILookupItem | null = assignedOutsideCounselIdRef.current
-                ? { id: assignedOutsideCounselIdRef.current, name: assignedOutsideCounselNameRef.current }
-                : null;
-
-              return (
-                <AssignWorkFollowOnStep
-                  nameValue={assignWorkNameRef.current}
-                  onNameChange={setAssignWorkName}
-                  descriptionValue={assignWorkDescriptionRef.current}
-                  onDescriptionChange={setAssignWorkDescription}
-                  matterTypeValue={mtVal}
-                  onMatterTypeChange={handleMatterTypeChange}
-                  onSearchMatterTypes={searchMatterTypes}
-                  practiceAreaValue={paVal}
-                  onPracticeAreaChange={handlePracticeAreaChange}
-                  onSearchPracticeAreas={searchPracticeAreas}
-                  priorityValue={assignWorkPriorityRef.current}
-                  onPriorityChange={setAssignWorkPriority}
-                  responseDueDateValue={assignWorkResponseDueDateRef.current}
-                  onResponseDueDateChange={setAssignWorkResponseDueDate}
-                  attorneyValue={attVal}
-                  onAttorneyChange={handleAttorneyChange}
-                  onSearchAttorneys={searchContacts}
-                  paralegalValue={paraVal}
-                  onParalegalChange={handleParalegalChange}
-                  onSearchParalegals={searchContacts}
-                  outsideCounselValue={ocVal}
-                  onOutsideCounselChange={handleOutsideCounselChange}
-                  onSearchOutsideCounsel={searchOrganizations}
-                />
-              );
-            } // end followon-assign-counsel
-            if (stepId === 'followon-create-event') {
-              if (!config.eventDataService) {
-                // eventDataService not configured — show informational text
-                return (
-                  <Text size={300} style={{ color: 'inherit' }}>
-                    Event creation is not configured for this wizard.
-                  </Text>
-                );
-              }
-              const currentFormValues = {
-                eventName: createEventNameRef.current,
-                eventTypeId: createEventTypeIdRef.current,
-                eventTypeName: createEventTypeNameRef.current,
-                dueDate: createEventDueDateRef.current,
-                priority: createEventPriorityRef.current,
-                description: createEventDescriptionRef.current,
-                regardingRecordId: '',
-                regardingRecordName: '',
-              };
-              return (
-                <CreateEventFollowOnStep
-                  dataService={config.eventDataService}
-                  formValues={currentFormValues}
-                  onFormValues={vals => {
-                    setCreateEventName(vals.eventName);
-                    setCreateEventTypeId(vals.eventTypeId);
-                    setCreateEventTypeName(vals.eventTypeName);
-                    setCreateEventDueDate(vals.dueDate);
-                    setCreateEventPriority(vals.priority);
-                    setCreateEventDescription(vals.description);
-                  }}
-                  onValidChange={() => {
-                    /* canAdvance is always true for follow-on */
-                  }}
-                />
-              );
-            }
-            if (stepId === 'followon-send-email') {
-              return (
-                <SendEmailStep
-                  emailTo={emailToRef.current}
-                  onEmailToChange={setEmailTo}
-                  emailSubject={emailSubjectRef.current}
-                  onEmailSubjectChange={setEmailSubject}
-                  emailBody={emailBodyRef.current}
-                  onEmailBodyChange={setEmailBody}
-                  onSearchUsers={searchUsers}
-                />
-              );
-            }
-            return <Text size={300}>{stepLabel}</Text>;
-          },
-        };
-
-        shellRef.current?.addDynamicStep(dynamicConfig, FOLLOW_ON_CANONICAL_ORDER);
+    if (selectedActions.includes('assign-counsel') && !assignWorkDefaultsApplied && config.getAssignWorkDefaults) {
+      const defaults = config.getAssignWorkDefaults();
+      if (defaults.assignWorkMatterTypeId) {
+        setAssignWorkMatterTypeId(defaults.assignWorkMatterTypeId);
+        setAssignWorkMatterTypeName(defaults.assignWorkMatterTypeName ?? '');
       }
-    });
-
-    prev.forEach(actionId => {
-      if (!next.includes(actionId)) {
-        shellRef.current?.removeDynamicStep(FOLLOW_ON_STEP_ID_MAP[actionId]);
+      if (defaults.assignWorkPracticeAreaId) {
+        setAssignWorkPracticeAreaId(defaults.assignWorkPracticeAreaId);
+        setAssignWorkPracticeAreaName(defaults.assignWorkPracticeAreaName ?? '');
       }
-    });
+      setAssignWorkDefaultsApplied(true);
+    }
+  }, [selectedActions, assignWorkDefaultsApplied, config]);
 
-    prevSelectedActionsRef.current = next;
+  // -- Follow-on card set (declared as config for the shared FollowOnGrid) --
+  // Card ids ('assign-counsel' / 'create-event' / 'send-email') are unchanged so
+  // the derived dynamic step ids ('followon-*'), the canonical sidebar order, and
+  // `IFinishContext.selectedActions` values reaching the Event/Project wrappers all
+  // stay byte-identical to the pre-consolidation behavior. Each `renderStep` reads
+  // the wizard's own refs so its form state survives step navigation exactly as it
+  // did when these bodies lived in the sync effect above.
+  const followOnCards: FollowOnCardConfig[] = React.useMemo(() => {
+    const searchContacts = config.searchContacts ?? EMPTY_SEARCH;
+    const searchOrganizations = config.searchOrganizations ?? EMPTY_SEARCH;
+    const searchUsers = config.searchUsers ?? EMPTY_SEARCH;
+    const searchMatterTypes = config.searchMatterTypes ?? EMPTY_SEARCH;
+    const searchPracticeAreas = config.searchPracticeAreas ?? EMPTY_SEARCH;
+
+    return [
+      {
+        id: 'assign-counsel',
+        label: 'Assign Work',
+        stepLabel: 'Assign Work',
+        icon: <PersonRegular fontSize={28} />,
+        description: 'Create a work assignment with resources linked to this record.',
+        renderStep: () => {
+          const mtVal: ILookupItem | null = assignWorkMatterTypeIdRef.current
+            ? { id: assignWorkMatterTypeIdRef.current, name: assignWorkMatterTypeNameRef.current }
+            : null;
+          const paVal: ILookupItem | null = assignWorkPracticeAreaIdRef.current
+            ? { id: assignWorkPracticeAreaIdRef.current, name: assignWorkPracticeAreaNameRef.current }
+            : null;
+          const attVal: ILookupItem | null = assignedAttorneyIdRef.current
+            ? { id: assignedAttorneyIdRef.current, name: assignedAttorneyNameRef.current }
+            : null;
+          const paraVal: ILookupItem | null = assignedParalegalIdRef.current
+            ? { id: assignedParalegalIdRef.current, name: assignedParalegalNameRef.current }
+            : null;
+          const ocVal: ILookupItem | null = assignedOutsideCounselIdRef.current
+            ? { id: assignedOutsideCounselIdRef.current, name: assignedOutsideCounselNameRef.current }
+            : null;
+
+          return (
+            <AssignWorkFollowOnStep
+              nameValue={assignWorkNameRef.current}
+              onNameChange={setAssignWorkName}
+              descriptionValue={assignWorkDescriptionRef.current}
+              onDescriptionChange={setAssignWorkDescription}
+              matterTypeValue={mtVal}
+              onMatterTypeChange={handleMatterTypeChange}
+              onSearchMatterTypes={searchMatterTypes}
+              practiceAreaValue={paVal}
+              onPracticeAreaChange={handlePracticeAreaChange}
+              onSearchPracticeAreas={searchPracticeAreas}
+              priorityValue={assignWorkPriorityRef.current}
+              onPriorityChange={setAssignWorkPriority}
+              responseDueDateValue={assignWorkResponseDueDateRef.current}
+              onResponseDueDateChange={setAssignWorkResponseDueDate}
+              attorneyValue={attVal}
+              onAttorneyChange={handleAttorneyChange}
+              onSearchAttorneys={searchContacts}
+              paralegalValue={paraVal}
+              onParalegalChange={handleParalegalChange}
+              onSearchParalegals={searchContacts}
+              outsideCounselValue={ocVal}
+              onOutsideCounselChange={handleOutsideCounselChange}
+              onSearchOutsideCounsel={searchOrganizations}
+            />
+          );
+        },
+      },
+      {
+        id: 'create-event',
+        label: 'Create Event',
+        stepLabel: 'Create Event',
+        icon: <CalendarRegular fontSize={28} />,
+        description: 'Create an event linked to this record.',
+        renderStep: () => {
+          if (!config.eventDataService) {
+            // eventDataService not configured — show informational text
+            return (
+              <Text size={300} style={{ color: 'inherit' }}>
+                Event creation is not configured for this wizard.
+              </Text>
+            );
+          }
+          const currentFormValues = {
+            eventName: createEventNameRef.current,
+            eventTypeId: createEventTypeIdRef.current,
+            eventTypeName: createEventTypeNameRef.current,
+            dueDate: createEventDueDateRef.current,
+            priority: createEventPriorityRef.current,
+            description: createEventDescriptionRef.current,
+            regardingRecordId: '',
+            regardingRecordName: '',
+          };
+          return (
+            <CreateEventFollowOnStep
+              dataService={config.eventDataService}
+              formValues={currentFormValues}
+              onFormValues={vals => {
+                setCreateEventName(vals.eventName);
+                setCreateEventTypeId(vals.eventTypeId);
+                setCreateEventTypeName(vals.eventTypeName);
+                setCreateEventDueDate(vals.dueDate);
+                setCreateEventPriority(vals.priority);
+                setCreateEventDescription(vals.description);
+              }}
+              onValidChange={() => {
+                /* canAdvance is always true for follow-on */
+              }}
+            />
+          );
+        },
+      },
+      {
+        id: 'send-email',
+        label: 'Send Notification Email',
+        // Sidebar step label stays 'Send Email' (was FOLLOW_ON_STEP_LABEL_MAP)
+        // even though the card reads 'Send Notification Email'.
+        stepLabel: 'Send Email',
+        icon: <MailRegular fontSize={28} />,
+        description: 'Compose and queue an introductory email to the client.',
+        canAdvance: () =>
+          emailToRef.current.trim() !== '' &&
+          emailSubjectRef.current.trim() !== '' &&
+          emailBodyRef.current.trim() !== '',
+        renderStep: () => (
+          <SendEmailFollowOnStep
+            emailTo={emailToRef.current}
+            onEmailToChange={setEmailTo}
+            emailSubject={emailSubjectRef.current}
+            onEmailSubjectChange={setEmailSubject}
+            emailBody={emailBodyRef.current}
+            onEmailBodyChange={setEmailBody}
+            onSearchUsers={searchUsers}
+            infoNote="This email will be saved as a draft activity on the record. You can review and send it from there."
+          />
+        ),
+      },
+    ];
   }, [
-    selectedActions,
-    searchContacts,
-    searchOrganizations,
-    searchUsers,
-    searchMatterTypes,
-    searchPracticeAreas,
+    config,
     handleMatterTypeChange,
     handlePracticeAreaChange,
     handleAttorneyChange,
     handleParalegalChange,
     handleOutsideCounselChange,
-    assignWorkDefaultsApplied,
-    config,
   ]);
 
   // -- Email pre-fill when send-email is selected --
@@ -604,17 +602,45 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
       label: 'Next Steps',
       canAdvance: () => true,
       isEarlyFinish: () => selectedActions.length === 0,
-      renderContent: () => (
-        <NextStepsStep
-          selectedActions={selectedActions}
-          onSelectionChange={setSelectedActions}
-          entityLabel={config.entityLabel}
+      renderContent: handle => (
+        <FollowOnGrid
+          // task 030: a wizard may override the built-in Assign Work/Create
+          // Event/Send Email card set via config.followOnCards (e.g.
+          // CreateInvoiceWizard's Send Email/Add To Do/Assign Work set). See
+          // ICreateRecordWizardConfig.followOnCards doc comment.
+          cards={config.followOnCards ?? followOnCards}
+          selected={selectedActions}
+          onSelectionChange={sel => setSelectedActions(sel as FollowOnActionId[])}
+          addDynamicStep={(cfg, order) => handle.addDynamicStep(cfg, order)}
+          removeDynamicStep={stepId => handle.removeDynamicStep(stepId)}
+          title="Next steps"
+          subtitle={
+            `Optionally select follow-on actions to complete after the ${config.entityLabel} is created. ` +
+            `You can skip all and handle these from the ${config.entityLabel} record.`
+          }
+          emptyHint={`No actions selected — click Finish to create the ${config.entityLabel} without follow-on steps.`}
         />
       ),
     };
 
+    // task 040: `config.hideFilesStep` omits "Add file(s)" entirely (not
+    // merely skippable) — see ICreateRecordWizardConfig.hideFilesStep doc
+    // comment. Every other consumer leaves this undefined, so `filesSteps`
+    // is `[addFilesStep]` exactly as before.
+    const filesSteps: IWizardStepConfig[] = config.hideFilesStep ? [] : [addFilesStep];
+
     if (config.associateToStep) {
-      const { entityTypes, navigationService } = config.associateToStep;
+      const { entityTypes, navigationService, lockAssociation } = config.associateToStep;
+
+      // Locked mode (design §5.5): the parent is fixed (e.g. launched from a
+      // Visual Host visual). Hide the Associate-To step entirely — the seeded
+      // `initialAssociation` still reaches onFinish through `associationRef`
+      // (set by the reset-on-open effect above), so the created child is
+      // regarding the host record without the user ever seeing the picker.
+      if (lockAssociation) {
+        return [...filesSteps, infoStepConfig, nextStepsConfig];
+      }
+
       const associateStepConfig: IWizardStepConfig = {
         id: 'associate-to',
         label: 'Associate To',
@@ -633,10 +659,10 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
           />
         ),
       };
-      return [associateStepConfig, addFilesStep, infoStepConfig, nextStepsConfig];
+      return [associateStepConfig, ...filesSteps, infoStepConfig, nextStepsConfig];
     }
 
-    return [addFilesStep, infoStepConfig, nextStepsConfig];
+    return [...filesSteps, infoStepConfig, nextStepsConfig];
   }, [
     fileState.uploadedFiles,
     fileState.validationErrors,
@@ -644,6 +670,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
     config,
     styles,
     filesStepSubtitle,
+    followOnCards,
     handleFilesAccepted,
     handleValidationErrors,
     handleRemoveFile,

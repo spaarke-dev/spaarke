@@ -10,7 +10,7 @@
  *   [0] Work to Assign (SelectWorkStep)
  *   [1] Add Files (AddFilesStep) -- skippable
  *   [2] Enter Info (EnterInfoStep) -- pre-filled from record or AI
- *   [3] Next Steps (NextStepsSelectionStep) -- early finish if 0 selected
+ *   [3] Next Steps (shared WizardFollowOns FollowOnGrid) -- early finish if 0 selected
  *   [4+] Dynamic: Assign Work, Send Email, Create Event
  *
  * Processing:
@@ -22,11 +22,10 @@
  */
 import * as React from 'react';
 import { Button, Text, Spinner, tokens } from '@fluentui/react-components';
-import { CheckmarkCircleFilled } from '@fluentui/react-icons';
+import { CheckmarkCircleFilled, PersonRegular, MailRegular, CalendarRegular } from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
 import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
-import { SendEmailStep } from '../CreateRecordWizard/steps/SendEmailStep';
 import { searchUsersAsLookup } from './workAssignmentService';
 
 import type {
@@ -35,21 +34,21 @@ import type {
   ICreateFollowOnEventState,
   WorkAssignmentFollowOnId,
 } from './formTypes';
-import {
-  EMPTY_WORK_ASSIGNMENT_FORM,
-  EMPTY_ASSIGN_WORK_STATE,
-  EMPTY_FOLLOW_ON_EVENT_STATE,
-  WA_FOLLOW_ON_STEP_ID_MAP,
-  WA_FOLLOW_ON_STEP_LABEL_MAP,
-  WA_FOLLOW_ON_CANONICAL_ORDER,
-} from './formTypes';
+import { EMPTY_WORK_ASSIGNMENT_FORM, EMPTY_ASSIGN_WORK_STATE, EMPTY_FOLLOW_ON_EVENT_STATE } from './formTypes';
 import { WorkAssignmentService } from './workAssignmentService';
 import { SelectWorkStep } from './SelectWorkStep';
 import { AddFilesStep } from './AddFilesStep';
 import { EnterInfoStep } from './EnterInfoStep';
-import { NextStepsSelectionStep } from './NextStepsSelectionStep';
 import { AssignWorkStep } from './AssignWorkStep';
 import { CreateFollowOnEventStep } from './CreateFollowOnEventStep';
+// Shared, config-driven Next-Steps grid + reusable Send Email step
+// (WizardFollowOns consolidation, design.md §5.9). The Assign Work + Create
+// Event step BODIES remain local: they feed the canonical (unchanged)
+// workAssignmentService, whose IAssignWorkState / ICreateFollowOnEventState
+// contracts differ from the shared AssignWork/CreateEvent follow-on steps
+// (those create *child* records for CreateRecordWizard). See task 023 notes.
+import { FollowOnGrid, SendEmailFollowOnStep, followOnStepId } from '../WizardFollowOns';
+import type { FollowOnCardConfig } from '../WizardFollowOns';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
@@ -233,6 +232,14 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       selectWorkValidRef.current = false;
       enterInfoValidRef.current = false;
       followOnEventValidRef.current = true;
+      // Clear any follow-on dynamic steps a prior run left in the shell. The
+      // shell's own reset only re-homes to step 0; it does not trim injected
+      // steps. FollowOnGrid injects/removes at click-time, so on reopen we
+      // must remove leftovers here (parity with the pre-consolidation
+      // selection-diff cleanup). removeDynamicStep is a no-op for absent ids.
+      (['assign-work', 'send-email', 'create-event'] as WorkAssignmentFollowOnId[]).forEach(cardId =>
+        shellRef.current?.removeDynamicStep(followOnStepId(cardId))
+      );
     }
   }, [open]);
 
@@ -316,97 +323,74 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
     [dataService]
   );
 
-  // -- Dynamic step injection ------------------------------------------------
-  const prevSelectedActionsRef = React.useRef<WorkAssignmentFollowOnId[]>([]);
-
-  React.useEffect(() => {
-    const prev = prevSelectedActionsRef.current;
-    const next = selectedActions;
-
-    next.forEach(actionId => {
-      if (!prev.includes(actionId)) {
-        const stepId = WA_FOLLOW_ON_STEP_ID_MAP[actionId];
-        const stepLabel = WA_FOLLOW_ON_STEP_LABEL_MAP[actionId];
-
-        const dynamicConfig: IWizardStepConfig = {
-          id: stepId,
-          label: stepLabel,
-          canAdvance: () => {
-            if (stepId === 'followon-wa-send-email') {
-              return (
-                emailToRef.current.trim() !== '' &&
-                emailSubjectRef.current.trim() !== '' &&
-                emailBodyRef.current.trim() !== ''
-              );
-            }
-            if (stepId === 'followon-wa-create-event') {
-              return followOnEventValidRef.current;
-            }
-            return true;
-          },
-          renderContent: () => {
-            if (stepId === 'followon-wa-assign-work') {
-              return (
-                <AssignWorkStep
-                  dataService={dataService}
-                  authenticatedFetch={authenticatedFetch}
-                  bffBaseUrl={bffBaseUrl}
-                  containerId={containerId}
-                  onFormValues={setAssignWorkState}
-                  initialValues={assignWorkStateRef.current}
-                />
-              );
-            }
-            if (stepId === 'followon-wa-send-email') {
-              return (
-                <SendEmailStep
-                  title="Send Email"
-                  emailTo={emailToRef.current}
-                  onEmailToChange={setEmailTo}
-                  emailCc={emailCcRef.current}
-                  onEmailCcChange={setEmailCc}
-                  emailSubject={emailSubjectRef.current}
-                  onEmailSubjectChange={setEmailSubject}
-                  emailBody={emailBodyRef.current}
-                  onEmailBodyChange={setEmailBody}
-                  onSearchUsers={handleSearchUsers}
-                />
-              );
-            }
-            if (stepId === 'followon-wa-create-event') {
-              return (
-                <CreateFollowOnEventStep
-                  dataService={dataService}
-                  onValidChange={handleFollowOnEventValid}
-                  onFormValues={setFollowOnEventState}
-                  initialValues={followOnEventStateRef.current}
-                />
-              );
-            }
-            return null;
-          },
-        };
-
-        shellRef.current?.addDynamicStep(dynamicConfig, WA_FOLLOW_ON_CANONICAL_ORDER);
-      }
-    });
-
-    prev.forEach(actionId => {
-      if (!next.includes(actionId)) {
-        shellRef.current?.removeDynamicStep(WA_FOLLOW_ON_STEP_ID_MAP[actionId]);
-      }
-    });
-
-    prevSelectedActionsRef.current = [...next];
-  }, [
-    selectedActions,
-    dataService,
-    authenticatedFetch,
-    bffBaseUrl,
-    containerId,
-    handleFollowOnEventValid,
-    handleSearchUsers,
-  ]);
+  // -- Follow-on cards (config-driven; drives WizardFollowOns FollowOnGrid) ---
+  // Card ids are the canonical WorkAssignmentFollowOnId union values so the
+  // finish handler's `actions.includes('assign-work' | 'send-email' |
+  // 'create-event')` checks and the email pre-fill effect keep working
+  // unchanged. Selecting a card injects the matching dynamic step
+  // (`followon-{id}`); the wizard still owns each step's form state via refs.
+  const followOnCards = React.useMemo<FollowOnCardConfig[]>(
+    () => [
+      {
+        id: 'assign-work',
+        label: 'Assign Work',
+        description: 'Assign attorneys, paralegals, and law firms to this work assignment.',
+        icon: <PersonRegular />,
+        renderStep: () => (
+          <AssignWorkStep
+            dataService={dataService}
+            authenticatedFetch={authenticatedFetch}
+            bffBaseUrl={bffBaseUrl}
+            containerId={containerId}
+            onFormValues={setAssignWorkState}
+            initialValues={assignWorkStateRef.current}
+          />
+        ),
+      },
+      {
+        id: 'send-email',
+        label: 'Send Email',
+        description: 'Send an email notification about this work assignment.',
+        icon: <MailRegular />,
+        canAdvance: () =>
+          emailToRef.current.trim() !== '' &&
+          emailSubjectRef.current.trim() !== '' &&
+          emailBodyRef.current.trim() !== '',
+        renderStep: () => (
+          <SendEmailFollowOnStep
+            title="Send Email"
+            emailTo={emailToRef.current}
+            onEmailToChange={setEmailTo}
+            emailCc={emailCcRef.current}
+            onEmailCcChange={setEmailCc}
+            emailSubject={emailSubjectRef.current}
+            onEmailSubjectChange={setEmailSubject}
+            emailBody={emailBodyRef.current}
+            onEmailBodyChange={setEmailBody}
+            onSearchUsers={handleSearchUsers}
+          />
+        ),
+      },
+      {
+        id: 'create-event',
+        label: 'Create an Event',
+        // Sidebar step label stays "Create Event" (matches pre-consolidation).
+        stepLabel: 'Create Event',
+        description: 'Create a follow-up event linked to this work assignment.',
+        icon: <CalendarRegular />,
+        canAdvance: () => followOnEventValidRef.current,
+        renderStep: () => (
+          <CreateFollowOnEventStep
+            dataService={dataService}
+            onValidChange={handleFollowOnEventValid}
+            onFormValues={setFollowOnEventState}
+            initialValues={followOnEventStateRef.current}
+          />
+        ),
+      },
+    ],
+    [dataService, authenticatedFetch, bffBaseUrl, containerId, handleFollowOnEventValid, handleSearchUsers]
+  );
 
   // -- Pre-fill email when entering Send Email step --------------------------
   React.useEffect(() => {
@@ -495,7 +479,16 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
         canAdvance: () => true,
         isEarlyFinish: () => selectedActionsRef.current.length === 0,
         renderContent: () => (
-          <NextStepsSelectionStep selectedActions={selectedActions} onSelectedActionsChange={setSelectedActions} />
+          <FollowOnGrid
+            cards={followOnCards}
+            selected={selectedActions}
+            onSelectionChange={next => setSelectedActions(next as WorkAssignmentFollowOnId[])}
+            addDynamicStep={(config, order) => shellRef.current?.addDynamicStep(config, order)}
+            removeDynamicStep={stepId => shellRef.current?.removeDynamicStep(stepId)}
+            title="Next Steps"
+            subtitle="Select additional actions to perform after creating the work assignment."
+            emptyHint="You can skip this step to create the work assignment without additional actions."
+          />
         ),
       },
     ],
@@ -505,6 +498,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       bffBaseUrl,
       containerId,
       selectedActions,
+      followOnCards,
       handleSelectWorkValid,
       handleSelectWorkValues,
       handleUploadedFilesChange,

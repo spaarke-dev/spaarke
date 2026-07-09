@@ -105,6 +105,22 @@ export interface IDocumentLinkResult {
   warnings: string[];
 }
 
+/**
+ * One extra `@odata.bind` to emit on a `sprk_document` create payload, alongside
+ * the primary bind. `sprk_document` exposes separate typed lookups per parent
+ * type (`sprk_matter`, `sprk_project`, `sprk_invoice`, `sprk_event`, …), so one
+ * document row can natively bind to multiple parents (design.md §5.8) — e.g. the
+ * host record AND the newly-created child record.
+ */
+export interface IAdditionalBind {
+  /** Target entity SET name (plural, e.g. `'sprk_matters'`). */
+  entitySet: string;
+  /** GUID of the target record. Brace-wrapped GUIDs are normalized automatically. */
+  id: string;
+  /** Navigation property name on `sprk_document` (e.g. `'sprk_Matter'`). */
+  navProp: string;
+}
+
 /** Input for sending email via BFF Communication service. */
 export interface ISendEmailInput {
   to: string | string[];
@@ -263,6 +279,17 @@ export class EntityCreationService {
   // -------------------------------------------------------------------------
   // INV-5-safe cascade helpers (spaarke-multi-container-multi-index-r1 / FR-WIZ-01..08)
   // -------------------------------------------------------------------------
+
+  /**
+   * Normalize a GUID for use in an `@odata.bind` URL: strip surrounding curly
+   * braces (as returned by `Xrm.Utility.lookupObjects` / some Xrm context APIs)
+   * and lowercase. Mirrors the normalization in
+   * `PolymorphicResolverService.applyResolverFields` — the OData bind syntax
+   * rejects brace-wrapped GUIDs with HTTP 400 "Error in query syntax".
+   */
+  private static _cleanGuid(id: string): string {
+    return id.replace(/[{}]/g, '').toLowerCase();
+  }
 
   /**
    * Returns true when the entity payload has a non-empty value for the given field.
@@ -545,7 +572,13 @@ export class EntityCreationService {
    * @param parentEntityId GUID of the parent entity record
    * @param navigationProperty Navigation property name on sprk_document (e.g., 'sprk_Matter')
    * @param uploadedFiles SPE file metadata from uploadFilesToSpe()
-   * @param options Additional context for the document records
+   * @param options Additional context for the document records. `additionalBinds`
+   *   (added by visual-host-create-button-r1 task 013 per design.md §5.8) lets a
+   *   caller bind the SAME document to one or more extra parents — e.g. the
+   *   Visual Host launch's host record — alongside the primary bind, since
+   *   `sprk_document` exposes separate typed lookups per parent type. Omitting
+   *   it preserves the historical single-bind behavior exactly (backward
+   *   compatible — this service is shared by multiple wizards).
    */
   async createDocumentRecords(
     parentEntityName: string,
@@ -559,6 +592,15 @@ export class EntityCreationService {
       parentRecordName?: string;
       /** Parent entity logical name (e.g., 'sprk_matter'). If omitted, derived from parentEntityName by removing trailing 's'. */
       parentEntityLogicalName?: string;
+      /**
+       * Extra `@odata.bind` entries to emit on EVERY created document, alongside
+       * the primary `navigationProperty` bind (e.g. bind to both the host record
+       * and the newly-created child record). Each entry's nav-prop must differ
+       * from the primary bind and from every other entry — a duplicate nav-prop
+       * is skipped (primary always wins) and reported as a warning rather than
+       * silently overwriting a bind.
+       */
+      additionalBinds?: IAdditionalBind[];
     }
   ): Promise<IDocumentLinkResult> {
     const warnings: string[] = [];
@@ -583,9 +625,35 @@ export class EntityCreationService {
           sprk_hasfile: true,
         };
 
-        // Add @odata.bind navigation property to link document to parent entity
+        // Add @odata.bind navigation property to link document to parent entity.
+        // GUID normalization (strip braces, lowercase) mirrors the convention used
+        // by PolymorphicResolverService.applyResolverFields — defensive against a
+        // caller passing a brace-wrapped GUID (e.g. sourced from an Xrm lookup
+        // control) straight through to the OData bind URL.
+        const usedNavProps = new Set<string>();
         if (navigationProperty) {
-          documentEntity[`${navigationProperty}@odata.bind`] = `/${parentEntityName}(${parentEntityId})`;
+          const cleanParentId = EntityCreationService._cleanGuid(parentEntityId);
+          documentEntity[`${navigationProperty}@odata.bind`] = `/${parentEntityName}(${cleanParentId})`;
+          usedNavProps.add(navigationProperty);
+        }
+
+        // Additional binds (design.md §5.8 multi-parent dual-bind — e.g. bind the
+        // same document to both the Visual Host launch's host record and the
+        // newly-created child record). Backward compatible: omitting
+        // `options.additionalBinds` leaves this loop a no-op and the payload
+        // identical to the pre-existing single-bind shape. A duplicate nav-prop
+        // (incl. one colliding with the primary bind) is skipped + warned rather
+        // than silently overwriting an already-set bind.
+        for (const bind of options?.additionalBinds ?? []) {
+          if (usedNavProps.has(bind.navProp)) {
+            const msg = `Skipped duplicate additionalBinds nav-prop "${bind.navProp}" for "${file.name}" — a bind for this nav-prop was already set on the payload.`;
+            console.warn(`[EntityCreationService] ${msg}`);
+            warnings.push(msg);
+            continue;
+          }
+          const cleanBindId = EntityCreationService._cleanGuid(bind.id);
+          documentEntity[`${bind.navProp}@odata.bind`] = `/${bind.entitySet}(${cleanBindId})`;
+          usedNavProps.add(bind.navProp);
         }
 
         console.info('[EntityCreationService] createDocumentRecord payload:', JSON.stringify(documentEntity, null, 2));

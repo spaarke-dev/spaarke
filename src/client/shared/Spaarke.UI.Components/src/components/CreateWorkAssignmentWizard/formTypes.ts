@@ -128,23 +128,10 @@ export interface ICreateWorkAssignmentResult {
 }
 
 // ---------------------------------------------------------------------------
-// Step ID mappings for dynamic step injection
+// Follow-on step injection
 // ---------------------------------------------------------------------------
-
-export const WA_FOLLOW_ON_STEP_ID_MAP: Record<WorkAssignmentFollowOnId, string> = {
-  'assign-work': 'followon-wa-assign-work',
-  'send-email': 'followon-wa-send-email',
-  'create-event': 'followon-wa-create-event',
-};
-
-export const WA_FOLLOW_ON_STEP_LABEL_MAP: Record<WorkAssignmentFollowOnId, string> = {
-  'assign-work': 'Assign Work',
-  'send-email': 'Send Email',
-  'create-event': 'Create Event',
-};
-
-export const WA_FOLLOW_ON_CANONICAL_ORDER = [
-  'followon-wa-assign-work',
-  'followon-wa-send-email',
-  'followon-wa-create-event',
-];
+// The per-wizard `WA_FOLLOW_ON_STEP_ID_MAP` / `_STEP_LABEL_MAP` /
+// `_CANONICAL_ORDER` constants were removed when this wizard migrated onto the
+// shared WizardFollowOns module (task 023). Dynamic step ids are now derived by
+// `followOnStepId(cardId)` from the card config; canonical ordering follows the
+// `FollowOnCardConfig[]` array order. See WorkAssignmentWizardDialog.tsx.
