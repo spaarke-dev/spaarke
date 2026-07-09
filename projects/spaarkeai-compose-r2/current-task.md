@@ -60,15 +60,20 @@ startable now; core-gated tracks (⛔) wait on core R2 Phase A0.
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 031 |
-| **Task File** | tasks/031-custom-marks.poml |
-| **Title** | FR-15 custom ProseMirror marks (insertion/deletion/commentAnchor) |
-| **Phase** | 3 Inline Editing UX |
-| **Status** | ✅ completed (2026-07-09) |
-| **Started** | 2026-07-09 |
+| **Task ID** | 040/041/043/044 (Phase 4 catalog wave) |
+| **Task File** | tasks/04{0,1,3,4}-*.poml |
+| **Title** | FR-07/08/10/11 compose Action + Binding catalog rows |
+| **Phase** | 4 Catalog |
+| **Status** | ✅ completed (2026-07-09) — 042 DEFERRED (core 010) |
 | **Rigor** | FULL · sonnet@high (session on Opus) · directional |
 
-**031 done**: 3 `Mark.create` marks (`src/widgets/marks/`) registered additively in ComposeEditor; span+`data-compose-mark` render with provenance attrs + token-based redline classes (ADR-021). Code-review caught + fixed a StarterKit-Strike parse collision. jest 19/19; build green; zero new deps. Materialization from ledger = FR-16 / task 033.
+**Phase-4 catalog wave (040/041/043/044) done — mirror-first, ADR-039.** Each capability = action-only seed (`infra/dataverse/actions/{code}.action.json`, systemPrompt home) + input mirror (`inputschemas/`) + output mirror (`outputschemas/`) + Binding row (`sprk_playbookconsumer-rows.json`). 13 files valid JSON; no banned property-level `required:true`; OptionSet codes verified vs `Binding.cs` (disposition=Informational/risk=None/captureMode=LoopElicitation = 100000000). Deploy = task 047 (`Deploy-AnalysisAction.ps1` + `Seed-PlaybookConsumers.ps1`); eval cases = task 045.
+- **SystemPrompt-home decision** (was the open review question): lives on `sprk_analysisaction.sprk_systemprompt` in an **action-only** seed file (no playbook — engine frozen); grounded in the R5 rule "sprk_systemprompt IS the JPS prompt primitive."
+- **042 (draft-alternative) DEFERRED**: its Binding declares the `compose` disposition = core task **010** (`BindingDisposition.Compose` + OutputRouter case), not landed. TASK-INDEX 042 → 🔴/⛔ (was wrongly unblocked).
+- **In-file REVIEW FLAGS** (non-blocking, for deploy/seed validation): 044 `surfaces="context"` (renders in Context pane — confirm the surface value is recognized); 043 input `changesText` upstream wiring finalizes with tasks 051/054; `ucid` left null pending a compose use-case id; span fields authored as text snippets (LLM-reliable).
+- **031 (prior) done**: 3 custom marks; jest 19/19; on branch.
+
+**Next**: 045 (eval cases ≥5 golden + ≥5 dispatch per row — FULL, modifies tests/) then 047 (deploy). 046 (dispatch wiring) also startable. 042 waits on core 010.
 
 ---
 

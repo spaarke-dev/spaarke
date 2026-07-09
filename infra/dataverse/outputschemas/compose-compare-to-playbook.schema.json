@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/compose-compare-to-playbook.schema.json",
+  "title": "Compose — Compare to Playbook — Output Schema (compose-compare-to-playbook)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='compose-compare-to-playbook' (spaarkeai-compose-r2 task 041, FR-08). MIRRORS VERBATIM the outputSchema in infra/dataverse/actions/compose-compare-to-playbook.action.json. Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required arrays, no anyOf/oneOf/discriminator; overallRisk is a constrained string via the enum keyword.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["matches", "overallRisk"],
+  "$comment-required": "Object-level required arrays only — property-level boolean 'required' is FORBIDDEN.",
+  "properties": {
+    "matches": {
+      "type": "array",
+      "description": "One entry per relevant playbook comparison. Empty when no relevant firm-standard was supplied.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["playbookEntryId", "clauseText", "deviations", "riskScore", "rationale"],
+        "properties": {
+          "playbookEntryId": {
+            "type": "string",
+            "description": "Id of the supplied matter/firm playbook entry (id ONLY — never quoted content)."
+          },
+          "clauseText": {
+            "type": "string",
+            "description": "The drafted clause text this comparison concerns.",
+            "maxLength": 4000
+          },
+          "deviations": {
+            "type": "array",
+            "description": "Concrete differences from the firm-standard language (each a short phrase). Empty when compliant.",
+            "items": { "type": "string", "maxLength": 200 }
+          },
+          "riskScore": {
+            "type": "number",
+            "description": "Deviation risk in [0,1]: 0 = fully compliant, 1 = severe deviation.",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "rationale": {
+            "type": "string",
+            "description": "One-sentence explanation of the risk.",
+            "maxLength": 500
+          }
+        }
+      }
+    },
+    "overallRisk": {
+      "type": "string",
+      "description": "Overall risk label for the selected clause versus the playbook.",
+      "enum": ["low", "medium", "high"]
+    }
+  }
+}

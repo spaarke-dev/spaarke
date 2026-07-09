@@ -40,11 +40,11 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 032 | FR-18 serial action queueing in ConversationPane | 3 Inline | 🟢 | none | 🔲 | FULL | sonnet | high |
 | 033 | FR-16 pending track-change materialization from ledger (compose disposition) | 3 Inline | 🔴 | 031,016 | ⛔ | FULL | opus | high |
 | 034 | FR-17 undo/replace via ledger supersession | 3 Inline | 🔴 | 033 | ⛔ | FULL | opus | high |
-| 040 | FR-07 compose-explain-clause Action + Binding | 4 Catalog | 🟢 | 001 | 🔲 | FULL | sonnet | high |
-| 041 | FR-08 compose-compare-to-playbook Action + Binding | 4 Catalog | 🟢 | 001 | 🔲 | FULL | sonnet | high |
-| 042 | FR-09 compose-draft-alternative Action + Binding (compose disposition) | 4 Catalog | 🟢 | 001,016 | 🔲 | FULL | opus | high |
-| 043 | FR-10 compose-summarize-word-changes Action + Binding | 4 Catalog | 🟢 | 001,006 | 🔲 | FULL | sonnet | high |
-| 044 | FR-11 compose-defined-terms Action + Binding (overflow trigger → Context) | 4 Catalog | 🟢 | 001 | 🔲 | FULL | sonnet | high |
+| 040 | FR-07 compose-explain-clause Action + Binding | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
+| 041 | FR-08 compose-compare-to-playbook Action + Binding | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
+| 042 | FR-09 compose-draft-alternative Action + Binding (compose disposition) | 4 Catalog | 🔴 | 001,016,core-010 | ⛔ | FULL | opus | high |
+| 043 | FR-10 compose-summarize-word-changes Action + Binding | 4 Catalog | 🟢 | 001,006 | ✅ | FULL | sonnet | high |
+| 044 | FR-11 compose-defined-terms Action + Binding (overflow trigger → Context) | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
 | 045 | FR-12 eval cases per row (golden + dispatch ≥5) + schema validation | 4 Catalog | 🟢 | 040,041,042,043,044 | 🔲 | FULL | sonnet | high |
 | 046 | FR-13 dispatch wiring (compose_selection_offer choreography + direct dispatchConsumer) | 4 Catalog | 🟢 | 016,030 | 🔲 | FULL | opus | high |
 | 047 | Deploy catalog rows to Dataverse (mirror-first) | 4 Catalog | 🟢 | 045 | 🔲 | STANDARD | sonnet | high |
@@ -90,7 +90,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 
 ## Blocked-on-core-A0 (⛔) — authored/executed post-A0
 
-016 UNBLOCKED (A0 ComposeDisposition landed 2026-07-08). **040-044/045/046/047 UNBLOCKED 2026-07-09** — core task **020 triple-twin hoist published to master** (`78073ae03`; SEAM-STATUS row 020 = ✅ published), and 046's non-core deps 016/030/031 are all done. Catalog tasks are now authorable/startable (respect intra-wave deps: 040-044 → 045 eval cases → 047 deploy). Still core-gated: **071** (core 037 UI-ack), **063** (core 057 memory.write), **064** (core 038 D-F4 view), and **033/034** (compose-disposition ledger WRITE = core task 010, + their non-core deps 031/016); **082/090** terminal. See SEAM-STATUS.md.
+016 UNBLOCKED (A0 ComposeDisposition landed 2026-07-08). Core task **020 triple-twin hoist published to master** 2026-07-09 (`78073ae03`; SEAM-STATUS row 020 = ✅ published) unblocked the catalog. **040/041/043/044 DONE 2026-07-09** (read Actions + Bindings authored mirror-first under `infra/dataverse/actions|inputschemas|outputschemas` + `sprk_playbookconsumer-rows.json`; deploy = task 047; eval cases = task 045). Remaining startable catalog: **045** (eval cases, dep 040-044), **046** (dispatch wiring, deps 016/030/031 done), **047** (deploy, dep 045). Still **core-gated on task 010** (compose-disposition ledger WRITE = `BindingDisposition.Compose` + OutputRouter case): **042** (draft-alternative Binding declares compose disposition) + **033/034** (pending-redline materialization / undo-replace). Also core-gated: **071** (core 037 UI-ack), **063** (core 057 memory.write), **064** (core 038 D-F4 view); **082/090** terminal. See SEAM-STATUS.md.
 
 These get full POML authoring finalized once core A0 contract shapes are confirmed (the handoff doc is the input). 082 (flagship gate) + 090 (wrap-up) are terminal — they require the full chain.
 

@@ -1,0 +1,18 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for compose-explain-clause (spaarkeai-compose-r2 task 040, FR-07). Normalized OpenAI-function-parameters subset (validated by CatalogInputSchemaContractTests + jps-validate). Consumes the R1 compose-selection JPS scope — the inline AI toolbar dispatches { selectionText, ... } via the shipped session-dispatch seam; selectionText is the load-bearing LLM input. Property-level \"required\": true is FORBIDDEN (invalid JSON Schema — use the object-level required array). Custom keywords elicitation_prompt / ledger_resolution are maker metadata (OpenAI-tolerated unknown keywords). No actionId here — it is assigned in Dataverse at deploy time (task 047). actionCode carries NO version suffix (owner hygiene).",
+  "actionCode": "compose-explain-clause",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["selectionText"],
+    "properties": {
+      "selectionText": {
+        "type": "string",
+        "description": "The selected contract clause (or clause fragment) to explain. The clause text the attorney highlighted in the Compose editor; interpret its legal effect in plain language. Capped upstream at the compose-selection scope's authored budget.",
+        "maxLength": 16000,
+        "elicitation_prompt": "Which clause would you like me to explain? Select it in the document first.",
+        "ledger_resolution": "compose.selectionText — the current editor selection dispatched by the FR-14 inline AI toolbar (compose-selection scope)"
+      }
+    }
+  }
+}

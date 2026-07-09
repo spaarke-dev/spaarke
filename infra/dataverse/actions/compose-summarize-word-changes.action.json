@@ -1,0 +1,49 @@
+{
+  "$comment": "spaarkeai-compose-r2 task 043 (FR-10) — compose-summarize-word-changes Action SEED (systemPrompt home). ACTION-ONLY, no playbook (ADR-039; engine frozen). Distinct from the existing 'compose-summarize' Binding (whole-document summary, playbook-backed) — this summarizes the TRACKED CHANGES made in Word on return (insertions/deletions/comments/structural). Mirror-first author surface for sprk_analysisaction (sprk_actioncode=compose-summarize-word-changes); deploy via scripts/Deploy-AnalysisAction.ps1. Consumes the compose-document JPS scope; invoked by the return-from-Word flow (task 054), not the toolbar. REVIEW FLAG: input field 'changesText' is a textual representation of the tracked changes parsed by the DocxAnnotationReader (task 051) — confirm the exact upstream wiring when 051/054 land. Owner hygiene: actionCode carries NO version suffix.",
+  "actionCode": "compose-summarize-word-changes",
+  "name": "Compose — Summarize Word Changes",
+  "description": "Summarize the tracked changes a reviewer made in Word (FR-10). Read-only: on return from Word, produces a plain-language summary of what changed plus a structured list of the individual changes (insertions, deletions, comments, structural edits). Consumes the compose-document JPS scope; no document mutation.",
+  "actionType": 0,
+  "temperature": 0.2,
+  "systemPrompt": "ROLE: You are the Spaarke Compose Word-change summarizer. A document was edited in Microsoft Word (track changes + comments) and has returned to Compose. You produce a clear summary of what a reviewer changed, so the drafting attorney can review the round-trip at a glance.\n\nINPUT: a changesText field carrying a textual representation of the tracked changes (insertions, deletions, comments, structural edits) parsed from the returned document.\n\nINSTRUCTIONS:\n  1. Read the supplied changes and produce a concise plain-language summary of the overall edit (what the reviewer did and why it likely matters).\n  2. Produce a structured list of the individual changes.\n  3. Emit a JSON object matching the output schema EXACTLY. additionalProperties is false; do not add fields.\n  4. summary: a plain-language overview of the changes (≤1 short paragraph, ≤1500 chars). Focus on substance (e.g. 'narrowed the indemnity to direct damages and added a 12-month liability cap') over mechanics.\n  5. changes: one entry per distinct change. kind is exactly one of 'insertion', 'deletion', 'comment', 'structural'. location is a short human-readable pointer to where the change is (e.g. 'Section 7.2', 'the indemnification clause', or a short quoted anchor). description is a one-sentence description of the change.\n\nCONSTRAINTS:\n  - Ground everything in the supplied changesText. Do NOT invent changes that were not present.\n  - This is a READ action: summarize; do NOT accept, reject, or propose edits here.\n  - Never echo secrets or content outside the supplied changes.",
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["summary", "changes"],
+    "$comment-required": "Object-level required arrays only — property-level boolean 'required' is FORBIDDEN. 'kind' is a constrained string via the enum keyword.",
+    "properties": {
+      "summary": {
+        "type": "string",
+        "description": "Plain-language overview of the reviewer's changes (≤1 short paragraph, ≤1500 chars). Emitted FIRST.",
+        "maxLength": 1500
+      },
+      "changes": {
+        "type": "array",
+        "description": "One entry per distinct tracked change.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "location", "description"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "description": "The kind of change.",
+              "enum": ["insertion", "deletion", "comment", "structural"]
+            },
+            "location": {
+              "type": "string",
+              "description": "Short human-readable pointer to where the change is (e.g. 'Section 7.2', a clause name, or a short quoted anchor).",
+              "maxLength": 500
+            },
+            "description": {
+              "type": "string",
+              "description": "One-sentence description of the change.",
+              "maxLength": 500
+            }
+          }
+        }
+      }
+    }
+  }
+}
