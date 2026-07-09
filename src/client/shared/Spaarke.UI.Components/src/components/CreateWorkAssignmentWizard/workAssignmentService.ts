@@ -24,7 +24,12 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IUploadProgress, AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
-import { applyResolverFields, findNavProp, discoverNavProps } from '../../services/PolymorphicResolverService';
+import {
+  applyResolverFields,
+  findNavProp,
+  discoverNavProps,
+  cleanGuid,
+} from '../../services/PolymorphicResolverService';
 import type { INavPropEntry } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
 
@@ -426,7 +431,7 @@ export class WorkAssignmentService {
     const bindLookup = (referencedEntity: string, entitySet: string, guid: string, columnHint?: string) => {
       const navProp = findNavProp(navProps, referencedEntity, columnHint);
       if (navProp) {
-        entity[`${navProp}@odata.bind`] = `/${entitySet}(${guid})`;
+        entity[`${navProp}@odata.bind`] = `/${entitySet}(${cleanGuid(guid)})`;
       } else {
         console.warn(
           `[WorkAssignmentService] No nav-prop found for ${referencedEntity} (hint: ${columnHint}), skipping binding`
@@ -647,14 +652,14 @@ export class WorkAssignmentService {
       // Link to work assignment
       const waNavProp = findNavProp(navProps, 'sprk_workassignment', 'workassignment');
       if (waNavProp) {
-        entity[`${waNavProp}@odata.bind`] = `/sprk_workassignments(${workAssignmentId})`;
+        entity[`${waNavProp}@odata.bind`] = `/sprk_workassignments(${cleanGuid(workAssignmentId)})`;
       }
 
       // Assigned To (systemuser)
       if (eventState.assignedToId) {
         const assignedNavProp = findNavProp(navProps, 'systemuser', 'assignedto');
         if (assignedNavProp) {
-          entity[`${assignedNavProp}@odata.bind`] = `/systemusers(${eventState.assignedToId})`;
+          entity[`${assignedNavProp}@odata.bind`] = `/systemusers(${cleanGuid(eventState.assignedToId)})`;
         }
       }
 

@@ -38,7 +38,7 @@ The key architectural decision was ADR-006: **field-bound controls on a Datavers
 
 | Control | Path | Purpose | React API |
 |---------|------|---------|-----------|
-| AssociationResolver | `src/client/pcf/AssociationResolver/` | Parent entity type/record selector for Events with field mapping | StandardControl (ReactDOM.render) |
+| ~~AssociationResolver~~ ⛔ RETIRED (2026-07) | ~~`src/client/pcf/AssociationResolver/`~~ (removed) | Retired by SRFR-045; picker + subgrid auto-detect folded into **RegardingResolver**. Field-mapping *value* copying is now the shared-lib `FieldMappingService` engine | — |
 | UpdateRelatedButton | `src/client/pcf/UpdateRelatedButton/` | Triggers BFF API field mapping rules on related records | StandardControl (ReactDOM.render) |
 | SpaarkeGridCustomizer | `src/client/pcf/SpaarkeGridCustomizer/` | Custom cell renderers for Power Apps Grid Control (regarding links) | PAOneGridCustomizer |
 
@@ -72,7 +72,7 @@ Two rendering patterns exist:
 
 | Pattern | Used By | Lifecycle |
 |---------|---------|-----------|
-| `StandardControl` with `ReactDOM.render()` | Most controls (AssociationResolver, VisualHost, etc.) | `render()` in `updateView()`, `unmountComponentAtNode()` in `destroy()` |
+| `StandardControl` with `ReactDOM.render()` | Most controls (RegardingResolver, VisualHost, etc.) | `render()` in `updateView()`, `unmountComponentAtNode()` in `destroy()` |
 | `ReactControl` with `updateView()` returning `React.ReactElement` | RelatedDocumentCount, SemanticSearchControl, DocumentRelationshipViewer, ScopeConfigEditor | Framework manages mounting/unmounting |
 
 ### Theme Resolution

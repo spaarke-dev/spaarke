@@ -38,7 +38,11 @@ There is **no custom admin app or PCF control** for this. Profiles and rules are
 
 ### Step 1: Open (or create) the profile
 
-1. Navigate to the `sprk_fieldmappingprofile` table (Advanced Find, a subarea, or a direct table view).
+1. **Find the table.** There is no dedicated sitemap subarea today, so use one of these (in order of reliability):
+   - **Power Apps maker portal** (`make.powerapps.com`) → your environment → **Tables** → search "Field Mapping Profile" (`sprk_fieldmappingprofile`) → **Data** tab to view/add rows. This is the most reliable path and also lets you edit the form/subgrid if needed.
+   - **Advanced Find** (classic) inside the model-driven app → Look for **Field Mapping Profile**.
+   - A direct record URL if you have one: `.../main.aspx?etn=sprk_fieldmappingprofile&pagetype=entitylist`.
+   > The retired Feb-2026 guide claimed a `Settings > Administration > Field Mapping Profiles` subarea — **that path no longer exists**; ignore it.
 2. To create a new profile: **+ New**. To extend the seeded attorney matrix, open the existing profile for the pair you want (e.g. "Matter → Event").
 3. Fill in:
    - **Name** — a descriptive label (e.g. "Matter → Event (Attorney Matrix)").
@@ -82,6 +86,16 @@ The engine supports exactly four mapping types (`sprk_mapping_type`). Every rule
 | **Template** | `sprk_expression` | Same resolver as Concat — the only difference is authoring intent (a fixed scaffold with fields dropped in, vs. a straight join). There is one placeholder engine underneath both; pick whichever label better describes your intent. |
 
 Concat and Template **only target text/memo fields** — you cannot use a format string to populate a lookup. A Concat/Template rule pointed at a lookup target is skipped with a warning at apply time.
+
+### Choice (option-set) values
+
+On the form you pick these as labels; when seeding via the Web API (below) you send the **integer**:
+
+| Field | Integer → label |
+|---|---|
+| `sprk_mapping_type` | `0`=Copy · `1`=Default · `2`=Concat · `3`=Template |
+| `sprk_sourcefieldtype` / `sprk_targetfieldtype` | `0`=Text · `1`=Lookup · `2`=OptionSet · `3`=Number · `4`=DateTime · `5`=Boolean · `6`=Memo |
+| `sprk_compatibilitymode` | `0`=Strict · `1`=Resolve |
 
 ---
 
@@ -143,6 +157,59 @@ Every rule is `sprk_isactive = true`, and both the Matter → Event profile and 
 
 ---
 
+## How this relates to "set regarding" (RegardingResolver)
+
+Field mapping only fires when the wizard already knows the **parent** record — that parent is the mapping's *source*. That linkage comes from the **RegardingResolver** control (the "set-regarding" picker), not from this framework:
+
+- **RegardingResolver** (a PCF on the child form) lets a user pick, or auto-detects from a subgrid, the polymorphic parent and writes the `sprk_regarding*` fields. That parent's entity + id become the field-mapping engine's `sourceEntity`/`sourceId`.
+- **This framework** then copies field *values* from that parent onto the new child at creation time.
+
+So: RegardingResolver decides *which* parent; field mapping decides *what carries over*. If a child is created with no regarding parent (no source), there is nothing to map and the wizard proceeds normally. (The older **AssociationResolver** control was retired in 2026-07 — RegardingResolver replaced it; ignore any older doc that references it.)
+
+---
+
+## Seeding programmatically (Claude Code / Web API)
+
+The native form is the supported human path. When an agent (or a migration script) needs to seed a profile + rules without clicking, use the Dataverse Web API. Key facts:
+
+- **Entity sets:** `sprk_fieldmappingprofiles`, `sprk_fieldmappingrules`, `sprk_recordtype_refs`.
+- **Profile lookups bind to `sprk_recordtype_ref` rows**, not logical-name strings — you must first resolve the source/target entities to their `sprk_recordtype_ref` GUIDs (query `sprk_recordtype_refs?$filter=sprk_recordlogicalname eq 'sprk_matter'`). If a target entity has no `sprk_recordtype_ref` row, create that row first — the profile cannot reference it otherwise.
+- **Choice fields are integers** (see the table above).
+- **Verify the exact single-valued navigation-property names** for the `@odata.bind` binds against `$metadata` before running — Dataverse is case-sensitive on nav-property names. The bind targets below use the schema names as configured in `spaarkedev1`; confirm in your environment.
+
+**1 — Create the profile** (`POST /api/data/v9.2/sprk_fieldmappingprofiles`):
+
+```json
+{
+  "sprk_name": "Matter → Event (Attorney Matrix)",
+  "sprk_sourcerecordtype@odata.bind": "/sprk_recordtype_refs(<MATTER_RECORDTYPE_GUID>)",
+  "sprk_targetrecordtype@odata.bind": "/sprk_recordtype_refs(<EVENT_RECORDTYPE_GUID>)"
+}
+```
+The profile is Active by default (`statecode`=0). Capture the returned `sprk_fieldmappingprofileid`.
+
+**2 — Create each rule** (`POST /api/data/v9.2/sprk_fieldmappingrules`), one per field. A **Copy (lookup)** rule:
+
+```json
+{
+  "sprk_name": "Copy assignedattorney1",
+  "sprk_FieldMappingProfile@odata.bind": "/sprk_fieldmappingprofiles(<PROFILE_GUID>)",
+  "sprk_mapping_type": 0,
+  "sprk_sourcefield": "sprk_assignedattorney1",
+  "sprk_targetfield": "sprk_assignedattorney1",
+  "sprk_sourcefieldtype": 1,
+  "sprk_targetfieldtype": 1,
+  "sprk_executionorder": 1,
+  "sprk_isactive": true
+}
+```
+
+A **Default** rule sets `"sprk_mapping_type": 1` + `"sprk_defaultvalue": "…"`. A **Concat/Template** rule sets `"sprk_mapping_type": 2` (or `3`) + `"sprk_expression": "{sprk_matternumber} - {sprk_mattername}"` and targets a text/memo field (`sprk_targetfieldtype` 0 or 6).
+
+**3 — Verify** with the same read path the engine uses: `GET /api/v1/field-mappings/profiles/sprk_matter/sprk_event` on the BFF should return the profile with all active rules `$expand`-ed. A `404` means the profile/pair wasn't found (check the `sprk_recordtype_ref` binds and `statecode`).
+
+---
+
 ## Verification
 
 1. **Confirm the profile is live** — open the profile record: `sprk_isactive` is checked, `sprk_sourcerecordtype` and `sprk_targetrecordtype` point at the correct `sprk_recordtype_ref` rows.
@@ -165,9 +232,11 @@ Every rule is `sprk_isactive = true`, and both the Matter → Event profile and 
 | A Concat/Template field is shorter than expected, missing a segment | One `{sprk_field}` placeholder didn't resolve (typo'd field name, or the parent record's value for that field was empty) | Re-check every placeholder in `sprk_expression` against the actual source entity's field names; check the source record actually has a value in that field. The engine omits unresolved tokens silently (with only a background warning) rather than erroring, so a typo won't be obvious from the output alone. |
 | A Concat/Template rule doesn't populate anything | The rule's target field is a lookup | Concat/Template can only write to text/memo targets; change the target field or switch the rule to Copy against a compatible scalar field. |
 | Fields were correct on creation but a later edit to the parent didn't cascade | Expected — mappings only apply at child-record **creation** time | Use the existing "Push Updates to Related Records" ribbon button on the parent to manually re-push mapped fields to already-existing children; this is a separate, unchanged mechanism from creation-time mapping. |
+| A **To Do** created via the cross-wizard "Add a To Do" follow-on (from an Invoice/Report Card wizard) didn't inherit mapped fields, but the standalone "Create New To Do" wizard works | Known scope gap — the follow-on path (`createTodoRegardingChild`) doesn't yet pass the auth/BFF dependencies the engine needs, so mapping is skipped (graceful no-op) there | Create the To Do via the standalone "+" To Do wizard if inheritance is required, or ask a developer to thread `authenticatedFetch`/`bffBaseUrl` through the follow-on call sites (documented in the architecture doc's Constraints). |
 
 ---
 
 ## Related
 
-- [`docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md`](../architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md) — technical architecture: the two tables, the BFF contract, the client engine, the four mapping types' implementation, the creation-time-vs-update-time boundary, and same-entity support (if this file does not yet exist, it is being authored in parallel — see `projects/set-regarding-and-field-mapping-resolver-r2/`)
+- [`docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md`](../architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md) — technical architecture: the full code + PCF component inventory, the two tables, the BFF contract, the client engine, the four mapping types' implementation, the creation-time-vs-update-time boundary, same-entity support, and how the set-regarding **RegardingResolver** control feeds this framework
+- **RegardingResolver** (the "set-regarding" PCF that supplies the parent/source) — see the architecture doc's "PCF Hosts & the Set-Regarding Resolver" section; **AssociationResolver** is retired (2026-07)

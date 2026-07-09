@@ -70,19 +70,17 @@ const editorDocxBytes: { current: ArrayBuffer | null | undefined } = { current: 
 jest.mock('./ComposeEditor', () => {
   const ReactLib = require('react');
   return {
-    ComposeEditor: ReactLib.forwardRef(
-      (props: { docxBytes: ArrayBuffer | null }, ref: React.Ref<unknown>) => {
-        editorDocxBytes.current = props.docxBytes;
-        ReactLib.useImperativeHandle(ref, () => ({
-          serialize: async () => new ArrayBuffer(0),
-          getCounts: () => ({ characters: 0, words: 0 }),
-          isDirty: () => true,
-          materializeComposeDraft: () => undefined,
-          materializePendingRedline: () => 'applied',
-        }));
-        return <div data-testid="compose-editor-stub" />;
-      }
-    ),
+    ComposeEditor: ReactLib.forwardRef((props: { docxBytes: ArrayBuffer | null }, ref: React.Ref<unknown>) => {
+      editorDocxBytes.current = props.docxBytes;
+      ReactLib.useImperativeHandle(ref, () => ({
+        serialize: async () => new ArrayBuffer(0),
+        getCounts: () => ({ characters: 0, words: 0 }),
+        isDirty: () => true,
+        materializeComposeDraft: () => undefined,
+        materializePendingRedline: () => 'applied',
+      }));
+      return <div data-testid="compose-editor-stub" />;
+    }),
   };
 });
 
@@ -145,16 +143,14 @@ describe('ComposeWorkspace — FR-03 transient upload-mount', () => {
     const urls = authenticatedFetchMock.mock.calls.map(([u]) => String(u));
 
     // Exactly one upload-serve fetch, with the session + file ids.
-    const uploadCalls = authenticatedFetchMock.mock.calls.filter(([u]) =>
-      String(u).includes('/api/compose/upload')
-    );
+    const uploadCalls = authenticatedFetchMock.mock.calls.filter(([u]) => String(u).includes('/api/compose/upload'));
     expect(uploadCalls).toHaveLength(1);
     const [, init] = uploadCalls[0];
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual({ sessionId: 'sess-1', documentId: 'file-abc' });
 
     // No sprk_document create on mount — no save / promote calls (create-on-save is task 013).
-    expect(urls.some((u) => u.includes('/save') || u.includes('/promote'))).toBe(false);
+    expect(urls.some(u => u.includes('/save') || u.includes('/promote'))).toBe(false);
   });
 
   it('surfaces an error banner when the retained bytes are gone (404)', async () => {
@@ -166,9 +162,7 @@ describe('ComposeWorkspace — FR-03 transient upload-mount', () => {
 
     renderWorkspace();
 
-    await waitFor(() =>
-      expect(screen.getByTestId('compose-workspace-error-empty')).toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.getByTestId('compose-workspace-error-empty')).toBeInTheDocument());
     expect(screen.queryByTestId('compose-editor-stub')).not.toBeInTheDocument();
   });
 
@@ -181,9 +175,7 @@ describe('ComposeWorkspace — FR-03 transient upload-mount', () => {
     // The upload effect must yield to the stored-document path — it must NOT call the
     // upload endpoint. (The stored-document Load path uses driveId 'drive-1'.)
     await waitFor(() => expect(authenticatedFetchMock).toHaveBeenCalled());
-    const uploadCalls = authenticatedFetchMock.mock.calls.filter(([u]) =>
-      String(u).includes('/api/compose/upload')
-    );
+    const uploadCalls = authenticatedFetchMock.mock.calls.filter(([u]) => String(u).includes('/api/compose/upload'));
     expect(uploadCalls).toHaveLength(0);
   });
 });

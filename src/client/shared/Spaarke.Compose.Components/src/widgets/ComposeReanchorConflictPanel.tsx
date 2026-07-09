@@ -121,30 +121,24 @@ function confidencePercent(confidence: number): string {
   return `${Math.round(confidence * 100)}% confidence`;
 }
 
-export function ComposeReanchorConflictPanel(
-  props: ComposeReanchorConflictPanelProps
-): React.JSX.Element {
+export function ComposeReanchorConflictPanel(props: ComposeReanchorConflictPanelProps): React.JSX.Element {
   const { open, summary, onResolve, onClose } = props;
   const styles = useStyles();
 
   // Only anchors that did NOT auto-anchor need resolution.
   const unresolved = React.useMemo<ReanchoredAnnotation[]>(
-    () => (summary?.annotations ?? []).filter((a) => a.band !== 'auto'),
+    () => (summary?.annotations ?? []).filter(a => a.band !== 'auto'),
     [summary]
   );
 
   const resolve = React.useCallback(
-    (annotationId: string, resolution: ReanchorResolution): void =>
-      onResolve({ annotationId, resolution }),
+    (annotationId: string, resolution: ReanchorResolution): void => onResolve({ annotationId, resolution }),
     [onResolve]
   );
 
   return (
     <Dialog open={open} onOpenChange={(_, data) => !data.open && onClose()}>
-      <DialogSurface
-        data-testid="compose-reanchor-conflict-panel"
-        aria-labelledby="compose-reanchor-conflict-title"
-      >
+      <DialogSurface data-testid="compose-reanchor-conflict-panel" aria-labelledby="compose-reanchor-conflict-title">
         <DialogBody>
           <DialogTitle id="compose-reanchor-conflict-title">Resolve re-anchored annotations</DialogTitle>
           <DialogContent className={styles.content}>
@@ -153,7 +147,7 @@ export function ComposeReanchorConflictPanel(
                 All annotations re-anchored cleanly — nothing needs your review.
               </Text>
             ) : (
-              unresolved.map((anchor) => {
+              unresolved.map(anchor => {
                 const badge = bandBadge(anchor);
                 const isOrphan = anchor.band === 'orphan';
                 return (
@@ -175,9 +169,7 @@ export function ComposeReanchorConflictPanel(
                       </Text>
                     </div>
 
-                    {anchor.preview ? (
-                      <Text className={styles.preview}>{anchor.preview}</Text>
-                    ) : null}
+                    {anchor.preview ? <Text className={styles.preview}>{anchor.preview}</Text> : null}
 
                     {isOrphan ? (
                       <Text className={styles.meta}>
@@ -226,11 +218,7 @@ export function ComposeReanchorConflictPanel(
             )}
           </DialogContent>
           <DialogActions>
-            <Button
-              appearance="secondary"
-              onClick={onClose}
-              data-testid="compose-reanchor-conflict-close"
-            >
+            <Button appearance="secondary" onClick={onClose} data-testid="compose-reanchor-conflict-close">
               Done
             </Button>
           </DialogActions>

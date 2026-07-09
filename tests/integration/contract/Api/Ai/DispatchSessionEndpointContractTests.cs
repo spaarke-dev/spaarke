@@ -551,6 +551,12 @@ public sealed class DispatchSessionEndpointTestFixture : IAsyncLifetime, IDispos
 
         // FR-P4-05 (task 054): metering counters emitted at the dispatch seam.
         builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
+        // ADR-043 E-30: the orchestrator ctor gained ICodedWorkflowRegistry (coded-workflow
+        // dispatch seam). Register the real registry with an empty ICodedWorkflow set — the
+        // prompted-path contract tests here don't exercise coded workflows, but the ctor requires it.
+        // (Fixes E-30 ctor-drift that shipped this class red on master; see compose-r2 merge note.)
+        builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.ICodedWorkflowRegistry,
+                                   Sprk.Bff.Api.Services.Ai.CodedWorkflowRegistry>();
         builder.Services.AddScoped<SessionDispatchOrchestrator>();
 
         builder.WebHost.UseTestServer();

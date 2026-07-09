@@ -255,7 +255,8 @@ public sealed class ContextBinderActionRunnerSeamTests
                 new InMemoryTenantCache(), Sessions, Mock.Of<ILogger<PendingPlanManager>>());
 
             Orchestrator = new SessionDispatchOrchestrator(
-                Sessions, Routing.Object, Scope.Object, runner, binder, TextSource.Object, router, pending,
+                Sessions, Routing.Object, Scope.Object, runner, binder,
+                Mock.Of<Sprk.Bff.Api.Services.Ai.ICodedWorkflowRegistry>(), TextSource.Object, router, pending,
                 Options.Create(new EventRulesOptions { ReadinessProbeAttempts = 1, ReadinessProbeDelayMs = 0 }),
                 new Sprk.Bff.Api.Telemetry.AiTelemetry(),
                 Mock.Of<ILogger<SessionDispatchOrchestrator>>());
