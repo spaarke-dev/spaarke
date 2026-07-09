@@ -272,11 +272,20 @@ describe('CitationBadge — variant per status', () => {
   });
 
   it('(i) verified badge aria-label mentions "verified"', () => {
+    // NOTE (test-repair task 021, 2026-07-08): the original body called
+    // `screen.getByRole('generic', { hidden: true })` — an ambiguous query
+    // that (a) matched TWO nested elements (the wrapper span AND the inner
+    // Fluent Badge div both carry aria-labels containing "verified", so this
+    // throws "Found multiple elements with the role 'generic'") and (b) its
+    // result was never actually asserted against — the test's real assertion
+    // was an unrelated data-status check duplicating test (c-verified) above.
+    // The test's OWN stated purpose ("aria-label mentions 'verified'") was
+    // never verified. Fixed to assert on the actual aria-label content via
+    // the stable data-testid, avoiding the ambiguous role query entirely.
     renderWithFluent(<CitationBadge result={verifiedResult} />);
-    // The badge element carries an aria-label
-    const badge = screen.getByRole('generic', { hidden: true });
-    // Check the wrapper has the correct data-status
-    expect(screen.getByTestId('citation-badge-1')).toHaveAttribute('data-status', 'verified');
+    const badge = screen.getByTestId('citation-badge-1');
+    expect(badge).toHaveAttribute('data-status', 'verified');
+    expect(badge.getAttribute('aria-label')).toMatch(/verified/i);
   });
 
   it('(j) unverified badge has data-status="unverified"', () => {
@@ -404,8 +413,21 @@ describe('AnnotatedMessageContent — unified render', () => {
       />
     );
 
+    // NOTE (test-repair task 021, 2026-07-08): AnnotatedMessageContent splits
+    // messageText at each citation marker ([N]) and wraps EACH resulting
+    // chunk in its own <span data-testid="groundedness-highlight"> — this is
+    // the documented design (see the CITATION_MARKER_REGEX docstring in
+    // SafetyAnnotationOverlay.tsx: "split text at citation boundaries so that
+    // CitationBadges can be inserted inline after each [N] marker"). This
+    // fixture's single "[1]" marker splits the message into exactly 2 chunks
+    // ("See regulation " / " for details on the penalty clause."), so there
+    // are legitimately 2 groundedness-highlight elements, not 1 — the
+    // original `getByTestId` (singular) threw "Found multiple elements".
+    // Asserting the exact count (rather than switching to a "some exist"
+    // check) preserves real regression protection for the split-by-citation
+    // behavior.
     expect(screen.getByTestId('annotated-message-content')).toBeInTheDocument();
-    expect(screen.getByTestId('groundedness-highlight')).toBeInTheDocument();
+    expect(screen.getAllByTestId('groundedness-highlight')).toHaveLength(2);
     expect(screen.getByTestId('citation-badge-1')).toBeInTheDocument();
   });
 

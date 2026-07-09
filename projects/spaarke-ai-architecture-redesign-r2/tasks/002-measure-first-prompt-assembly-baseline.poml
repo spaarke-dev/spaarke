@@ -1,0 +1,131 @@
+<task id="AIR2-002" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Measure-first prompt-assembly baseline — per-slice token counts on the AS-BUILT r1 assembly</title>
+    <status>completed</status>
+    <phase>0 — Reconciliation &amp; Discovery</phase>
+    <gate>none (foundation; fixes FR-B-05 ContextEnvelope budgets)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Brownfield instrumentation of a live, multi-collaborator prompt-assembly path — the hard part is tracing WHERE each slice is composed today and measuring without changing behavior; xhigh for the reverse-engineering.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, discovery, phase-0, measurement, context-envelope, token-budgets</tags>
+    <dependencies>none (Phase 0 front wave)</dependencies>
+  </metadata>
+
+  <prompt>
+    Instrument and measure r1's ACTUAL as-built prompt assembly — per-slice token counts on a representative turn — BEFORE any ContextEnvelope budget number is fixed (spec FR-P0-02, design D-M2). The §D-M2 / FR-B-05 budgets (Environment ≤50, User ≤300, Business ≤1,200, Record memory ≤600, Conversation ≤2,000; ceiling ≤4,200) are STARTING ESTIMATES; this task produces the measured baseline they get reconciled against. Measure the real composition path — do not estimate from source reading alone.
+  </prompt>
+
+  <role>Senior .NET developer who can trace a live prompt-assembly pipeline across collaborators (history manager, agent factory, orchestrator prompt builder, context provider), add no-content token instrumentation, and produce a measured table.</role>
+
+  <goal>
+    A measured baseline table in `projects/spaarke-ai-architecture-redesign-r2/notes/` giving per-slice token counts for r1's actual assembled prompt on ≥1 representative turn (ideally a record-context turn), mapping each measured slice to the ContextEnvelope slice it will become (Environment / User / Business / Record-memory / Conversation). The FR-B-05 budgets are annotated as "estimate vs measured" so task 054 fixes them against data, not a priori.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-07">No-content telemetry — token-count instrumentation logs identifiers/counts only, NEVER prompt content.</constraint>
+    <constraint source="ADR-040">Measure the existing ledger-facade assembly; do NOT introduce a parallel session cache or a second assembly path to measure.</constraint>
+    <constraint source="project">Measure the ACTUAL composition path at runtime (or a faithful harness over it) — a source-only estimate does not satisfy FR-P0-02.</constraint>
+    <constraint source="ADR-013">If any measurement hook is added to code CRUD reaches, keep it behind `Services/Ai/` internals; do not leak AI-internal types.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>prompt-assembly, context-slices, token-counting, ledger-outputs-context, no-content-telemetry</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="Ledger→Conversation slice" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs:302">BuildLedgerOutputsContext — the Conversation slice source; instrument its emitted size.</pattern>
+      <pattern name="Environment + Business directives" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs:129">BuildCurrentDateDirective (Environment slice) + honesty/host directives — count each directive block.</pattern>
+      <pattern name="Prompt assembly seam" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/OrchestratorPromptBuilder.cs:44">Where the slices are composed into the final prompt — the natural measurement seam.</pattern>
+      <pattern name="Host-identity / Business slice" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs:582">Host-identity line + host-record context → Business slice source.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>FR-P0-02 exists because the design D-M2 budgets were written a priori. R1 already assembles a prompt from six primitives (plan §3 GENERALIZE row). This task measures those primitives' real token footprint so the ContextEnvelope budgets (FR-B-05, task 054) and the cache-stability NFR (FR-P0-03 / NFR-04) rest on data. It runs in the Phase 0 front wave, parallel with A0.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Phase 0 front wave — no upstream.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-B-05 / task 054 sets ContextEnvelope token budgets AGAINST this measurement (breach-fails-eval).</item>
+      <item>FR-P0-03 / task 003 determinism check consumes the same Business-slice render path.</item>
+      <item>FR-A0-01 / task 015 ContextEnvelope v1 defines the slice set this baseline maps onto.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Trace the assembly path">From the four anchors, map how the final prompt is composed today and which slice each block belongs to (Environment / User / Business / Record-memory / Conversation).</step>
+    <step order="1" name="Add no-content instrumentation">Add token-count instrumentation at the OrchestratorPromptBuilder seam (counts/identifiers only, NFR-07); use a tokenizer consistent with the deployed model.</step>
+    <step order="2" name="Exercise a representative turn">Drive ≥1 representative turn (record-context preferred) through the real path or a faithful harness; capture per-slice counts.</step>
+    <step order="3" name="Produce the baseline table">Write the measured per-slice table + total; annotate each FR-B-05 budget as estimate-vs-measured with the delta.</step>
+    <step order="4" name="Verify + governance">Build; confirm no content is logged; measure publish-size delta vs baseline; state Placement Justification + bff-extensions checklist in PR notes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run the measurement harness</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/prompt-assembly-baseline.md (measured per-slice token table + estimate-vs-measured annotation)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (no-content token instrumentation at the assembly seam)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A measured per-slice token table exists in notes/, covering Environment / User / Business / Record-memory / Conversation for ≥1 representative turn, plus the total.</criterion>
+    <criterion testable="true">Each FR-B-05 budget (Environment ≤50 / User ≤300 / Business ≤1,200 / Record ≤600 / Conversation ≤2,000 / ceiling ≤4,200) is annotated estimate-vs-measured with the numeric delta.</criterion>
+    <criterion testable="true">Measurement came from the ACTUAL assembly path (real turn or faithful harness over it), not a source-only estimate — the note states which.</criterion>
+    <criterion testable="true">Instrumentation logs identifiers/counts only; a test or inspection confirms NO prompt content is emitted (NFR-07).</criterion>
+    <criterion testable="true">NEGATIVE: no parallel session cache or second assembly path was introduced to obtain the measurement (ADR-040) — the diff shows measurement rides the existing path.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the measured baseline shows any slice already exceeding its FR-B-05 estimate by a wide margin (e.g. Business or Conversation blows the ceiling on a normal turn), STOP and surface it — the budget model in FR-B-05 may need re-scoping before task 054, and it may indicate a cache-stability problem for FR-P0-03/NFR-04.</trigger>
+  </escalation>
+
+  <notes>
+    <completion date="2026-07-08">
+      Executed at FULL rigor (sonnet · xhigh). Deviation from the stated anchor (directional
+      steps mode): `OrchestratorPromptBuilder.cs:44` is registered in DI and unit-tested but has
+      ZERO production call sites (verified — `.BuildSystemPrompt(` matches only in its own file
+      and tests). The REAL single per-turn composition seam, per `PlaybookChatContextProvider`'s
+      own FR-27 binding docstring, is `GetContextAsync` + `SprkChatAgentFactory`'s suffix appends
+      + `ChatHistoryManager.BuildLedgerOutputsContext` (the POML's Conversation-slice anchor was
+      correct). Measured (not source-only) via a temporary xUnit harness that called these REAL
+      production methods with representative fixtures, then was deleted (zero residual diff,
+      verified by `git status`) — satisfying ADR-040 (no parallel assembly path) without adding
+      new production instrumentation, since the existing `IPromptBudgetTracker`
+      (`Services/Ai/Memory/`, R6 task 068) already provides no-content per-layer telemetry for
+      most blocks (component-justification: reused, not duplicated).
+
+      Escalated per this task's own trigger: Environment (111 measured vs. ≤50 estimate,
+      deterministic every-turn overshoot from `BuildCurrentDateDirective`); Business (1,118
+      measured vs. ≤1,200, dominated by two unconditional directives — Honesty 779 +
+      CompactFormatting 189 — that bypass the shared budget tracker entirely); Conversation
+      (structurally unbounded to ~8,000 tokens via `BuildLedgerOutputsContext`'s
+      `MaxContextOutputs=8 × MaxContextPayloadChars=4,000` ceiling, which sits entirely outside
+      `IPromptBudgetTracker`'s accounting). Full table + findings:
+      `projects/spaarke-ai-architecture-redesign-r2/notes/prompt-assembly-baseline.md`.
+      spec.md FR-B-05 annotated with the estimate-vs-measured summary.
+
+      Zero production `.cs` files modified. `dotnet build` and `dotnet publish` both verified
+      (0 errors; 44.34 MB compressed excl. PDBs, ~0 delta vs. the 45.87 MB baseline). No new
+      packages, no new CVE surface. Quality gates (code-review + adr-check) run inline; one
+      self-caught arithmetic inconsistency in the note's Conversation/Total ranges was found
+      and corrected during review.
+    </completion>
+  </notes>
+</task>

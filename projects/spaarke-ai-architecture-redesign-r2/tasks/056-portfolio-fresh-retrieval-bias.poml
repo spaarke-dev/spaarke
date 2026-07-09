@@ -1,0 +1,90 @@
+<task id="AIR2-056" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Portfolio fresh-retrieval bias — Memory.Conversation retrieval policy</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded retrieval-policy addition to the Memory.Conversation slice over an existing ledger primitive; no new subsystem, no architectural blast radius.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, memory-conversation, retrieval-policy, ledger, adr-040</tags>
+    <dependencies>053 (Context Binder — Memory.Conversation slice)</dependencies>
+  </metadata>
+
+  <prompt>
+    Add the portfolio fresh-retrieval bias (FR-B-07) to the Memory.Conversation retrieval policy: portfolio-/aggregate-level questions ("how many open matters", "list my invoices") bias to a FRESH query, never extrapolation from a prior turn's cached result in the ledger. This is a retrieval-policy rule on the `BuildLedgerOutputsContext`→Memory.Conversation slice generalized in task 053.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the ledger-outputs context primitive, ADR-040 ledger semantics, and the Context Binder Memory.Conversation slice.</role>
+
+  <goal>
+    The Memory.Conversation retrieval policy detects portfolio-/aggregate-level questions and biases them to a fresh query rather than reusing a prior turn's aggregate result. Point-lookup / single-record recall still uses the ledger normally; only aggregate/portfolio intents force freshness. No parallel cache is introduced (ADR-040) — the policy governs how the ledger tail is used, not a new store.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-040">No parallel cache — the policy governs use of the ledger tail; store-before-render preserved.</constraint>
+    <constraint source="project">Aggregate/portfolio intents bias fresh; point-lookup recall is unaffected — do not force freshness on all reads.</constraint>
+    <constraint source="ADR-039">Intent detection for "portfolio-level" is deterministic policy DATA, not runtime LLM risk judgment.</constraint>
+    <constraint source="ADR-038">Retrieval-policy tests are KEEP-path; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run bff-extensions.md checklist; measure publish-size; no new HIGH CVE; state Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/memory-conversation, retrieval-policy, ledger-facade, aggregate-freshness</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Ledger-outputs primitive → Memory.Conversation" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs:302">BuildLedgerOutputsContext — the fresh-retrieval policy attaches to this generalized slice.</pattern>
+      <pattern name="Context Binder Memory.Conversation slice" location="src/server/api/Sprk.Bff.Api/Services/Ai/">Task 053 Binder — the slice this policy governs.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R18 backlog: portfolio-level answers sometimes extrapolate from a stale prior turn (e.g., "you have 5 open matters" reused after a matter closed). FR-B-07 forces aggregate intents to re-query, biasing correctness over token savings for portfolio questions.</background>
+    <dependencies>
+      <dependency task="053" status="required">Memory.Conversation slice + fresh-retrieval hook.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Works with 054 budgets (fresh queries still travel as references, within Conversation budget).</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load spec FR-B-07, the ledger-outputs primitive, the Binder Memory.Conversation slice.</step>
+    <step order="1" name="Aggregate-intent detection">Deterministically classify portfolio-/aggregate-level questions (policy data, not LLM judgment).</step>
+    <step order="2" name="Fresh bias">For aggregate intents, force a fresh query; leave point-lookup recall on the normal ledger path.</step>
+    <step order="3" name="Tests">Aggregate question → fresh query (not prior-turn reuse); point-lookup → ledger path unaffected. Include NEGATIVE below.</step>
+    <step order="4" name="Verify + governance">Build; run tests; measure publish-size; state Placement Justification.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run retrieval-policy tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (Memory.Conversation fresh-retrieval policy)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (aggregate-freshness + point-lookup tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A portfolio-/aggregate-level question biases to a FRESH query rather than reusing a prior turn's aggregate result (asserted by a test).</criterion>
+    <criterion testable="true">Point-lookup / single-record recall still uses the ledger normally — freshness is not forced on all reads.</criterion>
+    <criterion testable="true">No parallel cache is introduced; the policy governs ledger-tail use (ADR-040).</criterion>
+    <criterion testable="true">NEGATIVE: a portfolio question following a prior aggregate answer does NOT extrapolate the stale count — a test asserts a fresh query is issued.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+</task>

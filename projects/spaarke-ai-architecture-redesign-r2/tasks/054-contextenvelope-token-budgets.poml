@@ -1,0 +1,98 @@
+<task id="AIR2-054" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>ContextEnvelope token budgets — fix against task-002 measurement; breach-fails-eval</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>1.5 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Per-slice budgets gate prompt size + cost across every turn and become an eval merge gate (breach-fails-eval); wrong ceilings either bloat prompts or starve context. Must reconcile a priori design numbers against the FR-P0-02 measurement — a measurement-driven judgment with platform-wide blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, contextenvelope, token-budget, eval-gate, adr-040</tags>
+    <dependencies>002 (measure-first prompt-assembly baseline), 053 (Context Binder)</dependencies>
+  </metadata>
+
+  <prompt>
+    Set per-slice ContextEnvelope token budgets (FR-B-05) fixed AGAINST the FR-P0-02 measured baseline (task 002), not a priori: Environment ≤50, User ≤300, Business ≤1,200, Record memory ≤600, Conversation ≤2,000; envelope ceiling ≤4,200 — treat the design numbers as STARTING estimates and reconcile them to measurement. Enforce the rules: full document text is never copied unless the invoked capability requires it; ledger entries travel as references; per-slice counts are logged per turn (identifiers/counts only, NFR-07); and a budget breach FAILS the eval run.
+  </prompt>
+
+  <role>Senior .NET developer fluent in token accounting, the Context Binder slice model, and the eval-gate wiring (golden-utterance suite + CI eval-gate).</role>
+
+  <goal>
+    The Context Binder enforces per-slice + envelope-ceiling token budgets, calibrated against the task-002 measurement (final integers ratified, not assumed). Full document text is never copied into the envelope unless the invoked capability requires it; ledger entries travel as references; per-slice token counts are emitted per turn as telemetry (ids/counts only). A budget breach is a hard eval failure wired into the eval merge gate (FR-D-02).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="measurement-baseline">projects/spaarke-ai-architecture-redesign-r2/notes/</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Budgets are fixed AGAINST the FR-P0-02 measurement; the design integers are starting estimates, ratified here — do not ship a priori numbers unreconciled.</constraint>
+    <constraint source="ADR-040">Ledger entries travel as references, not inlined copies; store-before-render + no parallel cache preserved.</constraint>
+    <constraint source="NFR-07">Per-slice counts logged as identifiers/counts only — never content.</constraint>
+    <constraint source="project">Full document text is never copied unless the invoked capability requires it.</constraint>
+    <constraint source="ADR-038">Budget-breach enforcement is exercised by a KEEP-path eval/integration test; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run bff-extensions.md checklist; measure publish-size; no new HIGH CVE; state Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/token-budget, context-assembly, eval-gate, no-content-telemetry</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Context Binder (enforce budgets here)" location="src/server/api/Sprk.Bff.Api/Services/Ai/">Task 053 Binder — per-slice budget enforcement + telemetry attach at slice emission.</pattern>
+      <pattern name="Eval gate + golden utterances" location="tests/integration/contract/Eval/golden-utterances.json">Eval suite; wire breach-fails-eval into the merge gate (CI eval-gate at sdap-ci.yml:225).</pattern>
+      <pattern name="Context event telemetry" location="src/server/api/Sprk.Bff.Api/Services/Ai/Telemetry/ContextEventEmitter.cs">Per-turn context telemetry — emit per-slice counts (ids/counts only).</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>D-M2 mandates measure-first: R1's actual assembly is measured (task 002) before any budget is fixed. This task closes that loop — it turns the measured slice sizes into enforced budgets and makes a breach a first-class eval failure, so context bloat is caught mechanically rather than by review.</background>
+    <dependencies>
+      <dependency task="002" status="required">Per-slice measured baseline to calibrate against.</dependency>
+      <dependency task="053" status="required">The Binder whose slices are budgeted.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-D-02 (task 071) is the eval-suite-green merge gate that consumes the breach-fails-eval rule.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load spec FR-B-05, the task-002 measurement, the Binder slice model. Compare measured slice sizes to the design starting estimates.</step>
+    <step order="1" name="Ratify budgets">Fix per-slice budgets + the ≤4,200 envelope ceiling against measurement; record any deviation from the design integers with rationale.</step>
+    <step order="2" name="Enforce in Binder">Enforce budgets at slice emission; ledger entries as references; no full-document copy unless the capability requires it.</step>
+    <step order="3" name="Telemetry">Emit per-slice counts per turn (ids/counts only, NFR-07).</step>
+    <step order="4" name="Breach-fails-eval">Wire a budget breach to a hard eval failure in the merge gate.</step>
+    <step order="5" name="Tests">Assert per-slice + ceiling enforcement; a breach fails the eval run; telemetry carries no content. Include NEGATIVE below.</step>
+    <step order="6" name="Verify + governance">Build; run tests; measure publish-size; state Placement Justification + the budget-reconciliation table.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run budget/eval tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (per-slice budget enforcement + per-turn count telemetry)</output>
+    <output type="test">tests/integration/contract/Eval/ (breach-fails-eval wiring + budget tests)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (measured-vs-design budget reconciliation table)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per-slice budgets + the ≤4,200 envelope ceiling are enforced by the Binder and calibrated to the task-002 measurement (reconciliation table recorded).</criterion>
+    <criterion testable="true">Ledger entries travel as references; full document text is not copied into the envelope unless the invoked capability requires it (asserted by a test).</criterion>
+    <criterion testable="true">Per-slice token counts are emitted per turn as identifiers/counts only — no content (NFR-07).</criterion>
+    <criterion testable="true">A budget breach FAILS the eval run and is wired into the merge gate (FR-D-02).</criterion>
+    <criterion testable="true">NEGATIVE: a crafted turn that overflows a slice (or the ceiling) causes the eval run to FAIL, not silently truncate — asserted by a test.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+</task>

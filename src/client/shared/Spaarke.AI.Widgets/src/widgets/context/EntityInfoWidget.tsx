@@ -128,10 +128,21 @@ function formatCurrency(amount: number, currency = 'USD'): string {
 
 function formatDate(isoDate: string): string {
   try {
+    // `isoDate` is a date-ONLY ISO 8601 string (see KeyDate.date docstring,
+    // e.g. "2026-09-30" — no time-of-day component). `new Date(isoDate)`
+    // parses that as UTC midnight per the ECMAScript spec; formatting it in
+    // the browser's LOCAL timezone then shifts the displayed calendar date
+    // back by one day for any timezone behind UTC (found by test-repair task
+    // 021, 2026-07-08 — reproduced on America/New_York, where "2026-09-30"
+    // rendered as "Sep 29, 2026"). A legal filing deadline showing the wrong
+    // date is a real correctness defect, not just a display quirk. Pin the
+    // format to UTC so the calendar date always matches the source string,
+    // regardless of the viewer's local timezone.
     return new Intl.DateTimeFormat('en-US', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
+      timeZone: 'UTC',
     }).format(new Date(isoDate));
   } catch {
     return isoDate;

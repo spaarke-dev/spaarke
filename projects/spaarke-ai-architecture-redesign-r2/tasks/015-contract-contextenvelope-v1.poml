@@ -1,0 +1,130 @@
+<task id="AIR2-015" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Publish ContextEnvelope v1 contract (walking skeleton) — the canonical per-turn six-slice context shape</title>
+    <status>completed</status>
+    <phase>A0 — Contract-first</phase>
+    <gate>G-R2-A (seam publication)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The per-turn context contract every memory/binder task and the cache-stability NFR bind to; slice set + stability classes + budget fields wrong = the whole Binder wave rebuilds. High architectural blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, contract, seam, adr-040, context-envelope, memory, prompt-cache</tags>
+    <dependencies>none (A0 front wave; publish early)</dependencies>
+  </metadata>
+
+  <prompt>
+    Publish the `ContextEnvelope v1` contract as a Phase-A0 walking skeleton (spec FR-A0-01, design D-M2). It is the canonical per-turn context shape with six slices — {User, Workspace, Business, Memory, Organizational, Semantic} — each carrying a stability class (stable-prefix vs volatile) + a per-slice token-budget field. This is the contract the Context Binder (FR-B-04) assembles once per turn and everything downstream consumes. Ship the contract WITH a thin reference producer (assembles a minimal envelope), a thin consumer, and a contract test — not a paper spec. Budgets are placeholders here; task 054 fixes them against the FR-P0-02 measurement.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the R1 prompt-assembly primitives, ADR-040 ledger-facade context, prompt-cache stability, and versioned tolerant-reader contracts.</role>
+
+  <goal>
+    A versioned `ContextEnvelope v1` contract under `Services/Ai/PublicContracts/` defining the six named slices, each with a stability class (stable-prefix ordering before the volatile ledger tail) and a per-slice budget field, plus a version field, tolerant-reader rules, an example payload, and partial/missing-slice states. A thin producer assembles a minimal envelope from existing primitives; a thin consumer reads it; a contract test in `tests/integration/contract/` locks the slice set + ordering (stable prefix precedes volatile tail).</goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="baseline">projects/spaarke-ai-architecture-redesign-r2/notes/prompt-assembly-baseline.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-040">Memory.Conversation slice IS the ledger facade — the envelope does NOT introduce a parallel session cache; it references ledger entries, not copies.</constraint>
+    <constraint source="NFR-04">Stable-prefix slices (identity, schema cards, environment, preferences) MUST be ordered before the volatile ledger tail for prompt-cache stability.</constraint>
+    <constraint source="NFR-07">Per-slice budget/count fields carry counts only; the envelope never logs slice CONTENT.</constraint>
+    <constraint source="ADR-013">Consumers reach ContextEnvelope only via `Services/Ai/PublicContracts/`.</constraint>
+    <constraint source="ADR-038">Contract test is a KEEP-path integration test; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="project">Budget NUMBERS are placeholders in v1 (task 054 fixes them against FR-P0-02). Tolerant-reader; version field; additive-only.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/context-assembly, context-envelope, stability-classes, token-budgets, versioned-contracts</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Conversation slice primitive" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs:302">BuildLedgerOutputsContext → Memory.Conversation slice (ledger facade).</pattern>
+      <pattern name="Environment slice primitive" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs:129">BuildCurrentDateDirective → Environment facts slice.</pattern>
+      <pattern name="Business slice primitive" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs:582">Host-identity + host-record schema card → Business slice (determinism verified in task 003).</pattern>
+      <pattern name="Assembly seam" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/OrchestratorPromptBuilder.cs:44">Where slices compose into the prompt — the envelope's assembly target.</pattern>
+      <pattern name="Contract test home" location="tests/integration/contract/">Add the ContextEnvelope contract test here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>D-M2 unifies R1's six scattered context primitives into ONE governed ContextEnvelope assembled per turn by the Context Binder (FR-B-04), with stable-prefix slices preceding the volatile tail for prompt-cache stability. This A0 task freezes the SHAPE first so the Binder (053), the budgets (054), the MemoryItem contract (016), and the determinism verdict (003) all bind to a stable slice set. Budgets are placeholders pending the FR-P0-02 measurement.</background>
+    <dependencies>
+      <dependency task="002" status="pending">Prompt-assembly baseline informs the slice→primitive mapping (helpful, not blocking the shape).</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-B-04 (task 053) Context Binder ASSEMBLES a ContextEnvelope per turn.</item>
+      <item>FR-B-05 (task 054) fixes the per-slice budget numbers against measurement.</item>
+      <item>FR-A0-03 (task 016) MemoryItem v1 populates the Memory slice.</item>
+      <item>FR-A1-09 (task 013/038) trace references a ContextEnvelope fingerprint (identifiers/counts only).</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load FR-A0-01, ADR-040, NFR-04/07, bff-extensions.md; map each of the six slices to its R1 primitive.</step>
+    <step order="1" name="Define the contract">Define `ContextEnvelope v1` DTO under `Services/Ai/PublicContracts/`: six named slices, stability class per slice, per-slice budget field (placeholder numbers), version field, tolerant-reader rules, partial/missing-slice states.</step>
+    <step order="2" name="Reference producer">Wire a thin producer assembling a minimal envelope from existing primitives (Conversation via ledger facade, Environment, Business).</step>
+    <step order="3" name="Reference consumer">A thin consumer reading the envelope + rendering slice presence/order.</step>
+    <step order="4" name="Contract test">Add a contract test asserting slice set, stable-prefix-before-volatile ordering, version, tolerant-reader (unknown slice/field ignored), and counts-only budget fields.</step>
+    <step order="5" name="Verify + governance">Build; run the contract test; measure publish-size delta; state Placement Justification + bff-extensions checklist.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run the contract/integration test</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (ContextEnvelope v1 contract DTO)</output>
+    <output type="test">tests/integration/contract/ (ContextEnvelope contract test)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (contract doc: six-slice map + stability classes + placeholder budgets + versioning + example payload)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ContextEnvelope v1` exists under `Services/Ai/PublicContracts/` (ADR-013) with the six named slices {User, Workspace, Business, Memory, Organizational, Semantic}, each carrying a stability class + budget field; version field + tolerant-reader rules present.</criterion>
+    <criterion testable="true">The contract test asserts stable-prefix slices are ordered BEFORE the volatile ledger tail (NFR-04 prompt-cache stability).</criterion>
+    <criterion testable="true">A thin producer assembles a minimal envelope from existing primitives (Conversation via the ledger facade — no parallel cache) and a thin consumer reads it — round-trip proven by the contract test.</criterion>
+    <criterion testable="true">The contract test asserts an unknown extra slice/field is ignored (tolerant-reader) and budget fields carry counts only (NFR-07).</criterion>
+    <criterion testable="true">The test uses no `Mock&lt;HttpMessageHandler&gt;` and no DI-registration assertions (ADR-038).</criterion>
+    <criterion testable="true">NEGATIVE: an envelope that copies ledger CONTENT into the Memory.Conversation slice (rather than referencing entries) fails a test assertion (ADR-040 no parallel cache).</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the six-slice model cannot represent the Memory.Conversation slice as a ledger REFERENCE (forcing a content copy / parallel cache), STOP — that is an ADR-040 tension (CLAUDE.md §6.5); surface it before the Binder wave builds on the shape.</trigger>
+  </escalation>
+
+  <notes>
+    Completed 2026-07-08. ContextEnvelope v1 published as a walking skeleton — NO ADR-040 tension:
+    the six-slice model represents Memory.Conversation as a ledger REFERENCE list
+    (LedgerEntryReference, no content member), so the escalation trigger did NOT fire.
+
+    Files created (NEW only; zero shared-file edits, zero DI):
+    - src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ContextEnvelope.cs — DTO (6 slices,
+      SliceStability, SliceMeta counts-only, LedgerEntryReference/MemoryItemReference/RetrievalReference,
+      CanonicalAssemblyOrder, JsonOptions tolerant-reader) + PlaceholderBudgets + thin reference
+      producer + consumer.
+    - tests/integration/contract/Api/Ai/ContextEnvelopeContractTests.cs — 12 self-contained tests
+      (shape, stability, NFR-04 ordering, ADR-040 ledger-facade + negative control, NFR-07 counts-only,
+      tolerant-reader, partial-slice states). No DI, no Mock&lt;HttpMessageHandler&gt;, no DI-reg tests.
+    - projects/.../notes/contextenvelope-v1-contract.md — slice→primitive map, budgets, invariants.
+
+    Build: BFF 0 errors; test proj 0 errors. Test: 12/12 pass.
+    Publish-size: 45.69 MB compressed excl PDB (~0 delta vs 45.87 MB baseline). No NEW HIGH CVE.
+    adr-check: clean (0 violations).
+
+    Budgets are PLACEHOLDERS (BudgetIsProvisional=true); task 054 (FR-B-05) finalizes vs FR-P0-02.
+    No csproj edit needed — test compiles via the existing tests/integration/contract/**/*.cs glob.
+    Follow-on wiring for the Binder (task 053) described in the notes doc (not done here per
+    parallel-safety).
+  </notes>
+</task>

@@ -147,7 +147,7 @@ describe('openSpaarkeAi — back-compat (entity form launch unchanged)', () => {
     uninstallXrmMock();
   });
 
-  test('opens sprk_spaarkeai with default target=2 (modal) at 90% x 90%', () => {
+  test('opens sprk_spaarkeai with default target=2 (modal) at 80% x 80%', () => {
     openSpaarkeAi({
       entityLogicalName: 'sprk_matter',
       entityId: 'abc-123',
@@ -159,10 +159,14 @@ describe('openSpaarkeAi — back-compat (entity form launch unchanged)', () => {
       pageType: 'webresource',
       webresourceName: 'sprk_spaarkeai',
     });
+    // Modal sizing is 80% x 80% per spaarkeai-compose-r1 task 101
+    // (2026-07-01 supplement, commit bb109056a) — intentionally reduced
+    // from the original 90% x 90% once the three-pane shell needed more
+    // surrounding chrome margin. This assertion tracks the shipped value.
     expect(navOptions).toMatchObject({
       target: 2,
-      width: { value: 90, unit: '%' },
-      height: { value: 90, unit: '%' },
+      width: { value: 80, unit: '%' },
+      height: { value: 80, unit: '%' },
     });
   });
 
@@ -220,7 +224,7 @@ describe('openSpaarkeAiCompose — Path A entry (task 046 §ui-tests)', () => {
    * operates: target=2 + 90%×90%. The visual toggle behaviour itself is
    * provided by the Xrm dialog chrome and is not under our control.
    */
-  test('Full-Screen Toggle: modal opens at target=2 (90% x 90%) for platform-provided expand affordance', () => {
+  test('Full-Screen Toggle: modal opens at target=2 (80% x 80%) for platform-provided expand affordance', () => {
     openSpaarkeAiCompose({
       sprkDocumentId: 'x',
       speDriveItemId: 'y',
@@ -228,10 +232,12 @@ describe('openSpaarkeAiCompose — Path A entry (task 046 §ui-tests)', () => {
 
     expect(nav.navigateTo).toHaveBeenCalledTimes(1);
     const [, navOptions] = nav.navigateTo.mock.calls[0];
+    // 80% x 80% per spaarkeai-compose-r1 task 101 (see back-compat test above
+    // for the commit reference) — Compose reuses openSpaarkeAi's modal sizing.
     expect(navOptions).toMatchObject({
       target: 2, // ALWAYS modal — never full-page for Compose Path A.
-      width: { value: 90, unit: '%' },
-      height: { value: 90, unit: '%' },
+      width: { value: 80, unit: '%' },
+      height: { value: 80, unit: '%' },
     });
   });
 

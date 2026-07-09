@@ -1,0 +1,99 @@
+<task id="AIR2-051" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Governance envelope on MemoryFact + tolerant-reader migration defaults</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>1.5 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Extends the durable memory data model with a 14-field governance envelope that 052 (governance), 053 (Binder), and 057 (write gate) all read; envelope-field mistakes propagate to every downstream consumer and to ADR-042. Tolerant-reader migration of already-persisted facts is a data-safety concern.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, memory, data-model, adr-015, tolerant-reader</tags>
+    <dependencies>050 (generalized service), 016 (MemoryItem v1 envelope shape)</dependencies>
+  </metadata>
+
+  <prompt>
+    Extend the existing `MemoryFact` with the governance envelope (FR-B-02): `scope` (record|user), `subjectType/subjectId` (or `userId`), `source` (+ `sessionId`/`turnId` provenance), `confidence`, `sensitivity`, `expiration`, `deletionPolicy`, `retentionClass`, `created/updated/createdBy` — REUSING the existing `Type/Key/Value/Source/ConfirmedByUser/Confidence/RecordedAt` fields, not replacing them. Structured objects, NOT embeddings. Apply tolerant-reader defaults so already-persisted facts deserialize without the new fields. A `sourceTrustLevel` field MAY be present but its ENFORCEMENT is deferred (FR-B-08: memory writes are AI-initiated + provenance-tagged; provenance + the user delete surface are the interim controls).
+  </prompt>
+
+  <role>Senior .NET developer fluent in durable memory data modeling, JSON tolerant-reader migration, and ADR-015 Tier 3 governance semantics.</role>
+
+  <goal>
+    `MemoryFact` carries a complete governance envelope aligned to MemoryItem v1: scope + subject keying, provenance (source + sessionId/turnId), confidence, sensitivity, expiration, deletionPolicy, retentionClass, and audit stamps — reusing existing fields where they already cover a concept. Existing persisted facts (missing the new fields) deserialize via tolerant-reader defaults with no data loss and no runtime error. `sourceTrustLevel` may be modeled but is inert (enforcement deferred). The envelope does not preclude a future `source: insights-engine` fact.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="existing-model">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryFact.cs</file>
+    <file purpose="upstream-service">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-015">Envelope must support Tier 3 GDPR erasure + user ownership; deletionPolicy/retentionClass align to Tier 3 semantics.</constraint>
+    <constraint source="project">REUSE existing `Type/Key/Value/Source/ConfirmedByUser/Confidence/RecordedAt`; do not duplicate a concept with a new field. Structured objects, NOT embeddings.</constraint>
+    <constraint source="project">Tolerant-reader: existing persisted facts lacking new fields deserialize with documented defaults; no migration script required for read.</constraint>
+    <constraint source="project">`sourceTrustLevel` field is OPTIONAL and INERT — enforcement is deferred to the separate governance project (FR-B-08). Do not wire it into any deny path here.</constraint>
+    <constraint source="ADR-013">Envelope surfaces to satellites only through the MemoryItem v1 PublicContracts shape.</constraint>
+    <constraint source="ADR-038">Serialization/tolerant-reader tests are KEEP-path; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run bff-extensions.md checklist; measure publish-size delta; no new HIGH CVE; state Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/memory, governance-envelope, tolerant-reader, adr-015-tier3</topic>
+    <files>
+      <file>docs/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="MemoryFact (extend)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryFact.cs">Existing fields to reuse; add envelope fields additively.</pattern>
+      <pattern name="MemoryItem v1 envelope contract" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/">Task 016 defines the 14-field envelope shape; MemoryFact aligns to it.</pattern>
+      <pattern name="Persistence + serialization" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs">Where facts serialize/deserialize to Cosmos — tolerant-reader defaults attach here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>MemoryItem v1 (task 016) is the seam contract; this task makes the durable server model carry the same envelope so the Binder (053), governance (052), and write-gate (057) have the fields they need. The two-scope refinement means the envelope must express both record `(subjectType,subjectId)` and user `userId` keying.</background>
+    <dependencies>
+      <dependency task="050" status="required">Generalized service + scope discriminator.</dependency>
+      <dependency task="016" status="required">MemoryItem v1 14-field envelope shape.</dependency>
+    </dependencies>
+    <related-work>
+      <item>052 enforces retention/expiration/sensitivity declared here; 057 reads provenance; ADR-042 (065) documents the envelope.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load spec FR-B-02, ADR-015, MemoryItem v1 shape. Map each envelope field to an existing MemoryFact field or a genuinely new one.</step>
+    <step order="1" name="Extend the model">Add envelope fields additively; reuse existing fields for already-covered concepts (Confidence, Source, RecordedAt→created).</step>
+    <step order="2" name="Tolerant-reader defaults">Define deserialization defaults for facts persisted before the envelope; document each default.</step>
+    <step order="3" name="Optional inert sourceTrustLevel">Model `sourceTrustLevel` as optional; assert it participates in NO deny path (enforcement deferred).</step>
+    <step order="4" name="Tests">Round-trip serialization; deserialize a pre-envelope fact (defaults applied, no error); envelope surfaces via MemoryItem v1. Include NEGATIVE case below.</step>
+    <step order="5" name="Verify + governance">Build; run tests; measure publish-size delta; state Placement Justification.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run serialization/tolerant-reader tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryFact.cs (governance envelope fields)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/ (serialization + tolerant-reader defaults)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (envelope round-trip + tolerant-reader migration tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">MemoryFact carries scope, subject keying (record + user), provenance (source + sessionId/turnId), confidence, sensitivity, expiration, deletionPolicy, retentionClass, and audit stamps — reusing existing fields where a concept already exists (documented mapping).</criterion>
+    <criterion testable="true">A fact persisted WITHOUT the new fields deserializes successfully with documented defaults — no exception, no data loss (asserted by a test).</criterion>
+    <criterion testable="true">Facts are structured objects, not embeddings; the envelope surfaces via MemoryItem v1 (ADR-013).</criterion>
+    <criterion testable="true">The envelope admits a `source: insights-engine` fact (asserted by a construction test) without special-casing.</criterion>
+    <criterion testable="true">NEGATIVE: a test asserts `sourceTrustLevel` (if present) participates in NO deny/reject path — the field is inert; enforcement is deferred.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+</task>

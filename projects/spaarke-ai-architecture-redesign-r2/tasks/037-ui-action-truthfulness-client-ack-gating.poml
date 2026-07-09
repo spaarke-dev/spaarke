@@ -1,0 +1,102 @@
+<task id="AIR2-037" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>UI-action truthfulness — client-ack gating for UI-affecting tools [FR-A1-08]</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction</phase>
+    <gate>G-R2-A (judgment)</gate>
+    <estimated-effort>1-2 days</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-bounded ack-gating change to a named directive (BuildChatDestinationAckDirective) + a client ack event — the honesty contract is clear (complete only on ack referencing the frame id, else fail on timeout). Sonnet at high effort fits a targeted directive + client-event wiring, not architectural design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, spaarkeai, directive-layer, ui-truthfulness, judgment</tags>
+    <dependencies>Extends the directive layer touched by 030; the ack event pairs with the frame-id emitted on the completion surface (035).</dependencies>
+  </metadata>
+
+  <prompt>
+    Gate UI-affecting tools (open tab, open Compose, navigation) so their tool result completes ONLY on a client acknowledgment event that references the emitted frame id — or fails honestly on timeout (spec FR-A1-08 / D-F3). This kills the R2-D fabricated-UI-action failure ("I opened the tab" with no client event). Anchor: `BuildChatDestinationAckDirective` at `SprkChatAgentFactory.cs:1406`. Compose r2 depends on this ack plumbing for its destination writes.
+  </prompt>
+
+  <role>Full-stack developer fluent in the Spaarke destination-ack directive (`BuildChatDestinationAckDirective`), the SSE frame-id contract, and the SpaarkeAi client event surface.</role>
+
+  <goal>
+    Every UI-claiming tool (open tab, open Compose, navigation) completes its tool result only upon a client ack event that references the emitted frame id; on ack timeout it fails honestly (renders the real "could not confirm the UI action" outcome, never a fabricated success). NFR-08 holds: every UI-claiming tool is ack-gated or fails honestly. The ack contract is the plumbing Compose r2 consumes for its destination writes.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">NFR-08 — every UI-claiming tool is ack-gated (completes on a client ack referencing the frame id) OR fails honestly on timeout; never a fabricated success.</constraint>
+    <constraint source="project">`no_fabrication` floor — a claimed UI action with no client ack is a fabrication; this task is its structural prevention (R2-D).</constraint>
+    <constraint source="ADR-040">The ack + the terminal outcome persist through the ledger (store-before-render); the frame id is the correlation key.</constraint>
+    <constraint source="ADR-013">The ack contract consumed by Compose r2 flows via `Services/Ai/PublicContracts/` — publish the ack shape, do not let Compose fork it.</constraint>
+    <constraint source="project">Extend the EXISTING `BuildChatDestinationAckDirective` (SprkChatAgentFactory.cs:1406); no second ack mechanism (CLAUDE.md §11).</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/ui-truthfulness, client-ack, frame-id-correlation, destination-directive</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-013-*.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Destination ack directive" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs">Line 1406 — BuildChatDestinationAckDirective; the ack-gating directive to extend for open-tab/open-Compose/navigation tools.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R2-D: the assistant claimed UI actions ("I opened the tab") with no backing client event. FR-A1-08 makes UI-affecting tool results complete only on a client ack referencing the emitted frame id, or fail honestly on timeout — structural prevention of fabricated UI actions. Compose r2 needs this ack plumbing for destination writes.</background>
+    <dependencies>
+      <dependency task="030" status="adjacent">Extends the same directive layer.</dependency>
+      <dependency task="035" status="referenced">The frame id the ack references is emitted on the completion surface.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Compose r2 consumes the ack contract for its open-Compose / save-back destination writes.</item>
+      <item>031 fabrication-counter case (3) browser-verifies "I opened the tab" fails without an ack.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load FR-A1-08 + NFR-08, ADR-040/013, bff-extensions.md. Read BuildChatDestinationAckDirective (:1406).</step>
+    <step order="1" name="Ack-gate UI tools">Extend the directive + tool-result completion so open-tab/open-Compose/navigation tools complete only on a client ack referencing the emitted frame id.</step>
+    <step order="2" name="Honest timeout">On ack timeout, fail honestly — render the real "could not confirm the UI action" terminal outcome; never a fabricated success.</step>
+    <step order="3" name="Publish the ack contract">Expose the ack shape via `Services/Ai/PublicContracts/` for Compose r2 consumption (no fork).</step>
+    <step order="4" name="Tests">Add KEEP-path tests: ack arrives → tool completes; ack absent within timeout → honest failure, no fabricated success.</step>
+    <step order="5" name="Verify + governance">Build; run tests; measure publish-size delta; state Placement Justification + bff-extensions checklist.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run ack-gating tests</tool>
+    <tool name="npm">Build the SpaarkeAi client ack event surface</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (BuildChatDestinationAckDirective ack-gating)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (published ack contract for Compose r2)</output>
+    <output type="code">src/solutions/SpaarkeAi/ (client ack event referencing the frame id)</output>
+    <output type="test">tests/ (ack-completes; timeout-fails-honestly)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">UI-affecting tools (open tab, open Compose, navigation) complete their tool result ONLY on a client ack event referencing the emitted frame id.</criterion>
+    <criterion testable="true">On ack timeout the tool fails honestly (real "could not confirm" outcome); it never renders a fabricated UI-action success.</criterion>
+    <criterion testable="true">The ack contract is published via `Services/Ai/PublicContracts/` for Compose r2 (no fork); it extends the existing `BuildChatDestinationAckDirective`, no second ack mechanism.</criterion>
+    <criterion testable="true">NFR-08 holds — every UI-claiming tool is ack-gated or fails honestly (coverage asserted).</criterion>
+    <criterion testable="true">NEGATIVE: a UI tool whose client ack never arrives within the timeout produces an honest failure, and a test that asserts a fabricated "I opened the tab" success FAILS (R2-D structurally prevented).</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-34). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a legitimate UI-affecting tool genuinely cannot emit a client ack (the client surface has no event for it), STOP — do NOT let it complete un-acked (that reopens R2-D fabrication); surface the missing client-event as a gap requiring the ack plumbing to be added, not bypassed.</trigger>
+  </escalation>
+</task>

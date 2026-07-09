@@ -142,35 +142,50 @@ describe('ContextPaneController — header', () => {
 // ---------------------------------------------------------------------------
 
 describe('ContextPaneController — shell stage defaults', () => {
-  it('shows "Select a Playbook" empty state on welcome stage', () => {
+  // NOTE (test-repair task 021, 2026-07-08): these four cases originally
+  // asserted per-stage static empty states (sources-empty / related-empty /
+  // an idle "Gathering context..." spinner / "Select a Playbook" text) that
+  // predate tasks 095/099/101. Those tasks made the Quick Start
+  // (GetStartedCardsWidget) UI win as the AT-REST default on EVERY shell
+  // stage — not just welcome — until a context_update event resolves a real
+  // widget (see ContextPaneController.tsx renderContent(), the block guarded
+  // by `selectedTool === "quick-start" && activeWidget === null &&
+  // !isResolving`). This was a deliberate fix for the "pane goes blank after
+  // modal close" bug, so the old per-stage empty states in
+  // renderStageDefaultContent() are unreachable at rest with the default
+  // 'quick-start' tool selection. Updated to assert the current, real,
+  // intentionally-shipped default rather than the superseded behavior.
+
+  it('shows the Quick Start empty state on welcome stage', () => {
     const bus = new PaneEventBus();
     renderController(bus, { currentStage: "welcome" });
 
-    expect(screen.getByText('Select a Playbook')).toBeInTheDocument();
     expect(screen.getByTestId('context-pane-welcome')).toBeInTheDocument();
+    expect(screen.getByText('Quick Start')).toBeInTheDocument();
   });
 
-  it('shows loading spinner on loading stage', () => {
+  it('shows Quick Start (not the idle stage spinner) on loading stage before any context_update', () => {
     const bus = new PaneEventBus();
     renderController(bus, { currentStage: "loading" });
 
-    expect(screen.getByText('Gathering context...')).toBeInTheDocument();
+    expect(screen.getByTestId('context-pane-welcome')).toBeInTheDocument();
+    expect(screen.queryByText('Gathering context...')).not.toBeInTheDocument();
   });
 
-  it('shows sources-empty state on active-chat stage (no widget yet)', () => {
+  it('shows Quick Start (not sources-empty) on active-chat stage before any context_update', () => {
     const bus = new PaneEventBus();
     renderController(bus, { currentStage: "active-chat" });
 
-    expect(screen.getByTestId('context-pane-sources-empty')).toBeInTheDocument();
-    expect(screen.getByText('Source Materials')).toBeInTheDocument();
+    expect(screen.getByTestId('context-pane-welcome')).toBeInTheDocument();
+    expect(screen.queryByTestId('context-pane-sources-empty')).not.toBeInTheDocument();
   });
 
-  it('shows related-empty state on review stage (no widget yet)', () => {
+  it('shows Quick Start (not related-empty) on review stage before any context_update', () => {
     const bus = new PaneEventBus();
     renderController(bus, { currentStage: "review" });
 
-    expect(screen.getByTestId('context-pane-related-empty')).toBeInTheDocument();
-    expect(screen.getByText('Related Items')).toBeInTheDocument();
+    expect(screen.getByTestId('context-pane-welcome')).toBeInTheDocument();
+    expect(screen.queryByTestId('context-pane-related-empty')).not.toBeInTheDocument();
   });
 });
 
@@ -300,14 +315,16 @@ describe('ContextPaneController — unknown widget type (null from registry)', (
 
     // During resolution, isResolving=true → should show resolving spinner
     // After resolution with null → isResolving=false, no active widget
-    // → stage-default content renders (sources-empty for active-chat)
+    // → Quick Start's at-rest default renders (task 095/099/101 — see the
+    // "shell stage defaults" describe block above for why this supersedes
+    // the old per-stage sources-empty state).
     await waitFor(() => {
       // Pane must still be mounted — no crash
       expect(screen.getByTestId('context-pane-controller')).toBeInTheDocument();
     });
 
-    // The sources-empty state appears after null resolution (no active widget)
-    expect(screen.getByTestId('context-pane-sources-empty')).toBeInTheDocument();
+    // Quick Start reappears after null resolution (no active widget)
+    expect(screen.getByTestId('context-pane-welcome')).toBeInTheDocument();
   });
 
   it('does not throw when registry returns null for unknown contextType', async () => {
@@ -436,8 +453,10 @@ describe('ContextPaneController — stage_change event', () => {
       expect(screen.queryByTestId('entity-info-widget')).not.toBeInTheDocument();
     });
 
-    // Stage-default content should appear (sources-empty for active-chat)
-    expect(screen.getByTestId('context-pane-sources-empty')).toBeInTheDocument();
+    // Reverts to Quick Start's at-rest default (task 095/099/101 — see the
+    // "shell stage defaults" describe block above for why this supersedes
+    // the old per-stage sources-empty state).
+    expect(screen.getByTestId('context-pane-welcome')).toBeInTheDocument();
   });
 });
 
