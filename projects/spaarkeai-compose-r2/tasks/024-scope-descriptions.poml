@@ -3,7 +3,7 @@
     <title>FR-23 enriched compose-selection/compose-document scope descriptions</title>
     <phase>2 LLM Editing Patterns</phase>
     <gate>green</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>

@@ -3,39 +3,39 @@
   "$version": 1,
   "scopeCode": "compose-selection",
   "scopeName": "Compose Selection",
-  "description": "Selected text in a Compose-hosted document. Input contract for playbook actions that operate on a user-selected span (e.g., Explain clause, Replace with standard, Compare-to-playbook, Draft alternative). All AI actions in Compose operating on a selection consume this scope.",
+  "description": "Selected text span in a Compose-hosted document — the input contract for playbook actions dispatched from the inline AI toolbar on a user selection (compose-explain-clause, compose-compare-to-playbook, compose-draft-alternative). GOTCHA: selectionText is capped at 16,000 characters (CHAT-ATTACHMENT-POLICY total-text class) — if selectionText ends mid-sentence at or near the cap, the BFF input filter truncated it before it reached you; do not assume the full clause is present. GOTCHA: an empty or whitespace-only selection is an invalid invocation — the toolbar does not appear without a non-empty selection, but if you receive one anyway, decline rather than fabricate clause content. RECOVERY PATH: selectionAnchorStart/End are character offsets stable only within the CURRENT editing session; if documentVersionEtag does not match the document's current SPE etag, the document changed after the selection was captured — treat the selection as possibly stale and prefer a caveat ('this text may have changed since it was selected') over silently acting on outdated offsets. EXAMPLE: selecting the clause \"The Receiving Party shall maintain the confidentiality of...\" inside an NDA yields selectionText = that sentence, documentSpeId = the open document's SPE id, and (if matter-bound) matterId populated for matter-scoped retrieval.",
   "appliesTo": ["compose-editor"],
   "inputs": {
     "fields": [
       {
         "name": "selectionText",
         "type": "string",
-        "description": "The exact text the user has selected in the Compose editor. UTF-8 plain text extracted from TipTap; rich-formatting metadata is stripped before sending. Bounded to 16,000 characters at the BFF input filter (CHAT-ATTACHMENT-POLICY total-text cap class). Empty selection = the playbook action is invalid; surface a validation error pre-dispatch.",
+        "description": "The exact text the user has selected in the Compose editor. UTF-8 plain text extracted from TipTap; rich-formatting metadata is stripped before sending. Bounded to 16,000 characters at the BFF input filter (CHAT-ATTACHMENT-POLICY total-text cap class) — GOTCHA: text ending abruptly at the cap means truncation happened upstream, not that the clause itself ends there. Empty selection = the playbook action is invalid; surface a validation error pre-dispatch rather than dispatching with empty text.",
         "required": true,
         "maxLength": 16000
       },
       {
         "name": "selectionAnchorStart",
         "type": "number",
-        "description": "Zero-based character offset of the selection start within the TipTap document. Used by R2 annotation re-anchoring on return-from-Word. Stable within a single editing session; meaningless across sessions unless paired with a document version etag.",
+        "description": "Zero-based character offset of the selection start within the TipTap document. Used by R2 annotation re-anchoring on return-from-Word. GOTCHA: stable only within a single editing session — meaningless across sessions or after a document reload unless paired with documentVersionEtag; do not persist this offset as a durable pointer without the etag.",
         "required": true
       },
       {
         "name": "selectionAnchorEnd",
         "type": "number",
-        "description": "Zero-based character offset of the selection end (exclusive). MUST satisfy selectionAnchorEnd > selectionAnchorStart.",
+        "description": "Zero-based character offset of the selection end (exclusive). MUST satisfy selectionAnchorEnd > selectionAnchorStart. RECOVERY PATH: if a consumer observes selectionAnchorEnd <= selectionAnchorStart, treat the payload as malformed and reject pre-dispatch rather than attempting to infer a valid range.",
         "required": true
       },
       {
         "name": "documentSpeId",
         "type": "string",
-        "description": "SharePoint Embedded drive-item id of the open document. The session<>document binding key. Always present (Compose binding rule: every document is in SPE).",
+        "description": "SharePoint Embedded drive-item id of the open document. The session<>document binding key. Always present (Compose binding rule: every document is in SPE) — GOTCHA: its presence does not guarantee the document still exists at dispatch time; a 404 on lookup means the document was deleted or moved after the session opened it, and the playbook should surface that as a distinct error from a stale-selection caveat.",
         "required": true
       },
       {
         "name": "documentVersionEtag",
         "type": "string",
-        "description": "SPE driveItem etag at the moment of selection. Lets the playbook detect that the document changed mid-flight and reject stale-selection invocations. Optional; if absent the playbook proceeds without staleness verification.",
+        "description": "SPE driveItem etag at the moment of selection. Lets the playbook detect that the document changed mid-flight and reject stale-selection invocations. Optional; if absent the playbook proceeds without staleness verification. RECOVERY PATH: on etag mismatch, do not silently discard the selection — surface a caveat in the response so the user can decide whether to proceed or re-select.",
         "required": false
       },
       {
@@ -48,20 +48,20 @@
       {
         "name": "matterId",
         "type": "string",
-        "description": "sprk_matter GUID when the document is matter-bound. Null when the document is unbound or pre-Save. When present, enables matter-scoped knowledge retrieval (precedent, prior negotiations, matter playbook entries).",
+        "description": "sprk_matter GUID when the document is matter-bound. Null when the document is unbound or pre-Save. When present, enables matter-scoped knowledge retrieval (precedent, prior negotiations, matter playbook entries). GOTCHA: absence does not mean 'no matter' permanently — a pre-Save ephemeral document can be promoted mid-session; do not cache a null matterId as a durable fact across dispatches.",
         "required": false,
         "format": "uuid"
       },
       {
         "name": "sessionId",
         "type": "string",
-        "description": "ChatSession id (Redis/Cosmos/Dataverse three-tier persistence key). Lets the playbook write annotations / derived insights back to session memory for the R2 'return-from-Word re-anchoring' workflow.",
+        "description": "ChatSession id (Redis/Cosmos/Dataverse three-tier persistence key). Lets the playbook write annotations / derived insights back to session memory for the R2 'return-from-Word re-anchoring' workflow. RECOVERY PATH: if the session cannot be resolved (expired/evicted from the Redis tier), fall back to responding without the session-memory write rather than failing the whole dispatch.",
         "required": true
       },
       {
         "name": "tenantId",
         "type": "string",
-        "description": "Azure AD tenant GUID. ADR-015 Tier 3 isolation key; inherited from PlaybookInvocationContext.TenantId.",
+        "description": "Azure AD tenant GUID. ADR-015 Tier 3 isolation key; inherited from PlaybookInvocationContext.TenantId. GOTCHA: never use this value to construct cross-tenant queries or citations — every knowledge/precedent lookup this scope enables MUST be scoped to this tenant.",
         "required": true,
         "format": "uuid"
       }
@@ -83,6 +83,9 @@
     "createdAt": "2026-06-29T00:00:00Z",
     "tags": ["compose", "selection", "input-scope", "r1"],
     "relatedAdrs": ["ADR-013", "ADR-015"],
-    "consumedBy": "R2 actions (Explain clause, Replace with standard, Compare-to-playbook, Draft alternative). R1 does NOT ship any action consuming this scope — schema is locked for R2 to consume without retrofit."
+    "consumedBy": "R2 actions (Explain clause, Replace with standard, Compare-to-playbook, Draft alternative). R1 does NOT ship any action consuming this scope — schema is locked for R2 to consume without retrofit.",
+    "enrichedBy": "spaarkeai-compose-r2 task 024 (FR-23)",
+    "enrichedAt": "2026-07-08T00:00:00Z",
+    "enrichmentNote": "description fields (scope-level + per-field) enriched with GOTCHA/RECOVERY PATH/EXAMPLE guidance per the 'tool descriptions ARE the prompt' pattern; no field/type/required/totalCharCap changes."
   }
 }

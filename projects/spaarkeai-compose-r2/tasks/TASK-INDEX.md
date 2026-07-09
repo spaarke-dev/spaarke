@@ -29,11 +29,11 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 015 | FR-06a upload fidelity branch (original-if-unedited) | 1 Entry | 🟢 | 013 | 🔲 | FULL | sonnet | high |
 | 016 | FR-04 draft-into-editor via compose disposition | 1 Entry | 🔴 | 000 | ⛔ | FULL | opus | high |
 | 017 | Deploy — BFF + SpaarkeAi (entry paths) + verify 1a/1b/1c mount | 1 Entry | 🟢 | 010,011,012,013,015 | 🔲 | STANDARD | sonnet | high |
-| 020 | FR-19 IComposeEditValidator + POST /edit-batch/validate | 2 LLM | 🟢 | 002 | 🔲 | FULL | sonnet | xhigh |
+| 020 | FR-19 IComposeEditValidator + POST /edit-batch/validate | 2 LLM | 🟢 | 002 | ✅ | FULL | sonnet | xhigh |
 | 021 | FR-20 ComposeEditBatch (4-phase pipeline) | 2 LLM | 🟢 | 003 | 🔲 | FULL | sonnet | high |
 | 022 | FR-21 ComposeEditTransaction (snapshot/rollback) | 2 LLM | 🟢 | 021 | 🔲 | FULL | sonnet | high |
-| 023 | FR-22 SemanticAppendixGenerator + CriticMarkup read direction | 2 LLM | 🟢 | 004 | 🔲 | FULL | sonnet | high |
-| 024 | FR-23 enriched compose-selection/compose-document scope descriptions | 2 LLM | 🟢 | none | 🔲 | STANDARD | sonnet | high |
+| 023 | FR-22 SemanticAppendixGenerator + CriticMarkup read direction | 2 LLM | 🟢 | 004 | ✅ | FULL | sonnet | high |
+| 024 | FR-23 enriched compose-selection/compose-document scope descriptions | 2 LLM | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 025 | Unit tests for Services/Compose LLM services (NFR-05/08 + NetArchTest) | 2 LLM | 🟢 | 020,021,022,023 | 🔲 | STANDARD | sonnet | high |
 | 030 | FR-14 TipTap BubbleMenu inline AI toolbar (Explain/Compare/Draft/More) | 3 Inline | 🟢 | none | 🔲 | FULL | sonnet | high |
 | 031 | FR-15 custom ProseMirror marks (insertion/deletion/commentAnchor) | 3 Inline | 🟢 | none | 🔲 | FULL | sonnet | high |
@@ -46,11 +46,11 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 043 | FR-10 compose-summarize-word-changes Action + Binding | 4 Catalog | 🔴 | 001,006 | ⛔ | FULL | sonnet | high |
 | 044 | FR-11 compose-defined-terms Action + Binding (overflow trigger → Context) | 4 Catalog | 🔴 | 001 | ⛔ | FULL | sonnet | high |
 | 045 | FR-12 eval cases per row (golden + dispatch ≥5) + schema validation | 4 Catalog | 🔴 | 040,041,042,043,044 | ⛔ | FULL | sonnet | high |
-| 046 | FR-13 dispatch wiring (PaneEventBus compose_action_request → dispatchConsumer) | 4 Catalog | 🔴 | 016,030 | ⛔ | FULL | opus | high |
+| 046 | FR-13 dispatch wiring (compose_selection_offer choreography + direct dispatchConsumer) | 4 Catalog | 🔴 | 016,030 | ⛔ | FULL | opus | high |
 | 047 | Deploy catalog rows to Dataverse (mirror-first) | 4 Catalog | 🔴 | 045 | ⛔ | STANDARD | sonnet | high |
 | 050 | FR-24 DocxAnnotationWriter (comments + track changes, edge cases) + push endpoint | 5 Word | 🟢 | 005 | 🔲 | FULL | opus | xhigh |
 | 051 | FR-25 DocxAnnotationReader (parse w:comment/w:ins/w:del) + pull endpoint | 5 Word | 🟢 | 006 | 🔲 | FULL | sonnet | high |
-| 052 | FR-26 SPE webhook subscription + BackgroundService renewal + delta query | 5 Word | 🟢 | none | 🔲 | FULL | opus | high |
+| 052 | FR-26 SPE webhook subscription + BackgroundService renewal + delta query | 5 Word | 🟢 | none | ✅ | FULL | opus | high |
 | 053 | FR-26 webhooks/spe-doc-changed + check-changes endpoints | 5 Word | 🟢 | 052 | 🔲 | FULL | sonnet | high |
 | 054 | FR-27 return-from-Word re-anchoring (bands ≥0.85/0.6–0.85/<0.6) + conflict banner | 5 Word | 🟢 | 051,006 | 🔲 | FULL | opus | high |
 | 055 | FR-28 push/save deterministic path (gate dialog + OutcomeCard = splittable) | 5 Word | 🟡 | 050 | 🔲 | FULL | sonnet | high |

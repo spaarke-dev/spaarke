@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | W0 wave ✅ COMPLETE (000/002/003/004/005/007). Next: W0b (006/008 — dep 005) or W1 services (020/021/023/024/052) |
+| **Task** | W0 ✅ + W1 partial ✅ (020/023/024/052 integrated, build+53 tests green). NEXT: **021** (held — dep 020 ✅ now met) |
 | **Step** | — |
-| **Status** | 6 spikes done; ready for W0b or W1 |
-| **Next Action** | Execute next wave via `task-execute`. W0b: 006 (Word→webhook→read round-trip; dep 005 ✅) + 008 (docx-benchmark harness; dep 005 ✅). Or W1 BFF services: 020/021/023/024/052. ⛔ tasks wait on core R2 Phase A0. Consider folding the spike-surfaced design/spec corrections first (see Handoff Notes). |
+| **Status** | 020/023/024/052 done + wired + verified; 021 ready to dispatch |
+| **Next Action** | Execute **021** (FR-20 ComposeEditBatch) via task-execute — apply Spike-3 two-path rule (overlap=skip / validation-fail=rollback). Then 022 (dep 021), 025 (dep 020/021/022/023). ⛔ tasks wait on core A0. |
 
 ### Files Modified This Session
 - `notes/spikes/spike-0-dispatch-path.md` - Created - Spike 0 (dispatch seam confirmed; `compose_action_request` correction)

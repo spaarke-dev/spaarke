@@ -3,7 +3,7 @@
     <title>FR-26 SPE webhook subscription + BackgroundService renewal + delta query</title>
     <phase>5 Word</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>opus</model-tier>
     <effort>high</effort>
