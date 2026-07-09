@@ -491,6 +491,26 @@ export interface ComposeAssistantToWorkspaceFlow {
 
   /** ISO-8601 UTC timestamp. Tier 1 safe. */
   timestamp: string;
+
+  /**
+   * FR-04 render-follows-store reference (spaarkeai-compose-r2 task 016).
+   *
+   * When present, this is the addressable ledger key `{bindingId}@t{n}` of the
+   * STORED `compose`-disposition SessionOutput the workspace must materialize
+   * FROM (ADR-040: the durable ledger entry is the source of truth, never the
+   * event payload — that is what makes the drafted content refresh-durable).
+   * ComposeWorkspace re-reads the stored output via the session-ledger read
+   * endpoint (`GET /api/ai/chat/sessions/{id}/compose-outputs`) and inserts it
+   * via `ComposeEditorHandle.materializeComposeDraft`.
+   *
+   * When ABSENT, this is a legacy Flow-5 event and the workspace keeps the R1
+   * manual-confirm staging path (the `contentHtml` payload above). The dispatch
+   * bridge (the compose SSE frame → Flow-5 hand-off) populates this from the
+   * `ledger_ref` on the `ComposeDispositionFrame`.
+   *
+   * Tier 1 safe (an addressable identifier, not content).
+   */
+  ledgerRef?: string;
 }
 
 // ---------------------------------------------------------------------------

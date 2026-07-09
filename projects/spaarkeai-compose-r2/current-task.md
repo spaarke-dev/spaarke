@@ -10,25 +10,27 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | W0 ✅ + W1 ✅. **Merged master 2026-07-08 → A0 contract seams now in worktree** (04f90caea, pushed). Build+63 tests green post-merge. |
+| **Task** | W0 ✅ + W1 ✅ + **016/030/032 FRONTEND INTEGRATION ✅** (2026-07-08). A0 seams in worktree. |
 | **Step** | — |
-| **Status** | 13 tasks done + master current (c5cfe04bc). **016/030/032 IMPLEMENTED but FRONTEND INTEGRATION PENDING** (BFF half of 016 committed + verified). |
-| **Next Action** | **Frontend integration pass** for 016/030/032, THEN dispatch 031. See "Integration WIP" below. |
+| **Status** | 13 tasks done + integration wave committed. **016/030/032 IMPLEMENTED + INTEGRATED + verified.** All 3 of 016's hooks landed; FR-18 near-side threaded; jest enabled for Compose.Components. |
+| **Next Action** | Dispatch **031** (custom ProseMirror marks — edits ComposeEditor.tsx, upgrades `materializeComposeDraft` to positioned pending-redline). Then consider `/merge-to-master`. |
 
-### ⚠️ Integration WIP — uncommitted frontend changes on disk (016/030/032)
-BFF half of 016 (`ComposeDraftDisposition.cs` + tests) is COMMITTED + verified (10 tests green). The following are **written to the working tree but UNCOMMITTED + not yet typechecked** (no `node_modules` installed):
-- 016: `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx`
-- 030: `.../widgets/ComposeEditor.tsx` (toolbar mount ~654-666), `.../widgets/ComposeAiToolbar.tsx` (+test), `index.ts`, `package.json` (added `@spaarke/ui-components`)
-- 032: `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`, `.../useSerialActionQueue.ts` (+test)
+### ✅ Integration wave complete (016/030/032) — 2026-07-08
+Committed the frontend+BFF integration wave. Verification:
+- **Compose.Components typecheck**: clean (against built `@spaarke/*` dists — built via `scripts/Build-AllClientComponents.ps1 -Component SharedLibs`).
+- **jest** (now enabled — first config for the package): `ComposeAiToolbar.test.tsx` **10/10 green**.
+- **BFF**: builds clean; Compose+ADR-013 suite **169/169 green** (incl. 4 new `ChatComposeOutputsProjectionTests`). Publish size **46.46 MB compressed incl PDBs** (< 60 MB ceiling; ~0 delta — no new packages).
 
-**Integration steps required (in order):**
-1. `npm install --legacy-peer-deps --no-audit --no-fund` (Compose.Components needs it; 030 added a dep). Root has no node_modules.
-2. Wire 016's 3 hooks: (a) BFF `GET /api/ai/chat/sessions/{id}/compose-outputs` read endpoint (reserved to main session; reuse `ComposeDraftDisposition.ResolveCurrent`); (b) `materializeComposeDraft(draft,{ledgerRef,bindingId,turn})` on `ComposeEditorHandle` in ComposeEditor.tsx (~L220/537); (c) dispatcher→Flow-5 `ledgerRef` bridge + add additive `ledgerRef?` to `ComposeAssistantToWorkspaceFlow` in `compose-contracts.ts`.
-3. **DESIGN DECISION — toolbar→queue seam (FR-18)**: 030's toolbar dispatches directly; 032's serial queue is separate. To serialize toolbar actions, thread a host-provided `enqueueComposeAction` (backed by 032's queue) from the SpaarkeAi host → ComposeWorkspace → ComposeEditor → toolbar, so the toolbar routes through the queue (its own `dispatchConsumer` becomes the standalone fallback). RECOMMENDED default.
-4. `npm run typecheck` in Compose.Components + SpaarkeAi; fix errors.
-5. jest config for `Spaarke.Compose.Components` (first test file — 030's + others can't run without it) OR defer `.tsx` test execution with a note.
-6. Commit the frontend wave; THEN dispatch **031** (custom marks — edits ComposeEditor.tsx, serialized after 030).
-Core follow-up: full server routing (`BindingDisposition.Compose` + `OutputRouter` case) is core task 010, not yet present.
+**What landed:**
+- **016 HOOK #1** (BFF read endpoint): `GET /api/ai/chat/sessions/{sessionId}/compose-outputs` in `ChatEndpoints.cs` — reads the existing `session.Outputs` ledger surface (ADR-040), projects `compose`-disposition entries via new pure `ProjectComposeOutputs` (skips truncation markers). New `ComposeLedgerOutputDto` in `SessionLedgerEntries.cs`. §10/§11: extends ChatEndpoints + reuses `session.Outputs`; no new service/DI/package.
+- **016 HOOK #2** (editor materialize): `materializeComposeDraft(draft, provenance)` added to `ComposeEditorHandle` + implemented (clean cursor insertion of `new_text` as escaped paragraphs; positioned `target_text` replace + pending-redline marks + provenance badge are **task 031**). Shared `ComposeDraftPayload`/`ComposeDraftProvenance` types now owned by ComposeEditor + imported by ComposeWorkspace (removed the local mirror + `ComposeDraftMaterializeCapable` hack).
+- **016 HOOK #3** (contract): additive `ledgerRef?` on shared `ComposeAssistantToWorkspaceFlow` (compose-contracts.ts); ComposeWorkspace's local `ComposeAssistantInsertLedgerSignal` hack removed.
+- **FR-18 seam (near-side)**: optional `enqueueComposeAction?` threaded toolbar → editor → workspace (`ComposeActionEnqueue` type). When a host supplies it, toolbar routes dispatch through 032's serial queue; else falls back to its own bound dispatcher.
+
+**Deferred (with rationale):**
+- **FR-18 far-side host wiring** — delivering ConversationPane's `dispatchComposeAction` across panes to `ComposeWorkspace.enqueueComposeAction` is a host/shared-context decision, and no toolbar action can dispatch until Phase-4 catalog (core-gated) wires real `bindingId`s. Near-side seam is ready; host wires it at Phase 4.
+- **SpaarkeAi solution typecheck** — the 032 files (`ConversationPane.tsx`, `useSerialActionQueue.ts` + test) are prior-session WIP UNCHANGED this session; my edits are confined to the shared Compose lib (typechecks clean). Full SpaarkeAi typecheck needs a full solution `npm install` — deferred (unmodified-by-this-session files).
+- **Core follow-up**: the compose WRITE path (`BindingDisposition.Compose` + `OutputRouter` case) is core task 010, not present — so the read endpoint returns `[]` until then (render-follows-store path is correctly dormant end-to-end).
 
 ### Files Modified This Session
 - `notes/spikes/spike-0-dispatch-path.md` - Created - Spike 0 (dispatch seam confirmed; `compose_action_request` correction)

@@ -20,6 +20,9 @@
  *     - Flow 2 (`compose_selection_offer` on `conversation`) — when selection
  *       is non-collapsed and ≥10 chars
  *  5. Honor ADR-021 (Fluent v9 semantic tokens; no hex) and ADR-022 (React 19).
+ *  6. Mount the inline AI toolbar (task 030, FR-14, `ComposeAiToolbar`) inside
+ *     the BubbleMenu on non-collapsed selection — see the "AI TOOLBAR MOUNT"
+ *     region below for the exact insertion point.
  *
  *  HEARTBEAT HOISTED (R2/R3 refactor, 2026-06-29): The 3-min SPE check-out
  *  heartbeat that previously lived here has been moved to the workspace level
@@ -30,11 +33,16 @@
  * What this component DOES NOT do (binding):
  *  - Speak to SPE directly (host pane supplies bytes via prop / receives via
  *    serialize callback; SPE plumbing lives in `ComposeDocumentService`).
- *  - Dispatch AI actions directly. Per refined ADR-013 (2026-05-20), AI dispatch
- *    flows through `IConsumerRoutingService` + the BFF playbook-invocation boundary via
- *    `POST /api/compose/action/{consumerType}` (W3-024). The editor emits
- *    `compose_selection_offer` on the `conversation` channel; the
- *    ConversationPane (or sibling toolbar) is the dispatcher.
+ *  - Invent a Compose-specific dispatch route. AI-action dispatch (task 030,
+ *    FR-14) is the inline `ComposeAiToolbar`'s bound `dispatchConsumer(bindingId,
+ *    { slots })` call — the shipped Click-path session-dispatch seam
+ *    (`POST /api/ai/chat/sessions/{sessionId}/dispatch`, ADR-039) — NOT a
+ *    `POST /api/compose/action/{consumerType}` endpoint (deleted; see
+ *    `notes/spikes/spike-0-dispatch-path.md`) and NOT a `compose_action_request`
+ *    PaneEventBus event (never existed; do not add one). The editor still
+ *    emits `compose_selection_offer` on the `conversation` channel (Flow 2) —
+ *    that is pane CHOREOGRAPHY (Assistant/Context awareness), not the
+ *    dispatch trigger.
  *  - Log selection text or document content (ADR-015 Tier 3). The PaneEventBus
  *    `logFlowEvent` reference impl already strips Tier 3 fields; this editor
  *    likewise NEVER `console.log`s `selectionText` or full document HTML.
@@ -77,6 +85,7 @@ import {
   LinkDismiss24Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
+import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the side-effect widget
 // registration (`register-workspace-widgets.ts` transitively pulls in
@@ -134,6 +143,18 @@ const LOCKED_EXTENSIONS = [
 /** Selection-change debounce per `compose-contracts.ts` Flow 1 comment (250ms). */
 const SELECTION_DEBOUNCE_MS = 250;
 
+/**
+ * Minimal HTML-escape for materializing LLM-drafted text as TipTap paragraph
+ * content (FR-04, task 016) — TipTap's `insertContent` parses HTML, so raw `<`
+ * in a draft must be escaped to render as literal text rather than markup.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 /** Minimum selection length to fire Flow 2 (`compose_selection_offer`). */
 const FLOW2_MIN_CHARS = 10;
 
@@ -162,6 +183,41 @@ export interface ComposeEditorDocumentRef {
   fileName?: string;
   /** SPE container id (multi-tenant scoping). */
   containerId?: string;
+}
+
+/**
+ * FR-04 Compose-owned structured-edit payload (spaarkeai-compose-r2 task 016) —
+ * the client mirror of `Services/Compose/ComposeDraftDisposition.cs`
+ * `ComposeDraftPayload`. Rides inside the opaque `payload` of a `compose`-
+ * disposition ledger entry; the core stores it opaquely, Compose renders it.
+ * snake_case wire vocabulary. Owned here (the editor performs the insertion) and
+ * re-imported by ComposeWorkspace so both sides of the materialize seam share
+ * ONE type (dependency direction is workspace → editor, already established).
+ *
+ * Privacy: `new_text` / `target_text` / `rationale` are Tier 3 (LLM/user content)
+ * and MUST NOT be logged; `sources` are identifiers only.
+ */
+export interface ComposeDraftPayload {
+  /** Text the draft targets for replacement; absent/empty for an insertion-style draft. */
+  target_text?: string;
+  /** The drafted content to materialize into the editor (load-bearing field). */
+  new_text: string;
+  /** How the client resolves `target_text` (Compose vocabulary, e.g. `strict` / `insert`). */
+  match_mode?: string;
+  /** Optional model-supplied rationale (provenance/explanation). */
+  rationale?: string;
+  /** Citations / source ids the draft was grounded on (ids only). */
+  sources?: string[];
+}
+
+/**
+ * Provenance stamp accompanying a materialized draft — all Tier 1 identifiers.
+ * `ledgerRef` is the addressable `{bindingId}@t{n}` key of the stored output.
+ */
+export interface ComposeDraftProvenance {
+  ledgerRef: string;
+  bindingId: string;
+  turn: number;
 }
 
 export interface ComposeEditorProps {
@@ -212,6 +268,13 @@ export interface ComposeEditorProps {
    * Tier 1 safe (warnings are configuration metadata, not document content).
    */
   onImportWarnings?: (messages: Array<{ type: string; message: string }>) => void;
+
+  /**
+   * FR-18 host serialization seam (task 032). Forwarded verbatim to the inline
+   * `ComposeAiToolbar`; when present, toolbar action dispatches route through the
+   * host's serial queue. Optional — see `ComposeActionEnqueue`.
+   */
+  enqueueComposeAction?: ComposeActionEnqueue;
 }
 
 /**
@@ -241,6 +304,22 @@ export interface ComposeEditorHandle {
    * Reset internally on each successful serialize() call.
    */
   isDirty(): boolean;
+
+  /**
+   * FR-04 draft-into-editor (spaarkeai-compose-r2 task 016). Materialize a
+   * `compose`-disposition draft — re-read FROM the stored session-ledger entry
+   * by ComposeWorkspace (ADR-040 render-follows-store) — into the TipTap
+   * document, with provenance.
+   *
+   * R2/016 behaviour is a clean INSERTION of `draft.new_text` at the cursor and
+   * marks the document dirty. Positioned `target_text` replacement, pending-
+   * redline marks, and the provenance badge are task 031 (custom ProseMirror
+   * marks) + FR-17 supersession — this method is the seam they build on. The
+   * host calls it via ref only after the workspace has resolved the current
+   * stored output; `provenance` fields are Tier 1 identifiers, `draft.new_text`
+   * is Tier 3 and is never logged.
+   */
+  materializeComposeDraft(draft: ComposeDraftPayload, provenance: ComposeDraftProvenance): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -458,7 +537,7 @@ function useSelectionEventDispatch(
  */
 export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditorProps>(
   function ComposeEditor(props, ref) {
-    const { docxBytes, documentRef, bffBaseUrl, sessionId = '', onDirtyChange, onImportWarnings } = props;
+    const { docxBytes, documentRef, bffBaseUrl, sessionId = '', onDirtyChange, onImportWarnings, enqueueComposeAction } = props;
 
     const styles = useStyles();
     const dispatch = useDispatchPaneEvent();
@@ -557,6 +636,26 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           };
         },
         isDirty: () => dirtyRef.current,
+        materializeComposeDraft: (draft, _provenance) => {
+          if (!editor) {
+            throw new Error('ComposeEditor: cannot materialize compose draft — editor not mounted');
+          }
+          const newText = draft?.new_text ?? '';
+          if (newText.length === 0) return;
+          // 016 basic materialization: insert the drafted content at the cursor.
+          // Positioned `target_text` replacement + pending-redline marks + the
+          // provenance badge are task 031 (custom marks) / FR-17 supersession —
+          // this satisfies FR-04 (durable ledger content → editor content).
+          // Insert as escaped paragraphs so LLM-drafted `<` is never parsed as
+          // markup; `new_text` is Tier 3 and is NEVER logged.
+          const html = newText
+            .split(/\r?\n/)
+            .map((line) => `<p>${escapeHtml(line)}</p>`)
+            .join('');
+          editor.chain().focus().insertContent(html).run();
+          dirtyRef.current = true;
+          onDirtyChange?.(true);
+        },
       }),
       [editor, onDirtyChange]
     );
@@ -641,6 +740,21 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
                 onClick={toggleLink}
               />
             </Toolbar>
+
+            {/* ===================================================================
+                AI TOOLBAR MOUNT — task 030 (FR-14). Localized region; task 031
+                (custom marks) edits AFTER this block — keep this region
+                self-contained so that follow-on edit stays a clean insertion.
+                =================================================================== */}
+            <ComposeAiToolbar
+              editor={editor}
+              documentRef={documentRef}
+              sessionId={sessionId}
+              bffBaseUrl={bffBaseUrl}
+              dispatch={dispatch}
+              enqueueComposeAction={enqueueComposeAction}
+            />
+            {/* =================== END AI TOOLBAR MOUNT (task 030) =================== */}
           </BubbleMenu>
         ) : null}
         {isImporting ? (
