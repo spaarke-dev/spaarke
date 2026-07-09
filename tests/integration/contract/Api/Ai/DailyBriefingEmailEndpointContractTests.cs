@@ -174,6 +174,50 @@ public class DailyBriefingEmailEndpointContractTests : IClassFixture<DailyBriefi
         (await response.Content.ReadAsStringAsync()).Should().Contain("\"tldr\"",
             "the widget-consumable camelCase contract is preserved (AC-12b)");
     }
+
+    [Fact]
+    public async Task PostRender_NoBody_ForwardsDefaultWindows()
+    {
+        _fx.Reset();
+        var client = _fx.CreateAuthenticatedClient();
+
+        var response = await client.PostAsync("/api/ai/daily-briefing/render", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fx.Composite.LastRenderWindows.Should().Be(
+            Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.BriefingWindowOptions.Default,
+            "an absent body preserves the fixed 5-day/120-hour defaults (scheduled callers, older clients)");
+    }
+
+    [Fact]
+    public async Task PostRender_WithWindowBody_ForwardsUserWindows()
+    {
+        _fx.Reset();
+        var client = _fx.CreateAuthenticatedClient();
+
+        var response = await client.PostAsync(
+            "/api/ai/daily-briefing/render", JsonBody("""{"dueWithinDays":3,"recencyHours":48}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fx.Composite.LastRenderWindows.Should().NotBeNull();
+        _fx.Composite.LastRenderWindows!.DueWithinDays.Should().Be(3);
+        _fx.Composite.LastRenderWindows!.RecencyHours.Should().Be(48);
+    }
+
+    [Fact]
+    public async Task PostRender_WithOutOfRangeWindows_ClampsAndDefaults()
+    {
+        _fx.Reset();
+        var client = _fx.CreateAuthenticatedClient();
+
+        // dueWithinDays 0 → default (5); recencyHours 99999 → clamped to 744 (31 days).
+        var response = await client.PostAsync(
+            "/api/ai/daily-briefing/render", JsonBody("""{"dueWithinDays":0,"recencyHours":99999}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fx.Composite.LastRenderWindows!.DueWithinDays.Should().Be(5, "≤0 falls back to the default");
+        _fx.Composite.LastRenderWindows!.RecencyHours.Should().Be(744, "recency is clamped to the 31-day ceiling");
+    }
 }
 
 /// <summary>
@@ -309,11 +353,17 @@ public sealed class DailyBriefingEndpointTestFixture : IAsyncLifetime, IDisposab
         public Exception? ThrowOnEmail { get; set; }
 
         public override Task<DailyBriefingNarrateResponse> RenderAsync(
-            Guid systemUserId, string tenantId, CancellationToken cancellationToken)
+            Guid systemUserId, string tenantId,
+            Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.BriefingWindowOptions windows,
+            CancellationToken cancellationToken)
         {
             RenderCalls.Add(systemUserId);
+            LastRenderWindows = windows;
             return Task.FromResult(BuildResponse());
         }
+
+        /// <summary>Captures the window options the endpoint forwarded (r5 settings-wiring).</summary>
+        public Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.BriefingWindowOptions? LastRenderWindows { get; private set; }
 
         public override Task<DailyBriefingNarrateResponse> EmailAsync(
             Guid systemUserId, string tenantId, string recipientEmail, CancellationToken cancellationToken)

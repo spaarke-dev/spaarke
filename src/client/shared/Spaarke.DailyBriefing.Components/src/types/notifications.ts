@@ -409,6 +409,25 @@ export type DueWindowDays = 1 | 2 | 3 | 5 | 7;
 export type TimeWindow = '12h' | '24h' | '48h' | '7d';
 
 /**
+ * Map a {@link TimeWindow} to hours for the server's recency look-back
+ * (`/render` recencyHours). r5 settings-wiring (2026-07-09).
+ */
+export function timeWindowToHours(window: TimeWindow): number {
+  switch (window) {
+    case '12h':
+      return 12;
+    case '24h':
+      return 24;
+    case '48h':
+      return 48;
+    case '7d':
+      return 168;
+    default:
+      return 120; // 5-day fallback (matches the server default)
+  }
+}
+
+/**
  * User preferences for the Daily Digest, stored as JSON in
  * sprk_userpreference.sprk_preferencevalue.
  *
@@ -423,19 +442,25 @@ export type TimeWindow = '12h' | '24h' | '48h' | '7d';
 export interface DailyDigestPreferences {
   /** Channels the user has disabled (opt-out). Empty = all enabled. */
   disabledChannels: NotificationCategory[];
-  /** Due-soon window in days (default: 3). */
+  /** Due-soon window in days (default: 5 — matches the server's out-of-box look-ahead). */
   dueWithinDays: DueWindowDays;
-  /** Recency time window (default: "24h"). */
+  /** Recency time window (default: "7d" — ≥ the server's 5-day recency so out-of-box shows at least as much). */
   timeWindow: TimeWindow;
   /** Whether to auto-popup the digest on workspace launch (default: true). */
   autoPopup: boolean;
 }
 
-/** Default preferences (opt-out model: everything enabled). */
+/**
+ * Default preferences (opt-out model: everything enabled).
+ *
+ * r5 settings-wiring (2026-07-09): defaults are GENEROUS (5-day due-soon, 7-day recency)
+ * so wiring the Display Parameters through to the collector does NOT reduce what an
+ * unconfigured user sees vs. the prior fixed-5-day behavior. Users narrow from here.
+ */
 export const DEFAULT_DAILY_DIGEST_PREFERENCES: DailyDigestPreferences = {
   disabledChannels: [],
-  dueWithinDays: 3,
-  timeWindow: '24h',
+  dueWithinDays: 5,
+  timeWindow: '7d',
   autoPopup: true,
 };
 

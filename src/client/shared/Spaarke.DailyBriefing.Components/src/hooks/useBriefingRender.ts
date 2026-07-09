@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { NarrateResponse } from '../services/briefingService';
+import type { NarrateResponse, BriefingWindowParams } from '../services/briefingService';
 import { fetchBriefingLive } from '../services/briefingService';
 
 // ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ export function isEmptyResponse(response: NarrateResponse): boolean {
  * `refetch()`. The /render call has no request body and authenticates via
  * the OBO token — the BFF resolves the caller's systemuserid server-side.
  */
-export function useBriefingRender(): UseBriefingRenderResult {
+export function useBriefingRender(windows?: BriefingWindowParams): UseBriefingRenderResult {
   const [status, setStatus] = useState<BriefingRenderStatus>('idle');
   const [data, setData] = useState<NarrateResponse | null>(null);
   const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
@@ -90,13 +90,17 @@ export function useBriefingRender(): UseBriefingRenderResult {
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // r5 settings-wiring (2026-07-09): re-fetch when the user's windows change (e.g. after a
+  // Settings Save) OR on explicit refetch. Serialize the windows for a stable effect dep.
+  const windowsKey = windows ? `${windows.dueWithinDays}:${windows.recencyHours}` : '';
+
   useEffect(() => {
     let cancelled = false;
     setStatus('loading');
     setError(null);
     setUnavailableReason(null);
 
-    fetchBriefingLive().then(result => {
+    fetchBriefingLive(windows).then(result => {
       if (cancelled) return;
 
       switch (result.status) {
@@ -124,7 +128,9 @@ export function useBriefingRender(): UseBriefingRenderResult {
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
+    // `windows` object identity may change each render; gate on its serialized key instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey, windowsKey]);
 
   const refetch = useCallback(() => {
     setRefreshKey(k => k + 1);

@@ -170,7 +170,7 @@ public sealed class DailyBriefingCompositeServiceTests
         SetupWorkflowResolution();
         var routed = SetupRouterPassthrough();
 
-        var response = await CreateSut().RenderAsync(SystemUserId, TenantId, CancellationToken.None);
+        var response = await CreateSut().RenderAsync(SystemUserId, TenantId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         response.HighPriorityItems.Should().ContainSingle(i => i.Name == "Acme");
         _workflow.Executions.Single().UserId.Should().Be(SystemUserId, "user-OBO identity flows into the workflow context");
@@ -191,7 +191,7 @@ public sealed class DailyBriefingCompositeServiceTests
         _collector.Payload = new DailyBriefingNarrateRequest();
         _collector.HighPriority = new[] { new HighPriorityItemDto { EntityType = "sprk_event", Name = "Urgent" } };
 
-        var response = await CreateSut().RenderAsync(SystemUserId, TenantId, CancellationToken.None);
+        var response = await CreateSut().RenderAsync(SystemUserId, TenantId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Nothing to narrate: no Binding resolve, no workflow, no ledger entry — but the
         // structured high-priority list still surfaces (operator design decision).
@@ -353,7 +353,8 @@ public sealed class DailyBriefingCompositeServiceTests
         public DailyBriefingNarrateRequest Payload { get; set; } = new();
         public HighPriorityItemDto[] HighPriority { get; set; } = Array.Empty<HighPriorityItemDto>();
 
-        public override Task<DailyBriefingNarrateRequest> CollectAsync(Guid systemUserId, CancellationToken ct)
+        public override Task<DailyBriefingNarrateRequest> CollectAsync(
+            Guid systemUserId, BriefingWindowOptions windows, CancellationToken ct)
             => Task.FromResult(Payload);
 
         public override Task<HighPriorityItemDto[]> CollectHighPriorityAsync(Guid systemUserId, CancellationToken ct)
