@@ -25,8 +25,21 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, Text, Link, Badge, Button, Tooltip } from '@fluentui/react-components';
-import { AlertUrgentRegular, MailRegular } from '@fluentui/react-icons';
+import {
+  makeStyles,
+  tokens,
+  Text,
+  Link,
+  Badge,
+  Button,
+  Tooltip,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItem,
+} from '@fluentui/react-components';
+import { AlertUrgentRegular, MailRegular, MoreVerticalRegular, OpenRegular } from '@fluentui/react-icons';
 
 import type { HighPriorityItemResult } from '../services/briefingService';
 
@@ -282,16 +295,33 @@ export const HighPrioritySection: React.FC<HighPrioritySectionProps> = ({ items,
                   <Badge appearance={badge.appearance} color={badge.color} size="small">
                     {badge.label}
                   </Badge>
-                  {onEmailItem && (
-                    <Tooltip content="Email this item to a colleague" relationship="label">
-                      <Button
-                        appearance="subtle"
-                        size="small"
-                        icon={<MailRegular />}
-                        aria-label={`Email ${item.name || 'item'} to a colleague`}
-                        onClick={() => onEmailItem(item)}
-                      />
-                    </Tooltip>
+                  {(onOpenRecord || onEmailItem) && (
+                    <Menu>
+                      <MenuTrigger disableButtonEnhancement>
+                        <Tooltip content="More actions" relationship="label">
+                          <Button
+                            appearance="subtle"
+                            size="small"
+                            icon={<MoreVerticalRegular />}
+                            aria-label={`More actions for ${item.name || 'item'}`}
+                          />
+                        </Tooltip>
+                      </MenuTrigger>
+                      <MenuPopover>
+                        <MenuList>
+                          {onOpenRecord && (
+                            <MenuItem icon={<OpenRegular />} onClick={() => handleOpen(item.entityType, item.entityId)}>
+                              Open record
+                            </MenuItem>
+                          )}
+                          {onEmailItem && (
+                            <MenuItem icon={<MailRegular />} onClick={() => onEmailItem(item)}>
+                              Email
+                            </MenuItem>
+                          )}
+                        </MenuList>
+                      </MenuPopover>
+                    </Menu>
                   )}
                 </div>
               </div>

@@ -53,6 +53,15 @@ Verdict: **no Critical issues.** Security clean (egress guard closes the externa
 - **Accepted (Suggestion) — empty-briefing "sent" toast:** not reachable in practice — the "Email Briefing" menu item renders ONLY on the success render path (a non-empty briefing), so `EmailAsync`'s empty short-circuit can't fire for a colleague share except via a benign render→send data race. Documented, not plumbed.
 - **Accepted (Suggestion) — "internal = any active systemuser":** the guard treats any active `systemuser` as internal; orgs that provision external guests as systemusers with external `internalemailaddress` domains could still receive. Accepted as documented defense-in-depth for MVP; a domain allow-list is a future hardening if strict employee-only is required.
 
+## UAT round 2 (2026-07-09) — operator feedback + fixes
+1. ✅ Email Briefing works.
+2. **Email Item now SENDS** (was: draft only). After `createRecord('email', …)` the client calls the Dataverse `SendEmail` bound action (`emails(id)/Microsoft.Dynamics.CRM.SendEmail`, `IssueSend:true`, same-origin `credentials:'include'`). Success → "Email sent"; if the sender mailbox isn't send-approved in the env, it falls back to "Draft email created" (activity still saved). No new BFF surface.
+3. **Dialog widened** — `SendEmailDialog` now `maxWidth="720px" height="70vh"` to match the wizard footprint (was 520px/auto).
+4. **Critical Today ⋮ menu** — replaced the standalone mail icon with a per-card `MoreVertical` menu (Open record + Email), matching the standard row pattern.
+5. **Missing Tasks/Matters/Documents sections — WORKING AS DESIGNED (needs operator decision).** The collector emits 5 channels (Upcoming Tasks, Overdue Tasks, Documents, Matters, To Dos); `ActivityNotesSection` hides empty ones. Those feeds query records **modified in the last 5 days** scoped to the user (`MatterModifiedDaysBack` etc.) — the test data has none, so only To Dos rendered. The matters in "Critical Today" come from the separate flagged-records source (`sprk_highpriority`/`sprk_monitor`), not the time-windowed Matters feed. **Options for the operator:** (a) widen the N-day window, (b) change semantics to "all active user matters", (c) accept as data-driven. Not changed unilaterally (affects the accuracy contract).
+
+**Still pending:** the #2 typed-personal-note passthrough (server-side note prepend) — deferred fast-follow.
+
 ## Open / deferred
 - Personal-note prepend + subject override for #2 (needs OutputRouter-adjacent HTML change) → **fast-follow**, not MVP.
 - #3 send-now (vs draft activity) → enhancement; draft is the safe MVP matching the SendEmailStep contract.

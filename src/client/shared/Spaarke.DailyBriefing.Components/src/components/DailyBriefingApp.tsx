@@ -598,16 +598,44 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         return;
       }
 
-      // mode === 'item' — create a DRAFT email activity (never auto-sent).
+      // mode === 'item' — create the email activity, then SEND it so the user is
+      // done after the dialog (UAT 2026-07-09: no "open from activities" step). If
+      // the send action fails (e.g. the sender mailbox isn't approved to send in
+      // this environment), the created activity remains a draft and we say so.
       if (!webApi) {
         throw new Error('Dataverse is not available.');
       }
-      await webApi.createRecord('email', buildEmailActivityRecord(userId, payload));
+      const created = await webApi.createRecord('email', buildEmailActivityRecord(userId, payload));
+      let sent = false;
+      try {
+        // Same-origin Dataverse Web API (the code page is served from the org URL);
+        // cookie auth via credentials:'include' — mirrors the EntityDefinitions fetch
+        // in useInlineTodoCreate. SendEmail is the bound action that delivers it.
+        const resp = await fetch(`/api/data/v9.2/emails(${created.id})/Microsoft.Dynamics.CRM.SendEmail`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'OData-MaxVersion': '4.0',
+            'OData-Version': '4.0',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ IssueSend: true }),
+        });
+        sent = resp.ok;
+        if (!resp.ok) {
+          console.warn('[DailyBriefing] SendEmail action failed:', resp.status, await resp.text().catch(() => ''));
+        }
+      } catch (sendErr) {
+        console.warn('[DailyBriefing] SendEmail action threw:', sendErr);
+      }
       dispatchToast(
         <Toast>
-          <ToastTitle>Draft email created</ToastTitle>
+          <ToastTitle>{sent ? 'Email sent' : 'Draft email created'}</ToastTitle>
           <ToastBody>
-            A draft email to {payload.to.name} was saved. Open it from your activities to review and send.
+            {sent
+              ? `Your email to ${payload.to.name} was sent.`
+              : `A draft to ${payload.to.name} was saved — open it from your activities to send.`}
           </ToastBody>
         </Toast>,
         { intent: 'success', timeout: 8000 }
@@ -784,6 +812,8 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           }
           onSearchUsers={handleSearchUsers}
           onSend={handleEmailSend}
+          maxWidth="720px"
+          height="70vh"
         />
       )}
     </div>
