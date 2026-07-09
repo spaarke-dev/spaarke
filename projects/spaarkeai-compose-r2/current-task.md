@@ -12,8 +12,8 @@
 |-------|-------|
 | **Task** | W0 ✅ + W1 ✅. **Merged master 2026-07-08 → A0 contract seams now in worktree** (04f90caea, pushed). Build+63 tests green post-merge. |
 | **Step** | — |
-| **Status** | 12 tasks done + MERGED TO MASTER (8652d535a). Phase 2: only **025** remains (020-024 ✅). A0 shapes on master. |
-| **Next Action** | **025** (NetArchTest facade guard `Services/Compose/*` ↛ `Services/Ai/*` + coverage — TEST-MODIFYING → FULL quality gates). Closes Phase 2. Then A0-unblocked **016** (FR-04 draft-into-editor, consumes `PublicContracts/ComposeDisposition.cs`). Catalog 040-044/045/047 still blocked on **core task 020**; 071→037; 063→057; 064→038. See SEAM-STATUS.md. |
+| **Status** | 13 tasks done. **Phase 0 ✅ + Phase 2 LLM services ✅ COMPLETE** (020-025). Merged to master through 8652d535a. |
+| **Next Action** | **016** (FR-04 draft-into-editor) — A0-unblocked keystone; consumes `PublicContracts/ComposeDisposition.cs` (opus-tier, client editor + BFF). Other startable-now: W1b UI (030/031/032), entry paths (010-013/015), Word (050/051/053/054), memory (060/061/062). Catalog 040-044/045/047 still blocked on **core task 020**; 071→037; 063→057; 064→038. See SEAM-STATUS.md. |
 
 ### Files Modified This Session
 - `notes/spikes/spike-0-dispatch-path.md` - Created - Spike 0 (dispatch seam confirmed; `compose_action_request` correction)
