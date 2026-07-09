@@ -1,0 +1,87 @@
+<task id="AIR2-044" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Wire ConfirmationPolicyEngine into the live core gate — end-to-end, no shims (FR-A1-03 acceptance closer)</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction (gap-closer added 2026-07-09)</phase>
+    <gate>G-R2-A</gate>
+    <estimated-effort>1.5 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Highest-blast-radius task of the wave: it makes the deterministic confirmation engine LIVE on the core chat gate execution path. Touches the gate call-site, the origin-signal flow from dispatch, and the execute/confirm/elicit branch. A subtle shim (origin defaulting to Inferred) would silently pass "code written" but fail "feature works." Requires the strongest reasoning + rigorous end-to-end verification.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Brownfield root-cause wiring across dispatch → gate → engine → behavior; the real origin/tier/completeness signal flow must be traced and threaded, not stubbed.</effort-reason>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, ai, gate, confirmation-policy, judgment, end-to-end, no-shim</tags>
+    <dependencies>032 (ConfirmationPolicyEngine PRODUCER — MERGED), 034 (gate pre-suspend validation — MERGED), 012 (GateDecisionV2 contract — MERGED). This task closes the FR-A1-03 acceptance gap: 032 built the engine but it has 0 production call-sites; nothing invokes ConfirmationPolicyEngine.Evaluate on the live path.</dependencies>
+  </metadata>
+
+  <prompt>
+    Make the deterministic Confirmation Policy v2 engine (ConfirmationPolicyEngine, task 032) LIVE on the core chat gate. Today the engine has ZERO production call-sites — SideEffectGateAIFunction.InvokeCoreAsync still decides suspend/execute via the OLD declared-class path (PendingPlanManager.RequiresConfirmation). This task invokes ConfirmationPolicyEngine.Evaluate at the live gate call-site, feeding it REAL (risk-tier × origin × completeness × overlays) signals, and drives real behavior from the returned GateDecisionV2: execute-without-dialog (explicit+complete 2a/2b), confirm-one-dialog (inferred/otherwise 2b), always-dialog (tier 3/4), elicit (incomplete args).
+
+    ABSOLUTE QUALITY MANDATE (operator, 2026-07-09): NO dead-ends, NO shims, NO pseudocode, NO incomplete/stubbed paths, NO origin hardcoded/defaulted-to-Inferred to "make it compile." The bar is "the feature works END TO END and is observable," not "did we write the code." If a required real signal (e.g. Click-vs-text origin) is genuinely not available at the call-site, THREAD IT from its real source — do not fabricate or default it. If threading it truly requires work beyond this task's reach (e.g. a frontend dispatch-envelope change), STOP and ESCALATE per §6.5 rather than shipping a signal that is always Inferred.
+  </prompt>
+
+  <role>Senior BFF engineer fluent in the ADR-039 dispatch model, the SprkChatAgentFactory gate wrap-site, the ADR-040 session ledger / Gate status, the Policy v2 engine (risk tier × origin × completeness + overlay precedence + E-1..E-6), and the SideEffectGateAIFunction suspend/resume lifecycle.</role>
+
+  <goal>
+    ConfirmationPolicyEngine.Evaluate is invoked on the live core gate path for every side-effect tool invocation, fed real signals, and its GateDecisionV2 outcome deterministically drives execute / confirm-once / always-dialog / elicit — REPLACING (not shadowing) the old declared-class-only suspend decision. The behavior is observable end-to-end: an explicit + complete Tier-2b request executes with NO dialog; an inferred Tier-2b confirms exactly once; a Tier-3/4 request always dialogs; an incomplete request elicits once then re-evaluates. The fail-closed floor (undecidable origin ⇒ Inferred ⇒ confirm), the R5-E hard block, the 034 pre-suspend validation, and D-F0(b) free-reads are all preserved.
+  </goal>
+
+  <inputs>
+    <file purpose="policy-source">projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md</file>
+    <file purpose="engine">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Gate/ConfirmationPolicyEngine.cs</file>
+    <file purpose="origin-classifier">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Gate/RequestOriginClassifier.cs</file>
+    <file purpose="risk-resolver">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Gate/RiskTierResolver.cs</file>
+    <file purpose="gate-callsite">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SideEffectGateAIFunction.cs</file>
+    <file purpose="wrap-site">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="pending-manager">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs</file>
+    <file purpose="contract">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/GateDecisionV2.cs</file>
+    <file purpose="adr">docs/adr/ADR-041-judgment-confirmation-completion-policy.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="no-shim">Origin MUST be derived from real turn provenance (Click path vs user-utterance vs document-content/tool-result), threaded from the actual dispatch/turn context to the gate. It MUST NOT be hardcoded, defaulted, or stubbed to a constant. The integration tests below are the forcing function — they cannot pass if origin is faked.</constraint>
+    <constraint source="ADR-039">Risk tier is catalog-declared DATA (the tool's declared side_effect_class / sprk_configuration.riskProfile resolved by RiskTierResolver) — never a runtime LLM judgment. No second intent mechanism.</constraint>
+    <constraint source="ADR-040">Confirmation state is a Gate-ledger property; the engine reads it so a second ask is structurally impossible. Store-before-render preserved (suspend marker lands before any dialog render).</constraint>
+    <constraint source="D-F0(b)">Reads/searches (Tier 0) are never gated; the engine can only ever WEAKEN a gate for a structurally-Explicit origin, never strengthen a read into a gate, and never weaken a hard block.</constraint>
+    <constraint source="034-preserve">The task-034 pre-suspend ValidateChat MUST be preserved and compose correctly with the engine decision — a doomed call still renders an honest ❌ with affordance (not Confirm→❌). A validation-passing call then follows the engine's execute/confirm/elicit decision.</constraint>
+    <constraint source="replace-not-shadow">The old PendingPlanManager.RequiresConfirmation declared-class-only decision MUST be replaced/subsumed by the engine decision on the live path — do NOT leave two parallel decision mechanisms that can disagree. If RequiresConfirmation is retained as an internal helper the engine consumes, that is fine; two independent top-level deciders is not.</constraint>
+    <constraint source="bff-hygiene">Load .claude/constraints/bff-extensions.md. No new package unless justified. Report publish-size delta (baseline ~46.48 MB compressed incl PDB; ceiling 60 MB) + no new HIGH CVE (pre-existing Microsoft.Kiota.Abstractions HIGH is not yours). PublicContracts facade discipline (ADR-013).</constraint>
+    <constraint source="eval-gate">The golden-utterance + resourcefulness + origin-classification eval families MUST stay green; add cases if the live wiring creates newly-observable behavior not yet covered.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Trace the real signal flow">Map, from actual code, where the gate is invoked (SprkChatAgentFactory wrap-site → SideEffectGateAIFunction.InvokeCoreAsync) and what context is available there. Identify the REAL source of each engine input: (a) origin — how the dispatch layer knows Click vs text vs doc-content (the ADR-039 dispatch envelope / invocation context); (b) risk tier — the tool's declared class via RiskTierResolver; (c) completeness — from ValidateForGate/the arg schema; (d) overlays — dispatchUncertain, shield-degradation, injection-suspect signals. Write the trace to notes/044-signal-flow-trace.md. IF any signal has no real source reachable from the call-site, that is the escalation point — do NOT invent a default.</step>
+    <step order="1" name="Thread origin to the gate">Make the real origin provenance available at InvokeCoreAsync (thread it through the wrap-site / invocation context). Feed RequestOriginClassifier the real turn structure + the Gate ledger (for E-1 affirmation-binding, E-2 reset, E-5 inheritance).</step>
+    <step order="2" name="Build PolicyEvaluationContext + call Evaluate">At the live gate call-site, assemble a real PolicyEvaluationContext (origin + risk tier + completeness + overlays) and call ConfirmationPolicyEngine.Evaluate → GateDecisionV2. Replace the old declared-class-only suspend decision with the engine's outcome.</step>
+    <step order="3" name="Drive real behavior from GateDecisionV2">Act on the decision: execute-without-suspend (no SessionGate marker) for explicit+complete 2a/2b (2a/2b carry the ✅ Undo affordance on the OutcomeCard); suspend-one-dialog for confirm; always-dialog for tier 3/4; elicit-once for incomplete then re-evaluate. Preserve 034 pre-suspend validation + the R5-E hard block ahead of the engine decision.</step>
+    <step order="4" name="Integration proof (the anti-shim gate)">Add integration tests that exercise the REAL gate path (not a mocked engine) and assert OBSERVABLE behavior: (i) explicit+complete Tier-2b create → tool executes, NO suspend marker written, NO dialog; (ii) inferred Tier-2b → exactly one suspend marker (one dialog), no re-ask; (iii) Tier-4 → always suspends even when explicit+complete; (iv) incomplete args → elicits once then re-evaluates; (v) undecidable origin → Inferred → confirm (fail-closed); (vi) R5-E hard block → honest ❌ with affordance, never a confirm dialog, zero Dataverse writes. Each test must fail if origin is hardcoded to a constant.</step>
+    <step order="5" name="Eval + gates">Keep all eval families green; add origin/behavior cases if newly observable. Run code-review + adr-check (Step 9.5). Report publish size + CVE.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build + test</tool>
+    <tool name="git">commit is MAIN-SESSION only — report proposed TASK-INDEX/current-task changes, do not commit yourself</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">The live gate call-site invoking ConfirmationPolicyEngine.Evaluate with real signals + GateDecisionV2-driven behavior (SideEffectGateAIFunction / dispatch context / origin threading)</output>
+    <output type="code">notes/044-signal-flow-trace.md (the real signal-source map)</output>
+    <output type="test">Integration tests proving the 6 observable behaviors on the real gate path</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ConfirmationPolicyEngine.Evaluate is invoked on the live core gate path (verifiable: a non-test, non-comment call-site exists that reaches it for every side-effect tool invocation).</criterion>
+    <criterion testable="true">Origin reaches the engine from REAL turn provenance threaded from the dispatch/invocation context — NOT a hardcoded/defaulted constant. The signal-flow trace documents each input's real source.</criterion>
+    <criterion testable="true">Behavior is driven by GateDecisionV2: explicit+complete Tier-2b executes with NO dialog; inferred Tier-2b confirms exactly once; Tier-3/4 always dialogs; incomplete elicits once then re-evaluates — all proven by integration tests on the real gate path (mocking the engine is NOT acceptable proof).</criterion>
+    <criterion testable="true">The old declared-class-only suspend decision is replaced/subsumed — there are not two independent top-level deciders that can disagree.</criterion>
+    <criterion testable="true">Fail-closed preserved: undecidable origin ⇒ Inferred ⇒ confirm; the R5-E hard block still renders honest ❌ with affordance (zero Dataverse writes); Tier-0 reads never gated; 034 pre-suspend validation preserved and composed.</criterion>
+    <criterion testable="true">Build 0 errors; golden-utterance + resourcefulness + origin eval families green; publish &lt; 60 MB; no new HIGH CVE; code-review + adr-check clean.</criterion>
+    <criterion testable="true">NEGATIVE / anti-shim: there is NO path where origin is hardcoded/defaulted to a constant to bypass real classification; NO TODO/NotImplemented/pseudocode in the live gate path; the integration tests would FAIL if origin were faked (demonstrate by construction).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If making origin real requires a signal that genuinely does not exist anywhere reachable from the gate call-site (e.g. the frontend dispatch envelope does not carry a Click-vs-text marker and adding it is out of this task's scope), STOP and escalate per CLAUDE.md §6.5 — describe the missing signal, the real source that would need to emit it, and the scope. Do NOT ship an always-Inferred default and call it done.</trigger>
+    <trigger>If wiring the engine surfaces a genuine conflict with ADR-039 (second intent mechanism) or ADR-040 (confirmation-state store) that comply (Path C) cannot resolve, STOP and run the §6.5 protocol.</trigger>
+  </escalation>
+</task>
