@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-08
+> **Last Updated**: 2026-07-09 (by context-handoff)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,21 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | W0 ✅ + W1 ✅ + **016/030/032 FRONTEND INTEGRATION ✅** (2026-07-08). A0 seams in worktree. |
-| **Step** | — |
-| **Status** | 13 tasks done + integration wave **MERGED TO MASTER** (2026-07-09, master @ `978333245`; merged origin/master DailyBriefing fix #584 en route). **016/030/032 IMPLEMENTED + INTEGRATED + verified.** All 3 of 016's hooks landed; FR-18 near-side threaded; jest enabled for Compose.Components. |
-| **Next Action** | Dispatch **031** (custom ProseMirror marks — edits ComposeEditor.tsx, upgrades `materializeComposeDraft` to positioned pending-redline). |
+| **Task** | Phase 3+4 progressing. **DONE this session**: 031 (custom marks), catalog 040/041/043/044, **compose-disposition routing promotion**. |
+| **Step** | — (between tasks) |
+| **Status** | Branch `work/spaarkeai-compose-r2` is **8 commits ahead of origin/master, NOT pushed/merged** (last merge to master was 016/030/032 @ `978333245`; everything since is branch-only). Master merged into branch 2026-07-09 (Wave J: core 032 gate engine + 037 UI-ack). BFF builds clean; 31 router/compose tests green. |
+| **Next Action** | **PUSH + MERGE to master** (8 commits: 031, catalog wave, routing promotion, gating, handoff) — Path B direct (master unprotected) per merge-to-master; verify build then `git push origin HEAD:master` + sync main repo. THEN 042 (draft-alternative, now routable) or 033 (pending-redline). |
+
+### 🔑 Newest work — compose-disposition routing promotion (2026-07-09), commit `540760eac`
+Core task 010 published the ComposeDisposition CONTRACT only + deferred the routing write; it was **unscheduled in redesign-r2**, so compose-r2 applied it: `BindingDisposition.Compose=100000006` (Binding.cs) + `ToLedgerValue`→"compose" + `OutputRouter` pass-through case (like Informational). **Unblocks 042/033/034.** Handoff for the redesign-r2 team: [`notes/HANDOFF-to-redesign-r2-compose-routing-promotion.md`](notes/HANDOFF-to-redesign-r2-compose-routing-promotion.md) (asks: confirm pass-through modeling; add sprk_disposition option-set value 100000006; don't re-implement).
+
+### Session commits (branch-only, ahead of master)
+`e345867a0` 031 marks · `d08df09e8` merge master · `a5a920f2d` gating (020 unblock) · `911a1ee9d` catalog 040/041/043/044 · (master-merge Wave J) · `540760eac` routing promotion · handoff-ref fill.
+
+### Still core-gated (not startable)
+042/033/034 NOW unblocked (routing promotion). 071 unblocked (core 037 ✅). Still blocked: 063 (core 057 memory.write), 064 (core 038 D-F4 view). 045 (eval) needs 042 first; 047 (deploy) needs 045.
+
+### ⬇️ Prior-session history below (016/030/032 integration wave — 2026-07-08)
 
 ### ✅ Integration wave complete (016/030/032) — 2026-07-08
 Committed the frontend+BFF integration wave. Verification:
