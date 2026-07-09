@@ -1,7 +1,7 @@
 <task id="AIR2-016" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Publish MemoryItem v1 contract (walking skeleton) — structured object + governance envelope over the EXISTING MemoryFact</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>A0 — Contract-first</phase>
     <gate>G-R2-B (seam publication)</gate>
     <estimated-effort>1 day</estimated-effort>
@@ -107,4 +107,19 @@
   <escalation>
     <trigger>If extending `MemoryFact` in place would break the EXISTING matter-keyed docs on dev (partition-key or serialization incompatibility), STOP and surface it — the live-doc migration decision (migrate vs fresh-container-and-leave-legacy) is owned by task 050 and is an operator-ratified call (spec Unresolved Questions), not something to force silently in the contract task.</trigger>
   </escalation>
+
+  <notes>
+    Completed 2026-07-08. MemoryItem v1 published under Services/Ai/PublicContracts/MemoryItem.cs
+    (DTO extends existing MemoryFact by composition; MemoryScope/MemoryOrigin constants;
+    MemoryItemContract version+tolerant-reader serializer+scope guard+structured-object invariant;
+    reference MemoryItemWriter/MemoryItemReader producer/consumer; MemoryItemMigration.FromLegacyMatterFact).
+    Contract test: tests/integration/contract/Api/Ai/MemoryItemContractTests.cs (10/10 green; self-contained,
+    no DI, ADR-038 KEEP-path). Contract doc: notes/contract-memoryitem-v1.md.
+    Aligns with ContextEnvelope.MemoryItemReference (scope=record|user). Unblocks Compose r2 FR-30.
+    Escalation trigger NOT fired — contract is additive (composition over MemoryFact); no in-place
+    MemoryFact schema change, so no live-doc migration decision was forced (that remains task 050's call).
+    Quality gates (code-review + adr-check) clean: ADR-013/015/040/010/038 + BFF §10 all satisfied.
+    SHARED-FILE TOUCHES: none (all NEW files). SEAM-STATUS.md row 016 flip left for main session
+    (parallel-safety: not edited by this agent).
+  </notes>
 </task>

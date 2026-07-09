@@ -8,9 +8,9 @@
 
 ## Active Task
 
-- **Task**: none (P0 wave 001–004 + A0 contracts 010–015 COMPLETE)
+- **Task**: none (P0 001–004 + ALL A0 contracts 010–016 + test-repair 021 COMPLETE)
 - **Status**: none
-- **Phase**: Phase A0 — Contract-first (6 of 7 contracts published on branch)
+- **Phase**: Phase A0 done (7/7 contracts green) → A-infra (020) + D-F0 (030) next
 
 ## Next Action
 
