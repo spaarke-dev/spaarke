@@ -21,11 +21,7 @@
 import * as React from 'react';
 import { useAuth } from '@spaarke/auth';
 
-import type {
-  PriorAnchorInput,
-  ReanchorAnnotationsResponse,
-  ReanchorSummary,
-} from './ComposeReanchor.types';
+import type { PriorAnchorInput, ReanchorAnnotationsResponse, ReanchorSummary } from './ComposeReanchor.types';
 
 export interface UseComposeReanchorOptions {
   /** BFF base URL (no trailing slash), e.g. `https://bff.example`. */

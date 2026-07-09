@@ -107,11 +107,7 @@ export function ComposeReanchorBanner(props: ComposeReanchorBannerProps): React.
 
   return (
     <div className={styles.root}>
-      <MessageBar
-        intent={intent}
-        data-testid="compose-reanchor-banner"
-        aria-live="polite"
-      >
+      <MessageBar intent={intent} data-testid="compose-reanchor-banner" aria-live="polite">
         <MessageBarBody>
           <MessageBarTitle>Document updated in Word</MessageBarTitle>
           <span data-testid="compose-reanchor-banner-summary">{title}</span>
@@ -132,12 +128,7 @@ export function ComposeReanchorBanner(props: ComposeReanchorBannerProps): React.
           }
         >
           {needsAttention > 0 ? (
-            <Button
-              appearance="primary"
-              size="small"
-              onClick={onReview}
-              data-testid="compose-reanchor-banner-review"
-            >
+            <Button appearance="primary" size="small" onClick={onReview} data-testid="compose-reanchor-banner-review">
               Review changes
             </Button>
           ) : null}

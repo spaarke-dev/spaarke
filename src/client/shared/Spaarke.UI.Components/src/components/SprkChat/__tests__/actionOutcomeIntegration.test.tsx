@@ -234,8 +234,7 @@ describe('SprkChat - action_outcome Integration (task 044c)', () => {
       },
       {
         type: 'token',
-        content:
-          'ACTION EXECUTED: Follow-up task "Review NDA" was created. An Undo affordance is available.',
+        content: 'ACTION EXECUTED: Follow-up task "Review NDA" was created. An Undo affordance is available.',
       },
       { type: 'done', content: null },
     ];
@@ -313,7 +312,10 @@ describe('SprkChat - action_outcome Integration (task 044c)', () => {
   it('sseFlow_NoActionOutcomeEvent_NoOutcomeCardRendered', async () => {
     const user = await renderChatWithSession();
 
-    const sseEvents = [{ type: 'token', content: 'Just a normal grounded answer.' }, { type: 'done', content: null }];
+    const sseEvents = [
+      { type: 'token', content: 'Just a normal grounded answer.' },
+      { type: 'done', content: null },
+    ];
 
     await sendMessageAndStream(user, 'A normal question', sseEvents);
 

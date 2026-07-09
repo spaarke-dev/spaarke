@@ -122,10 +122,7 @@ describe('usePendingRedline (materialize from ledger)', () => {
 
     let status: string | undefined;
     act(() => {
-      status = result.current.materialize(
-        { target_text: 'quick', new_text: 'nimble', match_mode: 'strict' },
-        PROV
-      );
+      status = result.current.materialize({ target_text: 'quick', new_text: 'nimble', match_mode: 'strict' }, PROV);
     });
 
     expect(status).toBe('applied');
@@ -180,10 +177,7 @@ describe('usePendingRedline (materialize from ledger)', () => {
 
     let status: string | undefined;
     act(() => {
-      status = result.current.materialize(
-        { target_text: 'term', new_text: 'x', match_mode: 'strict' },
-        PROV
-      );
+      status = result.current.materialize({ target_text: 'term', new_text: 'x', match_mode: 'strict' }, PROV);
     });
 
     expect(status).toBe('ambiguous');
@@ -326,9 +320,7 @@ describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => 
     expect(acceptBtn).toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId('compose-redline-reject-b1@t1'));
-    await waitFor(() =>
-      expect(screen.queryByTestId('compose-redline-controls')).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.queryByTestId('compose-redline-controls')).not.toBeInTheDocument());
   });
 
   it('surfaces the unresolved-target banner (do-not-guess) when target_text is absent from the doc', async () => {

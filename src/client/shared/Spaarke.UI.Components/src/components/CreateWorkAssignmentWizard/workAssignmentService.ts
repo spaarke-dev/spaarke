@@ -24,7 +24,12 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IUploadProgress, AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
-import { applyResolverFields, findNavProp, discoverNavProps, cleanGuid } from '../../services/PolymorphicResolverService';
+import {
+  applyResolverFields,
+  findNavProp,
+  discoverNavProps,
+  cleanGuid,
+} from '../../services/PolymorphicResolverService';
 import type { INavPropEntry } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
 
