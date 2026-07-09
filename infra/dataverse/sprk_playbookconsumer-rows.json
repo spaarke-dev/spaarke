@@ -179,6 +179,26 @@
       "toolDescription": "Scan the document for defined terms and check they are used consistently. Read-only; results render in the Context pane."
     },
     {
+      "$comment": "spaarkeai-compose-r2 task 042 (FR-09) — Click-path Binding for compose-draft-alternative, the ONE edit-producing Compose capability. UNLIKE the four sibling read/informational compose rows above (explain-clause/compare-to-playbook/summarize-word-changes/defined-terms, all disposition 100000000 = Informational), this row DECLARES the core `compose` disposition: disposition 100000006 VERIFIED against Binding.cs BindingDisposition.Compose (spaarkeai-compose-r2 routing promotion — ToLedgerValue -> 'compose', OutputRouter pass-through store-before-render). The dispatched output is a structured-edit SessionOutput written to the ledger BEFORE render (ADR-040), addressable as {bindingId}@t{n}; the Workspace materializes a pending track-change and undo/replace is ledger supersession (FR-17), never client DOM undo. risk 100000000 = BindingRisk.None (the pending redline IS the review surface — the attorney accepts/replaces/undoes before any persistence; no confirmation turn), captureMode 100000000 = BindingCaptureMode.LoopElicitation. surfaces=workspace: the redline materializes on the Compose editor/Workspace channel (the toolbar dispatches, the SSE compose frame carries ledger_ref, the client re-materializes). REVIEW FLAG: 'workspace' is the design-intended placement per the POML; Binding.cs Surfaces is a free comma-token list (IReadOnlyList<string>, not a validated enum — unknown tokens degrade gracefully), but confirm the client placement filter recognizes 'workspace' at seed time (existing rows use assistant/scheduler/context/null). Consumes compose-selection. Read-through the shipped session-dispatch seam — ZERO new BFF routes. Eval cases ship in task 045. actionCode/name carry NO version suffix (owner hygiene).",
+      "consumerType": "compose-draft-alternative",
+      "consumerCode": "default",
+      "environment": "*",
+      "name": "Compose — Draft Alternative",
+      "priority": 500,
+      "enabled": true,
+      "playbookName": null,
+      "actionCode": "compose-draft-alternative",
+      "ucid": null,
+      "disposition": 100000006,
+      "risk": 100000000,
+      "captureMode": 100000000,
+      "surfaces": "workspace",
+      "chipTransitions": null,
+      "onEventBindings": null,
+      "matchConditions": null,
+      "toolDescription": "Propose an alternative rewrite of this clause, grounded in matter/firm playbook and precedent context where available. Produces a pending track-change (a structured edit — replacement text plus rationale and sources) the attorney can accept, replace, or undo; it does not persist the edit until accepted."
+    },
+    {
       "consumerType": "create-task",
       "consumerCode": "default",
       "environment": "*",

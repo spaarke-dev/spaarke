@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-09 (by context-handoff)
+> **Last Updated**: 2026-07-09 (by context-handoff — pre-compact, parallel-wave plan captured)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,19 +10,82 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Phase 3+4 progressing. **DONE this session**: 031 (custom marks), catalog 040/041/043/044, **compose-disposition routing promotion**. |
+| **Task** | Phase 3+4. **DONE + MERGED TO MASTER** (`7f5e592c4`, 2026-07-09): 031 marks, catalog 040/041/043/044, compose-disposition routing promotion + task-035 OutcomeCard reconciliation. Branch clean, 0 ahead of master, main repo synced. |
 | **Step** | — (between tasks) |
-| **Status** | Branch `work/spaarkeai-compose-r2` is **8 commits ahead of origin/master, NOT pushed/merged** (last merge to master was 016/030/032 @ `978333245`; everything since is branch-only). Master merged into branch 2026-07-09 (Wave J: core 032 gate engine + 037 UI-ack). BFF builds clean; 31 router/compose tests green. |
-| **Next Action** | **PUSH + MERGE to master** (8 commits: 031, catalog wave, routing promotion, gating, handoff) — Path B direct (master unprotected) per merge-to-master; verify build then `git push origin HEAD:master` + sync main repo. THEN 042 (draft-alternative, now routable) or 033 (pending-redline). |
+| **Status** | **WAVE COMPLETE (2026-07-09), not yet committed.** ✅ **042** (draft-alternative catalog — Binding disposition=100000006 verified vs Binding.cs:144, schema OpenAI-subset compliant, no version suffix) · ✅ **061** (action-history-ledger — BFF build 0/0, 6 new + 86/86 Compose + 2/2 ADR-013 archtests, anti-component grep clean) · ✅ **033** (pending-redline — jest 36/36 incl. dark-theme ComposeEditor UI, tsc/build 0, BFF build 0/0). All disjoint files. Prior work on master (`7f5e592c4`). |
+| **Next Action** | **Commit the wave** (033+042+061 + POML/TASK-INDEX status). Then continue: **034** (undo/replace via ledger supersession — builds on usePendingRedline; opus, npm) now unblocked; **045** (eval cases — all catalog rows 040–044 ✅) now unblocked. |
 
-### 🔑 Newest work — compose-disposition routing promotion (2026-07-09), commit `540760eac`
-Core task 010 published the ComposeDisposition CONTRACT only + deferred the routing write; it was **unscheduled in redesign-r2**, so compose-r2 applied it: `BindingDisposition.Compose=100000006` (Binding.cs) + `ToLedgerValue`→"compose" + `OutputRouter` pass-through case (like Informational). **Unblocks 042/033/034.** Handoff for the redesign-r2 team: [`notes/HANDOFF-to-redesign-r2-compose-routing-promotion.md`](notes/HANDOFF-to-redesign-r2-compose-routing-promotion.md) (asks: confirm pass-through modeling; add sprk_disposition option-set value 100000006; don't re-implement).
+### Wave results (2026-07-09) — uncommitted
+- **033 files**: NEW `src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts` (+ `.test.tsx`, 16 tests) · MODIFIED `ComposeEditor.tsx` (materializeComposeDraft repointed → redline; +materializePendingRedline handle; accept/reject + unresolved-target banner) · `hooks/index.ts` barrel.
+- **042 files**: NEW `infra/dataverse/actions/compose-draft-alternative.action.json` + `inputschemas/…` + `outputschemas/…` · MODIFIED `infra/dataverse/sprk_playbookconsumer-rows.json` (5th compose Binding, disposition=compose 100000006). Seed-time flag (non-blocking): `surfaces="workspace"` not in Binding.cs Surfaces vocab but degrades gracefully (parity w/044 `context`).
+- **061 files**: MODIFIED `src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs` (+`GetActionHistory` read-only ledger query + `ComposeActionHistoryEntry`) · NEW `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ActionHistoryLedgerQueryTests.cs`.
+- **Deviations (033, directional)**: contracts path is shared-lib `src/types/compose-contracts.ts`; `compose_edit_apply_request` event doesn't exist (used shipped Flow 5 `compose_assistant_insert`+`ledgerRef`); no client FR-19 validator → strict/first/all + ambiguity implemented in hook. Escalation NOT fired (contract matched HANDOFF §1). FR-17 ledger-write supersession = task 034.
 
-### Session commits (branch-only, ahead of master)
-`e345867a0` 031 marks · `d08df09e8` merge master · `a5a920f2d` gating (020 unblock) · `911a1ee9d` catalog 040/041/043/044 · (master-merge Wave J) · `540760eac` routing promotion · handoff-ref fill.
+### 🏛️ ESCALATED TO PLATFORM-LEVEL ARCHITECTURE ASSESSMENT (2026-07-09)
+**Owner reframed the question**: don't just patch the compose-dispatch seam (tactical option "a" = kicks the can + orphans the cross-cutting debt between projects/teams). Strict project boundaries are THE root cause. Wants a proper **requirement / problem / solution analysis for the WHOLE legal-AI solution** (not compose-projected), covering BOTH the technical architecture AND the ownership/governance model that lets cross-cutting execution-layer debt fall between platform-core and satellites.
+**Deliverable**: a platform-level assessment in `docs/assessments/` (same home as `bff-ai-extraction-assessment-2026-05-20.md` that CLAUDE.md §10 governance was built from) → then an ADR as decision-of-record. Placed at platform level ON PURPOSE (anti-orphaning). Ties the org fix to the EXISTING proven precedent: CLAUDE.md §10 (BFF Hygiene governance) + §11 (Component Justification) — extend that pattern to the AI execution layer.
+**Thesis so far** (from the 3 validation agents): the AI capability EXECUTION engine realizes only a narrow slice of the declarative ADR-039 catalog contract — input hardcoded to session files, disposition a hardcoded allow-list (drifts from OutputRouter), action-kind prompted-only; AND there are TWO asymmetric execution engines (playbook `AiCompletionNodeExecutor` HAS input-binding/`runtimeInput`; canonical dispatch `ActionRunner` LACKS it) — the canonical one is the weaker; AND an ownership gap (shared seam = core's; need = satellites'; nobody owns generalization) + per-component definition-of-done (no vertical-slice test) hid it.
+**3 platform surveys dispatched 2026-07-09** (read-only): `survey-dispositions` (a3954d0cf7bc8bf5c — is the narrow-slice problem systemic across all dispositions/capabilities?), `survey-engines` (a43752aa5afb2fe63 — two-engine asymmetry + platform input-source landscape + convergence intent), `survey-governance` (a3c2af1d28959b2d0 — §10/§11 governance template + core/satellite intake gap + definition-of-done/integration-test gap + other orphaned cross-cutting items).
+**DONE**: wrote `docs/assessments/spaarke-ai-capability-execution-assessment-2026-07-09.md` (platform-level R/P/S + governance). 6 investigations complete + synthesized. **Awaiting owner review of §4 (decisions) + §5 (open Qs Q1-Q4).** Next: owner picks direction → core-owned ADR + re-plan (foundation owned by redesign-r2, compose = forcing consumer). Uncommitted on disk: the assessment + 045 eval work + validation note + this checkpoint. NO production code yet.
+**Key findings**: (1) TWO disjoint capability spines — declarative disposition spine only realizes informational+2 legs; ALL side-effects live on a parallel loop-tool-handler spine. (2) Disposition triplicated across 3 drift-prone lists (my compose promotion left the 3rd — the admit gate — un-widened = the live 422). (3) THREE executors; the ADR-039-canonical `ActionRunner` is input-POOREST (doc-text only); the intended unifier `ContextEnvelope`+`ContextBinder` (core task 053) is UNBUILT + unconsumed. (4) Two-engine split is BY DESIGN (ADR-039 freezes node engine; unify=R8+) → fix is NOT "unify engines" but "complete the canonical spine + single-source dispositions + reconcile the 2-spine boundary". (5) Governance owns contract SHAPES not WIRING → orphaning is systemic (FAILURE-MODES AP-2/AP-4 isomorphic; a 2nd live UNASSIGNED orphan in the same seam). Fix = extend §10/§11 template to the execution engine (named owner + vertical-slice KEEP test + deferral re-parenting).
+
+### 🛑 COMPOSE-DISPATCH FOUNDATION GAP (2026-07-09) — validated; SUBSUMED into the platform assessment above; code paused
+**Finding (investigating deeper)**: Compose AI actions CANNOT dispatch/execute through the shared `SessionDispatchOrchestrator.DispatchAsync` (the only path from client `dispatchConsumer` → `/dispatch`):
+1. **Disposition gate** (`SessionDispatchOrchestrator.cs:224`): only `Informational`/`WorkProduct` execute; `BindingDisposition.Compose` (100000006) → rejected `dispatch.disposition-not-supported` BEFORE reaching the OutputRouter compose case I built.
+2. **File-oriented execution** (`~249-331`): resolves session FILES, hard-errors if none ("No session files were available"), reads only `fileIds` from args, builds `DocumentText` from file text — NEVER passes selection text. But all 5 compose actions run on `selectionText`/`changesText` (compose-selection), not uploaded files. So even the 4 Informational compose actions likely fail the file requirement.
+3. Corroborating: 045 found the 5 compose consumer types are NOT registered in `ConsumerTypes.cs` (marked `catalogStatus: "planned"`).
+**Implication**: the compose-dispatch chain (016/042/046/033/034/047/055) rests on a foundation that isn't built. Task **046 is mis-scoped** ("reuse orchestrator unchanged, client choreography only" — but the orchestrator MUST be modified). This is effectively the unbuilt remainder of core task 010's routing promotion (I did the OutputRouter half; the orchestrator-execution half was never done). My earlier "replace is fully supported" claim was WRONG (I'd only checked OutputRouter, not the orchestrator entry gate).
+
+**OWNER DECISION (2026-07-09)**: Option **2 — re-plan the compose-dispatch chain**, BUT **validate the issue + resolution first** (think through ALL scenarios, component interactions, dependencies) before re-planning/coding. NO production code until diagnosis + resolution shape confirmed.
+
+**VALIDATION IN FLIGHT** — 3 read-only investigation sub-agents dispatched 2026-07-09:
+- `validate-paths` (af2ab460c0d67fadd): is SessionDispatchOrchestrator the ONLY exec path? enumerate all RouteAsync/RunAsync callers + gates; any working compose exec today?
+- `validate-input` (a126d02b87d26d46e): how does ActionRunner/PromptSchemaRenderer receive input? can args/slots (selectionText) flow instead of session-file text? classify all 5 compose input schemas.
+- `validate-deps` (a16a4505f6f92fe58): map affected/mis-scoped tasks (016/042/046/033/034/047/055/032) + corrected dependency graph + ConsumerTypes registration requirement.
+**Next**: synthesize their findings → validation writeup + corrected task/dep graph → present to owner for approval → THEN re-plan tasks → THEN code.
+
+### 045 (FR-12 eval cases) — DONE 2026-07-09, UNCOMMITTED (on disk)
+50 new cases (10 families golden+dispatch × 5 rows), 117 total; NEW `tests/integration/contract/Catalog/ComposeR2OutputSchemaContractTests.cs` (15/15 — all 5 output schemas pass OpenAiFunctionSchemaValidator, no property-level required). 60/60 Eval + 52/52 Catalog + 447/447 combined; Step 9.5 clean; no banned shapes / no version suffix. Judgment call: 5 consumer types `catalogStatus:"planned"` (not in ConsumerTypes.cs — mirrors create-matter precedent). **Files uncommitted** — fold into next commit once dispatch direction settled.
+
+### 034 (FR-17) — Path B chosen (2026-07-09, owner) — PAUSED pending foundation validation
+**Decision**: durable pure-undo via a NEW `compose-retract` Action+Binding dispatched through the shipped seam (ADR-039 compliant, NO new endpoint). Escalation (§6.5) resolved by owner: Path B (full durable undo), accepting BFF+catalog scope expansion.
+- **Replace** ("try another approach") = re-dispatch `compose-draft-alternative` → new higher-turn compose output supersedes → re-materialize. Fully supported by existing server code.
+- **Undo** ("undo that") = dispatch `compose-retract` → executor writes a higher-turn compose output with a Compose-owned `retracted:true` payload → `ResolveCurrent` returns it → client renders nothing + clears prior marks. `ComposeDraftPayload` is Compose-owned/opaque to core → add `retracted` flag with NO core coordination.
+- **Scope**: (a) `compose-retract` Action+Binding + mirrors; (b) retraction producer/executor (deterministic — investigating framework support); (c) `retracted` flag on `ComposeDraftPayload` (.cs + .ts); (d) client `useEditSupersession.ts` (SpaarkeAi) + `usePendingRedline` retraction handling + ConversationPane affordance + tests; (e) ≥10 eval cases for compose-retract (ADDITIVE to 045's 5-row scope — 045 running now, unaffected; coordinate/append after).
+- **Open design Q (investigating)**: does the dispatch→executor path support a DETERMINISTIC (non-LLM) action for the retraction, or must the producer be wired differently? This gates the producer design.
+- **045 sub-agent still running** (5-row eval scope, unaffected by the new row).
+
+### 033 execution notes (main session, DONE — committed d23ec9c2e)
+- **Design**: repoint `ComposeEditor.materializeComposeDraft` (only caller = ComposeWorkspace:589) to render a pending **redline pair** via new `widgets/hooks/usePendingRedline.ts`. Leaves ComposeWorkspace render-follows-store + refresh-durability + `lastMaterializedKey` idempotency + highest-turn (superseded) selection UNTOUCHED. Adds `materializePendingRedline` to the handle; keeps `materializeComposeDraft` as its delegate for back-compat.
+- **Deviations (directional mode, grounded in code)**: (1) contracts file is `src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts`, NOT the POML's `src/solutions/SpaarkeAi/...` path. (2) POML's `compose_edit_apply_request` event does NOT exist (spike-0 correction; ComposeEditor JSDoc bans adding it) — real seam is Flow 5 `compose_assistant_insert` + additive `ledgerRef`, already wired. (3) No client FR-19 validator exists (task 020 = BFF-side) → implement strict/first/all target-resolution + ambiguity locally in the hook.
+- **Marks API (031, verified)**: `setMark('deletion',{binding,ledgerRef})` over target span + insert new_text as `<span data-compose-mark="insertion" data-binding data-ledger-ref>` (parses back to InsertionMark). accept/reject = ledgerRef-keyed doc ops (not raw DOM). 034 does the true ledger-supersession write.
+
+### ▶️ NEXT: Parallel wave plan (user asked to run 042 + 033 + any safe parallels)
+Analysis of newly-unblocked tasks (parallel-safe flag / deps / files / build-system):
+| Task | Tier | parallel-safe | Files (footprint) | Build | Notes |
+|---|---|---|---|---|---|
+| **042** draft-alternative | opus | **true** | `infra/dataverse/actions|inputschemas|outputschemas/compose-draft-alternative.*` + Binding row in `sprk_playbookconsumer-rows.json` | none (JSON) | 5th catalog row. **Binding now declares `disposition=compose` (100000006)** — routing live. Follow the compose catalog template (see 040 `.action.json`). Output schema per POML. Owner hygiene: no `@v1`. |
+| **033** pending-redline | opus | **false** | `ComposeEditor.tsx` + NEW `widgets/hooks/usePendingRedline.ts` | npm | Materialize pending redlines from ledger using the 031 marks + compose-outputs read. parallel-safe=false (shares ComposeEditor) → **run in MAIN SESSION**. |
+| **034** undo/replace | opus | false | `usePendingRedline.ts` (shared w/033) + `useEditSupersession.ts` | npm | **dep 033 → serialize AFTER 033.** |
+| **050** DocxAnnotationWriter | opus/xhigh | true | BFF `Services/Compose` (C#) | dotnet | Word writer (hard). Disjoint. |
+| **051** DocxAnnotationReader | sonnet | true | BFF (C#) | dotnet | Disjoint. |
+| **060** anchored annotations | sonnet | true | (verify files before adding — likely ComposeWorkspace/BFF) | ? | deps none. Check footprint. |
+| **061** action history via ledger | sonnet | true | BFF (C#) | dotnet | deps none. Disjoint. |
+| **064** context-pane trace | sonnet | true | frontend Context pane | npm | core 038 landed → unblocked. |
+
+**Build-contention rule** (shared worktree): NO concurrent `dotnet build`; NO concurrent `npm build`. So a safe wave = at most 1 dotnet-building task + 1 npm-building task + unlimited no-build (catalog JSON) tasks, running as sub-agents that write DISJOINT files; MAIN SESSION runs the consolidated build/test after.
+
+**RECOMMENDED SAFE WAVE (3-way):**
+- **Sub-agent A → 042** (catalog JSON, no build, parallel-safe=true)
+- **Sub-agent B → 061** (action-history-ledger, BFF/dotnet, sonnet, deps none, disjoint) *(or 050 writer if you prefer the Word push next)*
+- **MAIN SESSION → 033** (pending-redline, ComposeEditor/npm, opus, parallel-safe=false)
+Then **034** after 033 (shares usePendingRedline.ts). Each task STILL runs via `task-execute` (FULL rigor; 042/033 also test-touching/opus). Cap 6 agents. After the wave: main session `dotnet build` + `npm run build`/typecheck + jest.
+
+### Merged-to-master commit trail (2026-07-09)
+`540760eac` routing promotion · (Wave K merge) · `7f5e592c4` task-035 OutcomeCard reconciliation (HEAD/master). Earlier: `978333245` 016/030/032 · catalog wave · gating.
 
 ### Still core-gated (not startable)
-042/033/034 NOW unblocked (routing promotion). 071 unblocked (core 037 ✅). Still blocked: 063 (core 057 memory.write), 064 (core 038 D-F4 view). 045 (eval) needs 042 first; 047 (deploy) needs 045.
+**042/033/034/064/060/061 NOW unblocked.** 071 needs 070 (070 deps 030/031 done → 070 startable but parallel-safe=false). Still blocked: **063** (core 057 memory.write — LAST A0 seam before the 017 "Compose UNBLOCKED" milestone). 045 (eval) needs 042; 047 (deploy) needs 045; 034 needs 033.
 
 ### ⬇️ Prior-session history below (016/030/032 integration wave — 2026-07-08)
 

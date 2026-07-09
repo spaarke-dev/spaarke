@@ -1,0 +1,18 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for compose-draft-alternative (spaarkeai-compose-r2 task 042, FR-09). Normalized OpenAI-function-parameters subset (validated by CatalogInputSchemaContractTests + jps-validate). Consumes the R1 compose-selection JPS scope — the inline AI toolbar dispatches { selectionText, ... } via the shipped session-dispatch seam; selectionText is the load-bearing LLM input and the anchor the emitted target_text is copied from. Matter/firm playbook + precedent grounding is supplied by the retrieval layer (not a maker-provided input field). Property-level \"required\": true is FORBIDDEN (invalid JSON Schema — use the object-level required array). Custom keywords elicitation_prompt / ledger_resolution are maker metadata (OpenAI-tolerated unknown keywords). No actionId here — it is assigned in Dataverse at deploy time (task 047). actionCode carries NO version suffix (owner hygiene).",
+  "actionCode": "compose-draft-alternative",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["selectionText"],
+    "properties": {
+      "selectionText": {
+        "type": "string",
+        "description": "The selected contract clause (or clause fragment) to rewrite. The clause the attorney highlighted in the Compose editor; the emitted target_text MUST be copied verbatim from this so the editor can locate and apply the edit. Capped upstream at the compose-selection scope's authored budget.",
+        "maxLength": 16000,
+        "elicitation_prompt": "Which clause would you like me to draft an alternative for? Select it in the document first.",
+        "ledger_resolution": "compose.selectionText — the current editor selection dispatched by the FR-14 inline AI toolbar (compose-selection scope). Matter/firm playbook + precedent grounding is supplied by the retrieval layer at dispatch time."
+      }
+    }
+  }
+}
