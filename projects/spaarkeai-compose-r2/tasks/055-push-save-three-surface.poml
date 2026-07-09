@@ -1,0 +1,139 @@
+<task id="055" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-28 push/save deterministic path (gate dialog + OutcomeCard = splittable)</title>
+    <phase>5 Word</phase>
+    <gate>splittable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W3-Word</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>050</deps>
+    <tags>bff-api,api,spe,docx</tags>
+    <estimated-effort>1.5-2 days (deterministic half)</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement the DETERMINISTIC half of FR-28: the push-annotations + save-back orchestration pipeline
+    that composes the task-050 `DocxAnnotationWriter` push with the existing save-back path, computes
+    the Tier-2c preview content ("what appears in Word vs what stays in Compose only" — counts of
+    comments / track changes and the split), and produces the per-step status set the completion
+    OutcomeCard will render (push → save → version). This task builds the pipeline + preview
+    computation NOW. The GATE-DIALOG rendering (one Policy v2 Tier 2c dialog hosting the preview) and
+    the OutcomeCard rendering itself WAIT on core Phase A0 `GateDecision v2` + `JobAwareCompletionState
+    v1` / `OutcomeCard v1` (HANDOFF §2/§4) — do NOT build those halves against guessed contract
+    shapes. This task is SPLITTABLE: ship the deterministic push/save/preview-computation path; leave
+    a seam for the gated UI halves and raise the escalation trigger when core A0 timing is needed.
+    Note the `ComposeEndpoints.cs` file-overlap with tasks 050/051/053 — serialize those edits.
+  </prompt>
+
+  <role>
+    .NET 8 developer orchestrating a multi-step deterministic pipeline over existing services
+    (DOCX writer + SPE save-back), producing structured preview + per-step status for a UI layer
+    authored later. No AI reach.
+  </role>
+
+  <goal>
+    A push/save orchestration in `Services/Compose/` (or extending `ComposeService`) that: (1) runs
+    the DOCX annotation push (task 050) + save-back via `SpeFileStore.ReplaceFileContentAsUserAsync`
+    with `If-Match` as an atomic-where-possible sequence; (2) computes the Tier-2c preview payload
+    (comment/track-change counts + Word-vs-Compose split); (3) emits a per-step status set
+    (push / save / version) shaped to feed a `JobAwareCompletionState` OutcomeCard once the core
+    contract publishes. The gate-dialog + OutcomeCard rendering is stubbed behind a clean seam.
+    Matching unit tests cover the pipeline happy path, preview computation, and etag-conflict.
+  </goal>
+
+  <context>
+    <background>
+      design §2.4 + §2.7 + §12.2. Push-annotations and save-back are Policy v2 Tier 2c side effects →
+      exactly ONE gate dialog with the preview inside it; completion is a job-aware OutcomeCard in the
+      transcript; the Context pane is audit-only (D-F4 trace). Per HANDOFF §2/§4, `JobAwareCompletionState
+      v1` (per-step queued/running/partial/completed/failed) and `GateDecision v2` (Tier 2c
+      preview/confirm) are core Phase A0 contracts Compose CONSUMES — the core has no worktree yet.
+      This task therefore builds only the deterministic pipeline + preview + per-step status producer
+      now; the two consuming UI surfaces attach when A0 publishes.
+    </background>
+    <relevant-files>
+      <file role="new-or-extend">src/server/api/Sprk.Bff.Api/Services/Compose/ — push/save orchestration (extend ComposeService or a thin PushSaveOrchestrator); state the choice per §11 justification</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs — task 050; the push step</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs — ReplaceFileContentAsUserAsync (save-back with If-Match)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — existing save/promote orchestration to extend or mirror</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — if a dedicated push/save orchestration route is needed (else reuse push-annotations from 050); SERIALIZE edits vs 050/051/053</file>
+      <file role="handoff">projects/spaarkeai-compose-r2/notes/HANDOFF-core-r2-A0-contract-requirements.md §2 (JobAwareCompletionState v1) + §4 (GateDecision v2 / Policy v2 Tier 2c)</file>
+      <file role="design">projects/spaarkeai-compose-r2/design.md §2.4 (push, three surfaces), §2.7, §12.2</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">DocxAnnotationWriter + push-annotations endpoint — the push step of the pipeline.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">Save-back through `SpeFileStore.ReplaceFileContentAsUserAsync`; no `Microsoft.Graph` types in `Services/Compose/`.</constraint>
+    <constraint source="ADR-013 / NFR-05">The push/save pipeline is deterministic — no AI-internal injection.</constraint>
+    <constraint source="ADR-008 / NFR-04">Any new route `.RequireAuthorization()`.</constraint>
+    <constraint source="spec FR-28">Exactly ONE confirmation surface (the gate dialog) — NO bespoke confirmation banner. Completion is an OutcomeCard. The Context pane never captures a decision. (This task computes the preview + per-step status; it MUST NOT introduce a bespoke confirm banner as a placeholder for the gated dialog.)</constraint>
+    <constraint source="ADR-009">Cross-request push/save job state → Redis, not `IMemoryCache`.</constraint>
+    <constraint source="ADR-029 / CLAUDE.md §10">Report publish-size + CVE. State Placement Justification.</constraint>
+    <constraint source="NFR-08">Matching unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`.</constraint>
+    <constraint source="project (splittable)">Build ONLY the deterministic push/save/preview/per-step-status producer. Do NOT author the gate-dialog or OutcomeCard rendering against guessed core-A0 contract shapes — leave a clean seam. Serialize `ComposeEndpoints.cs` edits vs 050/051/053.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Deterministic pipeline orchestration; Tier 2c preview; per-step status seam</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/spe-integration/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Save/promote orchestration" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs">
+        Existing multi-step save/promote flow — mirror its idempotency + If-Match handling for the push/save sequence.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Confirm task 050 merged. Declare FULL rigor; load HANDOFF §2/§4 + knowledge files; state Placement Justification + the extend-vs-new-service decision.</step>
+    <step order="1" name="Push/save pipeline">Compose the DOCX push (050) + save-back (`ReplaceFileContentAsUserAsync`, If-Match) into an ordered pipeline; handle etag-conflict without partial writes.</step>
+    <step order="2" name="Tier-2c preview computation">Compute the preview payload deterministically: counts of comments + track changes, and the Word-vs-Compose split ("what appears in Word vs stays in Compose only"). This is data the gate dialog will render later — no UI here.</step>
+    <step order="3" name="Per-step status producer">Emit an ordered per-step status set (push → save → version) shaped to map onto `JobAwareCompletionState` (queued/running/partial/completed/failed) once the core contract lands. Persist cross-request job state to Redis. Define a clean seam/interface the gated OutcomeCard + gate-dialog will attach to.</step>
+    <step order="4" name="Unit tests">Pipeline happy path (push+save → new version); preview counts correct; etag-conflict aborts cleanly with no partial write; per-step status transitions.</step>
+    <step order="5" name="Verify + escalate for the gated half">Build + tests; publish-size/CVE; NetArchTest facade check. Record in current-task.md that the gate-dialog + OutcomeCard rendering halves remain OPEN pending core A0; update TASK-INDEX (mark the deterministic half complete, note the gated half).</step>
+  </steps>
+
+  <escalation>
+    <trigger condition="gated-half-blocked">The gate-dialog (Policy v2 Tier 2c) + OutcomeCard rendering halves of FR-28 depend on core Phase A0 `GateDecision v2` and `JobAwareCompletionState v1` / `OutcomeCard v1` (HANDOFF §2/§4), which the core R2 project has not yet published (no worktree). When those halves are needed, STOP and escalate: 🔔 Human Input Required — confirm core A0 contract shapes + timing before implementing the consuming UI. Do NOT build the dialog/card against guessed shapes (charter §3.4 no-local-variant rule). The deterministic push/save/preview/status producer built by THIS task is the seam they attach to.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ (push/save orchestration + preview + per-step status producer)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (route if needed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ (pipeline + preview + conflict tests)</output>
+    <output type="report">Publish-size delta; CVE; Placement Justification; note of the OPEN gated halves (gate dialog + OutcomeCard)</output>
+  </outputs>
+
+  <justification>
+    <existing>Save-back exists in `ComposeService`; the DOCX push exists in task 050. No existing code composes them into an atomic push+save with Tier-2c preview + per-step status. This is the missing orchestration + preview layer.</existing>
+    <extension>Prefer extending `ComposeService` if the save-back path is already there; introduce a thin orchestrator only if the pipeline warrants separation — state the choice. No new SPE plumbing (reuses `ReplaceFileContentAsUserAsync`).</extension>
+    <cost-of-doing-nothing>Without the deterministic pipeline + preview computation, the gate dialog (when core A0 lands) would have no preview content to show and completion would have no per-step status — FR-28 acceptance ("exactly one confirmation dialog; completion is an OutcomeCard") could not be met, and push+save could partial-write on etag conflict.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The push/save pipeline runs the DOCX push (050) then save-back via `ReplaceFileContentAsUserAsync` with `If-Match`, returning the new version.</criterion>
+    <criterion testable="true">The Tier-2c preview payload is computed deterministically: correct comment + track-change counts and the Word-vs-Compose split.</criterion>
+    <criterion testable="true">An ordered per-step status set (push → save → version) is produced, shaped to map onto `JobAwareCompletionState` states, with cross-request job state in Redis.</criterion>
+    <criterion testable="true">Negative: an etag conflict aborts the pipeline with no partial write (returns 412-equivalent).</criterion>
+    <criterion testable="true">No bespoke confirmation banner is introduced; the gate-dialog + OutcomeCard rendering remain unbuilt behind a clean seam (escalation raised) — NOT stubbed with a placeholder confirm UX.</criterion>
+    <criterion testable="true">No AI-internal injection; no `Microsoft.Graph` in `Services/Compose/`; matching unit tests pass; publish-size + CVE reported.</criterion>
+    <criterion testable="true">current-task.md + TASK-INDEX record the OPEN gated halves pending core A0.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

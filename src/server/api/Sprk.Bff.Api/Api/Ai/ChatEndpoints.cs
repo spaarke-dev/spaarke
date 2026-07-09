@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.Safety.CrossMatter;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Telemetry;
@@ -188,6 +189,20 @@ public static class ChatEndpoints
             .ProducesProblem(401)
             .ProducesProblem(404)
             .ProducesProblem(429);
+
+        // GET /api/ai/chat/sessions/{sessionId}/compose-outputs — read the session's
+        // compose-disposition ledger outputs (spaarkeai-compose-r2 FR-04 render-follows-store;
+        // task 016 HOOK #1). Read-only projection of session.Outputs (ADR-040); same auth as
+        // the sibling GET session endpoints.
+        group.MapGet("/sessions/{sessionId}/compose-outputs", GetComposeOutputsAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("GetSessionComposeOutputs")
+            .WithSummary("Read stored compose-disposition draft outputs for a session (FR-04)")
+            .WithDescription("Projects the session ledger's compose-disposition SessionOutputs (ADR-040 store-before-render). ComposeWorkspace re-reads these to materialize AI-drafted content into the editor. Returns an empty list until a compose Binding writes an output (the write half — BindingDisposition.Compose + OutputRouter case — is core spaarke-ai-architecture-redesign-r2 task 010).")
+            .Produces<IReadOnlyList<ComposeLedgerOutputDto>>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(404);
 
         // GET /api/ai/chat/playbooks — discover available playbooks (no session required)
         group.MapGet("/playbooks", ListPlaybooksAsync)
@@ -1164,6 +1179,79 @@ public static class ChatEndpoints
 
         logger.LogInformation("Session deleted: {SessionId}", sessionId);
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// GET /api/ai/chat/sessions/{sessionId}/compose-outputs
+    ///
+    /// FR-04 render-follows-store READ HALF (spaarkeai-compose-r2 task 016 HOOK #1). Projects the
+    /// session ledger's <c>compose</c>-disposition <see cref="SessionOutput"/> entries (ADR-040:
+    /// storage precedes rendering — the client re-reads durable ledger state, never a client
+    /// buffer). ComposeWorkspace materializes the current draft into the TipTap editor from this
+    /// projection. Returns an empty list until a compose Binding writes an output (the WRITE half
+    /// — <c>BindingDisposition.Compose</c> + the OutputRouter case — is core
+    /// spaarke-ai-architecture-redesign-r2 task 010).
+    /// </summary>
+    private static async Task<IResult> GetComposeOutputsAsync(
+        string sessionId,
+        ChatSessionManager sessionManager,
+        HttpContext httpContext,
+        ILogger<ChatSessionManager> logger,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
+        if (session is null)
+        {
+            return Results.NotFound(new { error = $"Session {sessionId} not found" });
+        }
+
+        var outputs = ProjectComposeOutputs(session.Outputs);
+
+        // NFR-07: identifiers + count only — never payload content.
+        logger.LogDebug(
+            "GetComposeOutputs: session={SessionId}, tenant={TenantId}, composeOutputs={Count}",
+            sessionId, tenantId, outputs.Count);
+
+        return Results.Ok(outputs);
+    }
+
+    /// <summary>
+    /// Projects a session ledger's <c>compose</c>-disposition outputs to the client DTO, skipping
+    /// ADR-040 truncation markers — a truncated compose payload cannot be materialized (the
+    /// store-before-render consumer fails loud downstream), so a partial draft is omitted rather
+    /// than shipped. Pure + <c>internal</c> for unit testing (task 016 HOOK #1).
+    /// </summary>
+    internal static IReadOnlyList<ComposeLedgerOutputDto> ProjectComposeOutputs(IReadOnlyList<SessionOutput>? ledger)
+    {
+        if (ledger is null || ledger.Count == 0)
+        {
+            return Array.Empty<ComposeLedgerOutputDto>();
+        }
+
+        var result = new List<ComposeLedgerOutputDto>();
+        foreach (var output in ledger)
+        {
+            if (!string.Equals(output.Disposition, ComposeDisposition.DispositionValue, StringComparison.Ordinal))
+            {
+                continue;
+            }
+            if (SessionLedger.IsTruncationMarker(output.Payload))
+            {
+                continue;
+            }
+            result.Add(new ComposeLedgerOutputDto(
+                output.Key, output.BindingId, output.Turn, output.Disposition, output.Payload));
+        }
+        return result;
     }
 
     // The R2-052 per-action HITL confirm handler was DELETED by D12 / FR-P2-02 (task 031):

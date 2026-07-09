@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="visual-host-create-button-r1">
+  <metadata>
+    <title>Schema deltas: sprk_event doc lookup + sprk_kpiassessment regardingrecordurl (owner-approved, task 001 findings)</title>
+    <phase>0: Discovery &amp; Schema Verification</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>014,015,040</blocks>
+    <tags>dataverse, schema, dataverse-create-schema</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Additive Dataverse schema; no app code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical additive columns via dataverse-create-schema recipe</model-tier-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Task 001 found sprk_regardingrecordnumber already present on Event/Invoice/KPI (no-op — just verify + record). Task 001 ALSO found two owner-approved schema gaps (Path A chosen for both, 2026-07-08): (1) sprk_document has no lookup to sprk_event — add one, matching the sprk_invoice/sprk_workassignment pattern, to support Event file dual-bind (FR-12) and fix a latent bug in shipped CreateEventWizard.tsx:254-257. (2) sprk_kpiassessment is missing sprk_regardingrecordurl — add it (URL type) so applyResolverFields succeeds on KPI create.</prompt>
+  <role>SPAARKE platform developer. Dataverse schema authoring via Web API + PowerShell.</role>
+  <goal>3 additive schema items in place: (a) sprk_regardingrecordnumber confirmed on sprk_event/sprk_kpiassessment (no-op, already present per task 001), (b) new sprk_event lookup column on sprk_document (targets sprk_event, same shape as sprk_document.sprk_invoice), (c) new sprk_regardingrecordurl (URL) column on sprk_kpiassessment (same shape as sprk_event.sprk_regardingrecordurl).</goal>
+
+  <context>
+    <background>Owner approved Path A for both gaps (2026-07-08) after task 001 discovery. See projects/visual-host-create-button-r1/notes/field-manifests/event.md ("BLOCKING — Document dual-bind") and kpi.md ("BLOCKING — sprk_regardingrecordurl does not exist") for full rationale + rejected alternatives (Path B/C). The sprk_event lookup fix also resolves a pre-existing production bug: CreateEventWizard.tsx currently calls createDocumentRecords('sprk_events', eventId, 'sprk_Event', ...) against a nav-prop that doesn't exist, silently failing (caught, pushed to a non-fatal warnings array) — the Event record still creates today, just without the document bind.</background>
+    <relevant-files>sprk_event, sprk_kpiassessment, sprk_document (Dataverse schema, via dataverse-create-schema)</relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      projects/visual-host-create-button-r1/notes/field-manifests/event.md
+      projects/visual-host-create-button-r1/notes/field-manifests/kpi.md
+      .claude/adr/ADR-024-polymorphic-resolver-pattern.md
+      .claude/skills/dataverse-create-schema/SKILL.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Record sprk_regardingrecordnumber no-op (already present on sprk_event, sprk_invoice, sprk_kpiassessment per task 001 describe reads — no action needed).</step>
+    <step>Add a new lookup column to sprk_document targeting sprk_event (name it to match the existing sprk_invoice/sprk_workassignment lookup convention on sprk_document — confirm exact naming convention from those two existing columns before creating).</step>
+    <step>Add sprk_regardingrecordurl (URL) to sprk_kpiassessment, matching the definition on sprk_event.sprk_regardingrecordurl (URL, NVARCHAR(2000)).</step>
+    <step>Verify both new columns via a describe read post-add; confirm findNavProp/applyResolverFields will discover them (nav-prop discovery is dynamic — no hardcoded relationship names needed downstream).</step>
+  </steps>
+
+  <tools>Skill(dataverse-create-schema), ToolSearch (mcp__dataverse__describe), Read</tools>
+  <outputs>sprk_regardingrecordnumber no-op note; new sprk_document→sprk_event lookup; new sprk_kpiassessment.sprk_regardingrecordurl column.</outputs>
+
+  <acceptance-criteria>
+    <criterion>sprk_regardingrecordnumber present on both sprk_event and sprk_kpiassessment (pre-existing, confirmed).</criterion>
+    <criterion>sprk_document has a new lookup column targeting sprk_event, confirmed via describe.</criterion>
+    <criterion>sprk_kpiassessment has a new sprk_regardingrecordurl (URL) column, confirmed via describe.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-07-08 via dataverse-create-schema (Web API + PowerShell against spaarkedev1).
+
+    (a) sprk_regardingrecordnumber no-op confirmed (already present on sprk_event, sprk_invoice, sprk_kpiassessment
+        per task 001 — no action taken).
+
+    (b) New OneToMany relationship sprk_Event_Document_1n: sprk_event (1) -> sprk_document (N). Lookup attribute
+        SchemaName = "sprk_Event" (logical name sprk_event), Delete=RemoveLink (matches the existing
+        sprk_WorkAssignment_Document_1n / sprk_document_Invoice_n1 precedent). SchemaName casing verified against
+        live metadata BEFORE creation (sprk_document.sprk_invoice -> SchemaName "sprk_Invoice",
+        sprk_workassignment -> "sprk_WorkAssignment") to match Dataverse's PascalCase lookup convention —
+        confirmed via describe() post-create: sprk_document now has "sprk_event LOOKUP (Related table: sprk_event)".
+
+        Bonus: because "sprk_Event" is the EXACT nav-prop string CreateEventWizard.tsx:254-257 already hardcodes,
+        the pre-existing silently-failing document-bind call in that file will now succeed with ZERO code
+        changes. Task 015's "fix hardcoded nav-prop" step becomes a verification-only step.
+
+    (c) New sprk_regardingrecordurl (StringAttributeMetadata, Format=Url, MaxLength=2000, SchemaName
+        "sprk_RegardingRecordURL", DisplayName "Link") added to sprk_kpiassessment, replicating the exact
+        definition read from sprk_event.sprk_regardingrecordurl (verified via metadata cast query before
+        creating). Confirmed via describe() post-create: sprk_kpiassessment now has
+        "sprk_regardingrecordurl URL (NVARCHAR(2000))".
+
+    Published customizations for sprk_document, sprk_event, sprk_kpiassessment (single PublishXml call).
+    No PowerShell script file saved to scripts/ — one-time additive delta, not reusable automation.
+  </notes>
+</task>

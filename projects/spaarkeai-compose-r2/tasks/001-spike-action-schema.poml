@@ -1,0 +1,82 @@
+<task id="001" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Spike 1 — Action row + structured OutputSchemaJson reliability</title>
+    <phase>0 Spikes</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>000</dependencies>
+    <blocks>040, 041, 042, 043, 044</blocks>
+    <tags>ai, azure-openai, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Exploratory spike — throwaway prompt/schema experiment recorded as a spike note, not production catalog rows. STANDARD per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prompt + schema validation experiment over the shipped seam; no architectural blast radius. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W0b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Prove that a single R2 Action row (e.g. compose-explain-clause) with an adeu-style behavioral prompt (SystemPrompt) and a structured OutputSchemaJson returns schema-valid JSON reliably when dispatched through the shipped seam validated in Spike 0. The goal is to lock the prompt-pattern, the JPS scope `description` format ("tool descriptions ARE the prompt"), and the Action schema shape (OpenAiFunctionSchemaValidator-compliant — no property-level boolean `required`) before Phase 4 authors 5 real catalog rows. Run enough sample selections to characterise reliability; record failure modes and the schema/prompt adjustments that fix them. All artifacts are throwaway; the deliverable is a spike note.
+  </prompt>
+
+  <role>
+    Prompt engineer + AI platform developer fluent in JPS (JSON Prompt Schema) Action authoring, OutputSchemaJson / OpenAiFunctionSchemaValidator constraints (ADR-039), and adeu's "tool descriptions are the prompt" pattern.
+  </role>
+
+  <goal>
+    A spike note at projects/spaarkeai-compose-r2/notes/spikes/spike-1-action-schema.md that unlocks the Phase-4 decision: the validated prompt pattern, JPS scope description format, and Action schema shape that returns schema-valid JSON reliably. It records a measured reliability figure across sample selections and the exact OutputSchemaJson/SystemPrompt shape to copy in Phase 4.
+  </goal>
+
+  <context>
+    <background>
+      Design §13 Spike 1 + §7 (Action + Binding authoring) + §2.0 (tool descriptions surface as user hints). Phase 4 authors 5 Action+Binding pairs; this spike de-risks the Action-half prompt+schema pattern once, so all five reuse a proven shape. Decision unlocked (design §13): prompt-pattern validation; JPS scope description format; Action schema shape. Builds directly on Spike 0's confirmed dispatch seam.
+    </background>
+    <relevant-files>
+      <file purpose="dispatch-seam">src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts — the seam Spike 0 validated; reuse to invoke the Action</file>
+      <file purpose="catalog-mirror">infra/dataverse/inputschemas/ — mirror-first Action + Binding rows (throwaway)</file>
+      <file purpose="spike-0-note">projects/spaarkeai-compose-r2/notes/spikes/spike-0-dispatch-path.md — the confirmed seam contract this spike builds on</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="000" status="not-started">Requires the Spike-0 confirmed dispatch seam to invoke the Action row.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Action row carries the prompt (SystemPrompt + OutputSchemaJson + Temperature + ModelDeploymentId); OutputSchemaJson MUST be OpenAiFunctionSchemaValidator-compliant — property-level boolean `required` is BANNED. Rows are mirror-first under infra/dataverse/inputschemas/. No new dispatch endpoint; dispatch via the shipped seam.</constraint>
+    <constraint source="ADR-040">Dispatched output is ledger-written; the spike reuses that path, does not bypass it.</constraint>
+    <constraint source="project">Throwaway experiment — the Action/Binding rows are not the final Phase-4 rows; deliverable is a spike note recording the reusable pattern.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/jps-action-authoring, ai/output-schema-validation</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + load">Load this task, project CLAUDE.md, Spike-0 note, and the knowledge files.</step>
+    <step order="1" name="Author Action + prompt">Author a throwaway Action row with an adeu-style SystemPrompt and a structured OutputSchemaJson (validator-compliant). Draft the JPS scope description in the "description = prompt = tooltip" format.</step>
+    <step order="2" name="Dispatch samples">Invoke the Action over several representative clause selections through the Spike-0 seam.</step>
+    <step order="3" name="Measure reliability">Record how often responses are schema-valid; capture failure modes (missing fields, extra prose, invalid enum) and the prompt/schema tweaks that fix them.</step>
+    <step order="4" name="Write spike note">Record the validated prompt pattern, JPS scope description format, and Action schema shape for Phase 4 reuse.</step>
+  </steps>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/spikes/spike-1-action-schema.md</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Spike note documents a validated prompt pattern, JPS scope `description` format, and Action schema shape — the decision the spike unlocks (design §13).</criterion>
+    <criterion testable="true">A measured reliability figure (schema-valid rate across sample selections) is recorded.</criterion>
+    <criterion testable="true">The OutputSchemaJson shape is OpenAiFunctionSchemaValidator-compliant with no property-level boolean `required` (ADR-039), and the note states this.</criterion>
+    <criterion testable="true">Failure modes + their prompt/schema fixes are captured for Phase-4 reuse.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

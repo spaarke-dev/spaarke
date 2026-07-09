@@ -1,0 +1,99 @@
+<task id="045" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-12 eval cases per row (golden + dispatch ≥5) + schema validation</title>
+    <phase>4 Catalog</phase>
+    <status>blocked</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>040, 041, 042, 043, 044</dependencies>
+    <blocks>047</blocks>
+    <tags>dataverse, ai, azure-openai, testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>STANDARD per TASK-INDEX. NOTE: this task modifies tests/** (the golden-utterance eval suite), so per CLAUDE.md §8 the TEST-MODIFYING override applies — code-review + adr-check run UNCONDITIONALLY at Step 9.5 regardless of the STANDARD hint; banned test shapes (Mock&lt;HttpMessageHandler&gt;, DI-registration, ctor null-check) forbidden.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Eval-case authoring + schema-validation wiring over the established golden-utterance harness; no architectural change. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-eval</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Ship the eval coverage that gates the five R2 catalog rows (FR-12 / NFR-06). For each of `compose-explain-clause`, `compose-compare-to-playbook`, `compose-draft-alternative`, `compose-summarize-word-changes`, `compose-defined-terms`, author a golden-utterance family AND a dispatch family, ≥5 cases each, extending the EXISTING golden-utterance harness (do NOT build a second harness). Assert correct dispatch through the shipped seam, schema conformance against each Action's OutputSchemaJson, and (where applicable) citation integrity. Confirm every row's OutputSchemaJson passes OpenAiFunctionSchemaValidator with no property-level boolean `required`. A row without this coverage does not merge.
+  </prompt>
+
+  <role>
+    Test engineer expert in the Spaarke golden-utterance / dispatch eval harness, ADR-038 KEEP-class integration-test conventions, and OpenAiFunctionSchemaValidator catalog contract tests.
+  </role>
+
+  <goal>
+    Golden + dispatch eval families (≥5 cases each) added to the existing eval suite for all five R2 catalog rows, plus OpenAiFunctionSchemaValidator confirmation for all five OutputSchemaJson mirrors, with CI green. Each family asserts correct closed-catalog dispatch, schema conformance, and citation integrity where applicable. No row is merge-eligible without its coverage.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-12 + NFR-06 (golden + dispatch ≥5 each, gate to merge) + NFR-09 (schema validation) + design §7.4 (eval obligation). Extends the shipped golden-utterance harness from spaarke-ai-architecture-redesign-r1 — the BA-editable JSON case file plus the CI contract test that validates inventory + schema. Aggregates the five rows authored in tasks 040–044; the last catalog task before deploy (047).
+    </background>
+    <relevant-files>
+      <file purpose="golden-utterance-suite">tests/integration/contract/Eval/golden-utterances.json — the existing BA-editable eval case file; ADD golden + dispatch families for the five rows here (do not build a second harness)</file>
+      <file purpose="eval-runner">tests/integration/contract/Eval/GoldenUtteranceEvalSuiteTests.cs — the CI suite that validates the cases; extend coverage, not the harness</file>
+      <file purpose="eval-readme">tests/integration/contract/Eval/README.md — the case schema (caseId, family, channel, expected.outcomeClass, assertions.schemaConformance) to follow</file>
+      <file purpose="schema-contract-test">tests/integration/contract/ — the OpenAiFunctionSchemaValidator catalog contract test (CatalogInputSchemaContractTests) that must green for all five rows</file>
+      <file purpose="row-mirrors">infra/dataverse/inputschemas/ and infra/dataverse/outputschemas/ — the five Action schema mirrors authored in 040–044, validated here</file>
+      <file purpose="binding-mirror">infra/dataverse/sprk_playbookconsumer-rows.json — the five Binding rows whose dispatch the dispatch-family cases assert</file>
+      <file purpose="validate-skill">.claude/skills/jps-validate/SKILL.md — schema/render validation the eval gate depends on</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="blocked">compose-explain-clause row to cover.</dependency>
+      <dependency task="041" status="blocked">compose-compare-to-playbook row to cover.</dependency>
+      <dependency task="042" status="blocked">compose-draft-alternative row to cover.</dependency>
+      <dependency task="043" status="blocked">compose-summarize-word-changes row to cover.</dependency>
+      <dependency task="044" status="blocked">compose-defined-terms row to cover.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Eval assertions enforce the grounded-output contract: closed-catalog dispatch through the shipped seam, one dispatch protocol, cited reads. Cases MUST NOT assert against any second intent-detection mechanism (none exists) or a tool-name gating list.</constraint>
+    <constraint source="ADR-038">TEST-MODIFYING task: eval suite is KEEP-class at tests/integration/contract/Eval/; banned patterns (Mock&lt;HttpMessageHandler&gt;, DI-registration tests, ctor null-check tests) forbidden; code-review + adr-check run unconditionally at Step 9.5.</constraint>
+    <constraint source="NFR-06">Every catalog row ships golden + dispatch eval families, ≥5 cases each — the gate to merge. A row without coverage does not merge.</constraint>
+    <constraint source="NFR-09">All five Action OutputSchemaJson pass OpenAiFunctionSchemaValidator; property-level boolean `required` BANNED.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing/eval-suite, ai/output-schema-validation, dataverse/catalog-governance</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + gate">Load task, project CLAUDE.md, HANDOFF doc, the eval README + suite, and the five row mirrors. CONFIRM tasks 040–044 rows exist and core Phase A0 published the eval-gate + dispatch seam before authoring.</step>
+    <step order="1" name="Author golden families">For each of the five rows, add ≥5 golden-utterance cases (phrasings, typos, doc-level triggers as appropriate) asserting correct dispatch, consumerType/consumerCode, and schemaConformance against the row's OutputSchemaJson.</step>
+    <step order="2" name="Author dispatch families">For each row, add ≥5 dispatch cases exercising the Click-path seam (and, for compose-draft-alternative, the `compose`-disposition ledger write; for compose-summarize-word-changes, the return-from-Word invocation).</step>
+    <step order="3" name="Schema validation">Run the OpenAiFunctionSchemaValidator catalog contract test + jps-validate over all five schemas; confirm no property-level boolean `required`.</step>
+    <step order="4" name="Green CI">Run the eval suite; confirm all families green and inventory integrity passes.</step>
+  </steps>
+
+  <outputs>
+    <output type="test">tests/integration/contract/Eval/golden-utterances.json (golden + dispatch families for 5 rows)</output>
+    <output type="test">tests/integration/contract/Eval/GoldenUtteranceEvalSuiteTests.cs (coverage extension if needed)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Each of the five rows has a golden-utterance family AND a dispatch family, ≥5 cases each (10 families total, ≥50 cases).</criterion>
+    <criterion testable="true">Every case asserts closed-catalog dispatch through the shipped seam and schemaConformance against the row's OutputSchemaJson; no case references a second intent-detection mechanism or tool-name gating list.</criterion>
+    <criterion testable="true">All five Action OutputSchemaJson pass OpenAiFunctionSchemaValidator with NO property-level boolean `required` (contract test green).</criterion>
+    <criterion testable="true">The compose-draft-alternative dispatch family asserts the `compose`-disposition ledger write; the compose-summarize-word-changes family asserts return-from-Word invocation.</criterion>
+    <criterion testable="true">The eval suite is green in CI; no banned test shape is introduced; no row lacking coverage is merge-eligible.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Consumes core Phase A0 eval-gate + triple-twin description hoist + session-dispatch/invoke seam per notes/HANDOFF-core-r2-A0-contract-requirements.md §7. If the published contract differs from the proposed shape, STOP and reconcile — do not adapt silently.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

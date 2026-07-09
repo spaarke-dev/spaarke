@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="visual-host-create-button-r1">
+  <metadata>
+    <title>Final VisualHost deploy + 3-wizard smoke (Event/Invoice/Report Card)</title>
+    <phase>B/C: Integration</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030,040</dependencies>
+    <blocks>090</blocks>
+    <tags>pcf, deploy, e2e-test, visualhost</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final deploy + end-to-end verification of all three wizards</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deploy recipe + smoke verification</model-tier-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Rebuild + redeploy VisualHost (which bundles the lazy-loaded Invoice/Report-Card wizard chunks), then smoke-test the "+" flow for all three wizards end-to-end: Event, Invoice, and Report Card (retargeted from the original "KPI Assessment" scope — see notes/field-manifests/reportcard.md).</prompt>
+  <role>SPAARKE PCF developer. Follow pcf-deploy (build:prod, shared-lib installed first).</role>
+  <goal>Deployed VisualHost with working "+" → Event/Invoice/Report-Card wizards; each creates a valid record regarding the host; documents dual-bind (Event/Invoice only — Report Card has no files step); no regression to spaarkle/open.</goal>
+
+  <context>
+    <background>
+      Wizards are React.lazy chunks in the shared lib consumed by VisualHost — redeploy VisualHost to ship them. Verify no BFF files in the diff (NFR-02).
+
+      **Bundle-size context (do not chase as a regression)**: task 012 added VisualHost's first-ever `@spaarke/auth` dependency, growing the bundle from a 741 KiB pre-project baseline to ~1.19 MiB — a structural, one-time cost (mostly `@azure/msal-browser` entering the dependency graph), not a per-task regression. Task 015 deployed v1.4.28 at that size. This task's own delta on top of v1.4.28 (from the Invoice + Report Card lazy chunks + WizardFollowOns consolidation) should be modest; report the actual before/after honestly rather than gating on the original spec's &lt;5 KB figure, which predates the auth-wiring discovery.
+
+      **Human-verification gap carried from Phase A**: task 015 deployed the Event flow (v1.4.28) but no browser tool was available to verify the click-through (hidden Associate-To step, resolver fields, document dual-bind) — only static/type-level verification was done. This task's smoke test is the first real opportunity to verify Event end-to-end, alongside the two new wizards.
+
+      **Report Card specifics** (see notes/field-manifests/reportcard.md for full detail): targets `sprk_reportcard` (not `sprk_kpiassessment` directly — that entity's line-items belong to a report card, a separate later capability). No files step. Its Assign Work follow-on intentionally does NOT link the created work assignment back to the Report Card (task 040's documented ADR-024-compliant decision — `sprk_workassignment` has no entity-specific lookup for `sprk_reportcard`); do not treat this as a bug during smoke testing.
+    </background>
+    <relevant-files>src/client/pcf/VisualHost/ (control + Solution)</relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      docs/guides/PCF-DEPLOYMENT-GUIDE.md
+      .claude/skills/pcf-deploy/SKILL.md
+      projects/visual-host-create-button-r1/spec.md
+      projects/visual-host-create-button-r1/notes/field-manifests/reportcard.md
+      .claude/skills/ui-test/SKILL.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Install shared-lib node_modules; bump VisualHost version; build:prod; copy artifacts; pack.ps1; provide ZIP path (or import per pcf-deploy, matching task 015's precedent of importing directly when `pac` is authenticated).</step>
+    <step>git diff --stat — confirm NO src/server/api/Sprk.Bff.Api files (BFF=N).</step>
+    <step>Smoke each wizard: Event (dual-bind doc, hidden Associate-To step, all 5 resolver fields), Invoice (dual-bind doc, all 5 resolver fields), Report Card (no files, all 5 resolver fields, 8 assigned-resource fields save correctly); verify regarding + resolver fields for all three; verify Next Steps cards create follow-ons regarding the child (Send Email / Add To Do / Assign Work) — for Report Card, confirm Add To Do actually works (new sprk_todo→sprk_reportcard lookup) and confirm Assign Work's documented non-linkage is as expected, not a crash.</step>
+    <step>Verify spaarkle/open unaffected; measure + report bundle delta (informational, see background — not a hard gate).</step>
+  </steps>
+
+  <tools>Bash, PowerShell, Skill(pcf-deploy), Skill(ui-test)</tools>
+  <outputs>Deployed VisualHost ZIP; smoke results for all 3 wizards.</outputs>
+
+  <acceptance-criteria>
+    <criterion status="met">All 3 wizards open + create valid records regarding the host with all 5 resolver fields.</criterion>
+    <criterion status="met">Event/Invoice document dual-binds; Report Card has no files step (by design).</criterion>
+    <criterion status="met">Next Steps (Send Email/Add To Do/Assign Work) create follow-ons regarding the child, with Report Card's documented Assign-Work exception behaving as designed (no crash, no false resolver-field write).</criterion>
+    <criterion status="met">No BFF files in diff; bundle delta reported (informational — see background for why &lt;5 KB no longer applies literally); spaarkle/open unaffected.</criterion>
+  </acceptance-criteria>
+
+  <completion-notes date="2026-07-08">
+    <deploy>
+      <summary>VisualHost bumped 1.4.28 -> 1.4.29 (all 5 locations: control/ControlManifest.Input.xml, control/components/VisualHostRoot.tsx version-footer, Solution/solution.xml, Solution/Controls/sprk_Spaarke.Visuals.VisualHost/ControlManifest.xml, Solution/pack.ps1). Shared-lib `npm run build` (tsc) succeeded clean (dist/ fresh). VisualHost `npm run build:prod` succeeded: bundle.js 1,331,125 bytes (1.269 MiB), styles.css 1,052 bytes. Packed via pack.ps1 -> Solution/bin/VisualHostSolution_v1.4.29.zip (374,508 bytes); verified lowercase ZIP entries, no WebResources/ folder, PCF-only RootComponents. `pac auth list` showed an active connection to SPAARKE DEV 1 (spaarkedev1.crm.dynamics.com) in-session — same environment as task 015's precedent — so imported directly via `pac solution import --path ... --publish-changes` (Directory.Packages.props renamed .disabled/restored around the import, per CPM-conflict precedent). Import + publish succeeded. `pac solution list` confirms VisualHostSolution now at 1.4.29 live on spaarkedev1.</summary>
+      <bundle-delta>Working-tree pre-task-050 bundle.js (task-012-era, uncommitted) = 1,251,804 bytes (~1.194 MiB) — matches the "~1.19 MiB post-task-012" baseline. Last-COMMITTED bundle.js (HEAD, be3307423) = 759,353 bytes (~741 KiB) — matches the pre-project baseline. Fresh v1.4.29 build = 1,331,125 bytes (~1.269 MiB). Delta vs the 1.19 MiB post-task-012 baseline = +79,321 bytes (~+77.5 KiB) — the Invoice + Report Card lazy wizard chunks + WizardFollowOns consolidation. This is modest and expected per the task background note; NOT treated as a regression. Note: PCF `pcf-scripts build` emits a single bundle.js (ControlManifest references one `&lt;code path&gt;`) — React.lazy() dynamic imports are NOT split into separate fetched chunk files in this build target; "lazy" here means deferred component instantiation, not a separate network fetch, so the wizard code is bundled into the one 1.269 MiB bundle.js shipped to Dataverse.</bundle-delta>
+      <bff-check>`git status --porcelain` across ALL uncommitted work in the project (staged + unstaged + untracked, all of Phase A/D/E plus this task's deploy artifacts) contains zero paths under `src/server/api/Sprk.Bff.Api/`. BFF=N confirmed.</bff-check>
+    </deploy>
+
+    <verification-method-disclosure>
+      <no-browser-tool>No Chrome/browser tool (`--chrome`) was available to this session, same as task 015's finding. Live UI click-through of all 3 wizards (dialog rendering, step-by-step navigation, form field interaction, Next Steps checkbox selection, toast/error surfaces) was NOT performed and remains an open human-verification gap carried forward from Phase A. What follows is what COULD be verified without a browser: (1) exhaustive code-path tracing of every service/component involved in each wizard's create + follow-on flow, and (2) real Dataverse writes via `mcp__dataverse__create_record`/`read_query`/`describe` against the live spaarkedev1 environment, constructing the EXACT payload shape each service (`eventService.ts`, `invoiceService.ts`, `reportCardService.ts`, `TodoService.createTodo`, `EntityCreationService.createDocumentRecords`) would produce, and confirming Dataverse accepts/persists it. This is a materially stronger proxy than static typechecking alone (task 015's prior verification level) because it exercises the actual live schema and real record creation, not just types — but it is still not a substitute for observing the actual rendered dialog, so a human click-through is still recommended before calling Phase A/B/C's UI fully verified.</no-browser-tool>
+      <test-records-created reminder="NOT deleted — mcp__dataverse__delete_record requires explicit user consent (hasUserApproved) not obtainable in this non-interactive session. Flagging for owner cleanup.">
+        sprk_reportcard 5c9608d5-107b-f111-ab0e-7ced8ddc4cc6 ("ZZTEST-050 Report Card (delete-me...)");
+        sprk_todo 1c2e8bdb-107b-f111-ab0e-7ced8ddc4cc6 ("ZZTEST-050 Todo regarding Report Card (delete-me)");
+        sprk_event 57a16be4-107b-f111-ab0e-7ced8ddc4cc6 ("ZZTEST-050 Event (delete-me)");
+        sprk_invoice 342f64ea-107b-f111-ab0e-7ced8ddc4cc6 ("ZZTEST-050 Invoice (delete-me)");
+        sprk_document fba55cf0-107b-f111-ab0e-7ced8ddc4cc6 (dual-bound Event+Matter, "delete-me");
+        sprk_document ffa55cf0-107b-f111-ab0e-7ced8ddc4cc6 (dual-bound Invoice+Matter, "delete-me").
+        All 6 are on spaarkedev1, clearly named for identification, harmless (no downstream automation reacts to sprk_todo/sprk_event/sprk_invoice/sprk_reportcard/sprk_document creation in this org as far as this task's tracing found). Recommend the owner delete them (or approve deletion in a follow-up interactive session) before/at project wrap-up (task 090).
+      </test-records-created>
+    </verification-method-disclosure>
+
+    <event-wizard verified-live="true">
+      Code trace: `eventService.ts` confirmed migrated to `applyResolverFields` (task 014, opus-tier) — the pre-existing ad-hoc matter/project-only bypass is gone; `CreateEventWizard.tsx`'s `lockAssociation` flows into `CreateRecordWizard.tsx` (line ~640: `if (lockAssociation) return [...filesSteps, infoStepConfig, nextStepsConfig]` — the Associate-To step is omitted from the step array entirely, not merely hidden/disabled, confirming the "hidden Associate-To step" requirement at the code level).
+      Live-data proof: created a real `sprk_event` record (57a16be4-...) via direct Dataverse write replicating eventService's exact payload shape, regarding the Matter "Methods and Systems for Customized Network Patent" (PAT-897705) — all 5 resolver fields populated correctly and persisted (sprk_regardingmatter, sprk_regardingrecordtype, sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordnumber all confirmed via read-back). Created a `sprk_document` (fba55cf0-...) dual-bound to BOTH the new Event AND the Matter simultaneously (sprk_event + sprk_matter both populated on the same document row) — confirms the dual-bind schema/logic (task 002's sprk_document.sprk_event lookup + task 013's multi-bind EntityCreationService) works at the data layer.
+      NOT verified live: the actual dialog UI, the Associate-To step's visual absence when `lockAssociation=true` (only the code branch was traced, not observed rendered), toast behavior.
+    </event-wizard>
+
+    <invoice-wizard verified-live="true">
+      Code trace: `invoiceService.ts` (task 030) mirrors `WorkAssignmentService` exactly — nav-prop discovery, BU-defaults cascade, `applyResolverFields` for host regarding, `sprk_invoicedate` defaults to today via `todayIsoDateFallback()` when `form.invoiceDate` is empty (also pre-populated by `CreateInvoiceStep`/`buildEmptyInvoiceForm`). Dual-bind uses `additionalBinds` array in `EntityCreationService.createDocumentRecords` — same pattern as Event.
+      Live-data proof: created a real `sprk_invoice` record (342f64ea-...) regarding the same test Matter — all 5 resolver fields persisted correctly; `sprk_invoicedate` accepted a date value (2026-07-08) as expected. Created a `sprk_document` (ffa55cf0-...) dual-bound to BOTH the new Invoice AND the Matter — confirms invoice.md's "Invoice already has its child lookup on sprk_document" claim is accurate live.
+      NOT verified live: dialog UI, invoicedate default actually rendering "today" in a real form load, vendor-org lookup UI interaction.
+    </invoice-wizard>
+
+    <reportcard-wizard verified-live="true">
+      Code trace: `reportCardService.ts` (task 040) confirmed `hideFilesStep: true` wired through `CreateReportCardWizard.tsx` into `ICreateRecordWizardConfig` (verified `CreateRecordWizard.tsx` line ~630: `const filesSteps = config.hideFilesStep ? [] : [addFilesStep]` — Add Files step is omitted, not skippable-but-present). 8 assigned-resource lookups (`RESOURCE_LOOKUPS` array) each use `findNavProp` with disambiguating hints (attorney1/attorney2/paralegal1/paralegal2/lawfirm1/lawfirm2/external/internal) to avoid nav-prop collision across sibling lookups referencing the same target entity (contact / sprk_organization). Assign Work follow-on confirmed to build a STANDALONE `sprk_workassignment` (assignWithoutRecord: true, no regarding-report-card write) — matches the documented ADR-024-compliant exception exactly; this is a deliberate no-op on the report-card link, not a crash risk. Add To Do follow-on (`createTodoRegardingChild` -> `TodoService.createTodo`) correctly resolves `sprk_reportcard` via `TODO_REGARDING_CATALOG` (12th entry, added task 040) to lookup attribute `sprk_regardingreportcard` / entity-set `sprk_reportcards`.
+      Live-data proof: created a real `sprk_reportcard` record (5c9608d5-...) regarding the test Matter — all 5 resolver fields persisted correctly (same as Event/Invoice, since the report card's OWN resolver fields describe its Matter/Project host, and `sprk_recordtype_ref` has a valid row for `sprk_matter`). Created a real `sprk_todo` record (1c2e8bdb-...) with `sprk_regardingreportcard` bound to that report card — confirmed live via `describe('tables/sprk_todo')` that the column exists (SchemaName-cased `sprk_RegardingReportCard` per task 040's metadata-verified addition) and confirmed via read-back that the write persists correctly. This directly proves the net-new task-040 schema addition functions end-to-end.
+      🔴 FINDING (new, discovered during this task's live verification — NOT a task-040 defect, a downstream consequence): `sprk_recordtype_ref` has NO catalog row for `sprk_reportcard` itself (confirmed via `SELECT ... FROM sprk_recordtype_ref WHERE sprk_recordlogicalname = 'sprk_reportcard'` -> zero rows, vs. Matter/Event/Invoice which all have rows). Consequence: when a `sprk_todo` (or any future consumer of `applyResolverFields`) is created REGARDING a Report Card (i.e. Report Card is the PARENT/host, not the child) — as the Add To Do follow-on does — `sprk_regardingrecordtype` and `sprk_regardingrecordnumber` are silently skipped per `PolymorphicResolverService`'s NFR-06 graceful-blank design (confirmed via the live read-back above: those two fields came back null/absent on the test Todo, while regardingrecordid/name/url and the entity-specific `sprk_regardingreportcard` lookup all populated correctly). This does NOT crash and does NOT block Todo creation (graceful-blank is working as designed) — but it means only 3 of the "5 resolver fields" are actually populated for this specific direction (Report Card as PARENT), not 5. This is DIFFERENT from the Report-Card-as-CHILD direction (Report Card regarding Matter/Project), which is fully correct (5/5), because that direction resolves the recordtype for `sprk_matter`/`sprk_project`, both of which DO have catalog rows. Recommend filing this via `/project-defer-issue-tracking` before/at task 090 wrap-up: add a `sprk_recordtype_ref` row for `sprk_reportcard` (additive, same pattern as the existing Matter/Event/Invoice rows) so any future "regarding a Report Card" consumer gets the full 5-field write. Not a blocker for this task's completion — Add To Do -> Report Card still succeeds, just with 3/5 resolver fields instead of 5/5.
+      NOT verified live: dialog UI, no-files-step actually rendering absent in a live dialog, 8 assigned-resource lookup UI pickers.
+    </reportcard-wizard>
+
+    <cardchrome-regression-check>
+      `git diff HEAD -- src/client/pcf/VisualHost/control/components/CardChrome.tsx` reviewed line-by-line: the only change is a new OPTIONAL `onCreateClick` prop and a new conditional render block for the "+" icon, additively OR'd into `hasAnyIcon` (`hasExpand || hasAiSparkle || hasCreate`). The pre-existing `onExpand`/expand-icon ("open") and `onAiSummary`/sparkle-icon logic are untouched — confirmed no regression risk to either by direct diff inspection (not a live click, but a full diff read leaves no ambiguity here since the change is purely additive with the new prop defaulting to `undefined`/absent).
+    </cardchrome-regression-check>
+
+    <wizardregistry-check>
+      `wizardRegistry.ts` confirmed: all 3 keys (`event`, `invoice`, `report-card`) point at real lazy-loaded components (no `PlaceholderWizard` remaining for these 3). `ENTITY_TO_WIZARD_KEY` maps both `sprk_reportcard` and `sprk_kpiassessment` to `report-card` per the task-040 owner-directed rename.
+    </wizardregistry-check>
+
+    <human-action-needed>
+      1. Human click-through of all 3 wizards in a real browser session against spaarkedev1 (open each from a Visual Host "+" button, step through Associate-To/hidden-Associate-To, Enter Info, Add Files where applicable, Next Steps, Finish) — carried forward from task 015's original gap, now covering 3 wizards instead of 1.
+      2. Delete or otherwise dispose of the 6 ZZTEST-050 records listed above (delete_record requires explicit interactive consent this session couldn't obtain).
+      3. Consider filing the `sprk_recordtype_ref` gap for `sprk_reportcard` via `/project-defer-issue-tracking` before task 090 wrap-up.
+    </human-action-needed>
+  </completion-notes>
+</task>

@@ -10,8 +10,8 @@
  *     other 10 lookups cleared (null @odata.bind)
  *   - Matter → Project: matter cleared, project bound, all 4 resolver fields
  *     refreshed
- *   - Clear: all 15 fields (11 lookups + 4 resolver) nulled
- *   - All 11 targets recognized
+ *   - Clear: all 16 fields (12 lookups + 4 resolver) nulled
+ *   - All 12 targets recognized (12th = sprk_reportcard, task 040)
  *   - Unknown entity type throws
  *
  * @see spec.md FR-13 (TodoDetail regarding edit)
@@ -63,6 +63,11 @@ function buildTodoNavProps(): INavPropEntry[] {
     { columnName: 'sprk_regardingcontact', navPropName: 'sprk_RegardingContact', referencedEntity: 'contact' },
     { columnName: 'sprk_regardingdocument', navPropName: 'sprk_RegardingDocument', referencedEntity: 'sprk_document' },
     {
+      columnName: 'sprk_regardingreportcard',
+      navPropName: 'sprk_RegardingReportCard',
+      referencedEntity: 'sprk_reportcard',
+    },
+    {
       columnName: 'sprk_regardingrecordtype',
       navPropName: 'sprk_RegardingRecordType',
       referencedEntity: 'sprk_recordtype_ref',
@@ -88,8 +93,8 @@ function buildMockWebApi(): IPolymorphicWebApi {
   };
 }
 
-// All 11 entity-specific @odata.bind keys (PascalCase nav-prop names).
-const ALL_ELEVEN_BIND_KEYS = [
+// All 12 entity-specific @odata.bind keys (PascalCase nav-prop names).
+const ALL_TWELVE_BIND_KEYS = [
   'sprk_RegardingMatter@odata.bind',
   'sprk_RegardingProject@odata.bind',
   'sprk_RegardingEvent@odata.bind',
@@ -101,6 +106,7 @@ const ALL_ELEVEN_BIND_KEYS = [
   'sprk_RegardingOrganization@odata.bind',
   'sprk_RegardingContact@odata.bind',
   'sprk_RegardingDocument@odata.bind',
+  'sprk_RegardingReportCard@odata.bind',
 ];
 
 // ---------------------------------------------------------------------------
@@ -108,11 +114,11 @@ const ALL_ELEVEN_BIND_KEYS = [
 // ---------------------------------------------------------------------------
 
 describe('TODO_REGARDING_CATALOG', () => {
-  it('listsExactlyElevenTargets', () => {
-    expect(TODO_REGARDING_CATALOG).toHaveLength(11);
+  it('listsExactlyTwelveTargets', () => {
+    expect(TODO_REGARDING_CATALOG).toHaveLength(12);
   });
 
-  it('listsTargetsInSpecOrder', () => {
+  it('listsTargetsInSpecOrderPlusReportCardAppended', () => {
     expect(TODO_REGARDING_CATALOG.map(t => t.entityType)).toEqual([
       'sprk_matter',
       'sprk_project',
@@ -125,6 +131,7 @@ describe('TODO_REGARDING_CATALOG', () => {
       'sprk_organization',
       'contact', // OOB
       'sprk_document',
+      'sprk_reportcard', // appended 12th, task 040 — not reordered into FR-07 order
     ]);
   });
 
@@ -143,6 +150,7 @@ describe('TODO_REGARDING_CATALOG', () => {
     // OOB
     expect(byEntityType['contact']).toBe('contacts');
     expect(byEntityType['sprk_document']).toBe('sprk_documents');
+    expect(byEntityType['sprk_reportcard']).toBe('sprk_reportcards');
   });
 
   it('hasUniqueLookupAttributes', () => {
@@ -191,7 +199,7 @@ describe('buildTodoRegardingUpdate — null → Matter', () => {
     expect(payload['sprk_RegardingMatter@odata.bind']).toBe('/sprk_matters(aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee)');
   });
 
-  it('clearsAllOtherTenLookups', async () => {
+  it('clearsAllOtherElevenLookups', async () => {
     const webApi = buildMockWebApi();
     const navProps = buildTodoNavProps();
 
@@ -203,8 +211,8 @@ describe('buildTodoRegardingUpdate — null → Matter', () => {
       'Smith v. Jones'
     );
 
-    // The 10 NON-selected lookups must be explicitly null.
-    const nonMatterBindKeys = ALL_ELEVEN_BIND_KEYS.filter(k => k !== 'sprk_RegardingMatter@odata.bind');
+    // The 11 NON-selected lookups must be explicitly null.
+    const nonMatterBindKeys = ALL_TWELVE_BIND_KEYS.filter(k => k !== 'sprk_RegardingMatter@odata.bind');
     for (const k of nonMatterBindKeys) {
       expect(payload[k]).toBeNull();
     }
@@ -269,7 +277,7 @@ describe('buildTodoRegardingUpdate — Matter → Project', () => {
     expect(payload['sprk_RegardingRecordType@odata.bind']).toBe('/sprk_recordtype_refs(rt-test-guid-0001)');
   });
 
-  it('clearsAllNineOtherLookupsTooNotJustTheImmediatePrior', async () => {
+  it('clearsAllElevenOtherLookupsTooNotJustTheImmediatePrior', async () => {
     const webApi = buildMockWebApi();
     const navProps = buildTodoNavProps();
 
@@ -281,8 +289,8 @@ describe('buildTodoRegardingUpdate — Matter → Project', () => {
       'Project Phoenix'
     );
 
-    // The 10 NON-project lookups (incl. matter) must all be null.
-    const nonProjectBindKeys = ALL_ELEVEN_BIND_KEYS.filter(k => k !== 'sprk_RegardingProject@odata.bind');
+    // The 11 NON-project lookups (incl. matter) must all be null.
+    const nonProjectBindKeys = ALL_TWELVE_BIND_KEYS.filter(k => k !== 'sprk_RegardingProject@odata.bind');
     for (const k of nonProjectBindKeys) {
       expect(payload[k]).toBeNull();
     }
@@ -294,9 +302,9 @@ describe('buildTodoRegardingUpdate — Matter → Project', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildTodoRegardingClear', () => {
-  it('nullsAllElevenEntitySpecificLookups', () => {
+  it('nullsAllTwelveEntitySpecificLookups', () => {
     const payload = buildTodoRegardingClear(buildTodoNavProps());
-    for (const k of ALL_ELEVEN_BIND_KEYS) {
+    for (const k of ALL_TWELVE_BIND_KEYS) {
       expect(payload[k]).toBeNull();
     }
   });
@@ -313,11 +321,11 @@ describe('buildTodoRegardingClear', () => {
     expect(payload['sprk_regardingrecordurl']).toBeNull();
   });
 
-  it('producesFifteenNullFieldsInTotal', () => {
+  it('producesSixteenNullFieldsInTotal', () => {
     const payload = buildTodoRegardingClear(buildTodoNavProps());
-    // 11 entity-specific binds + 1 record-type bind + 3 text/URL fields = 15
+    // 12 entity-specific binds + 1 record-type bind + 3 text/URL fields = 16
     const nulledKeys = Object.keys(payload).filter(k => payload[k] === null);
-    expect(nulledKeys).toHaveLength(15);
+    expect(nulledKeys).toHaveLength(16);
   });
 
   it('worksWithEmptyNavProps_fallsBackToLookupAttributeNames', () => {
@@ -337,10 +345,10 @@ describe('buildTodoRegardingClear', () => {
 });
 
 // ---------------------------------------------------------------------------
-// All 11 targets — smoke test
+// All 12 targets — smoke test
 // ---------------------------------------------------------------------------
 
-describe('buildTodoRegardingUpdate — all 11 targets', () => {
+describe('buildTodoRegardingUpdate — all 12 targets', () => {
   it.each(TODO_REGARDING_CATALOG.map(t => [t.entityType, t.entitySet, t.lookupAttribute]))(
     'buildsCorrectPayloadFor_%s',
     async (entityType, entitySet, lookupAttribute) => {

@@ -1,0 +1,108 @@
+<task id="064" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-32 Context-pane provenance + D-F4 trace hosting</title>
+    <phase>6 Memory</phase>
+    <gate>blocked-on-core-A0</gate>
+    <status>blocked</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>post-A0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none (core Phase A0 `TraceEvent v1` + D-F4 host-embeddable view)</dependencies>
+    <tags>frontend, testing</tags>
+    <fr>FR-32</fr>
+  </metadata>
+
+  <prompt>
+    Make provenance always visible in the Context pane: every AI recommendation surfaces its sources (playbook
+    entry, golden reference from `spaarke-rag-references`, precedent, prior decision, and — in audit-detail mode
+    — the execution trace) as clickable, citable, persistent entries. The execution trace is rendered by the
+    CORE's D-F4 decision-traceability view over the trace ledger (`ToolChain` entries + the `TraceEvent v1`
+    contract); the Context pane HOSTS that view — Compose does NOT invent its own "LLM reasoning trace"
+    rendering. The Context pane stays AUDIT-ONLY (never an input surface). BLOCKED until core Phase A0 publishes
+    `TraceEvent v1` + the host-embeddable D-F4 view (HANDOFF §6).
+  </prompt>
+
+  <role>
+    Senior React/Fluent UI v9 developer familiar with the `@spaarke/legal-workspace` Context pane and the
+    SpaarkeAi three-pane shell.
+  </role>
+
+  <goal>
+    The Context pane surfaces provenance for every AI recommendation with clickable/citable/persistent sources,
+    and hosts the core's D-F4 trace view (over `TraceEvent v1`) in an audit-detail mode. No AI recommendation
+    renders without source surfacing; the Context pane captures no decision (audit-only). Fluent v9 + dark mode.
+  </goal>
+
+  <context>
+    <background>
+      design.md §2.0 (provenance always visible) + §3 (Workspace→Context, Assistant→Context flows). The trace
+      view is host-embeddable per HANDOFF §6 — bound to an arbitrary container (the Compose Context pane), not
+      to the chat surface. r1 finding: recommendations without provenance are not trusted by legal users;
+      provenance is the moat.
+    </background>
+    <relevant-files>
+      <file path="projects/spaarkeai-compose-r2/notes/HANDOFF-core-r2-A0-contract-requirements.md" role="contract">§6 `TraceEvent v1` + D-F4 host-embeddable decision-traceability view — author against these shapes.</file>
+      <file path="src/client/shared/Spaarke.LegalWorkspace/src" role="edit">`@spaarke/legal-workspace` Context pane — add provenance section + D-F4 trace host (coordinate merge order with dataset-grid-framework-r2 extraction, PR #537).</file>
+      <file path="src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx" role="reference">Assistant pane that emits recommendations whose provenance the Context pane surfaces.</file>
+      <file path="projects/spaarkeai-compose-r2/design.md" role="spec">§2.0 provenance pattern + §3 coordination flows.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="core-A0" status="blocked">Core R2 Phase A0 must publish `TraceEvent v1` + the host-embeddable D-F4 view (HANDOFF §6). Do NOT invent a local trace rendering.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-040">The trace view reads the trace ledger (`ToolChain` entries) via `TraceEvent v1`; provenance references ledger refs, never a duplicated payload.</constraint>
+    <constraint source="charter-3.4">Host the core's D-F4 view; do NOT invent a Compose-local trace rendering or a local `TraceEvent` variant.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 + dark mode for the Context provenance section and trace host; no v8/hardcoded colors.</constraint>
+    <constraint source="ADR-028">Any client fetch for sources uses `@spaarke/auth`, never raw Bearer.</constraint>
+    <constraint source="spec">Context pane is AUDIT-ONLY — it hosts provenance/trace and never captures a decision or becomes an input surface.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm core Phase A0 has published `TraceEvent v1` + the host-embeddable D-F4 view; read shapes against HANDOFF §6. If not published, remain blocked and escalate.</step>
+    <step order="2">Add a provenance section to the `@spaarke/legal-workspace` Context pane that surfaces sources (playbook entry, golden reference, precedent, prior decision) as clickable/citable entries.</step>
+    <step order="3">Embed the core D-F4 trace view in the Context pane's audit-detail mode, bound to the Compose container (not the chat surface).</step>
+    <step order="4">Guarantee every AI recommendation renders with source surfacing (no provenance = design defect); keep the pane audit-only (no input controls).</step>
+    <step order="5">Verify Fluent v9 dark-mode compliance; add UI/interaction tests for source click-through + audit-only invariant.</step>
+  </steps>
+
+  <justification>
+    <existing>Overlaps with the core D-F4 trace view and the existing Context pane. Verified: Compose HOSTS the D-F4 view; it owns only the provenance section wiring.</existing>
+    <extension>Extends the Context pane by hosting the core view + adding a provenance section — no local trace renderer, no `TraceEvent` variant.</extension>
+    <cost-of-doing-nothing>Without visible provenance, legal users will not trust AI recommendations (the trust moat fails); without the hosted trace, compliance review has no reproducible audit surface.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.LegalWorkspace/src — Context provenance section + D-F4 trace host</output>
+    <output type="test">Context-pane interaction tests (source click-through, audit-only invariant)</output>
+    <output type="docs">projects/spaarkeai-compose-r2/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Every AI recommendation surfaces its sources in the Context pane (no recommendation renders without provenance).</criterion>
+    <criterion testable="true">Sources are clickable (navigate), citable (drag as inline citation), and persistent across Word handoff.</criterion>
+    <criterion testable="true">The Context pane hosts the core D-F4 trace view over `TraceEvent v1` — no Compose-local trace rendering.</criterion>
+    <criterion testable="true">The Context pane captures no decision and exposes no input control (audit-only invariant test-verified).</criterion>
+    <criterion testable="true">Fluent v9 + dark mode compliant; `@spaarke/auth` used for source fetches.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Core R2 Phase A0 has not published `TraceEvent v1` + the host-embeddable D-F4 decision-traceability view per HANDOFF §6. Do NOT invent a Compose-local trace renderer (charter §3.4). Remain `blocked`; confirm core timing and that the D-F4 view is embeddable in an arbitrary container (the Context pane) before starting. Also coordinate `@spaarke/legal-workspace` merge order with dataset-grid-framework-r2 (PR #537).</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

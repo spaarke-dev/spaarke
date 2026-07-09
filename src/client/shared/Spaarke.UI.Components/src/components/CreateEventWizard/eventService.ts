@@ -13,6 +13,7 @@ import type { ILookupItem } from '../../types/LookupTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { IWebApiLike } from '../../types/WebApiLike';
 import { EntityCreationService } from '../../services/EntityCreationService';
+import { applyResolverFields } from '../../services/PolymorphicResolverService';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -86,6 +87,43 @@ function _findNavProp(entries: NavPropEntry[], referencedEntity: string, columnH
     if (hinted) return hinted.navPropName;
   }
   return matches[0].navPropName;
+}
+
+// ---------------------------------------------------------------------------
+// Regarding-parent resolution helpers (ADR-024)
+// ---------------------------------------------------------------------------
+
+/**
+ * Explicit logical-name → entity-set (collection) name map for the parent
+ * types `sprk_event` can be regarding, used to build the `@odata.bind` URL in
+ * `applyResolverFields`. Irregular plurals (`sprk_analysis` → `sprk_analyses`)
+ * and OOB entities (`account`/`contact`) are enumerated here; everything else
+ * falls back to the naive `${logicalName}s` rule.
+ */
+const _ENTITY_SET_MAP: Record<string, string> = {
+  sprk_matter: 'sprk_matters',
+  sprk_project: 'sprk_projects',
+  sprk_invoice: 'sprk_invoices',
+  sprk_workassignment: 'sprk_workassignments',
+  sprk_budget: 'sprk_budgets',
+  sprk_analysis: 'sprk_analyses',
+  account: 'accounts',
+  contact: 'contacts',
+};
+
+/** Resolve the entity-set name for a parent entity logical name. */
+function _resolveEntitySet(entityLogicalName: string): string {
+  return _ENTITY_SET_MAP[entityLogicalName] ?? `${entityLogicalName}s`;
+}
+
+/**
+ * Derive the column hint used by `findNavProp` to disambiguate the
+ * entity-specific regarding lookup when several nav-props reference the same
+ * entity (e.g. `sprk_regardingmatter` includes "matter"). Strips the `sprk_`
+ * prefix so `sprk_matter` → `matter`; OOB names (`account`) are returned as-is.
+ */
+function _resolveLookupHint(entityLogicalName: string): string {
+  return entityLogicalName.startsWith('sprk_') ? entityLogicalName.slice('sprk_'.length) : entityLogicalName;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,9 +230,13 @@ export class EventService {
    *   `regardingEntityName` is provided, the event is linked to the parent
    *   matter or project via the appropriate nav-prop discovered at runtime.
    * @param regardingEntityName - Optional logical name of the parent entity
-   *   (e.g. 'sprk_matter', 'sprk_project'). When supplied together with
-   *   `formValues.regardingRecordId`, the event is associated via the
-   *   N:1 relationship nav-prop resolved through metadata discovery.
+   *   (e.g. 'sprk_matter', 'sprk_project', 'sprk_invoice'). When supplied
+   *   together with `formValues.regardingRecordId`, the event is associated via
+   *   the ADR-024 Polymorphic Resolver (`applyResolverFields`): the
+   *   entity-specific `@odata.bind` lookup AND all 5 denormalized resolver
+   *   fields (`sprk_regardingrecordtype`/`id`/`name`/`url`/`number`) are
+   *   written. `formValues.regardingRecordName` supplies the display-name
+   *   fallback per SRFR-052.
    * @param options - Optional injection points for testing:
    *   - `getCurrentUserId`: override of the Xrm.Utility.getUserId() probe (returns
    *     a GUID without braces, or `null` when no user context is available).
@@ -312,28 +354,45 @@ export class EventService {
       }
     }
 
-    // Regarding record (parent matter / project) — link via nav-prop
+    // Regarding record (parent) — ADR-024 Polymorphic Resolver.
+    //
+    // Writes the entity-specific `@odata.bind` lookup AND all 5 denormalized
+    // resolver fields (`sprk_regardingrecordtype` → `sprk_recordtype_ref`,
+    // `sprk_regardingrecordid`, `sprk_regardingrecordname`,
+    // `sprk_regardingrecordurl`, `sprk_regardingrecordnumber`) via the shared
+    // `applyResolverFields` primitive — the ADR-024-mandated flow, mirroring
+    // the canonical `WorkAssignmentService`.
+    //
+    // This replaces the pre-existing ad-hoc matter/project-only map that bound
+    // only the entity-specific lookup and skipped every resolver field — a
+    // shipped ADR-024 violation (§ "MUST NOT skip resolver fields"). Migrating
+    // here is a correctness fix, not a new deviation.
+    //
+    // Mutual-exclusion (ADR-024 MUST): exactly one parent is supplied per
+    // create, so only one entity-specific lookup is ever populated.
+    //
+    // Graceful degradation (NFR-06): `applyResolverFields` never throws for a
+    // missing catalog row or target-field value — it warns and skips the
+    // affected write, so event creation is never blocked by resolver metadata.
     if (formValues.regardingRecordId && regardingEntityName) {
-      const pluralMap: Record<string, string> = {
-        sprk_matter: 'sprk_matters',
-        sprk_project: 'sprk_projects',
+      const entitySet = _resolveEntitySet(regardingEntityName);
+      const hint = _resolveLookupHint(regardingEntityName);
+      // `applyResolverFields` expects an IPolymorphicWebApi (retrieveMultipleRecords
+      // with an optional maxPageSize). Wrap IDataService, which omits the third arg.
+      const polyWebApi = {
+        retrieveMultipleRecords: (entityLogicalName: string, query: string) =>
+          this._dataService.retrieveMultipleRecords(entityLogicalName, query),
       };
-      const entitySetName = pluralMap[regardingEntityName] ?? `${regardingEntityName}s`;
-      const navProp = _findNavProp(navProps, regardingEntityName);
-      if (navProp) {
-        entity[`${navProp}@odata.bind`] = `/${entitySetName}(${formValues.regardingRecordId})`;
-      } else {
-        // Fallback: use well-known column names if metadata discovery missed the relationship
-        const fallbackMap: Record<string, string> = {
-          sprk_matter: 'sprk_regardingmatterid',
-          sprk_project: 'sprk_regardingprojectid',
-        };
-        const fallback = fallbackMap[regardingEntityName];
-        if (fallback) {
-          entity[`${fallback}_${regardingEntityName}@odata.bind`] =
-            `/${entitySetName}(${formValues.regardingRecordId})`;
-        }
-      }
+      await applyResolverFields(
+        polyWebApi,
+        entity,
+        navProps,
+        regardingEntityName,
+        entitySet,
+        formValues.regardingRecordId,
+        formValues.regardingRecordName,
+        hint
+      );
     }
 
     try {

@@ -27,7 +27,14 @@ import * as React from 'react';
 import { Button, Text, tokens } from '@fluentui/react-components';
 import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 
-import { CreateRecordWizard, type ICreateRecordWizardConfig, type IFinishContext } from '../CreateRecordWizard';
+import {
+  CreateRecordWizard,
+  type ICreateRecordWizardConfig,
+  type IFinishContext,
+  type IAssociateToStepConfig,
+  type AssociationResult,
+} from '../CreateRecordWizard';
+import { EVENT_REGARDING_TARGETS } from '../AssociateToStep/types';
 
 import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
@@ -39,6 +46,65 @@ import type { ICreateEventFormState } from './formTypes';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
+
+// ---------------------------------------------------------------------------
+// Pure helpers (exported for unit testing — see __tests__/CreateEventWizard.associateToStep.test.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Determines the `associateToStep` config for CreateEventWizard.
+ *
+ * Gated MORE PRECISELY than `TodoWizardDialog`'s equivalent (which enables
+ * purely on `navigationService` presence): `CreateEventWizard` is consumed by
+ * BOTH the locked Visual Host launch (task 012 `initialAssociation`/
+ * `lockAssociation=true` seed) AND the pre-existing standalone Code Page
+ * (`src/solutions/CreateEventWizard/src/main.tsx`), which already passes a
+ * `navigationService` but neither `initialAssociation` nor `lockAssociation`.
+ *
+ * Gating purely on `navigationService` would suddenly surface an unlocked,
+ * un-seeded Associate-To step on that Code Page — a UX regression to an
+ * already-shipped surface (task 015 step 7 finding). Requiring an explicit
+ * signal (`initialAssociation` supplied OR `lockAssociation === true`)
+ * preserves that surface's existing behavior (no Associate-To step at all)
+ * while enabling the Visual Host locked-launch path this task targets.
+ */
+export function resolveEventAssociateToStepConfig(
+  navigationService: INavigationService | undefined,
+  initialAssociation: AssociationResult | undefined,
+  lockAssociation: boolean | undefined
+): IAssociateToStepConfig | undefined {
+  if (!navigationService) return undefined;
+  if (initialAssociation === undefined && !lockAssociation) return undefined;
+
+  return {
+    entityTypes: EVENT_REGARDING_TARGETS.slice(),
+    navigationService,
+    initialAssociation,
+    lockAssociation,
+  };
+}
+
+/**
+ * Copies the wizard's selected/seeded regarding association
+ * (`IFinishContext.association`) onto the form fields `EventService.createEvent`
+ * expects (`regardingRecordId`/`regardingRecordName` — read off `formValues`
+ * per its JSDoc contract; the entity type is passed as a separate argument).
+ *
+ * When no association is present (AssociateToStep hidden, or the user
+ * skipped it), `formValues` passes through unchanged — behaviorally identical
+ * to the pre-task-015 create path (no regarding parent).
+ */
+export function mergeEventRegardingFromAssociation(
+  formValues: ICreateEventFormState,
+  association: AssociationResult | null
+): ICreateEventFormState {
+  if (!association) return formValues;
+  return {
+    ...formValues,
+    regardingRecordId: association.recordId,
+    regardingRecordName: association.recordName,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Search helper functions (use IDataService instead of IWebApi)
@@ -118,6 +184,27 @@ export interface ICreateEventWizardProps {
    * `config.tenantId` in `main.tsx`.
    */
   tenantId?: string;
+  /**
+   * Optional pre-filled regarding association (visual-host-create-button-r1
+   * task 012/015). When supplied, the AssociateToStep starts pre-selected with
+   * this record — the user may still change it or clear it before advancing,
+   * UNLESS `lockAssociation` is also `true` (see below).
+   */
+  initialAssociation?: AssociationResult;
+  /**
+   * When `true`, the Associate-To step is hidden entirely and
+   * `initialAssociation` flows straight through to `onFinish` (via
+   * `context.association`) without ever showing the picker — used when the
+   * parent record is unambiguous, e.g. a wizard launched from a Visual Host
+   * visual (design §5.5, task 012's VisualHostRoot seed).
+   *
+   * Defaults to `false`. See `resolveEventAssociateToStepConfig` for the full
+   * gating rule (also requires `navigationService` and either this flag or
+   * `initialAssociation` to be present) — this keeps the pre-existing Code
+   * Page entry point (`src/solutions/CreateEventWizard/src/main.tsx`, which
+   * passes `navigationService` but neither of these two props) unchanged.
+   */
+  lockAssociation?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,6 +240,8 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
   bffBaseUrl,
   resolveSpeContainerId,
   tenantId,
+  initialAssociation,
+  lockAssociation,
 }) => {
   // -- Entity-specific form state --------------------------------------------
   const [formValid, setFormValid] = React.useState(false);
@@ -193,6 +282,11 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       filesStepSubtitle: 'Upload documents to associate with this event, or click Next to skip.',
       finishingLabel: 'Creating event\u2026',
 
+      // visual-host-create-button-r1 task 015 -- see resolveEventAssociateToStepConfig
+      // doc comment for the gating rationale (precise gate vs. TodoWizardDialog's
+      // navigationService-only gate, to avoid a Code Page regression).
+      associateToStep: resolveEventAssociateToStepConfig(navigationService, initialAssociation, lockAssociation),
+
       infoStep: {
         id: 'create-record',
         label: 'Event Details',
@@ -225,10 +319,15 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       }),
 
       onFinish: async (context: IFinishContext): Promise<IWizardSuccessConfig> => {
-        const currentFormValues = formValuesRef.current;
+        // visual-host-create-button-r1 task 015: copy the AssociateToStep's
+        // selected/seeded regarding association (context.association -- null
+        // when the step is absent/skipped) onto the fields EventService.createEvent
+        // reads off formValues, then pass the entity type as the separate
+        // regardingEntityName argument (ADR-024 applyResolverFields contract).
+        const currentFormValues = mergeEventRegardingFromAssociation(formValuesRef.current, context.association);
 
         const eventService = new EventService(dataService);
-        const result = await eventService.createEvent(currentFormValues);
+        const result = await eventService.createEvent(currentFormValues, context.association?.entityType);
         if (!result.success) {
           throw new Error(result.errorMessage ?? 'Failed to create event');
         }
@@ -355,6 +454,8 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       navigationService,
       resolveSpeContainerId,
       webApiAdapter,
+      initialAssociation,
+      lockAssociation,
     ]
   );
 

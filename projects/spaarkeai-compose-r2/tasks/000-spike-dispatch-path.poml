@@ -1,0 +1,118 @@
+<task id="000" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Spike 0 — validate session-dispatch path (throwaway compose Binding)</title>
+    <phase>0 Spikes</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>001, 010, 016</blocks>
+    <tags>ai, bff-api, azure-openai, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Exploratory spike — throwaway code + spike notes, not production; no code-review/adr-check gate. STANDARD per TASK-INDEX.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Highest blast radius of the spike set — validates the end-to-end dispatch seam that every Phase-4 catalog row and the inline-AI flow build on. A wrong conclusion here misdirects the whole project.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Validate the shipped session-dispatch path end-to-end for a single Compose capability BEFORE any Phase-1/3/4 work builds on it. Author a throwaway `compose-explain-clause` Action + Binding pair (mirror-first), wire a stub Workspace toolbar button that emits a PaneEventBus `compose_action_request` event, and confirm the full chain: PaneEventBus → ConversationPane → `dispatchConsumer(bindingId, args)` → `POST /api/ai/chat/sessions/{id}/dispatch` → `SessionDispatchOrchestrator` → Binding resolution → prompted executor → SSE stream into the chat surface + a ledger `SessionOutput` write. This is a validation of the shipped path (the server surface is already answered), proving the Compose-specific legs: event payload shape, scope-payload assembly, and selection args. All artifacts are throwaway — the deliverable is a spike note recording whether the seam works and what the Compose-specific event/args contract must be.
+  </prompt>
+
+  <role>
+    Senior full-stack engineer fluent in .NET 8 Minimal API, the Spaarke session-dispatch seam (ADR-039), the ADR-040 session ledger, PaneEventBus choreography (ADR-030), and SSE streaming (ADR-033).
+  </role>
+
+  <goal>
+    A spike note at projects/spaarkeai-compose-r2/notes/spikes/spike-0-dispatch-path.md that answers a single decision: is the shipped session-dispatch seam confirmed end-to-end for a Compose Binding? It must record, with evidence, (1) the PaneEventBus event shape a Compose toolbar click must emit, (2) the selection-args + scope-payload assembly the ConversationPane must perform, (3) proof of SSE streaming into the chat surface, (4) proof of a ledger `SessionOutput` write, and (5) confirmation the gate does not interfere for a Tier-0/1 action. No production code is committed.
+  </goal>
+
+  <context>
+    <background>
+      Design §13 Spike 0 + §2.1 + §7.2: R2 introduces NO new AI dispatch endpoint (PR #544 killed the parallel Compose endpoint; ADR-039 makes the Binding table the only routing config). Every AI action flows through the shipped Click-path seam. Before authoring 5 real catalog rows (Phase 4) and the inline toolbar (Phase 3), this spike de-risks the Compose-specific legs of that seam with one throwaway Binding. Decision unlocked (design §13): confirms the end-to-end seam before Phase 1 builds on it.
+    </background>
+    <relevant-files>
+      <file purpose="dispatch-seam-client">src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts — dispatchConsumer(bindingId, args) → POST /api/ai/chat/sessions/{id}/dispatch</file>
+      <file purpose="dispatch-endpoint">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — existing Compose endpoint group (reference only; do NOT add a dispatch route)</file>
+      <file purpose="conversation-pane">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx — consumes compose_action_request, assembles args, calls dispatchConsumer</file>
+      <file purpose="pre-seed-bridge">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/SendWorkspaceArtifactHandler.cs — chat→Compose bridge reference for payload conventions</file>
+      <file purpose="catalog-mirror">infra/dataverse/inputschemas/ — mirror-first location for the throwaway Action + Binding rows</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependencies — startable immediately (Wave W0).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Dispatch MUST go through the shipped session-dispatch seam only. Do NOT add a new BFF dispatch route. Routing config lives ONLY in the Binding table; string-key resolution outside it is banned. The throwaway Action + Binding pair is mirror-first under infra/dataverse/inputschemas/.</constraint>
+    <constraint source="ADR-040">The dispatched response MUST be written to the session ledger as a SessionOutput before render (storage precedes rendering). The spike verifies the write occurs; it does not invent a parallel session store.</constraint>
+    <constraint source="ADR-033">SSE streaming rides the ChatInvocationContext streaming side channel — the spike observes this path, it does not create a bespoke stream.</constraint>
+    <constraint source="ADR-030">PaneEventBus payloads are typed discriminants (compose_action_request), no `any`.</constraint>
+    <constraint source="project">Throwaway only — no production code committed; the Action + Binding rows are throwaway and MUST NOT be deployed to a shared catalog beyond what the spike needs to observe the path. Deliverable is a spike note.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/session-dispatch, ai/session-ledger, ai/streaming</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + load">Load this task, project CLAUDE.md, and the knowledge files. State the Placement Justification if any BFF surface is touched (expected: none new — path already exists).</step>
+    <step order="1" name="Author throwaway Binding">Mirror-first: create a throwaway compose-explain-clause Action row (SystemPrompt + minimal OutputSchemaJson) + one Binding row targeting it under infra/dataverse/inputschemas/. Keep it minimal — the payload is not the point; the path is.</step>
+    <step order="2" name="Wire stub toolbar">Add a stub Workspace toolbar button that emits a PaneEventBus compose_action_request event carrying {bindingId, selection, args}. Record the exact event shape.</step>
+    <step order="3" name="Trace the chain">Confirm ConversationPane consumes the event, assembles the scope payload + selection args, and calls dispatchConsumer(bindingId, args) → POST /api/ai/chat/sessions/{id}/dispatch.</step>
+    <step order="4" name="Observe SSE + ledger">Confirm the response streams via SSE into the chat surface AND a SessionOutput ledger entry is written. Confirm the gate does not interfere for a Tier-0/1 action.</step>
+    <step order="5" name="Write spike note">Record the decision + the Compose-specific contracts (event shape, args assembly, scope payload) in the spike note. Note any surprises that change Phase 1/3/4 assumptions.</step>
+  </steps>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/spikes/spike-0-dispatch-path.md</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Spike note confirms (yes/no with evidence) the end-to-end session-dispatch seam works for a Compose Binding — this is the decision the spike unlocks (design §13).</criterion>
+    <criterion testable="true">The exact PaneEventBus compose_action_request event shape ({bindingId, selection, args}) a Compose toolbar click must emit is documented.</criterion>
+    <criterion testable="true">SSE streaming into the chat surface is observed and recorded.</criterion>
+    <criterion testable="true">A ledger SessionOutput write is observed and recorded (ADR-040 storage-precedes-rendering).</criterion>
+    <criterion testable="true">Zero new BFF dispatch routes were added (ADR-039); the note states this explicitly.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    Completed 2026-07-08 (static code trace + contract reconciliation). Deliverable:
+    notes/spikes/spike-0-dispatch-path.md.
+
+    DECISION: The shipped ADR-039 session-dispatch seam is confirmed present + coherent
+    end-to-end for a Compose Binding (server route unconditional, orchestrator resolves the
+    Binding table, ADR-040 ledger-before-render, shared SSE writer, one client helper). ZERO
+    new BFF dispatch routes needed.
+
+    KEY CORRECTION (changes Phase 1/3/4): the design/POML `compose_action_request`
+    `{bindingId, selection, args}` event DOES NOT EXIST and must not be created. The real,
+    R1-shipped contract is the six-flow choreography in Spaarke.Compose.Components
+    compose-contracts.ts — a selection emits `conversation.compose_selection_offer` (Flow 2);
+    the actual dispatch is a direct `dispatchConsumer(bindingId, {slots})` call (the shipped
+    useConsumerChips pattern); Assistant→editor insertion is `workspace.compose_assistant_insert`
+    (Flow 5). Tasks 016/030/046 must be authored against this, not `compose_action_request`.
+
+    Also confirmed: the parallel Compose AI-dispatch endpoint (POST /api/compose/action/
+    {consumerType}) is DELETED (design §2.1/§7.2 premise holds); only a stale doc-comment
+    survives at IComposeService.cs:35 (minor Phase-4/5 cleanup). R7 LinearConsumers and the
+    session-dispatch seam are the same routing surface (sprk_playbookconsumer table), not rivals.
+
+    CAVEAT: criteria 3 (SSE) + 4 (ledger write) are statically confirmed (wiring correct) but
+    NOT live-observed — a headless code session cannot render live frames/rows. Runtime
+    confirmation recipe recorded in the note §6 (run on spaarkedev1 at Phase 1 start; needs a
+    throwaway Binding — core-A0-gated). Deliberately did not author/commit throwaway rows or
+    stub UI (directional step-mode adaptation; rationale in note §7).
+  </notes>
+</task>

@@ -1,0 +1,97 @@
+<task id="046" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-13 dispatch wiring (PaneEventBus compose_action_request → ConversationPane → dispatchConsumer)</title>
+    <phase>4 Catalog</phase>
+    <status>blocked</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>016, 030</dependencies>
+    <blocks>082</blocks>
+    <tags>frontend, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Client dispatch choreography across PaneEventBus + ConversationPane + the shipped dispatch seam; the enforcement point for "zero new endpoints / no string-key routing" (ADR-039 §7.2). Feeds the flagship gate. FULL per TASK-INDEX.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-pane dispatch wiring touching the PaneEventBus contract + ConversationPane + the `compose`-disposition ledger-reference choreography — high blast radius on the ADR-039/030/040 seam. Opus per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-dispatch</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Wire the client dispatch path for all five R2 catalog actions: the Compose BubbleMenu toolbar (and doc-level overflow) emits a PaneEventBus `compose_action_request` on the `conversation` channel with `{bindingId, selection, args, correlationId}`; `ConversationPane` subscribes, calls `dispatchConsumer(bindingId, args)` → `POST /api/ai/chat/sessions/{id}/dispatch` → `SessionDispatchOrchestrator` → `GetBindingByIdAsync` → prompted executor. For the compose-draft-alternative leg, on the `compose`-disposition SSE frame the pane emits `compose_edit_apply_request` on the `workspace` channel REFERENCING the ledger entry (never carrying the payload). ADD ZERO new BFF routes; NO string-key resolution outside the Binding table (ADR-039 §7.2). Add the typed PaneEventBus discriminants (ADR-030).
+  </prompt>
+
+  <role>
+    Senior React/TypeScript developer fluent in the SpaarkeAi three-pane PaneEventBus contract (ADR-030), the shipped Click-path session-dispatch seam, ADR-040 ledger-reference choreography, and Fluent v9 conventions.
+  </role>
+
+  <goal>
+    A wired dispatch path where selecting text (or the doc-level overflow) in Compose dispatches any of the five catalog Bindings through the shipped seam with zero new routes: `compose_action_request` (conversation channel) consumed by `ConversationPane`, resolved via `dispatchConsumer`, streamed back as an assistant message; the draft-alternative leg emits `compose_edit_apply_request` (workspace channel) referencing the ledger entry after the `compose`-disposition SSE frame. Typed PaneEventBus discriminants added; a code-review checklist item enforces §7.2 (no new endpoint, no string-key routing).
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-13 + design §3 (Workspace→Assistant + Assistant→Workspace flows) + §7.2 (the full dispatch sequence + the permanent "zero new endpoints" ruling). The seam already exists (shipped in redesign-r1): this task adds only the client choreography — the two PaneEventBus discriminants and the ConversationPane subscription/dispatch — never a server route. Depends on FR-04 draft-into-editor (016) for the `compose`-disposition SSE-frame consumption and FR-14 inline toolbar (030) for the event emitter.
+    </background>
+    <relevant-files>
+      <file purpose="event-bus">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts — ADD typed discriminants `compose_action_request` (conversation channel) + `compose_edit_apply_request` (workspace channel); no `any` payloads (ADR-030)</file>
+      <file purpose="assistant-consumer">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx — subscribe to `compose_action_request`, call dispatchConsumer, render streamed response; on the `compose` SSE frame emit `compose_edit_apply_request` referencing the ledger entry</file>
+      <file purpose="dispatch-seam-REUSE">src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts — REUSE: dispatchConsumer(bindingId, args) → POST /api/ai/chat/sessions/{id}/dispatch. NO new endpoint; NO string-key routing</file>
+      <file purpose="toolbar-emitter">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — the BubbleMenu toolbar + doc-level overflow that emits `compose_action_request` with {bindingId, selection, args, correlationId}</file>
+      <file purpose="server-seam-REUSE">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs — the shipped orchestrator (GetBindingByIdAsync → prompted executor); REUSE, do not modify to add a route</file>
+      <file purpose="dispatch-endpoint-REUSE">src/server/api/Sprk.Bff.Api/Api/Ai/DispatchSessionEndpoint.cs — the existing POST /dispatch endpoint; the ONLY dispatch surface (no new endpoint)</file>
+      <file purpose="disposition-leg">projects/spaarkeai-compose-r2/tasks/016-*.poml (FR-04) — the `compose`-disposition + SSE-frame consumption path this wiring emits the apply-request against</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="016" status="blocked">Requires FR-04 draft-into-editor — the `compose`-disposition + SSE-frame consumption path.</dependency>
+      <dependency task="030" status="not-started">Requires FR-14 inline AI toolbar — the BubbleMenu emitter of `compose_action_request`.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">All five actions dispatch via PaneEventBus → ConversationPane → dispatchConsumer → POST /api/ai/chat/sessions/{id}/dispatch → SessionDispatchOrchestrator → GetBindingByIdAsync → prompted executor. Dispatch code adds ZERO new routes; NO string-key resolution outside the Binding table. §7.2 is the binding reviewer guard — a code-review checklist item enforces it.</constraint>
+    <constraint source="ADR-040">The `compose_edit_apply_request` references the ledger entry; it NEVER carries the edit payload as the source of truth. Storage precedes rendering; the Workspace materializes from the ledger.</constraint>
+    <constraint source="ADR-030">PaneEventBus discriminants are typed (no `any` payloads); the two new events ride the existing four channels (conversation / workspace).</constraint>
+    <constraint source="ADR-028">Client fetches use @spaarke/auth, never raw Bearer.</constraint>
+    <constraint source="ADR-021">Any UI touched (toolbar, streamed message) is Fluent v9 + dark mode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ui/pane-event-bus, ai/dispatch-seam, ai/ledger-disposition</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + gate">Load task, project CLAUDE.md, HANDOFF doc (§1 ComposeDisposition), design §3 + §7.2, knowledge files. CONFIRM core Phase A0 published ComposeDisposition v1 (+ SSE frame) and the dispatch/invoke seam before wiring.</step>
+    <step order="1" name="Add PaneEventBus discriminants">Add typed `compose_action_request` (conversation channel) and `compose_edit_apply_request` (workspace channel) discriminants to PaneEventBus.ts; no `any` payloads.</step>
+    <step order="2" name="Wire ConversationPane subscription">Subscribe to `compose_action_request`; call dispatchConsumer(bindingId, args); render the streamed assistant response. Serial-queue integration honored (FR-18).</step>
+    <step order="3" name="Wire draft-alternative apply leg">On the `compose`-disposition SSE frame, emit `compose_edit_apply_request` referencing the ledger entry (not the payload); the Workspace materializes the pending track-change with `{bindingId}@t{n}` provenance.</step>
+    <step order="4" name="Verify zero new routes">Route audit: confirm dispatch adds no new BFF route and no string-key resolution exists outside the Binding table; add the §7.2 code-review checklist item.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts (two typed discriminants)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (subscription + dispatch + apply-request emit)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (toolbar/overflow emitter)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Selecting text (or the doc-level overflow) emits `compose_action_request` on the conversation channel with {bindingId, selection, args, correlationId}; ConversationPane consumes it and dispatches via dispatchConsumer.</criterion>
+    <criterion testable="true">Dispatch resolves through the shipped seam (POST /api/ai/chat/sessions/{id}/dispatch → SessionDispatchOrchestrator → GetBindingByIdAsync → executor) and adds ZERO new BFF routes.</criterion>
+    <criterion testable="true">The compose-draft-alternative leg emits `compose_edit_apply_request` on the workspace channel REFERENCING the ledger entry (never the payload) after the `compose`-disposition SSE frame.</criterion>
+    <criterion testable="true">Both PaneEventBus discriminants are typed with no `any` payloads (ADR-030); client fetches use @spaarke/auth.</criterion>
+    <criterion testable="true">A route audit confirms no string-key resolution outside the Binding table; the §7.2 code-review checklist item is present.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Consumes core Phase A0 ComposeDisposition v1 (+ SSE frame) per notes/HANDOFF-core-r2-A0-contract-requirements.md §1, AND the session-dispatch/invoke seam per §7. If either published contract differs from the proposed shape, STOP and reconcile — do not adapt silently.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

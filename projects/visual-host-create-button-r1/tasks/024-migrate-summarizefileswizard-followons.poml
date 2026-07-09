@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="visual-host-create-button-r1">
+  <metadata>
+    <title>Migrate SummarizeFilesWizard onto WizardFollowOns (delete duplicate)</title>
+    <phase>D: WizardFollowOns Consolidation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>none</blocks>
+    <tags>shared-lib, consolidation, regression</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Migrates an existing working wizard</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Regression-sensitive migration; summary-oriented card set must survive via config</model-tier-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Migrate SummarizeFilesWizard to consume WizardFollowOns and delete its SummaryNextStepsStep + SummarizeSendEmailStep copies. Its summary-oriented card set is expressed as a FollowOnCardConfig[], not a fork.</prompt>
+  <role>SPAARKE shared-UI developer. Follow §11.</role>
+  <goal>SummarizeFilesDialog renders Next Steps via WizardFollowOns; its duplicate copies removed; summarize flow + follow-ons unchanged.</goal>
+
+  <context>
+    <background>design §5.9. SummarizeFilesWizard has SummaryNextStepsStep + SummarizeSendEmailStep. If its cards are summary-specific, register them as FollowOnCardConfig entries (extend the shared step set if genuinely needed, don't fork the grid).</background>
+    <relevant-files>
+      src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/ (SummaryNextStepsStep.tsx, SummarizeSendEmailStep.tsx, SummarizeFilesDialog.tsx)
+      src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      projects/visual-host-create-button-r1/design.md
+      src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummaryNextStepsStep.tsx
+      src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/index.ts
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Swap SummaryNextStepsStep for WizardFollowOns FollowOnGrid + its FollowOnCardConfig[].</step>
+    <step>Delete SummaryNextStepsStep.tsx + SummarizeSendEmailStep.tsx; fix imports.</step>
+    <step>Regression: run the summarize flow, exercise each card.</step>
+    <step>Build + tests. Confirm grep shows NO remaining duplicate NextSteps/SendEmail across all four families.</step>
+  </steps>
+
+  <tools>Read, Grep, Edit, Bash, Skill(code-review)</tools>
+  <outputs>SummarizeFilesWizard on WizardFollowOns; duplicates deleted; project-wide duplicate-free confirmation.</outputs>
+
+  <completion-notes>
+    <summary>
+      SummarizeFilesWizard migrated onto the shared, config-driven WizardFollowOns
+      module. The local Next-Steps grid + Send Email step (562 LOC across two
+      files) were deleted and replaced by a FollowOnCardConfig[] consumed by the
+      shared FollowOnGrid + SendEmailFollowOnStep. Net −531 lines in the folder.
+      TypeScript typecheck clean (whole lib), eslint clean, WizardFollowOns +
+      related tests pass (7/7). code-review = APPROVE (0 critical/0 warning),
+      adr-check = 0 violations.
+    </summary>
+    <files-changed>
+      MODIFIED src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx
+      MODIFIED src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/index.ts
+      DELETED  src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummaryNextStepsStep.tsx
+      DELETED  src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeSendEmailStep.tsx
+    </files-changed>
+    <how-renderSelectedExtra-was-used>
+      The "include only short summary in email" toggle that the old
+      SummaryNextStepsStep rendered inline in the grid (only while Send Email is
+      selected) is now expressed as the send-email card's `renderSelectedExtra`
+      slot — exactly the case the slot was added for. No grid fork. The Send
+      Email dynamic step also keeps its own copy of the toggle via
+      SendEmailFollowOnStep's `headerContent` slot (matching the original, which
+      showed the toggle in both places). Both are wired to the same
+      includeShortSummary state/ref.
+    </how-renderSelectedExtra-was-used>
+    <design-decisions>
+      - Card set preserved verbatim: send-email / create-project / work-on-analysis
+        (the last two are intentionally non-canonical plain-string ids — expected
+        per design §5.9 / followOnTypes doc). Labels, descriptions, icons
+        (Mail/FolderAdd/ClipboardTask @28px) and canonical order unchanged.
+      - Removed the imperative prev/next diff useEffect + handleSkipAction +
+        prevSelectedActionsRef; FollowOnGrid now injects/removes each dynamic step
+        at click time via shellRef. Step bodies read dialog form state via refs
+        (same stale-closure-proof pattern as before).
+      - Relocated buildSummaryEmailSubject/buildSummaryEmailBody + the
+        SummaryActionId union into SummarizeFilesDialog.tsx (were exported from
+        the deleted SummarizeSendEmailStep); index.ts re-points there, so the
+        public API is unchanged. No external consumer (pcf/solutions) imported the
+        deleted symbols — verified by grep.
+      - Did NOT touch src/components/index.ts (task 021 owns it) — the root barrel
+        does `export * from './SummarizeFilesWizard'`, so dropping the deleted
+        symbols from the local barrel is sufficient and non-conflicting.
+    </design-decisions>
+    <behavioral-delta>
+      One intentional change: the old Skip was a custom footer button that
+      DESELECTED the card (removing its sidebar step). The shared model uses
+      IWizardStepConfig.isSkippable, whose Skip ADVANCES without deselecting.
+      Mitigation: handleFinish's create-project branch now additionally guards on
+      projectFormValidRef.current, so a skipped/invalid Create Project can no
+      longer fire createProject(EMPTY_PROJECT_FORM). This preserves the original
+      invariant (the old flow could never Finish with an invalid create-project
+      step selected, since Finish was canAdvance-gated). send-email already
+      self-guards on emailTo.trim(); work-on-analysis is side-effect-free. Guard +
+      rationale documented inline.
+    </behavioral-delta>
+    <regression>
+      No SummarizeFilesDialog unit-test harness exists; the follow-on mechanics
+      are covered by the shared FollowOnGrid.test.tsx (select→addDynamicStep with
+      derived id + canonical order, per-card stepLabel/isSkippable/canAdvance,
+      deselect→removeDynamicStep, renderSelectedExtra inline toggle) — all pass.
+      Card labels/descriptions/icons/order, canAdvance predicates, step ids
+      (followon-*), and the email pre-fill + short-summary-rebuild effects were
+      verified identical to the deleted originals by direct comparison.
+    </regression>
+    <own-scope-duplicate-grep>
+      Recursive find for *nextstep*/*sendemail*/*followon* files, at check time
+      (2026-07-08): SummarizeFilesWizard = CLEAN (0 local follow-on files),
+      CreateMatterWizard = CLEAN. Still present (sibling in-flight work, NOT this
+      task's concern): CreateRecordWizard/steps/SendEmailStep.tsx (task 021),
+      CreateWorkAssignmentWizard/CreateFollowOnEventStep.tsx (task 023). Cannot
+      assert full project-wide single-implementation completeness from my own
+      scope — tasks 021/023 must land first. My scope's contribution to the
+      zero-duplicates criterion is complete.
+    </own-scope-duplicate-grep>
+    <quality-gates>
+      code-review: APPROVE — 0 critical, 0 warning; net −531 LOC (Quality
+      Improved); 0 AI code smells. adr-check: 0 violations — ADR-012/021/022
+      compliant (no PCF leak, no v8 imports, no hardcoded colors). typecheck +
+      eslint clean.
+    </quality-gates>
+  </completion-notes>
+
+  <acceptance-criteria>
+    <criterion>No local SummaryNextStepsStep/SummarizeSendEmailStep remains (grep clean).</criterion>
+    <criterion>Grep across the lib shows exactly ONE follow-on implementation (WizardFollowOns) — all four families migrated.</criterion>
+    <criterion>Summarize flow + follow-ons unchanged (regression pass).</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,98 @@
+<task id="043" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-10 compose-summarize-word-changes Action + Binding</title>
+    <phase>4 Catalog</phase>
+    <status>blocked</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>001, 006</dependencies>
+    <blocks>045</blocks>
+    <tags>dataverse, ai, azure-openai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production catalog row on the closed ADR-039 catalog; schema-validation gate + ADR-039/040 compliance. FULL per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prompt + schema authoring reusing the Spike-1 pattern; read/summarize capability, no disposition, invoked by the return-from-Word flow. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-catalog-rows</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author the `compose-summarize-word-changes` capability as an Action row + Click-path Binding row (ADR-039), mirror-first under infra/dataverse/, dispatched through the shipped session-dispatch seam (NO new endpoint). The Action produces a human-friendly summary of what changed in a returned-from-Word DOCX version and returns `{summary, changes: [{kind: "insertion"|"deletion"|"comment"|"structural", location, description}]}` (FR-10). It is invoked by the return-from-Word flow (design §2.5) and consumes the `compose-document` JPS scope. Ships with eval cases in task 045.
+  </prompt>
+
+  <role>
+    AI platform developer fluent in JPS Action authoring, the ADR-039 Action+Binding catalog model, the Word round-trip (DOCX pull / re-anchor) flow, and OpenAiFunctionSchemaValidator constraints.
+  </role>
+
+  <goal>
+    A deployable `compose-summarize-word-changes` Action row (change-summary SystemPrompt + OutputSchemaJson + Temperature + ModelDeploymentId) and its Click-path Binding row, authored mirror-first through the core's hoisted description source, consuming `compose-document`, invoked by the return-from-Word flow, returning schema `{summary: string, changes: [{kind: "insertion"|"deletion"|"comment"|"structural", location, description}]}` passing OpenAiFunctionSchemaValidator with no property-level boolean `required`. Zero new routes; eval-ready for task 045.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-10 + design §2.5 (Return from Word) + §7 (Catalog Roster row 5). A read/summarize action invoked automatically after a Word round-trip (FR-25 pull + FR-27 re-anchor produce the changed-version input): the LLM turns the structured change set into a human-friendly narrative. Consumes the R1 `compose-document` scope (enriched by the FR-22 semantic appendix). No `compose` disposition. Depends on Spike 6 (reverse round-trip) landing the return-from-Word input shape.
+    </background>
+    <relevant-files>
+      <file purpose="input-schema-mirror-NEW">infra/dataverse/inputschemas/compose-summarize-word-changes.input.schema.json — NEW input-schema mirror (proposed actionCode compose-summarize-word-changes; confirm via jps-action-create)</file>
+      <file purpose="output-schema-mirror-NEW">infra/dataverse/outputschemas/compose-summarize-word-changes.schema.json — NEW OutputSchemaJson mirror `{summary, changes[]}`</file>
+      <file purpose="binding-mirror-EXTEND">infra/dataverse/sprk_playbookconsumer-rows.json — EXTEND: Click-path Binding row (consumerType compose-summarize-word-changes / consumerCode default; invoked by the return-from-Word flow)</file>
+      <file purpose="exemplar-input">infra/dataverse/inputschemas/sum-chat-v1.input.schema.json — summarize-Action schema shape to copy</file>
+      <file purpose="dispatch-seam">src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts — Click-path seam (no new route)</file>
+      <file purpose="return-from-word-input">projects/spaarkeai-compose-r2/notes/spikes/spike-6-*.md — the reverse round-trip note that establishes the changed-version input shape this Action consumes</file>
+      <file purpose="spike-1-pattern">projects/spaarkeai-compose-r2/notes/spikes/spike-1-action-schema.md — validated prompt/schema pattern</file>
+      <file purpose="hoist-source">infra/dataverse/ — the core's hoisted description mirror; author the row's description through it</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="not-started">Requires the Spike-1 validated Action prompt/schema pattern.</dependency>
+      <dependency task="006" status="not-started">Requires Spike 6 reverse round-trip — the return-from-Word changed-version input shape this Action summarizes.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Action row + Binding row; the Binding is the ONLY routing config. NO new dispatch endpoint; NO string-key routing. Mirror-first through the core's hoisted description source. Eval cases gate the change. OutputSchemaJson MUST pass OpenAiFunctionSchemaValidator — property-level boolean `required` BANNED (the `kind` enum is expressed via the `enum` keyword).</constraint>
+    <constraint source="ADR-040">Dispatched output is ledger-written by the seam; no parallel cache.</constraint>
+    <constraint source="project">Engine FROZEN — prompted Action, not a playbook. Consumes the R1 `compose-document` scope.</constraint>
+    <constraint source="ADR-038">Golden + dispatch eval families ≥5 each ship with the row (task 045).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/jps-action-authoring, ai/output-schema-validation, word/round-trip</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + gate">Load task, project CLAUDE.md, HANDOFF doc, Spike-1 + Spike-6 notes, knowledge files. CONFIRM core Phase A0 published the triple-twin hoist + dispatch seam before authoring.</step>
+    <step order="1" name="Author Action row">Via jps-action-create, author a change-summary SystemPrompt over the returned-from-Word change set + OutputSchemaJson `{summary: string, changes: [{kind enum[insertion,deletion,comment,structural], location, description}]}`, Temperature, ModelDeploymentId. Write mirrors under infra/dataverse/ through the hoisted source.</step>
+    <step order="2" name="Author Binding row">Add the Click-path Binding row (consumerType compose-summarize-word-changes, consumerCode default, toolDescription) consuming `compose-document`; mark it as invoked by the return-from-Word flow.</step>
+    <step order="3" name="Validate schema">jps-validate: OutputSchemaJson passes OpenAiFunctionSchemaValidator; `kind` via enum keyword; no property-level boolean `required`.</step>
+    <step order="4" name="Verify dispatch path">Confirm the Binding resolves through the shipped seam (zero new routes) when invoked by the return-from-Word flow.</step>
+  </steps>
+
+  <outputs>
+    <output type="config">infra/dataverse/inputschemas/compose-summarize-word-changes.input.schema.json</output>
+    <output type="config">infra/dataverse/outputschemas/compose-summarize-word-changes.schema.json</output>
+    <output type="config">infra/dataverse/sprk_playbookconsumer-rows.json (Binding row added)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A `compose-summarize-word-changes` Action row exists mirror-first with OutputSchemaJson exactly `{summary: string, changes: [{kind: "insertion"|"deletion"|"comment"|"structural", location, description}]}` (closed set).</criterion>
+    <criterion testable="true">A Click-path Binding row (consumerType compose-summarize-word-changes / consumerCode default) consumes `compose-document`, is invoked by the return-from-Word flow, and is the only routing config.</criterion>
+    <criterion testable="true">OutputSchemaJson passes OpenAiFunctionSchemaValidator; `kind` is an enum keyword; no property-level boolean `required`.</criterion>
+    <criterion testable="true">The row's description is authored through the core's hoisted single-source mirror.</criterion>
+    <criterion testable="true">Dispatch resolves through the shipped seam and adds zero new BFF routes; row is eval-ready for task 045.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Consumes core Phase A0 triple-twin description hoist + session-dispatch/invoke seam per notes/HANDOFF-core-r2-A0-contract-requirements.md §7. If the published contract differs from the proposed shape, STOP and reconcile — do not adapt silently.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

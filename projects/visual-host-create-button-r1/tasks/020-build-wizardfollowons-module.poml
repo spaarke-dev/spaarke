@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="visual-host-create-button-r1">
+  <metadata>
+    <title>Build shared WizardFollowOns module + net-new AddTodoFollowOnStep</title>
+    <phase>D: WizardFollowOns Consolidation</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>021,022,023,024</blocks>
+    <tags>shared-lib, consolidation, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New shared module that four existing wizards will consume</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Foundation of a cross-cutting consolidation; the config-driven contract must fit 4 divergent wizard card sets</model-tier-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Create a single config-driven WizardFollowOns module (FollowOnGrid + reusable follow-on steps, incl. the net-new AddTodoFollowOnStep) that will replace the four duplicated Next-Steps implementations. Export from the shared-lib root.</prompt>
+  <role>SPAARKE shared-UI developer. React 18 + Fluent v9. Follow ADR-012 + §11 (one excellent component, not forks).</role>
+  <goal>components/WizardFollowOns/ with FollowOnGrid (config-driven card grid → addDynamicStep, zero-selection = early finish), followOnTypes (FollowOnCardConfig + id/label/canonical-order maps), and reusable steps SendEmailFollowOnStep, AddTodoFollowOnStep (net-new, calls todoService.createTodo), AssignWorkFollowOnStep, CreateEventFollowOnStep, DraftSummaryFollowOnStep; exported from src/index.ts.</goal>
+
+  <context>
+    <background>Today NextSteps/SendEmail are duplicated across CreateRecordWizard, CreateWorkAssignmentWizard, CreateMatterWizard, SummarizeFilesWizard (only EmailStep is shared). design §5.9. The grid must be config-driven so each wizard's card set is FollowOnCardConfig[], not a fork. AddTodoFollowOnStep seeds the To Do's regarding to the created child via applyResolverFields.</background>
+    <relevant-files>
+      src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/ (new)
+      src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/FollowOnSteps.tsx (source of truth to generalize)
+      src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/
+      src/client/shared/Spaarke.UI.Components/src/components/EmailStep/
+      src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/todoService.ts
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      projects/visual-host-create-button-r1/design.md
+      src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/FollowOnSteps.tsx
+      src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/NextStepsSelectionStep.tsx
+      src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/todoService.ts
+      src/client/shared/Spaarke.UI.Components/src/components/EmailStep/SendEmailStep.tsx
+      src/client/shared/Spaarke.UI.Components/src/components/Wizard/wizardShellTypes.ts
+      .claude/adr/ADR-024-polymorphic-resolver-pattern.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Design FollowOnCardConfig { id, label, icon, description, renderStep } + FOLLOW_ON_ID_MAP / LABEL_MAP / CANONICAL_ORDER in followOnTypes.ts.</step>
+    <step>Build FollowOnGrid consuming cards + the shell's addDynamicStep/removeDynamicStep; zero selection = early finish.</step>
+    <step>Move/generalize the reusable steps into steps/: SendEmailFollowOnStep (wraps shared EmailStep), AssignWorkFollowOnStep, CreateEventFollowOnStep, DraftSummaryFollowOnStep.</step>
+    <step>Build net-new AddTodoFollowOnStep: collect To Do fields, call todoService.createTodo, seed regarding to the created child via applyResolverFields.</step>
+    <step>Export the module from src/index.ts. Do NOT yet delete the old copies (that happens in 021-024).</step>
+    <step>Add unit tests for grid selection → dynamic step + AddTodoFollowOnStep create path.</step>
+  </steps>
+
+  <tools>Read, Grep, Edit, Write, Skill(code-review)</tools>
+  <outputs>components/WizardFollowOns/ (FollowOnGrid, followOnTypes, steps/*, index.ts); root export.</outputs>
+
+  <acceptance-criteria>
+    <criterion>A wizard can render an arbitrary FollowOnCardConfig[]; selecting a card adds its dynamic step; zero selection = early finish.</criterion>
+    <criterion>AddTodoFollowOnStep creates a To Do regarding the child via applyResolverFields.</criterion>
+    <criterion>Shared lib builds; tests pass; module exported from root.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <summary>
+      Built the shared, config-driven WizardFollowOns module ALONGSIDE the four
+      existing wizards' local Next-Steps/SendEmail copies (no deletions — that is
+      tasks 021-024, one wizard at a time so each migration is independently
+      regression-testable). All 3 acceptance criteria verified; both quality
+      gates (code-review + adr-check) clean — 0 Critical, 0 Warnings, 0 ADR
+      violations.
+    </summary>
+
+    <abstraction-design>
+      FollowOnCardConfig = { id, label, icon, description, renderStep } plus four
+      OPTIONAL fields that absorb the divergence across the 4 future consumers
+      without any fork:
+        - `stepLabel` — card label vs sidebar label can differ.
+        - `canAdvance` — required-field gate (Send Email requires To/Subject/Body)
+          vs always-optional (Assign Work / Create Event). Defaults to always-true.
+        - `isSkippable` — per-step Skip button.
+        - `renderSelectedExtra` — inline grid UI shown only while a card is
+          selected. This is the key fit for SummarizeFilesWizard, whose Send Email
+          card carries an "include only short summary" toggle IN THE GRID. Without
+          this slot, task 024 would have had to fork the grid. `id` is a plain
+          `string` (not limited to the canonical FollowOnId union), so
+          SummarizeFiles' non-canonical cards (create-project, work-on-analysis)
+          are just config too.
+      Why the four consumers fit: (Matter) assign-counsel/draft-summary/send-email,
+      (WorkAssignment) assign-work/send-email/create-event, (CreateRecord/new
+      wizards) assign-work/add-todo/send-email, (Summarize) send-email +
+      create-project + work-on-analysis with the inline toggle — every difference
+      is expressible as FollowOnCardConfig fields, none needs a grid variant.
+
+      Non-obvious correctness decision: the grid drives addDynamicStep/
+      removeDynamicStep IMPERATIVELY in the card click handler, NOT in a
+      useEffect diff on `selected`. The grid is the "Next Steps" step CONTENT and
+      unmounts whenever the user navigates onto an injected follow-on step; a
+      mount-scoped effect would risk cleanup removing steps on unmount. Driving at
+      click time (grid guaranteed mounted) is robust and keeps the grid a pure,
+      testable function of its props. Canonical sidebar order defaults to the
+      card-array order (a wizard controls ordering by ordering its array);
+      FOLLOW_ON_CANONICAL_ORDER is exported as a convenience default.
+
+      AddTodoFollowOnStep (net-new): the STEP is a thin controlled wrapper reusing
+      the shared CreateTodoStep form (§11 reuse-first); the CREATE path is the
+      exported `createTodoRegardingChild(dataService, formValues, child)` helper
+      the wizard calls in onFinish. It delegates to the ADR-024-compliant
+      TodoService.createTodo, seeding regarding to the JUST-CREATED CHILD (not the
+      host) via the shared applyResolverFields primitive — no duplicated resolver
+      logic. Known limitation surfaced (not a blocker): sprk_kpiassessment is not
+      in TODO_REGARDING_CATALOG, so a To Do cannot be regarding a KPI record;
+      createTodo returns success:false gracefully (test-covered). Task 023/024
+      decides whether KPI offers the Add-To-Do card or the catalog is extended.
+    </abstraction-design>
+
+    <files-touched>
+      NEW: src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/
+        followOnTypes.ts, FollowOnGrid.tsx, index.ts,
+        steps/{SendEmailFollowOnStep, AssignWorkFollowOnStep,
+        CreateEventFollowOnStep, DraftSummaryFollowOnStep, RecipientField (internal),
+        AddTodoFollowOnStep}.tsx,
+        __tests__/{FollowOnGrid, AddTodoFollowOnStep}.test.tsx
+      MODIFIED: src/client/shared/Spaarke.UI.Components/src/components/index.ts
+        (curated named re-export of the new public API).
+    </files-touched>
+
+    <transitional-export-note>
+      A plain `export * from './WizardFollowOns'` at the components barrel FAILS
+      the build (TS2308) because AssignWorkFollowOnStep, CreateEventFollowOnStep,
+      WORK_ASSIGNMENT_PRIORITY, FOLLOW_ON_CANONICAL_ORDER, IRecipientItem (+ prop
+      types) are STILL exported by CreateRecordWizard during the migration window.
+      Per the established codebase convention (SummarizeFilesWizard/index.ts avoids
+      duplicate re-exports), components/index.ts re-exports only the genuinely-new
+      names (FollowOnGrid, FollowOnCardConfig, FOLLOW_ON_ID_MAP, FOLLOW_ON_LABEL_MAP,
+      followOnStepId, SendEmailFollowOnStep, DraftSummaryFollowOnStep,
+      AddTodoFollowOnStep, createTodoRegardingChild + types). The duplicated names
+      remain importable from the WizardFollowOns barrel directly. Verified via grep
+      that NO consumer imports any colliding name from the @spaarke/ui-components
+      root, so nothing regresses. ACTION FOR TASK 021 (or whichever deletes the last
+      CreateRecordWizard follow-on copy): flip components/index.ts to
+      `export * from './WizardFollowOns'`.
+    </transitional-export-note>
+
+    <verification>
+      - tsc --noEmit on the whole shared lib: exit 0 (clean build).
+      - eslint src/components/WizardFollowOns: exit 0.
+      - jest src/components/WizardFollowOns: 7/7 pass (2 suites). FollowOnGrid:
+        arbitrary card set renders, select→addDynamicStep(id=followon-{id},
+        canonicalOrder), per-card stepLabel/isSkippable/canAdvance carried,
+        deselect→removeDynamicStep, zero-selection early-finish hint,
+        renderSelectedExtra inline-on-select. AddTodoFollowOnStep create path:
+        asserts createRecord('sprk_todo', payload) with sprk_regardingrecordid =
+        normalized child GUID + entity-specific @odata.bind to the child invoice +
+        resolver record-type bind; unsupported-entity-type returns success:false
+        without creating.
+      - Quality gates (unconditional, FULL/opus): code-review = Clean (0 crit,
+        0 warn, 2 optional suggestions); adr-check = 4 compliant (ADR-012/021/024/
+        038), 0 warnings, 0 violations, no §6.5 escalation.
+    </verification>
+  </notes>
+</task>

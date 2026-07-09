@@ -1,0 +1,80 @@
+<task id="004" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Spike 4 — semantic appendix hallucination delta</title>
+    <phase>0 Spikes</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>023</blocks>
+    <tags>ai, azure-openai, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Exploratory spike — throwaway generator + measurement recorded as a spike note, not the production Services/Compose service. STANDARD per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prompt-payload enrichment + A/B hallucination measurement; bounded, no architectural blast radius. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build a SemanticAppendixGenerator for the compose-document scope (defined terms, cross-references, structural metadata appended to the scope payload) and measure the LLM hallucination delta WITH vs WITHOUT the appendix over the same set of document questions/edits. This validates that the appendix reduces hallucination before FR-22 (task 023) builds the production generator + CriticMarkup read-direction rendering. Deliverable is a spike note recording the measured delta + the appendix content format.
+  </prompt>
+
+  <role>
+    AI platform developer measuring LLM grounding/hallucination, familiar with adeu's Semantic Appendix pattern and the ADR-039 grounded-output invariant.
+  </role>
+
+  <goal>
+    A spike note at projects/spaarkeai-compose-r2/notes/spikes/spike-4-semantic-appendix.md that unlocks the FR-22 decision: hallucination-reduction validation — a measured WITH-vs-WITHOUT delta over a fixed question/edit set, plus the appendix content format (defined terms, cross-refs, structural metadata) to reproduce in production.
+  </goal>
+
+  <context>
+    <background>
+      Design §6.1 (Semantic Appendix in scope payload) + §13 Spike 4 + spec FR-22. The appendix gives the LLM defined terms, cross-references, and structural metadata so it hallucinates less. This spike measures the delta before task 023 builds SemanticAppendixGenerator + CriticMarkup read-direction rendering for the compose-document scope. Decision unlocked (design §13): hallucination-reduction validation.
+    </background>
+    <relevant-files>
+      <file purpose="target-service-dir">src/server/api/Sprk.Bff.Api/Services/Compose/ — where production SemanticAppendixGenerator lands (task 023); spike prototypes under notes/spikes/</file>
+      <file purpose="dispatch-seam">src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts — reuse the confirmed seam to run the A/B invocations</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependencies — startable immediately (Wave W0).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">The appendix enriches a scope payload consumed by a grounded LLM invocation; the spike honors the grounded-output invariant and dispatches via the shipped seam (no new endpoint).</constraint>
+    <constraint source="ADR-013">Services/Compose code (incl. the appendix generator) MUST NOT inject AI internals; the generator produces a payload, it does not call the model directly. Tier-1 NetArchTest enforces this in production.</constraint>
+    <constraint source="project">Throwaway generator + measurement — production service is FR-22 (task 023); deliverable is a spike note under notes/spikes/.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/grounding, ai/semantic-appendix, ai/hallucination-measurement</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + load">Load this task, project CLAUDE.md, and the knowledge files.</step>
+    <step order="1" name="Build appendix generator">Prototype a SemanticAppendixGenerator that extracts defined terms, cross-references, and structural metadata from a sample document into an appendix payload.</step>
+    <step order="2" name="Design A/B harness">Assemble a fixed set of document questions/edits; run each WITH and WITHOUT the appendix in the scope payload.</step>
+    <step order="3" name="Measure delta">Score hallucination/grounding for each arm and compute the delta.</step>
+    <step order="4" name="Write spike note">Record the measured delta + the appendix content format for FR-22.</step>
+  </steps>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/spikes/spike-4-semantic-appendix.md</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Spike note reports a measured hallucination delta WITH vs WITHOUT the appendix over a fixed question/edit set — the decision the spike unlocks (design §13).</criterion>
+    <criterion testable="true">The appendix content format (defined terms, cross-refs, structural metadata) is specified for production reuse.</criterion>
+    <criterion testable="true">The A/B harness and scoring method are documented so the measurement is reproducible.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

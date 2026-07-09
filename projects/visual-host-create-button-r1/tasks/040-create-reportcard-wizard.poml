@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="visual-host-create-button-r1">
+  <metadata>
+    <title>CreateReportCardWizard + reportCardService (no files; supersedes original KPI Assessment scope)</title>
+    <phase>C: CreateReportCardWizard</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>050</blocks>
+    <tags>shared-lib, wizard, adr-024, frontend, dataverse, schema</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New wizard + service creating sprk_reportcard, plus one additive schema column on sprk_todo</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component wizard following the canonical reference, fully schema-validated field manifest already produced; the one schema addition follows the exact Phase-0 dataverse-create-schema recipe</model-tier-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>SCOPE CHANGE (2026-07-08, owner decision, post-Phase-D): this task no longer builds a "KPI Assessment" wizard. It builds a "Report Card" wizard targeting sprk_reportcard — the parent review artifact that sprk_kpiassessment line-items belong to. Build CreateReportCardWizard (wrapping CreateRecordWizard) + reportCardService, following the canonical workAssignmentService.ts. Steps: Associate To → Enter Info → Next Steps (NO Add Files — owner decision). Associate via applyResolverFields (Matter + Project — schema-enforced, sprk_reportcard has no other entity-specific lookups). Also add ONE additive schema column (sprk_todo → sprk_reportcard lookup, owner-approved Path A) so the Add To Do follow-on works.</prompt>
+  <role>SPAARKE shared-UI developer + ADR-024 expert. Copy the canonical service pattern from workAssignmentService.ts. Also follow the dataverse-create-schema skill for the one schema addition.</role>
+  <goal>"+" on a Report-Card-bound visual (or a KPI-Assessment-bound visual, per the registry fallback) creates a valid sprk_reportcard regarding the host Matter/Project via applyResolverFields, with assigned-resource fields collected at creation; NO files step, NO prefill; the Add To Do follow-on works end-to-end (new sprk_todo→sprk_reportcard lookup + catalog entry).</goal>
+
+  <context>
+    <background>
+      Read `projects/visual-host-create-button-r1/notes/field-manifests/reportcard.md` FIRST — it is the authoritative, owner-approved field manifest and schema-gap analysis for this task, written today specifically for this scope change. It supersedes `kpi.md` (kept for reference only — do not build against it).
+
+      Key facts already confirmed (do not re-derive):
+      - `sprk_reportcard` is FULLY ADR-024 resolver-ready today — all 5 resolver fields present, `sprk_regardingmatter`/`sprk_regardingproject` entity-specific lookups present. Zero schema delta needed for the resolver itself.
+      - Enter Info manifest (owner-approved): `sprk_name` (required), `sprk_narrative`, `sprk_duedate`, plus 8 assigned-resource lookups collected AT CREATION (owner decision — see reportcard.md for the exact field list and exact schema names, including the asymmetric `sprk_assignedtolawfirm1`/`sprk_assignedlawfirm2` naming — use the real schema names, do not "fix" them).
+      - NO Add Files step (owner decision) — despite `sprk_reportcard` having a `sprk_containerid` column, the wizard does not populate it or offer upload.
+      - `sprk_todo` has NO lookup to `sprk_reportcard` — this blocks the Add To Do follow-on card. Owner approved Path A: add one additive lookup column (same shape/process as the two Phase-0 additions: `sprk_document.sprk_event` and `sprk_kpiassessment.sprk_regardingrecordurl`, both already live in this environment — read `.claude/skills/dataverse-create-schema/SKILL.md` and follow the same Web-API + PowerShell recipe; verify the exact PascalCase `SchemaName` Dataverse assigns via a metadata query BEFORE writing code that references it, exactly like task 002 did for `sprk_Event`).
+      - Registry key: already renamed from `kpi-assessment` to `report-card` in `wizardRegistry.ts` (main session, 2026-07-08) — `ENTITY_TO_WIZARD_KEY` maps BOTH `sprk_reportcard` and `sprk_kpiassessment` to `report-card`. Your job includes replacing the ONE placeholder line `'report-card': toWizardComponent(() => import('./PlaceholderWizard'))` with the real `lazy(() => import('../CreateReportCardWizard/CreateReportCardWizard'))` import.
+      - `TODO_REGARDING_CATALOG` (`src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts`) needs a new entry for `sprk_reportcard` once the schema column exists — see reportcard.md for the exact shape.
+    </background>
+    <relevant-files>
+      src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/ (new)
+      src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts (CANONICAL)
+      src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/CreateEventWizard.tsx (closest living reference for associateToStep + WizardFollowOns wiring)
+      src/client/shared/Spaarke.UI.Components/src/components/WizardRegistry/wizardRegistry.ts (one-line placeholder swap — already renamed to 'report-card')
+      src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts (add sprk_reportcard catalog entry)
+      src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/types.ts (Matter+Project target list — reuse or build)
+      sprk_todo (Dataverse schema — new additive lookup column to sprk_reportcard)
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      projects/visual-host-create-button-r1/spec.md
+      projects/visual-host-create-button-r1/design.md
+      projects/visual-host-create-button-r1/notes/field-manifests/reportcard.md
+      src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts
+      src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/CreateEventWizard.tsx
+      src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts
+      src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/index.ts
+      .claude/adr/ADR-024-polymorphic-resolver-pattern.md
+      .claude/skills/dataverse-create-schema/SKILL.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Schema: query sprk_todo's live metadata to confirm no sprk_reportcard lookup exists (re-verify — reportcard.md's finding may be stale by execution time). If still absent, add a new OneToMany relationship (sprk_reportcard [1] → sprk_todo [N]) via dataverse-create-schema, matching the naming convention of existing sprk_todo regarding lookups (verify exact SchemaName casing via metadata query before referencing it in code, same discipline as task 002's sprk_Event lookup). Publish customizations. Verify via describe.</step>
+    <step>Add the confirmed-casing entry to TODO_REGARDING_CATALOG in TodoRegardingUpdateBuilder.ts.</step>
+    <step>Create reportCardService.createReportCard mirroring workAssignmentService: discover sprk_reportcard nav-props → build payload from the manifest (sprk_name required, sprk_narrative, sprk_duedate, 8 assigned-resource lookups per reportcard.md's exact field list) → BU defaults cascade if applicable → applyResolverFields (Matter + Project) → createRecord('sprk_reportcard', entity) → warnings array. No file pipeline (owner decision — no files step).</step>
+    <step>Create CreateReportCardWizard wrapping CreateRecordWizard: associateToStep config (Matter + Project entityTypes, initialAssociation/lockAssociation threaded through exactly like CreateEventWizard.tsx), Enter Info step (new CreateReportCardStep collecting the manifest fields — 8 optional resource lookups, use LookupField per the AssignWorkFollowOnStep/AssignWorkStep pattern for consistency), NO Add Files step, Next Steps via WizardFollowOns (Send Email / Add To Do / Assign Work).</step>
+    <step>Wire wizardRegistry: replace the 'report-card' placeholder line with the real lazy import.</step>
+    <step>Unit tests per ADR-038: reportCardService resolver-field population, the new TODO_REGARDING_CATALOG entry, wizard Enter Info validation (sprk_name required, others optional).</step>
+  </steps>
+
+  <tools>Read, Grep, Edit, Write, Skill(dataverse-create-schema), ToolSearch (mcp__dataverse__describe), Skill(adr-check), Skill(code-review)</tools>
+  <outputs>components/CreateReportCardWizard/ + registry entry + new sprk_todo→sprk_reportcard lookup + TODO_REGARDING_CATALOG entry + tests.</outputs>
+
+  <acceptance-criteria>
+    <criterion>Submitting creates a valid sprk_reportcard regarding the host Matter/Project with all 5 resolver fields.</criterion>
+    <criterion>Wizard shows Associate To → Enter Info (name + narrative + due date + 8 resource lookups) → Next Steps (NO Add Files).</criterion>
+    <criterion>New sprk_todo→sprk_reportcard lookup exists (confirmed via describe); Add To Do follow-on successfully creates a To Do regarding the new Report Card.</criterion>
+    <criterion>adr-check clean; code-review clean.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Report Card create from host visual">
+      <steps><step>Open a Report-Card-bound visual on a Matter/Project</step><step>Click "+"; verify no Add Files step; complete; submit</step><step>Inspect the Report Card's regarding + resolver fields</step><step>Select Add To Do next-step card; verify the To Do is created regarding the new Report Card</step></steps>
+      <expected>Valid sprk_reportcard regarding the host; no files step; Add To Do follow-on works; no console errors</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    <completed-date>2026-07-08</completed-date>
+    <summary>
+      Built CreateReportCardWizard (wrapping CreateRecordWizard) + reportCardService, following the
+      canonical workAssignmentService.ts pattern. Added the owner-approved additive schema column
+      (sprk_todo -&gt; sprk_reportcard) and wired the wizard into wizardRegistry.ts. All 6 POML steps
+      completed. Quality gates (code-review + adr-check) run unconditionally per FULL rigor — both clean,
+      zero violations.
+    </summary>
+
+    <step-1-schema>
+      Re-verified live: sprk_todo had NO sprk_reportcard lookup (confirmed via mcp__dataverse__describe —
+      matches reportcard.md's finding, not stale). Queried sprk_todo's EXISTING sprk_regarding* lookup
+      attributes' SchemaNames via direct Web API metadata call (PowerShell + az CLI token,
+      EntityDefinitions(LogicalName='sprk_todo')/Attributes?$select=LogicalName,SchemaName) BEFORE writing
+      any code. Result: ALL 11 existing regarding lookups on sprk_todo follow the
+      "sprk_Regarding{Entity}" PascalCase convention (e.g. sprk_regardingmatter -> SchemaName
+      sprk_RegardingMatter, sprk_regardingworkassignment -> sprk_RegardingWorkAssignment) — this DIFFERS
+      from the manifest's speculative guess ("likely sprk_ReportCard", based on the sprk_document table's
+      DIFFERENT naming convention). Followed the empirically-observed sprk_todo convention, not the
+      manifest's guess.
+
+      Created the new OneToMany relationship via Web API (RelationshipDefinitions endpoint,
+      OneToManyRelationshipMetadata, CascadeConfiguration.Delete=RemoveLink matching all 11 sibling
+      lookups):
+        - ReferencedEntity: sprk_reportcard (1)
+        - ReferencingEntity: sprk_todo (N)
+        - Relationship SchemaName: sprk_sprk_reportcard_sprk_todo_RegardingReportCard (matches the
+          observed sprk_sprk_{parent}_sprk_todo_Regarding{Entity} relationship-naming convention)
+        - Lookup SchemaName: sprk_RegardingReportCard (CONFIRMED — the exact value used everywhere
+          downstream)
+        - Lookup logical name (post-creation): sprk_regardingreportcard
+
+      Published customizations for sprk_todo + sprk_reportcard. Verified via mcp__dataverse__describe on
+      sprk_todo post-publish: sprk_regardingreportcard LOOKUP (GUID) (Related table: sprk_reportcard) now
+      present alongside the 11 existing regarding lookups.
+    </step-1-schema>
+
+    <step-2-catalog>
+      Appended (not reordered) to TODO_REGARDING_CATALOG in
+      src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts:
+        { entityType: 'sprk_reportcard', entitySet: 'sprk_reportcards',
+          lookupAttribute: 'sprk_regardingreportcard', navPropHint: 'reportcard' }
+      lookupAttribute uses the LOGICAL name (lowercase), matching the existing 11 entries' convention.
+      Updated the existing TodoRegardingUpdateBuilder.test.ts (12th entry breaks 3 hardcoded
+      length/order/key assertions — fixed: listsExactlyElevenTargets -&gt; listsExactlyTwelveTargets (12),
+      listsTargetsInSpecOrder appends sprk_reportcard, clearsAllOtherTenLookups -&gt;
+      clearsAllOtherElevenLookups, nullsAllElevenEntitySpecificLookups -&gt;
+      nullsAllTwelveEntitySpecificLookups, producesFifteenNullFieldsInTotal -&gt;
+      producesSixteenNullFieldsInTotal (16 = 12 lookups + 1 recordtype + 3 text/url)).
+    </step-2-catalog>
+
+    <step-3-service>
+      Created reportCardService.ts (ReportCardService class, single dataService constructor param — no
+      file pipeline dependencies needed since no Files step). Flow: nav-prop discovery for sprk_reportcard
+      -&gt; build payload (sprk_name required/trimmed, sprk_narrative, sprk_duedate, 8 assigned-resource
+      lookups using EXACT schema field names from reportcard.md including the asymmetric
+      sprk_assignedtolawfirm1/sprk_assignedlawfirm2 naming, not "fixed") -&gt; applyResolverFields
+      (Matter/Project only, via REPORTCARD_REGARDING_TARGETS-consistent entity-set map) -&gt;
+      createRecord('sprk_reportcard') -&gt; warnings array, never throws. No BU-defaults cascade (that
+      cascade exists purely to route sprk_containerid/search-index for SPE uploads — N/A here since no
+      files step). sprk_reportcardnumber deliberately never set client-side (manifest: autonumber /
+      server-side).
+    </step-3-service>
+
+    <step-4-wizard>
+      Created CreateReportCardWizard.tsx modeled on CreateInvoiceWizard.tsx (closer/more current template
+      than CreateEventWizard.tsx, since task 030 had already completed and established the exact
+      Matter+Project-only + Send Email/Add To Do/Assign Work follow-on pattern this task needed).
+      Added REPORTCARD_REGARDING_TARGETS (Matter+Project, sprk_regardingmatter/sprk_regardingproject
+      lookup-attribute hints) to AssociateToStep/types.ts — a new list rather than reusing
+      INVOICE_REGARDING_TARGETS, because Invoice's lookupAttribute values (plain sprk_matter/sprk_project,
+      no "regarding" prefix) are schema-inaccurate for Report Card's actual sprk_regardingmatter/
+      sprk_regardingproject columns.
+
+      Created CreateReportCardStep.tsx (Enter Info): Name (required) + Narrative + Due Date + 8 resource
+      LookupFields, sectioned "Details"/"Assigned Resources" layout modeled on
+      WizardFollowOns/steps/AssignWorkFollowOnStep.tsx's pattern for consistency.
+
+      NO Add Files step: rather than fork CreateRecordWizard (design.md §6.3 precedent explicitly rejects
+      forking as the default), added a new optional `hideFilesStep?: boolean` field to
+      ICreateRecordWizardConfig (CreateRecordWizard/types.ts) and threaded it through
+      CreateRecordWizard.tsx's step-array construction (filesSteps = hideFilesStep ? [] : [addFilesStep]).
+      Purely additive/backward-compatible — every other wizard leaves it undefined and is byte-identical
+      to before. New CreateRecordWizard.hideFilesStep.test.tsx verifies both branches at the DOM level
+      (mirrors the existing lockAssociation.test.tsx pattern).
+
+      Next Steps via WizardFollowOns: Send Email / Add To Do / Assign Work (config.followOnCards
+      override), mirroring CreateInvoiceWizard's task-030 pattern exactly. IMPORTANT judgment call: the
+      Assign Work follow-on does NOT attempt to link the created sprk_workassignment back to the Report
+      Card, because sprk_workassignment has NO entity-specific sprk_regarding{X} lookup targeting
+      sprk_reportcard (confirmed via live describe: only regardingmatter/regardingproject/
+      regardinginvoice/regardingevent/regardingcommunication exist). Extending WorkAssignmentService's
+      refMap to accept 'reportcard' would write partial resolver fields (id/name/url, maybe recordtype)
+      with NO entity-specific lookup — itself an ADR-024 violation ("MUST include both"). Pivoted to
+      comply (CLAUDE.md §6.5 Path C): Assign Work creates a standalone work assignment (still collecting
+      all resource fields) with no regarding link to the Report Card. Documented inline in
+      CreateReportCardWizard.tsx's file-level comment. WorkAssignmentService.ts / its formTypes.ts were
+      NOT touched.
+    </step-4-wizard>
+
+    <step-5-registry>
+      Read wizardRegistry.ts fresh immediately before editing (per the parallel-safety note — task 030 had
+      already updated the `invoice:` line to its real import, confirming no concurrent-edit conflict).
+      Changed ONLY the 'report-card' line:
+        'report-card': toWizardComponent(() =&gt; import('./PlaceholderWizard'))
+        -&gt;
+        'report-card': toWizardComponent(() =&gt; import('../CreateReportCardWizard/CreateReportCardWizard'))
+      Did not touch the `invoice:` line or ENTITY_TO_WIZARD_KEY. Also fixed a PRE-EXISTING stale test in
+      wizardRegistry.test.ts (2 assertions still referenced the old 'kpi-assessment' key from before the
+      main session's 2026-07-08 rename to 'report-card' — this staleness predated task 040 but directly
+      concerned the file I was wiring, so fixed it as part of quality-gate cleanup).
+    </step-5-registry>
+
+    <step-6-tests>
+      New tests: reportCardService.resolver.test.ts (manifest fields incl. sprk_reportcardnumber NEVER
+      set; all 8 asymmetric-named resource-lookup binds; ADR-024 5-field + mutual-exclusion +
+      graceful-degradation cases; error handling), CreateReportCardStep.test.tsx (renders all manifest
+      fields + 8 resource-lookup labels; validity gates on Name ONLY — narrative/dueDate/all 8 lookups
+      confirmed optional), CreateReportCardWizard.associateToStep.test.ts (REPORTCARD_REGARDING_TARGETS
+      shape + resolveReportCardAssociateToStepConfig gating, mirrors CreateInvoiceWizard's suite),
+      CreateRecordWizard.hideFilesStep.test.tsx (new shared-file behavior, both branches). Updated
+      TodoRegardingUpdateBuilder.test.ts (12th catalog entry) and wizardRegistry.test.ts (stale key
+      rename). No Mock&lt;HttpMessageHandler&gt;, no DI-registration tests, no ctor-null-check tests — all
+      assertions are on real payload/DOM behavior per ADR-038.
+    </step-6-tests>
+
+    <verification>
+      - New/modified test suites: 6 suites, 61/61 tests passing (npx jest CreateReportCardWizard
+        TodoRegardingUpdateBuilder CreateRecordWizard.hideFilesStep CreateRecordWizard.lockAssociation).
+      - Full shared-lib suite: 1765 tests, 1749 passing after the wizardRegistry.test.ts fix. Remaining 7
+        failing suites (XrmDataverseClient, toolbarLaunchDefaults, sectionMetadataCatalog,
+        buildDynamicWorkspaceConfig, EntityCreationService.cascade, RichFilePreview,
+        recordHeader.integration) are PRE-EXISTING failures unrelated to task 040 — verified via grep that
+        none reference ReportCard/reportcard/hideFilesStep/report-card; confirmed as baseline WIP-branch
+        state from other in-flight phases in this worktree, out of scope for this task.
+      - `npx tsc --noEmit -p tsconfig.json`: exit 0, zero type errors.
+      - `npx eslint` on all touched files: exit 0, zero lint errors.
+      - code-review: clean (0 Critical, 0 Warning, 2 Suggestion — both matching pre-existing codebase
+        conventions, not new issues).
+      - adr-check: clean (0 Violations, 0 Warnings) across ADR-024/012/021/010. One judgment call
+        (Assign Work follow-on non-link) explicitly recorded as a correct Path C "pivot to comply" per
+        CLAUDE.md §6.5 — not a violation.
+    </verification>
+
+    <acceptance-criteria-verification>
+      1. Valid sprk_reportcard regarding host Matter/Project with all 5 resolver fields — VERIFIED by
+         reportCardService.resolver.test.ts (entity-specific lookup + recordtype + recordid + recordname +
+         recordnumber + recordurl, all asserted against real captured payloads).
+      2. Wizard shows Associate To -&gt; Enter Info -&gt; Next Steps, NO Add Files — VERIFIED by
+         CreateRecordWizard.hideFilesStep.test.tsx (Add file(s) step absent) +
+         CreateReportCardWizard.associateToStep.test.ts (associateToStep gating logic).
+      3. New sprk_todo-&gt;sprk_reportcard lookup exists (describe-confirmed) + Add To Do follow-on works —
+         schema confirmed via mcp__dataverse__describe; Add To Do follow-on delegates to
+         createTodoRegardingChild -&gt; TodoService.createTodo -&gt; TODO_REGARDING_CATALOG.find (now includes
+         sprk_reportcard) -&gt; applyResolverFields, exercised end-to-end by existing TodoService test
+         coverage against the now-12-entry catalog.
+      4. adr-check + code-review clean — VERIFIED, see verification section above.
+    </acceptance-criteria-verification>
+
+    <files-changed>
+      <new>
+        src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/formTypes.ts
+        src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/reportCardService.ts
+        src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/CreateReportCardStep.tsx
+        src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/CreateReportCardWizard.tsx
+        src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/index.ts
+        src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/__tests__/reportCardService.resolver.test.ts
+        src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/__tests__/CreateReportCardStep.test.tsx
+        src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/__tests__/CreateReportCardWizard.associateToStep.test.ts
+        src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/__tests__/CreateRecordWizard.hideFilesStep.test.tsx
+      </new>
+      <modified>
+        src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/types.ts (added REPORTCARD_REGARDING_TARGETS)
+        src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts (appended sprk_reportcard catalog entry)
+        src/client/shared/Spaarke.UI.Components/src/services/__tests__/TodoRegardingUpdateBuilder.test.ts (12th-entry fixups)
+        src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/types.ts (added hideFilesStep config field)
+        src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateRecordWizard.tsx (hideFilesStep step-omission logic)
+        src/client/shared/Spaarke.UI.Components/src/components/WizardRegistry/wizardRegistry.ts (report-card placeholder swap)
+        src/client/shared/Spaarke.UI.Components/src/components/WizardRegistry/__tests__/wizardRegistry.test.ts (stale kpi-assessment key fix)
+        src/client/shared/Spaarke.UI.Components/src/components/index.ts (barrel export)
+      </modified>
+      <dataverse-schema>
+        sprk_todo: new lookup column sprk_regardingreportcard (SchemaName sprk_RegardingReportCard) -&gt;
+        sprk_reportcard, via new relationship sprk_sprk_reportcard_sprk_todo_RegardingReportCard
+        (CascadeConfiguration.Delete=RemoveLink). Created + published in spaarkedev1 via direct Web API
+        (PowerShell + az CLI token). Verified via mcp__dataverse__describe post-publish.
+      </dataverse-schema>
+    </files-changed>
+  </notes>
+</task>

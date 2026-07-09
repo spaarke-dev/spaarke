@@ -1,0 +1,119 @@
+<task id="014" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-05 optional parent-association prompt (Tier 2c dialog integration)</title>
+    <phase>1 Entry</phase>
+    <status>not-started</status>
+    <estimated-hours>12</estimated-hours>
+    <effort>high</effort>
+    <dependencies>013</dependencies>
+    <blocks>082</blocks>
+    <tags>frontend,dataverse</tags>
+    <rigor-hint reason="Modifies .tsx dialog + association write path; FULL per TASK-INDEX">FULL</rigor-hint>
+    <model-tier reason="UI + association write reusing existing record-creation association mechanism; no architectural blast radius">sonnet</model-tier>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe reason="Splittable: the association-selection half (dropdown + write) is independent; the gate-dialog-hosting half waits on core GateDecision v2 (Tier 2c dialog). Serialize only against 013 (needs the create pipeline)">true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create-on-save (013) persists a Spaarke Document with NO required parent — a standalone Document is
+    valid. FR-05 adds an OPTIONAL association step: inside the Tier-2c save dialog, prompt the user to
+    optionally associate the new Document to matter / project / invoice / work-assignment / none. Container
+    is NOT prompted (it is resolved deterministically from the business unit in 013). This is splittable:
+    the association-SELECTION + association-WRITE half is independent and can be built now against the
+    existing record-association mechanism; the half that HOSTS the prompt INSIDE the one gate dialog waits
+    on core Phase A0 `GateDecision v2` (Policy v2 Tier 2c). Build the independent half; stub/guard the
+    gate-hosting half behind the core contract so no bespoke confirmation banner is introduced.
+  </prompt>
+
+  <role>
+    React/TypeScript + Dataverse developer fluent in Fluent UI v9 dialogs and Spaarke record-association
+    (regarding/lookup) writes. You reuse the existing association mechanism used by matter/project record
+    creation; you do not invent a new association surface.
+  </role>
+
+  <goal>
+    On first Save, the user can optionally pick a parent (matter / project / invoice / work-assignment /
+    none); the selected association is written to the new `sprk_document` via the existing association
+    mechanism; "none" leaves the Document standalone (valid). The prompt lives inside the one Tier-2c gate
+    dialog (no bespoke banner); the gate-hosting integration is guarded behind core `GateDecision v2`.
+  </goal>
+
+  <context>
+    <background>
+      Handoff §4 (`GateDecision v2` / Confirmation Policy v2 Tier 2c): the one gate dialog HOSTS the
+      create-on-save optional-association prompt; container is not prompted; no bespoke confirm banner
+      anywhere. Association reuses the same mechanism as new matter/project record creation (design §2.7c).
+      Because the gate-dialog contract is core-A0-gated, split the task: association selection+write now;
+      gate-dialog hosting guarded behind the published contract.
+    </background>
+    <relevant-files>
+      <file purpose="create-pipeline" edit="false">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file purpose="save-dialog" edit="true">src/solutions/SpaarkeAi/src/components/**</file>
+      <file purpose="compose-workspace" edit="maybe">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+    </relevant-files>
+    <notes>
+      Confirm the exact association write API (regarding/lookup) used by matter/project creation during
+      Step 2 discovery. The five choices are matter / project / invoice / work-assignment / none.
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Association prompt is Fluent v9 + dark mode; no v8, no hardcoded colors.</constraint>
+    <constraint source="ADR-028">Association write fetch uses `@spaarke/auth`; never a raw Bearer.</constraint>
+    <constraint source="project">Association is OPTIONAL — "none" yields a valid standalone Document; do NOT block Save on a parent.</constraint>
+    <constraint source="project">The prompt lives INSIDE the one Tier-2c gate dialog — NO bespoke confirmation banner (Policy v2 kills that friction class).</constraint>
+    <constraint source="project">Container is NOT prompted (resolved from business unit in 013).</constraint>
+    <constraint source="core-A0">The gate-dialog-hosting integration consumes core `GateDecision v2`; guard it behind the published contract — do not fork a local Tier-2c dialog.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose/create-on-save, fluent-v9-dialog, dataverse-association, gate-policy</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarkeai-compose-r2/notes/HANDOFF-core-r2-A0-contract-requirements.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <justification component="Optional parent-association prompt (reuses record-association mechanism)">
+    <existing>Matter/project record creation already has an association (regarding/lookup) write mechanism; the Tier-2c gate dialog is the sanctioned confirm surface.</existing>
+    <extension>Reuse the association mechanism + host the prompt inside the existing gate dialog; no new association surface, no new dialog.</extension>
+    <cost-of-doing-nothing>Without it, a created Document can never be linked to its matter/project at creation time, forcing a separate manual lookup — the friction FR-05 explicitly removes; flagship gate (082) create leg is incomplete.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Load spec.md FR-05 + handoff §4. Confirm the association write API and the five choices. Verify 013's create pipeline is complete.</step>
+    <step order="1">Build the association-selection UI (matter / project / invoice / work-assignment / none) and the write path via the existing mechanism (independent half).</step>
+    <step order="2">Wire the selected association into the create-on-save completion so the new `sprk_document` gets the parent; "none" leaves it standalone.</step>
+    <step order="3">Guard the gate-dialog-hosting integration behind core `GateDecision v2`; where the contract is unpublished, host the prompt in the sanctioned dialog surface without introducing a bespoke banner.</step>
+    <step order="4">Add ui-tests (selection renders, write fires, "none" path). Build the package; run tests.</step>
+    <step order="5">Run code-review + adr-check (Step 9.5). Update TASK-INDEX + current-task.md.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/**</output>
+    <output type="test">src/solutions/SpaarkeAi/src/components/__tests__/CreateOnSaveAssociation.test.tsx</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test name="association-choices-render">The prompt renders all five choices (matter / project / invoice / work-assignment / none) in Fluent v9.</ui-test>
+    <ui-test name="write-on-select">Selecting a parent writes the association to the new `sprk_document` via the existing mechanism (auth from @spaarke/auth).</ui-test>
+    <ui-test name="none-is-standalone">Choosing "none" completes Save with a valid standalone Document (no association write).</ui-test>
+    <ui-test name="dark-mode">Prompt renders correctly in dark mode (ADR-021); no bespoke confirmation banner exists.</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The save flow prompts (optionally) to associate to matter / project / invoice / work-assignment / none.</criterion>
+    <criterion testable="true">Selecting a parent writes the association to the new `sprk_document` via the existing record-association mechanism.</criterion>
+    <criterion testable="true">Choosing "none" yields a valid standalone Document; Save is never blocked on a parent.</criterion>
+    <criterion testable="true">The prompt lives inside the one Tier-2c gate dialog; no bespoke confirmation banner is introduced.</criterion>
+    <criterion testable="true">Container is not prompted (resolved from business unit in 013).</criterion>
+    <criterion testable="true">The gate-dialog-hosting integration is guarded behind core `GateDecision v2` (no forked local dialog).</criterion>
+    <criterion testable="true">Prompt renders in light + dark mode (ADR-021); fetches use `@spaarke/auth`; ui-tests pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -4,11 +4,16 @@
  * Builds a Web API `updateRecord` payload for `sprk_todo` regarding edits per
  * spec.md FR-13 / ADR-024 (Polymorphic Resolver Pattern).
  *
- * The eleven `sprk_regarding*` lookups on `sprk_todo` are mutually exclusive
+ * The twelve `sprk_regarding*` lookups on `sprk_todo` are mutually exclusive
  * (at most one populated at a time). When a user changes the regarding from
  * one entity type to another, the previous entity-specific lookup MUST be
  * cleared in the same update. When the user clears regarding entirely, all
- * fifteen fields (11 lookups + 4 resolver fields) MUST be nulled.
+ * sixteen fields (12 lookups + 4 resolver fields) MUST be nulled.
+ *
+ * The 12th target (`sprk_reportcard`) was added by visual-host-create-button-r1
+ * task 040 — an additive `sprk_todo.sprk_regardingreportcard` lookup column
+ * (SchemaName `sprk_RegardingReportCard`, verified via live metadata query)
+ * enabling the "Add To Do" follow-on from `CreateReportCardWizard`.
  *
  * This helper centralizes that clear-and-set semantic so SmartTodo, future
  * Outlook add-in surfaces, and any other host that edits `sprk_todo` regarding
@@ -49,7 +54,9 @@ export interface ITodoRegardingTargetCatalogEntry {
 }
 
 /**
- * The eleven canonical `sprk_todo` regarding targets, in spec.md FR-07 order.
+ * The twelve canonical `sprk_todo` regarding targets. The first eleven are in
+ * spec.md FR-07 order; `sprk_reportcard` was appended 12th (not reordered
+ * into FR-07 order) by visual-host-create-button-r1 task 040.
  *
  * Entity-set names follow Dataverse plural convention:
  *   - `sprk_matter` → `sprk_matters`
@@ -115,6 +122,12 @@ export const TODO_REGARDING_CATALOG: ReadonlyArray<ITodoRegardingTargetCatalogEn
     entitySet: 'sprk_documents',
     lookupAttribute: 'sprk_regardingdocument',
     navPropHint: 'document',
+  },
+  {
+    entityType: 'sprk_reportcard',
+    entitySet: 'sprk_reportcards',
+    lookupAttribute: 'sprk_regardingreportcard',
+    navPropHint: 'reportcard',
   },
 ] as const;
 
