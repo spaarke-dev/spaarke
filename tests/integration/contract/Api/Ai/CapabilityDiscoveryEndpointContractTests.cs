@@ -283,14 +283,14 @@ public sealed class CapabilityDiscoveryEndpointTestFixture : IAsyncLifetime, IDi
         string consumerType,
         string? toolDescription = "Do the thing.",
         string[]? surfaces = null) => new()
-    {
-        BindingId = new Guid(++_bindingCounter, 0, 0, new byte[8]),
-        ConsumerType = consumerType,
-        ConsumerCode = "default",
-        Environment = "*",
-        ToolDescription = toolDescription,
-        Surfaces = surfaces ?? Array.Empty<string>(),
-    };
+        {
+            BindingId = new Guid(++_bindingCounter, 0, 0, new byte[8]),
+            ConsumerType = consumerType,
+            ConsumerCode = "default",
+            Environment = "*",
+            ToolDescription = toolDescription,
+            Surfaces = surfaces ?? Array.Empty<string>(),
+        };
 
     public HttpClient CreateAuthenticatedClient()
     {

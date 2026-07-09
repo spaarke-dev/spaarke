@@ -315,6 +315,93 @@ public class OutputRouterTests
         persister.Persisted.Should().BeEmpty("a session without a host record has no persistence target");
     }
 
+    // ─── OutcomeCard coverage (task 035 / FR-A1-06 / NFR-09) ─────────────────────────────────────
+    // OutputRouter is the SINGLE universal disposition surface for the auto-executed AND event
+    // paths (EventRulesService routes every event-path output through RouteAsync). Composing the
+    // OutcomeCard here — AFTER the ledger write — is how every completing route on both paths
+    // yields a card that references the STORED output (store-before-render), riding this
+    // disposition surface with no second rendering path.
+
+    [Fact]
+    public async Task RouteAsync_InformationalDisposition_YieldsOutcomeCardReferencingStoredEntry()
+    {
+        var binding = BuildBinding() with
+        {
+            ChipTransitions = new[] { new ChipTransition { ChipLabel = "Draft an email", TargetBindingId = "UC-B-1" } },
+        };
+
+        var routed = await CreateSut().RouteAsync(
+            BuildSession(), binding, ParseJson("""{"summary":"The matter was summarized."}"""));
+
+        routed.Outcome.Should().NotBeNull("every completing route yields an OutcomeCard (NFR-09)");
+        routed.Outcome!.LedgerOutputKey.Should().Be(routed.Entry.Key,
+            "the card renders the STORED ledger output (store-before-render — ADR-040)");
+        routed.Outcome.Status.Should().Be(OutcomeStatus.Succeeded);
+        routed.Outcome.Summary.UserFacing.Should().Be("The matter was summarized.");
+        routed.Outcome.NextSteps.Should().ContainSingle().Which.Label.Should().Be("Draft an email",
+            "next-step chips come from the Binding's DECLARED transitions");
+    }
+
+    [Fact]
+    public async Task RouteAsync_EmailDisposition_YieldsOutcomeCardAfterDelivery()
+    {
+        var binding = BuildBinding() with { Disposition = BindingDisposition.Email };
+        var sender = new RecordingEmailSender(_sessionManager);
+        var payload = ParseJson("""
+            {"summary":"Draft ready.","email":{"to":["u@x.com"],"subject":"s","htmlBody":"<html>b</html>"}}
+            """);
+
+        var routed = await new OutputRouter(_sessionManager, Mock.Of<ILogger<OutputRouter>>(), sender)
+            .RouteAsync(BuildSession(), binding, payload);
+
+        routed.Outcome.Should().NotBeNull();
+        routed.Outcome!.LedgerOutputKey.Should().Be(routed.Entry.Key);
+        routed.Outcome.Status.Should().Be(OutcomeStatus.Succeeded);
+    }
+
+    [Fact]
+    public async Task RouteAsync_WorkProductDisposition_YieldsOutcomeCardAfterPersist()
+    {
+        var binding = BuildBinding() with { Disposition = BindingDisposition.WorkProduct };
+        var persister = new RecordingWorkProductPersister(_sessionManager);
+
+        var routed = await new OutputRouter(
+                _sessionManager, Mock.Of<ILogger<OutputRouter>>(), emailSender: null, workProductPersister: persister)
+            .RouteAsync(BuildSessionWithHostContext(), binding, ParseJson("""{"summary":"WP saved."}"""));
+
+        routed.Outcome.Should().NotBeNull();
+        routed.Outcome!.LedgerOutputKey.Should().Be(routed.Entry.Key);
+    }
+
+    [Theory]
+    [InlineData(BindingDisposition.Informational)]
+    [InlineData(BindingDisposition.Email)]
+    [InlineData(BindingDisposition.WorkProduct)]
+    public async Task RouteAsync_EveryCompletingDisposition_YieldsOutcomeCard_NoPathCompletesCardLess(
+        BindingDisposition disposition)
+    {
+        // NEGATIVE NFR-09 guard: a side-effect COMPLETING on the auto-executed/event path WITHOUT
+        // an OutcomeCard is a coverage failure. This theory fails the moment any completing
+        // disposition returns a card-less RoutedOutput.
+        var binding = BuildBinding() with { Disposition = disposition };
+        var session = disposition == BindingDisposition.WorkProduct ? BuildSessionWithHostContext() : BuildSession();
+        var payload = disposition == BindingDisposition.Email
+            ? ParseJson("""{"email":{"to":["u@x.com"],"subject":"s","htmlBody":"b"}}""")
+            : ParseJson("""{"summary":"done"}""");
+
+        var router = new OutputRouter(
+            _sessionManager, Mock.Of<ILogger<OutputRouter>>(),
+            emailSender: new RecordingEmailSender(_sessionManager),
+            workProductPersister: new RecordingWorkProductPersister(_sessionManager));
+
+        var routed = await router.RouteAsync(session, binding, payload);
+
+        routed.Outcome.Should().NotBeNull(
+            $"disposition '{disposition}' completes a side effect and MUST yield an OutcomeCard (NFR-09)");
+        routed.Outcome!.LedgerOutputKey.Should().Be(routed.Entry.Key,
+            "the card always references the STORED ledger output (store-before-render)");
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────────────────────────────────
 
     private static Binding BuildBinding() => new()

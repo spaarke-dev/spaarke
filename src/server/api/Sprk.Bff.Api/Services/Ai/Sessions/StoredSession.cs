@@ -170,4 +170,8 @@ public class StoredSession
     /// <summary>Pending-confirmation / elicitation gate markers.</summary>
     [JsonPropertyName("gates")]
     public List<StoredGate> Gates { get; set; } = [];
+
+    /// <summary>Per-turn ContextEnvelope fingerprints (identifiers/counts only — NFR-07; AIR2-038).</summary>
+    [JsonPropertyName("contextFingerprints")]
+    public List<StoredContextFingerprint> ContextFingerprints { get; set; } = [];
 }

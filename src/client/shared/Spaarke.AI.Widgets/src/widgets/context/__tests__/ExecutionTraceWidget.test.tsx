@@ -338,3 +338,144 @@ describe('ExecutionTraceWidget — defensive handling', () => {
     expect(screen.queryByText('No execution trace yet')).not.toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// AIR2-038 / FR-A1-09 — server ToolChain read surface (hard-refresh backfill)
+// + host-embeddable decision-traceability view + live narration
+// ---------------------------------------------------------------------------
+
+/** A server TraceEvent v1 record (camelCase wire shape). */
+type ServerTraceEvent = {
+  version?: string;
+  sequence: number;
+  turn: number;
+  kind: string;
+  timestamp?: string;
+  fingerprintId?: string;
+  contextSliceCount?: number;
+  toolCallCount?: number;
+  toolId?: string;
+  resultCount?: number;
+  citations?: readonly string[];
+  durationMs?: number;
+  gateId?: string;
+  gateKind?: string;
+  status?: string;
+  sideEffectClass?: string;
+};
+
+/** A full-lineage server trace for one turn: context -> chain -> call -> gate. */
+function serverLineage(): ServerTraceEvent[] {
+  return [
+    { version: 'trace-event/v1', sequence: 0, turn: 1, kind: 'context', fingerprintId: 'fp-1', contextSliceCount: 4 },
+    { version: 'trace-event/v1', sequence: 1, turn: 1, kind: 'tool_chain', toolCallCount: 1 },
+    {
+      version: 'trace-event/v1',
+      sequence: 2,
+      turn: 1,
+      kind: 'tool_call',
+      toolId: 'sprk_document_search',
+      resultCount: 3,
+      durationMs: 120,
+    },
+    {
+      version: 'trace-event/v1',
+      sequence: 3,
+      turn: 1,
+      kind: 'gate',
+      gateId: 'g-1',
+      gateKind: 'confirmation',
+      status: 'pending',
+      sideEffectClass: 'write',
+    },
+  ];
+}
+
+describe('ExecutionTraceWidget — server trace read surface (AIR2-038)', () => {
+  it('rehydrates prior-turn trace from the server on mount (closes the hard-refresh mount-gap)', async () => {
+    // A hard refresh: the in-memory buffer is empty (new page load). The host
+    // provides restoreTrace wired to GET /sessions/{id}/trace. The widget must
+    // backfill the trace from the durable server ledger.
+    const restoreTrace = jest.fn(async (_sessionId: string) => serverLineage());
+
+    renderWidget({ data: { sessionId: 's-1', restoreTrace } });
+
+    // Tool-call rows are restored from the server stream.
+    const rows = await screen.findAllByTestId('execution-trace-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveAttribute('data-tool-id', 'sprk_document_search');
+    expect(restoreTrace).toHaveBeenCalledWith('s-1');
+    expect(screen.queryByText('No execution trace yet')).not.toBeInTheDocument();
+  });
+
+  it('is HOST-EMBEDDABLE: renders the full lineage standalone from a session id, with NO chat-surface events', async () => {
+    // No PaneEventBus tool_chain events are ever dispatched. The widget renders
+    // purely from the session id + server read fn — proving it needs no chat
+    // context and can mount in an arbitrary container (e.g. Compose Context pane).
+    const restoreTrace = jest.fn(async () => serverLineage());
+    renderWidget({ data: { sessionId: 'binding-42', restoreTrace } });
+
+    const narrationLines = await screen.findAllByTestId('execution-trace-narration-line');
+    const texts = narrationLines.map(n => n.textContent ?? '');
+    // Full lineage: context slices -> tools -> gate/approval.
+    expect(texts.some(t => t.includes('Consulted 4 context slices'))).toBe(true);
+    expect(texts.some(t => t.includes('Selected 1 tool'))).toBe(true);
+    expect(texts.some(t => t.includes('Ran sprk_document_search'))).toBe(true);
+    expect(texts.some(t => t.includes('Awaiting your approval to write'))).toBe(true);
+  });
+
+  it('skips the in-memory buffer when a server read fn is provided (server is authoritative — no double count)', async () => {
+    // A stale buffered event exists (same-page). With restoreTrace present the
+    // widget must use the SERVER trace and NOT also replay the buffer.
+    recordExecutionTraceEvent(makeToolChainEvent([{ toolId: 'buffered.stale.tool' }]) as unknown as BufferedTraceEvent);
+    const restoreTrace = jest.fn(async () => serverLineage());
+
+    renderWidget({ data: { sessionId: 's-1', restoreTrace } });
+
+    const rows = await screen.findAllByTestId('execution-trace-row');
+    expect(rows.map(r => r.getAttribute('data-tool-id'))).toEqual(['sprk_document_search']);
+    expect(rows.map(r => r.getAttribute('data-tool-id'))).not.toContain('buffered.stale.tool');
+  });
+
+  it('NFR-07: server-restored context/gate narration carries identifiers/counts only — no content', async () => {
+    const restoreTrace = jest.fn(async () => serverLineage());
+    renderWidget({ data: { sessionId: 's-1', restoreTrace } });
+
+    const narration = await screen.findByTestId('execution-trace-narration');
+    const text = narration.textContent ?? '';
+    // Only counts + the fingerprint-derived count + side-effect class label render;
+    // no slice content, no fingerprint id body, no gate payload.
+    expect(text).toContain('4 context slices');
+    expect(text).not.toMatch(/fp-1/); // the opaque id is not surfaced as content
+    expect(text).not.toMatch(/privileged|secret|work product/i);
+  });
+
+  it('a server read failure never breaks the widget (falls back to the empty/live state)', async () => {
+    const restoreTrace = jest.fn(async () => {
+      throw new Error('network');
+    });
+    renderWidget({ data: { sessionId: 's-1', restoreTrace } });
+
+    // No throw; the widget renders its empty hint.
+    expect(await screen.findByText('No execution trace yet')).toBeInTheDocument();
+  });
+
+  it('live tool_chain events still append after a server backfill', async () => {
+    const restoreTrace = jest.fn(async () => serverLineage());
+    const bus = new PaneEventBus();
+    renderWidget({ data: { sessionId: 's-1', restoreTrace } }, bus);
+
+    // Wait for the server backfill row first.
+    await screen.findAllByTestId('execution-trace-row');
+
+    act(() => {
+      bus.dispatch(
+        'context',
+        makeToolChainEvent([{ toolId: 'live.after.restore', resultCount: 1 }], { turn: 2 } as Partial<ContextPaneEvent>)
+      );
+    });
+
+    const rows = screen.getAllByTestId('execution-trace-row');
+    expect(rows.map(r => r.getAttribute('data-tool-id'))).toEqual(['sprk_document_search', 'live.after.restore']);
+  });
+});

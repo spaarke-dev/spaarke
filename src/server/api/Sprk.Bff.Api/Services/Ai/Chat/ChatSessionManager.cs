@@ -399,6 +399,53 @@ public class ChatSessionManager
         return (updated, stored);
     }
 
+    /// <summary>
+    /// Appends one <see cref="SessionContextFingerprint"/> ledger entry (the context-selection
+    /// leg of the decision-traceability trace — AIR2-038 / FR-A1-09) and persists through the
+    /// existing 3-tier pipeline (ADR-040: store before render; append-only).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Mirrors <see cref="AppendToolChainAsync"/>: the session is RE-FETCHED before appending
+    /// so concurrent ledger writes in the same turn are not clobbered. This is the write seam
+    /// the Context Binder (FR-B-04 / task 053) calls once per-turn ContextEnvelope assembly
+    /// lands; the server trace read surface (<see cref="Services.Ai.PublicContracts.ISessionTraceReader"/>)
+    /// projects these entries into <see cref="Services.Ai.PublicContracts.TraceEventKind.Context"/> events.
+    /// </para>
+    /// <para><b>NFR-07</b>: the entry and this log carry the fingerprint id + slice COUNT only — never content.</para>
+    /// </remarks>
+    /// <returns>The updated session carrying the appended entry, or null when the session no longer exists.</returns>
+    public virtual async Task<ChatSession?> AppendContextFingerprintAsync(
+        string tenantId,
+        string sessionId,
+        SessionContextFingerprint entry,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(entry);
+
+        var session = await GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+        if (session is null)
+        {
+            _logger.LogWarning(
+                "AppendContextFingerprintAsync: session not found — tenant={TenantId} session={SessionId}; ContextFingerprint entry dropped.",
+                tenantId, sessionId);
+            return null;
+        }
+
+        var appended = new List<SessionContextFingerprint>(
+            session.ContextFingerprints ?? Array.Empty<SessionContextFingerprint>()) { entry };
+        var updated = session with { ContextFingerprints = appended };
+        await UpdateSessionCacheAsync(updated, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Ledger ContextFingerprint stored: turn={Turn} fingerprintId={FingerprintId} sliceCount={SliceCount} tenant={TenantId} session={SessionId}",
+            entry.Turn, entry.FingerprintId, entry.SliceCount, tenantId, sessionId);
+
+        return updated;
+    }
+
     // === Private helpers ===
 
     /// <summary>
@@ -494,7 +541,8 @@ public class ChatSessionManager
             Outputs = SessionPersistenceService.MapOutputsToStored(session.Outputs),
             ToolChains = SessionPersistenceService.MapToolChainsToStored(session.ToolChains),
             WidgetEvents = SessionPersistenceService.MapWidgetEventsToStored(session.WidgetEvents),
-            Gates = SessionPersistenceService.MapGatesToStored(session.Gates)
+            Gates = SessionPersistenceService.MapGatesToStored(session.Gates),
+            ContextFingerprints = SessionPersistenceService.MapContextFingerprintsToStored(session.ContextFingerprints)
         };
     }
 
@@ -558,7 +606,8 @@ public class ChatSessionManager
             Outputs = SessionPersistenceService.MapOutputsFromStored(stored.Outputs),
             ToolChains = SessionPersistenceService.MapToolChainsFromStored(stored.ToolChains),
             WidgetEvents = SessionPersistenceService.MapWidgetEventsFromStored(stored.WidgetEvents),
-            Gates = SessionPersistenceService.MapGatesFromStored(stored.Gates)
+            Gates = SessionPersistenceService.MapGatesFromStored(stored.Gates),
+            ContextFingerprints = SessionPersistenceService.MapContextFingerprintsFromStored(stored.ContextFingerprints)
         };
     }
 }

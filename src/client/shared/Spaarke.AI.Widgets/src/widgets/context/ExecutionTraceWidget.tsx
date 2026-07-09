@@ -66,6 +66,13 @@ import type { ContextWidgetProps } from '../../types/widget-types';
 import { usePaneEvent } from '../../events/usePaneEvent';
 import type { ContextPaneEvent, TraceToolCallSummary } from '../../events/PaneEventTypes';
 import { getExecutionTraceBuffer } from './executionTraceBuffer';
+import {
+  narrateTrace,
+  narrateTraceEvent,
+  TRACE_EVENT_KIND,
+  type TraceEventDto,
+  type NarrationLine,
+} from './executionTraceNarration';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -99,8 +106,28 @@ export interface ExecutionTraceData {
    * carries a `sessionId`, only matching events are retained. Events without
    * a sessionId are accepted (the SSE relay is per-request/per-session, so
    * cross-session bleed cannot occur on the transport).
+   *
+   * When {@link restoreTrace} is provided this ALSO doubles as the
+   * session/binding identifier passed to the server read surface — the widget
+   * needs no chat-surface context, only this id (D-F4 host-embeddable).
    */
   sessionId?: string;
+
+  /**
+   * HOST-EMBEDDABLE server read surface (AIR2-038 / FR-A1-09, D-F4). When the
+   * host provides this async function, the widget rehydrates the decision trace
+   * from the durable server ledger on mount — closing the
+   * `executionTraceBuffer` mount-gap so a HARD REFRESH no longer loses prior
+   * turns' trace. The host wires it to
+   * `GET /api/ai/chat/sessions/{sessionId}/trace` (via the ISessionTraceReader
+   * facade). It takes ONLY a session id and returns the ordered TraceEvent v1
+   * stream — the widget has NO hard dependency on the chat surface, so it can
+   * be mounted in an arbitrary container (e.g. the Compose Context pane).
+   *
+   * When omitted, the widget falls back to the in-memory replay buffer
+   * (same-page-load only — the pre-AIR2-038 behavior).
+   */
+  restoreTrace?: (sessionId: string) => Promise<readonly TraceEventDto[]>;
 }
 
 /**
@@ -160,6 +187,35 @@ const useStyles = makeStyles({
   headerSubtitle: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
+  },
+
+  // Live plan-narration strip (D-F4 / FR-A1-09). Sits above the detailed
+  // timeline; each line is derived from a REAL trace event (never model prose).
+  narration: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    flexShrink: 0,
+  },
+  narrationLine: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: tokens.spacingHorizontalXS,
+  },
+  narrationTurn: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground4,
+    fontFamily: tokens.fontFamilyMonospace,
+    flexShrink: 0,
+  },
+  narrationText: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
   },
 
   // Scrollable timeline area. Auto-scrolls on new entries.
@@ -359,6 +415,57 @@ function narrowCall(raw: TraceToolCallSummary): Omit<TraceEntry, 'id' | 'turn' |
   };
 }
 
+/**
+ * Convert a server TraceEvent v1 stream into timeline rows — one row per
+ * `tool_call` event (the detailed tool activity). Context / tool_chain / gate
+ * events are surfaced in the narration strip (the lineage summary), not as
+ * tool rows. Pure; `idFrom` yields the monotonic React list keys so the
+ * backfilled rows share the widget's key space with live rows. NFR-07: only
+ * typed identifier/count fields are copied.
+ */
+function traceEventsToEntries(events: readonly TraceEventDto[], idFrom: () => number): TraceEntry[] {
+  const rows: TraceEntry[] = [];
+  for (const e of [...events].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))) {
+    if (e === null || typeof e !== 'object' || e.kind !== TRACE_EVENT_KIND.toolCall) continue;
+    if (typeof e.toolId !== 'string' || e.toolId.length === 0) continue;
+    rows.push({
+      id: idFrom(),
+      turn: typeof e.turn === 'number' ? e.turn : 0,
+      timestamp: typeof e.timestamp === 'string' && e.timestamp.length > 0 ? e.timestamp : new Date().toISOString(),
+      toolId: e.toolId,
+      argsSummary: typeof e.argsSummary === 'string' ? e.argsSummary : undefined,
+      resultCount: typeof e.resultCount === 'number' ? e.resultCount : undefined,
+      citationCount: Array.isArray(e.citations) ? e.citations.length : undefined,
+      durationMs: typeof e.durationMs === 'number' ? e.durationMs : undefined,
+    });
+  }
+  return rows;
+}
+
+/**
+ * Narrate ONE live `tool_chain` PaneEvent as honest narration lines — a
+ * "Selected N tools" line plus one "Ran X" line per real call. Sourced strictly
+ * from the real event's typed fields (never model prose): the lines are built by
+ * constructing TraceEvent dtos from the persisted-segment fields and reusing the
+ * SAME narration vocabulary as the server backfill (one truthfulness code path).
+ */
+function narrateLiveToolChain(turn: number, calls: readonly TraceToolCallSummary[]): NarrationLine[] {
+  const dtos: TraceEventDto[] = [
+    { sequence: 0, turn, kind: TRACE_EVENT_KIND.toolChain, toolCallCount: calls.length },
+    ...calls.map(
+      (c, i): TraceEventDto => ({
+        sequence: i + 1,
+        turn,
+        kind: TRACE_EVENT_KIND.toolCall,
+        toolId: c.toolId,
+        resultCount: c.resultCount,
+        durationMs: c.durationMs,
+      })
+    ),
+  ];
+  return dtos.map(narrateTraceEvent).filter((l): l is NarrationLine => l !== null);
+}
+
 // ---------------------------------------------------------------------------
 // Sub-component: TraceRow
 // ---------------------------------------------------------------------------
@@ -457,9 +564,28 @@ const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({ data, isLoa
   const styles = useStyles();
   const sessionFilter = data?.sessionId ?? '';
 
+  const restoreTrace = data?.restoreTrace;
+
   const [entries, setEntries] = useState<TraceEntry[]>([]);
+  // Live plan narration (D-F4 / FR-A1-09) — one line per REAL trace event,
+  // never model prose. Capped alongside the timeline entries.
+  const [narration, setNarration] = useState<NarrationLine[]>([]);
   // Monotonic ID source for the React list keys.
   const nextIdRef = useRef<number>(1);
+  const allocId = useCallback((): number => {
+    const id = nextIdRef.current;
+    nextIdRef.current = id + 1;
+    return id;
+  }, []);
+
+  // Append honest narration lines, FIFO-capped to the same bound as entries.
+  const appendNarration = useCallback((lines: NarrationLine[]): void => {
+    if (lines.length === 0) return;
+    setNarration(prev => {
+      const merged = [...prev, ...lines];
+      return merged.length > MAX_TRACE_ENTRIES ? merged.slice(merged.length - MAX_TRACE_ENTRIES) : merged;
+    });
+  }, []);
 
   // Auto-scroll target — the sentinel sits at the BOTTOM of the list and is
   // scrolled into view whenever a new entry is appended.
@@ -488,9 +614,7 @@ const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({ data, isLoa
       for (const raw of calls) {
         const narrowed = narrowCall(raw);
         if (narrowed === null) continue;
-        const id = nextIdRef.current;
-        nextIdRef.current = id + 1;
-        appended.push({ id, turn, timestamp, ...narrowed });
+        appended.push({ id: allocId(), turn, timestamp, ...narrowed });
       }
       if (appended.length === 0) return;
 
@@ -498,30 +622,77 @@ const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({ data, isLoa
         const merged = [...prev, ...appended];
         return merged.length > MAX_TRACE_ENTRIES ? merged.slice(merged.length - MAX_TRACE_ENTRIES) : merged;
       });
+
+      // Live plan narration from the SAME real event (never model prose).
+      appendNarration(narrateLiveToolChain(turn, calls));
     },
-    [sessionFilter]
+    [sessionFilter, allocId, appendNarration]
   );
 
   usePaneEvent('context', handleContextEvent);
 
-  // ── Replay-on-mount (G-P3 UAT round-5 R5-D, 2026-07-07) ────────────────────
-  // The widget mounts only when the user selects "Execution Trace" from the
-  // Context-pane Tools menu — typically AFTER the turns whose tool calls it
-  // should show. PaneEventBus does not buffer, so those events were dropped.
-  // The always-mounted bridge records every dispatched tool_chain event into
-  // the module buffer; replay it ONCE on mount through the SAME handler the
-  // live subscription uses (identical narrowing/NFR-07 discipline). The
-  // replayed events run before any post-mount live event can interleave
-  // (synchronous effect body), so ordering is preserved.
-  const replayedRef = useRef<boolean>(false);
+  // ── Backfill-on-mount ──────────────────────────────────────────────────────
+  // The widget mounts only when the user opens it — typically AFTER the turns
+  // whose trace it should show. Two backfill sources close that mount-gap:
+  //
+  //  (A) SERVER read surface (AIR2-038 / FR-A1-09) — when the host provides
+  //      `restoreTrace`, the widget rehydrates the FULL decision trace from the
+  //      durable ledger (context → tools → gate → outcome). This survives a HARD
+  //      REFRESH (the buffer does not) and needs no chat-surface context, only a
+  //      session id — so the widget is host-embeddable (D-F4). The server stream
+  //      is authoritative for prior turns, so when it is used the in-memory buffer
+  //      replay is SKIPPED (no double-count).
+  //
+  //  (B) In-memory replay buffer (G-P3 UAT round-5 R5-D) — the pre-AIR2-038
+  //      fallback for hosts without a server read fn: the always-mounted bridge
+  //      records dispatched tool_chain events; replay them ONCE through the SAME
+  //      handler the live subscription uses.
+  //
+  // Either way the backfill runs before any post-mount live event so ordering
+  // is preserved. Live events append after.
+  const backfilledRef = useRef<boolean>(false);
   useEffect(() => {
-    if (replayedRef.current) return;
-    replayedRef.current = true;
+    if (backfilledRef.current) return;
+    backfilledRef.current = true;
+
+    if (restoreTrace && sessionFilter !== '') {
+      let cancelled = false;
+      void (async () => {
+        try {
+          const events = await restoreTrace(sessionFilter);
+          if (cancelled || !Array.isArray(events) || events.length === 0) return;
+          const restoredRows = traceEventsToEntries(events, allocId);
+          if (restoredRows.length > 0) {
+            setEntries(prev => {
+              const merged = [...restoredRows, ...prev];
+              return merged.length > MAX_TRACE_ENTRIES ? merged.slice(merged.length - MAX_TRACE_ENTRIES) : merged;
+            });
+          }
+          // Full lineage narration (context/tools/gate/outcome) from the server stream.
+          const restoredNarration = narrateTrace(events);
+          if (restoredNarration.length > 0) {
+            setNarration(prev => {
+              const merged = [...restoredNarration, ...prev];
+              return merged.length > MAX_TRACE_ENTRIES ? merged.slice(merged.length - MAX_TRACE_ENTRIES) : merged;
+            });
+          }
+        } catch {
+          // A trace-read failure must never break the widget — fall through to
+          // the empty/live state (the read surface is a convenience, not a gate).
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // Fallback (B): in-memory buffer replay (same-page-load only).
     for (const buffered of getExecutionTraceBuffer()) {
       handleContextEvent(buffered as unknown as ContextPaneEvent);
     }
-    // handleContextEvent identity changes only with sessionFilter; replay must
-    // not re-run on filter change (entries would duplicate).
+    return undefined;
+    // Backfill runs ONCE on mount; deps intentionally omitted (re-running would
+    // duplicate rows). sessionFilter/restoreTrace are read at mount time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -535,11 +706,12 @@ const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({ data, isLoa
   }, [entries.length]);
 
   const subtitle = useMemo(() => {
-    if (entries.length === 0) return 'Waiting for activity';
+    if (entries.length === 0 && narration.length === 0) return 'Waiting for activity';
+    if (entries.length === 0) return 'Decision trace from the session ledger';
     const count = entries.length;
     const noun = count === 1 ? 'tool call' : 'tool calls';
     return `${count} ${noun} from the session ledger`;
-  }, [entries.length]);
+  }, [entries.length, narration.length]);
 
   // Loading shim — the widget itself doesn't load any data, but the prop is
   // honoured for consistency with the ContextWidgetProps contract.
@@ -571,9 +743,36 @@ const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({ data, isLoa
       </div>
       <Divider appearance="subtle" />
 
-      {entries.length === 0 ? (
+      {/* Live plan-narration strip (D-F4 / FR-A1-09) — one line per REAL trace
+          event; nothing here originates from model prose. */}
+      {narration.length > 0 && (
+        <>
+          <div
+            className={styles.narration}
+            role="log"
+            aria-label="Plan narration"
+            data-testid="execution-trace-narration"
+          >
+            {narration.map((line, idx) => (
+              <div
+                className={styles.narrationLine}
+                key={`${line.sourceSequence}-${idx}`}
+                data-testid="execution-trace-narration-line"
+                data-kind={line.kind}
+                data-turn={line.turn}
+              >
+                {line.turn > 0 && <Text className={styles.narrationTurn}>t{line.turn}</Text>}
+                <Text className={styles.narrationText}>{line.text}</Text>
+              </div>
+            ))}
+          </div>
+          <Divider appearance="subtle" />
+        </>
+      )}
+
+      {entries.length === 0 && narration.length === 0 ? (
         <ExecutionTraceEmpty styles={styles} />
-      ) : (
+      ) : entries.length === 0 ? null : (
         <div className={styles.scrollContainer} data-testid="execution-trace-scroll">
           <div className={styles.list} role="list" aria-label="Agent tool activity">
             {entries.map((entry, idx) => {

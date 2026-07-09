@@ -595,6 +595,29 @@ public class SessionPersistenceService : ISessionPersistenceService
                 ResolvedAt = s.ResolvedAt
             }).ToList();
 
+    // AIR2-038 / FR-A1-09 — ContextEnvelope-fingerprint ledger entries (ids/counts only, NFR-07).
+    internal static List<StoredContextFingerprint> MapContextFingerprintsToStored(IReadOnlyList<SessionContextFingerprint>? fingerprints)
+        => fingerprints is not { Count: > 0 }
+            ? []
+            : fingerprints.Select(f => new StoredContextFingerprint
+            {
+                Turn = f.Turn,
+                FingerprintId = f.FingerprintId,
+                SliceCount = f.SliceCount,
+                CreatedAt = f.CreatedAt
+            }).ToList();
+
+    internal static IReadOnlyList<SessionContextFingerprint>? MapContextFingerprintsFromStored(List<StoredContextFingerprint>? stored)
+        => stored is not { Count: > 0 }
+            ? null
+            : stored.Select(s => new SessionContextFingerprint
+            {
+                Turn = s.Turn,
+                FingerprintId = s.FingerprintId,
+                SliceCount = s.SliceCount,
+                CreatedAt = s.CreatedAt
+            }).ToList();
+
     /// <summary>
     /// Re-hydrates a raw-JSON payload string to a detached <see cref="System.Text.Json.JsonElement"/>.
     /// Malformed / empty payloads (which should not occur — the write side always emits

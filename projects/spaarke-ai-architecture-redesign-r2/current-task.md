@@ -9,20 +9,25 @@
 
 | Field | Value |
 |---|---|
-| **Progress** | **21 of 53 tasks complete** — foundation + Wave J (gate engine + 5 parallel surfaces) done |
-| **Done** | Phase 0 (001–004), all A0 contracts (010–016), test-repair (021), triple-twin hoist (020), D-F0 doctrine (030), D-F0 eval family (031), **Wave J parallel batch: 032 gate engine, 037 UI-ack, 039 progressive render, 040 refusal-affordance, 041 capability-discovery, 042 create-matter (2026-07-09)** |
-| **Status** | between waves; Wave J being committed. Combined tree VERIFIED GREEN: build 0 errors (3 projects), no conflict markers, eval-gate + gate engine + all new suites **521 passed / 0 failed / 1 pre-existing skip**, publish **48.30 MB** compressed (under 60 ceiling, ~baseline). |
-| **Branch** | `work/spaarke-ai-architecture-redesign-r2` — ahead of master by prior checkpoint commits + Wave J commit (this commit). NOT yet merged. |
-| **Next Action** | **Serial J-wave (shared gate/factory/completion stack — run ONE AT A TIME in the main session or one subagent at a time):** 033 (origin-classification eval family, sonnet, dep 032✅) → 034 (gate pre-suspend validation, opus, dep 032✅) → 035 (Completion Engine + OutcomeCard, opus, dep 011✅) → 036 (job-aware completion, opus, dep 014✅) → 038 (trace view + server read, opus, dep 013✅) → 043 (ADR-041 authoring, fable, dep 030✅/032✅/035). Then the memory wave M. |
+| **Progress** | **27 of 53 tasks complete** — foundation + Wave J + Wave K (033/034/035/036/038) + 043 ADR-041 done → **G-R2-A CODE-COMPLETE** |
+| **Done** | Phase 0 (001–004), all A0 contracts (010–016), test-repair (021), triple-twin hoist (020), D-F0 (030/031), Wave J (032/037/039/040/041/042, merged master PR #595), **Wave K: 033 origin-eval, 034 gate pre-suspend, 035 Completion Engine, 036 job-aware completion, 038 trace view (2026-07-09)** |
+| **Status** | Wave J MERGED to master (PR #595, `c21529f80`). Wave K (033/034/035/036/038) committed on branch, VERIFIED GREEN: build 0 errors (3 projects), eval-gate + trace/ledger/persistence suites **107 passed / 0 failed**, publish ~46.48 MB (< 60). **TraceEvent view seam PUBLISHED — only 057 memory.write remains before the 017 Compose-UNBLOCKED milestone.** |
+| **Branch** | `work/spaarke-ai-architecture-redesign-r2` — Wave K (033/034/035/036/038) committed, NOT yet merged (Wave J already on master). |
+| **Next Action** | **G-R2-A is CODE-COMPLETE (030–043 all done).** Two forks: (A) **Memory wave M** — build-ahead is dependency-clear now (050 dep 016✅ → 051/052; 053 Binder dep 015✅ — ALSO the writer for 038's dark `AppendContextFingerprintAsync` fingerprint seam → 054 dep 002✅+053; 055/056/**057 memory.write** dep 016✅ = the LAST Compose seam; 060–065). (B) **task 049 G-R2-A browser UAT** — OPERATOR-ONLY gate on spaarkedev1, never auto-run; its pass promotes ADR-041 Proposed→Accepted. Recommend: push/merge Wave K, then start memory wave M build-ahead while operator schedules the 049 UAT. |
 
-### Immediate next tasks (per TASK-INDEX Parallel Groups — J-serial share the gate/factory/completion files, NOT parallel-safe)
-- **033** Origin-classification eval family (sonnet, dep 032✅) — eval cases over the RequestOriginClassifier; pairs with 032's E-1..E-6.
-- **034** Gate pre-suspend validation (opus, dep 032✅) — wires the live gate call-site origin/proposal signals (the 032 engine currently defaults origin to `Inferred`/always-suspend until 034 feeds it).
-- **035** Completion Engine + OutcomeCard all paths (opus, dep 011✅) — also unblocks DEF-001 (OutcomeCard-structured refusal follow-up).
-- **036** Job-aware completion / ingestion-parity (opus, dep 014✅). Note: `JobStatusService.cs` is at `Services/Office/`, not `Services/Jobs/`.
-- **038** Traceability view + narration + server read surface (opus, dep 013✅) — publishes the last-but-one seam (TraceEvent view half).
-- **043** ADR-041 authoring (fable, dep 030✅/032✅/035) — §6.5 + `.claude/` write-boundary (main-session-only).
-- **Memory wave M** (after J-serial): 050 (dep 016✅) → 051/052; 053 Binder (dep 015✅) → 054 (dep 002✅+053); 055/056/**057 memory.write**/060–065. 057 publishes the final seam; **017** milestone posts "Compose UNBLOCKED" after 038+057.
+### 🔔 G-R2-A gate + open items for operator
+- **Task 049 (G-R2-A browser UAT)** is an operator-only gate (spaarkedev1). Its pass flips ADR-041 Proposed→Accepted. Cannot be auto-run.
+- **ConfirmationPolicyEngine 0-core-call-sites** open item (from 034) — still needs an operator decision (accept-as-Compose-seam / wire-up task / deferral). Now documented in ADR-041's "Known open item" section.
+- **Task 053 (Binder)** is the intended writer for task 038's dark-landed `SessionContextFingerprint` seam (`AppendContextFingerprintAsync`) — sequence 053 to wire it.
+
+### 🔔 OPEN ITEM (surfaced by task 034, needs operator decision) — ConfirmationPolicyEngine has 0 core call-sites
+- Task 032 shipped `ConfirmationPolicyEngine` (Policy v2 PRODUCER, tiers + E-1..E-6) as a published seam. But it is **DARK in the core**: 034 = pre-suspend `ValidateChat` (per authoritative spec FR-A1-05 — NOT engine wiring), and 042 reused the existing gated `dataverse.create_record` path. **No current WBS task wires the engine into the core's own live gate.** Correct for Compose r2 (it consumes the engine directly), but the core's live gate still runs on the pre-existing suspend floor + 034's pre-suspend validation. **Decision needed:** (a) accept as-is (engine is a Compose-consumed seam, core doesn't need it live), (b) add a small task to wire it at the Binding-dispatch/resume surface, or (c) documented deferral. Flagged to operator 2026-07-09.
+
+### Immediate next tasks
+- **035** Completion Engine + OutcomeCard all paths (opus, dep 011✅) — clears DEF-001; consume `JobAwareOutcomeProjection` for async paths.
+- **038** Traceability view + narration + server read surface (opus, dep 013✅) — publishes the TraceEvent view seam (2nd-to-last seam).
+- **043** ADR-041 authoring (fable, dep 030✅/032✅/035) — §6.5 + `.claude/` write-boundary (main-session-only, NOT a subagent).
+- **Memory wave M** (after J-wave): 050 (dep 016✅) → 051/052; 053 Binder (dep 015✅) → 054 (dep 002✅+053); 055/056/**057 memory.write**/060–065. 057 publishes the final seam; **017** milestone posts "Compose UNBLOCKED" after 038+057.
 
 ### Critical Context (essential for continuation)
 - **Execution model**: dispatch each task as a subagent running `task-execute` at its POML `<model-tier>` (sonnet default; opus/fable for the flagged tasks). Parallel-safe tasks → concurrent subagents (each creates NEW files, does NOT edit TASK-INDEX/current-task/SEAM-STATUS — main session consolidates + flips rows + commits). parallel-safe=false → run one at a time. Build-verify between waves.

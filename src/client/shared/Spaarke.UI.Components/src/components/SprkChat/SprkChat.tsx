@@ -749,16 +749,29 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         const result = await dispatchConfirmedAction(action, apiBaseUrl, authenticatedFetch);
 
         if (result.success) {
-          // G-P3 UAT round-4 R4-3 (2026-07-07): confirmed executions carry a
-          // server-composed MDA deep link to the created record — render it as a
-          // clickable markdown link (the transcript renderer opens links in a new
-          // tab). The server persists the matching durable copy with the same link.
-          const recordLink = result.recordUrl ? ` [Open record](${result.recordUrl})` : '';
-          addMessage({
-            role: 'Assistant',
-            content: `✅ ${result.message}${recordLink}`,
-            timestamp: new Date().toISOString(),
-          });
+          if (result.outcome) {
+            // task 035 / FR-A1-06: the server emitted a structured OutcomeCard for this
+            // confirmed side-effect. Render it via the OutcomeCard component (server-composed
+            // link chip + next-step chips) instead of the ad-hoc markdown "[Open record]" link.
+            // The plain-text content stays as an accessible fallback for the transcript.
+            addMessage({
+              role: 'Assistant',
+              content: `✅ ${result.message}`,
+              timestamp: new Date().toISOString(),
+              metadata: { responseType: 'outcome_card', data: result.outcome },
+            });
+          } else {
+            // G-P3 UAT round-4 R4-3 (2026-07-07): pre-035 fallback — confirmed executions carry
+            // a server-composed MDA deep link to the created record; render it as a clickable
+            // markdown link (the transcript renderer opens links in a new tab). Used when the
+            // server did not emit a structured card (e.g. the Binding-dispatch leg).
+            const recordLink = result.recordUrl ? ` [Open record](${result.recordUrl})` : '';
+            addMessage({
+              role: 'Assistant',
+              content: `✅ ${result.message}${recordLink}`,
+              timestamp: new Date().toISOString(),
+            });
+          }
         } else if (result.errorCode === 'gate.no-binding-target') {
           // G-P2 UAT round-1 finding 6 (2026-07-06), narrowed by FR-P3-03 (task 042):
           // typed-handler confirms now EXECUTE server-side; this branch remains only
