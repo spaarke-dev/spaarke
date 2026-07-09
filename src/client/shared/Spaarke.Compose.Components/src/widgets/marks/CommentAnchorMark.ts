@@ -67,21 +67,18 @@ export const CommentAnchorMark = Mark.create<CommentAnchorMarkOptions>({
     return {
       commentId: {
         default: null,
-        parseHTML: (element) => element.getAttribute('data-comment-id'),
-        renderHTML: (attributes) =>
-          attributes.commentId ? { 'data-comment-id': attributes.commentId as string } : {},
+        parseHTML: element => element.getAttribute('data-comment-id'),
+        renderHTML: attributes => (attributes.commentId ? { 'data-comment-id': attributes.commentId as string } : {}),
       },
       binding: {
         default: null,
-        parseHTML: (element) => element.getAttribute('data-binding'),
-        renderHTML: (attributes) =>
-          attributes.binding ? { 'data-binding': attributes.binding as string } : {},
+        parseHTML: element => element.getAttribute('data-binding'),
+        renderHTML: attributes => (attributes.binding ? { 'data-binding': attributes.binding as string } : {}),
       },
       ledgerRef: {
         default: null,
-        parseHTML: (element) => element.getAttribute('data-ledger-ref'),
-        renderHTML: (attributes) =>
-          attributes.ledgerRef ? { 'data-ledger-ref': attributes.ledgerRef as string } : {},
+        parseHTML: element => element.getAttribute('data-ledger-ref'),
+        renderHTML: attributes => (attributes.ledgerRef ? { 'data-ledger-ref': attributes.ledgerRef as string } : {}),
       },
     };
   },
@@ -104,11 +101,11 @@ export const CommentAnchorMark = Mark.create<CommentAnchorMarkOptions>({
   addCommands() {
     return {
       setCommentAnchor:
-        (attributes) =>
+        attributes =>
         ({ commands }) =>
           commands.setMark(this.name, attributes),
       toggleCommentAnchor:
-        (attributes) =>
+        attributes =>
         ({ commands }) =>
           commands.toggleMark(this.name, attributes),
       unsetCommentAnchor:

@@ -244,7 +244,7 @@ describe('FieldMappingService — Copy engine (task 012)', () => {
       mappingType: 'Copy',
     });
     const dataService = makeDataService({
-      '_sprk_assignedattorney1_value': ATTORNEY_CONTACT_ID,
+      _sprk_assignedattorney1_value: ATTORNEY_CONTACT_ID,
       '_sprk_assignedattorney1_value@Microsoft.Dynamics.CRM.lookuplogicalname': 'contact',
     });
     const payload: Record<string, unknown> = {};
@@ -280,7 +280,7 @@ describe('FieldMappingService — Copy engine (task 012)', () => {
     // Prefer header that only includes FormattedValue, not lookuplogicalname —
     // the exact BFF-adapter gap documented in the source read).
     const dataService = makeDataService({
-      '_sprk_assignedattorney1_value': ATTORNEY_CONTACT_ID,
+      _sprk_assignedattorney1_value: ATTORNEY_CONTACT_ID,
     });
     const payload: Record<string, unknown> = {};
 
@@ -328,7 +328,7 @@ describe('FieldMappingService — Copy engine (task 012)', () => {
     });
     const dataService = makeDataService({
       sprk_description: 'Contract dispute matter',
-      '_sprk_assignedattorney1_value': ATTORNEY_CONTACT_ID,
+      _sprk_assignedattorney1_value: ATTORNEY_CONTACT_ID,
       '_sprk_assignedattorney1_value@Microsoft.Dynamics.CRM.lookuplogicalname': 'contact',
     });
     const payload: Record<string, unknown> = {};
@@ -501,7 +501,7 @@ describe('FieldMappingService — Default/Concat/Template engines (task 013)', (
     expect(thrown).toBeNull();
     // The unresolved token is OMITTED (empty string substitution), not left as "{sprk_missingfield}".
     expect(payload['sprk_description']).toBe('M-1001 - ');
-    expect((payload['sprk_description'] as string)).not.toContain('{sprk_missingfield}');
+    expect(payload['sprk_description'] as string).not.toContain('{sprk_missingfield}');
     expect(result!.fieldsMapped).toEqual(['sprk_description']);
     expect(result!.warnings).toHaveLength(1);
     expect(result!.warnings[0]).toMatch(/sprk_missingfield.*could not be resolved/i);
@@ -808,7 +808,7 @@ describe('FieldMappingService — graceful degradation (task 015)', () => {
     // Record has the lookup GUID but no lookuplogicalname annotation (unresolvable
     // lookup) and no "sprk_doesnotexist" key (missing scalar source field).
     const dataService = makeDataService({
-      '_sprk_assignedattorney1_value': ATTORNEY_CONTACT_ID,
+      _sprk_assignedattorney1_value: ATTORNEY_CONTACT_ID,
     });
     const payload: Record<string, unknown> = {};
 
