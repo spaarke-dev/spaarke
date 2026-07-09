@@ -198,7 +198,10 @@ describe('useSseStream - action_outcome dispatch (task 044c)', () => {
 
   it('startStream_NoActionOutcomeEvent_PendingActionEventStaysNull', async () => {
     // Non-regression: an ordinary token/done stream must not synthesize an action event.
-    const events = [{ type: 'token', content: 'Just a normal reply.' }, { type: 'done', content: null }];
+    const events = [
+      { type: 'token', content: 'Just a normal reply.' },
+      { type: 'done', content: null },
+    ];
     mockFetch.mockResolvedValueOnce(createSseResponse(events));
 
     const { result } = renderHook(() => useSseStream());
