@@ -3,7 +3,7 @@
   <metadata>
     <title>Wire engine into invoice + reportCard services</title>
     <phase>2: Wire Wizard Services</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>015,011</dependencies>
     <blocks>040</blocks>
@@ -69,7 +69,14 @@
     <criterion testable="true">Build + service tests pass.</criterion>
   </acceptance-criteria>
 
-  <notes>Ref: spec.md FR-12, FR-13.</notes>
+  <notes>
+    Ref: spec.md FR-12, FR-13. Completed 2026-07-09 — see notes/task-022-notes.md.
+    ReportCardService's constructor gained required authenticatedFetch/bffBaseUrl
+    params (it previously had none) to mirror InvoiceService/WorkAssignmentService's
+    injected-dependency shape; CreateReportCardWizard.tsx's ReportCardService
+    instantiation was updated accordingly (not a "service file" per the parallel-wave
+    boundary, but necessary for the wiring to be functionally real in production).
+  </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

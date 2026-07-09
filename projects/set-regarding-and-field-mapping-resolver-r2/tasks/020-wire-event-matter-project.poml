@@ -3,7 +3,7 @@
   <metadata>
     <title>Wire engine into event, matter, project services</title>
     <phase>2: Wire Wizard Services</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>015,011</dependencies>
     <blocks>040</blocks>

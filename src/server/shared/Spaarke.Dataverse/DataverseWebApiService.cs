@@ -1756,7 +1756,7 @@ public class DataverseWebApiService : IDataverseService
             ? $"$filter=_sprk_fieldmappingprofile_value eq {profileId} and sprk_isactive eq true&"
             : $"$filter=_sprk_fieldmappingprofile_value eq {profileId}&";
 
-        var url = $"sprk_fieldmappingrules?{filterQuery}$select=sprk_fieldmappingruleid,sprk_name,_sprk_fieldmappingprofile_value,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_iscascadingsource,sprk_executionorder,sprk_isactive&$orderby=sprk_executionorder asc";
+        var url = $"sprk_fieldmappingrules?{filterQuery}$select=sprk_fieldmappingruleid,sprk_name,_sprk_fieldmappingprofile_value,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_mapping_type,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_expression,sprk_iscascadingsource,sprk_executionorder,sprk_isactive&$orderby=sprk_executionorder asc";
 
         _logger.LogDebug("Getting field mapping rules for profile: {ProfileId}", profileId);
 
@@ -2042,7 +2042,7 @@ public class DataverseWebApiService : IDataverseService
 
             // Step 2: query profile + expand rules in one round-trip filtered by resolved GUIDs.
             // sprk_fieldmappingprofile_fieldmappingrule is the 1:N navigation property name.
-            var ruleSelect = "$select=sprk_fieldmappingruleid,sprk_name,_sprk_fieldmappingprofile_value,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_iscascadingsource,sprk_executionorder,sprk_isactive";
+            var ruleSelect = "$select=sprk_fieldmappingruleid,sprk_name,_sprk_fieldmappingprofile_value,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_mapping_type,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_expression,sprk_iscascadingsource,sprk_executionorder,sprk_isactive";
             var ruleFilter = activeRulesOnly ? ";$filter=sprk_isactive eq true" : "";
             var ruleOrderBy = ";$orderby=sprk_executionorder asc";
 
@@ -2283,10 +2283,13 @@ public class DataverseWebApiService : IDataverseService
             TargetField = data.TryGetValue("sprk_targetfield", out var tf) && tf.ValueKind != JsonValueKind.Null
                 ? tf.GetString()! : string.Empty,
             TargetFieldType = data.TryGetValue("sprk_targetfieldtype", out var tft) ? tft.GetInt32() : 0,
+            MappingType = data.TryGetValue("sprk_mapping_type", out var mt) && mt.ValueKind != JsonValueKind.Null ? mt.GetInt32() : 0,
             CompatibilityMode = data.TryGetValue("sprk_compatibilitymode", out var cm) ? cm.GetInt32() : 0,
             IsRequired = data.TryGetValue("sprk_isrequired", out var req) && req.GetBoolean(),
             DefaultValue = data.TryGetValue("sprk_defaultvalue", out var dv) && dv.ValueKind != JsonValueKind.Null
                 ? dv.GetString() : null,
+            Expression = data.TryGetValue("sprk_expression", out var expr) && expr.ValueKind != JsonValueKind.Null
+                ? expr.GetString() : null,
             IsCascadingSource = data.TryGetValue("sprk_iscascadingsource", out var cs) && cs.GetBoolean(),
             ExecutionOrder = data.TryGetValue("sprk_executionorder", out var eo) ? eo.GetInt32() : 0,
             IsActive = data.TryGetValue("sprk_isactive", out var active) && active.GetBoolean()

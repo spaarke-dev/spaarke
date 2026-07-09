@@ -3,7 +3,7 @@
   <metadata>
     <title>Field Mapping Framework architecture doc + CLAUDE.md pointer</title>
     <phase>4: Documentation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>015,022,030</dependencies>
     <blocks>090</blocks>

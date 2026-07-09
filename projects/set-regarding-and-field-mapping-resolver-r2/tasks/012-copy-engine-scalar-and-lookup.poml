@@ -3,7 +3,7 @@
   <metadata>
     <title>Copy mapping engine — scalar + lookup @odata.bind</title>
     <phase>1: Client Engine</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>010,011</dependencies>
     <blocks>013,014,015</blocks>
@@ -84,7 +84,15 @@
     <criterion testable="true">Shared-lib build passes.</criterion>
   </acceptance-criteria>
 
-  <notes>Ref: spec.md FR-03, FR-04, design.md §4.1a. This is the long pole.</notes>
+  <notes>Ref: spec.md FR-03, FR-04, design.md §4.1a. This is the long pole.
+  COMPLETED 2026-07-09. See notes/task-012-notes.md for full detail. Copy seam
+  implemented in FieldMappingService.ts: scalar assigns the source value;
+  lookup resolves `_&lt;field&gt;_value` + `@Microsoft.Dynamics.CRM.lookuplogicalname`
+  annotation to the referent entity, discovers the target nav-prop via the
+  shared discoverNavProps (task 011), and writes `${navProp}@odata.bind`.
+  Source record fetched ONCE per invocation across all Copy rules (never one
+  fetch per rule). 4 focused tests added (scalar, lookup, unresolvable-warns,
+  single-fetch); build 0 errors; code-review + adr-check both clean.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

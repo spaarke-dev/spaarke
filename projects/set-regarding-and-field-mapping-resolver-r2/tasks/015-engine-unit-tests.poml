@@ -3,7 +3,7 @@
   <metadata>
     <title>Engine unit tests — all four types, lookup, same-entity, graceful degradation</title>
     <phase>1: Client Engine</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>012,013,014</dependencies>
     <blocks>020,021,022</blocks>
@@ -73,7 +73,22 @@
     <criterion testable="true">npm test for the shared lib passes.</criterion>
   </acceptance-criteria>
 
-  <notes>Ref: spec.md Success Criteria 2 + NFR-07.</notes>
+  <notes>Ref: spec.md Success Criteria 2 + NFR-07.
+
+  **Completed 2026-07-09.** Consolidated the existing 14 tests (tasks 012/013/014)
+  into a single file with an explicit closed-set coverage map (see file header),
+  and added 3 tests closing the remaining gaps: no-profile 404 no-op,
+  missing-source-field warning, and a never-throw test mixing two failing rules
+  with one succeeding rule. Suite now has 17 tests, all green.
+
+  **Production defect found + fixed**: `applyCopyScalar` did not implement the
+  FR-09 "missing source field → warning + skip" contract — it silently wrote
+  `payload[targetField] = undefined` and still marked the field as mapped. Fixed
+  to warn + skip when the source value is `undefined` (field genuinely absent
+  from the parent record), while still allowing an explicit `null` value
+  through (a legitimate empty-field copy). See notes/task-015-notes.md for full
+  detail. code-review + adr-check both re-run clean after the fix.
+  </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

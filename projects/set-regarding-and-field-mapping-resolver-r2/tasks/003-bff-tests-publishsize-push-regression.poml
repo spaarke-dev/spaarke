@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF tests + publish-size + push regression for DTO extension</title>
     <phase>0: BFF Contract + Schema Extension</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>002</dependencies>
     <blocks>010</blocks>
@@ -77,7 +77,43 @@
     <criterion testable="true">No new HIGH-severity CVE introduced.</criterion>
   </acceptance-criteria>
 
-  <notes>Ref: spec.md FR-16, NFR-01, NFR-07.</notes>
+  <notes>
+    Ref: spec.md FR-16, NFR-01, NFR-07.
+
+    Completed 2026-07-09. Added tests/unit/Sprk.Bff.Api.Tests/Api/FieldMappings/FieldMappingRuleProjectionTests.cs
+    (15 tests) covering MapRuleEntityToDto projection of the 5 new rule-DTO fields (all 4 MappingType
+    branches + unknown-int fallback, DefaultValue/Expression/IsRequired passthrough, both CompatibilityMode
+    branches + unknown-int fallback) and 2 push-path regression tests proving ApplyMappingRule still maps
+    source-to-target correctly (Mapped + Skipped cases) when the rule carries the new fields.
+
+    Code-review found MapRuleEntityToDto/ApplyMappingRule were private static, forcing a reflection seam
+    (existing precedent: ChatEndpointsAttachmentsTests.cs). Found a cleaner seam: Sprk.Bff.Api.Tests already
+    has InternalsVisibleTo, so both methods were changed private -> internal static (accessibility-only,
+    zero behavior change) in FieldMappingEndpoints.cs, and the test calls them directly — no reflection,
+    fully B8-compliant per tests/CLAUDE.md.
+
+    dotnet test tests/unit/Sprk.Bff.Api.Tests: 7662 passed, 0 failed, 101 skipped (pre-existing skips),
+    Total 7763 — confirmed on 2 consecutive full runs after the accessibility change (one transient
+    single-test flake in an intermediate run self-resolved on re-run; unrelated to this task's files).
+
+    Publish size (dotnet publish -c Release, compressed via Compress-Archive -CompressionLevel Optimal):
+    49.60 MB incl. PDBs (baseline ~49.63 MB, delta ~-0.03 MB) / 45.73 MB excl. PDBs (baseline 45.87 MB,
+    delta ~-0.14 MB) -- both essentially flat vs baseline as expected (DTO fields + accessibility change
+    only, no new packages). Well under the 60 MB ceiling.
+
+    CVE scan (dotnet list package --vulnerable --include-transitive on Sprk.Bff.Api): 1 HIGH-severity
+    finding, Microsoft.Kiota.Abstractions 1.21.2 (transitive via Microsoft.Graph). Confirmed PRE-EXISTING:
+    `git diff origin/master...HEAD --stat -- '**/*.csproj'` is empty for this branch -- no package
+    references were touched by tasks 001/002/003. Not a new CVE introduced by this task.
+
+    Quality gates: code-review (1 finding -- B8 reflection seam -- remediated per above) and adr-check
+    (0 violations; 1 pre-existing Warning noted -- test file lives at tests/unit/Sprk.Bff.Api.Tests/Api/FieldMappings/,
+    matching 100% of sibling FieldMapping tests in this project, which predates the tests/CLAUDE.md six-KEEP-path
+    reorg referenced as "after task 050 path reorganization completes"; out of scope for this task to relocate
+    the whole legacy test tree) both re-run clean after the fix.
+
+    See notes/task-003-notes.md for the full report.
+  </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

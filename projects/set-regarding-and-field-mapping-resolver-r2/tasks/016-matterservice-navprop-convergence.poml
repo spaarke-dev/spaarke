@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Converge matterService nav-prop onto shared discoverNavProps (create-payload-touching)</title>
+    <phase>1: Client Engine</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, typescript, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Changes matterService's create-payload-feeding nav-prop resolution (behavior-preservation risk on lookup @odata.bind keys).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Behavior-preservation refactor on a create-payload path; requires payload-equivalence reasoning.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only matterService.ts + shared util; disjoint from other service files.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Split off from task 011 (Path A) per CLAUDE.md §6.5. matterService.ts uses a DIVERGENT nav-prop discovery:
+    it returns a column→navprop map (Record&lt;string,string&gt;), caches Record&lt;string,Record&lt;string,string&gt;&gt;,
+    OMITS ReferencedEntity from its $select, and resolves BY COLUMN LOGICAL NAME (_resolveNavProp / navPropMap[col])
+    directly in its create-payload path (lookup @odata.bind keys at matterService.ts:317, document bind :354,
+    sprk_assignedlawfirm1 counsel bind :443). Converge it onto the shared array-form discoverNavProps introduced
+    in task 011 WITHOUT changing the emitted create-payload (the @odata.bind keys and values must be byte-identical).
+  </prompt>
+
+  <role>SPAARKE shared-lib developer. Behavior-preservation refactorer with payload-equivalence discipline.</role>
+
+  <goal>matterService imports the shared discoverNavProps (or a thin toNavPropMap adapter over it); its create payload is provably unchanged; one nav-prop implementation remains across all 7 services.</goal>
+
+  <context>
+    <background>Task 011 consolidated the 6 array-form services and deferred matterService because its convergence touches the create-payload path that 011 constraint 3 forbade. See notes/task-011-BLOCKED.md for the full divergence diff and the three candidate approaches (B full convergence, C shared util + toNavPropMap adapter). Approach C is likely lowest-risk: keep matter's map shape via an adapter that derives the map from the shared array result.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">The matterService create payload MUST be byte-identical before/after: same @odata.bind keys, same values, same order. Prove it with a payload-equivalence test.</constraint>
+    <constraint source="ADR-012">Shared util stays context-agnostic (existing fetch('/api/data/v9.0/EntityDefinitions...') pattern).</constraint>
+    <constraint source="project">Preserve matterService's nav-prop cache-reset test helper semantics.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/set-regarding-and-field-mapping-resolver-r2/notes/task-011-BLOCKED.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read notes/task-011-BLOCKED.md; confirm the shared discoverNavProps signature landed by task 011.</step>
+    <step order="2">Add a payload-equivalence test that captures matterService's current create payload (lookup @odata.bind keys/values) as the golden baseline.</step>
+    <step order="3">Implement approach C (preferred): a toNavPropMap(entries) adapter deriving the column→navprop map from the shared array result; re-point matterService's _resolveNavProp at it. Fall back to approach B only if C cannot preserve the map exactly.</step>
+    <step order="4">Run the equivalence test + shared-lib build + matterService tests — all green, payload byte-identical.</step>
+    <step order="5">Step 9.5 gates (code-review + adr-check). Update TASK-INDEX.md: mark 016 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the shared array form cannot reconstruct matter's exact map (e.g. a column resolves to a different nav prop without ReferencedEntity), STOP and escalate rather than shipping a payload difference.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build/test the shared library</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts</output>
+    <output type="code">shared util (adapter, if approach C)</output>
+    <output type="test">matterService payload-equivalence test</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Exactly one nav-prop discovery implementation remains across all 7 services (matter via the shared fn/adapter).</criterion>
+    <criterion testable="true">matterService create payload is byte-identical to the pre-change baseline (equivalence test passes).</criterion>
+    <criterion testable="true">Shared-lib build + matterService tests green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md FR-08, design.md §4.1a. Created 2026-07-09 as the §6.5 Path-A follow-up split off from task 011.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

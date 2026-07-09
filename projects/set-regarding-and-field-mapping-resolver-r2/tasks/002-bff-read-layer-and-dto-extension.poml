@@ -3,7 +3,7 @@
   <metadata>
     <title>Extend BFF field-mapping read layer + rule DTO (additive)</title>
     <phase>0: BFF Contract + Schema Extension</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>003,010</blocks>

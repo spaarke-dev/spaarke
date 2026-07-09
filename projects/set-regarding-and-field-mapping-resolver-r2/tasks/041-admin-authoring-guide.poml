@@ -3,7 +3,7 @@
   <metadata>
     <title>Admin authoring guide (native MDA form + mapping types)</title>
     <phase>4: Documentation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>090</blocks>
@@ -66,7 +66,26 @@
     <criterion testable="true">It includes a worked example matching the seeded attorney matrix.</criterion>
   </acceptance-criteria>
 
-  <notes>Ref: spec.md FR-17, design.md §5, §11.</notes>
+  <notes>Ref: spec.md FR-17, design.md §5, §11.
+
+Completed 2026-07-09 · Rigor: MINIMAL · Model: sonnet@high · Verdict: COMPLETED.
+Wrote docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md per docs-guide skill conventions
+(Prerequisites/Quick Reference/Procedure/Configuration/Verification/
+Troubleshooting/Related). Documents native MDA form + subgrid authoring only
+(no PCF referenced or implied); all four sprk_mapping_type values (Copy,
+Default/Constant, Concat, Template) with their exact field requirements;
+sprk_expression {sprk_field} placeholder syntax incl. the unresolved-token
+omit-with-warning behavior (verified against completed task 013's notes/
+constraints, not assumed); the real seeded Matter->Event 8-rule attorney
+matrix from notes/task-030-notes.md (rule-for-rule), plus the Invoice/Report
+Card field-name-divergence note (renames + Invoice's no-lawfirm/no-external-
+internal omissions) so makers don't copy a rule set verbatim across targets.
+Added a docs/guides/INDEX.md entry (Workspace & Entity Creation section).
+Did NOT touch TASK-INDEX.md or current-task.md (out of boundary per
+dispatch). docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md (task 040,
+parallel) did not exist yet at write time; the guide's Related section notes
+this conditionally rather than linking a nonexistent file. See
+notes/task-041-notes.md for full detail.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

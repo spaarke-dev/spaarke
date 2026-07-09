@@ -326,7 +326,11 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
         // regardingEntityName argument (ADR-024 applyResolverFields contract).
         const currentFormValues = mergeEventRegardingFromAssociation(formValuesRef.current, context.association);
 
-        const eventService = new EventService(dataService);
+        // Task 020 (spec FR-12): pass authFetch/bffBaseUrl so EventService can
+        // drive the Field Mapping Framework engine (graceful no-op when the
+        // host omits either, or when there's no regarding association / no
+        // configured profile for the pair).
+        const eventService = new EventService(dataService, authFetch, bffBaseUrl);
         const result = await eventService.createEvent(currentFormValues, context.association?.entityType);
         if (!result.success) {
           throw new Error(result.errorMessage ?? 'Failed to create event');
@@ -334,7 +338,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
 
         const eventId = result.eventId!;
         const eventName = result.eventName!;
-        const warnings: string[] = [];
+        const warnings: string[] = [...result.warnings];
 
         // Upload files to SPE + create document records
         if (context.uploadedFiles.length > 0 && context.speContainerId && authFetch && bffBaseUrl) {

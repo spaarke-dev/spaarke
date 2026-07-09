@@ -3,7 +3,7 @@
   <metadata>
     <title>Add sprk_expression column to sprk_fieldmappingrule</title>
     <phase>0: BFF Contract + Schema Extension</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>002,030</blocks>
@@ -73,7 +73,7 @@
     <criterion testable="true">No existing sprk_fieldmappingrule record was modified.</criterion>
   </acceptance-criteria>
 
-  <notes>Ref: spec.md FR-11, design.md §4.3.</notes>
+  <notes>Ref: spec.md FR-11, design.md §4.3. COMPLETED 2026-07-09: sprk_expression (Memo, MaxLength 2000, nullable) added to sprk_fieldmappingrule via Web API; published; verified MaxLength=2000/Required=None. sprk_defaultvalue untouched. No plugin. See notes/task-001-notes.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

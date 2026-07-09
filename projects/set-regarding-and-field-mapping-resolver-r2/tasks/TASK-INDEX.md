@@ -7,21 +7,22 @@
 
 | ID | Title | Phase | Status | Deps | Model/Effort | Rigor | Parallel |
 |----|-------|-------|--------|------|--------------|-------|----------|
-| 001 | Add `sprk_expression` column | 0 | 🔲 | none | sonnet/high | STANDARD | — |
-| 002 | BFF read-layer + rule DTO extension | 0 | 🔲 | 001 | sonnet/high | FULL | — |
-| 003 | BFF tests + publish-size + push regression | 0 | 🔲 | 002 | sonnet/high | FULL | — |
-| 010 | Engine shell + types (context-agnostic) | 1 | 🔲 | 003 | opus/high | FULL | A |
-| 011 | Consolidate nav-prop discovery | 1 | 🔲 | none | opus/high | FULL | A |
-| 012 | Copy engine — scalar + lookup `@odata.bind` | 1 | 🔲 | 010,011 | sonnet/xhigh | FULL | — |
-| 013 | Default + Concat + Template engines | 1 | 🔲 | 012 | sonnet/high | FULL | — |
-| 014 | Same-entity support + no-guard test | 1 | 🔲 | 013 | sonnet/high | FULL | — |
-| 015 | Engine unit tests (all paths) | 1 | 🔲 | 012,013,014 | sonnet/high | FULL | — |
-| 020 | Wire event + matter + project | 2 | 🔲 | 015,011 | sonnet/high | FULL | B |
-| 021 | Wire todo + workAssignment | 2 | 🔲 | 015,011 | sonnet/high | FULL | B |
-| 022 | Wire invoice + reportCard | 2 | 🔲 | 015,011 | sonnet/high | FULL | B |
-| 030 | Cleanup + seed attorney matrix | 3 | 🔲 | 001 | sonnet/high | STANDARD | — |
-| 040 | Architecture doc + CLAUDE.md pointer | 4 | 🔲 | 015,022,030 | sonnet/high | MINIMAL | — |
-| 041 | Admin authoring guide | 4 | 🔲 | 030 | sonnet/high | MINIMAL | — |
+| 001 | Add `sprk_expression` column | 0 | ✅ | none | sonnet/high | STANDARD | — |
+| 002 | BFF read-layer + rule DTO extension | 0 | ✅ | 001 | sonnet/high | FULL | — |
+| 003 | BFF tests + publish-size + push regression | 0 | ✅ | 002 | sonnet/high | FULL | — |
+| 010 | Engine shell + types (context-agnostic) | 1 | ✅ | 003 | opus/high | FULL | A |
+| 011 | Consolidate nav-prop discovery (Path A: 6-of-7; matter→016) | 1 | ✅ | none | opus/high | FULL | A |
+| 012 | Copy engine — scalar + lookup `@odata.bind` | 1 | ✅ | 010,011 | sonnet/xhigh | FULL | — |
+| 013 | Default + Concat + Template engines | 1 | ✅ | 012 | sonnet/high | FULL | — |
+| 014 | Same-entity support + no-guard test | 1 | ✅ | 013 | sonnet/high | FULL | — |
+| 015 | Engine unit tests (all paths) | 1 | ✅ | 012,013,014 | sonnet/high | FULL | — |
+| 016 | matterService nav-prop convergence (deferred from 011, §6.5) | 1 | 🔲 | 011 | opus/xhigh | FULL | — |
+| 020 | Wire event + matter + project | 2 | ✅ | 015,011 | sonnet/high | FULL | B |
+| 021 | Wire todo + workAssignment | 2 | ✅ | 015,011 | sonnet/high | FULL | B |
+| 022 | Wire invoice + reportCard | 2 | ✅ | 015,011 | sonnet/high | FULL | B |
+| 030 | Cleanup + seed attorney matrix (all 3 pairs; +Report Card recordtype_ref) | 3 | ✅ | 001 | sonnet/high | STANDARD | — |
+| 040 | Architecture doc + CLAUDE.md pointer | 4 | ✅ | 015,022,030 | sonnet/high | MINIMAL | — |
+| 041 | Admin authoring guide | 4 | ✅ | 030 | sonnet/high | MINIMAL | — |
 | 090 | Project wrap-up | 5 | 🔲 | 020,021,022,030,040,041 | sonnet/high | FULL | — |
 
 ## Dependency Graph (critical path)

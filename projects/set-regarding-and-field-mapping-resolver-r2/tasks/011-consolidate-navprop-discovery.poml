@@ -3,7 +3,7 @@
   <metadata>
     <title>Consolidate nav-prop discovery into a shared util</title>
     <phase>1: Client Engine</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>012,020,021,022</blocks>
@@ -81,7 +81,9 @@
     <criterion testable="true">No service's create-payload output changed.</criterion>
   </acceptance-criteria>
 
-  <notes>Ref: spec.md FR-08, design.md §4.1a. This unblocks lookup binding in task 012.</notes>
+  <notes>Ref: spec.md FR-08, design.md §4.1a. This unblocks lookup binding in task 012.
+
+Completion (2026-07-09): Path A: 6-of-7 consolidated; matterService convergence deferred to follow-up task 016 (create-payload-touching, needs equivalence test + owner sign-off) per §6.5. Escalation trigger fired first (matterService is a Record&lt;string,string&gt; map-form outlier feeding its create-payload path); orchestrator accepted the escalation and directed Path A. Shared `discoverNavProps(entityLogicalName, fetchImpl = fetch): Promise&lt;INavPropEntry[]&gt;` + `_resetNavPropCacheForTests()` added to PolymorphicResolverService.ts (co-located with findNavProp) and exported via services/index.ts. The 6 array-form services (event/invoice/project/reportCard/workAssignment/todo) now import it; the 3 reset helpers delegate to the shared reset; todo's fetchImpl seam preserved. matterService.ts untouched — no create-payload change. Build clean (tsc exit 0); 15 suites / 165 tests pass. Step 9.5: code-review PASS (0 critical/0 warning), adr-check PASS (ADR-012 compliant, 0 violations). Details: notes/task-011-notes.md + notes/task-011-BLOCKED.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Default/Constant + Concat + Template mapping engines</title>
     <phase>1: Client Engine</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>012</dependencies>
     <blocks>014,015</blocks>
@@ -74,7 +74,21 @@
     <criterion testable="true">Shared-lib build passes.</criterion>
   </acceptance-criteria>
 
-  <notes>Ref: spec.md FR-05, FR-06, FR-07, design.md §4.1.</notes>
+  <notes>Ref: spec.md FR-05, FR-06, FR-07, design.md §4.1.
+
+Completed 2026-07-09 · Rigor: FULL · Model: sonnet@high · Verdict: COMPLETED.
+Implemented SEAM[013:Default] (literal), SEAM[013:Concat]/SEAM[013:Template]
+(shared resolveExpression placeholder resolver). Extended task 012's single
+batched source $select to also cover Concat/Template placeholder fields, so
+there is still exactly ONE IDataService.retrieveRecord call per invocation.
+Renamed IRuleApplyContext.sourceRecordForCopy -> sourceRecord (now shared by
+Copy + Concat/Template). Found + fixed a warning-spam/garbled-payload bug
+during Step 9.5 review: applyExpressionRule lacked the same
+shared-fetch-failure guard applyCopy already had; added it + a regression
+test. 12/12 focused tests pass (4 pre-existing Copy + 8 new); 75/75 on the
+regression sweep; build + eslint clean. code-review + adr-check both clean
+(0 Critical/Warning/Violation after the one fix). See
+notes/task-013-notes.md for full detail.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -421,14 +421,19 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         }
 
         // 2. Create sprk_project record (with INV-5-safe BU cascade applied inside the service)
-        const projectService = new ProjectService(dataService);
-        const result = await projectService.createProject(mergedFormValues, cascadeDefaults);
+        // Task 020 (spec FR-12): pass authFetch/bffBaseUrl + the AssociateToStep
+        // selection so ProjectService can drive the Field Mapping Framework
+        // engine (graceful no-op when the host omits either, there's no
+        // association, or no configured profile for the pair).
+        const projectService = new ProjectService(dataService, authFetch, bffBaseUrl);
+        const result = await projectService.createProject(mergedFormValues, cascadeDefaults, context.association);
         if (!result.success) {
           throw new Error(result.errorMessage ?? 'Failed to create project');
         }
 
         const projectId = result.projectId!;
         const projectName = result.projectName!;
+        warnings.push(...result.warnings);
 
         // 1b. Create Work Assignment (sprk_workassignment) linked to this project
         // Delegates to the shared WorkAssignmentService, which performs nav-prop
@@ -488,7 +493,11 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         // 1b-ii. Create Event (sprk_event) linked to this project
         if (context.selectedActions.includes('create-event') && context.followOn.createEventName.trim()) {
           try {
-            const eventService = new EventService(dataService);
+            // Task 020: authFetch/bffBaseUrl also drive the Field Mapping
+            // Framework engine for this follow-on Event create (Project ->
+            // Event pair) — see the primary createEvent wiring in
+            // CreateEventWizard.tsx for the full rationale.
+            const eventService = new EventService(dataService, authFetch, bffBaseUrl);
             const eventFormValues = {
               eventName: context.followOn.createEventName.trim(),
               eventTypeId: context.followOn.createEventTypeId,
@@ -500,6 +509,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               regardingRecordName: projectName,
             };
             const eventResult = await eventService.createEvent(eventFormValues, 'sprk_project');
+            if (eventResult.warnings.length > 0) warnings.push(...eventResult.warnings);
             if (eventResult.success) {
               console.info('[CreateProjectWizard] Event created and linked to project:', projectId);
             } else {
