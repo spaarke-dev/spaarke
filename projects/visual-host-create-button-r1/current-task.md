@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Post-deployment UAT triage (task 090 wrap-up still pending, held until remaining UAT bugs are resolved) |
-| **Step** | PR #585 merged to master (6df45d45b, 2026-07-09). **Follow-up fix built + deployed as v1.4.32 (2026-07-09, uncommitted)**: root-caused and fixed 2 of 3 UAT lookup bugs in `CreateEventWizard.tsx`. |
-| **Status** | in-progress — 2 of 3 lookup bugs FIXED + deployed; 1 remaining (Invoice Vendor Org) still unexplained |
-| **Next Action** | Commit + push the v1.4.32 fix (currently uncommitted on this branch). Ask owner to retest all 3 wizards' lookups on v1.4.32. If Invoice's Vendor Organization lookup is STILL broken, escalate to the owner for a browser Network-tab check (all code-level hypotheses now exhausted — see "Investigation dead-end" below). |
+| **Task** | 090 — Project wrap-up — COMPLETE. Project status: Complete. |
+| **Step** | All 090 deliverables done: ISS-01 filed (`notes/defer-issues.md` + GitHub #587); maker-facing valid-keys note added to `docs/guides/VISUALHOST-SETUP-GUIDE.md`; README → Complete (KPI→Report Card language corrected throughout); `notes/lessons-learned.md` written (6 lessons + process notes); TASK-INDEX.md + POML marked ✅/completed. |
+| **Status** | not-started (project complete — no active task) |
+| **Next Action** | Commit all wrap-up artifacts, `/push-to-github`, then `/merge-to-master`. Worktree stays open (owner explicitly does NOT want it archived). |
 
 ### Root cause found + fixed (2026-07-09) — v1.4.32
 `CreateEventWizard.tsx` had two real bugs, both in its own local, duplicated search-helper code (not shared with the already-correct `matterService.ts`/`workAssignmentService.ts`):

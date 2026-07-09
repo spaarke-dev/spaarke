@@ -3,7 +3,7 @@
   <metadata>
     <title>Project wrap-up: test-diet, docs, PR</title>
     <phase>E: Wrap-up</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>050</dependencies>
     <blocks>none</blocks>
@@ -49,4 +49,20 @@
     <criterion>README status = Complete; lessons-learned written.</criterion>
     <criterion>PR opened; git diff --stat shows no Sprk.Bff.Api files.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-07-09. /test-diet already run this session (notes/test-diet-report.md,
+    committed 8035564b6) — 163 tests reviewed, 0 scaffolding, 163 MAINTAIN. Maker-facing
+    valid-keys note added to docs/guides/VISUALHOST-SETUP-GUIDE.md (new section, keys:
+    event/invoice/report-card -- corrected from the POML's stale "kpi-assessment", which
+    was retargeted to report-card on 2026-07-08 per owner decision). README updated to
+    Complete with corrected KPI->Report Card scope language throughout. lessons-learned.md
+    written (6 numbered lessons + process notes). Invoice Vendor Org lookup bug filed as
+    ISS-01 in notes/defer-issues.md + GitHub Issue #587 (owner decision: resolve in a
+    separate follow-on session, not blocking wrap-up). PR: this branch already merged to
+    master once via #585 (2026-07-09); the 3 follow-up commits since then (v1.4.32 fix +
+    code-review lint fix + test-diet report) plus this wrap-up commit go into a new PR
+    per owner's explicit instruction to push + merge everything before leaving the branch
+    open (worktree intentionally kept, not archived).
+  </notes>
 </task>
