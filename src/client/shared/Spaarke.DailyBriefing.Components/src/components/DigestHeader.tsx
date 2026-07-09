@@ -82,8 +82,21 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export interface DigestHeaderProps {
-  /** Total number of unread notifications across all channels. */
-  totalUnreadCount: number;
+  /**
+   * @deprecated No longer rendered (R5, 2026-07-09). The subtitle previously
+   * showed "· {N} items" from this count, but that reflected only the visible
+   * activity bullets — not the whole briefing (high-priority "Critical" items
+   * are separate) — which read as a confusing total. The subtitle now shows a
+   * "Last updated" timestamp instead. Retained as an OPTIONAL prop so existing
+   * callers do not break.
+   */
+  totalUnreadCount?: number;
+  /**
+   * When the briefing data was generated (ISO string or Date). Rendered as
+   * "Last updated {weekday, month day} at {time}". When omitted/null (loading /
+   * empty / error states), the subtitle falls back to just today's date.
+   */
+  lastUpdated?: string | Date | null;
   /** Called when the user clicks the refresh button. */
   onRefresh?: () => void;
   /** Slot for the preferences dropdown (rendered in the actions area). */
@@ -120,8 +133,33 @@ function formatToday(): string {
   }
 }
 
+/**
+ * "Last updated {weekday, month day} at {time}", e.g.
+ * "Last updated Thursday, July 9 at 9:56 AM". Formats the briefing's
+ * generation timestamp in the viewer's locale + timezone. Falls back to just
+ * today's date if the value is missing or unparseable.
+ */
+function formatLastUpdated(value: string | Date): string {
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) return formatToday();
+  try {
+    const date = new Intl.DateTimeFormat(undefined, {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+    }).format(d);
+    const time = new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(d);
+    return `Last updated ${date} at ${time}`;
+  } catch {
+    return formatToday();
+  }
+}
+
 export const DigestHeader: React.FC<DigestHeaderProps> = ({
-  totalUnreadCount,
+  lastUpdated,
   onRefresh,
   preferencesSlot,
   onBrowsePlaybooks,
@@ -136,8 +174,7 @@ export const DigestHeader: React.FC<DigestHeaderProps> = ({
           Daily Briefing
         </Text>
         <Text size={200} className={styles.subtitle}>
-          {formatToday()}
-          {totalUnreadCount > 0 ? ` · ${totalUnreadCount} ${totalUnreadCount === 1 ? 'item' : 'items'}` : ''}
+          {lastUpdated ? formatLastUpdated(lastUpdated) : formatToday()}
         </Text>
       </div>
       <div className={styles.actions}>

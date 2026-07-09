@@ -464,7 +464,6 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     return (
       <div className={styles.container}>
         <DigestHeader
-          totalUnreadCount={0}
           onRefresh={refreshBriefing}
           preferencesSlot={<PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />}
           onBrowsePlaybooks={onBrowsePlaybooks}
@@ -482,7 +481,6 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     return (
       <div className={styles.container}>
         <DigestHeader
-          totalUnreadCount={0}
           onRefresh={refreshBriefing}
           preferencesSlot={<PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />}
           onBrowsePlaybooks={onBrowsePlaybooks}
@@ -505,7 +503,6 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     return (
       <div className={styles.container}>
         <DigestHeader
-          totalUnreadCount={0}
           onRefresh={refreshBriefing}
           preferencesSlot={<PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />}
           onBrowsePlaybooks={onBrowsePlaybooks}
@@ -544,7 +541,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     <div className={styles.container}>
       <Toaster toasterId={toasterId} position="bottom-end" />
       <DigestHeader
-        totalUnreadCount={totalVisibleBullets}
+        lastUpdated={generatedAtIso}
         onRefresh={refreshBriefing}
         preferencesSlot={<PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />}
         onBrowsePlaybooks={onBrowsePlaybooks}
