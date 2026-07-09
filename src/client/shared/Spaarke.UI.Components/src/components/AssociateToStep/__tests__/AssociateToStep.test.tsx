@@ -428,6 +428,81 @@ describe('AssociateToStep — disabled state', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Locked mode (design §5.5 — lockAssociation / Visual Host launch)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('AssociateToStep — locked mode', () => {
+  const lockedValue: AssociationResult = {
+    entityType: 'sprk_matter',
+    recordId: 'abc-123',
+    recordName: 'Smith v. Jones',
+  };
+
+  it('rendersFixedAssociationReadOnlyWithoutPickerControls', () => {
+    const navigationService = createMockNavigationService();
+    renderWithProviders(
+      <AssociateToStep
+        entityTypes={[...TODO_REGARDING_TARGETS]}
+        navigationService={navigationService}
+        value={lockedValue}
+        onChange={jest.fn()}
+        locked
+      />
+    );
+
+    // The fixed record is shown read-only...
+    expect(screen.getByTestId('associate-to-step-locked-record')).toBeInTheDocument();
+    expect(screen.getByText('Smith v. Jones')).toBeInTheDocument();
+    expect(screen.getByText('(Matter)')).toBeInTheDocument();
+
+    // ...but NONE of the picker affordances are rendered (cannot re-target/clear).
+    expect(screen.queryByTestId('associate-to-step-entity-type-dropdown')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('associate-to-step-select-record-button')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear selection' })).not.toBeInTheDocument();
+  });
+
+  it('lockedModeNeverOpensLookup', async () => {
+    const user = userEvent.setup();
+    const navigationService = createMockNavigationService();
+    renderWithProviders(
+      <AssociateToStep
+        entityTypes={[...TODO_REGARDING_TARGETS]}
+        navigationService={navigationService}
+        value={lockedValue}
+        onChange={jest.fn()}
+        locked
+      />
+    );
+
+    // There is no Select Record button to click; the header still renders.
+    expect(screen.getByText('Associate To')).toBeInTheDocument();
+    // Guard: even if a stray control existed, the lookup must not have fired on mount.
+    await waitFor(() => expect(navigationService.openLookup).not.toHaveBeenCalled());
+    // Nothing to interact with — assert the picker button is absent.
+    expect(screen.queryByTestId('associate-to-step-select-record-button')).not.toBeInTheDocument();
+    await user.keyboard('{Tab}');
+    expect(navigationService.openLookup).not.toHaveBeenCalled();
+  });
+
+  it('defaultUnlockedModeStillRendersPicker', () => {
+    // Regression guard: omitting `locked` preserves the interactive picker.
+    const navigationService = createMockNavigationService();
+    renderWithProviders(
+      <AssociateToStep
+        entityTypes={[...TODO_REGARDING_TARGETS]}
+        navigationService={navigationService}
+        value={lockedValue}
+        onChange={jest.fn()}
+      />
+    );
+
+    expect(screen.getByTestId('associate-to-step-entity-type-dropdown')).toBeInTheDocument();
+    expect(screen.getByTestId('associate-to-step-select-record-button')).toBeInTheDocument();
+    expect(screen.queryByTestId('associate-to-step-locked-record')).not.toBeInTheDocument();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Error handling
 // ─────────────────────────────────────────────────────────────────────────────
 

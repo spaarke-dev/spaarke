@@ -2,9 +2,9 @@
 <manifest>
   <control namespace="Spaarke.Controls"
            constructor="TrackingFieldTrio"
-           version="1.0.4"
+           version="1.0.5"
            display-name-key="Tracking Field Trio"
-           description-key="Compact 3-field control for tracking flags (v1.0.4). Combines two Yes/No toggles (Monitor, High Priority) with a 3-value segmented picker (Access Permission). Designed to fit inside a 33% form column."
+           description-key="Compact 3-field control for tracking flags (v1.0.5). Combines two Yes/No toggles (Monitor, High Priority) with a 3-value segmented picker (Access Permission). Designed to fit inside a 33% form column."
            control-type="standard">
     <external-service-usage enabled="false" />
 

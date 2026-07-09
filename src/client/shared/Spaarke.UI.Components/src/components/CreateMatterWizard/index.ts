@@ -20,7 +20,14 @@ export { CreateRecordStep } from './CreateRecordStep';
 
 // Task 024 -- matter-specific step components
 export { AssignCounselStep } from './AssignCounselStep';
-export { buildDefaultEmailSubject, buildDefaultEmailBody } from './SendEmailStep';
+// NOTE: The local NextStepsStep.tsx + SendEmailStep.tsx were duplicate copies of
+// the shared Next-Steps / email flow. CreateMatterWizard renders its follow-on
+// cards through CreateRecordWizard (now backed by the shared WizardFollowOns
+// module, design.md §5.9), so those local copies were dead code and were
+// deleted in visual-host-create-button-r1 task 022. The unused
+// buildDefaultEmailSubject / buildDefaultEmailBody helpers went with them —
+// CreateMatterWizard.tsx builds its email subject/body inline via the
+// CreateRecordWizard config (buildEmailSubject / buildEmailBody).
 
 // Service layer
 export {

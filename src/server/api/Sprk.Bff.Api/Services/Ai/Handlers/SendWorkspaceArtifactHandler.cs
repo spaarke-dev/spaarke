@@ -154,20 +154,8 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Send Workspace Artifact",
-        Description: "Open a tab in the user's workspace pane. PREFERRED USE — open a named workspace " +
-                     "LAYOUT as a live tab: widgetType 'Workspace' with widgetData " +
-                     "{\"kind\":\"Workspace\",\"layoutName\":\"<layout name>\"} (e.g. layoutName 'Compose' " +
-                     "when the user asks to open the Compose editor / start composing or drafting a document " +
-                     "in the workspace). The tab opens immediately in the workspace pane and the tool result " +
-                     // R4-2 (2026-07-07): Compose document pre-seed contract.
-                     "confirms it. When opening the Compose layout ABOUT A SPECIFIC DOCUMENT, add " +
-                     "widgetData.documentId (the sprk_document GUID, e.g. from a search result path " +
-                     "tables/sprk_document/records/{guid}) — Compose then opens WITH that document loaded. " +
-                     "Session-UPLOADED chat files cannot pre-seed Compose (they exist only as extracted " +
-                     "text, not stored documents) — the tab opens empty and the result says so; relay that " +
-                     "honestly. Legacy artifact variants (Summary, DocumentViewer, Dashboard, Table) record " +
-                     "an artifact to workspace state but are NOT visible in the current workspace UI — avoid " +
-                     "them unless explicitly instructed.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-send-workspace-artifact-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Open a tab in the user's workspace pane. PREFERRED USE — open a named workspace LAYOUT as a live tab: widgetType 'Workspace' with widgetData {""kind"":""Workspace"",""layoutName"":""<layout name>""}. Use layoutName 'Compose' when the user asks to open the Compose editor or to start composing/drafting a document in the workspace; other layouts (e.g. 'Daily Briefing', 'Documents') open the same way. When opening the Compose layout ABOUT A SPECIFIC DOCUMENT, add widgetData.documentId (the sprk_document GUID, e.g. from a search result path tables/sprk_document/records/{guid}) — Compose then opens WITH that document loaded. Session-UPLOADED chat files cannot pre-seed Compose (they exist only as extracted text, not stored documents) — omit documentId for them; the tab opens empty and the tool result says so — relay it honestly. If the requested layout does not exist, the tool result lists the available layout names — relay them honestly. The tab opens immediately in the workspace pane and the tool result confirms it; only claim a tab was opened when this tool result says so. Legacy artifact variants (Summary, DocumentViewer, Dashboard, Table) record an artifact to workspace state but are NOT visible in the current workspace UI — avoid them unless explicitly instructed. Agent-created tabs default to visible-to-assistant.",
         Version: "1.1.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

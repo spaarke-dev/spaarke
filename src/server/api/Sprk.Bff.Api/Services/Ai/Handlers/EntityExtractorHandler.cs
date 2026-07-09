@@ -112,10 +112,8 @@ public sealed class EntityExtractorHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Entity Extractor",
-        Description: "LLM-assisted Named Entity Recognition (NER) with code-based validation " +
-                     "and normalization. Extracts organizations, persons, locations, dates, " +
-                     "money, emails, phone numbers, and URLs from free text. Configurable type " +
-                     "filter and confidence threshold.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-entity-extractor-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"LLM-assisted Named Entity Recognition (NER) with code-based validation + normalization. Extracts organizations, persons, locations, dates, money, emails, phone numbers, and URLs from free text. Configurable type filter (entityTypes) and confidence threshold (confidenceThreshold). Output entities are deterministically validated + normalized (ISO 8601 dates, lowercased emails, sanitized phones, uppercase currency codes).",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

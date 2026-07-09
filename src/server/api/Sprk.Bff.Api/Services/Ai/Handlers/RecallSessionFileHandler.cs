@@ -248,11 +248,8 @@ public sealed class RecallSessionFileHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Recall Session File",
-        Description: "Recall content from a session-uploaded file by scope + purpose. Returns " +
-                     "citation-bearing content. The precomputed summary is NOT authoritative — " +
-                     "for any legally-precise question (specific clauses, exact wording, dates, " +
-                     "parties, dollar amounts) call this tool with requireCitations=true and cite " +
-                     "the source in your answer. Architecture §8.1.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-recall-session-file-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Recall content from a session-uploaded file by scope + purpose; returns citation-bearing content. Use this tool for ANY legally-precise question (specific clauses, exact wording, dates, parties, dollar amounts). The file's precomputed summary is NOT authoritative — DO NOT quote it as if it were the source. Call this tool with requireCitations=true (the default) for any answer that uses recalled content, and cite the returned citations explicitly. Scope choices: 'summary' for high-level framing only (NEVER cite); 'relevant_sections' for targeted semantic search (default); 'full_text' for the whole document (auto-truncates at 8K tokens to summary + first 2K chars); 'tables' for tabular data; 'citations' for already-cited material. Purpose biases retrieval semantics: 'answer_question' (default semantic), 'quote' (exact-phrase substring filter), 'compare' (multi-file), 'summarize' (broader top-K), 'extract_dates' (date-token post-processing), 'verify' (broader top-K with citation markers). Architecture §8.1.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

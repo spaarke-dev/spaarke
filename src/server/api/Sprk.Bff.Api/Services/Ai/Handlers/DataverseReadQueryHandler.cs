@@ -55,19 +55,8 @@ public sealed class DataverseReadQueryHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Dataverse Read Query",
-        Description: "Executes a read-only SQL SELECT against Dataverse under the calling user's permissions " +
-                     "and returns matching rows with record-id citations. Supported dialect (GA Dataverse MCP " +
-                     "read_query contract): SELECT [TOP n] explicit columns FROM one table [WHERE simple " +
-                     "column-to-literal predicates with AND/OR] [ORDER BY]. Not supported: JOIN, GROUP BY, " +
-                     "aggregates, subqueries, DISTINCT, HAVING, UNION, OFFSET. Use dataverse.describe first to " +
-                     "discover table and column logical names. " +
-                     // G-P3 UAT round-5 R5-C (2026-07-07): distribution/aggregate steering + the
-                     // lookup-column contract (selecting a lookup previously failed at the Web API).
-                     "For distributions/aggregations (counts by category), SELECT the category column across " +
-                     "rows (TOP up to 200) and aggregate the values YOURSELF from the result. LOOKUP columns " +
-                     "(e.g. sprk_practicearea on sprk_matter) are selectable and return the referenced record's " +
-                     "GUID — query the referenced table (e.g. sprk_practicearea_ref) to map GUIDs to names. " +
-                     "Choice columns return numeric option values — map them to labels via dataverse.describe.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-dataverse-read-query-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Executes a read-only SQL SELECT against Dataverse under the calling user's permissions and returns rows with record-id citations. Use dataverse.describe FIRST to get the table's column logical names and types, then construct a query that strictly follows the supported dialect: SELECT [TOP n] explicit column list FROM one table [WHERE simple column-to-literal predicates combined with AND/OR] [ORDER BY column ASC|DESC]. NOT supported: SELECT *, JOIN, GROUP BY, aggregates (COUNT/SUM/AVG/MIN/MAX), subqueries, DISTINCT, HAVING, UNION, OFFSET, GETDATE(). For distributions/aggregations (counts by category), SELECT the category column across rows (TOP up to 200) and aggregate the values YOURSELF from the result. LOOKUP columns (e.g. sprk_practicearea on sprk_matter) ARE selectable and return the referenced record's GUID — query the referenced table (e.g. sprk_practicearea_ref) to map GUIDs to display names. Choice columns return numeric option values — map them to labels via dataverse.describe. Default row cap 50 (TOP max 200). Results respect the current user's Dataverse security roles and row-level security. Spaarke entity map (use these logical names): 'matter'/'case'/'deal' = sprk_matter (key columns sprk_mattername, sprk_matternumber, sprk_matterdescription, statuscode; lookups sprk_practicearea to sprk_practicearea_ref, sprk_mattertype to sprk_mattertype_ref, sprk_assignedattorney1 to contact, sprk_externalaccount to account). 'project'/'workstream' = sprk_project (sprk_projectname, sprk_projectnumber). 'document'/'contract'/'file' = sprk_document (sprk_documentname, sprk_filename, sprk_documenttype, sprk_filesummary; lookups sprk_matter, sprk_project). People = contact; client companies = account; law firms/vendors = sprk_organization.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

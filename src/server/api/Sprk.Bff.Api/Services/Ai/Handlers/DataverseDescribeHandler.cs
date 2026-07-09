@@ -67,11 +67,8 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Dataverse Describe",
-        Description: "Describes Dataverse structure and records under the calling user's permissions. " +
-                     "Path forms (GA Dataverse MCP contract): 'tables/' lists tables; 'tables/{logicalName}' " +
-                     "returns the table schema (columns, types); 'tables/{logicalName}/records/{guid}' returns " +
-                     "one full record. Read-only; results respect the user's Dataverse security roles and " +
-                     "row-level security.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-dataverse-describe-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Describes Dataverse structure and records under the calling user's permissions (read-only). Path forms: 'tables/' lists all tables; 'tables/{logicalName}' returns the table schema with column logical names and types; 'tables/{logicalName}/records/{guid}' returns one full record. Use this FIRST to discover table and column logical names before calling dataverse.read_query, and to read full record details for paths returned by dataverse.search_data. Results respect the current user's Dataverse security roles and row-level security. Spaarke entity map (use these logical names): 'matter'/'case'/'deal' = sprk_matter (key columns sprk_mattername, sprk_matternumber, sprk_matterdescription, statuscode; lookups sprk_practicearea, sprk_mattertype, sprk_assignedattorney1 to contact, sprk_externalaccount to account). 'project'/'workstream' = sprk_project (sprk_projectname, sprk_projectnumber). 'document'/'contract'/'file' = sprk_document (sprk_documentname, sprk_filename, sprk_documenttype, sprk_filesummary; lookups sprk_matter, sprk_project). People = contact; client companies = account; law firms/vendors = sprk_organization.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

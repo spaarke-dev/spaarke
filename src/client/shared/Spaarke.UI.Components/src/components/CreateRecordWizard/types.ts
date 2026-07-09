@@ -15,6 +15,7 @@ import type { ILookupItem } from '../../types/LookupTypes';
 import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 import type { AssociationResult, EntityTypeOption } from '../AssociateToStep/types';
 import type { INavigationService, IDataService } from '../../types/serviceInterfaces';
+import type { FollowOnCardConfig } from '../WizardFollowOns';
 
 // Re-export for convenience
 export type { AssociationResult, EntityTypeOption };
@@ -57,14 +58,45 @@ export interface IAssociateToStepConfig {
    * contract.
    */
   initialAssociation?: AssociationResult;
+
+  /**
+   * When `true`, the Associate-To step is hidden and the `initialAssociation`
+   * is treated as a fixed parent that flows straight through to `onFinish`
+   * (via `context.association`) without ever showing the picker
+   * (visual-host-create-button-r1 task 014 / design §5.5).
+   *
+   * Used when the parent record is unambiguous — e.g. a wizard launched from a
+   * Visual Host visual, where the host record is always the parent. The step is
+   * removed from the wizard sequence entirely (not merely disabled), so the
+   * user cannot re-target or clear the association.
+   *
+   * Requires `initialAssociation` to be meaningful; when `lockAssociation` is
+   * `true` but no `initialAssociation` is supplied, the wizard simply proceeds
+   * with no association (equivalent to the user having skipped the step).
+   *
+   * Defaults to `false` — the step remains visible and skip-able exactly as
+   * before for every other launch context.
+   */
+  lockAssociation?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Follow-on action identifiers
 // ---------------------------------------------------------------------------
 
-/** Identifiers for the optional follow-on action cards shown in "Next Steps". */
-export type FollowOnActionId = 'assign-counsel' | 'create-event' | 'send-email';
+/**
+ * Identifiers for the optional follow-on action cards shown in "Next Steps".
+ *
+ * Widened (visual-host-create-button-r1 task 030) to accept any string via
+ * the `(string & {})` idiom — the three named literals remain for
+ * autocomplete/back-compat with the built-in card set, but a wizard supplying
+ * a `config.followOnCards` override (e.g. `'assign-work' | 'add-todo'` from
+ * the shared `WizardFollowOns` canonical vocabulary) is not rejected by the
+ * type system. Purely a type-level relaxation — `CreateRecordWizard.tsx`
+ * already passed arbitrary card ids straight through via `as FollowOnActionId[]`
+ * before this change; this just removes the lie.
+ */
+export type FollowOnActionId = 'assign-counsel' | 'create-event' | 'send-email' | (string & {});
 
 // ---------------------------------------------------------------------------
 // Recipient item (used by Draft Summary and Send Email)
@@ -211,6 +243,20 @@ export interface ICreateRecordWizardConfig {
   /** Subtitle for the Add Files step (optional override). */
   filesStepSubtitle?: string;
   /**
+   * When `true`, the "Add file(s)" step is omitted entirely from the wizard's
+   * step sequence — not merely skippable, but never shown.
+   *
+   * Added by visual-host-create-button-r1 task 040 for `CreateReportCardWizard`
+   * (owner decision: `sprk_reportcard` has a `sprk_containerid` column but the
+   * wizard doesn't populate it or offer document upload — no files step at
+   * all). Every other consumer omits this field, preserving the exact
+   * pre-existing step sequence (`[Associate To?] → Add file(s) → Entity info
+   * → Next Steps`) — fully backward compatible, opt-in only.
+   *
+   * Defaults to `false`/undefined (Add file(s) step present, as before).
+   */
+  hideFilesStep?: boolean;
+  /**
    * Optional configuration for an AssociateToStep prepended as step 1.
    *
    * When provided, the step sequence becomes:
@@ -290,6 +336,35 @@ export interface ICreateRecordWizardConfig {
    * fields are applied — the user can still override everything.
    */
   getAssignWorkDefaults?: () => Partial<IAssignWorkFollowOnState>;
+
+  /**
+   * Optional override for the built-in "Next Steps" card set (default:
+   * Assign Work / Create Event / Send Email — see `CreateRecordWizard.tsx`'s
+   * internal `followOnCards`). When supplied, `CreateRecordWizard` renders
+   * THIS array instead of its default 3 cards.
+   *
+   * Introduced by visual-host-create-button-r1 task 030: `CreateInvoiceWizard`
+   * (and `CreateKPIAssessmentWizard`) offer **Send Email / Add To Do / Assign
+   * Work** per design.md §5.9 — a different card set than the legacy default
+   * (which has Create Event instead of Add To Do). Rather than fork
+   * `CreateRecordWizard` or hand-roll a new wizard directly on `WizardShell`
+   * (design.md §6.3 — rejected as the default), the wizard supplies its own
+   * `FollowOnCardConfig[]` and owns 100% of the follow-on state itself
+   * (mirroring the established `WorkAssignmentWizardDialog`/
+   * `SummarizeFilesDialog` pattern of closures over local refs read inside
+   * `renderStep`). Consequently `IFinishContext.followOn` (populated from
+   * `CreateRecordWizard`'s OWN internal assign-work/create-event/email
+   * state) is NOT meaningful when this override is supplied — the wizard's
+   * `onFinish` must read its follow-on field values from its own local state
+   * instead. `IFinishContext.selectedActions` (via `FollowOnActionId`,
+   * widened above) still faithfully reports whichever card ids were
+   * selected.
+   *
+   * Omitting this field preserves the exact pre-existing behavior for every
+   * other consumer (`CreateEventWizard`, `CreateMatterWizard`,
+   * `CreateProjectWizard`) — fully backward compatible, opt-in only.
+   */
+  followOnCards?: FollowOnCardConfig[];
 }
 
 // ---------------------------------------------------------------------------
