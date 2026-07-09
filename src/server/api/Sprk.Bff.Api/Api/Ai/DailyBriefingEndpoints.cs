@@ -72,13 +72,19 @@ public static class DailyBriefingEndpoints
         // POST /api/ai/daily-briefing/email — Email delivery leg (FR-P3-04 / UC-D-1).
         // Executes the SAME coded composite via the `email` Binding (consumerCode=email,
         // disposition=email): collect → narrate → ledger write → Communication-service
-        // delivery to the calling user (SendMode.User OBO). The scheduled trigger is
-        // declared on the Binding row's sprk_oneventbindings (briefing_scheduled); the
-        // scheduler invokes THIS route per user at the per-user time.
+        // delivery. The scheduled trigger is declared on the Binding row's
+        // sprk_oneventbindings (briefing_scheduled); the scheduler invokes THIS route per
+        // user at the per-user time with NO body → recipient defaults to the calling user.
+        //
+        // r5 email-share (2026-07-09): the body is OPTIONAL. When a caller supplies
+        // { "recipientEmail": "colleague@…" }, the caller's OWN briefing is rendered and
+        // delivered to that colleague ("share my briefing"). systemuserid stays the caller —
+        // only the delivery address changes. Empty/absent body preserves the scheduled
+        // behavior (deliver to self). Nullable body param ⇒ empty body allowed (.NET 7+).
         group.MapPost("/email", HandleEmail)
             .RequireRateLimiting("ai-batch")
             .WithName("EmailDailyBriefing")
-            .WithSummary("Render and email the Daily Briefing to the calling user via the coded composite Action")
+            .WithSummary("Render and email the Daily Briefing (to the caller, or to an optional colleague recipient) via the coded composite Action")
             .Produces<DailyBriefingNarrateResponse>(StatusCodes.Status200OK)
             .ProducesProblem(401)
             .ProducesProblem(429)
@@ -152,10 +158,20 @@ public static class DailyBriefingEndpoints
 
     /// <summary>
     /// FR-P3-04 (task 043) email leg: executes the coded composite via the <c>email</c>
-    /// Binding and delivers the briefing to the calling user through the Communication
-    /// (Email) service (OutputRouter email disposition — store precedes send, ADR-040).
+    /// Binding and delivers the briefing through the Communication (Email) service
+    /// (OutputRouter email disposition — store precedes send, ADR-040).
     /// </summary>
+    /// <remarks>
+    /// r5 email-share (2026-07-09): the optional request body may carry a
+    /// <see cref="EmailDailyBriefingRequest.RecipientEmail"/>. When supplied, the caller's
+    /// OWN briefing (systemuserid from the token, unchanged) is delivered to that colleague
+    /// address instead of back to the caller — the "share this with a colleague" affordance.
+    /// When the body is absent/empty (the scheduled trigger), the recipient defaults to the
+    /// caller's own address via the claim cascade. The body param is nullable so an empty
+    /// POST binds to <c>null</c> rather than 415/400.
+    /// </remarks>
     private static async Task<IResult> HandleEmail(
+        EmailDailyBriefingRequest? request,
         ILoggerFactory loggerFactory,
         Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService composite,
         Spaarke.Dataverse.IGenericEntityService entityService,
@@ -171,20 +187,60 @@ public static class DailyBriefingEndpoints
             return identity.Failure;
         }
 
-        // Recipient = the acting user (same claim cascade the Communication service uses
-        // for its SendMode.User sender resolution).
-        var recipientEmail = httpContext.User?.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
-            ?? httpContext.User?.FindFirst("preferred_username")?.Value
-            ?? httpContext.User?.FindFirst("email")?.Value
-            ?? httpContext.User?.FindFirst("upn")?.Value
-            ?? httpContext.User?.FindFirst(System.Security.Claims.ClaimTypes.Upn)?.Value
-            ?? httpContext.User?.FindFirst("unique_name")?.Value;
-        if (string.IsNullOrWhiteSpace(recipientEmail))
+        string recipientEmail;
+        var requestedRecipient = request?.RecipientEmail;
+        if (!string.IsNullOrWhiteSpace(requestedRecipient))
         {
-            return Results.Problem(
-                statusCode: 400,
-                title: "Bad Request",
-                detail: "Could not resolve the caller's email address from authentication claims.");
+            // Colleague-share path: deliver the caller's own briefing to an explicit address.
+            // The systemuserid (whose briefing) stays token-derived — never body-supplied — so
+            // there is no sender/identity spoofing surface; only the delivery ADDRESS is client-
+            // supplied. Two guards on that address:
+            //  (1) format validation — the value flows into the Communication recipient list;
+            //  (2) INTERNAL-ONLY egress guard — the briefing may carry client-confidential matter
+            //      data, so the address MUST resolve to an active systemuser. This is server-side
+            //      defense-in-depth mirroring the UI's systemuser-search picker, and it preserves
+            //      the prior claims-only "no arbitrary recipient" posture (an authenticated caller
+            //      cannot egress their briefing to an external/unknown address).
+            var trimmedRecipient = requestedRecipient.Trim();
+            if (!IsValidEmailAddress(trimmedRecipient))
+            {
+                return Results.Problem(
+                    statusCode: 400,
+                    title: "Bad Request",
+                    detail: "recipientEmail is not a valid email address.");
+            }
+            if (!await IsActiveInternalUserAsync(entityService, trimmedRecipient, cancellationToken).ConfigureAwait(false))
+            {
+                logger.LogWarning(
+                    "Daily briefing email: colleague-share by systemuserid={SystemUserId} rejected — recipient is not an active internal user",
+                    identity.SystemUserId);
+                return Results.Problem(
+                    statusCode: 400,
+                    title: "Bad Request",
+                    detail: "recipientEmail must be an active internal user in this environment.");
+            }
+            recipientEmail = trimmedRecipient;
+            logger.LogInformation(
+                "Daily briefing email: colleague-share requested by systemuserid={SystemUserId}", identity.SystemUserId);
+        }
+        else
+        {
+            // Default (scheduled / self-send): recipient = the acting user (same claim cascade
+            // the Communication service uses for its SendMode.User sender resolution).
+            var callerEmail = httpContext.User?.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                ?? httpContext.User?.FindFirst("preferred_username")?.Value
+                ?? httpContext.User?.FindFirst("email")?.Value
+                ?? httpContext.User?.FindFirst("upn")?.Value
+                ?? httpContext.User?.FindFirst(System.Security.Claims.ClaimTypes.Upn)?.Value
+                ?? httpContext.User?.FindFirst("unique_name")?.Value;
+            if (string.IsNullOrWhiteSpace(callerEmail))
+            {
+                return Results.Problem(
+                    statusCode: 400,
+                    title: "Bad Request",
+                    detail: "Could not resolve the caller's email address from authentication claims.");
+            }
+            recipientEmail = callerEmail;
         }
 
         try
@@ -286,6 +342,46 @@ public static class DailyBriefingEndpoints
                 detail: "Failed to resolve caller identity."));
         }
     }
+
+    /// <summary>
+    /// Egress guard for the r5 colleague-share recipient: returns true only when
+    /// <paramref name="email"/> matches an ACTIVE (not disabled) systemuser's
+    /// <c>internalemailaddress</c> in this environment. The briefing may contain
+    /// client-confidential matter data, so a caller may only forward it to an internal
+    /// colleague — never an arbitrary/external address. The email is XML-escaped before
+    /// interpolation into FetchXML (same defense as the oid guard in
+    /// <see cref="ResolveSystemUserIdAsync"/>).
+    /// </summary>
+    private static async Task<bool> IsActiveInternalUserAsync(
+        Spaarke.Dataverse.IGenericEntityService entityService,
+        string email,
+        CancellationToken cancellationToken)
+    {
+        var escaped = System.Security.SecurityElement.Escape(email) ?? email;
+        var fxml = $@"
+            <fetch top=""1"">
+              <entity name=""systemuser"">
+                <attribute name=""systemuserid""/>
+                <filter>
+                  <condition attribute=""internalemailaddress"" operator=""eq"" value=""{escaped}""/>
+                  <condition attribute=""isdisabled"" operator=""eq"" value=""0""/>
+                </filter>
+              </entity>
+            </fetch>";
+        var lookup = await entityService.RetrieveMultipleAsync(
+            new Microsoft.Xrm.Sdk.Query.FetchExpression(fxml), cancellationToken).ConfigureAwait(false);
+        return lookup.Entities.Count > 0;
+    }
+
+    /// <summary>
+    /// Defensive email-format validation for the r5 colleague-share recipient. Uses
+    /// <see cref="System.Net.Mail.MailAddress.TryCreate(string, out System.Net.Mail.MailAddress)"/>
+    /// and requires the parse to round-trip to the same address (rejects display-name forms
+    /// like "Name &lt;a@b.com&gt;" — we want a bare address for the Communication recipient list).
+    /// </summary>
+    private static bool IsValidEmailAddress(string value) =>
+        System.Net.Mail.MailAddress.TryCreate(value, out var parsed)
+        && string.Equals(parsed.Address, value, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Tenant id from the caller's token (empty when absent — dev tolerance).</summary>
     private static string GetTenantId(HttpContext httpContext) =>
@@ -552,6 +648,23 @@ public static class DailyBriefingEndpoints
 // ────────────────────────────────────────────────────────────────
 // Request / Response DTOs
 // ────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Optional request body for <c>POST /api/ai/daily-briefing/email</c> (r5 email-share,
+/// 2026-07-09). Absent/empty body ⇒ deliver the caller's briefing to the caller (scheduled
+/// trigger + backward compatibility). When <see cref="RecipientEmail"/> is supplied, the
+/// caller's OWN briefing is delivered to that colleague address instead.
+/// </summary>
+public record EmailDailyBriefingRequest
+{
+    /// <summary>
+    /// Optional colleague recipient. When set to a valid email address, the caller's briefing
+    /// is emailed to this address ("share with a colleague"). When null/blank, the recipient
+    /// defaults to the caller's own address resolved from authentication claims.
+    /// </summary>
+    [JsonPropertyName("recipientEmail")]
+    public string? RecipientEmail { get; init; }
+}
 
 /// <summary>
 /// Request DTO for daily briefing summarization.

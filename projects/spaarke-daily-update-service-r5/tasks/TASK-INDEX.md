@@ -28,9 +28,9 @@
 | 016 | Eval family — mixed-item corpus + gate | A | ✅ | 011,013,014 | 017 | STANDARD(TEST-MOD) | **opus**/xhigh | ❌ |
 | 017 | Phase A deploy + G-R5-A UAT + metering | A | 🔲 | 016 | 090 | FULL | sonnet/high | ❌ deploy |
 | 020 | Scaffold `/prototype` harness (cross-repo) | D | ✅ | none | 021 | FULL | sonnet/high | ❌ cross-repo |
-| 021 | Design iterations (UX params) | D | 🔲 | 020 | 022 | FULL | **opus**/high | ❌ |
+| 021 | Design iterations (UX params) | D | ✅ | 020 | 022 | FULL | **opus**/high | ❌ | (live design loop; operator-approved each step) |
 | 022 | Operator harness sign-off (GATE G-R5-D) | D | 🔲 | 021 | 023 | MINIMAL | sonnet/high | ❌ operator gate |
-| 023 | Production port to shared lib | D | 🔲 | 022,011 | 024 | FULL | sonnet/high | ❌ client lib |
+| 023 | Production port to shared lib | D | ✅ | 022,011 | 024 | FULL | sonnet/high | ❌ client lib | (redesign shipped to @spaarke/daily-briefing-components; on master; UAT'd 2026-07-09) |
 | 024 | Phase D deploy + G-R5-D UAT | D | 🔲 | 023 | 090 | STANDARD | sonnet/high | ❌ deploy |
 | 030 | CoerceFieldValue String→Choice fix | B | ✅ | none | 032 | FULL | sonnet/xhigh | ❌ frozen-engine |
 | 031 | jps-validate Step 7.7 Choice check | B | ✅ | none | — | STANDARD | sonnet/high | ❌ `.claude/` main-session |

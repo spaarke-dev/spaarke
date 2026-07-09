@@ -376,7 +376,7 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, 
         ...(dueDate ? { sprk_duedate: new Date(dueDate).toISOString() } : {}),
         sprk_status: 1, // Open
         // Note: the event-as-todo toggle was removed in R3 task 007 — events are not to-dos.
-        'sprk_projectid@odata.bind': `sprk_projects(${projectId})`,
+        'sprk_RegardingProject@odata.bind': `/sprk_projects(${projectId})`, // R5 002: PascalCase nav prop (metadata-verified)
       };
 
       const created = await createEvent(projectId, payload);
