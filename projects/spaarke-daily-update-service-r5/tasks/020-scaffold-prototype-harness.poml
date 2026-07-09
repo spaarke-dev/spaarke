@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Scaffold /prototype harness in spaarke-prototype for Spaarke.DailyBriefing.Components (FR-D1)</title>
+    <phase>D: Visual redesign</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>021</blocks>
+    <tags>prototype, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Frontend scaffolding that stands up a runnable harness (TypeScript/React/Vite) wiring the production shared lib; modifies/creates .tsx/.ts files and build config — code implementation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical harness scaffolding with two explicit canonical skills to follow (prototype-harness-setup + prototype-harness-extend); no open-ended design judgment (that is task 021).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Cross-repo work in spaarke-prototype; soft-coupled to the unmerged fix/daily-briefing-components-standalone-build branch — must be sequenced, not run alongside other Phase D tasks.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Scaffold a /prototype harness in the spaarke-prototype repo for the production shared library
+    Spaarke.DailyBriefing.Components, following prototype-harness-setup (production-component mode). Add mocked
+    briefing data via prototype-harness-extend, reusing the Phase-A task-016 mixed-item eval corpus as the harness
+    fixtures. The harness must run locally with HMR and render the full Daily Briefing against realistic mixed-item
+    data in both light and dark. This is FR-D1; it unblocks the design iterations in task 021.
+  </prompt>
+
+  <role>
+    SPAARKE platform frontend developer. Expert in React 18 + Fluent UI v9 + Vite, the spaarke-prototype harness
+    system (seed factories/presets, mocks), and consuming the Spaarke.DailyBriefing.Components shared library as a
+    production component under a prototype harness.
+  </role>
+
+  <goal>
+    A runnable /prototype harness exists in the spaarke-prototype repo that imports the real
+    Spaarke.DailyBriefing.Components components (DailyBriefingApp and its item/TL;DR renderers), feeds them mocked
+    briefing data derived from the task-016 mixed-item corpus, supports HMR, and renders correctly in both light and
+    dark themes. No production Spaarke.DailyBriefing.Components source is modified by this task.
+  </goal>
+
+  <context>
+    <background>
+      R5 redesigns the Daily Briefing UI. Per operator ruling (spec D-8), the redesign happens in the spaarke-prototype
+      harness FIRST, is operator-approved, THEN ported into the existing shared lib (task 023). This task stands up
+      that harness. It consumes Spaarke.DailyBriefing.Components as a production component (not greenfield), so it uses
+      prototype-harness-setup in production-component mode plus prototype-harness-extend for mock data. The task-016
+      Phase-A mixed-item eval corpus (built for FR-A7) is reused verbatim as the harness fixtures so the design is
+      iterated against the same realistic, zero-cross-pairing data the accuracy work validates against.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/TldrSection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/SubRow.tsx</file>
+      <file>(spaarke-prototype repo) new harness directory for Spaarke.DailyBriefing.Components</file>
+      <file>(spaarke-prototype repo) seed factory + preset for mocked briefing data</file>
+      <file>projects/spaarke-daily-update-service-r5/tasks/ (task-016 mixed-item corpus, reused as fixtures)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="skill:prototype-harness-setup">Use prototype-harness-setup in production-component mode for a shared library. Do NOT scaffold a Mode-1 greenfield experiment (prototype-experiment-init) — Spaarke.DailyBriefing.Components is existing production code.</constraint>
+    <constraint source="skill:prototype-harness-extend">Add mocked briefing data as a spaarke-prototype seed factory + preset via prototype-harness-extend. Seed the preset from the task-016 mixed-item corpus fixtures — do NOT invent a new unrelated dataset.</constraint>
+    <constraint source="project">This task ONLY scaffolds the harness in the spaarke-prototype repo. It MUST NOT modify any file under src/client/shared/Spaarke.DailyBriefing.Components/ in this repo. The harness consumes the shared lib; it does not change it.</constraint>
+    <constraint source="project">The harness MUST render in both light and dark themes using a Fluent v9 FluentProvider theme toggle. Do not hard-code a single theme.</constraint>
+    <constraint source="ADR-021">All rendering goes through the real shared-lib components, which use Fluent v9 semantic tokens; the harness MUST NOT introduce hard-coded hex colors of its own in the mount wrapper.</constraint>
+    <constraint source="project">Do NOT begin any design-variant work in this task — this task delivers ONE faithful baseline render of the current components. Variants are task 021.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/prototype-harness-setup/SKILL.md</file>
+      <file>.claude/skills/prototype-harness-extend/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>projects/spaarke-daily-update-service-r5/plan.md</file>
+    </files>
+    <patterns>
+      <pattern name="Production-component harness" location=".claude/skills/prototype-harness-setup/SKILL.md">
+        Scaffold a Vite+HMR harness that imports a production shared lib and mounts it with a theme toggle and mocked host context.
+      </pattern>
+      <pattern name="Seed factory + preset" location=".claude/skills/prototype-harness-extend/SKILL.md">
+        Add an entity factory + preset so the harness renders against realistic mocked data.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check for Spaarke.DailyBriefing.Components before starting (r2-core coordination per plan Risks).</step>
+    <step order="2">Verify Spaarke.DailyBriefing.Components builds standalone. If it does NOT build standalone, STOP and invoke the escalation trigger below (coordinate landing fix/daily-briefing-components-standalone-build) before scaffolding anything.</step>
+    <step order="3">Follow prototype-harness-setup (production-component mode) to scaffold a harness in the spaarke-prototype repo that imports Spaarke.DailyBriefing.Components and mounts DailyBriefingApp under a Fluent v9 FluentProvider with a light/dark theme toggle and HMR.</step>
+    <step order="4">Locate the task-016 mixed-item corpus fixtures in this project and follow prototype-harness-extend to add a seed factory + preset that shapes that corpus into the briefing view-model the components expect (items[], TL;DR block, High-Priority/Critical items).</step>
+    <step order="5">Wire the preset into the harness so the default harness state renders the full briefing (item rows + TL;DR + High-Priority section) against the mixed-item data.</step>
+    <step order="6">Run the harness locally; confirm HMR works, the briefing renders, and toggling light/dark re-themes without errors. Capture one light and one dark baseline screenshot into projects/spaarke-daily-update-service-r5/notes/design/baseline/.</step>
+    <step order="7">Document the harness location, run command, and fixture-mapping in projects/spaarke-daily-update-service-r5/notes/design/harness-README.md.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Spaarke.DailyBriefing.Components will NOT build standalone (the harness cannot import it in isolation), STOP and escalate per root CLAUDE.md §6 to coordinate landing the unmerged branch fix/daily-briefing-components-standalone-build FIRST. Do NOT work around it by copying component source into the harness or by patching the shared lib.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build/run the Vite harness (use npm install --legacy-peer-deps --no-audit --no-fund per root CLAUDE.md §12)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">(spaarke-prototype repo) Daily Briefing harness directory (Vite + HMR + FluentProvider theme toggle)</output>
+    <output type="code">(spaarke-prototype repo) seed factory + preset sourced from the task-016 mixed-item corpus</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/design/harness-README.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/design/baseline/ (light + dark baseline screenshots)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A /prototype harness for Spaarke.DailyBriefing.Components exists in the spaarke-prototype repo and starts locally with HMR active.</criterion>
+    <criterion testable="true">The harness renders the full Daily Briefing (item rows + TL;DR + High-Priority section) using the REAL Spaarke.DailyBriefing.Components components, not reimplemented copies.</criterion>
+    <criterion testable="true">The harness fixtures are derived from the task-016 mixed-item corpus (a seed factory + preset added via prototype-harness-extend), not an unrelated dataset.</criterion>
+    <criterion testable="true">Toggling the harness theme renders the briefing correctly in BOTH light and dark with no console errors; one light and one dark baseline screenshot are saved under notes/design/baseline/.</criterion>
+    <criterion testable="true">No file under src/client/shared/Spaarke.DailyBriefing.Components/ in this repo is modified by this task.</criterion>
+    <criterion testable="true">If the shared lib did not build standalone, the task stopped and escalated (per the escalation trigger) rather than working around it.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Briefing renders against mixed-item data">
+      <steps>
+        <step>Start the harness locally (npm run dev) and open it in the browser</step>
+        <step>Verify DailyBriefingApp renders item rows, the TL;DR section, and the High-Priority section</step>
+        <step>Verify item rows reflect the task-016 mixed-item corpus (distinct titles/regarding/sender per item)</step>
+        <step>Check the browser console for JavaScript errors</step>
+      </steps>
+      <expected>The full briefing renders from the real shared-lib components with zero console errors.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle the harness theme from light to dark via the FluentProvider theme toggle</step>
+        <step>Verify background colors adapt (no white surfaces in dark mode)</step>
+        <step>Verify text colors adapt (no black text in dark mode)</step>
+        <step>Verify icons/badges use Fluent v9 semantic tokens (currentColor / token-driven), not hard-coded hex</step>
+      </steps>
+      <expected>Both themes render via Fluent UI v9 semantic tokens per ADR-021; no hard-coded colors introduced by the harness wrapper.</expected>
+    </test>
+    <test name="HMR active">
+      <steps>
+        <step>Edit the harness preset (e.g. change a mocked item title) while the dev server runs</step>
+        <step>Verify the change hot-reloads in the browser without a full manual restart</step>
+      </steps>
+      <expected>HMR updates the rendered briefing on save.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Cross-repo task: the harness lives in spaarke-prototype, the component lives in this repo's shared lib. Do NOT
+    fork or duplicate the component into the harness — import it. The task-016 corpus is the single fixture source
+    shared with the FR-A7 eval work, so the design is iterated against the same zero-cross-pairing data. This task is
+    the faithful baseline; design variation is deferred to task 021.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

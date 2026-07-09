@@ -157,6 +157,47 @@ public class HandoffUrlBuilderTests
 
     #endregion
 
+    #region BuildDocumentUploadWizardUrl(Guid?) refusal-affordance overload (AIR2-040 / FR-A1-11)
+
+    [Fact]
+    public void BuildDocumentUploadWizardUrl_WithMatterId_HostScopesToSprkMatter()
+    {
+        var matterId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+
+        var url = _builder.BuildDocumentUploadWizardUrl((Guid?)matterId);
+
+        url.Should().Contain("webresourceName=sprk_documentuploadwizard");
+        var data = ExtractDecodedData(url);
+        data.Should().Contain("parentEntityType=sprk_matter",
+            because: "ChatInvocationContext.MatterId is always a sprk_matter reference");
+        data.Should().Contain($"parentEntityId={matterId}");
+    }
+
+    [Fact]
+    public void BuildDocumentUploadWizardUrl_WithNullMatterId_DegradesToUnscopedLink()
+    {
+        var url = _builder.BuildDocumentUploadWizardUrl((Guid?)null);
+
+        url.Should().Contain($"{BaseUrl}/main.aspx?pagetype=webresource&webresourceName=sprk_documentuploadwizard",
+            because: "the degraded link must still target the wizard — actionable, never dead");
+        var data = ExtractDecodedData(url);
+        data.Should().NotContain("parentEntityType",
+            because: "no host record is known, so no scoping parameter may be fabricated");
+        data.Should().NotContain("parentEntityId");
+    }
+
+    [Fact]
+    public void BuildDocumentUploadWizardUrl_WithEmptyGuidMatterId_DegradesToUnscopedLink()
+    {
+        var url = _builder.BuildDocumentUploadWizardUrl((Guid?)Guid.Empty);
+
+        var data = ExtractDecodedData(url);
+        data.Should().NotContain("parentEntityType",
+            because: "Guid.Empty is not a real matter reference and must degrade the same as null");
+    }
+
+    #endregion
+
     #region BuildSummarizeFilesWizardUrl Tests
 
     [Fact]

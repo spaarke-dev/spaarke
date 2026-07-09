@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>jps-validate Step 7.7: flag type:"string" fieldMappings targeting Choice columns</title>
+    <phase>B: Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>skill, tooling</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Extends an existing skill-directive (jps-validate SKILL.md) with an authoring-check rule; no production .cs/.ts code — skill-directive edit with explicit scope (Step 3.5.5 STANDARD).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Text/procedure edit to one skill file with an explicit rule to add; no cross-cutting reasoning (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary; sub-agents cannot write to .claude/).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend the jps-validate skill Step 7.7 (SKILL.md:179) so that when it validates a node's sprk_configjson against the INodeExecutor.GetConfigSchema() source, it FLAGS any fieldMapping declared with type:"string" whose target Dataverse column is a Choice column — emitting a warning that names the field and its target column and recommends type:"choice" with an options map. Per FR-C2. This is the authoring-time complement to task 030's runtime coercion.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in the JPS (JSON Prompt Schema) authoring toolchain, the jps-validate skill, and Dataverse column-metadata typing.
+  </role>
+
+  <goal>
+    jps-validate Step 7.7 gains a rule that inspects UpdateRecord-node fieldMappings and warns when a type:"string" mapping targets a Choice column. The warning names the field and target column and points to the type:"choice" + options remedy. Valid mappings (string→text, correctly-typed choice, BRIEF-NARRATE and other non-UpdateRecord nodes) are NOT flagged. SKILL.md Step 7.7 text is updated to document the new check.
+  </goal>
+
+  <context>
+    <background>
+      Task 030 hardens the runtime so String-typed Choice writes coerce instead of 500ing. This task adds the authoring-time signal so makers catch the mismatch before execution. jps-validate Step 7.7 already reads INodeExecutor.GetConfigSchema() from source and validates node sprk_configjson; the new rule extends that same step. Reference: notes/inbound-from-r7/06 (Track A / authoring gate spirit, implemented here as a validate-time warning).
+    </background>
+    <relevant-files>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/06-choice-field-coercion-in-updaterecord.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Edit ONLY .claude/skills/jps-validate/SKILL.md (main-session-only per the sub-agent write boundary). Do not modify production code, other skills, or catalog data in this task.</constraint>
+    <constraint source="project">The new rule applies specifically to UpdateRecord-node fieldMappings (the surface that writes columns). It MUST flag ONLY the pattern: mapping type == "string" AND target column metadata type == Choice. It MUST NOT flag string→text mappings, already-correct type:"choice" mappings, or fieldMappings on nodes that do not write Dataverse columns.</constraint>
+    <constraint source="project">The warning text MUST name both the field (logical name) and the target column, and recommend the type:"choice" + options remedy (mirroring the runtime fix in task 030). It is a WARNING (authoring guidance), not a hard validation failure — do not make it block otherwise-valid JPS.</constraint>
+    <constraint source="project">Determining the target column's metadata type requires column metadata. Follow whatever metadata-access mechanism Step 7.7 already uses (or the executor-config-schema endpoint referenced in note 06); do not invent a new access path in the skill directive. If the metadata type is unavailable, the check degrades to an advisory note, not a false positive.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/06-choice-field-coercion-in-updaterecord.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read .claude/skills/jps-validate/SKILL.md Step 7.7 (around line 179) to understand how it reads INodeExecutor.GetConfigSchema() and validates node sprk_configjson, and what metadata it already has access to for target columns.</step>
+    <step order="2">Add a sub-rule to Step 7.7: for each UpdateRecord-node fieldMapping, if mapping.type == "string" and the target column metadata type is Choice, emit a warning naming the field + target column and recommending type:"choice" with an options map (cross-reference task 030's runtime coercion).</step>
+    <step order="3">Specify the non-flag cases in the SKILL.md text so a literal executor does not over-warn: string→text OK, correctly-typed choice OK, non-column-writing nodes out of scope, metadata-unavailable → advisory only.</step>
+    <step order="4">Update the Step 7.7 heading/description text to document the new check and its warning wording.</step>
+    <step order="5">Update TASK-INDEX.md task 031 → completed; record any deviations in projects/spaarke-daily-update-service-r5/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Read/search the skill and note files</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/skills/jps-validate/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a node whose fieldMappings include a type:"string" entry targeting a Choice column, when jps-validate Step 7.7 runs, then it emits a warning that names the field AND the target column AND recommends type:"choice" with an options map.</criterion>
+    <criterion testable="true">Given a fieldMapping that is string→text, or a correctly-typed type:"choice" mapping, or a BRIEF-NARRATE / non-UpdateRecord node mapping, when jps-validate runs, then NO string→Choice warning is emitted (no false positives).</criterion>
+    <criterion testable="true">Given target-column metadata is unavailable, the check degrades to an advisory note rather than a false-positive warning or a hard failure.</criterion>
+    <criterion testable="true">SKILL.md Step 7.7 text is updated to document the new check and its exact warning wording; only .claude/skills/jps-validate/SKILL.md is modified.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-C2, plan.md Phase B.2. This is the authoring-time complement to the runtime coercion in task 030 (note 06 Track A + Track B together). Skill-directive hot path per project CLAUDE.md hot-path-declaration — main-session-only edit. The executor-config-schema endpoint (GET /api/ai/playbook-builder/executor-config-schemas, note 06 §References) may already expose the needed column metadata.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. This edits a .claude/ path — apply in the MAIN SESSION only (sub-agent write boundary). Follow task-execute for the pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

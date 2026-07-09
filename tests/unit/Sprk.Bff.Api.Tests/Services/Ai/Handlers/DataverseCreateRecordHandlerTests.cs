@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
+using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
@@ -26,10 +27,13 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 /// </remarks>
 public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixture
 {
+    private const string TestDataverseBaseUrl = "https://spaarkedev1.crm.dynamics.com";
+
     private readonly Mock<IDataverseUserClient> _dataverse = new();
+    private readonly HandoffUrlBuilder _handoffUrlBuilder = new(TestDataverseBaseUrl);
 
     private DataverseCreateRecordHandler CreateHandler() =>
-        new(_dataverse.Object, CreateLogger<DataverseCreateRecordHandler>());
+        new(_dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(), _handoffUrlBuilder);
 
     private static AnalysisTool BuildCreateTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseCreateRecordHandler), name: "SYS-Dataverse Create Record");
@@ -231,6 +235,70 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
             d => d.PostAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
             Times.Never,
             failMessage: "no sprk_document row may ever be written from this tool");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // AIR2-040 (FR-A1-11 / D-F0(d)) — refusal-affordance: the R5-E hard block carries a
+    // server-composed, actionable Document Upload deep-link so the refusal is never a
+    // dead end. The block itself remains UNCONDITIONAL (NFR-12 ingestion-parity) —
+    // these tests assert BOTH the block still fires AND the affordance link is present.
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void ValidateChat_SprkDocumentTable_WithMatterId_CarriesHostScopedDocumentUploadLink()
+    {
+        var matterId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        var expectedUrl = _handoffUrlBuilder.BuildDocumentUploadWizardUrl(matterId);
+        var ctx = BuildChatInvocationContext(
+            toolArgumentsJson: """{"tablename":"sprk_document","item":{"sprk_documentname":"Summary of NDA"}}""",
+            matterId: matterId);
+
+        var result = CreateHandler().ValidateChat(ctx, BuildCreateTool());
+
+        result.IsValid.Should().BeFalse(
+            because: "the affordance link must never grant the blocked write (NFR-12 ingestion-parity)");
+        var error = string.Join(" ", result.Errors);
+        error.Should().Contain($"[Document Upload wizard]({expectedUrl})",
+            because: "the refusal must carry a server-composed, actionable, host-scoped clickable link (NFR-10) — never a dead end");
+        expectedUrl.Should().Contain(matterId.ToString("D"),
+            because: "sanity check that the builder actually host-scoped the URL for this assertion to be meaningful");
+        _dataverse.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public void ValidateChat_SprkDocumentTable_WithoutMatterId_DegradesToValidUnscopedDocumentUploadLink()
+    {
+        var expectedUnscopedUrl = _handoffUrlBuilder.BuildDocumentUploadWizardUrl((Guid?)null);
+        var ctx = BuildChatInvocationContext(
+            toolArgumentsJson: """{"tablename":"sprk_document","item":{"sprk_documentname":"Summary of NDA"}}""",
+            matterId: null);
+
+        var result = CreateHandler().ValidateChat(ctx, BuildCreateTool());
+
+        result.IsValid.Should().BeFalse();
+        var error = string.Join(" ", result.Errors);
+        error.Should().Contain($"[Document Upload wizard]({expectedUnscopedUrl})",
+            because: "with no host record known, the affordance must degrade to a valid, still-actionable unscoped link — never an empty/dead message");
+        error.Should().NotContain("parentEntityType",
+            because: "unscoped degrade must not fabricate a host-scoping parameter when no host record is known");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_SprkDocumentTable_CarriesDocumentUploadAffordanceLink_OnDefenseInDepthPath()
+    {
+        var matterId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var expectedUrl = _handoffUrlBuilder.BuildDocumentUploadWizardUrl(matterId);
+        var ctx = BuildChatInvocationContext(
+            toolArgumentsJson: """{"tablename":"sprk_document","item":{"sprk_documentname":"Summary of NDA"}}""",
+            matterId: matterId);
+
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildCreateTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse(
+            because: "the defense-in-depth path must never grant the blocked write either");
+        result.ErrorMessage.Should().Contain($"[Document Upload wizard]({expectedUrl})",
+            because: "the ExecuteChatAsync defense-in-depth path composes the same host-scoped link as ValidateChat");
+        _dataverse.VerifyNoOtherCalls();
     }
 
     /// <summary>

@@ -73,6 +73,19 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// schema verbatim, so the projected tool block the model sees is byte-identical to
 /// the unwrapped projection (same rule as <see cref="BudgetedAIFunction"/>).
 /// </para>
+/// <para>
+/// <b>Confirmation Policy v2 (FR-A1-03, task 032)</b>: the DELIBERATION of WHETHER (and how)
+/// this suspension becomes a dialog / auto-execute-with-Undo / elicit is owned by the
+/// deterministic <see cref="Gate.ConfirmationPolicyEngine"/> — it produces a
+/// <see cref="Services.Ai.PublicContracts.GateDecisionV2"/> from (catalog-declared risk tier ×
+/// deterministically-classified origin × arg completeness) with the precedence-ordered overlays.
+/// That engine is NOT a second gate: it reads THIS gate's ADR-040 ledger state and projects the
+/// outcome the surface renders. This class remains the fail-closed suspension MECHANISM — its
+/// current declared-class suspension is the safe floor while the origin/proposal plumbing the
+/// engine consumes is wired at the call sites (tasks 034 / 042); the engine can only ever weaken
+/// a gate for a structurally-<c>Explicit</c> origin (Click path today), never for an inferred or
+/// injection-suspect one.
+/// </para>
 /// </remarks>
 public sealed class SideEffectGateAIFunction : AIFunction
 {

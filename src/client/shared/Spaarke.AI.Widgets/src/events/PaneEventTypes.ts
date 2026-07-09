@@ -247,6 +247,18 @@ export interface WorkspacePaneEvent {
   /** Target tab identifier when `type === 'tab_change'`. */
   tabId?: string;
 
+  /**
+   * D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): the SERVER-issued frame id a
+   * server-initiated `widget_load` (no `tabId`) carries when the emitting tool call is
+   * ack-gated (e.g. `SendWorkspaceArtifactHandler`'s `workspace_open_tab` frame). When
+   * present, the WorkspacePane subscriber POSTs an ack (`/ai/chat/sessions/{id}/ack`)
+   * referencing this EXACT value once the tab has actually been added via
+   * `WorkspaceTabManager.addTab` — the client-materialized-tab confirmation the ack-gated
+   * tool call is waiting on. Absent on client-originated events (menu-opened tabs, the
+   * re-dispatched `tabId`-carrying confirmation) — those never need an ack.
+   */
+  frameId?: string;
+
   /** Named action identifier when `type === 'widget_action'`. */
   action?: string;
 

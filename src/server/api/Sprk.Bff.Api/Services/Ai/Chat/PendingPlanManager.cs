@@ -557,6 +557,39 @@ public class PendingPlanManager
         return resolved;
     }
 
+    /// <summary>
+    /// The current ADR-040 ledger status string for <paramref name="gateId"/> — the status of
+    /// its LAST-appended entry (append order IS ledger order). Returns null when no gate id is
+    /// supplied or no entry exists for it. Pure — no store access, no classification.
+    ///
+    /// <para>
+    /// This is how the Confirmation Policy v2 engine (<c>ConfirmationPolicyEngine</c>, FR-A1-03)
+    /// binds confirmation state to the ledger: it feeds the returned status to
+    /// <see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.GateDecisionProjector.MapLedgerStatus"/>,
+    /// so a <c>confirmed</c> gate projects <c>Confirmed</c> and renders NO second ask (ADR-040 —
+    /// structurally kills the R3-1 loop). The status vocabulary is the
+    /// <c>GateStatus*</c> constants above.
+    /// </para>
+    /// </summary>
+    public static string? GetCurrentGateStatus(IReadOnlyList<SessionGate>? gates, string? gateId)
+    {
+        if (gates is not { Count: > 0 } || string.IsNullOrEmpty(gateId))
+        {
+            return null;
+        }
+
+        string? status = null;
+        foreach (var entry in gates)
+        {
+            if (string.Equals(entry.GateId, gateId, StringComparison.Ordinal))
+            {
+                status = entry.Status; // later appends win — the last entry per gate id is its current state
+            }
+        }
+
+        return status;
+    }
+
     private static string BuildGateKey(string sessionId, string gateId) => $"{sessionId}:{gateId}";
 
     // FR-P2-06 (task 035): the plan-shaped session-singleton entries (StoreAsync /

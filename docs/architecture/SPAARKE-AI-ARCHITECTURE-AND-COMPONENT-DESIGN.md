@@ -556,6 +556,44 @@ Categories:
   learning), UC-F-1 (retro-tag the closed matter for future retrieval).
 - **Status**: aspirational.
 
+#### UC-B-6 · Conversational matter creation (create-matter capability)
+
+- **Actor**: user in the Assistant chat (any host context), typically with an
+  uploaded document or matter specifics stated directly in conversation.
+- **Trigger**: user asks the Assistant to create a matter (e.g. "create a
+  matter from this file, practice area Employment, type Litigation"); or
+  clicks a "Create a matter" next-step chip.
+- **Input**: session-uploaded document(s) (grounding) + conversational
+  statement of matter specifics (practice area, matter type) the model cannot
+  reliably derive from documents alone.
+- **Behavior**: LLM drafts a matter proposal (name, description,
+  practice-area/matter-type LABEL suggestions) grounded in the source
+  material; presents it for confirmation; on confirm, resolves the
+  practice-area/matter-type LABELS to `sprk_practicearea_ref` /
+  `sprk_mattertype_ref` lookup GUIDs via `dataverse.read_query`, then creates
+  the `sprk_matter` record via the gated `dataverse.create_record` tool
+  (`side_effect_class=Write` — the ONE confirmation gate).
+- **Output binding**: `sprk_matter` record created directly (chat write
+  path) under the user-Proceed gate; OutcomeCard link targets the created
+  matter record.
+- **Typical prior context**: often follows UC-A-1 / UC-A-3 / UC-A-7 surfacing
+  a document that implies a new matter. Distinct from **UC-B-1** (Matter
+  Creation WIZARD pre-fill — client-side form population, not committed until
+  the wizard is submitted): this is the CHAT-NATIVE direct-write analog,
+  mirroring UC-H-1's create-task shape for matters rather than UC-B-1's
+  pre-fill shape.
+- **Typical next steps**: UC-B-3 (initial matter briefing), UC-B-4 (obligation
+  extraction on any contracts), UC-H-1 (create follow-up tasks tied to the new
+  matter), UC-E-3 (welcome email to the matter team).
+- **Status**: introduced `spaarke-ai-architecture-redesign-r2` task 042
+  (FR-A1-13 / R19) — a Binding + prompted Action (`CREATE-MATTER@v1`)
+  cataloged like create-task, riding the EXISTING `dataverse.create_record`
+  handler (no new handler/dispatch path). Catalog artifacts authored
+  (JPS Action, input/output schema mirrors, staged Binding row); live
+  Binding/Action seeding + `ConsumerTypes.CreateMatter` activation deferred to
+  the deploy step (gate G-R2-A / task 049) per
+  `projects/spaarke-ai-architecture-redesign-r2/notes/jps/create-matter-binding-row-pending-seed.json`.
+
 ### 3.C Interactive Q&A
 
 #### UC-C-1 · Chat over uploaded documents
@@ -1026,7 +1064,7 @@ capability terminates into:
 | Write shape | What it does | Current UCs that instantiate it | Underlying Tool primitive |
 |---|---|---|---|
 | **Edit file** | Mutate / annotate / redline an SPE document; produce a new draft version | UC-E-1 (draft from template), UC-E-2 (redline), UC-A-6 (compare-then-produce diff), future document-mutating UCs | `document.write`, `document.annotate` |
-| **Create record** | Create a Dataverse record of any type | UC-B-1 (matter), UC-B-2 (project), UC-B-4 (obligation), UC-H-1 (task/event), UC-A-4 (invoice lines), UC-B-5 (close-out doc), UC-A-7 write-back | `dataverse.create` (+ `dataverse.update` for edits) |
+| **Create record** | Create a Dataverse record of any type | UC-B-1 (matter pre-fill, wizard), UC-B-6 (matter, chat-native), UC-B-2 (project), UC-B-4 (obligation), UC-H-1 (task/event), UC-A-4 (invoice lines), UC-B-5 (close-out doc), UC-A-7 write-back | `dataverse.create` (+ `dataverse.update` for edits) |
 | **Send communication** | Draft/send email; send notification; trigger routing | UC-E-3 (correspondence), UC-D-2 (personalized reminders), UC-D-3 (email triage output), UC-D-4 (executive alerts) | `email.draft`, `notification.send` |
 
 **Everything above these three write shapes is either a read+reason step

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Promise-cache the primary-contact lookup; fix the truncation comment</title>
+    <phase>B: Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>038</blocks>
+    <tags>bff-api, refactoring, performance</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Small perf refactor of an existing surface (promise-caching) + a comment fix; no new capability, pinned by a single-resolution test (Step 3.5.5 STANDARD).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Localized standard promise-caching pattern + a one-line comment correction; low ambiguity (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>DailyBriefingCollector.cs overlap (chain 033→034→036→037); depends on 036 and is the last collector-chain link before deploy (038).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Cache the primary-contact lookup so it resolves once per briefing run (promise-cache / lazy-async pattern) instead of re-querying, and fix the misleading truncation comment. Per FR-C8. NOTE: verify the exact caller before editing — R7 note 03 places the primary-contact lookup in the client hook useInlineTodoCreate.ts (a Promise&lt;string|null&gt; cache) and the truncation comment in a bulletToNotificationItem-style helper (comment says sprk_todo.subject but the real column is sprk_name). Resolve the actual file(s) and apply the fix where the code lives.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in async caching patterns (promise-caching), the DailyBriefing collector's primary-contact resolution, and the useInlineTodoCreate client hook.
+  </role>
+
+  <goal>
+    The primary-contact lookup executes exactly once per briefing run even under concurrent callers: the cache holds the in-flight Promise (not the resolved value), so concurrent callers await the same promise rather than each issuing a duplicate lookup. The truncation comment is corrected to reference the real column (sprk_name, not sprk_todo.subject which does not exist). A test asserts single resolution under concurrent invocation. No functional change to briefing output.
+  </goal>
+
+  <context>
+    <background>
+      notes/inbound-from-r7/03 items 4 + 5: (4) primaryContactRef caches the RESOLVED value (string|null|undefined); two concurrent createTodo calls before the first resolves both see undefined and issue duplicate retrieveMultipleRecords lookups — fix by caching a Promise&lt;string|null&gt;. (5) a comment reads "truncated to 197 chars for sprk_todo.subject per max-length" but the truncated field is sprk_name (there is no subject column on sprk_todo) — fix the comment (ideally source MaxLength from schema/a shared constant). The collector also has a primary-contact lookup + ClassifyAction path (server-side, ~line 574); confirm which layer the R5 fix targets before editing.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useInlineTodoCreate.ts</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/03-code-review-followups.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">First RESOLVE the actual location of each fix by reading useInlineTodoCreate.ts and searching for the truncation comment (bulletToNotificationItem / the 197-char magic number). Apply the promise-cache to whichever holds the primary-contact lookup and the comment fix to whichever holds the truncation comment. Do NOT assume both are in the same file.</constraint>
+    <constraint source="project">Promise-cache pattern: the cache ref holds Promise&lt;string|null&gt; (the in-flight lookup), NOT the resolved value. First caller sets the ref to the promise; concurrent callers await the same promise. On rejection, do not permanently cache a failed promise if a retry is expected — mirror the existing hook's error semantics (state the choice in notes).</constraint>
+    <constraint source="project">The truncation comment MUST be corrected to reference sprk_name (the real column); sprk_todo has no subject column. Keeping the magic number 197 is acceptable, but the comment must name the correct field. If a shared MaxLength constant/schema source already exists, prefer it (verify by Grep; do not add a new metadata round-trip just for this).</constraint>
+    <constraint source="project">No functional change to briefing output: the deduped lookup returns the same contact; the truncation still truncates to the same length. Add a test asserting single resolution under concurrent invocation (client hook: renderHook + two concurrent createTodo calls → one retrieveMultipleRecords).</constraint>
+    <constraint source="root-CLAUDE.md-§10">If the fix touches BFF .cs (collector), the §10 obligations apply: state placement, run dotnet publish, report size + diff vs ~49.63 MB baseline, confirm no new HIGH CVE. If the fix is client-only (useInlineTodoCreate.ts), state that no BFF publish-size change occurred.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/03-code-review-followups.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read useInlineTodoCreate.ts and locate primaryContactRef + the resolved-value cache; search the DailyBriefing surfaces for the "197" truncation comment (bulletToNotificationItem / sprk_todo.subject wording) to pin the exact file(s).</step>
+    <step order="2">Convert the primary-contact cache to hold Promise&lt;string|null&gt;; first call assigns the promise, concurrent calls await it. Preserve error semantics (note the rejection-caching choice).</step>
+    <step order="3">Correct the truncation comment to reference sprk_name; if a shared MaxLength constant exists, reference it.</step>
+    <step order="4">Add a test asserting single resolution under concurrent invocation (two concurrent createTodo → one retrieveMultipleRecords) at the appropriate KEEP test path.</step>
+    <step order="5">If BFF .cs changed: build + dotnet test + publish-size report. If client-only: run the package jest suite; state no BFF size change.</step>
+    <step order="6">Update TASK-INDEX.md task 037 → completed; record which file(s) each fix landed in, and any deviations, in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the primary-contact lookup and the truncation comment turn out to live in a file NOT listed in relevant-files, or the "subject vs sprk_name" premise is wrong for the current code, STOP and note the discrepancy before editing rather than force-fitting the R7 note's description onto mismatched code (root CLAUDE.md §6).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Run jest for the client package</tool>
+    <tool name="dotnet">Build/test/publish the BFF if collector .cs changes</tool>
+    <tool name="terminal">Search for the truncation comment + primary-contact caller</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useInlineTodoCreate.ts</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/useInlineTodoCreate.promiseCache.test.ts</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/037-promise-cache.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The primary-contact cache holds an in-flight Promise&lt;string|null&gt;, not a resolved value; given two concurrent createTodo calls before the first resolves, exactly one primary-contact lookup (retrieveMultipleRecords) is issued — a test asserts this.</criterion>
+    <criterion testable="true">The truncation comment references sprk_name (the real column), not sprk_todo.subject; grep confirms no remaining "subject" reference in that comment.</criterion>
+    <criterion testable="true">Briefing output is functionally unchanged: the deduped lookup returns the same contact and truncation length is unchanged.</criterion>
+    <criterion testable="true">notes/037-promise-cache.md states which file(s) each fix landed in and the rejection-caching semantics chosen.</criterion>
+    <criterion testable="true">If BFF .cs changed, publish size is reported (absolute + diff vs 49.63 MB incl-PDBs) and no new HIGH CVE; if client-only, notes state no BFF size change.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-C8, plan.md Phase B.8, notes/inbound-from-r7/03 items 4 + 5. Item 5 flags the exact file as "search codebase — needs confirmation" — so file resolution is step 1, not an assumption. Last link of the collector chain (033→034→036→037) before the Phase B deploy (038).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. TEST-MODIFYING rigor applies (adds a test): code-review + adr-check at Step 9.5. Follow task-execute for the pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -28,7 +28,6 @@ import * as React from 'react';
 import {
   makeStyles,
   tokens,
-  Title2,
   Text,
   Button,
   Tooltip,
@@ -38,7 +37,7 @@ import {
   MenuList,
   MenuItem,
 } from '@fluentui/react-components';
-import { AlertRegular, ArrowClockwiseRegular, MoreHorizontalRegular, BookRegular } from '@fluentui/react-icons';
+import { NewsRegular, ArrowClockwiseRegular, MoreHorizontalRegular, BookRegular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only — ADR-021)
@@ -63,10 +62,11 @@ const useStyles = makeStyles({
   titleGroup: {
     flex: 1,
     display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
+    flexDirection: 'column',
+    gap: '2px',
+    minWidth: 0,
   },
-  unreadCount: {
+  subtitle: {
     color: tokens.colorNeutralForeground3,
   },
   actions: {
@@ -107,6 +107,19 @@ export interface DigestHeaderProps {
 // Component
 // ---------------------------------------------------------------------------
 
+/** Today's date, e.g. "Thursday, July 9" — presentational only. */
+function formatToday(): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+    }).format(new Date());
+  } catch {
+    return '';
+  }
+}
+
 export const DigestHeader: React.FC<DigestHeaderProps> = ({
   totalUnreadCount,
   onRefresh,
@@ -117,14 +130,15 @@ export const DigestHeader: React.FC<DigestHeaderProps> = ({
 
   return (
     <div className={styles.root}>
-      <AlertRegular className={styles.icon} />
+      <NewsRegular className={styles.icon} />
       <div className={styles.titleGroup}>
-        <Title2>Daily Briefing</Title2>
-        {totalUnreadCount > 0 && (
-          <Text size={200} className={styles.unreadCount}>
-            {totalUnreadCount} unread
-          </Text>
-        )}
+        <Text size={500} weight="semibold">
+          Daily Briefing
+        </Text>
+        <Text size={200} className={styles.subtitle}>
+          {formatToday()}
+          {totalUnreadCount > 0 ? ` · ${totalUnreadCount} ${totalUnreadCount === 1 ? 'item' : 'items'}` : ''}
+        </Text>
       </div>
       <div className={styles.actions}>
         {onRefresh && (

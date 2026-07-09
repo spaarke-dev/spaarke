@@ -1,12 +1,29 @@
 /**
- * NarrativeBullet -- renders a single AI-narrated bullet with a primary
- * `Add To Do` checkmark icon button AND a preserved three-dot overflow
- * action menu.
+ * NarrativeBullet -- renders a single item row deterministically from its
+ * own source fields, with a primary `Add To Do` checkmark icon button AND a
+ * preserved three-dot overflow action menu.
  *
- * Each bullet shows the narrative text, a clickable regarding-name link that
- * opens the entity in a Dataverse dialog, a PRIMARY visible Fluent v9
- * `Checkmark` icon button ('Add To Do') and a Fluent v9 three-dot overflow
- * `Menu` containing the remaining secondary actions.
+ * R5 task 011 (FR-A1, 2026-07-08): PRIOR to task 010, `narrative` carried
+ * per-channel LLM-authored prose and an optional `references[]` array (an
+ * LLM narrative could mention several DIFFERENT entities in free text). Task
+ * 010 removed the per-channel LLM call entirely — `narrative` is now built
+ * server-side directly from the source item's own `Title` field
+ * (`DailyBriefingNarrator.BuildDeterministicBullet`), and there is at most
+ * ONE entity per bullet (its own regarding record). This component was
+ * updated to match: the `references[]` prop is REMOVED (no per-channel LLM
+ * narrative is ever consumed here), and `narrative` + `primaryEntityName` /
+ * `primaryEntityType` / `primaryEntityId` are ALWAYS the same scalar props
+ * passed together by the caller (see `ActivityNotesSection`, which
+ * destructures every field from the SAME `bullet` object) — cross-item
+ * pairing is structurally impossible: there is nowhere in this component's
+ * props for a second item's fields to enter.
+ *
+ * Each bullet shows the item's title text, a clickable regarding-name link
+ * that opens the entity in a Dataverse dialog (inline when the regarding
+ * name is textually present in the title, else a trailing link — see
+ * `NarrativeCitedText`), a PRIMARY visible Fluent v9 `Checkmark` icon button
+ * ('Add To Do') and a Fluent v9 three-dot overflow `Menu` containing the
+ * remaining secondary actions.
  *
  * Per Wave 12 task 134 (operator MVP spec, wave12 plan §2.1):
  *   "for the tools only need the 'Add To Do' (so just the checkmark — but in
@@ -66,8 +83,7 @@ import {
   makeStyles,
   tokens,
   Text,
-  Button,
-  Tooltip,
+  Badge,
   Menu,
   MenuTrigger,
   MenuButton,
@@ -83,10 +99,9 @@ import {
   OpenRegular,
 } from '@fluentui/react-icons';
 import type { NotificationItem } from '../types/notifications';
-import type { NarrativeBulletReferenceResult } from '../services/briefingService';
 import { formatDueDate } from '../utils/formatDueDate';
 import { SubRow } from './SubRow';
-import { NarrativeCitedText } from './NarrativeCitedText';
+import { NarrativeCitedText, hasInlineRegardingMention } from './NarrativeCitedText';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -97,40 +112,39 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'flex-start',
     gap: tokens.spacingHorizontalS,
-    marginBottom: tokens.spacingVerticalL,
-  },
-  bullet: {
-    color: tokens.colorNeutralForeground1,
-    flexShrink: 0,
-    lineHeight: tokens.lineHeightBase400,
-    userSelect: 'none',
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    borderRadius: tokens.borderRadiusMedium,
+    marginBottom: tokens.spacingVerticalXXS,
+    ':hover': {
+      backgroundColor: tokens.colorSubtleBackgroundHover,
+    },
   },
   content: {
     flex: 1,
+    minWidth: 0,
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
+    gap: tokens.spacingVerticalXXS,
   },
-  narrativeText: {
-    color: tokens.colorNeutralForeground1,
-    lineHeight: tokens.lineHeightBase400,
+  metaRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flexWrap: 'wrap',
+    marginTop: '2px',
   },
   entityLink: {
-    color: tokens.colorBrandForeground1,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase200,
     cursor: 'pointer',
     textDecorationLine: 'none',
     ':hover': {
       textDecorationLine: 'underline',
+      color: tokens.colorBrandForeground1,
     },
-  },
-  dueDateRow: {
-    color: tokens.colorNeutralForeground2,
-    lineHeight: tokens.lineHeightBase200,
-    marginTop: tokens.spacingVerticalXXS,
-  },
-  dueDateOverdue: {
-    color: tokens.colorPaletteRedForeground1,
-    fontWeight: tokens.fontWeightSemibold,
   },
   actions: {
     display: 'flex',
@@ -168,26 +182,33 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export interface NarrativeBulletProps {
-  /** AI-generated narrative text for this bullet. */
+  /**
+   * The item's own title text. R5 task 010 (FR-A3): built server-side
+   * directly from the source record's `Title` field — deterministic, never
+   * LLM-authored. R5 task 011 (FR-A1): the prior `references[]` prop (an
+   * LLM-narrative-era mechanism for mentioning multiple different entities
+   * in free text) was REMOVED — this component never consumes a per-channel
+   * LLM narrative field. The regarding-name link below is always derived
+   * from `primaryEntityName`/`primaryEntityType`/`primaryEntityId`, which
+   * MUST be sourced from the SAME item as `narrative` (see
+   * `ActivityNotesSection`, which destructures both from one `bullet`
+   * object per row).
+   */
   narrative: string;
-  /** Display name of the primary entity (shown as clickable link). */
+  /** Display name of the primary entity (shown as clickable link). SAME item as `narrative`. */
   primaryEntityName: string;
-  /** Dataverse logical name of the primary entity. */
+  /** Dataverse logical name of the primary entity. SAME item as `narrative`. */
   primaryEntityType: string;
-  /** GUID of the primary entity record. */
+  /** GUID of the primary entity record. SAME item as `narrative`. */
   primaryEntityId: string;
   /** Notification IDs covered by this bullet. */
   itemIds: string[];
   /**
-   * R7 W12 feedback items 2/3/4 (2026-07-01) — per-bullet entity references.
-   * When supplied and non-empty, the narrative text is rendered with inline
-   * hyperlinks on mentioned entity names + trailing [N] citations for implicit
-   * refs (via <NarrativeCitedText />). The separate regarding-name link line
-   * below the narrative is suppressed to avoid duplication.
-   * When omitted or empty, the classic plain-text + separate-link render is
-   * preserved (back-compat).
+   * Optional deterministic due-status pill (R5 task 021 redesign) — Overdue /
+   * Due today / Due soon. Rendered on the meta line; supplied by the combined
+   * "Tasks" section. Derived from the item's due date, never from LLM text.
    */
-  references?: NarrativeBulletReferenceResult[];
+  dueStatus?: 'Overdue' | 'DueToday' | 'DueSoon';
   /** Callback to add the covered notifications to To Do. */
   onAddToTodo: (itemIds: string[]) => void;
   /** Callback to dismiss the covered notifications. */
@@ -263,6 +284,7 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   primaryEntityType,
   primaryEntityId,
   itemIds,
+  dueStatus,
   onAddToTodo,
   onDismiss,
   isTodoCreated,
@@ -275,9 +297,19 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   onRemove,
   onKeep,
   onOpenRecord,
-  references,
 }) => {
   const styles = useStyles();
+
+  // R5 task 011 (FR-A1): whether the regarding-name is textually present in
+  // the (deterministic, item.title-sourced) narrative — decides whether
+  // NarrativeCitedText inlines it as a link, or whether the separate
+  // regarding-name link line below renders instead. Both branches source
+  // EXCLUSIVELY from `narrative` + `primaryEntityName`/`Type`/`Id`, which are
+  // always the SAME item's fields (see NarrativeBulletProps doc comment) —
+  // cross-item pairing is structurally impossible.
+  const hasRegardingTarget = Boolean(primaryEntityName && primaryEntityType && primaryEntityId);
+  const isRegardingInlined =
+    hasRegardingTarget && hasInlineRegardingMention(narrative, primaryEntityName, primaryEntityType, primaryEntityId);
 
   // FR-11: render sub-list only for aggregated bullets (itemIds.length > 1)
   // AND only when the underlying `items` are supplied. Single-item bullets
@@ -292,6 +324,16 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   const singleItemDueDate =
     !showSubList && Array.isArray(items) && items.length === 1 ? formatDueDate(items[0].dueDate) : null;
   const isSingleItemOverdue = singleItemDueDate?.startsWith('Overdue') ?? false;
+
+  // R5 task 021: deterministic status pill for the combined "Tasks" section.
+  const statusBadge =
+    dueStatus === 'Overdue'
+      ? { label: 'Overdue', color: 'danger' as const }
+      : dueStatus === 'DueToday'
+        ? { label: 'Due today', color: 'warning' as const }
+        : dueStatus === 'DueSoon'
+          ? { label: 'Due soon', color: 'informative' as const }
+          : null;
 
   // Resolve the Xrm globals once (used by both the inline regarding-name link
   // and the fallback "Open record" overflow-menu handler).
@@ -393,50 +435,49 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
 
   return (
     <div className={styles.root}>
-      <Text size={300} className={styles.bullet}>
-        &bull;
-      </Text>
       <div className={styles.content}>
-        {references && references.length > 0 ? (
-          // R7 W12 feedback items 2/3/4 (2026-07-01): inline entity-name links
-          // + trailing [N] citations. Renderer handles both mentioned + implicit
-          // refs; the separate regarding-name line below is suppressed because
-          // the mentioned refs already surface it inline.
-          <NarrativeCitedText
-            narrative={narrative}
-            references={references}
-            onOpenRecord={onOpenRecord}
-            textSize={300}
-          />
-        ) : (
-          <Text size={300} className={styles.narrativeText}>
-            {narrative}
-          </Text>
-        )}
-        {/* Legacy standalone regarding-name link — only rendered when the
-             bullet has NO references[] (back-compat / narrator degraded path). */}
-        {(!references || references.length === 0) && primaryEntityName && primaryEntityType && primaryEntityId && (
-          <Text
-            size={300}
-            className={styles.entityLink}
-            onClick={handleLinkClick}
-            role="link"
-            tabIndex={0}
-            onKeyDown={(e: React.KeyboardEvent) => {
-              if (e.key === 'Enter' || e.key === ' ') handleLinkClick();
-            }}
-          >
-            {primaryEntityName} &#8599;
-          </Text>
-        )}
-        {/* R2.2: single-item due-date hint (task notifications only — others have item.dueDate=null). */}
-        {singleItemDueDate && (
-          <Text
-            size={200}
-            className={`${styles.dueDateRow} ${isSingleItemOverdue ? styles.dueDateOverdue : ''}`.trim()}
-          >
-            {singleItemDueDate}
-          </Text>
+        {/* R5 task 011 (FR-A1): item text + regarding-name link, both
+             deterministically sourced from THIS bullet's own fields (never a
+             per-channel LLM narrative). NarrativeCitedText inlines the
+             regarding name when it's textually present in `narrative`;
+             otherwise the meta line below carries the (same-item) regarding
+             link — never both, so there's exactly one visible link per row. */}
+        <NarrativeCitedText
+          narrative={narrative}
+          regardingName={primaryEntityName}
+          regardingEntityType={primaryEntityType}
+          regardingId={primaryEntityId}
+          onOpenRecord={onOpenRecord}
+          textSize={300}
+        />
+        {/* Meta line: status pill (Tasks) or due-date pill + (non-inlined) regarding link. */}
+        {(statusBadge || singleItemDueDate || (hasRegardingTarget && !isRegardingInlined)) && (
+          <div className={styles.metaRow}>
+            {statusBadge && (
+              <Badge appearance="tint" color={statusBadge.color} size="small">
+                {statusBadge.label}
+              </Badge>
+            )}
+            {!statusBadge && singleItemDueDate && (
+              <Badge appearance="tint" color={isSingleItemOverdue ? 'danger' : 'informative'} size="small">
+                {singleItemDueDate}
+              </Badge>
+            )}
+            {hasRegardingTarget && !isRegardingInlined && (
+              <Text
+                size={200}
+                className={styles.entityLink}
+                onClick={handleLinkClick}
+                role="link"
+                tabIndex={0}
+                onKeyDown={(e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') handleLinkClick();
+                }}
+              >
+                {primaryEntityName} &#8599;
+              </Text>
+            )}
+          </div>
         )}
         {/* FR-11: per-item sub-list for aggregated bullets (itemIds.length > 1). */}
         {showSubList && (
@@ -450,41 +491,9 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
         )}
       </div>
       <div className={styles.actions}>
-        {/*
-          R7 Wave 12 task 134 — PRIMARY visible 'Add To Do' tool.
-
-          Operator MVP requirement (wave12 plan §2.1):
-            "for the tools only need the 'Add To Do' (so just the checkmark —
-             but in future we will add other tools so don't remove the three
-             dot tool menu)"
-
-          Implementation:
-            - Fluent v9 IconButton with CheckmarkRegular icon (Fluent UI v9 per
-              ADR-006; semantic-token color per ADR-021 — no hardcoded colors).
-            - aria-label "Add To Do" (operator wording). DISTINCT from the
-              SubRowTodo aria-label "Add to To Do" so per-bullet vs per-sub-row
-              targeting is unambiguous for tests and screen readers.
-            - Wraps in Fluent v9 Tooltip surfacing live state (default / added
-              / pending / error) — matches the SubRowTodo tooltip pattern.
-            - Disabled when isTodoCreated or isTodoPending (prevents duplicates).
-            - Delegates to the SAME `handleMenuAddToTodo` handler used by the
-              prior menu item → onAddToTodo(itemIds) → parent's
-              useInlineTodoCreate (ADR-024 wiring unchanged).
-        */}
-        <Tooltip content={addToDoLabel} relationship="label">
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={
-              <CheckmarkRegular
-                className={isTodoCreated || isTodoPending ? styles.addTodoIconDisabled : styles.addTodoIcon}
-              />
-            }
-            aria-label="Add To Do"
-            onClick={handleMenuAddToTodo}
-            disabled={isTodoCreated || isTodoPending}
-          />
-        </Tooltip>
+        {/* Operator (2026-07-09): "Add to To Do" moved into the overflow menu —
+             the row now shows only the three-dot menu trigger. The menu component
+             is preserved for future tools per the R7 W12 task-134 note. */}
         {/*
           R4 FR-18 / R7 Wave 12 task 134 — Three-dot overflow menu PRESERVED
           for future tool additions per operator emphasis. Today it contains
@@ -526,6 +535,15 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
                   Keep on briefing for 7 more days
                 </MenuItem>
               )}
+              {/* Canonical position 4 (per FR-18 order): "Add to To Do" moved from a
+                  standalone button into the menu (R5 task 021). */}
+              <MenuItem
+                icon={<CheckmarkRegular />}
+                onClick={handleMenuAddToTodo}
+                disabled={isTodoCreated || isTodoPending}
+              >
+                {addToDoLabel}
+              </MenuItem>
               <MenuItem icon={<DismissRegular />} onClick={handleMenuDismiss}>
                 Dismiss
               </MenuItem>

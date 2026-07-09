@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Collapse 7 QueryHighPriority*Async wrappers into one spec-driven method</title>
+    <phase>B: Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>034</dependencies>
+    <blocks>037</blocks>
+    <tags>bff-api, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Behavior-preserving refactor of existing BFF .cs (no new surface); pinned by equivalence tests. Modifies code but no new capability (Step 3.5.5 STANDARD: refactoring of existing surface with tests).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical collapse of 7 near-identical wrappers onto an existing generic method with a spec array; low ambiguity (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>DailyBriefingCollector.cs overlap (chain 033→034→036→037); depends on 034 and must land before 037.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Collapse the 7 near-identical QueryHighPriority{Matter,Project,Invoice,Document,Workassignment,Event,Todo}Async wrappers (lines 344-427) into ONE spec-driven method that delegates to the existing shared QueryHighPriorityGenericAsync (line 450), with each entity registered as a row in a HighPriorityEntitySpec array. All 7 entities must still be queried with identical behavior — this is a pure refactor, no behavior change. Per FR-C7.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in the DailyBriefing collector's high-priority scan and behavior-preserving C# refactoring.
+  </role>
+
+  <goal>
+    The 7 QueryHighPriority*Async wrapper methods (344-427) are replaced by a single spec-driven method (e.g. iterating a HighPriorityEntitySpec[] and delegating to QueryHighPriorityGenericAsync at 450). CollectHighPriorityAsync's fan-out (currently the 7 named calls at 319-325) drives off the spec array. Each of the 7 entities is queried with identical entity name / name column / description column / regarding context as before. Equivalence tests pin per-entity behavior. BFF builds 0 errors; publish size reported per NFR-01.
+  </goal>
+
+  <context>
+    <background>
+      R7 W12 shipped 7 helper methods each 20-30 lines differing only in entity name, name column, and description column — all delegating to QueryHighPriorityGenericAsync (line 450). Every change had to be replicated 7 times (a case-sensitivity fix already required editing all seven). notes/inbound-from-r7/03 item 3 prescribes collapsing to QueryHighPriorityAsync(HighPriorityEntitySpec spec) + a spec array (record HighPriorityEntitySpec(string EntityName, string NameColumn, string DescriptionColumn, string? RegardingContext)).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/03-code-review-followups.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Replace the 7 wrappers (QueryHighPriorityMatterAsync/ProjectAsync/InvoiceAsync/DocumentAsync/WorkassignmentAsync/EventAsync/TodoAsync, lines 344-427) with a single spec-driven method that delegates to the EXISTING QueryHighPriorityGenericAsync (line 450). Do NOT rewrite QueryHighPriorityGenericAsync's query logic — reuse it. Each entity becomes one HighPriorityEntitySpec row capturing its entity name, name column, description column, and regarding/context.</constraint>
+    <constraint source="project">Behavior MUST be identical per entity: same entity queried, same columns, same filter (sprk_highpriority OR sprk_monitor), same failure-soft (empty array on Dataverse error), same ordering downstream. The Todo entity's systemUserId parameter (QueryHighPriorityTodoAsync takes systemUserId) must still be threaded — the spec/dispatch must accommodate the per-entity systemUser scoping where it exists.</constraint>
+    <constraint source="project">Add equivalence tests that pin per-entity behavior: for each of the 7 entities the collapsed path produces the same query intent (entity + columns + filter) the named wrapper did. This guards the refactor against silent per-entity drift.</constraint>
+    <constraint source="root-CLAUDE.md-§10">BFF-touching task: state the placement decision (behavior-preserving refactor inside the existing collector; no new service/DI — the HighPriorityEntitySpec record is a local type, not a new injected surface; §11 does not require justification for pure refactor of existing surface), run dotnet publish -c Release, report size + diff vs ~49.63 MB baseline (incl PDBs), confirm no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-039-coded-composite.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/03-code-review-followups.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check for DailyBriefingCollector.cs against r2-core (root §7); confirm 034 landed.</step>
+    <step order="2">Read the 7 wrappers (344-427) and QueryHighPriorityGenericAsync (450); tabulate each wrapper's entity name, name column, description column, regarding/context, and whether it takes systemUserId (Todo does).</step>
+    <step order="3">Define record HighPriorityEntitySpec(...) and a static spec array with the 7 rows. Add QueryHighPriorityAsync(HighPriorityEntitySpec spec, ... ct) delegating to QueryHighPriorityGenericAsync; thread systemUserId where a spec row needs it.</step>
+    <step order="4">Rewire CollectHighPriorityAsync (319-326) to fan out over the spec array instead of the 7 named calls; delete the 7 wrappers.</step>
+    <step order="5">Add per-entity equivalence tests (7 entities → same query intent as before).</step>
+    <step order="6">Build (0 errors); dotnet test the collector project; confirm equivalence + existing high-priority tests pass.</step>
+    <step order="7">Run dotnet publish -c Release, report size + diff vs 49.63 MB baseline; dotnet list package --vulnerable → no new HIGH CVE.</step>
+    <step order="8">Update TASK-INDEX.md task 036 → completed; record deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the 7 wrappers are NOT actually equivalent (a per-entity special case beyond entity/column/context — e.g. a distinct filter or extra join not captured by HighPriorityEntitySpec), STOP and escalate per root CLAUDE.md §6 rather than forcing the collapse and losing a per-entity behavior.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, and publish the BFF</tool>
+    <tool name="terminal">Run grep / conflict-check</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/036-queryhighpriority-collapse-and-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The 7 QueryHighPriority*Async wrappers (344-427) are removed and replaced by a single spec-driven method delegating to the existing QueryHighPriorityGenericAsync (450); grep shows no remaining named per-entity wrappers.</criterion>
+    <criterion testable="true">CollectHighPriorityAsync fans out over a HighPriorityEntitySpec[] array of 7 rows; all 7 entities (matter, project, invoice, document, workassignment, event, todo) are still queried.</criterion>
+    <criterion testable="true">Per-entity equivalence tests pass: each entity's query intent (entity + name/description columns + filter) matches the pre-refactor behavior; the Todo per-user scoping is preserved.</criterion>
+    <criterion testable="true">Existing high-priority collector tests still pass with no behavior change.</criterion>
+    <criterion testable="true">dotnet build exits 0 errors; publish size reported (absolute + diff vs 49.63 MB incl-PDBs); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-C7, plan.md Phase B.7, notes/inbound-from-r7/03 item 3 (prescribes the HighPriorityEntitySpec shape). Part of the collector chain (033→034→036→037). Pure refactor — no functional change; equivalence tests are the guard.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist and BFF publish-size verification.
+    </protocol>
+  </execution>
+</task>

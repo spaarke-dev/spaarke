@@ -167,6 +167,10 @@ public static class EndpointMappingExtensions
         // AIPU2-036: Feedback — per-response thumbs up/down submit + aggregation by playbook/capability
         app.MapFeedbackEndpoints();
         app.MapChatEndpoints();
+        // D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): client-ack endpoint for
+        // UI-affecting tool results. UNCONDITIONAL mapping — IUiActionAckCoordinator is
+        // registered unconditionally in AiChatModule (no compound-gate dependency).
+        app.MapChatAckEndpoints();
 
         // FR-P1-01 (ai-architecture-redesign-r1 task 020) — catalog-driven chat-summarize.
         // Maps POST /api/ai/chat/sessions/{sessionId}/summarize and delegates to
@@ -184,6 +188,14 @@ public static class EndpointMappingExtensions
         // UNCONDITIONAL mapping — NullSessionDispatchOrchestrator mirror registered on
         // the compound-OFF branch (asymmetric-registration rule §10 F.1 satisfied).
         app.MapDispatchSessionEndpoint();
+
+        // FR-A1-12 (spaarke-ai-architecture-redesign-r2 task 041) — capability-discovery
+        // READ endpoint for deterministic soft-slash launchers (gate-038 deferral).
+        // Maps GET /api/ai/capabilities. Depends ONLY on IConsumerRoutingService, which
+        // RoutingModule registers UNCONDITIONALLY (always-on routing facade, no feature
+        // flag) — so this mapping is symmetric with its dependency (§10 F.1) and does NOT
+        // need to sit inside the DocumentIntelligence/Analysis compound-flag block below.
+        app.MapCapabilityDiscoveryEndpoints();
 
         try { app.MapChatDocumentEndpoints(); }
         catch (Exception ex)

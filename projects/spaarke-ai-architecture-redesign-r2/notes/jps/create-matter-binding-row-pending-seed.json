@@ -1,0 +1,31 @@
+{
+  "$comment": "STAGED sprk_playbookconsumer (Binding) row for the create-matter capability (spaarke-ai-architecture-redesign-r2 task 042, FR-A1-13 / R19). Deliberately NOT placed in infra/dataverse/sprk_playbookconsumer-rows.json: that mirror's own header states 'Direction of truth: table -> mirror... Do NOT hand-author routing here that does not exist in a live table' (Seed-PlaybookConsumers.ps1 docstring; spec MUST NOT: no routing config outside the live Binding table). Hand-inserting this row into the live mirror ahead of a live row would misrepresent it as already-live and would report as MISSING IN ENV drift on the next -DiffOnly run. This file is the ready-to-seed staging artifact instead — the shape below IS what belongs in sprk_playbookconsumer-rows.json, added at the SAME time the live row is created (never before).",
+  "deploySequence": [
+    "1. Create the live sprk_analysisaction row for CREATE-MATTER@v1 (sprk_kind=Prompted; sprk_promptschema = projects/spaarke-ai-architecture-redesign-r2/notes/jps/CREATE-MATTER-v1.jps.json; sprk_inputschema = infra/dataverse/inputschemas/create-matter-v1.input.schema.json 'inputSchema' member; sprk_outputschemajson = infra/dataverse/outputschemas/create-matter-v1.schema.json). Record the resulting sprk_analysisactionid GUID.",
+    "2. Update infra/dataverse/inputschemas/create-matter-v1.input.schema.json 'actionId' from the placeholder to the real GUID from step 1.",
+    "3. Insert this row (below) into infra/dataverse/sprk_playbookconsumer-rows.json, in consumerType-alphabetical order (immediately BEFORE the existing 'create-task' row).",
+    "4. Run scripts/dataverse/Seed-PlaybookConsumers.ps1 against spaarkedev1 (its actionCode lookup now resolves because step 1 landed the Action row).",
+    "5. Add ConsumerTypes.CreateMatter = \"create-matter\" to src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs AND to the ConsumerTypes.All array — in the SAME step as 3/4, never before (adding the constant without the live row trips RoutingConsumerTypeHealthCheck's ConstantsWithoutRows dimension to Unhealthy on the deployed BFF).",
+    "6. Flip the golden-utterance GU-065/066/067 cases (tests/integration/contract/Eval/golden-utterances.json) from catalogStatus=planned to existing (removes the now-unneeded plannedBy field).",
+    "7. Run scripts/dataverse/Seed-PlaybookConsumers.ps1 -DiffOnly to confirm zero drift, then commit the refreshed mirror if -Export changed anything cosmetic."
+  ],
+  "row": {
+    "consumerType": "create-matter",
+    "consumerCode": "default",
+    "environment": "*",
+    "name": "create-matter (default)",
+    "priority": 500,
+    "enabled": true,
+    "playbookName": null,
+    "actionCode": "CREATE-MATTER@v1",
+    "ucid": "UC-B-6",
+    "disposition": 100000000,
+    "risk": 100000000,
+    "captureMode": 100000000,
+    "surfaces": "assistant",
+    "chipTransitions": "[]",
+    "onEventBindings": null,
+    "matchConditions": null,
+    "toolDescription": "Create a new matter (a Spaarke sprk_matter record) from this conversation. Use when the user asks to create, open, start, or intake a matter, or says something like 'create a matter from this file, practice area <label>, type <label>'. This capability DRAFTS the proposed matter (name, description, practice-area/matter-type LABEL suggestions, source citations) grounded in the session material — it does NOT create the record. After presenting the proposal to the user, create the record by calling dataverse.create_record with tablename 'sprk_matter' and an item carrying: sprk_mattername (the proposal's matter name, or the user's stated name if they gave one), sprk_matterdescription (the proposal description PLUS a final provenance line that MUST name the source document file, e.g. 'Provenance: source document nda-acme.pdf' — copy file names VERBATIM from the session context). PRACTICE AREA / MATTER TYPE RULE: sprk_practicearea and sprk_mattertype are LOOKUPS to sprk_practicearea_ref / sprk_mattertype_ref (never multi-select choices, never free text) — before asking the user to confirm, resolve the practice-area/matter-type LABEL (from the proposal's suggestions or the user's own words) to its reference-row GUID via dataverse.read_query IN THE SAME TURN, and set {\"relatedTable\":\"sprk_practicearea_ref\",\"recordId\":\"guid\"} (same pattern for sprk_mattertype_ref); if you cannot resolve a confident match, OMIT that column and mention the intended value inside sprk_matterdescription instead — never guess a GUID and never use '@odata.bind'. Records you create belong to the calling user automatically. POST-CONFIRMATION RULE: ask for confirmation in chat AT MOST ONCE — presenting the drafted proposal and asking once is the ONLY chat question allowed. The moment the user affirms the proposal ('yes', 'create it', 'confirm'), IMMEDIATELY invoke dataverse.create_record with the sprk_matter contract above IN THAT SAME TURN — do NOT announce that you are about to proceed and ask again, do NOT re-invoke this capability to regenerate the draft. The CONFIRMATION DIALOG presented by dataverse.create_record is the approval step: invoke the write tool and let it suspend."
+  }
+}

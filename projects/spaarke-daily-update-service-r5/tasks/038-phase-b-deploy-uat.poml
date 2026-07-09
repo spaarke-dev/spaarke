@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Deploy BFF to spaarkedev1 for G-R5-C browser UAT (collaborator-scope + Choice writes)</title>
+    <phase>B: Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>037,032,035</dependencies>
+    <blocks>090</blocks>
+    <tags>deploy, bff-api, azure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task (irreversible/ordered — prescriptive steps) preparing an operator gate; no new production code, follows the bff-deploy runbook (Step 3.5.5 STANDARD; deploy phase).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runbook-driven deploy + UAT-script authoring following bff-deploy skill; mechanical, well-specified (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys the aggregate of Phase B BFF changes; must run after all Phase B code tasks (037,032,035) land. Irreversible deploy step.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the BFF (Sprk.Bff.Api) to spaarkedev1 so the operator can run the G-R5-C browser UAT: an assigned attorney (sprk_assignedattorney1, non-owner) sees their matter in the Daily Briefing, and a Choice-field Update Record write succeeds instead of 500ing. Author the G-R5-C browser UAT script (steps + expected outcomes) and report publish size within the ≤60 MB ceiling. Per FR-C4/FR-C1 gate (G-R5-C).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer + release engineer. Follow ADRs strictly. Expert in the bff-deploy runbook, Azure App Service deployment, and Spaarke's browser-UAT gate convention (NFR-07).
+  </role>
+
+  <goal>
+    The BFF built from the Phase B branch (incl. tasks 030/033/034/036/037 code + 032 data restoration) is deployed to spaarkedev1 via the bff-deploy skill. A G-R5-C browser UAT script exists at projects/spaarke-daily-update-service-r5/notes/ covering: (1) an assigned attorney sees a non-owned assigned matter in the briefing; (2) an Update Record Choice write succeeds (no 500). Publish size is measured and reported within the ≤60 MB compressed ceiling. The gate remains operator-executed (this task prepares it; it does not self-certify the gate).
+  </goal>
+
+  <context>
+    <background>
+      Gates G-R5-A/C are operator-executed browser UAT on spaarkedev1 (NFR-07 — curl/tests/logs never satisfy a gate). This task ships the Phase B BFF so the operator can verify the collaborator-scope fix (task 033) and the Choice-coercion fix (task 030 + 032 restoration) in the browser. The deploy convention is master-sync-first (FR-E1): warn if the branch is behind origin/master before deploying.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Do NOT deploy until dependencies 037, 032, and 035 are complete. Deploy the aggregate Phase B BFF (collaborator-scope + de-dup + query-collapse + promise-cache + Choice coercion + restored sprk_documenttype mapping).</constraint>
+    <constraint source="project">Deploy target is spaarkedev1 via the bff-deploy skill/runbook. Do NOT hand-roll a deploy; follow .claude/skills/bff-deploy/SKILL.md.</constraint>
+    <constraint source="FR-E1">Master-sync-first convention: before deploying, warn (one line) if the worktree branch is behind origin/master; state the master-sync disposition in the deploy notes/PR description.</constraint>
+    <constraint source="NFR-07">This task PREPARES the operator gate — it authors the UAT script and deploys. It MUST NOT claim the gate is passed on the basis of curl/tests/logs. The gate is operator-executed browser UAT.</constraint>
+    <constraint source="root-CLAUDE.md-§10">Report publish size (absolute compressed + diff vs ~49.63 MB baseline, incl PDBs); HARD STOP if ≥60 MB. Confirm no new HIGH-severity CVE from dotnet list package --vulnerable --include-transitive.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm dependencies 037, 032, 035 are complete. If any is not, STOP.</step>
+    <step order="2">Run the master-sync-first check (FR-E1): if the branch is behind origin/master, emit the one-line warning and record the disposition (sync or proceed-with-rationale) in the deploy notes.</step>
+    <step order="3">Build + publish: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/; measure compressed size; record absolute + diff vs 49.63 MB baseline (incl PDBs). HARD STOP if ≥60 MB.</step>
+    <step order="4">Run dotnet list package --vulnerable --include-transitive; confirm no new HIGH-severity CVE.</step>
+    <step order="5">Deploy to spaarkedev1 via the bff-deploy skill (.claude/skills/bff-deploy/SKILL.md); capture the deploy output/URL.</step>
+    <step order="6">Author the G-R5-C browser UAT script to projects/spaarke-daily-update-service-r5/notes/038-g-r5-c-uat-script.md: (a) assigned-attorney (sprk_assignedattorney1, non-owner) opens the Daily Briefing and sees the assigned matter — steps + expected; (b) run an Update Record node writing a Choice label and confirm success (no 500) + read-back enum match — steps + expected.</step>
+    <step order="7">Update TASK-INDEX.md task 038 → completed; note that G-R5-C is now ready for operator execution; record deploy details + publish size in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the publish size is ≥60 MB (HARD STOP), a new HIGH-severity CVE appears, or the deploy to spaarkedev1 fails, STOP and escalate per root CLAUDE.md §6 rather than forcing the deploy or shipping over the ceiling.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/publish the BFF; check vulnerable packages</tool>
+    <tool name="terminal">Run the bff-deploy skill + git branch-behind check</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/038-g-r5-c-uat-script.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/038-deploy-and-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The BFF built from the Phase B branch is deployed to spaarkedev1 via the bff-deploy skill; the deploy notes capture the target + output/URL.</criterion>
+    <criterion testable="true">notes/038-g-r5-c-uat-script.md contains a runnable browser-UAT script with (a) the assigned-attorney-sees-non-owned-matter scenario and (b) the Choice-write-succeeds scenario, each with steps + expected outcomes.</criterion>
+    <criterion testable="true">Publish size is measured and reported (absolute compressed + diff vs 49.63 MB incl-PDBs baseline) and is within the ≤60 MB ceiling; the task HARD-STOPs if ≥60 MB.</criterion>
+    <criterion testable="true">dotnet list package --vulnerable --include-transitive shows no new HIGH-severity CVE.</criterion>
+    <criterion testable="true">The master-sync-first check (FR-E1) ran and its disposition is recorded; the task does NOT claim G-R5-C passed (gate is operator-executed browser UAT per NFR-07).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md Success Criteria G-R5-C, plan.md Phase B.deploy, FR-E1 (master-sync-first), NFR-06/07. Deploy the aggregate of Phase B. Gate is operator browser UAT on spaarkedev1 — this task readies it, blocks 090 (wrap-up).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/bff-deploy/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt; and confirm 037/032/035 complete. Follow the bff-deploy runbook exactly (prescriptive steps — irreversible deploy). Report publish size per root §10; do not self-certify the operator gate.
+    </protocol>
+  </execution>
+</task>

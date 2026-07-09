@@ -101,7 +101,7 @@ public class GoldenUtteranceEvalSuiteTests
     private static readonly IReadOnlySet<string> CanonicalUcIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "UC-A-1", "UC-A-2", "UC-A-3", "UC-A-4", "UC-A-5", "UC-A-6", "UC-A-7",
-        "UC-B-1", "UC-B-2", "UC-B-3", "UC-B-4", "UC-B-5",
+        "UC-B-1", "UC-B-2", "UC-B-3", "UC-B-4", "UC-B-5", "UC-B-6",
         "UC-C-1", "UC-C-2", "UC-C-3", "UC-C-4",
         "UC-D-1", "UC-D-2", "UC-D-3", "UC-D-4",
         "UC-E-1", "UC-E-2", "UC-E-3",

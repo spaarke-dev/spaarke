@@ -17,6 +17,7 @@ This directory contains cross-cutting coding standards, anti-pattern catalog, in
 | **[CODING-STANDARDS.md](CODING-STANDARDS.md)** | Naming conventions, file organization, formatting, error handling, and language-specific rules (.NET/C#, TypeScript, PCF, Code Pages) | 2026-04-05 | 2026-04-05 | New |
 | **[ANTI-PATTERNS.md](ANTI-PATTERNS.md)** | Catalog of patterns to avoid across BFF API, PCF controls, plugins, auth, and AI integration with corrective examples | 2026-04-05 | 2026-04-05 | New |
 | **[INTEGRATION-CONTRACTS.md](INTEGRATION-CONTRACTS.md)** | Cross-module integration contracts: API → PCF, PCF → BFF, plugin → API, job contracts, event shapes, and versioning rules | 2026-04-05 | 2026-04-05 | New |
+| **[ODATA-NAMING-CONVENTION.md](ODATA-NAMING-CONVENTION.md)** | Dataverse OData attribute naming: PascalCase SchemaName for `@odata.bind` lookup binding vs lowercase LogicalName for filtering/selecting | 2026-07-08 | 2026-07-08 | New |
 
 ### Authentication & Security
 

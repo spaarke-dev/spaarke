@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Sweep playbook fieldMappings for string→Choice; restore sprk_documenttype to Profile Document node</title>
+    <phase>B: Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, ai, audit</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Audit + catalog-data restoration relying on task 030's shipped coercion; produces a report + a data change, not new code (Step 3.5.5 STANDARD: has explicit constraints, no production code file edited).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Enumerative audit + a single mapping restoration with a known target; mechanical, well-specified (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on task 030's runtime coercion being shipped/verified before restoring sprk_documenttype; must run after 030.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Audit existing playbook UpdateRecord-node fieldMappings for the string→Choice pattern (the trap in notes/inbound-from-r7/06, especially cases 3/4 — other Choice columns on sprk_document and other entities), producing a report of every occurrence. Then, because task 030's coercion now ships, restore the sprk_documenttype mapping to the Profile Document node's Update Record fieldMappings and verify it writes successfully via the new coercion. Per FR-C3.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in JPS playbook node configuration, Dataverse Choice-column metadata, and the UpdateRecord node executor.
+  </role>
+
+  <goal>
+    A sweep report at projects/spaarke-daily-update-service-r5/notes/ lists every UpdateRecord fieldMapping in existing playbook nodes where a type:"string" mapping targets a Choice column (field + target column + playbook/node id). The sprk_documenttype mapping is restored to the Profile Document node (playbook node 0fa4e8db-b216-f111-8343-7c1e520aa4df) and, on end-to-end execution, the Choice value round-trips (read back the record → enum value matches the AI label) via task 030's coercion.
+  </goal>
+
+  <context>
+    <background>
+      R7 unblocked the Profile Document 500 by dropping the sprk_documenttype mapping (note 06 §R7 unblock). Now that task 030 makes String-typed Choice writes coerce correctly and fail loud on invalid labels, the mapping can be restored. The same string→Choice trap likely exists on other Choice columns (sprk_classification, sprk_filesummarystatus, sprk_documentstatus, sprk_sourcetype, sprk_relationshiptype on sprk_document; and on Matter/Project/Todo) — this task enumerates them so the debt is visible even where not restored here.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/06-choice-field-coercion-in-updaterecord.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Do NOT start until task 030 (runtime coercion) is merged/verified — the sprk_documenttype restoration depends on it. If 030 is not complete, STOP.</constraint>
+    <constraint source="project">The sweep MUST enumerate EVERY UpdateRecord fieldMapping across existing playbook nodes where type:"string" targets a Choice column. For each hit, record: playbook (id/name), node id, field logical name, target column, and whether it was restored or left as-is (and why). Write the report to projects/spaarke-daily-update-service-r5/notes/032-fieldmapping-sweep.md.</constraint>
+    <constraint source="project">Restore ONLY the sprk_documenttype mapping to the Profile Document node in THIS task (the one dropped in R7). Do not bulk-restore other dropped/absent Choice mappings without evidence they were previously dropped for the same reason — list them in the report as candidates instead. Catalog/node data edits use the BA editor / mcp__dataverse__update_record (mirror-first authoring).</constraint>
+    <constraint source="project">Verify the restored mapping round-trips: execute the Profile Document playbook end-to-end (or the node in isolation), then read back sprk_documenttype and confirm the numeric enum value matches the AI-emitted label. A verbatim-string 500 is a FAIL for this task.</constraint>
+    <constraint source="root-CLAUDE.md-§10">If this task edits any BFF code (it should not — it is data + audit), the §10 obligations apply. If it is data-only, state that no BFF publish-size change occurred in the report.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-039-coded-composite.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/06-choice-field-coercion-in-updaterecord.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm task 030 is merged/verified (coercion shipped). If not, STOP and report blocked.</step>
+    <step order="2">Enumerate existing playbook UpdateRecord nodes and their fieldMappings; identify every type:"string" mapping whose target column is Choice (sweep sprk_document Choice columns per note 06 case 3, and Matter/Project/Todo per case 4). Use mcp__dataverse describe/read to confirm column types.</step>
+    <step order="3">Write the sweep report to notes/032-fieldmapping-sweep.md: one row per hit (playbook, node id, field, target column, disposition).</step>
+    <step order="4">Restore the sprk_documenttype mapping to the Profile Document node (node 0fa4e8db-b216-f111-8343-7c1e520aa4df) via mcp__dataverse__update_record — either as type:"string" (now coerced by 030) or type:"choice" with an options map; state which and why in the report.</step>
+    <step order="5">Execute the Profile Document playbook (or the Update Record node) end-to-end; read back the record and confirm sprk_documenttype holds the correct numeric enum value matching the AI label.</step>
+    <step order="6">Update TASK-INDEX.md task 032 → completed; record any deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If restoring sprk_documenttype still produces a 500 or a wrong enum after task 030 shipped, STOP and escalate per root CLAUDE.md §6 — do NOT re-drop the mapping as a silent workaround; the coercion contract from 030 must be honored or the defect re-opened.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Search playbook data, run describe/read queries</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/032-fieldmapping-sweep.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/032-fieldmapping-sweep.md lists every UpdateRecord fieldMapping found where a type:"string" mapping targets a Choice column, with playbook/node/field/target-column/disposition for each.</criterion>
+    <criterion testable="true">The sprk_documenttype mapping is restored to the Profile Document node (0fa4e8db-b216-f111-8343-7c1e520aa4df); the report states whether it was restored as type:"string" (coerced) or type:"choice" and why.</criterion>
+    <criterion testable="true">Given the restored mapping and an end-to-end Profile Document run, when the record is read back, then sprk_documenttype holds the numeric enum value matching the AI-emitted label (round-trip verified; no 500).</criterion>
+    <criterion testable="true">No other Choice mapping is bulk-restored without evidence; candidates are listed in the report rather than changed.</criterion>
+    <criterion testable="true">The report states whether any BFF code changed (expected: none — data + audit only) and thus whether publish-size verification applies.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-C3, plan.md Phase B.3, notes/inbound-from-r7/06 (§R7 unblock, §Recommendation Track C stopgap, §Test cases 3/4). Depends on task 030. Target metadata: sprk_document via mcp__dataverse__describe. Profile Document playbook 18cf3cc8-02ec-f011-8406-7c1e520aa4df; node 0fa4e8db-b216-f111-8343-7c1e520aa4df.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt; and confirm task 030 is complete. Follow task-execute for the pre-execution checklist. Catalog/node data edits are mirror-first authoring.
+    </protocol>
+  </execution>
+</task>

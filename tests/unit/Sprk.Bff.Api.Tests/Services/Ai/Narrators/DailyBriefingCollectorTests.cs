@@ -9,8 +9,10 @@
 //   - Per-bullet entity-link metadata (RegardingEntityType + RegardingId) populated for
 //     ALL 6 entity types — sprk_event tasks reference sprk_matter; sprk_document references
 //     sprk_matter; sprk_matter / sprk_project self-regard; sprk_todo references sprk_matter
-//   - Ownership gate is owner-scoped QueryExpression (owninguser eq user) — resolver bypassed
-//     since 5ca115765 (R7 W12 cutover, DEF-NNN); no inline FetchXml and no unscoped fetch
+//   - Ownership gate routes through IMembershipResolverService for events/matters/projects
+//     (R5 task 033 reverted the R7 W12 owner-only bypass now that the R7 root-cause fix to
+//     MembershipFieldDiscoveryService synthesizes Owner/Customer lookup targets) — collaborators
+//     (e.g. sprk_assignedattorney1) are included in the candidate set, not just owners
 //   - Failure-soft per-channel: a single channel exception does not abort the briefing
 //
 // Per CLAUDE.md tests/CLAUDE.md anti-pattern bans:
@@ -235,22 +237,25 @@ public sealed class DailyBriefingCollectorTests
     }
 
     [Fact]
-    public async Task CollectAsync_OwnershipGate_UsesOwnerScopedQueryExpressions_ResolverBypassed()
+    public async Task CollectAsync_OwnershipGate_RoutesThroughMembershipResolver()
     {
-        // Since commit 5ca115765 (R7 W12 widget cutover, 2026-06-30) the collector BYPASSES
-        // IMembershipResolverService — the resolver returns 0 rows for records owned via the
-        // polymorphic Owner attribute (DEF-NNN) — and resolves candidate sets via direct
-        // owner-scoped QueryExpression queries (owninguser eq systemUserId).
-        //
-        // PROTECTIVE INTENT PRESERVED from the pre-cutover test: the ownership gate MUST be
-        // a structured, per-user-scoped query — never inline FetchXML and never an unscoped
-        // fetch that leaks other users' records into the briefing.
-        //
-        // When the resolver bug is fixed and ResolveMembershipsSafelyAsync is restored, this
-        // test MUST be flipped back to resolver-routing assertions (Times.Once per entity type).
+        // R5 task 033 (2026-07-08) — re-flip of the R7 W12 pin (PR #558). The R7 W12 owner-only
+        // bypass (commit 5ca115765) has been reverted: the R7 root-cause fix to
+        // MembershipFieldDiscoveryService.ProjectLookupAttributeRows now synthesizes Owner +
+        // Customer lookup targets, so IMembershipResolverService returns rows for the
+        // polymorphic Owner attribute again. Candidate-set resolution for events/matters/
+        // projects routes through the resolver — this test now asserts resolver ROUTING
+        // (not the bypass) so collaborator scope (assigned attorneys, paralegals, etc.) is
+        // restored.
 
-        // Arrange — capture every Dataverse query the collector issues.
-        var resolverMock = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        // Arrange
+        var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
+        {
+            ["sprk_event"] = MembershipWith("sprk_event", EventId1),
+            ["sprk_matter"] = MembershipWith("sprk_matter", MatterId1),
+            ["sprk_project"] = MembershipWith("sprk_project", ProjectId1),
+        });
+
         var capturedQueries = new List<QueryExpression>();
         var entityMock = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entityMock
@@ -266,31 +271,19 @@ public sealed class DailyBriefingCollectorTests
         // Act
         _ = await sut.CollectAsync(SystemUserId, CancellationToken.None);
 
-        // Assert — the resolver is NOT invoked at all on the current (bypassed) path.
-        resolverMock.Verify(r => r.ResolveAsync(
-            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
-            Times.Never,
-            "R7 W12 cutover bypasses IMembershipResolverService until DEF-NNN (polymorphic-Owner) is fixed");
-
-        // Each candidate-set entity type gets exactly ONE owner-scoped QueryExpression:
-        // owninguser eq {systemUserId}. QueryExpression (not a FetchXML string) keeps the
-        // ownership predicate structurally inspectable — the inline-FetchXml eq-userid
-        // bypass the original test guarded against stays banned.
+        // Assert — the resolver IS invoked exactly once per candidate-set entity type, scoped
+        // to the acting user.
         foreach (var entityType in new[] { "sprk_event", "sprk_matter", "sprk_project" })
         {
-            capturedQueries
-                .Where(q => q.EntityName == entityType)
-                .Should().ContainSingle(
-                    $"candidate-set resolution for {entityType} is a single owned-ID query " +
-                    "(channel queries early-return when the candidate set is empty)")
-                .Which.Criteria.Conditions.Should().Contain(c =>
-                    c.AttributeName == "owninguser" &&
-                    c.Operator == ConditionOperator.Equal &&
-                    c.Values.Contains((object)SystemUserId),
-                    "the ownership gate must scope to the acting user's systemuserid");
+            resolverMock.Verify(r => r.ResolveAsync(
+                SystemUserId, entityType, It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
+                Times.Once,
+                $"candidate-set resolution for {entityType} must route through IMembershipResolverService");
         }
 
-        // The per-user to-dos channel also stays owner-scoped (no membership dependency).
+        // The per-user to-dos channel stays a direct owner-scoped QueryExpression — sprk_todo
+        // has no membership-bearing fields, so it is intentionally out of scope for the
+        // resolver-routing revert.
         capturedQueries
             .Where(q => q.EntityName == "sprk_todo")
             .Should().ContainSingle()
@@ -299,6 +292,125 @@ public sealed class DailyBriefingCollectorTests
                 c.Operator == ConditionOperator.Equal &&
                 c.Values.Contains((object)SystemUserId),
                 "todos are per-user; an unscoped todo query would leak other users' items");
+    }
+
+    [Fact]
+    public async Task CollectAsync_CollaboratorNotOwner_SeesAssignedMatterInCandidateSet()
+    {
+        // R5 task 033 collaborator smoke test (spec FR-C4). A systemUser who is a
+        // sprk_assignedattorney1 (collaborator) but NOT the owner of a matter must see that
+        // matter in the collected briefing candidate set. IMembershipResolverService discovers
+        // the assignedAttorney role (unlike the reverted owner-only bypass, which only ever
+        // matched `owninguser = systemUserId`).
+        //
+        // This test is constructed so it FAILS against the old bypass: the entity-service stub
+        // returns EMPTY for any query that filters on `owninguser` (simulating that this user
+        // does not own the matter directly — the bypass's ResolveOwnedIdsAsync query would find
+        // nothing) and returns the matter row only for the membership-driven `sprk_matterid IN
+        // [...]` query the resolver-routed channel query issues.
+
+        // Arrange — resolver reports the matter via the assignedAttorney role (NOT owner).
+        var resolverMock = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        resolverMock
+            .Setup(r => r.ResolveAsync(
+                SystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MembershipResponse(
+                EntityType: "sprk_matter",
+                PersonIdentity: MakeIdentity(),
+                Ids: new[] { MatterId1 },
+                ByRole: new Dictionary<string, IReadOnlyList<Guid>> { ["assignedAttorney"] = new[] { MatterId1 } },
+                Count: 1,
+                CacheExpiresAt: DateTimeOffset.UtcNow.AddMinutes(5)));
+        resolverMock
+            .Setup(r => r.ResolveAsync(
+                SystemUserId, It.Is<string>(e => e != "sprk_matter"), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .Returns<Guid, string, MembershipResolveOptions?, CancellationToken>(
+                (_, entityType, _, _) => Task.FromResult(EmptyMembership(entityType)));
+
+        var entityMock = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entityMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns<QueryExpression, CancellationToken>((q, _) =>
+            {
+                var isDirectOwnerLookup = q.Criteria.Conditions.Any(c => c.AttributeName == "owninguser");
+                if (isDirectOwnerLookup)
+                {
+                    // The old bypass's direct-owner lookup — this user owns nothing directly.
+                    return Task.FromResult(new EntityCollection());
+                }
+                if (q.EntityName == "sprk_matter")
+                {
+                    return Task.FromResult(new EntityCollection(new List<Entity>
+                    {
+                        MakeMatterEntity(MatterId1, "Collaborator Matter")
+                    }));
+                }
+                return Task.FromResult(new EntityCollection());
+            });
+
+        var sut = new DailyBriefingCollector(
+            entityMock.Object,
+            resolverMock.Object,
+            NullLogger<DailyBriefingCollector>.Instance);
+
+        // Act
+        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+
+        // Assert — the collaborator-only matter surfaces in the briefing.
+        request.Channels.Should().Contain(c => c.Category == "matters",
+            "the assigned attorney (collaborator, not owner) must see the matter via membership resolution");
+        request.Channels.Single(c => c.Category == "matters").Items
+            .Should().ContainSingle(i => i.RegardingId == MatterId1.ToString());
+    }
+
+    [Fact]
+    public async Task CollectAsync_OwnerOfMatterProjectEvent_StillIncludedInCandidateSet()
+    {
+        // R5 task 033 owner-scoped regression guard: reverting the bypass MUST NOT regress the
+        // owner-scoped case. A systemUser who OWNS a matter, project, and event still sees all
+        // three in the briefing candidate set once resolution is routed through
+        // IMembershipResolverService.
+        var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
+        {
+            ["sprk_event"] = MembershipWith("sprk_event", EventId1),
+            ["sprk_matter"] = MembershipWith("sprk_matter", MatterId1),
+            ["sprk_project"] = MembershipWith("sprk_project", ProjectId1),
+        });
+
+        var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>
+        {
+            ["sprk_event"] = new EntityCollection(new List<Entity>
+            {
+                MakeEventEntity(EventId1, "Owned Task", "Matter Alpha", MatterId1)
+            }),
+            ["sprk_matter"] = new EntityCollection(new List<Entity>
+            {
+                MakeMatterEntity(MatterId1, "Owned Matter")
+            }),
+            ["sprk_project"] = new EntityCollection(new List<Entity>
+            {
+                MakeProjectEntity(ProjectId1, "Owned Project")
+            }),
+        });
+
+        var sut = new DailyBriefingCollector(
+            entityMock.Object,
+            resolverMock.Object,
+            NullLogger<DailyBriefingCollector>.Instance);
+
+        // Act
+        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+
+        // Assert — owner still sees their own matter, project, and (task-typed) event.
+        request.Channels.Should().Contain(c => c.Category == "matters");
+        request.Channels.Single(c => c.Category == "matters").Items
+            .Should().ContainSingle(i => i.RegardingId == MatterId1.ToString());
+
+        request.Channels.Should().Contain(c => c.Category == "projects");
+        request.Channels.Single(c => c.Category == "projects").Items
+            .Should().ContainSingle(i => i.RegardingId == ProjectId1.ToString());
+
+        request.Channels.Should().Contain(c => c.Category == "upcoming-tasks");
     }
 
     [Fact]
@@ -561,5 +673,378 @@ public sealed class DailyBriefingCollectorTests
         request.TotalNotificationCount.Should().Be(3);
         request.Categories.Should().Contain(c => c.Name == "Matters" && c.Count == 2);
         request.Categories.Should().Contain(c => c.Name == "To Dos" && c.Count == 1);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // De-dup (R5 task 034 / FR-C5) — an item reachable via two collection paths must
+    // appear exactly once in the assembled output; unique items must never be dropped.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CollectAsync_EventReachableViaBothUpcomingAndOverdueDateFields_AppearsExactlyOnce()
+    {
+        // Arrange — a single sprk_event whose sprk_duedate is already 6 days past (matches
+        // the Overdue query's OnOrBefore filter) while its sprk_finalduedate is 2 days out
+        // (matches the Upcoming query's NextXDays filter). QueryEventsAsync's date filter is
+        // an OR across both fields, so the SAME event row satisfies BOTH the upcoming-tasks
+        // query and the overdue-tasks query — the two-collection-path duplication case this
+        // task de-dups. The stub returns this one row for every sprk_event query (both
+        // channels query the same entity), so without de-dup the event would appear in both
+        // the "upcoming-tasks" and "overdue-tasks" channels.
+        var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
+        {
+            ["sprk_event"] = MembershipWith("sprk_event", EventId1),
+        });
+
+        var dualDateEvent = new Entity("sprk_event", EventId1);
+        dualDateEvent["sprk_eventid"] = EventId1;
+        dualDateEvent["sprk_eventname"] = "Task reachable via both date fields";
+        dualDateEvent["sprk_duedate"] = DateTime.UtcNow.Date.AddDays(-6);       // satisfies Overdue
+        dualDateEvent["sprk_finalduedate"] = DateTime.UtcNow.Date.AddDays(2);   // satisfies Upcoming
+        dualDateEvent["modifiedon"] = DateTime.UtcNow;
+
+        var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>
+        {
+            ["sprk_event"] = new EntityCollection(new List<Entity> { dualDateEvent }),
+        });
+
+        var sut = new DailyBriefingCollector(
+            entityMock.Object,
+            resolverMock.Object,
+            NullLogger<DailyBriefingCollector>.Instance);
+
+        // Act
+        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+
+        // Assert — the record's identity (sprk_event + EventId1) appears exactly once across
+        // ALL channels combined (not merely once per channel) — the two-path dedup contract.
+        var allItemIds = request.Channels
+            .SelectMany(c => c.Items)
+            .Where(i => i.Id == EventId1.ToString())
+            .ToArray();
+        allItemIds.Should().ContainSingle(
+            "an item reachable via two collection paths (upcoming + overdue date fields) must appear exactly once");
+
+        // Category counts and TotalNotificationCount must reflect the de-duped view, not the
+        // raw double-counted per-query row count.
+        request.TotalNotificationCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CollectAsync_NDistinctRecordsAcrossPathsIncludingSameTitledMatters_AllNAppear()
+    {
+        // Arrange — no-over-dedup guard: N genuinely-distinct records across different
+        // channels/entity types, INCLUDING two distinct sprk_matter records that share the
+        // exact same display title ("Shared Title Matter"). De-dup keys on entity+GUID
+        // identity, never display text — so both same-titled matters must survive alongside
+        // every other distinct record. N = 4 total (2 same-titled matters + 1 project + 1 todo).
+        var matterA = Guid.Parse("77777777-7777-7777-7777-777777777771");
+        var matterB = Guid.Parse("77777777-7777-7777-7777-777777777772");
+
+        var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
+        {
+            ["sprk_matter"] = MembershipWith("sprk_matter", matterA, matterB),
+            ["sprk_project"] = MembershipWith("sprk_project", ProjectId1),
+        });
+
+        var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>
+        {
+            ["sprk_matter"] = new EntityCollection(new List<Entity>
+            {
+                MakeMatterEntity(matterA, "Shared Title Matter"),
+                MakeMatterEntity(matterB, "Shared Title Matter"),
+            }),
+            ["sprk_project"] = new EntityCollection(new List<Entity>
+            {
+                MakeProjectEntity(ProjectId1, "Distinct Project")
+            }),
+            ["sprk_todo"] = new EntityCollection(new List<Entity>
+            {
+                MakeTodoEntity(TodoId1, "Distinct Todo")
+            }),
+        });
+
+        var sut = new DailyBriefingCollector(
+            entityMock.Object,
+            resolverMock.Object,
+            NullLogger<DailyBriefingCollector>.Instance);
+
+        // Act
+        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+
+        // Assert — all 4 distinct records survive; no unique item was dropped by de-dup.
+        var allItems = request.Channels.SelectMany(c => c.Items).ToArray();
+        allItems.Should().HaveCount(4);
+        request.TotalNotificationCount.Should().Be(4);
+
+        // The two same-titled-but-distinct matters both survive (proves entity+GUID keying,
+        // not display-text keying — display-text keying would have collapsed these to 1).
+        var matterChannel = request.Channels.Single(c => c.Category == "matters");
+        matterChannel.Items.Should().HaveCount(2);
+        matterChannel.Items.Select(i => i.Id).Should().BeEquivalentTo(new[] { matterA.ToString(), matterB.ToString() });
+    }
+
+    [Fact]
+    public async Task CollectHighPriorityAsync_ItemReachableAcrossQueries_AppearsExactlyOnceAndOrderingPreserved()
+    {
+        // Arrange — 3 distinct high-priority records across 3 different entity types, with
+        // due dates chosen so the expected DueDate-then-Name order is unambiguous. This proves
+        // (a) de-dup does not drop unique items across the 7-entity merge, and (b) the
+        // existing DueDate-then-Name ordering survives the de-dup step (constraint: de-dup
+        // before/within ordering, never reshuffle beyond removing duplicates).
+        var matterId = Guid.Parse("88888888-8888-8888-8888-888888888881");
+        var projectId = Guid.Parse("88888888-8888-8888-8888-888888888882");
+        var eventId = Guid.Parse("88888888-8888-8888-8888-888888888883");
+
+        var matterEntity = new Entity("sprk_matter", matterId);
+        matterEntity["sprk_matterid"] = matterId;
+        matterEntity["sprk_mattername"] = "Zeta Matter"; // no due date column — sorts last (MaxValue)
+        matterEntity["sprk_highpriority"] = true;
+        matterEntity["statecode"] = 0;
+        matterEntity["modifiedon"] = DateTime.UtcNow;
+
+        var projectEntity = new Entity("sprk_project", projectId);
+        projectEntity["sprk_projectid"] = projectId;
+        projectEntity["sprk_projectname"] = "Alpha Project"; // no due date column — sorts last
+        projectEntity["sprk_highpriority"] = true;
+        projectEntity["statecode"] = 0;
+        projectEntity["modifiedon"] = DateTime.UtcNow;
+
+        var eventEntity = new Entity("sprk_event", eventId);
+        eventEntity["sprk_eventid"] = eventId;
+        eventEntity["sprk_eventname"] = "Earliest-Due Task";
+        eventEntity["sprk_highpriority"] = true;
+        eventEntity["sprk_finalduedate"] = DateTime.UtcNow.Date.AddDays(1); // has a due date — sorts first
+        eventEntity["modifiedon"] = DateTime.UtcNow;
+
+        var entityMock = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entityMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns<QueryExpression, CancellationToken>((q, _) => q.EntityName switch
+            {
+                "sprk_matter" => Task.FromResult(new EntityCollection(new List<Entity> { matterEntity })),
+                "sprk_project" => Task.FromResult(new EntityCollection(new List<Entity> { projectEntity })),
+                "sprk_event" => Task.FromResult(new EntityCollection(new List<Entity> { eventEntity })),
+                _ => Task.FromResult(new EntityCollection()),
+            });
+
+        var resolverMock = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        var sut = new DailyBriefingCollector(
+            entityMock.Object,
+            resolverMock.Object,
+            NullLogger<DailyBriefingCollector>.Instance);
+
+        // Act
+        var items = await sut.CollectHighPriorityAsync(SystemUserId, CancellationToken.None);
+
+        // Assert — all 3 distinct records present exactly once each (no drop, no duplication).
+        items.Should().HaveCount(3);
+        items.Select(i => i.EntityId).Should().BeEquivalentTo(
+            new[] { matterId.ToString(), projectId.ToString(), eventId.ToString() });
+
+        // Ordering preserved: due-dated item first (DueDate ascending), then undated items
+        // ordered by Name ascending ("Alpha Project" before "Zeta Matter").
+        items[0].EntityId.Should().Be(eventId.ToString(), "the only due-dated item sorts first");
+        items[1].Name.Should().Be("Alpha Project", "undated items fall back to Name ascending");
+        items[2].Name.Should().Be("Zeta Matter");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // TL;DR scaffolding wiring (R5 task 013 / FR-A4) — the collector attaches
+    // deterministically-computed TldrFacts onto the request it hands the narrator.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CollectAsync_AttachesTldrFacts_MatchingTheRequestsOwnDeterministicViewModel()
+    {
+        // Arrange — same fixture as CollectAsync_CategoriesAndTotalCountMatchActualItems: 2
+        // matter rows, 1 todo row.
+        var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
+        {
+            ["sprk_matter"] = MembershipWith("sprk_matter", MatterId1, MatterId2),
+        });
+
+        var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>
+        {
+            ["sprk_matter"] = new EntityCollection(new List<Entity>
+            {
+                MakeMatterEntity(MatterId1, "Matter Alpha"),
+                MakeMatterEntity(MatterId2, "Matter Beta"),
+            }),
+            ["sprk_todo"] = new EntityCollection(new List<Entity>
+            {
+                MakeTodoEntity(TodoId1, "Send agenda")
+            })
+        });
+
+        var sut = new DailyBriefingCollector(
+            entityMock.Object,
+            resolverMock.Object,
+            NullLogger<DailyBriefingCollector>.Instance);
+
+        // Act
+        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+
+        // Assert — TldrFacts is populated (not the LLM's job to fill it in) and every count
+        // traces back EXACTLY to the same view model the request itself carries — this is the
+        // "TL;DR asserts only deterministic facts" contract at the collector boundary.
+        request.TldrFacts.Should().NotBeNull(
+            because: "the collector must stamp deterministic scaffolding onto every request it builds (R5 FR-A4)");
+        request.TldrFacts!.TotalNotificationCount.Should().Be(request.TotalNotificationCount);
+        request.TldrFacts.CategoryCounts.Should().BeEquivalentTo(request.Categories);
+        request.TldrFacts.PriorityItemCount.Should().Be(request.PriorityItems.Length);
+    }
+}
+
+/// <summary>
+/// R5 task 013 (FR-A4) — pure unit tests for <see cref="DailyBriefingCollector.BuildTldrFacts"/>,
+/// the deterministic-fact computation the TL;DR LLM call consumes as ground truth. No Dataverse
+/// I/O, no LLM — <c>BuildTldrFacts</c> is a pure static function over an already-built
+/// <see cref="DailyBriefingNarrateRequest"/> view model, so these tests assert its output
+/// (counts/dates/names) equals the deterministic view-model values it was built FROM, across
+/// multiple fixtures (single-category and multi-category) — the direct proof for the "TL;DR
+/// asserts only deterministic facts" acceptance criterion.
+/// </summary>
+[Trait("status", "task-013-r5")]
+public sealed class DailyBriefingTldrFactsTests
+{
+    [Fact]
+    public void BuildTldrFacts_SingleCategoryFixture_CountsAndDatesMatchViewModel()
+    {
+        var dueDate = new DateTimeOffset(2026, 7, 10, 0, 0, 0, TimeSpan.Zero);
+        var request = new DailyBriefingNarrateRequest
+        {
+            Categories = [new NotificationCategoryDto { Name = "Overdue Tasks", Count = 2, UnreadCount = 2 }],
+            PriorityItems =
+            [
+                new PriorityItemDto { Category = "Tasks", Title = "Review engagement letter", DueDate = dueDate },
+                new PriorityItemDto { Category = "Tasks", Title = "File motion" }
+            ],
+            TotalNotificationCount = 2,
+            Channels =
+            [
+                new ChannelNarrationInput
+                {
+                    Category = "overdue-tasks",
+                    Label = "Overdue Tasks",
+                    Items =
+                    [
+                        new ChannelItemDto { Id = "1", Title = "Review engagement letter", RegardingName = "Acme Matter" },
+                        new ChannelItemDto { Id = "2", Title = "File motion", RegardingName = "Acme Matter" }
+                    ]
+                }
+            ]
+        };
+
+        var facts = DailyBriefingCollector.BuildTldrFacts(request);
+
+        // Counts trace back EXACTLY to the request's own deterministic view model.
+        facts.TotalNotificationCount.Should().Be(request.TotalNotificationCount);
+        facts.CategoryCounts.Should().BeEquivalentTo(request.Categories);
+        facts.PriorityItemCount.Should().Be(request.PriorityItems.Length);
+
+        // Only the PriorityItem that actually HAS a due date produces a KeyDate — and the date
+        // value equals the deterministic view-model value verbatim.
+        facts.KeyDates.Should().ContainSingle();
+        facts.KeyDates[0].RecordName.Should().Be("Review engagement letter");
+        facts.KeyDates[0].Date.Should().Be(dueDate);
+
+        // RecordNames carries the priority-item titles + channel record names — the TL;DR's
+        // allow-list of names it may reference.
+        facts.RecordNames.Should().Contain(new[] { "Review engagement letter", "File motion", "Acme Matter" });
+    }
+
+    [Fact]
+    public void BuildTldrFacts_MultiCategoryFixture_CountsAndDatesMatchViewModelAcrossChannels()
+    {
+        var overdueDate = new DateTimeOffset(2026, 6, 20, 0, 0, 0, TimeSpan.Zero);
+        var upcomingDate = new DateTimeOffset(2026, 7, 12, 0, 0, 0, TimeSpan.Zero);
+        var request = new DailyBriefingNarrateRequest
+        {
+            Categories =
+            [
+                new NotificationCategoryDto { Name = "Overdue Tasks", Count = 1, UnreadCount = 1 },
+                new NotificationCategoryDto { Name = "Upcoming Tasks", Count = 1, UnreadCount = 1 },
+                new NotificationCategoryDto { Name = "Documents", Count = 3, UnreadCount = 3 }
+            ],
+            PriorityItems =
+            [
+                new PriorityItemDto { Category = "Tasks", Title = "Respond to opposing counsel", DueDate = overdueDate },
+                new PriorityItemDto { Category = "Tasks", Title = "Prepare deposition outline", DueDate = upcomingDate }
+            ],
+            TotalNotificationCount = 5,
+            Channels =
+            [
+                new ChannelNarrationInput
+                {
+                    Category = "overdue-tasks", Label = "Overdue Tasks",
+                    Items = [new ChannelItemDto { Id = "e1", Title = "Respond to opposing counsel", RegardingName = "Beta Matter" }]
+                },
+                new ChannelNarrationInput
+                {
+                    Category = "upcoming-tasks", Label = "Upcoming Tasks",
+                    Items = [new ChannelItemDto { Id = "e2", Title = "Prepare deposition outline", RegardingName = "Beta Matter" }]
+                },
+                new ChannelNarrationInput
+                {
+                    Category = "documents", Label = "Documents",
+                    Items =
+                    [
+                        new ChannelItemDto { Id = "d1", Title = "Engagement letter.docx", RegardingName = "Beta Matter" },
+                        new ChannelItemDto { Id = "d2", Title = "NDA draft.docx", RegardingName = "Gamma Matter" },
+                        new ChannelItemDto { Id = "d3", Title = "Cover letter.docx", RegardingName = "Gamma Matter" }
+                    ]
+                }
+            ]
+        };
+
+        var facts = DailyBriefingCollector.BuildTldrFacts(request);
+
+        facts.TotalNotificationCount.Should().Be(5);
+        facts.CategoryCounts.Should().HaveCount(3);
+        facts.CategoryCounts.Select(c => c.Name).Should()
+            .BeEquivalentTo(new[] { "Overdue Tasks", "Upcoming Tasks", "Documents" });
+        facts.PriorityItemCount.Should().Be(2);
+
+        // Both priority items have due dates — both surface as KeyDates, verbatim.
+        facts.KeyDates.Should().HaveCount(2);
+        facts.KeyDates.Should().ContainEquivalentOf(
+            new TldrKeyDateDto { RecordName = "Respond to opposing counsel", Date = overdueDate });
+        facts.KeyDates.Should().ContainEquivalentOf(
+            new TldrKeyDateDto { RecordName = "Prepare deposition outline", Date = upcomingDate });
+
+        // RecordNames spans every channel — the TL;DR may reference any record across all 3
+        // categories, not just the priority items.
+        facts.RecordNames.Should().Contain(new[]
+        {
+            "Respond to opposing counsel", "Prepare deposition outline",
+            "Beta Matter", "Gamma Matter",
+            "Engagement letter.docx", "NDA draft.docx", "Cover letter.docx"
+        });
+    }
+
+    [Fact]
+    public void BuildTldrFacts_ChannelWithManyItems_CapsRecordNamesInsteadOfDumpingEveryRecord()
+    {
+        // ADR-015 data-minimization / aggregation constraint: the TL;DR scaffolding must
+        // aggregate, not dump, every source record — a channel with more rows than the cap
+        // must not blow the TL;DR call's token budget.
+        var items = Enumerable.Range(1, 30)
+            .Select(i => new ChannelItemDto { Id = $"n{i}", Title = $"Notification {i}", RegardingName = "Delta Matter" })
+            .ToArray();
+        var request = new DailyBriefingNarrateRequest
+        {
+            Categories = [new NotificationCategoryDto { Name = "Documents", Count = 30, UnreadCount = 30 }],
+            PriorityItems = [],
+            TotalNotificationCount = 30,
+            Channels = [new ChannelNarrationInput { Category = "documents", Label = "Documents", Items = items }]
+        };
+
+        var facts = DailyBriefingCollector.BuildTldrFacts(request);
+
+        // The count fact is still exact (counting is cheap and safe to assert precisely)...
+        facts.TotalNotificationCount.Should().Be(30);
+        // ...but the enumerated name list stays bounded regardless of channel size.
+        facts.RecordNames.Length.Should().BeLessOrEqualTo(DailyBriefingCollector.TldrFactsMaxRecordNames);
     }
 }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
@@ -71,18 +72,42 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         "sprk_document is blocked on this tool unconditionally and no argument change makes it " +
         "valid; offer an alternative instead (Document Upload wizard, create a task, or draft an email).";
 
+    /// <summary>
+    /// Refusal-affordance composer (spaarke-ai-architecture-redesign-r2 task 040, FR-A1-11,
+    /// design D-F0(d), NFR-10): appends a SERVER-composed, actionable Document Upload wizard
+    /// deep-link to <see cref="SprkDocumentCreateBlockedMessage"/> so the R5-E hard-block
+    /// refusal is never a dead end. The link travels on the SAME refusal-message channel the
+    /// R5-E block already relies on (<see cref="ToolValidationResult.Errors"/> in
+    /// <see cref="ValidateChat"/> — the gate-resume leg's first stop — and
+    /// <see cref="ToolResult.ErrorMessage"/> in <see cref="ExecuteChatAsync"/> defense-in-depth);
+    /// composing it via <see cref="HandoffUrlBuilder"/> keeps the URL server-trusted (D-F0(b): the
+    /// model never invents the link a user clicks), and it never grants or softens the block
+    /// itself — the create is REJECTED unconditionally regardless of this link's composition.
+    /// Host-scopes to the chat session's bound matter (<paramref name="matterId"/>) when known;
+    /// degrades to a valid unscoped wizard link otherwise (see
+    /// <see cref="HandoffUrlBuilder.BuildDocumentUploadWizardUrl(Guid?)"/>).
+    /// </summary>
+    internal string BuildBlockedMessageWithAffordance(Guid? matterId)
+    {
+        var url = _handoffUrlBuilder.BuildDocumentUploadWizardUrl(matterId);
+        return $"{SprkDocumentCreateBlockedMessage} Open the correct path now: [Document Upload wizard]({url})";
+    }
+
     [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
     private static partial Regex LogicalNameRegex();
 
     private readonly IDataverseUserClient _dataverse;
     private readonly ILogger<DataverseCreateRecordHandler> _logger;
+    private readonly HandoffUrlBuilder _handoffUrlBuilder;
 
     public DataverseCreateRecordHandler(
         IDataverseUserClient dataverse,
-        ILogger<DataverseCreateRecordHandler> logger)
+        ILogger<DataverseCreateRecordHandler> logger,
+        HandoffUrlBuilder handoffUrlBuilder)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _handoffUrlBuilder = handoffUrlBuilder ?? throw new ArgumentNullException(nameof(handoffUrlBuilder));
     }
 
     /// <inheritdoc />
@@ -146,9 +171,11 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
 
         // R5-E HARD RULE: sprk_document creates never execute — the gate-resume leg
         // (TypedHandlerResumeExecutor) runs ValidateChat BEFORE ExecuteChatAsync, so this
-        // rejection fires before any Dataverse wire call on every path.
+        // rejection fires before any Dataverse wire call on every path. AIR2-040 (FR-A1-11):
+        // the refusal carries a server-composed, host-scoped Document Upload deep-link — the
+        // block itself is unconditional and unaffected by the affordance.
         if (string.Equals(tablename, BlockedTableLogicalName, StringComparison.Ordinal))
-            return ToolValidationResult.Failure(SprkDocumentCreateBlockedMessage);
+            return ToolValidationResult.Failure(BuildBlockedMessageWithAffordance(context.MatterId));
 
         return ToolValidationResult.Success();
     }
@@ -169,11 +196,12 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
 
         // R5-E HARD RULE (defense in depth — ValidateChat already rejects): sprk_document
         // creates are blocked BEFORE any Dataverse call. TryParseArgs lower-cases the
-        // table name, so casing variants cannot slip past.
+        // table name, so casing variants cannot slip past. AIR2-040 (FR-A1-11): same
+        // affordance-carrying refusal as ValidateChat, for parity on this defense-in-depth path.
         if (string.Equals(tablename, BlockedTableLogicalName, StringComparison.Ordinal))
         {
             return LogOutcome(context, tablename,
-                Error(tool, SprkDocumentCreateBlockedMessage, ToolErrorCodes.ValidationFailed, startedAt),
+                Error(tool, BuildBlockedMessageWithAffordance(context.MatterId), ToolErrorCodes.ValidationFailed, startedAt),
                 stopwatch);
         }
 

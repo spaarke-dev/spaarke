@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Operator harness sign-off — approve one Daily Briefing variant (GATE G-R5-D, FR-D3)</title>
+    <phase>D: Visual redesign</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>023</blocks>
+    <tags>design, gate</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Operator sign-off gate — no code implementation; records an approval decision and archives screenshots/spec.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical: present variants, record the operator's decision, archive artifacts. No design judgment by the agent (the operator judges).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Gate task — must run after 021 and before 023; blocks the port.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Present the task-021 Daily Briefing design variants to the operator and record which single variant is approved
+    (GATE G-R5-D). Archive the approved screenshots and capture the approved design's concrete token/spacing/layout
+    spec so task 023 can port it faithfully. This is an operator sign-off gate — do NOT self-approve.
+  </prompt>
+
+  <role>
+    SPAARKE project facilitator. Presents the harness variants and their trade-offs to the operator, then records the
+    operator's decision precisely. Does not substitute its own aesthetic judgment for the operator's.
+  </role>
+
+  <goal>
+    Exactly one task-021 variant is operator-approved and recorded in
+    projects/spaarke-daily-update-service-r5/notes/design/APPROVED.md, with the approved light+dark screenshots
+    archived and the approved design's concrete token/spacing/layout spec captured for the task-023 port.
+  </goal>
+
+  <context>
+    <background>
+      Per spec NFR-07, G-R5-D is satisfied by OPERATOR HARNESS SIGN-OFF (screenshots archived) — not by tests, curl,
+      or logs. FR-D3 requires the redesign to be operator-approved IN THE HARNESS before any production change. This
+      gate selects the single variant task 023 will port. Because the port must reproduce the approved look exactly,
+      this task also captures the approved design's concrete spec (tokens, spacing scale, layout structure) rather
+      than just "variant B".
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r5/notes/design/variants-brief.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/design/ (per-variant light + dark screenshots)</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/design/APPROVED.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">This is an operator sign-off GATE. The agent MUST NOT self-approve, infer approval, or pick the variant on the operator's behalf. Approval is the operator's explicit decision recorded verbatim.</constraint>
+    <constraint source="project">If the operator is unavailable or does not respond, set this task's status to blocked (do NOT proceed to task 023). Record the blocked state and reason.</constraint>
+    <constraint source="project">Exactly ONE variant is approved. If the operator asks for a blend or a revision instead of approving one as-is, record that as "revision requested", set status blocked, and route back to task 021 — do NOT record an approval.</constraint>
+    <constraint source="project">The captured approved-design spec MUST be concrete enough to port: named Fluent v9 tokens, the spacing scale, the layout structure (regions/order), and where TL;DR + "Critical Today" sit. "Approved variant B" alone is insufficient.</constraint>
+    <constraint source="project">This task modifies ONLY files under projects/spaarke-daily-update-service-r5/notes/design/ (and TASK-INDEX.md). No source code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r5/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r5/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/design/variants-brief.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Compile a concise presentation for the operator: each task-021 variant with its light+dark screenshots and its parameter-by-parameter summary from variants-brief.md.</step>
+    <step order="2">Present the variants to the operator and explicitly request selection of exactly one, using the format 🔔 Human Input Required (situation, options = the 2-3 variants, recommendation optional).</step>
+    <step order="3">If the operator is unavailable OR requests a revision/blend rather than approving one variant: set this task's status to blocked, record the reason in notes/design/APPROVED.md, and STOP (do not proceed to task 023; route revision requests back to task 021).</step>
+    <step order="4">On explicit approval of exactly one variant: write projects/spaarke-daily-update-service-r5/notes/design/APPROVED.md recording the approved variant id, the operator identity/date, and a link to the approved screenshots.</step>
+    <step order="5">In APPROVED.md, capture the approved design's concrete port spec: named Fluent v9 tokens used, the spacing scale, the layout region structure and order, and the placement/prominence treatment of TL;DR and "Critical Today".</step>
+    <step order="6">Copy the approved variant's light+dark screenshots into projects/spaarke-daily-update-service-r5/notes/design/approved/.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed (only if an approval was recorded).</step>
+  </steps>
+
+  <escalation>
+    <trigger>This entire task is a gate. If the operator does not explicitly approve exactly one variant, do NOT complete it — set status blocked and stop per root CLAUDE.md §6. Self-approval is forbidden.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Run shell commands / copy screenshot files</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/design/APPROVED.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/design/approved/ (approved light + dark screenshots)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The operator has explicitly approved exactly one variant (recorded verbatim; the agent did not self-approve).</criterion>
+    <criterion testable="true">notes/design/APPROVED.md records the approved variant id, the approving operator, the date, and links to the approved screenshots.</criterion>
+    <criterion testable="true">The approved light + dark screenshots are archived under notes/design/approved/.</criterion>
+    <criterion testable="true">APPROVED.md captures the approved design's concrete port spec — named Fluent v9 tokens, spacing scale, layout region structure/order, and TL;DR + "Critical Today" placement/prominence.</criterion>
+    <criterion testable="true">If no approval was obtained (operator unavailable or revision requested), the task status is blocked and task 023 has not started.</criterion>
+    <criterion testable="true">No source code file is modified by this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    G-R5-D is an operator gate (spec NFR-07): screenshots + explicit approval, never tests/curl/logs. The concrete
+    port spec in APPROVED.md is what makes the task-023 port faithful — without named tokens and layout structure the
+    port will drift. Route revision/blend requests back to task 021 rather than recording a partial approval.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
