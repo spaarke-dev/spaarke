@@ -2,7 +2,7 @@
   <metadata>
     <title>FR-09 compose-draft-alternative Action + Binding (compose disposition)</title>
     <phase>4 Catalog</phase>
-    <status>blocked</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <dependencies>001, 016</dependencies>
     <blocks>045, 082</blocks>

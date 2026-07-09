@@ -20,3 +20,14 @@ export type {
 } from './useComposeCheckoutLifecycle';
 
 export { useComposeHeartbeatGate } from './useComposeHeartbeatGate';
+
+export { usePendingRedline, resolveTargetSpans, collectMarkedRanges } from './usePendingRedline';
+export type {
+  UsePendingRedlineResult,
+  PendingRedline,
+  PendingRedlineError,
+  MaterializeStatus,
+  RedlineMatchMode,
+  RedlineSpan,
+  ResolveResult,
+} from './usePendingRedline';

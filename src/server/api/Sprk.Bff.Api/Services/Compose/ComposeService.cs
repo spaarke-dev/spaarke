@@ -385,4 +385,163 @@ public class ComposeService : IComposeService
             return null;
         }
     }
+
+    // =========================================================================
+    // FR-31 action history — READ-ONLY ledger query (task 061). See design.md §8:
+    // the 2026-07-03 draft's `actionLog: ComposeAction[]` stored structure is DELETED —
+    // "it IS the session ledger". This adds no new stored surface; it projects the
+    // existing ChatSession.Outputs (SessionOutput) + ChatSession.ToolChains
+    // (SessionToolChain) ledger collections into a Compose action-history view.
+    // =========================================================================
+
+    /// <summary>
+    /// FR-31 read-only action-history query: projects Compose's prior actions for a session
+    /// directly from the session ledger — <see cref="ChatSession.Outputs"/> (<see cref="SessionOutput"/>
+    /// entries, addressable by <c>{bindingId}@t{n}</c>) correlated with
+    /// <see cref="ChatSession.ToolChains"/> (<see cref="SessionToolChain"/> entries) for a
+    /// best-effort args summary. This is a QUERY over the existing ledger — never a second
+    /// stored structure (ADR-040 / FR-31 / design.md §8: the action log IS the session ledger).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Supersession (ADR-040)</b>: within the same <see cref="SessionOutput.BindingId"/>, the
+    /// highest-<see cref="SessionOutput.Turn"/> entry is CURRENT; earlier same-binding entries are
+    /// SUPERSEDED (<see cref="ComposeActionHistoryEntry.IsSuperseded"/> = <c>true</c>). This
+    /// generalizes the compose-disposition undo/replace pattern already established by
+    /// <see cref="Ai.PublicContracts.ComposeDisposition.ResolveCurrent"/> (which resolves the
+    /// current <c>compose</c>-disposition output for one binding) to EVERY disposition — any
+    /// Binding's output can be re-produced within a session (retries, refinements), and this
+    /// query always reflects CURRENT ledger state, never a stale copy of it (ADR-040 constraint;
+    /// spec FR-31 acceptance criterion 3).
+    /// </para>
+    /// <para>
+    /// <b>Args (best-effort)</b>: <see cref="SessionToolCall.ArgsSummary"/> values are correlated
+    /// to an output by matching <see cref="SessionToolChain.Turn"/> to
+    /// <see cref="SessionOutput.Turn"/>. This is a best-effort correlation, NOT a guaranteed 1:1
+    /// link — the two ledger collections use independently-allocated per-session ordinals (see
+    /// <see cref="Ai.OutputRouter"/> remarks on Turn numbering) — so <see cref="ComposeActionHistoryEntry.Args"/>
+    /// is <c>null</c> when no ToolChain entry shares the output's turn (e.g. a loop-native output).
+    /// </para>
+    /// <para>
+    /// <b>ADR-013 facade boundary</b>: pure projection over <see cref="ChatSession"/> data already
+    /// in hand — no AI executor/routing types, no DI, no I/O. Callers obtain the session via the
+    /// existing <see cref="Ai.Chat.ChatSessionManager.GetSessionAsync"/> seam; this method never
+    /// reaches into AI internals.
+    /// </para>
+    /// <para>
+    /// <b>ADR-015</b>: no new retention policy — entries live and expire with the session's
+    /// existing Tier 3 ledger lifetime (ADR-015 / ADR-040). This method only reads what is
+    /// already persisted; it persists nothing itself.
+    /// </para>
+    /// </remarks>
+    /// <param name="session">The Compose session whose ledger to query.</param>
+    /// <param name="bindingId">
+    /// Optional filter to one Binding's action history. Null (default) returns every binding's
+    /// action history recorded in the session.
+    /// </param>
+    /// <returns>Action-history entries ordered oldest-first by <see cref="SessionOutput.Turn"/>.</returns>
+    public static IReadOnlyList<ComposeActionHistoryEntry> GetActionHistory(
+        ChatSession session,
+        string? bindingId = null)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        IEnumerable<SessionOutput> outputs = session.Outputs ?? Array.Empty<SessionOutput>();
+        if (!string.IsNullOrWhiteSpace(bindingId))
+        {
+            outputs = outputs.Where(o => string.Equals(o.BindingId, bindingId, StringComparison.Ordinal));
+        }
+
+        var materializedOutputs = outputs.ToList();
+
+        // ADR-040 supersession: the highest-Turn entry per BindingId is CURRENT; every
+        // earlier same-binding entry is superseded. Computed over ALL outputs for the
+        // binding (not just the filtered set) would require the unfiltered collection —
+        // but since a bindingId filter already narrows to one binding, computing over
+        // materializedOutputs is equivalent whether filtered or not.
+        var currentTurnByBinding = materializedOutputs
+            .GroupBy(o => o.BindingId, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Max(o => o.Turn), StringComparer.Ordinal);
+
+        var toolChainsByTurn = (session.ToolChains ?? Array.Empty<SessionToolChain>())
+            .ToLookup(tc => tc.Turn);
+
+        var entries = new List<ComposeActionHistoryEntry>(materializedOutputs.Count);
+        foreach (var output in materializedOutputs)
+        {
+            var argsSummary = toolChainsByTurn[output.Turn]
+                .SelectMany(tc => tc.Calls)
+                .Select(c => c.ArgsSummary)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s!)
+                .ToList();
+
+            var isCurrent = currentTurnByBinding.TryGetValue(output.BindingId, out var maxTurn)
+                && maxTurn == output.Turn;
+
+            entries.Add(new ComposeActionHistoryEntry
+            {
+                OutputRef = output.Key,
+                BindingId = output.BindingId,
+                UcId = output.UcId,
+                Disposition = output.Disposition,
+                Turn = output.Turn,
+                Args = argsSummary.Count > 0 ? argsSummary : null,
+                CreatedAt = output.CreatedAt,
+                IsSuperseded = !isCurrent,
+            });
+        }
+
+        return entries
+            .OrderBy(e => e.Turn)
+            .ToList();
+    }
+}
+
+/// <summary>
+/// FR-31 read-only projection of one ledger action (a <see cref="SessionOutput"/> entry,
+/// optionally correlated with a <see cref="SessionToolChain"/> entry's args) for Compose's
+/// action-history view. This is a QUERY RESULT, never a stored structure — produced by
+/// <see cref="ComposeService.GetActionHistory"/>. There is no persisted <c>actionLog</c> or
+/// <c>derivedInsight</c> type anywhere in this codebase (design.md §8 / ADR-040) — this record
+/// is transient, constructed fresh from the ledger on every call.
+/// </summary>
+public sealed record ComposeActionHistoryEntry
+{
+    /// <summary>Addressable ledger key (<c>{bindingId}@t{n}</c>) of the underlying <see cref="SessionOutput"/>.</summary>
+    public required string OutputRef { get; init; }
+
+    /// <summary>Binding (<c>sprk_playbookconsumer</c>) id that produced the output.</summary>
+    public required string BindingId { get; init; }
+
+    /// <summary>Stable use-case vocabulary id (<see cref="SessionOutput.UcId"/>).</summary>
+    public required string UcId { get; init; }
+
+    /// <summary>
+    /// Rendering-contract disposition the output was routed under (<c>informational</c> |
+    /// <c>work_product</c> | <c>overlay</c> | <c>email</c> | <c>record</c> | <c>notification</c> |
+    /// <c>compose</c>) — see <see cref="SessionOutput.Disposition"/>.
+    /// </summary>
+    public required string Disposition { get; init; }
+
+    /// <summary>1-based session turn (output ordinal) the action was produced on.</summary>
+    public required int Turn { get; init; }
+
+    /// <summary>
+    /// Best-effort args summary correlated from a <see cref="SessionToolChain"/> entry sharing
+    /// the same Turn (see <see cref="ComposeService.GetActionHistory"/> remarks). Null when no
+    /// ToolChain entry correlates with this action's turn.
+    /// </summary>
+    public IReadOnlyList<string>? Args { get; init; }
+
+    /// <summary>UTC timestamp the underlying output was written to the ledger.</summary>
+    public required DateTimeOffset CreatedAt { get; init; }
+
+    /// <summary>
+    /// True when a later-turn <see cref="SessionOutput"/> for the SAME <see cref="BindingId"/>
+    /// exists in the session ledger — i.e., this action has been superseded (ADR-040 undo/replace
+    /// semantics). The highest-turn entry per binding is CURRENT and authoritative
+    /// (<c>IsSuperseded == false</c>).
+    /// </summary>
+    public required bool IsSuperseded { get; init; }
 }

@@ -75,7 +75,7 @@ import TaskItem from '@tiptap/extension-task-item';
 import CharacterCount from '@tiptap/extension-character-count';
 import TextAlign from '@tiptap/extension-text-align';
 
-import { makeStyles, tokens, Spinner, Text, Toolbar, ToolbarButton } from '@fluentui/react-components';
+import { makeStyles, tokens, Spinner, Text, Toolbar, ToolbarButton, Button } from '@fluentui/react-components';
 import {
   TextBold24Regular,
   TextItalic24Regular,
@@ -83,12 +83,15 @@ import {
   TextStrikethrough24Regular,
   Link24Regular,
   LinkDismiss24Regular,
+  Checkmark16Regular,
+  Dismiss16Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
+import { usePendingRedline, type MaterializeStatus } from './hooks/usePendingRedline';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the side-effect widget
 // registration (`register-workspace-widgets.ts` transitively pulls in
@@ -154,15 +157,6 @@ const COMPOSE_R2_MARKS = [InsertionMark, DeletionMark, CommentAnchorMark];
 
 /** Selection-change debounce per `compose-contracts.ts` Flow 1 comment (250ms). */
 const SELECTION_DEBOUNCE_MS = 250;
-
-/**
- * Minimal HTML-escape for materializing LLM-drafted text as TipTap paragraph
- * content (FR-04, task 016) — TipTap's `insertContent` parses HTML, so raw `<`
- * in a draft must be escaped to render as literal text rather than markup.
- */
-function escapeHtml(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
 
 /** Minimum selection length to fire Flow 2 (`compose_selection_offer`). */
 const FLOW2_MIN_CHARS = 10;
@@ -327,8 +321,26 @@ export interface ComposeEditorHandle {
    * host calls it via ref only after the workspace has resolved the current
    * stored output; `provenance` fields are Tier 1 identifiers, `draft.new_text`
    * is Tier 3 and is never logged.
+   *
+   * R2/033 (FR-16): this now delegates to {@link materializePendingRedline} — a
+   * draft with a `target_text` renders as a pending insertion/deletion redline
+   * pair, an insertion-style draft as a pending insertion. Kept as the stable
+   * seam ComposeWorkspace's render-follows-store path (task 016) already calls.
    */
   materializeComposeDraft(draft: ComposeDraftPayload, provenance: ComposeDraftProvenance): void;
+
+  /**
+   * FR-16 pending track-change materialization (spaarkeai-compose-r2 task 033).
+   * Render the stored `compose`-disposition draft as a PENDING redline using the
+   * FR-15 marks (task 031), tagged with `{bindingId}@t{n}` provenance, with inline
+   * accept/reject. A `target_text` produces an insertion/deletion pair (resolved by
+   * the payload's `match_mode`); an insertion-style draft produces a pending
+   * insertion at the cursor. Idempotent per `ledgerRef`; a newer output for the same
+   * binding supersedes the prior one (FR-17 alignment). Returns the outcome so the
+   * host can distinguish applied vs an unresolved (`ambiguous`/`not_found`) target —
+   * the FR-19 "do not guess" rule. The true ledger-supersession WRITE is FR-17/034.
+   */
+  materializePendingRedline(draft: ComposeDraftPayload, provenance: ComposeDraftProvenance): MaterializeStatus;
 }
 
 // ---------------------------------------------------------------------------
@@ -423,7 +435,50 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow4,
     padding: tokens.spacingHorizontalXXS,
   },
+  // R2 pending-redline accept/reject affordances (task 033, FR-16). Semantic tokens only
+  // (ADR-021 dark-mode-correct) — no hardcoded hex.
+  redlineControls: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalXXS,
+    padding: tokens.spacingHorizontalS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  redlineItem: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+  },
+  redlineLabel: {
+    flex: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: tokens.colorNeutralForeground2,
+  },
+  redlineError: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+    padding: tokens.spacingHorizontalS,
+    backgroundColor: tokens.colorStatusWarningBackground1,
+    color: tokens.colorStatusWarningForeground1,
+    borderBottom: `1px solid ${tokens.colorStatusWarningBorder1}`,
+  },
+  redlineErrorText: {
+    flex: 1,
+    minWidth: 0,
+  },
 });
+
+/** Truncated, log-safe label for a pending redline (rationale is Tier 3 — shown, never logged). */
+function redlineLabelText(rationale: string | undefined, ledgerRef: string): string {
+  const base = rationale && rationale.trim().length > 0 ? rationale.trim() : 'Suggested edit';
+  const label = base.length > 80 ? `${base.slice(0, 80)}…` : base;
+  return `${label} (${ledgerRef})`;
+}
 
 // ---------------------------------------------------------------------------
 // Heartbeat hook — REMOVED in R2/R3 refactor (FU-1 fix, 2026-06-29).
@@ -645,6 +700,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // ----- Selection dispatch (heartbeat hoisted to ComposeWorkspace) -----
     useSelectionEventDispatch(editor, documentRef, sessionId, dispatch);
 
+    // ----- FR-16 pending-redline materialization (task 033) ---------------
+    // Owns materialize-from-ledger → FR-15 marks + accept/reject + supersession.
+    const redline = usePendingRedline(editor);
+
     // ----- Imperative handle ----------------------------------------------
     React.useImperativeHandle(
       ref,
@@ -671,28 +730,15 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           };
         },
         isDirty: () => dirtyRef.current,
-        materializeComposeDraft: (draft, _provenance) => {
-          if (!editor) {
-            throw new Error('ComposeEditor: cannot materialize compose draft — editor not mounted');
-          }
-          const newText = draft?.new_text ?? '';
-          if (newText.length === 0) return;
-          // 016 basic materialization: insert the drafted content at the cursor.
-          // Positioned `target_text` replacement + pending-redline marks + the
-          // provenance badge are task 031 (custom marks) / FR-17 supersession —
-          // this satisfies FR-04 (durable ledger content → editor content).
-          // Insert as escaped paragraphs so LLM-drafted `<` is never parsed as
-          // markup; `new_text` is Tier 3 and is NEVER logged.
-          const html = newText
-            .split(/\r?\n/)
-            .map(line => `<p>${escapeHtml(line)}</p>`)
-            .join('');
-          editor.chain().focus().insertContent(html).run();
-          dirtyRef.current = true;
-          onDirtyChange?.(true);
+        // FR-04 seam (task 016) now delegates to the FR-16 redline path (task 033):
+        // the stored ledger draft renders as a PENDING redline, not a committed
+        // insertion. ComposeWorkspace's render-follows-store path calls this.
+        materializeComposeDraft: (draft, provenance) => {
+          redline.materialize(draft, provenance);
         },
+        materializePendingRedline: (draft, provenance) => redline.materialize(draft, provenance),
       }),
-      [editor, onDirtyChange]
+      [editor, redline]
     );
 
     // ----- Render ---------------------------------------------------------
@@ -791,6 +837,62 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             />
             {/* =================== END AI TOOLBAR MOUNT (task 030) =================== */}
           </BubbleMenu>
+        ) : null}
+
+        {/* ===================================================================
+            PENDING REDLINE affordances — task 033 (FR-16). Unresolved-target
+            banner (FR-19 "do not guess") + per-suggestion accept/reject. Driven
+            by usePendingRedline; semantic tokens only (ADR-021 dark-mode).
+            =================================================================== */}
+        {redline.error ? (
+          <div className={styles.redlineError} role="alert" data-testid="compose-redline-error">
+            <Text size={200} className={styles.redlineErrorText}>
+              {redline.error.kind === 'ambiguous'
+                ? `Couldn't place this suggested edit: its target text appears ${redline.error.matchCount} times in the document. Reselect the exact passage and try again.`
+                : `Couldn't place this suggested edit: its target text was not found in the current document.`}
+            </Text>
+            <Button
+              size="small"
+              appearance="subtle"
+              icon={<Dismiss16Regular />}
+              aria-label="Dismiss"
+              onClick={redline.clearError}
+            />
+          </div>
+        ) : null}
+        {redline.pending.length > 0 ? (
+          <div
+            className={styles.redlineControls}
+            role="group"
+            aria-label="Pending suggested edits"
+            data-testid="compose-redline-controls"
+          >
+            {redline.pending.map(p => (
+              <div key={p.ledgerRef} className={styles.redlineItem} data-testid={`compose-redline-${p.ledgerRef}`}>
+                <Text size={200} className={styles.redlineLabel} title={p.rationale ?? undefined}>
+                  {redlineLabelText(p.rationale, p.ledgerRef)}
+                </Text>
+                <Button
+                  size="small"
+                  appearance="primary"
+                  icon={<Checkmark16Regular />}
+                  onClick={() => redline.accept(p.ledgerRef)}
+                  data-testid={`compose-redline-accept-${p.ledgerRef}`}
+                >
+                  Accept
+                </Button>
+                <Button
+                  size="small"
+                  appearance="subtle"
+                  icon={<Dismiss16Regular />}
+                  onClick={() => redline.reject(p.ledgerRef)}
+                  data-testid={`compose-redline-reject-${p.ledgerRef}`}
+                >
+                  Reject
+                </Button>
+              </div>
+            ))}
+          </div>
         ) : null}
         {isImporting ? (
           <div className={styles.loadingState} role="status" aria-live="polite">
