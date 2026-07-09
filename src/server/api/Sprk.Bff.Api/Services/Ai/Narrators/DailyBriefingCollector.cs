@@ -335,7 +335,15 @@ public class DailyBriefingCollector : ICodedWorkflow
             QueryHighPriorityTodoAsync(systemUserId, ct)
         ).ConfigureAwait(false);
 
+        // R5 task 034 (FR-C5) — de-dup before ordering. The 7 queries are one per
+        // flagged entity type so cross-entity collision is not possible today, but this
+        // keys on stable record identity (entity + GUID, NEVER display text) as a
+        // defensive boundary against any future entity/route addition that could surface
+        // the same record twice. DistinctBy preserves first-occurrence order, so applying
+        // it BEFORE the OrderBy/ThenBy below means the de-dup never reshuffles anything —
+        // it only removes duplicates ahead of the existing DueDate-then-Name ordering.
         var all = queries.SelectMany(x => x)
+            .DistinctBy(x => (x.EntityType, x.EntityId))
             .OrderBy(x => x.DueDate ?? DateTimeOffset.MaxValue)
             .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -1176,6 +1184,24 @@ public class DailyBriefingCollector : ICodedWorkflow
         BriefingItem[] projects,
         BriefingItem[] todos)
     {
+        // R5 task 034 (FR-C5) — de-dup across the 6 channels before assembling
+        // categories/priorityItems/channels/total below. An item reachable via more than
+        // one channel — e.g. an sprk_event whose sprk_duedate falls in the Overdue window
+        // while its sprk_finalduedate falls in the Upcoming window (QueryEventsAsync's OR
+        // date-filter allows both) — must appear exactly once in the assembled output.
+        // Keys on stable record identity (EntityType + EntityId), NEVER display text, so
+        // two genuinely-distinct records sharing a title both survive. First-occurrence
+        // wins in this fixed channel-priority order (upcoming, overdue, documents,
+        // matters, projects, todos); each channel's OWN internal ordering (e.g. Documents'
+        // modifiedon desc) is untouched — de-dup only removes items, it never reorders.
+        var seenKeys = new HashSet<(string EntityType, string EntityId)>();
+        upcomingTasks = DeduplicateAcrossChannels(upcomingTasks, seenKeys);
+        overdueTasks = DeduplicateAcrossChannels(overdueTasks, seenKeys);
+        documents = DeduplicateAcrossChannels(documents, seenKeys);
+        matters = DeduplicateAcrossChannels(matters, seenKeys);
+        projects = DeduplicateAcrossChannels(projects, seenKeys);
+        todos = DeduplicateAcrossChannels(todos, seenKeys);
+
         var categories = new[]
         {
             new NotificationCategoryDto { Name = "Upcoming Tasks", Count = upcomingTasks.Length, UnreadCount = upcomingTasks.Length },
@@ -1224,6 +1250,36 @@ public class DailyBriefingCollector : ICodedWorkflow
         // computation the narrator's TL;DR call consumes as ground truth (never computed by the
         // LLM). See BuildTldrFacts for the aggregation rules.
         return request with { TldrFacts = BuildTldrFacts(request) };
+    }
+
+    /// <summary>
+    /// R5 task 034 (FR-C5) — filter <paramref name="items"/> down to the entries whose
+    /// (EntityType, EntityId) identity has not already been claimed by an earlier-processed
+    /// channel, recording each surviving key into <paramref name="seenKeys"/> as it goes.
+    /// Keys on stable record identity, never display text (Title), so two distinct records
+    /// that happen to share a title both survive — only a true re-appearance of the SAME
+    /// record (same entity + same GUID) is dropped. Preserves the input array's relative
+    /// order; only removes items, never reshuffles.
+    /// </summary>
+    private static BriefingItem[] DeduplicateAcrossChannels(
+        BriefingItem[] items,
+        HashSet<(string EntityType, string EntityId)> seenKeys)
+    {
+        if (items.Length == 0)
+        {
+            return items;
+        }
+
+        var kept = new List<BriefingItem>(items.Length);
+        foreach (var item in items)
+        {
+            if (seenKeys.Add((item.EntityType, item.EntityId)))
+            {
+                kept.Add(item);
+            }
+        }
+
+        return kept.Count == items.Length ? items : kept.ToArray();
     }
 
     /// <summary>

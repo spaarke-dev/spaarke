@@ -947,6 +947,49 @@ public record TldrResult
     /// <summary>Number of priority items that were included.</summary>
     [JsonPropertyName("priorityItemCount")]
     public int PriorityItemCount { get; init; }
+
+    /// <summary>
+    /// R5 task 014 (FR-A5): anchor-to-item grounding for the TL;DR. Every named anchor
+    /// (a record/matter/party name the LLM chose to call out in <see cref="Summary"/>,
+    /// <see cref="KeyTakeaways"/>, or <see cref="TopAction"/>) MUST carry an <see
+    /// cref="TldrItemRefDto.ItemId"/> pointing at a real source item. Resolution is BINARY —
+    /// the widget resolves each <c>itemId</c> against the request's <c>items[]</c>
+    /// (<c>ChannelItemDto.Id</c>) and DROPS any anchor that doesn't resolve (renders the
+    /// anchor text as plain, unlinked prose — no residue, no warning). There is deliberately
+    /// NO groundedness-score threshold and NO warn/withhold band (FR-A6 locks this posture);
+    /// existence-by-itemId is the only signal. Empty array is valid (no anchors named — the
+    /// common case for terse summaries) and is NOT itself a signal of low quality.
+    /// </summary>
+    [JsonPropertyName("itemRefs")]
+    public TldrItemRefDto[] ItemRefs { get; init; } = [];
+}
+
+/// <summary>
+/// A single TL;DR anchor-to-item grounding entry (R5 task 014, FR-A5). Pairs a verbatim text
+/// span the TL;DR named (<see cref="AnchorText"/>) with the source item it claims to reference
+/// (<see cref="ItemId"/> — a <c>ChannelItemDto.Id</c> from the same narrate request). The widget
+/// is the sole enforcement point: it looks up <see cref="ItemId"/> against the items it has
+/// available and links <see cref="AnchorText"/> (when found verbatim in the TL;DR text) to that
+/// item's record — or drops the anchor entirely when the lookup misses. No probabilistic score
+/// is attached to this DTO; resolution is exists-or-doesn't.
+/// </summary>
+public sealed record TldrItemRefDto
+{
+    /// <summary>
+    /// The exact text span (record/party/matter name) the TL;DR named in <see
+    /// cref="TldrResult.Summary"/>, one of <see cref="TldrResult.KeyTakeaways"/>, or <see
+    /// cref="TldrResult.TopAction"/>. Matched case-insensitively against the TL;DR text by the
+    /// widget (mirrors the <c>NarrativeCitedText.buildSegments</c> matching rule).
+    /// </summary>
+    [JsonPropertyName("anchorText")]
+    public string AnchorText { get; init; } = "";
+
+    /// <summary>
+    /// The source item id (<c>ChannelItemDto.Id</c>) this anchor claims to reference. MUST
+    /// resolve against the narrate request's <c>items[]</c> or the widget drops the anchor.
+    /// </summary>
+    [JsonPropertyName("itemId")]
+    public string ItemId { get; init; } = "";
 }
 
 /// <summary>

@@ -23,7 +23,7 @@
 | 011 | Deterministic item-row rendering | A | ✅ | 010 | 016 | FULL | sonnet/high | ❌ client lib |
 | 012 | Retire BRIEF-NARRATE-CHANNEL Action | A | 🔲 | 010 | — | FULL | sonnet/high | ❌ narrator.cs |
 | 013 | Deterministic TL;DR factual scaffolding | A | ✅ | 010 | 014,016 | FULL | sonnet/xhigh | ❌ composite/collector |
-| 014 | Binary anchor resolution (no threshold) | A | 🔲 | 013 | 016 | FULL | sonnet/high | ❌ TldrSection/composite |
+| 014 | Binary anchor resolution (no threshold) | A | ✅ | 013 | 016 | FULL | sonnet/high | ❌ TldrSection/composite |
 | 015 | Groundedness guardrail (eval-only) | A | 🔲 | none | — | STANDARD | sonnet/high | ✅ Group G |
 | 016 | Eval family — mixed-item corpus + gate | A | 🔲 | 011,013,014 | 017 | STANDARD(TEST-MOD) | **opus**/xhigh | ❌ |
 | 017 | Phase A deploy + G-R5-A UAT + metering | A | 🔲 | 016 | 090 | FULL | sonnet/high | ❌ deploy |
@@ -36,7 +36,7 @@
 | 031 | jps-validate Step 7.7 Choice check | B | 🔲 | none | — | STANDARD | sonnet/high | ❌ `.claude/` main-session |
 | 032 | fieldMapping sweep + restore documenttype | B | 🔲 | 030 | — | STANDARD | sonnet/high | ❌ |
 | 033 | Collaborator-scope fix + re-flip test | B | ✅ | none | 034 | FULL(TEST-MOD) | sonnet/xhigh | ❌ collector |
-| 034 | Collector de-duplication | B | 🔲 | 033 | 036 | FULL | sonnet/high | ❌ collector |
+| 034 | Collector de-duplication | B | ✅ | 033 | 036 | FULL | sonnet/high | ❌ collector |
 | 035 | Client-helper jest tests | B | ✅ | none | — | STANDARD(TEST-MOD) | sonnet/high | ✅ Group H |
 | 036 | Collapse 7 QueryHighPriority* helpers | B | 🔲 | 034 | 037 | STANDARD | sonnet/high | ❌ collector |
 | 037 | Promise-cache primary-contact + comment | B | 🔲 | 036 | 038 | STANDARD | sonnet/high | ❌ collector |

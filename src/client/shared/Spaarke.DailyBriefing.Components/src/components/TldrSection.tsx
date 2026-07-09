@@ -16,11 +16,28 @@
  * (Wave 3 / Group A). Source of truth; the original-location file at
  * `src/solutions/DailyBriefing/src/components/TldrSection.tsx` is now a
  * re-export shim pending full cleanup in R2 task 017.
+ *
+ * R5 task 014 (FR-A5, 2026-07-08) — BINARY anchor resolution. `tldr.itemRefs[]`
+ * pairs a verbatim text span the TL;DR named (`anchorText`) with the source
+ * item it claims to reference (`itemId`). This component is the WIDGET half
+ * of the binary contract: for each itemRef, resolve `itemId` against the
+ * `resolvableItems` map the caller supplies (built from the same narrate
+ * request's items — see `DailyBriefingApp`'s `tldrResolvableItems`). A
+ * resolving itemId gets its `anchorText` wrapped as a clickable link inline
+ * in whichever of summary/keyTakeaways/topAction contains it (reuses
+ * `NarrativeCitedText.buildSegments`, the same matching rule the item-row
+ * links already use). A NON-resolving itemId is DROPPED — the anchor text
+ * renders as plain prose, exactly as if no itemRefs entry had ever named it.
+ * There is deliberately NO warn badge, confidence indicator, or withheld-
+ * content placeholder anywhere in this path (FR-A6 locks the no-threshold
+ * posture) — resolution is exists-or-doesn't, never scored.
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, Text, Badge, Skeleton, SkeletonItem } from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Badge, Skeleton, SkeletonItem, Link } from '@fluentui/react-components';
 import { InfoRegular } from '@fluentui/react-icons';
+import { buildSegments } from './NarrativeCitedText';
+import type { NarrativeBulletReferenceResult, TldrItemRefResult } from '../services/briefingService';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -92,11 +109,32 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
+  inlineLink: {
+    // R5 task 014 — matches NarrativeCitedText's inline-link token usage (ADR-021: no
+    // hard-coded colors, brand-forward token so the link reads distinctly from body text).
+    color: tokens.colorBrandForeground1,
+    textDecorationLine: 'none',
+    cursor: 'pointer',
+    ':hover': {
+      textDecorationLine: 'underline',
+    },
+  },
 });
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
+
+/**
+ * The resolved link target for a TL;DR item ref (R5 task 014, FR-A5) — the shape
+ * `DailyBriefingApp` builds its `resolvableItems` map from (mirrors
+ * `NarrativeBulletResult`'s primary-entity fields, the same target every other
+ * item-row link in the widget already points at).
+ */
+export interface TldrResolvableItem {
+  entityType: string;
+  entityId: string;
+}
 
 export interface TldrSectionProps {
   /**
@@ -110,6 +148,8 @@ export interface TldrSectionProps {
     topAction: string;
     categoryCount: number;
     priorityItemCount: number;
+    /** R5 task 014 (FR-A5) — anchor-to-item grounding. See module JSDoc. */
+    itemRefs?: TldrItemRefResult[];
   } | null;
   isLoading: boolean;
   isUnavailable: boolean;
@@ -117,6 +157,15 @@ export interface TldrSectionProps {
   error: string | null;
   /** ISO timestamp of when the TL;DR was generated. */
   generatedAt: string | null;
+  /**
+   * R5 task 014 (FR-A5) — map from item id (`ChannelItemDto.Id` / `TldrItemRefResult.itemId`)
+   * to its click-through target. An itemRef whose `itemId` is NOT a key in this map is DROPPED
+   * — no entry, no warning, no residue (binary resolution; FR-A6 forbids a threshold/warn
+   * band). Omitted/empty map = every anchor renders as plain unlinked text (safe default).
+   */
+  resolvableItems?: Record<string, TldrResolvableItem>;
+  /** Called with (entityType, entityId) when a resolved anchor link is clicked. */
+  onOpenRecord?: (entityType: string, entityId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +204,73 @@ function formatRelativeTime(isoTimestamp: string): string {
   return `${diffDays}d ago`;
 }
 
+/**
+ * R5 task 014 (FR-A5) — BINARY anchor resolution. Filters `itemRefs` down to the subset
+ * whose `itemId` resolves against `resolvableItems`, mapping each survivor to the
+ * `NarrativeBulletReferenceResult` shape `buildSegments` (NarrativeCitedText.tsx) already
+ * knows how to text-match and link. A non-resolving itemId (missing key, or an empty
+ * `resolvableItems` map) is simply excluded — there is no partial/low-confidence entry to
+ * emit; resolution is exists-or-doesn't, never scored (FR-A6).
+ */
+function resolveTldrRefs(
+  itemRefs: TldrItemRefResult[] | undefined,
+  resolvableItems: Record<string, TldrResolvableItem> | undefined
+): NarrativeBulletReferenceResult[] {
+  if (!itemRefs || itemRefs.length === 0 || !resolvableItems) return [];
+  const resolved: NarrativeBulletReferenceResult[] = [];
+  for (const ref of itemRefs) {
+    const target = resolvableItems[ref.itemId];
+    if (!target) continue; // DROP — no resolving item for this anchor's itemId.
+    resolved.push({
+      index: resolved.length + 1,
+      entityType: target.entityType,
+      entityId: target.entityId,
+      entityName: ref.anchorText,
+      mentioned: true,
+    });
+  }
+  return resolved;
+}
+
+/**
+ * Renders `text` with each resolved anchor (that's textually present in `text`) wrapped as a
+ * clickable inline link — via the same `buildSegments` splitter `NarrativeCitedText` uses for
+ * item-row links. Anchors not present in `text` (or dropped by `resolveTldrRefs` before this
+ * point) simply don't produce a link segment; the surrounding prose renders unchanged, with
+ * zero residue — no placeholder, no asterisk, no "citation unavailable" note.
+ */
+const TldrAnchoredText: React.FC<{
+  text: string;
+  refs: NarrativeBulletReferenceResult[];
+  onOpenRecord?: (entityType: string, entityId: string) => void;
+  linkClassName: string;
+}> = ({ text, refs, onOpenRecord, linkClassName }) => {
+  const segments = React.useMemo(() => buildSegments(text, refs), [text, refs]);
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.kind === 'text' ? (
+          <React.Fragment key={i}>{seg.text}</React.Fragment>
+        ) : (
+          <Link
+            key={i}
+            appearance="default"
+            className={linkClassName}
+            onClick={() => onOpenRecord?.(seg.entityType, seg.entityId)}
+            role="link"
+            tabIndex={0}
+            onKeyDown={(e: React.KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') onOpenRecord?.(seg.entityType, seg.entityId);
+            }}
+          >
+            {seg.display}
+          </Link>
+        )
+      )}
+    </>
+  );
+};
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -166,6 +282,8 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
   unavailableReason,
   error,
   generatedAt,
+  resolvableItems,
+  onOpenRecord,
 }) => {
   const styles = useStyles();
 
@@ -228,6 +346,13 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
     return null;
   }
 
+  // R5 task 014 (FR-A5): binary anchor resolution — non-resolving itemRefs are excluded
+  // BEFORE any text rendering happens, so there is no code path downstream that could ever
+  // show a warning/withhold affordance for a dropped anchor (FR-A6). resolveTldrRefs is a
+  // plain function (no hooks), safe to call after this component's earlier conditional
+  // returns.
+  const resolvedRefs = resolveTldrRefs(tldr.itemRefs, resolvableItems);
+
   // Success state
   return (
     <div className={styles.card}>
@@ -239,21 +364,38 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
       </Badge>
       {tldr.summary && (
         <Text size={300} className={styles.briefingText}>
-          {tldr.summary}
+          <TldrAnchoredText
+            text={tldr.summary}
+            refs={resolvedRefs}
+            onOpenRecord={onOpenRecord}
+            linkClassName={styles.inlineLink}
+          />
         </Text>
       )}
       {Array.isArray(tldr.keyTakeaways) && tldr.keyTakeaways.length > 0 && (
         <ul className={styles.takeawaysList} aria-label="Key takeaways">
           {tldr.keyTakeaways.map((takeaway, idx) => (
             <li key={idx} className={styles.takeawayItem}>
-              <Text size={300}>{takeaway}</Text>
+              <Text size={300}>
+                <TldrAnchoredText
+                  text={takeaway}
+                  refs={resolvedRefs}
+                  onOpenRecord={onOpenRecord}
+                  linkClassName={styles.inlineLink}
+                />
+              </Text>
             </li>
           ))}
         </ul>
       )}
       {tldr.topAction && (
         <Text size={300} weight="semibold" className={styles.topAction}>
-          {tldr.topAction}
+          <TldrAnchoredText
+            text={tldr.topAction}
+            refs={resolvedRefs}
+            onOpenRecord={onOpenRecord}
+            linkClassName={styles.inlineLink}
+          />
         </Text>
       )}
       <div className={styles.footer}>

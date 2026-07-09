@@ -3,7 +3,7 @@
   <metadata>
     <title>De-duplicate collector output so an item reachable via two paths appears once</title>
     <phase>B: Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>033</dependencies>
     <blocks>036</blocks>

@@ -262,7 +262,8 @@ public class DailyBriefingNarrator : ICodedWorkflow
             Tldr = tldr with
             {
                 CategoryCount = req.Categories.Length,
-                PriorityItemCount = req.PriorityItems.Length
+                PriorityItemCount = req.PriorityItems.Length,
+                ItemRefs = BuildTldrItemRefs(req, tldr)
             },
             ChannelNarratives = channelNarrations,
             GeneratedAtUtc = DateTimeOffset.UtcNow,
@@ -349,6 +350,68 @@ public class DailyBriefingNarrator : ICodedWorkflow
     /// </summary>
     private static string BuildTldrCandidateText(TldrResult tldr) =>
         string.Join("\n\n", tldr.Summary, string.Join("\n", tldr.KeyTakeaways), tldr.TopAction);
+
+    /// <summary>
+    /// R5 task 014 (FR-A5): deterministic anchor-to-item grounding pass for the TL;DR — NEVER
+    /// asked of or trusted from the LLM. <see cref="TldrFactsDto"/> (the TL;DR call's entire
+    /// input) carries no item ids at all (only aggregated names/dates, by FR-A4 design), so the
+    /// model structurally cannot know a real <c>itemId</c>; having it emit one would either be a
+    /// fabrication or a guaranteed-empty field. Instead: for every channel item whose
+    /// <c>RegardingName</c> or <c>Title</c> appears VERBATIM (case-insensitive, matches the
+    /// widget's own <c>NarrativeCitedText.buildSegments</c> matching rule) in the TL;DR's own
+    /// <see cref="TldrResult.Summary"/> / <see cref="TldrResult.KeyTakeaways"/> / <see
+    /// cref="TldrResult.TopAction"/> text, pair that matched span with the item's id. Uses the
+    /// SAME candidate-name universe as <see cref="BuildAllowList"/> (RegardingName ahead of
+    /// Title) so the entity-scrub allow-list and the itemRefs grounding agree on what counts as
+    /// "named". <see cref="PriorityItemDto"/> carries no <c>Id</c> — its titles are excluded (no
+    /// item to link to), which is correct: an unlinkable name simply gets no itemRefs entry and
+    /// the widget renders it unlinked (binary resolution, no fallback fabrication).
+    /// </summary>
+    private static TldrItemRefDto[] BuildTldrItemRefs(DailyBriefingNarrateRequest req, TldrResult tldr)
+    {
+        var candidateText = string.Join("\n", tldr.Summary, string.Join("\n", tldr.KeyTakeaways), tldr.TopAction);
+        if (string.IsNullOrWhiteSpace(candidateText))
+        {
+            return [];
+        }
+
+        var refs = new List<TldrItemRefDto>();
+        var linkedItemIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var channel in req.Channels)
+        {
+            foreach (var item in channel.Items)
+            {
+                if (string.IsNullOrEmpty(item.Id) || !linkedItemIds.Add(item.Id))
+                {
+                    continue; // no id to link to, or this item already matched once
+                }
+
+                var anchor = MatchesVerbatim(candidateText, item.RegardingName)
+                    ? item.RegardingName
+                    : MatchesVerbatim(candidateText, item.Title)
+                        ? item.Title
+                        : null;
+
+                if (anchor is not null)
+                {
+                    refs.Add(new TldrItemRefDto { AnchorText = anchor, ItemId = item.Id });
+                }
+            }
+        }
+
+        return refs.ToArray();
+    }
+
+    /// <summary>
+    /// Verbatim (case-insensitive) substring match, min length 3 — mirrors the widget's
+    /// <c>NarrativeCitedText.buildSegments</c> guard against false-positive matches on short
+    /// tokens like "of"/"a".
+    /// </summary>
+    private static bool MatchesVerbatim(string text, string candidate) =>
+        !string.IsNullOrWhiteSpace(candidate) &&
+        candidate.Length >= 3 &&
+        text.Contains(candidate, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// R5 task 010 (FR-A3): build one <see cref="NarrativeBulletDto"/> DIRECTLY from a single

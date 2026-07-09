@@ -676,6 +676,180 @@ public sealed class DailyBriefingCollectorTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // De-dup (R5 task 034 / FR-C5) — an item reachable via two collection paths must
+    // appear exactly once in the assembled output; unique items must never be dropped.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CollectAsync_EventReachableViaBothUpcomingAndOverdueDateFields_AppearsExactlyOnce()
+    {
+        // Arrange — a single sprk_event whose sprk_duedate is already 6 days past (matches
+        // the Overdue query's OnOrBefore filter) while its sprk_finalduedate is 2 days out
+        // (matches the Upcoming query's NextXDays filter). QueryEventsAsync's date filter is
+        // an OR across both fields, so the SAME event row satisfies BOTH the upcoming-tasks
+        // query and the overdue-tasks query — the two-collection-path duplication case this
+        // task de-dups. The stub returns this one row for every sprk_event query (both
+        // channels query the same entity), so without de-dup the event would appear in both
+        // the "upcoming-tasks" and "overdue-tasks" channels.
+        var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
+        {
+            ["sprk_event"] = MembershipWith("sprk_event", EventId1),
+        });
+
+        var dualDateEvent = new Entity("sprk_event", EventId1);
+        dualDateEvent["sprk_eventid"] = EventId1;
+        dualDateEvent["sprk_eventname"] = "Task reachable via both date fields";
+        dualDateEvent["sprk_duedate"] = DateTime.UtcNow.Date.AddDays(-6);       // satisfies Overdue
+        dualDateEvent["sprk_finalduedate"] = DateTime.UtcNow.Date.AddDays(2);   // satisfies Upcoming
+        dualDateEvent["modifiedon"] = DateTime.UtcNow;
+
+        var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>
+        {
+            ["sprk_event"] = new EntityCollection(new List<Entity> { dualDateEvent }),
+        });
+
+        var sut = new DailyBriefingCollector(
+            entityMock.Object,
+            resolverMock.Object,
+            NullLogger<DailyBriefingCollector>.Instance);
+
+        // Act
+        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+
+        // Assert — the record's identity (sprk_event + EventId1) appears exactly once across
+        // ALL channels combined (not merely once per channel) — the two-path dedup contract.
+        var allItemIds = request.Channels
+            .SelectMany(c => c.Items)
+            .Where(i => i.Id == EventId1.ToString())
+            .ToArray();
+        allItemIds.Should().ContainSingle(
+            "an item reachable via two collection paths (upcoming + overdue date fields) must appear exactly once");
+
+        // Category counts and TotalNotificationCount must reflect the de-duped view, not the
+        // raw double-counted per-query row count.
+        request.TotalNotificationCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CollectAsync_NDistinctRecordsAcrossPathsIncludingSameTitledMatters_AllNAppear()
+    {
+        // Arrange — no-over-dedup guard: N genuinely-distinct records across different
+        // channels/entity types, INCLUDING two distinct sprk_matter records that share the
+        // exact same display title ("Shared Title Matter"). De-dup keys on entity+GUID
+        // identity, never display text — so both same-titled matters must survive alongside
+        // every other distinct record. N = 4 total (2 same-titled matters + 1 project + 1 todo).
+        var matterA = Guid.Parse("77777777-7777-7777-7777-777777777771");
+        var matterB = Guid.Parse("77777777-7777-7777-7777-777777777772");
+
+        var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
+        {
+            ["sprk_matter"] = MembershipWith("sprk_matter", matterA, matterB),
+            ["sprk_project"] = MembershipWith("sprk_project", ProjectId1),
+        });
+
+        var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>
+        {
+            ["sprk_matter"] = new EntityCollection(new List<Entity>
+            {
+                MakeMatterEntity(matterA, "Shared Title Matter"),
+                MakeMatterEntity(matterB, "Shared Title Matter"),
+            }),
+            ["sprk_project"] = new EntityCollection(new List<Entity>
+            {
+                MakeProjectEntity(ProjectId1, "Distinct Project")
+            }),
+            ["sprk_todo"] = new EntityCollection(new List<Entity>
+            {
+                MakeTodoEntity(TodoId1, "Distinct Todo")
+            }),
+        });
+
+        var sut = new DailyBriefingCollector(
+            entityMock.Object,
+            resolverMock.Object,
+            NullLogger<DailyBriefingCollector>.Instance);
+
+        // Act
+        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+
+        // Assert — all 4 distinct records survive; no unique item was dropped by de-dup.
+        var allItems = request.Channels.SelectMany(c => c.Items).ToArray();
+        allItems.Should().HaveCount(4);
+        request.TotalNotificationCount.Should().Be(4);
+
+        // The two same-titled-but-distinct matters both survive (proves entity+GUID keying,
+        // not display-text keying — display-text keying would have collapsed these to 1).
+        var matterChannel = request.Channels.Single(c => c.Category == "matters");
+        matterChannel.Items.Should().HaveCount(2);
+        matterChannel.Items.Select(i => i.Id).Should().BeEquivalentTo(new[] { matterA.ToString(), matterB.ToString() });
+    }
+
+    [Fact]
+    public async Task CollectHighPriorityAsync_ItemReachableAcrossQueries_AppearsExactlyOnceAndOrderingPreserved()
+    {
+        // Arrange — 3 distinct high-priority records across 3 different entity types, with
+        // due dates chosen so the expected DueDate-then-Name order is unambiguous. This proves
+        // (a) de-dup does not drop unique items across the 7-entity merge, and (b) the
+        // existing DueDate-then-Name ordering survives the de-dup step (constraint: de-dup
+        // before/within ordering, never reshuffle beyond removing duplicates).
+        var matterId = Guid.Parse("88888888-8888-8888-8888-888888888881");
+        var projectId = Guid.Parse("88888888-8888-8888-8888-888888888882");
+        var eventId = Guid.Parse("88888888-8888-8888-8888-888888888883");
+
+        var matterEntity = new Entity("sprk_matter", matterId);
+        matterEntity["sprk_matterid"] = matterId;
+        matterEntity["sprk_mattername"] = "Zeta Matter"; // no due date column — sorts last (MaxValue)
+        matterEntity["sprk_highpriority"] = true;
+        matterEntity["statecode"] = 0;
+        matterEntity["modifiedon"] = DateTime.UtcNow;
+
+        var projectEntity = new Entity("sprk_project", projectId);
+        projectEntity["sprk_projectid"] = projectId;
+        projectEntity["sprk_projectname"] = "Alpha Project"; // no due date column — sorts last
+        projectEntity["sprk_highpriority"] = true;
+        projectEntity["statecode"] = 0;
+        projectEntity["modifiedon"] = DateTime.UtcNow;
+
+        var eventEntity = new Entity("sprk_event", eventId);
+        eventEntity["sprk_eventid"] = eventId;
+        eventEntity["sprk_eventname"] = "Earliest-Due Task";
+        eventEntity["sprk_highpriority"] = true;
+        eventEntity["sprk_finalduedate"] = DateTime.UtcNow.Date.AddDays(1); // has a due date — sorts first
+        eventEntity["modifiedon"] = DateTime.UtcNow;
+
+        var entityMock = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entityMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns<QueryExpression, CancellationToken>((q, _) => q.EntityName switch
+            {
+                "sprk_matter" => Task.FromResult(new EntityCollection(new List<Entity> { matterEntity })),
+                "sprk_project" => Task.FromResult(new EntityCollection(new List<Entity> { projectEntity })),
+                "sprk_event" => Task.FromResult(new EntityCollection(new List<Entity> { eventEntity })),
+                _ => Task.FromResult(new EntityCollection()),
+            });
+
+        var resolverMock = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        var sut = new DailyBriefingCollector(
+            entityMock.Object,
+            resolverMock.Object,
+            NullLogger<DailyBriefingCollector>.Instance);
+
+        // Act
+        var items = await sut.CollectHighPriorityAsync(SystemUserId, CancellationToken.None);
+
+        // Assert — all 3 distinct records present exactly once each (no drop, no duplication).
+        items.Should().HaveCount(3);
+        items.Select(i => i.EntityId).Should().BeEquivalentTo(
+            new[] { matterId.ToString(), projectId.ToString(), eventId.ToString() });
+
+        // Ordering preserved: due-dated item first (DueDate ascending), then undated items
+        // ordered by Name ascending ("Alpha Project" before "Zeta Matter").
+        items[0].EntityId.Should().Be(eventId.ToString(), "the only due-dated item sorts first");
+        items[1].Name.Should().Be("Alpha Project", "undated items fall back to Name ascending");
+        items[2].Name.Should().Be("Zeta Matter");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // TL;DR scaffolding wiring (R5 task 013 / FR-A4) — the collector attaches
     // deterministically-computed TldrFacts onto the request it hands the narrator.
     // ─────────────────────────────────────────────────────────────────────────
