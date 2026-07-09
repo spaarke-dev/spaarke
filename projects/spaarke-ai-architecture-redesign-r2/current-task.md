@@ -1,7 +1,14 @@
 # Current Task State — Spaarke AI Architecture Redesign R2 (Core)
 
-> **Last Updated**: 2026-07-09 (by context-handoff)
+> **Last Updated**: 2026-07-09 (late session — Phase E + G-R2-A deploy — by context-handoff)
 > **Recovery**: Read "Quick Recovery" first. Protocol: [Context Recovery](../../docs/procedures/context-recovery.md)
+
+### This session's ledger (2026-07-09 — Wave K close → 044 → Phase E kickoff → deploy)
+- **All work is MERGED to master + committed** — working tree CLEAN. Branch 1 ahead (this checkpoint) / 5 behind master (other projects landed after PR #600). Nothing at risk.
+- **Key decisions (also in memory)**: (1) confirmation model = **risk + ambiguity**, NOT the E-1..E-6 origin machinery (memory `confirmation-model-ambiguity-not-origin`); 044 wired the engine live on that model, 044c fixed the client card render. (2) **Phase E = best long-term architecture, NOT consumer-unblock** (memory `architecture-over-feature-unblocking` — forcing consumers surface+validate, never drive). (3) operand-vs-context split = option **(b)** (operand→`## Input`, envelope unchanged); `## Input` = single-source producer; ContextBinder designed against ALL 3 completion consumers. (4) Multi-step "Action Engine" seam reserved in ADR-043 (hybrid auth / closed-catalog / ledger plan / framework-agnostic).
+- **Deploy state**: BFF `spaarke-bff-dev` already live from master (verified via endpoints, NOT redeployed). SpaarkeAi `sprk_spaarkeai` DEPLOYED via `scripts/Deploy-SpaarkeAi.ps1` (pac authed to SPAARKE DEV 1; action_outcome verified present in bundle). Deploy from MAIN REPO master, never the worktree (E-10 was mid-flight). BFF App Service = `spaarke-bff-dev` / rg `rg-spaarke-dev`; Dataverse env = spaarkedev1.
+- **Cross-project handoffs delivered** (for operator to share / already shared): compose-r2 execution-foundation ack (B2=envelope not runtimeInput, B5→core), daily-briefing E-12 input-parity (they don't ride node executor; retire their `## Input` replica).
+- **Open / optional**: create-matter catalog seed (DEF-003 / #593) NOT deployed — optional (generic gated path works for the UAT). ConfirmationPolicyEngine 0-core-call-sites RESOLVED by 044.
 
 ---
 
