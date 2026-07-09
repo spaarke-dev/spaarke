@@ -62,6 +62,14 @@ Verdict: **no Critical issues.** Security clean (egress guard closes the externa
 
 **Still pending:** the #2 typed-personal-note passthrough (server-side note prepend) — deferred fast-follow.
 
+## UAT round 3 (2026-07-09) — Settings Display Parameters wired end-to-end
+Operator: "Wire them end-to-end (make them real)." Done.
+- **Server**: `POST /render` now accepts an optional `{ dueWithinDays, recencyHours }` body (clamped 1–31d / 1–744h; absent → fixed 5-day defaults). `DailyBriefingCollector.CollectAsync` takes a `BriefingWindowOptions`; the upcoming-tasks look-ahead uses `dueWithinDays`, and documents/matters/projects recency uses `recencyHours` (AddHours). Threaded through `RenderAsync` + both Null-object peers. Overdue window stays fixed (no UI control). Confirmed the windows-collected payload is what renders (RenderAsync pre-collects → serialized to ArgumentsJson for the narrator workflow).
+- **Client**: `fetchBriefingLive(windows?)` posts the params; `useBriefingRender(windows)` re-fetches when they change (so a Settings **Save** re-renders); `DailyBriefingApp` derives windows from `preferences` (dueWithinDays + `timeWindowToHours(timeWindow)`), loaded before the render call.
+- **Defaults made generous** (`DEFAULT_DAILY_DIGEST_PREFERENCES`: dueWithinDays 3→**5**, timeWindow '24h'→**'7d'**) so wiring does NOT reduce what an unconfigured user sees vs. the prior fixed 5-day behavior; users narrow from there.
+- **Tests**: 3 new `/render` contract tests (default / user-windows / clamp), collector + composite + endpoint suites green (38/38); client preference/smoke/emailShare green (17, 0 fail).
+- **Audit finding recap** (what was broken): channel toggles + auto-open worked; the Due-soon/Recency dropdowns saved to `sprk_userpreference` but were dropped from the live path in the R7 W12 render cutover — never reached the collector (fixed constants). Now wired.
+
 ## Open / deferred
 - Personal-note prepend + subject override for #2 (needs OutputRouter-adjacent HTML change) → **fast-follow**, not MVP.
 - #3 send-now (vs draft activity) → enhancement; draft is the safe MVP matching the SendEmailStep contract.

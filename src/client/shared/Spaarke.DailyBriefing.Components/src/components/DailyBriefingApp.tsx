@@ -59,6 +59,7 @@ import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components'
 import { extractEmailKey } from '@spaarke/ui-components/services';
 import { useBriefingRender, useInlineTodoCreate, useBriefingPreferences } from '../hooks';
 import { TOASTER_ID } from '../utils/toastUtils';
+import { timeWindowToHours } from '../types/notifications';
 import type { IWebApi, NotificationCategory, NotificationItem } from '../types/notifications';
 import {
   emailBriefingToColleague,
@@ -285,12 +286,28 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     }
   }, [xrm]);
 
+  // Preferences (sprk_userpreference) — drive BOTH the client-side channel-disabled
+  // filter AND (r5 settings-wiring, 2026-07-09) the server-side collector date windows.
+  // Loaded first so the render call can pass the user's Display Parameters.
+  const { preferences, updatePreferences } = useBriefingPreferences(webApi, userId);
+
+  // Translate the user's Display Parameters into the /render window params. Memoized on the
+  // primitive fields so a Settings Save re-fetches the briefing with the new windows.
+  const briefingWindows = React.useMemo(
+    () => ({
+      dueWithinDays: preferences.dueWithinDays,
+      recencyHours: timeWindowToHours(preferences.timeWindow),
+    }),
+    [preferences.dueWithinDays, preferences.timeWindow]
+  );
+
   // ---------------------------------------------------------------------------
   // Data source — single /render call (R7 Wave 12 cutover).
   //
   // No appnotification dependency. /render queries Dataverse server-side via
   // DailyBriefingCollector across 6 entity types (sprk_event, sprk_document,
-  // sprk_matter, sprk_project, sprk_todo) and narrates the result.
+  // sprk_matter, sprk_project, sprk_todo) and narrates the result. The user's
+  // Display Parameters (briefingWindows) bound the per-channel date windows.
   // ---------------------------------------------------------------------------
   const {
     status: renderStatus,
@@ -298,12 +315,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     unavailableReason,
     error: renderError,
     refetch: refreshBriefing,
-  } = useBriefingRender();
-
-  // Preferences (sprk_userpreference, independent of appnotification) — used
-  // for the client-side channel-disabled filter applied to /render's
-  // channelNarratives output.
-  const { preferences, updatePreferences } = useBriefingPreferences(webApi, userId);
+  } = useBriefingRender(briefingWindows);
 
   // Inline To Do creation from narrative bullets — writes first-class sprk_todo
   // records per ADR-024 + smart-todo-decoupling-r3 FR-29.

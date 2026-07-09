@@ -108,12 +108,29 @@ public class DailyBriefingCollector : ICodedWorkflow
     private const int TodoStatusOpen = 1;
     private const int TodoStatusInProgress = 659490001;
 
-    // Date-window constants (operator-stated; wave12 §2.1)
-    private const int TaskUpcomingDaysAhead = 5;
+    // Date-window DEFAULTS (operator-stated; wave12 §2.1). r5 settings-wiring (2026-07-09):
+    // the upcoming-task + recency windows are now overridable per-user via the briefing
+    // Display Parameters (see BriefingWindowOptions); these constants are the fallback when
+    // no options are supplied (scheduled email leg, tests, and cold-load before prefs resolve).
+    // TaskOverdueDaysPast stays fixed — "overdue" has no user-facing control.
     private const int TaskOverdueDaysPast = 5;
-    private const int DocumentModifiedDaysBack = 5;
-    private const int MatterModifiedDaysBack = 5;
-    private const int ProjectModifiedDaysBack = 5;
+    // Kept for BriefingWindowOptions.Default only (see below).
+    internal const int DefaultDueWithinDays = 5;
+    internal const int DefaultRecencyHours = 120; // 5 days
+
+    /// <summary>
+    /// Per-user briefing date windows, sourced from the caller's Display Parameters
+    /// (sprk_userpreference: Due-soon window + Recency window) and applied to the
+    /// deterministic collector queries. <see cref="DueWithinDays"/> bounds the upcoming
+    /// tasks/events look-ahead (NextXDays); <see cref="RecencyHours"/> bounds the
+    /// documents/matters/projects modified-on look-back. <see cref="Default"/> reproduces
+    /// the pre-wiring fixed 5-day behavior for callers that pass no options.
+    /// </summary>
+    public sealed record BriefingWindowOptions(int DueWithinDays, int RecencyHours)
+    {
+        public static readonly BriefingWindowOptions Default =
+            new(DefaultDueWithinDays, DefaultRecencyHours);
+    }
 
     // Entity logical names (kept as constants so a typo fails at compile time).
     private const string EntityEvent = "sprk_event";
@@ -198,7 +215,11 @@ public class DailyBriefingCollector : ICodedWorkflow
                 nameof(context));
         }
 
-        return await CollectAsync(userId, cancellationToken).ConfigureAwait(false);
+        // Coded-workflow entry (Binding execution) — no per-user window options in the
+        // workflow context, so use the fixed defaults. The /render endpoint's window override
+        // is applied by the composite's direct CollectAsync(systemUserId, windows, ct) call,
+        // whose collected payload is what gets rendered.
+        return await CollectAsync(userId, BriefingWindowOptions.Default, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -208,12 +229,17 @@ public class DailyBriefingCollector : ICodedWorkflow
     /// </summary>
     public virtual async Task<DailyBriefingNarrateRequest> CollectAsync(
         Guid systemUserId,
+        BriefingWindowOptions windows,
         CancellationToken ct)
     {
         if (systemUserId == Guid.Empty)
         {
             throw new ArgumentException("systemUserId is required", nameof(systemUserId));
         }
+        // r5 settings-wiring (2026-07-09): the user's Display Parameters (Due-soon window +
+        // Recency window) drive the per-channel windows. Null-safe fallback to the fixed
+        // defaults preserves the pre-wiring behavior for callers that don't pass options.
+        var w = windows ?? BriefingWindowOptions.Default;
         var startedAt = DateTimeOffset.UtcNow;
 
         _logger.LogInformation(
@@ -261,11 +287,11 @@ public class DailyBriefingCollector : ICodedWorkflow
         //    Each query returns empty array on Dataverse failure (failure-soft per channel —
         //    a single broken channel does not abort the whole briefing).
         var queries = await Task.WhenAll(
-            QueryUpcomingTasksAsync(systemUserId, eventIds, matterIds, projectIds, ct),
+            QueryUpcomingTasksAsync(systemUserId, eventIds, matterIds, projectIds, w.DueWithinDays, ct),
             QueryOverdueTasksAsync(systemUserId, eventIds, matterIds, projectIds, ct),
-            QueryDocumentsAsync(matterIds, projectIds, ct),
-            QueryMattersAsync(matterIds, ct),
-            QueryProjectsAsync(projectIds, ct),
+            QueryDocumentsAsync(matterIds, projectIds, w.RecencyHours, ct),
+            QueryMattersAsync(matterIds, w.RecencyHours, ct),
+            QueryProjectsAsync(projectIds, w.RecencyHours, ct),
             QueryTodosAsync(systemUserId, ct)
         ).ConfigureAwait(false);
 
@@ -629,6 +655,7 @@ public class DailyBriefingCollector : ICodedWorkflow
         IReadOnlyList<Guid> eventIds,
         IReadOnlyList<Guid> matterIds,
         IReadOnlyList<Guid> projectIds,
+        int dueWithinDays,
         CancellationToken ct)
     {
         return QueryEventsAsync(
@@ -638,10 +665,10 @@ public class DailyBriefingCollector : ICodedWorkflow
             projectIds: projectIds,
             applyDateFilter: query =>
             {
-                // sprk_duedate OR sprk_finalduedate within next N days.
+                // sprk_duedate OR sprk_finalduedate within the user's Due-soon window (days).
                 var dateGroup = new FilterExpression(LogicalOperator.Or);
-                dateGroup.AddCondition("sprk_duedate", ConditionOperator.NextXDays, TaskUpcomingDaysAhead);
-                dateGroup.AddCondition("sprk_finalduedate", ConditionOperator.NextXDays, TaskUpcomingDaysAhead);
+                dateGroup.AddCondition("sprk_duedate", ConditionOperator.NextXDays, dueWithinDays);
+                dateGroup.AddCondition("sprk_finalduedate", ConditionOperator.NextXDays, dueWithinDays);
                 query.Criteria.AddFilter(dateGroup);
             },
             ct: ct);
@@ -761,12 +788,13 @@ public class DailyBriefingCollector : ICodedWorkflow
     }
 
     /// <summary>
-    /// Documents — sprk_document modified in last 5 days where the user is a member of
-    /// the regarding matter or project.
+    /// Documents — sprk_document modified within the user's Recency window where the user
+    /// is a member of the regarding matter or project.
     /// </summary>
     private async Task<BriefingItem[]> QueryDocumentsAsync(
         IReadOnlyList<Guid> matterIds,
         IReadOnlyList<Guid> projectIds,
+        int recencyHours,
         CancellationToken ct)
     {
         try
@@ -777,7 +805,7 @@ public class DailyBriefingCollector : ICodedWorkflow
                 return Array.Empty<BriefingItem>();
             }
 
-            var cutoff = DateTime.UtcNow.AddDays(-DocumentModifiedDaysBack);
+            var cutoff = DateTime.UtcNow.AddHours(-recencyHours);
 
             var query = new QueryExpression(EntityDocument)
             {
@@ -828,10 +856,12 @@ public class DailyBriefingCollector : ICodedWorkflow
     }
 
     /// <summary>
-    /// Matters — sprk_matter modified in last 5 days where the user is a member. Active only.
+    /// Matters — sprk_matter modified within the user's Recency window where the user is a
+    /// member. Active only.
     /// </summary>
     private async Task<BriefingItem[]> QueryMattersAsync(
         IReadOnlyList<Guid> matterIds,
+        int recencyHours,
         CancellationToken ct)
     {
         try
@@ -841,7 +871,7 @@ public class DailyBriefingCollector : ICodedWorkflow
                 return Array.Empty<BriefingItem>();
             }
 
-            var cutoff = DateTime.UtcNow.AddDays(-MatterModifiedDaysBack);
+            var cutoff = DateTime.UtcNow.AddHours(-recencyHours);
 
             var query = new QueryExpression(EntityMatter)
             {
@@ -881,10 +911,12 @@ public class DailyBriefingCollector : ICodedWorkflow
     }
 
     /// <summary>
-    /// Projects — sprk_project modified in last 5 days where the user is a member. Active only.
+    /// Projects — sprk_project modified within the user's Recency window where the user is a
+    /// member. Active only.
     /// </summary>
     private async Task<BriefingItem[]> QueryProjectsAsync(
         IReadOnlyList<Guid> projectIds,
+        int recencyHours,
         CancellationToken ct)
     {
         try
@@ -894,7 +926,7 @@ public class DailyBriefingCollector : ICodedWorkflow
                 return Array.Empty<BriefingItem>();
             }
 
-            var cutoff = DateTime.UtcNow.AddDays(-ProjectModifiedDaysBack);
+            var cutoff = DateTime.UtcNow.AddHours(-recencyHours);
 
             var query = new QueryExpression(EntityProject)
             {

@@ -219,7 +219,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        var request = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — at least the 5 channels we explicitly populated are present.
         // (The collector calls the entity service for sprk_event twice — once for
@@ -269,7 +269,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        _ = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        _ = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — the resolver IS invoked exactly once per candidate-set entity type, scoped
         // to the acting user.
@@ -354,7 +354,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        var request = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — the collaborator-only matter surfaces in the briefing.
         request.Channels.Should().Contain(c => c.Category == "matters",
@@ -399,7 +399,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        var request = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — owner still sees their own matter, project, and (task-typed) event.
         request.Channels.Should().Contain(c => c.Category == "matters");
@@ -432,7 +432,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        var request = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — documents channel is filtered (no matter/project membership)
         request.Channels.Should().NotContain(c => c.Category == "documents");
@@ -463,7 +463,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        var request = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — every channel's items have non-empty regarding metadata (so
         // EnrichBulletWithEntityRefs downstream can build click-through links)
@@ -500,7 +500,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        var request = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — the matter row is self-regarding (RegardingEntityType == "sprk_matter",
         // RegardingId == matter's own GUID)
@@ -532,7 +532,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        var request = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — project is self-regarding under its own entity type
         var projectChannel = request.Channels.Single(c => c.Category == "projects");
@@ -573,7 +573,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        var request = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — the matter channel still appears (failure-soft per channel)
         request.Channels.Should().Contain(c => c.Category == "matters");
@@ -611,7 +611,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        var request = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — to-dos channel is present (no membership dep); membership-dependent
         // channels are filtered out (empty arrays after resolver failure).
@@ -634,7 +634,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act + Assert
-        var act = async () => await sut.CollectAsync(Guid.Empty, CancellationToken.None);
+        var act = async () => await sut.CollectAsync(Guid.Empty, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
         await act.Should().ThrowAsync<ArgumentException>()
             .WithMessage("systemUserId is required*");
     }
@@ -667,7 +667,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        var request = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — total = 2 matters + 1 todo = 3
         request.TotalNotificationCount.Should().Be(3);
@@ -714,7 +714,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        var request = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — the record's identity (sprk_event + EventId1) appears exactly once across
         // ALL channels combined (not merely once per channel) — the two-path dedup contract.
@@ -770,7 +770,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        var request = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — all 4 distinct records survive; no unique item was dropped by de-dup.
         var allItems = request.Channels.SelectMany(c => c.Items).ToArray();
@@ -972,7 +972,7 @@ public sealed class DailyBriefingCollectorTests
             NullLogger<DailyBriefingCollector>.Instance);
 
         // Act
-        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+        var request = await sut.CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
 
         // Assert — TldrFacts is populated (not the LLM's job to fill it in) and every count
         // traces back EXACTLY to the same view model the request itself carries — this is the

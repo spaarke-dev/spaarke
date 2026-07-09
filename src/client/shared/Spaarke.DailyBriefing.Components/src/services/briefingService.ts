@@ -482,12 +482,25 @@ export async function fetchBriefingNarration(channels: ChannelFetchResult[]): Pr
  * `/render` unconditionally on mount, without the appnotification load gate
  * that `useBriefingNarration` had.
  */
-export async function fetchBriefingLive(): Promise<NarrationResult> {
+/**
+ * Optional per-user briefing windows (r5 settings-wiring, 2026-07-09), sourced from the
+ * user's Display Parameters. Omitted → the server applies its fixed 5-day defaults.
+ */
+export interface BriefingWindowParams {
+  /** Due-soon look-ahead in days (upcoming tasks/events). */
+  dueWithinDays: number;
+  /** Recency look-back in hours (documents/matters/projects modified-on). */
+  recencyHours: number;
+}
+
+export async function fetchBriefingLive(windows?: BriefingWindowParams): Promise<NarrationResult> {
   try {
     const response = await authenticatedFetch('/api/ai/daily-briefing/render', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: '{}',
+      body: windows
+        ? JSON.stringify({ dueWithinDays: windows.dueWithinDays, recencyHours: windows.recencyHours })
+        : '{}',
     });
 
     const data = (await response.json()) as NarrateResponse;

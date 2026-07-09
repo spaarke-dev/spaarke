@@ -102,6 +102,7 @@ public static class DailyBriefingEndpoints
     /// No body required — the briefing is self-contained.
     /// </summary>
     private static async Task<IResult> HandleRender(
+        RenderDailyBriefingRequest? request,
         ILoggerFactory loggerFactory,
         Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService composite,
         Spaarke.Dataverse.IGenericEntityService entityService,
@@ -117,10 +118,16 @@ public static class DailyBriefingEndpoints
             return identity.Failure;
         }
 
+        // r5 settings-wiring (2026-07-09): the client passes the user's Display Parameters
+        // (Due-soon window in days, Recency window in hours) so the collector's per-channel
+        // windows reflect the user's saved preferences. Clamp to sane bounds; an absent body
+        // (scheduled callers / older clients) falls back to the fixed defaults.
+        var windows = BuildWindowOptions(request);
+
         try
         {
             var response = await composite.RenderAsync(
-                identity.SystemUserId, GetTenantId(httpContext), cancellationToken).ConfigureAwait(false);
+                identity.SystemUserId, GetTenantId(httpContext), windows, cancellationToken).ConfigureAwait(false);
             return TypedResults.Ok(response);
         }
         catch (FeatureDisabledException ex)
@@ -382,6 +389,36 @@ public static class DailyBriefingEndpoints
     private static bool IsValidEmailAddress(string value) =>
         System.Net.Mail.MailAddress.TryCreate(value, out var parsed)
         && string.Equals(parsed.Address, value, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Translate the optional render request's Display Parameters into a clamped
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.BriefingWindowOptions"/>.
+    /// Null/absent body OR out-of-range values fall back to the fixed 5-day defaults, so the
+    /// scheduled leg and older clients are unaffected. Bounds: due 1–31 days, recency 1–744 h (31 d).
+    /// </summary>
+    private static Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.BriefingWindowOptions BuildWindowOptions(
+        RenderDailyBriefingRequest? request)
+    {
+        var def = Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.BriefingWindowOptions.Default;
+        if (request is null)
+        {
+            return def;
+        }
+        var dueWithinDays = ClampOrDefault(request.DueWithinDays, 1, 31, def.DueWithinDays);
+        var recencyHours = ClampOrDefault(request.RecencyHours, 1, 744, def.RecencyHours);
+        return new Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.BriefingWindowOptions(
+            dueWithinDays, recencyHours);
+    }
+
+    /// <summary>Clamp a nullable/optional value into [min,max]; null or ≤0 → <paramref name="fallback"/>.</summary>
+    private static int ClampOrDefault(int? value, int min, int max, int fallback)
+    {
+        if (value is null || value.Value <= 0)
+        {
+            return fallback;
+        }
+        return Math.Clamp(value.Value, min, max);
+    }
 
     /// <summary>Tenant id from the caller's token (empty when absent — dev tolerance).</summary>
     private static string GetTenantId(HttpContext httpContext) =>
@@ -648,6 +685,23 @@ public static class DailyBriefingEndpoints
 // ────────────────────────────────────────────────────────────────
 // Request / Response DTOs
 // ────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Optional request body for <c>POST /api/ai/daily-briefing/render</c> (r5 settings-wiring,
+/// 2026-07-09). Carries the caller's briefing Display Parameters so the collector's per-channel
+/// date windows reflect saved preferences. Absent body ⇒ fixed 5-day defaults (scheduled callers,
+/// older clients). Nullable body param ⇒ empty POST allowed.
+/// </summary>
+public record RenderDailyBriefingRequest
+{
+    /// <summary>Due-soon look-ahead in days (upcoming tasks/events). Clamped 1–31; ≤0/null ⇒ default 5.</summary>
+    [JsonPropertyName("dueWithinDays")]
+    public int? DueWithinDays { get; init; }
+
+    /// <summary>Recency look-back in hours (documents/matters/projects modified-on). Clamped 1–744; ≤0/null ⇒ default 120.</summary>
+    [JsonPropertyName("recencyHours")]
+    public int? RecencyHours { get; init; }
+}
 
 /// <summary>
 /// Optional request body for <c>POST /api/ai/daily-briefing/email</c> (r5 email-share,
