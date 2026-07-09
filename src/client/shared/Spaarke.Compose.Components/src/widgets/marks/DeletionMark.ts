@@ -63,15 +63,13 @@ export const DeletionMark = Mark.create<DeletionMarkOptions>({
     return {
       binding: {
         default: null,
-        parseHTML: (element) => element.getAttribute('data-binding'),
-        renderHTML: (attributes) =>
-          attributes.binding ? { 'data-binding': attributes.binding as string } : {},
+        parseHTML: element => element.getAttribute('data-binding'),
+        renderHTML: attributes => (attributes.binding ? { 'data-binding': attributes.binding as string } : {}),
       },
       ledgerRef: {
         default: null,
-        parseHTML: (element) => element.getAttribute('data-ledger-ref'),
-        renderHTML: (attributes) =>
-          attributes.ledgerRef ? { 'data-ledger-ref': attributes.ledgerRef as string } : {},
+        parseHTML: element => element.getAttribute('data-ledger-ref'),
+        renderHTML: attributes => (attributes.ledgerRef ? { 'data-ledger-ref': attributes.ledgerRef as string } : {}),
       },
     };
   },
@@ -99,11 +97,11 @@ export const DeletionMark = Mark.create<DeletionMarkOptions>({
   addCommands() {
     return {
       setDeletion:
-        (attributes) =>
+        attributes =>
         ({ commands }) =>
           commands.setMark(this.name, attributes),
       toggleDeletion:
-        (attributes) =>
+        attributes =>
         ({ commands }) =>
           commands.toggleMark(this.name, attributes),
       unsetDeletion:
