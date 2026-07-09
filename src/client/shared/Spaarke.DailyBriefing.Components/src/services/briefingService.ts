@@ -524,3 +524,48 @@ export async function fetchBriefingLive(): Promise<NarrationResult> {
     };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Email-share (r5 email-share #2, 2026-07-09)
+// ---------------------------------------------------------------------------
+
+/** Result of a briefing email-share attempt. */
+export type EmailShareResult = { status: 'success' } | { status: 'error'; message: string };
+
+/**
+ * Email the caller's Daily Briefing to an internal colleague ("share with a colleague").
+ *
+ * POSTs `{ recipientEmail }` to `/api/ai/daily-briefing/email` (Option A) — the SERVER
+ * renders the caller's OWN briefing HTML and delivers it via the existing Communication
+ * leg. The systemuserid (whose briefing) stays token-derived server-side; only the
+ * delivery address is supplied here, and the server enforces internal-recipient-only
+ * (an external/unknown address returns 400 → surfaced as an error the dialog shows).
+ *
+ * @param recipientEmail Internal colleague's email (from the systemuser picker).
+ */
+export async function emailBriefingToColleague(recipientEmail: string): Promise<EmailShareResult> {
+  try {
+    await authenticatedFetch('/api/ai/daily-briefing/email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipientEmail }),
+    });
+    return { status: 'success' };
+  } catch (err: unknown) {
+    const error = err as { statusCode?: number; message?: string };
+    if (error.statusCode === 400) {
+      return {
+        status: 'error',
+        message: 'That recipient must be an active internal user, or the address is invalid.',
+      };
+    }
+    if (error.statusCode === 503 || error.statusCode === 429) {
+      return { status: 'error', message: 'Briefing email service is temporarily unavailable. Please try again.' };
+    }
+    if (error.statusCode === 401 || error.statusCode === 403) {
+      return { status: 'error', message: 'Sign-in required to send the briefing.' };
+    }
+    console.error('[DailyBriefing] briefing email-share failed:', err);
+    return { status: 'error', message: error.message ?? 'Failed to email the briefing.' };
+  }
+}

@@ -1,7 +1,7 @@
 /**
  * StatTiles — at-a-glance KPI row for the Daily Briefing (R5 task 021 redesign).
  *
- * A compact row of count tiles ("Open items / Overdue / Critical / New matters")
+ * A compact row of count tiles ("Updates / Overdue / Critical / New matters")
  * that answers "how much is on my plate" before the reader scans the sections.
  *
  * Component justification (root CLAUDE.md §11):

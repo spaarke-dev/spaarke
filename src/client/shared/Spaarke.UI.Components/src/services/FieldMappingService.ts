@@ -34,7 +34,12 @@
 
 import type { IDataService } from '../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from './EntityCreationService';
-import { FieldMappingTypes, type IFieldMappingProfile, type IFieldMappingRule, type IMappingResult } from '../types/FieldMappingTypes';
+import {
+  FieldMappingTypes,
+  type IFieldMappingProfile,
+  type IFieldMappingRule,
+  type IMappingResult,
+} from '../types/FieldMappingTypes';
 import { discoverNavProps, findNavProp } from './PolymorphicResolverService';
 
 /**
@@ -251,8 +256,9 @@ function normalizeRule(raw: unknown): IFieldMappingRule {
     targetFieldType: String(r.targetFieldType ?? 'Text'),
     priority: typeof r.priority === 'number' ? r.priority : 0,
     mappingType: String(r.mappingType ?? FieldMappingTypes.Copy),
-    defaultValue: typeof r.defaultValue === 'string' ? r.defaultValue : (r.defaultValue == null ? null : String(r.defaultValue)),
-    expression: typeof r.expression === 'string' ? r.expression : (r.expression == null ? null : String(r.expression)),
+    defaultValue:
+      typeof r.defaultValue === 'string' ? r.defaultValue : r.defaultValue == null ? null : String(r.defaultValue),
+    expression: typeof r.expression === 'string' ? r.expression : r.expression == null ? null : String(r.expression),
     isRequired: Boolean(r.isRequired),
     compatibilityMode: String(r.compatibilityMode ?? 'Strict'),
   };
@@ -432,7 +438,12 @@ async function applyCopyLookup(rule: IFieldMappingRule, ctx: IRuleApplyContext):
   const guid = record[valueKey];
   const referentEntity = record[annotationKey];
 
-  if (typeof guid !== 'string' || guid.length === 0 || typeof referentEntity !== 'string' || referentEntity.length === 0) {
+  if (
+    typeof guid !== 'string' ||
+    guid.length === 0 ||
+    typeof referentEntity !== 'string' ||
+    referentEntity.length === 0
+  ) {
     ctx.warnings.push(
       `Copy rule "${rule.sourceField}"→"${rule.targetField}" skipped: could not resolve the referent ` +
         `entity for the source lookup (missing or empty "${annotationKey}" annotation).`
@@ -502,9 +513,7 @@ function _resolveEntitySetForReferent(entityLogicalName: string): string {
 function applyDefault(rule: IFieldMappingRule, ctx: IRuleApplyContext): void {
   const value = rule.defaultValue;
   if (value === null || value === undefined || value === '') {
-    ctx.warnings.push(
-      `Default rule for "${rule.targetField}" skipped: rule.defaultValue is empty.`
-    );
+    ctx.warnings.push(`Default rule for "${rule.targetField}" skipped: rule.defaultValue is empty.`);
     return;
   }
 

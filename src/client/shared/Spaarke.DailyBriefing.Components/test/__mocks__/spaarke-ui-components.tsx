@@ -24,6 +24,22 @@ export const MicrosoftToDoIcon: React.FC<any> = props => (
 );
 
 // ---------------------------------------------------------------------------
+// r5 email-share (2026-07-09): DailyBriefingApp imports SendEmailDialog +
+// ISendEmailPayload from `@spaarke/ui-components`. Stub the dialog as a no-op so
+// importing DailyBriefingApp resolves in test context (the pure-helper test
+// under test/ does not mount it).
+// ---------------------------------------------------------------------------
+
+export interface ISendEmailPayload {
+  to: { id: string; name: string };
+  subject: string;
+  body: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const SendEmailDialog: React.FC<any> = () => null;
+
+// ---------------------------------------------------------------------------
 // Types referenced by the LegalWorkspace registry factory under test
 // (`createLegalWorkspaceSectionRegistry`, R2 Option D).
 // ---------------------------------------------------------------------------

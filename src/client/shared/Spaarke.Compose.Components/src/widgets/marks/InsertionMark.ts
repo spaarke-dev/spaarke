@@ -69,15 +69,13 @@ export const InsertionMark = Mark.create<InsertionMarkOptions>({
     return {
       binding: {
         default: null,
-        parseHTML: (element) => element.getAttribute('data-binding'),
-        renderHTML: (attributes) =>
-          attributes.binding ? { 'data-binding': attributes.binding as string } : {},
+        parseHTML: element => element.getAttribute('data-binding'),
+        renderHTML: attributes => (attributes.binding ? { 'data-binding': attributes.binding as string } : {}),
       },
       ledgerRef: {
         default: null,
-        parseHTML: (element) => element.getAttribute('data-ledger-ref'),
-        renderHTML: (attributes) =>
-          attributes.ledgerRef ? { 'data-ledger-ref': attributes.ledgerRef as string } : {},
+        parseHTML: element => element.getAttribute('data-ledger-ref'),
+        renderHTML: attributes => (attributes.ledgerRef ? { 'data-ledger-ref': attributes.ledgerRef as string } : {}),
       },
     };
   },
@@ -103,11 +101,11 @@ export const InsertionMark = Mark.create<InsertionMarkOptions>({
   addCommands() {
     return {
       setInsertion:
-        (attributes) =>
+        attributes =>
         ({ commands }) =>
           commands.setMark(this.name, attributes),
       toggleInsertion:
-        (attributes) =>
+        attributes =>
         ({ commands }) =>
           commands.toggleMark(this.name, attributes),
       unsetInsertion:
