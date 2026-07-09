@@ -1,25 +1,22 @@
-// R7 Wave 12 task 135 — Per-bullet entity-link resolution across all 6 entity types.
+// R7 Wave 12 task 135 (origin) — Per-bullet entity-link resolution across all 6 entity types.
+// REWRITTEN by R5 task 010 (FR-A3, 2026-07-08): the per-channel LLM narrate leg that this
+// suite originally exercised was REMOVED (R4 / R7 W12 tried prompt-steering to stop
+// cross-item hallucination and failed; the per-channel LLM call was the primary source).
+// Channel/section content is now built DETERMINISTICALLY, straight from the collector's
+// req.Channels view model — one bullet per source item, no LLM call, no free-text
+// matching. See DailyBriefingNarrator.BuildDeterministicBullet.
 //
-// Behavior contract under test (the operator-facing wave12 plan §2.1 AC5):
+// Behavior contract under test (still the operator-facing wave12 plan §2.1 AC5, now
+// satisfied structurally instead of via LLM-narrative substring matching):
 //   "Each Activity Notes bullet has working entity link" — i.e., every rendered
-//   NarrativeBulletDto MUST have PrimaryEntityType/Id/Name populated so the
-//   widget can build a click-through to the underlying Dataverse record.
+//   NarrativeBulletDto MUST have PrimaryEntityType/Id/Name populated (when resolvable)
+//   so the widget can build a click-through to the underlying Dataverse record.
 //
-// Source of the gap (pre-task-135): EnrichBulletWithEntityRefs only checked
-// RegardingId; for orphan items (no regarding matter — common for sprk_event
-// tasks with no sprk_regardingmatter, and for sprk_todo with no regarding),
-// PrimaryEntityType/Id came out empty and the widget hid the link.
-//
-// Fix verified here: when no match has a populated RegardingId, the enrichment
-// falls back to the source entity (SourceEntityType + Id + Title) so the
-// widget can still navigate.
-//
-// We drive the narrator end-to-end through NarrateAsync (mocking only the LLM
-// at the IOpenAiClient boundary, per ADR-038 §1 — integration-heavy pyramid,
-// mock at module boundary, assert observable behavior). The LLM is stubbed to
-// emit a narrative that mentions a specific item's title, then we assert the
-// resulting NarrativeBulletDto carries the correct PrimaryEntity* fields for
-// each of the 6 entity types operator-configured in T131.
+// We drive the narrator end-to-end through NarrateAsync, mocking ONLY the TL;DR LLM call
+// at the IOpenAiClient boundary (ADR-038 §1 — integration-heavy pyramid, mock at module
+// boundary, assert observable behavior). The mock is Strict, so any attempt to call the
+// LLM for anything other than the TL;DR action fails the test — that IS the "exactly one
+// LLM call" assertion for this suite.
 
 using System.Text.Json;
 using FluentAssertions;
@@ -34,27 +31,25 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Narrators;
 
-[Trait("status", "task-135-r7")]
+[Trait("status", "task-010-r5")]
 public sealed class DailyBriefingNarratorEntityLinkTests
 {
     private const string TldrActionCode = "BRIEF-NARRATE-TLDR";
-    private const string ChannelActionCode = "BRIEF-NARRATE-CHANNEL";
 
     // ─── Per-entity-type theory data ────────────────────────────────────────
     //
-    // For each of the 6 channels T131 introduced, we synthesize a single-item
-    // request, stub the channel LLM to return a narrative mentioning the item
-    // by Title, and assert the resulting bullet's PrimaryEntity* fields match
-    // what the widget needs to navigate.
+    // For each of the 6 channels T131 introduced, we synthesize a single-item request and
+    // assert the resulting deterministic bullet's PrimaryEntity* fields match what the
+    // widget needs to navigate.
     //
     // Cases:
     //   1. sprk_event (Task) with regarding matter   → link points to matter
     //   2. sprk_document with regarding matter       → link points to matter
     //   3. sprk_matter (self-regarding)              → link points to matter
-    //   4. sprk_project (self-regarding)             → link points to project
-    //   5. sprk_todo with regarding matter           → link points to matter
-    //   6. sprk_event (orphan: no regarding matter)  → link FALLS BACK to event
-    //   7. sprk_todo (orphan)                        → link FALLS BACK to todo
+    //   4. sprk_project (self-regarding)              → link points to project
+    //   5. sprk_todo with regarding matter            → link points to matter
+    //   6. sprk_event (orphan: no regarding matter)   → link FALLS BACK to event
+    //   7. sprk_todo (orphan)                          → link FALLS BACK to todo
 
     public static TheoryData<EntityLinkCase> EntityLinkCases() => new()
     {
@@ -71,7 +66,6 @@ public sealed class DailyBriefingNarratorEntityLinkTests
                 RegardingId = "11111111-1111-1111-1111-111111111111",
                 SourceEntityType = "sprk_event"
             },
-            NarrativeMentionsTitle = true,
             ExpectedPrimaryEntityType = "sprk_matter",
             ExpectedPrimaryEntityId = "11111111-1111-1111-1111-111111111111",
             ExpectedPrimaryEntityName = "Acme Corp Matter"
@@ -90,7 +84,6 @@ public sealed class DailyBriefingNarratorEntityLinkTests
                 RegardingId = "22222222-2222-2222-2222-222222222222",
                 SourceEntityType = "sprk_document"
             },
-            NarrativeMentionsTitle = true,
             ExpectedPrimaryEntityType = "sprk_matter",
             ExpectedPrimaryEntityId = "22222222-2222-2222-2222-222222222222",
             ExpectedPrimaryEntityName = "Bravo Matter"
@@ -109,7 +102,6 @@ public sealed class DailyBriefingNarratorEntityLinkTests
                 RegardingId = "33333333-3333-3333-3333-333333333333",
                 SourceEntityType = "sprk_matter"
             },
-            NarrativeMentionsTitle = true,
             ExpectedPrimaryEntityType = "sprk_matter",
             ExpectedPrimaryEntityId = "33333333-3333-3333-3333-333333333333",
             ExpectedPrimaryEntityName = "Charlie Litigation Matter"
@@ -129,7 +121,6 @@ public sealed class DailyBriefingNarratorEntityLinkTests
                 RegardingId = "44444444-4444-4444-4444-444444444444",
                 SourceEntityType = "sprk_project"
             },
-            NarrativeMentionsTitle = true,
             ExpectedPrimaryEntityType = "sprk_project",
             ExpectedPrimaryEntityId = "44444444-4444-4444-4444-444444444444",
             ExpectedPrimaryEntityName = "Delta Initiative Project"
@@ -148,14 +139,13 @@ public sealed class DailyBriefingNarratorEntityLinkTests
                 RegardingId = "55555555-5555-5555-5555-555555555555",
                 SourceEntityType = "sprk_todo"
             },
-            NarrativeMentionsTitle = true,
             ExpectedPrimaryEntityType = "sprk_matter",
             ExpectedPrimaryEntityId = "55555555-5555-5555-5555-555555555555",
             ExpectedPrimaryEntityName = "Echo Settlement Matter"
         },
 
-        // 6. sprk_event ORPHAN (no regarding matter) — pre-task-135 BUG path.
-        //    Tier 2 fallback should kick in: link points to the source event row.
+        // 6. sprk_event ORPHAN (no regarding matter). Tier 2 fallback: link points to the
+        //    source event row.
         new EntityLinkCase
         {
             Name = "orphan sprk_event task falls back to source event row",
@@ -168,14 +158,13 @@ public sealed class DailyBriefingNarratorEntityLinkTests
                 RegardingId = "",
                 SourceEntityType = "sprk_event"
             },
-            NarrativeMentionsTitle = true,
             ExpectedPrimaryEntityType = "sprk_event",
             ExpectedPrimaryEntityId = "event-orphan-1",
             ExpectedPrimaryEntityName = "Submit independent CLE attestation"
         },
 
-        // 7. sprk_todo ORPHAN (no regarding matter) — pre-task-135 BUG path.
-        //    Tier 2 fallback should kick in: link points to the source todo row.
+        // 7. sprk_todo ORPHAN (no regarding matter). Tier 2 fallback: link points to the
+        //    source todo row.
         new EntityLinkCase
         {
             Name = "orphan sprk_todo falls back to source todo row",
@@ -188,7 +177,6 @@ public sealed class DailyBriefingNarratorEntityLinkTests
                 RegardingId = "",
                 SourceEntityType = "sprk_todo"
             },
-            NarrativeMentionsTitle = true,
             ExpectedPrimaryEntityType = "sprk_todo",
             ExpectedPrimaryEntityId = "todo-orphan-1",
             ExpectedPrimaryEntityName = "Reschedule personal dentist appointment"
@@ -197,7 +185,7 @@ public sealed class DailyBriefingNarratorEntityLinkTests
 
     [Theory]
     [MemberData(nameof(EntityLinkCases))]
-    public async Task NarrateAsync_PopulatesPrimaryEntityFields_ForEachEntityType(EntityLinkCase tc)
+    public async Task NarrateAsync_PopulatesPrimaryEntityFieldsDeterministically_ForEachEntityType(EntityLinkCase tc)
     {
         // Arrange — build a single-channel request carrying just the one item.
         var req = new DailyBriefingNarrateRequest
@@ -222,26 +210,7 @@ public sealed class DailyBriefingNarratorEntityLinkTests
             ]
         };
 
-        var tldrJson = JsonSerializer.Serialize(new
-        {
-            summary = "summary",
-            keyTakeaways = new[] { "k1" },
-            topAction = "action"
-        });
-
-        // Channel LLM stub — emit a narrative that mentions the item's Title so
-        // EnrichBulletWithEntityRefs's substring matcher fires.
-        var narrative = tc.NarrativeMentionsTitle
-            ? $"You should {tc.Item.Title} as your top priority."
-            : "Some unrelated text that mentions nothing.";
-
-        var channelJson = JsonSerializer.Serialize(new
-        {
-            channel = tc.Item.SourceEntityType,
-            narrative = new[] { narrative }
-        });
-
-        var (actions, llm, scrubber) = BuildBoundaryMocks(tldrJson, channelJson);
+        var (actions, llm, scrubber) = BuildBoundaryMocks();
 
         var sut = new DailyBriefingNarrator(
             actions.Object,
@@ -252,37 +221,45 @@ public sealed class DailyBriefingNarratorEntityLinkTests
         // Act
         var response = await sut.NarrateAsync(req, CancellationToken.None);
 
-        // Assert — exactly one channel narrative with one bullet; bullet's
-        // PrimaryEntity* fields point to the expected target.
+        // Assert — exactly one channel narrative with one bullet; bullet's Narrative is the
+        // source item's Title VERBATIM (deterministic — no LLM authorship), and PrimaryEntity*
+        // fields point to the expected target.
         response.ChannelNarratives.Should().HaveCount(1, because: tc.Name);
         var bullets = response.ChannelNarratives[0].Bullets;
         bullets.Should().HaveCount(1, because: tc.Name);
 
         var bullet = bullets[0];
-        bullet.Narrative.Should().Be(narrative, because: tc.Name);
+        bullet.Narrative.Should().Be(tc.Item.Title, because: tc.Name + " — deterministic bullet echoes the source Title verbatim");
         bullet.PrimaryEntityType.Should().Be(tc.ExpectedPrimaryEntityType, because: tc.Name);
         bullet.PrimaryEntityId.Should().Be(tc.ExpectedPrimaryEntityId, because: tc.Name);
         bullet.PrimaryEntityName.Should().Be(tc.ExpectedPrimaryEntityName, because: tc.Name);
 
-        // The ItemIds collection includes the matched item's Id regardless of
-        // tier — widget uses this for "Add To Do" + "Dismiss" actions, both
-        // of which key off the SOURCE row id (not the regarding row id).
+        // ItemIds carries the source item's own Id — widget uses this for "Add To Do" +
+        // "Dismiss" actions, both of which key off the SOURCE row id.
         bullet.ItemIds.Should().Contain(tc.Item.Id, because: tc.Name);
+
+        // The Strict LLM mock only stubs the TL;DR action — if the narrator had called
+        // anything else (e.g., a resurrected per-channel leg), Moq would throw and this
+        // test would fail. That IS the "exactly one LLM call" assertion.
+        llm.Verify(c => c.GetStructuredCompletionRawAsync(
+                It.IsAny<string>(), It.IsAny<BinaryData>(), TldrActionCode.Replace('-', '_'),
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
-    // ─── Negative path: narrative mentions nothing → bullet has no link ─────
+    // ─── Negative path: item with neither regarding nor source-entity data → no link ────
 
     [Fact]
-    public async Task NarrateAsync_LeavesBulletUnlinked_WhenNarrativeDoesNotMentionAnyItemName()
+    public async Task NarrateAsync_LeavesBulletUnlinked_WhenItemHasNoRegardingOrSourceEntityData()
     {
         var item = new ChannelItemDto
         {
-            Id = "event-x",
+            Id = "",
             Title = "Some specific task name",
-            RegardingName = "Some Matter Name",
-            RegardingEntityType = "sprk_matter",
-            RegardingId = Guid.NewGuid().ToString(),
-            SourceEntityType = "sprk_event"
+            RegardingName = "",
+            RegardingEntityType = "",
+            RegardingId = "",
+            SourceEntityType = ""
         };
 
         var req = new DailyBriefingNarrateRequest
@@ -296,16 +273,7 @@ public sealed class DailyBriefingNarratorEntityLinkTests
             ]
         };
 
-        var tldrJson = JsonSerializer.Serialize(new { summary = "s", keyTakeaways = new[] { "k" }, topAction = "a" });
-
-        // Narrative mentions NEITHER the item title NOR the regarding name.
-        var channelJson = JsonSerializer.Serialize(new
-        {
-            channel = "tasks",
-            narrative = new[] { "Generic prose that references no specific entity at all." }
-        });
-
-        var (actions, llm, scrubber) = BuildBoundaryMocks(tldrJson, channelJson);
+        var (actions, llm, scrubber) = BuildBoundaryMocks();
 
         var sut = new DailyBriefingNarrator(actions.Object, llm.Object, scrubber.Object,
             NullLogger<DailyBriefingNarrator>.Instance);
@@ -314,20 +282,20 @@ public sealed class DailyBriefingNarratorEntityLinkTests
 
         response.ChannelNarratives.Should().HaveCount(1);
         var bullet = response.ChannelNarratives[0].Bullets.Single();
+        bullet.Narrative.Should().Be(item.Title);
         bullet.PrimaryEntityType.Should().BeEmpty(
-            because: "no item name was mentioned, so no entity-link resolution is possible");
+            because: "neither RegardingId nor SourceEntityType+Id is populated, so no entity-link resolution is possible");
         bullet.PrimaryEntityId.Should().BeEmpty();
         bullet.PrimaryEntityName.Should().BeEmpty();
     }
 
-    // ─── Mixed channel: one orphan + one regarding-matter item ──────────────
-    // Tier 1 should win — the matter-linked match comes first in the resolution
-    // order even if the orphan is earlier in the items array.
+    // ─── Multi-item channel: deterministic pass-through, one bullet per item ────────────
+    // Pre-R5 the LLM could aggregate multiple items into one bullet ("several tasks...").
+    // Post-R5 each source item gets its own bullet — no aggregation, no LLM authorship.
 
     [Fact]
-    public async Task NarrateAsync_PrefersRegardingMatch_OverOrphanFallback_WhenBothItemsMatch()
+    public async Task NarrateAsync_ProducesOneBulletPerSourceItem_WithNoCrossItemAggregation()
     {
-        // Orphan item (no regarding) listed FIRST.
         var orphan = new ChannelItemDto
         {
             Id = "event-orphan",
@@ -337,7 +305,6 @@ public sealed class DailyBriefingNarratorEntityLinkTests
             RegardingId = "",
             SourceEntityType = "sprk_event"
         };
-        // Regarding-matter item listed SECOND.
         var regarding = new ChannelItemDto
         {
             Id = "event-regarding",
@@ -359,41 +326,36 @@ public sealed class DailyBriefingNarratorEntityLinkTests
                 {
                     Category = "tasks",
                     Label = "Tasks",
-                    Items = [orphan, regarding]  // orphan FIRST
+                    Items = [orphan, regarding]
                 }
             ]
         };
 
-        // Narrative mentions BOTH titles. Resolution should still prefer
-        // the regarding-matter match (Tier 1) over the orphan (Tier 2),
-        // because Tier 1 produces a richer click-through to the parent matter.
-        var tldrJson = JsonSerializer.Serialize(new { summary = "s", keyTakeaways = new[] { "k" }, topAction = "a" });
-        var channelJson = JsonSerializer.Serialize(new
-        {
-            channel = "tasks",
-            narrative = new[] { $"Both {orphan.Title} and {regarding.Title} need attention." }
-        });
-
-        var (actions, llm, scrubber) = BuildBoundaryMocks(tldrJson, channelJson);
+        var (actions, llm, scrubber) = BuildBoundaryMocks();
         var sut = new DailyBriefingNarrator(actions.Object, llm.Object, scrubber.Object,
             NullLogger<DailyBriefingNarrator>.Instance);
 
         var response = await sut.NarrateAsync(req, CancellationToken.None);
 
-        var bullet = response.ChannelNarratives[0].Bullets.Single();
-        bullet.PrimaryEntityType.Should().Be("sprk_matter",
-            because: "Tier 1 (regarding-matter) wins over Tier 2 (orphan source-entity fallback)");
-        bullet.PrimaryEntityId.Should().Be(regarding.RegardingId);
-        bullet.PrimaryEntityName.Should().Be(regarding.RegardingName);
+        // Two source items → two independent bullets (no LLM aggregation).
+        var bullets = response.ChannelNarratives[0].Bullets;
+        bullets.Should().HaveCount(2);
 
-        // BOTH matched items contribute to ItemIds (widget aggregates actions).
-        bullet.ItemIds.Should().BeEquivalentTo(new[] { orphan.Id, regarding.Id });
+        bullets[0].Narrative.Should().Be(orphan.Title);
+        bullets[0].PrimaryEntityType.Should().Be("sprk_event", because: "orphan item falls back to its own source row");
+        bullets[0].PrimaryEntityId.Should().Be(orphan.Id);
+        bullets[0].ItemIds.Should().BeEquivalentTo(new[] { orphan.Id });
+
+        bullets[1].Narrative.Should().Be(regarding.Title);
+        bullets[1].PrimaryEntityType.Should().Be("sprk_matter");
+        bullets[1].PrimaryEntityId.Should().Be(regarding.RegardingId);
+        bullets[1].ItemIds.Should().BeEquivalentTo(new[] { regarding.Id });
     }
 
-    // ─── Test infrastructure (mirrors DailyBriefingNarratorTldrChainingTests) ─
+    // ─── Test infrastructure ──────────────────────────────────────────────────────────────
 
     private static (Mock<AnalysisActionService> actions, Mock<IOpenAiClient> llm, Mock<IEntityNameScrubber> scrubber)
-        BuildBoundaryMocks(string tldrResponseJson, string channelResponseJson)
+        BuildBoundaryMocks()
     {
         var actions = new Mock<AnalysisActionService>(MockBehavior.Loose,
             new HttpClient { BaseAddress = new Uri("https://example.crm.dynamics.com/api/data/v9.2/") },
@@ -403,9 +365,17 @@ public sealed class DailyBriefingNarratorEntityLinkTests
 
         actions.Setup(s => s.GetActionByCodeAsync(TldrActionCode, It.IsAny<CancellationToken>()))
                .ReturnsAsync(MakeTldrAction());
-        actions.Setup(s => s.GetActionByCodeAsync(ChannelActionCode, It.IsAny<CancellationToken>()))
-               .ReturnsAsync(MakeChannelAction());
 
+        var tldrJson = JsonSerializer.Serialize(new
+        {
+            summary = "summary",
+            keyTakeaways = new[] { "k1" },
+            topAction = "action"
+        });
+
+        // Strict — the TL;DR action is the ONLY LLM call this narrator is allowed to make
+        // post-R5 task 010. Any other invocation (e.g. a resurrected per-channel call)
+        // throws MockException and fails the test.
         var llm = new Mock<IOpenAiClient>(MockBehavior.Strict);
         llm.Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(),
@@ -415,16 +385,7 @@ public sealed class DailyBriefingNarratorEntityLinkTests
                 It.IsAny<int?>(),
                 It.IsAny<float?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(tldrResponseJson);
-        llm.Setup(c => c.GetStructuredCompletionRawAsync(
-                It.IsAny<string>(),
-                It.IsAny<BinaryData>(),
-                ChannelActionCode.Replace('-', '_'),
-                It.IsAny<string?>(),
-                It.IsAny<int?>(),
-                It.IsAny<float?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(channelResponseJson);
+            .ReturnsAsync(tldrJson);
 
         var scrubber = new Mock<IEntityNameScrubber>(MockBehavior.Loose);
         scrubber.Setup(s => s.Scrub(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>()))
@@ -443,18 +404,6 @@ public sealed class DailyBriefingNarratorEntityLinkTests
         Name = TldrActionCode,
         SystemPrompt = "TLDR.",
         OutputSchemaJson = """{"type":"object","properties":{"summary":{"type":"string"},"keyTakeaways":{"type":"array","items":{"type":"string"}},"topAction":{"type":"string"}},"required":["summary","keyTakeaways","topAction"],"additionalProperties":false}""",
-        SortOrder = 0,
-        ExecutorType = ExecutorType.AiAnalysis,
-        OwnerType = ScopeOwnerType.System,
-        Temperature = 0.0m
-    };
-
-    private static AnalysisAction MakeChannelAction() => new()
-    {
-        Id = Guid.NewGuid(),
-        Name = ChannelActionCode,
-        SystemPrompt = "CHANNEL.",
-        OutputSchemaJson = """{"type":"object","properties":{"channel":{"type":"string"},"narrative":{"type":"array","items":{"type":"string"}}},"required":["channel","narrative"],"additionalProperties":false}""",
         SortOrder = 0,
         ExecutorType = ExecutorType.AiAnalysis,
         OwnerType = ScopeOwnerType.System,
@@ -483,7 +432,6 @@ public sealed class DailyBriefingNarratorEntityLinkTests
     {
         public required string Name { get; init; }
         public required ChannelItemDto Item { get; init; }
-        public bool NarrativeMentionsTitle { get; init; } = true;
         public required string ExpectedPrimaryEntityType { get; init; }
         public required string ExpectedPrimaryEntityId { get; init; }
         public required string ExpectedPrimaryEntityName { get; init; }

@@ -3,7 +3,7 @@
   <metadata>
     <title>Revert collector membership-resolver bypass; re-flip pinned test; add collaborator smoke test</title>
     <phase>B: Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>034</blocks>

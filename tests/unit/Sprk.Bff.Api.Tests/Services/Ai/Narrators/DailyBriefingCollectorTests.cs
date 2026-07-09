@@ -9,8 +9,10 @@
 //   - Per-bullet entity-link metadata (RegardingEntityType + RegardingId) populated for
 //     ALL 6 entity types — sprk_event tasks reference sprk_matter; sprk_document references
 //     sprk_matter; sprk_matter / sprk_project self-regard; sprk_todo references sprk_matter
-//   - Ownership gate is owner-scoped QueryExpression (owninguser eq user) — resolver bypassed
-//     since 5ca115765 (R7 W12 cutover, DEF-NNN); no inline FetchXml and no unscoped fetch
+//   - Ownership gate routes through IMembershipResolverService for events/matters/projects
+//     (R5 task 033 reverted the R7 W12 owner-only bypass now that the R7 root-cause fix to
+//     MembershipFieldDiscoveryService synthesizes Owner/Customer lookup targets) — collaborators
+//     (e.g. sprk_assignedattorney1) are included in the candidate set, not just owners
 //   - Failure-soft per-channel: a single channel exception does not abort the briefing
 //
 // Per CLAUDE.md tests/CLAUDE.md anti-pattern bans:
@@ -235,22 +237,25 @@ public sealed class DailyBriefingCollectorTests
     }
 
     [Fact]
-    public async Task CollectAsync_OwnershipGate_UsesOwnerScopedQueryExpressions_ResolverBypassed()
+    public async Task CollectAsync_OwnershipGate_RoutesThroughMembershipResolver()
     {
-        // Since commit 5ca115765 (R7 W12 widget cutover, 2026-06-30) the collector BYPASSES
-        // IMembershipResolverService — the resolver returns 0 rows for records owned via the
-        // polymorphic Owner attribute (DEF-NNN) — and resolves candidate sets via direct
-        // owner-scoped QueryExpression queries (owninguser eq systemUserId).
-        //
-        // PROTECTIVE INTENT PRESERVED from the pre-cutover test: the ownership gate MUST be
-        // a structured, per-user-scoped query — never inline FetchXML and never an unscoped
-        // fetch that leaks other users' records into the briefing.
-        //
-        // When the resolver bug is fixed and ResolveMembershipsSafelyAsync is restored, this
-        // test MUST be flipped back to resolver-routing assertions (Times.Once per entity type).
+        // R5 task 033 (2026-07-08) — re-flip of the R7 W12 pin (PR #558). The R7 W12 owner-only
+        // bypass (commit 5ca115765) has been reverted: the R7 root-cause fix to
+        // MembershipFieldDiscoveryService.ProjectLookupAttributeRows now synthesizes Owner +
+        // Customer lookup targets, so IMembershipResolverService returns rows for the
+        // polymorphic Owner attribute again. Candidate-set resolution for events/matters/
+        // projects routes through the resolver — this test now asserts resolver ROUTING
+        // (not the bypass) so collaborator scope (assigned attorneys, paralegals, etc.) is
+        // restored.
 
-        // Arrange — capture every Dataverse query the collector issues.
-        var resolverMock = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        // Arrange
+        var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
+        {
+            ["sprk_event"] = MembershipWith("sprk_event", EventId1),
+            ["sprk_matter"] = MembershipWith("sprk_matter", MatterId1),
+            ["sprk_project"] = MembershipWith("sprk_project", ProjectId1),
+        });
+
         var capturedQueries = new List<QueryExpression>();
         var entityMock = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entityMock
@@ -266,31 +271,19 @@ public sealed class DailyBriefingCollectorTests
         // Act
         _ = await sut.CollectAsync(SystemUserId, CancellationToken.None);
 
-        // Assert — the resolver is NOT invoked at all on the current (bypassed) path.
-        resolverMock.Verify(r => r.ResolveAsync(
-            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
-            Times.Never,
-            "R7 W12 cutover bypasses IMembershipResolverService until DEF-NNN (polymorphic-Owner) is fixed");
-
-        // Each candidate-set entity type gets exactly ONE owner-scoped QueryExpression:
-        // owninguser eq {systemUserId}. QueryExpression (not a FetchXML string) keeps the
-        // ownership predicate structurally inspectable — the inline-FetchXml eq-userid
-        // bypass the original test guarded against stays banned.
+        // Assert — the resolver IS invoked exactly once per candidate-set entity type, scoped
+        // to the acting user.
         foreach (var entityType in new[] { "sprk_event", "sprk_matter", "sprk_project" })
         {
-            capturedQueries
-                .Where(q => q.EntityName == entityType)
-                .Should().ContainSingle(
-                    $"candidate-set resolution for {entityType} is a single owned-ID query " +
-                    "(channel queries early-return when the candidate set is empty)")
-                .Which.Criteria.Conditions.Should().Contain(c =>
-                    c.AttributeName == "owninguser" &&
-                    c.Operator == ConditionOperator.Equal &&
-                    c.Values.Contains((object)SystemUserId),
-                    "the ownership gate must scope to the acting user's systemuserid");
+            resolverMock.Verify(r => r.ResolveAsync(
+                SystemUserId, entityType, It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
+                Times.Once,
+                $"candidate-set resolution for {entityType} must route through IMembershipResolverService");
         }
 
-        // The per-user to-dos channel also stays owner-scoped (no membership dependency).
+        // The per-user to-dos channel stays a direct owner-scoped QueryExpression — sprk_todo
+        // has no membership-bearing fields, so it is intentionally out of scope for the
+        // resolver-routing revert.
         capturedQueries
             .Where(q => q.EntityName == "sprk_todo")
             .Should().ContainSingle()
@@ -299,6 +292,125 @@ public sealed class DailyBriefingCollectorTests
                 c.Operator == ConditionOperator.Equal &&
                 c.Values.Contains((object)SystemUserId),
                 "todos are per-user; an unscoped todo query would leak other users' items");
+    }
+
+    [Fact]
+    public async Task CollectAsync_CollaboratorNotOwner_SeesAssignedMatterInCandidateSet()
+    {
+        // R5 task 033 collaborator smoke test (spec FR-C4). A systemUser who is a
+        // sprk_assignedattorney1 (collaborator) but NOT the owner of a matter must see that
+        // matter in the collected briefing candidate set. IMembershipResolverService discovers
+        // the assignedAttorney role (unlike the reverted owner-only bypass, which only ever
+        // matched `owninguser = systemUserId`).
+        //
+        // This test is constructed so it FAILS against the old bypass: the entity-service stub
+        // returns EMPTY for any query that filters on `owninguser` (simulating that this user
+        // does not own the matter directly — the bypass's ResolveOwnedIdsAsync query would find
+        // nothing) and returns the matter row only for the membership-driven `sprk_matterid IN
+        // [...]` query the resolver-routed channel query issues.
+
+        // Arrange — resolver reports the matter via the assignedAttorney role (NOT owner).
+        var resolverMock = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        resolverMock
+            .Setup(r => r.ResolveAsync(
+                SystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MembershipResponse(
+                EntityType: "sprk_matter",
+                PersonIdentity: MakeIdentity(),
+                Ids: new[] { MatterId1 },
+                ByRole: new Dictionary<string, IReadOnlyList<Guid>> { ["assignedAttorney"] = new[] { MatterId1 } },
+                Count: 1,
+                CacheExpiresAt: DateTimeOffset.UtcNow.AddMinutes(5)));
+        resolverMock
+            .Setup(r => r.ResolveAsync(
+                SystemUserId, It.Is<string>(e => e != "sprk_matter"), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .Returns<Guid, string, MembershipResolveOptions?, CancellationToken>(
+                (_, entityType, _, _) => Task.FromResult(EmptyMembership(entityType)));
+
+        var entityMock = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entityMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns<QueryExpression, CancellationToken>((q, _) =>
+            {
+                var isDirectOwnerLookup = q.Criteria.Conditions.Any(c => c.AttributeName == "owninguser");
+                if (isDirectOwnerLookup)
+                {
+                    // The old bypass's direct-owner lookup — this user owns nothing directly.
+                    return Task.FromResult(new EntityCollection());
+                }
+                if (q.EntityName == "sprk_matter")
+                {
+                    return Task.FromResult(new EntityCollection(new List<Entity>
+                    {
+                        MakeMatterEntity(MatterId1, "Collaborator Matter")
+                    }));
+                }
+                return Task.FromResult(new EntityCollection());
+            });
+
+        var sut = new DailyBriefingCollector(
+            entityMock.Object,
+            resolverMock.Object,
+            NullLogger<DailyBriefingCollector>.Instance);
+
+        // Act
+        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+
+        // Assert — the collaborator-only matter surfaces in the briefing.
+        request.Channels.Should().Contain(c => c.Category == "matters",
+            "the assigned attorney (collaborator, not owner) must see the matter via membership resolution");
+        request.Channels.Single(c => c.Category == "matters").Items
+            .Should().ContainSingle(i => i.RegardingId == MatterId1.ToString());
+    }
+
+    [Fact]
+    public async Task CollectAsync_OwnerOfMatterProjectEvent_StillIncludedInCandidateSet()
+    {
+        // R5 task 033 owner-scoped regression guard: reverting the bypass MUST NOT regress the
+        // owner-scoped case. A systemUser who OWNS a matter, project, and event still sees all
+        // three in the briefing candidate set once resolution is routed through
+        // IMembershipResolverService.
+        var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
+        {
+            ["sprk_event"] = MembershipWith("sprk_event", EventId1),
+            ["sprk_matter"] = MembershipWith("sprk_matter", MatterId1),
+            ["sprk_project"] = MembershipWith("sprk_project", ProjectId1),
+        });
+
+        var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>
+        {
+            ["sprk_event"] = new EntityCollection(new List<Entity>
+            {
+                MakeEventEntity(EventId1, "Owned Task", "Matter Alpha", MatterId1)
+            }),
+            ["sprk_matter"] = new EntityCollection(new List<Entity>
+            {
+                MakeMatterEntity(MatterId1, "Owned Matter")
+            }),
+            ["sprk_project"] = new EntityCollection(new List<Entity>
+            {
+                MakeProjectEntity(ProjectId1, "Owned Project")
+            }),
+        });
+
+        var sut = new DailyBriefingCollector(
+            entityMock.Object,
+            resolverMock.Object,
+            NullLogger<DailyBriefingCollector>.Instance);
+
+        // Act
+        var request = await sut.CollectAsync(SystemUserId, CancellationToken.None);
+
+        // Assert — owner still sees their own matter, project, and (task-typed) event.
+        request.Channels.Should().Contain(c => c.Category == "matters");
+        request.Channels.Single(c => c.Category == "matters").Items
+            .Should().ContainSingle(i => i.RegardingId == MatterId1.ToString());
+
+        request.Channels.Should().Contain(c => c.Category == "projects");
+        request.Channels.Single(c => c.Category == "projects").Items
+            .Should().ContainSingle(i => i.RegardingId == ProjectId1.ToString());
+
+        request.Channels.Should().Contain(c => c.Category == "upcoming-tasks");
     }
 
     [Fact]

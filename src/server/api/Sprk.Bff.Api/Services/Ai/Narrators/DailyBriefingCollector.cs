@@ -215,28 +215,32 @@ public class DailyBriefingCollector : ICodedWorkflow
 
         // ── Phase 1: resolve candidate-set IDs for the 3 entities in parallel.
         //
-        // R7 W12 widget cutover (2026-06-30) — BYPASS of IMembershipResolverService.
-        //   The resolver returns 0 rows for users who own records via `ownerid` on
-        //   sprk_matter / sprk_project / sprk_event, despite the FetchXml running against
-        //   the correct systemUserId. Root cause is in the resolver's descriptor/condition
-        //   translation for the polymorphic Owner attribute; needs deeper investigation and
-        //   affects all consumers of IMembershipResolverService (chat scope resolution,
-        //   knowledge base filtering, etc.). Filed as DEF-NNN for follow-up.
+        // R5 task 033 (2026-07-08) — bypass reverted; routes through
+        // IMembershipResolverService again.
         //
-        //   For the Daily Briefing MVP tonight, this collector uses direct `owninguser`
-        //   queries — matches the Todos pattern below. Trade-off: collaborators (members
-        //   via sprk_assignedattorney*, sprk_assignedparalegal*, sprk_assignedtointernal,
-        //   etc.) are NOT included in the candidate set. Owner-only scope is the operator-
-        //   accepted MVP fallback until the resolver bug is fixed. Once the resolver is
-        //   fixed, revert to `ResolveMembershipsSafelyAsync` calls to restore collaborator
-        //   scope.
+        //   R7 W12 (2026-06-30) had introduced a temporary owner-only bypass here because
+        //   the resolver returned 0 rows for the polymorphic Owner attribute (DEF-NNN) —
+        //   `OwnerAttributeMetadata` doesn't inherit from the sealed `LookupAttributeMetadata`,
+        //   so the resolver's condition translation silently dropped Owner-based membership
+        //   fields. R7 ALSO shipped the root-cause fix in the same wave:
+        //   `MembershipFieldDiscoveryService.ProjectLookupAttributeRows` now synthesizes
+        //   Owner + Customer lookup targets from the base `AttributeMetadata`, so the resolver
+        //   returns rows for owner-based fields again.
         //
-        //   Reference: projects/spaarke-ai-platform-unification-r7/notes/handoffs/
-        //              daily-briefing-widget-cutover-restart.md §10 secondary risk.
+        //   With the root cause fixed, the owner-only bypass left in place silently
+        //   under-scoped the candidate set: it only matched `owninguser`, so collaborators
+        //   (assigned attorneys, paralegals, etc. — reachable via
+        //   IMembershipResolverService's other discovered roles) never appeared in the
+        //   briefing. This routes candidate-set resolution back through
+        //   `ResolveMembershipsSafelyAsync` to restore full membership scope (owner +
+        //   collaborator roles) for events/matters/projects.
+        //
+        //   Reference: projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/
+        //              03-code-review-followups.md item 1.
         var membershipsTask = Task.WhenAll(
-            ResolveOwnedIdsAsync(systemUserId, EntityEvent, "sprk_eventid", filterActive: false, ct),
-            ResolveOwnedIdsAsync(systemUserId, EntityMatter, "sprk_matterid", filterActive: true, ct),
-            ResolveOwnedIdsAsync(systemUserId, EntityProject, "sprk_projectid", filterActive: true, ct));
+            ResolveMembershipsSafelyAsync(systemUserId, EntityEvent, ct),
+            ResolveMembershipsSafelyAsync(systemUserId, EntityMatter, ct),
+            ResolveMembershipsSafelyAsync(systemUserId, EntityProject, ct));
 
         var memberships = await membershipsTask.ConfigureAwait(false);
         var eventIds = memberships[0];
@@ -244,7 +248,7 @@ public class DailyBriefingCollector : ICodedWorkflow
         var projectIds = memberships[2];
 
         _logger.LogInformation(
-            "DailyBriefingCollector owned IDs resolved (resolver bypass — R7 W12): events={EventCount}, matters={MatterCount}, projects={ProjectCount}",
+            "DailyBriefingCollector membership-resolved IDs: events={EventCount}, matters={MatterCount}, projects={ProjectCount}",
             eventIds.Count, matterIds.Count, projectIds.Count);
 
         // ── Phase 2: query per-channel candidate rows in parallel.
@@ -599,64 +603,6 @@ public class DailyBriefingCollector : ICodedWorkflow
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// R7 W12 widget cutover (2026-06-30) — direct-owner ID query. Returns record IDs of
-    /// <paramref name="entityType"/> where <c>owninguser</c> equals <paramref name="systemUserId"/>.
-    /// Used in place of <see cref="ResolveMembershipsSafelyAsync"/> while the membership
-    /// resolver's polymorphic-Owner classification bug is being investigated (DEF-NNN).
-    /// </summary>
-    /// <param name="systemUserId">The calling user's systemuserid.</param>
-    /// <param name="entityType">Logical name of the target entity (sprk_matter / sprk_project / sprk_event).</param>
-    /// <param name="idColumn">Primary-key column name for the entity (e.g. sprk_matterid).</param>
-    /// <param name="filterActive">If true, adds statecode = 0 (Active). sprk_event doesn't have a statecode filter here — event status is checked in QueryEventsAsync.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>List of owned entity IDs. Empty on error (logged as warning) so downstream channels degrade gracefully.</returns>
-    private async Task<IReadOnlyList<Guid>> ResolveOwnedIdsAsync(
-        Guid systemUserId,
-        string entityType,
-        string idColumn,
-        bool filterActive,
-        CancellationToken ct)
-    {
-        try
-        {
-            var query = new QueryExpression(entityType)
-            {
-                NoLock = true,
-                TopCount = 500,
-                ColumnSet = new ColumnSet(idColumn)
-            };
-            query.Criteria.AddCondition("owninguser", ConditionOperator.Equal, systemUserId);
-            if (filterActive)
-            {
-                query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
-            }
-
-            var result = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            var ids = new List<Guid>(result.Entities.Count);
-            foreach (var e in result.Entities)
-            {
-                var id = e.GetAttributeValue<Guid>(idColumn);
-                if (id != Guid.Empty)
-                {
-                    ids.Add(id);
-                }
-            }
-            return ids;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "DailyBriefingCollector direct-owner lookup failed for entity={EntityType}; downstream channels will degrade",
-                entityType);
-            return Array.Empty<Guid>();
-        }
-    }
-
-    /// <summary>
     /// Resolves membership for a single entity type. Returns empty list on any failure
     /// (logged as warning) so a partial-failure in the membership pipeline doesn't
     /// abort the whole briefing — the dependent per-channel query simply returns
@@ -1008,7 +954,10 @@ public class DailyBriefingCollector : ICodedWorkflow
     ///   1. Ownership filter changed from `ownerid = systemUserId` to
     ///      `owninguser = systemUserId`. The polymorphic Owner attribute doesn't
     ///      match plain Guid values reliably in QueryExpression (same class of
-    ///      bug as the membership resolver — see ResolveOwnedIdsAsync above).
+    ///      bug the R7 root-cause fix addressed for the membership resolver —
+    ///      see ResolveMembershipsSafelyAsync above). sprk_todo has no
+    ///      membership-bearing fields, so it stays a direct per-user query
+    ///      (out of scope for the R5 task 033 resolver-routing revert).
     ///   2. Date filter widened from `= today OR = tomorrow` (exact timestamp
     ///      match, misses records with any time-of-day) to `>= today start UTC`
     ///      (matches operator intent: "today, tomorrow, later"). Operator can
