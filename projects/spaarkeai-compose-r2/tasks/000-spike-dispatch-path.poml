@@ -2,7 +2,7 @@
   <metadata>
     <title>Spike 0 — validate session-dispatch path (throwaway compose Binding)</title>
     <phase>0 Spikes</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>001, 010, 016</blocks>
@@ -86,4 +86,33 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-08 (static code trace + contract reconciliation). Deliverable:
+    notes/spikes/spike-0-dispatch-path.md.
+
+    DECISION: The shipped ADR-039 session-dispatch seam is confirmed present + coherent
+    end-to-end for a Compose Binding (server route unconditional, orchestrator resolves the
+    Binding table, ADR-040 ledger-before-render, shared SSE writer, one client helper). ZERO
+    new BFF dispatch routes needed.
+
+    KEY CORRECTION (changes Phase 1/3/4): the design/POML `compose_action_request`
+    `{bindingId, selection, args}` event DOES NOT EXIST and must not be created. The real,
+    R1-shipped contract is the six-flow choreography in Spaarke.Compose.Components
+    compose-contracts.ts — a selection emits `conversation.compose_selection_offer` (Flow 2);
+    the actual dispatch is a direct `dispatchConsumer(bindingId, {slots})` call (the shipped
+    useConsumerChips pattern); Assistant→editor insertion is `workspace.compose_assistant_insert`
+    (Flow 5). Tasks 016/030/046 must be authored against this, not `compose_action_request`.
+
+    Also confirmed: the parallel Compose AI-dispatch endpoint (POST /api/compose/action/
+    {consumerType}) is DELETED (design §2.1/§7.2 premise holds); only a stale doc-comment
+    survives at IComposeService.cs:35 (minor Phase-4/5 cleanup). R7 LinearConsumers and the
+    session-dispatch seam are the same routing surface (sprk_playbookconsumer table), not rivals.
+
+    CAVEAT: criteria 3 (SSE) + 4 (ledger write) are statically confirmed (wiring correct) but
+    NOT live-observed — a headless code session cannot render live frames/rows. Runtime
+    confirmation recipe recorded in the note §6 (run on spaarkedev1 at Phase 1 start; needs a
+    throwaway Binding — core-A0-gated). Deliberately did not author/commit throwaway rows or
+    stub UI (directional step-mode adaptation; rationale in note §7).
+  </notes>
 </task>

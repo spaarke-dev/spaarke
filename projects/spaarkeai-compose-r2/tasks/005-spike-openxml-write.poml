@@ -2,7 +2,7 @@
   <metadata>
     <title>Spike 5 — Open XML write w:ins+w:comment → Word for Web</title>
     <phase>0 Spikes</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>006, 008, 050</blocks>

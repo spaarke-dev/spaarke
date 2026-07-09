@@ -14,6 +14,8 @@
 >
 > ### Revision log
 >
+> **2026-07-08 (Spike 0 — dispatch-contract correction)** — **The session-dispatch seam is confirmed (static code trace) end-to-end for a Compose Binding** (`notes/spikes/spike-0-dispatch-path.md`): shipped server route `POST /api/ai/chat/sessions/{id}/dispatch` (unconditional) → `SessionDispatchOrchestrator` → Binding-table resolution → ADR-040 ledger-before-render → shared SSE writer → the one client helper `dispatchConsumer(bindingId, args)`; ZERO new BFF dispatch routes. **Correction folded into §2.1, §3, §5, §7.2, §13:** the previously-named PaneEventBus events **`compose_action_request`** and **`compose_edit_apply_request`** were **invented names that do not exist in the code** — the real, R1-shipped contract is the six-flow choreography in `Spaarke.Compose.Components/src/types/compose-contracts.ts`. A selection emits **`conversation.compose_selection_offer`** (Flow 2, R1-wired); the **actual capability dispatch is a direct `dispatchConsumer(bindingId, {slots})` call** (the shipped `useConsumerChips` pattern — the inline toolbar holds a bound dispatcher; no new bus event routes the dispatch); the Assistant→editor draft insertion is **`workspace.compose_assistant_insert`** (Flow 5, R1-wired behind a user-confirm gate). Also re-confirmed: the parallel `POST /api/compose/action/{consumerType}` endpoint is deleted (only a stale doc-comment survives at `IComposeService.cs:35`); R7 LinearConsumers and the session-dispatch seam are the same `sprk_playbookconsumer` routing surface, not rivals. Tasks 016/030/046 inherit this corrected contract.
+>
 > **2026-07-08 (code verification)** — **Entry-point state verified against the as-built code (Explore agent, file:line evidence).** Confirms owner review #2: **1c WORKS** (ribbon → launch-resolver → `ComposeWorkspace` → `GET /api/compose/documents/{speId}` → `docxBytes`→`docxToTipTapHtml`→`setContent`; load-only, checkout stubbed). **1a is a STUB** (`ComposeEmptyState` Browse/Search callbacks never supplied; fallback bus events have zero subscribers). **1b is NOT-WIRED for uploads** (upload bytes go to `/api/ai/chat/sessions/{id}/documents` for RAG only; `send_workspace_artifact` explicitly refuses session-upload ids — "tab opens empty for session files"; `POST /api/compose/upload` = 501). **Three findings that shrink R2 scope**: (1) **save-time bytes RESOLVED** — save already regenerates `.docx` from editor via `tipTapToDocxBytes` (= option (b), matches §1.6); (2) **create-on-save half-exists** — `PromoteIfEphemeralAsync` already creates the row on save; R2 UPGRADES it to full parity (+association +profile +indexing), not net-new; (3) **transient 1b mount is a short reach** — the `docxBytes` mount seam is source-agnostic and the upload flow retains the original `File`. Grounded facts folded into §2.7(d) and §5.
 >
 > **2026-07-08 (owner UX review #2)** — **Interaction-model + entry-point decisions from a second owner review.** (5a) **Inline redline stays** (design §2.3 confirmed — AI edits materialize as pending track-changes in the Workspace, Word-style; the Assistant hosts the reasoning/confirmation) — **plus a NEW requirement: the Assistant must support undo/replace of a previously-applied AI edit** ("undo that and try another approach" → the prior rewrite is retracted and swapped for a new one). (5b) **Context pane stays audit-only** — confirmed NOT an interactive input surface; the "how do we surface clause/selection inputs" question is **deferred together with clause scope**. (4b/5b) **Clause library + insert-at-cursor are OUT of R2 scope** — but the selection-popover + dispatch model MUST remain extensible so a follow-on project adds them without rearchitecting (§2.0 extensibility guarantee). **Entry-point reality correction (supersedes the §5 "✅ SHIPPED" claims):** only **1c** (Document record → "Open in Compose") mounts a file today (TipTap load only; no further functionality). **1a** (spaarke.ai home, no Document: "Browse / open file" + "Search for Document") and **1b** (Assistant upload → "open in Compose") **never worked** and are **R2 build items**. **§2.7(d) reframed**: a chat-UPLOADED file **mounts immediately as a transient working draft** (rendered from upload bytes — no SPE pointer needed to render) and **becomes a real Spaarke Document on first Save** at full ingestion parity (create-on-save; the save confirmation IS the "create it?" moment) — replacing the prior "uploaded files can never load directly / create-first" framing. Open save-time detail (spec/Spike-5): which bytes persist to SPE — original upload vs. regenerated `.docx` from editor state.
@@ -135,13 +137,13 @@ Per adeu's "tool descriptions ARE the prompt" insight, the same descriptions tha
 **User story**: User selects a clause they don't fully understand. **Inline AI toolbar appears near the selection** (per §2.0); user clicks "Explain". Assistant returns a plain-language explanation with relevant legal context.
 
 **Three-pane choreography**:
-- **Workspace**: Selection highlighted; persistent annotation marker added (clickable to replay explanation); inline toolbar dismisses after click. **Toolbar click dispatches a PaneEventBus event** to the Assistant pane with `{bindingId, selection, args}` — a Click-path invocation by construction (ADR-039).
-- **Assistant**: Consumes the PaneEventBus event and dispatches through the **shipped session-dispatch seam**: `dispatchConsumer(bindingId, args)` → `POST /api/ai/chat/sessions/{sessionId}/dispatch` → `SessionDispatchOrchestrator` → Binding resolution (`IConsumerRoutingService`) → prompted executor. The response **streams via SSE** into the Assistant's chat surface as an assistant message (ledger-written before render, ADR-040); offers follow-up actions ("Compare to playbook?", "Draft alternative?")
+- **Workspace**: Selection highlighted; persistent annotation marker added (clickable to replay explanation); inline toolbar dismisses after click. **The inline toolbar holds a bound dispatcher and calls `dispatchConsumer(bindingId, {slots})` directly** (the shipped `useConsumerChips` pattern) — a Click-path invocation by construction (ADR-039); no new PaneEventBus event routes the dispatch. In parallel, the settling selection emits `conversation.compose_selection_offer` (Flow 2, R1-wired) so the Assistant/Context panes can choreograph (surface sources, offer follow-ups).
+- **Assistant**: The dispatch runs through the **shipped session-dispatch seam**: `dispatchConsumer(bindingId, {slots})` → `POST /api/ai/chat/sessions/{sessionId}/dispatch` → `SessionDispatchOrchestrator` → Binding resolution (`IConsumerRoutingService`) → prompted executor. The response **streams via SSE** into the Assistant's chat surface as an assistant message (ledger-written before render, ADR-040); offers follow-up actions ("Compare to playbook?", "Draft alternative?")
 - **Context**: **Sources surfaced (per §2.0 provenance pattern)** — related precedent clauses from matter; relevant golden references from `spaarke-rag-references` index; click-to-navigate to source; execution trace hosted via the core's D-F4 view
 
 **Catalog rows**: `compose-explain-clause` — NEW `sprk_analysisaction` Action row (carries SystemPrompt + OutputSchemaJson + Temperature + ModelDeploymentId) **+ one NEW `sprk_playbookconsumer` Binding row** targeting it (the invocation config the toolbar's Click dispatch resolves)
 **JPS scope**: `compose-selection` (defined in R1)
-**Dispatch path**: PaneEventBus (`conversation` channel, discriminant `compose_action_request`) → Assistant pane → session-dispatch seam → Binding → executor → streaming assistant message. **NO Compose-specific BFF endpoint** — same code path as every other Click-path capability (chips, ribbons, wizards).
+**Dispatch path**: inline toolbar → direct `dispatchConsumer(bindingId, {slots})` (Click path) → session-dispatch seam → Binding → executor → streaming assistant message. The `conversation.compose_selection_offer` event (Flow 2) runs alongside for pane choreography, NOT as the dispatch trigger. **NO Compose-specific BFF endpoint** — same code path as every other Click-path capability (chips, ribbons, wizards).
 
 **Why it matters**: Lowest-effort AI action; universal use; demonstrates Workspace → Assistant flow cleanly.
 
@@ -310,10 +312,10 @@ R1 wired the six coordinated flows with stub receivers. R2 fills them with real 
 | Flow | R1 status | R2 activates |
 |---|---|---|
 | **Workspace → Context** | Wire only | Selection → Context surfaces playbook matches, precedent, prior negotiation history; all entries source-attributed (per §2.0 provenance); Context also HOSTS the core's D-F4 decision-traceability view (trace ledger + `TraceEvent v1`) |
-| **Workspace → Assistant** | Wire only | Selection → **inline AI toolbar appears** (per §2.0); click dispatches PaneEventBus `compose_action_request` on `conversation` channel with `{bindingId, selection, args}`. Assistant consumes + dispatches through the **shipped session-dispatch seam** (`dispatchConsumer` → `POST /api/ai/chat/sessions/{id}/dispatch` → `SessionDispatchOrchestrator` → Binding → executor). NO Compose-specific BFF endpoint. |
+| **Workspace → Assistant** | Wire only (`conversation.compose_selection_offer`, Flow 2) | Selection → **inline AI toolbar appears** (per §2.0); toolbar click calls `dispatchConsumer(bindingId, {slots})` directly (Click path) through the **shipped session-dispatch seam** (`dispatchConsumer` → `POST /api/ai/chat/sessions/{id}/dispatch` → `SessionDispatchOrchestrator` → Binding → executor). The `compose_selection_offer` event choreographs the panes (surface sources/actions); it is NOT the dispatch trigger. NO Compose-specific BFF endpoint. |
 | **Context → Workspace** | Wire only | Drag precedent clause / golden reference from Context → drops into editor as inline citation; click on Context entry navigates Workspace |
 | **Context → Assistant** | Wire only | "Use this precedent" → Assistant takes Context entry as input to next action |
-| **Assistant → Workspace** | Wire only | AI draft (from `compose-draft-alternative`'s structured edit-payload output — §2.3) is **ledger-written as a `SessionOutput` with the `compose` disposition FIRST** (ADR-040 storage-precedes-rendering); the Workspace **materializes** the pending track-change from the stored entry **with `{bindingId}@t{n}` provenance** (clickable to source per §2.0). PaneEventBus `compose_edit_apply_request` on `workspace` channel remains the client choreography signal — it references the ledger entry, never carries the payload as the source of truth. |
+| **Assistant → Workspace** (`workspace.compose_assistant_insert`, Flow 5) | Wire only | AI draft (from `compose-draft-alternative`'s structured edit-payload output — §2.3) is **ledger-written as a `SessionOutput` with the `compose` disposition FIRST** (ADR-040 storage-precedes-rendering); the Workspace **materializes** the pending track-change from the stored entry **with `{bindingId}@t{n}` provenance** (clickable to source per §2.0). PaneEventBus `compose_assistant_insert` on `workspace` channel (Flow 5, R1-wired behind a user-confirm gate) is the client choreography signal — it references the ledger entry, never carries the payload as the source of truth. |
 | **Assistant → Context** | Wire only | AI-derived insight persists to **workspace-scope memory via the gated `memory.write` tool** (core D-M3); surfaces in Context **with full source attribution** (Binding, playbook entry, golden reference, precedent — clickable) |
 
 **Binding architectural rule**: every R2 feature lights up at least two of these six flows. Features that don't are flagged for redesign — three-pane is the differentiator, not an optional layer.
@@ -351,7 +353,7 @@ R1 wired the six coordinated flows with stub receivers. R2 fills them with real 
 | **Entry-point empty state** — "Browse / open file" + "Search for Document" buttons on the Compose empty state | ❌ **NON-FUNCTIONAL** (never worked) | **R2 BUILD ITEM** — wire both buttons (Browse → transient mount; Search → Document lookup + pre-seed) |
 | Open-in-Word handoff via existing `/api/documents/{id}/open-links` | wired | + Push-to-Word annotation infrastructure (NEW BFF service) |
 | SPE plumbing (load, save, promote-on-Save) — `ComposeService` reworked in PR #544 to inject `SpeFileStore` directly; added `SpeFileStore.ReplaceFileContentAsUserAsync` for item-based content replacement | wired | + SPE webhook subscription + delta query for return-from-Word detection; + promotion-on-first-Save bar-raised to full ingestion parity (§2.7) |
-| Three-pane coordination wire-only | wired | + Activated flows per §3 (PaneEventBus discriminants `compose_action_request` + `compose_edit_apply_request` added by R2, upgraded to the D-F3 ack contract) |
+| Three-pane coordination wire-only | wired (six flows, `compose-contracts.ts`) | + Activated flows per §3 — the R1-shipped discriminants (`conversation.compose_selection_offer` Flow 2, `workspace.compose_assistant_insert` Flow 5) go from stub-receiver to real behavior and upgrade to the D-F3 ack contract. R2 adds NO new dispatch-triggering event: the toolbar dispatches via a direct `dispatchConsumer(bindingId, {slots})` call (§7.2). |
 | Single-session lock (`DocumentCheckoutService`), heartbeat | wired | + Conflict UX banner for return-from-Word edits |
 
 **R2 entry-point reality (corrected 2026-07-08 owner review #2; grounded by 2026-07-08 code verification).** Only the **1c** path (Document record → "Open in Compose") mounts a file today, and it is load-only (no AI actions / annotations yet). The **1a** (in-workspace Browse + Search) and **1b** (Assistant upload → mount) entry paths are **R2 build items**, not done. So R2's earliest user-visible work is BOTH: (i) wiring the missing entry paths (1a/1b, including transient-mount + create-on-save per §2.7(d)), and (ii) chat-drafted content landing in the editor via the `compose` disposition.
@@ -382,8 +384,8 @@ R2's risk and effort are concentrated in two distinct phases with different valu
 | **CriticMarkup-as-display** for LLM read direction | LLM sees existing track changes inline as `{++/--/>>/<<}` markers in rendered Markdown | JPS scope payload generator for `compose-selection` and `compose-document` |
 | **`match_mode` validator** (`strict` / `first` / `all`) | LLM specifies match precision; engine refuses ambiguity with actionable error | `IComposeEditValidator` in BFF |
 | **Structured ambiguity errors with recovery paths** | Error includes match count, 5 examples with context, copy-pasteable resolution | Error response shape on validation failure |
-| **4-phase atomic batch pipeline** (resolve → sort descending → skip overlap → apply bottom-up) | Edits apply in order; earlier edits don't shift later offsets | `ComposeEditBatch` class in BFF |
-| **Snapshot / rollback** | Atomic suggest-or-fail; if any edit in batch fails validation, none applied | `ComposeEditTransaction` wrapper |
+| **4-phase batch pipeline** (resolve → sort descending → skip overlap → apply bottom-up) | Edits apply in order; earlier edits don't shift later offsets. **Within-batch overlap is NON-FATAL** (Spike 3): the overlapping edit is skipped-and-reported, the batch still commits | `ComposeEditBatch` class in BFF |
+| **Snapshot / rollback** | **Fatal path only** (Spike 3 — distinct from overlap): if any edit fails *validation* (not-found / ambiguous-in-strict / empty-target), the WHOLE batch rolls back to the byte-identical snapshot and none apply. Overlap does NOT trigger rollback. Tasks 021/022 model these as **two separate code paths**. | `ComposeEditTransaction` wrapper |
 | **Pattern-based text anchoring** (content-match + structural hint) | Drift-resistant anchors that survive document edits | `TextAnchor` value object — used for both LLM-proposed and human-created annotations |
 | **Tool descriptions ARE the prompt** | Behavioral guidance + recovery paths embedded in tool/scope descriptions, not just metadata | JPS scope `description` fields; Binding tool-description fields |
 | **Semantic Appendix** in scope payload | LLM sees defined terms, cross-references, structural metadata to reduce hallucination | `compose-document` scope payload generator |
@@ -460,26 +462,19 @@ Full-workflow playbooks (multi-node orchestration) remain what the EXISTING Dail
 
 ### 7.2 Dispatch Mechanism — PaneEventBus → Assistant → session-dispatch seam
 
-The Compose toolbar dispatches an AI-action request via PaneEventBus; the Assistant pane consumes it and invokes the **shipped Click-path session-dispatch seam**. The server surface question is **ANSWERED, not open**: the seam exists, shipped in redesign-r1, and provides SSE streaming, ledger write, and gate integration for free.
+The Compose inline toolbar dispatches an AI action by calling the **shipped Click-path session-dispatch seam directly** (a bound `dispatchConsumer` — the `useConsumerChips` pattern). The server surface question is **ANSWERED, not open**: the seam exists, shipped in redesign-r1, and provides SSE streaming, ledger write, and gate integration for free. PaneEventBus carries pane *choreography* (selection offers, insert signals) — **not** the dispatch itself. (Spike 0 correction, 2026-07-08: there is no `compose_action_request` / `compose_edit_apply_request` event in the code; those were invented names. The real contract is `compose-contracts.ts`.)
 
 **Sequence**:
 
 ```
-User clicks "Explain" in Compose toolbar (BubbleMenu)
-    ↓
-ComposeToolbar dispatches PaneEventBus event on `conversation` channel:
-    { type: 'compose_action_request',
-      bindingId: '<compose-explain-clause Binding GUID>',
-      selection: {...},
-      args: { jpsScopePayload, documentContext: { documentId, driveId, tenantId } },
-      correlationId: '...' }        // upgrades to the D-F3 ack contract (§3)
-    ↓
-Assistant pane's ConversationPane subscribes to this event
-    ↓
-ConversationPane calls the shared client helper:
-    dispatchConsumer(bindingId, args)
+User clicks "Explain" in Compose inline toolbar (BubbleMenu)
+    ↓  (in parallel, the settled selection has emitted
+    ↓   conversation.compose_selection_offer — Flow 2 — for pane choreography)
+The toolbar's bound dispatcher calls the shared client helper directly:
+    dispatchConsumer('<compose-explain-clause Binding GUID>', { slots: {...selection args...} })
     ↓
 POST /api/ai/chat/sessions/{sessionId}/dispatch          (existing endpoint — Click path)
+    body: { bindingId, args: slots }
     ↓
 SessionDispatchOrchestrator
     → IConsumerRoutingService.GetBindingByIdAsync(bindingId)   (Binding resolution — ADR-039)
@@ -491,11 +486,12 @@ SessionDispatchOrchestrator
 ConversationPane renders the streamed response as an assistant chat message
     ↓ (for Draft Alternative only)
 The output is a SessionOutput with the `compose` disposition (already in the ledger);
-its SSE frame signals the client; ConversationPane emits PaneEventBus
-`compose_edit_apply_request` on `workspace` channel REFERENCING the ledger entry
+its SSE frame signals the client; the Assistant emits PaneEventBus
+workspace.compose_assistant_insert (Flow 5) REFERENCING the ledger entry
     ↓
 Compose Workspace materializes the pending track-change FROM the stored ledger entry
-(with {bindingId}@t{n} provenance) and acks the frame id (D-F3)
+(with {bindingId}@t{n} provenance), gated behind user-confirm (Flow 5 R1 default),
+and acks the frame id (D-F3)
 ```
 
 **Endpoint surface: ZERO new endpoints — and this is closed, permanently.** Read this before writing any Compose dispatch code:
@@ -602,7 +598,7 @@ Every external/cross-cutting resource R2 depends on, mapped to where it's used:
 | **`spaarke-rag-references` AI Search index** | Existing | **Golden references** source for Context-pane provenance (per §2.0); use existing `add-reference-to-index` skill to maintain |
 | **Existing `useDocumentActions` shared lib** | UI (R1 deliverable) | Open-in-Word reuse |
 | **Spaarke Auth v2** | Existing | All R2 endpoints `RequireAuthorization()` |
-| **`ConversationPane`** | UI (Existing) | Extended to consume `compose_action_request` events + render OutcomeCards; coordination-prompt pattern in responses |
+| **`ConversationPane`** | UI (Existing) | Renders dispatched-action output (the toolbar dispatches directly via `dispatchConsumer`; ConversationPane already hosts that render path via `useConsumerChips`) + OutcomeCards; subscribes to `compose_selection_offer` (Flow 2) for follow-up choreography; coordination-prompt pattern in responses |
 
 **NEW resources introduced in R2** (zero-license-fee verification):
 - Microsoft Open XML SDK 3.x — **MIT, .NET Foundation, no fee**
@@ -642,7 +638,7 @@ All R2 endpoints belong in `Sprk.Bff.Api`. No new microservice. No Dataverse plu
 2. **Open XML SDK runs server-side** — DOCX manipulation in browser is infeasible at our scope (file sizes, dependencies, security). BFF is the natural host.
 3. **AI dispatch = Binding resolution via the shipped session-dispatch seam** (§7.2) — `SessionDispatchOrchestrator` → `IConsumerRoutingService` → prompted executor, all core-owned `Services/Ai/` internals that Compose consumes at the HTTP seam. Compose services in `Services/Compose/` never inject AI internals directly — the ADR-013 facade boundary is now a **Tier-1 CI-blocking NetArchTest rule** (merged 2026-07-08), so a violation fails the build.
 4. **SPE webhook subscriptions terminate on BFF** — only stable inbound surface; not a separate service.
-5. **Publish-size impact estimate**: baseline is **49.63 MB compressed incl. PDBs** (2026-07-08, ADR-029 re-baseline). +3–5 MB (Open XML SDK + OpenXmlPowerTools) ≈ **53–55 MB** — under the 60 MB hard ceiling but **brushing the ≥55 MB architecture-review trigger** (CLAUDE.md §10). Mitigation lever if triggered: the PDB-exclusion option (−3.76 MB) exists and is the first move before any architecture review. Will measure per-task.
+5. **Publish-size impact estimate** (revised per Spike 5): baseline is **49.63 MB compressed incl. PDBs** (2026-07-08, ADR-029 re-baseline). **The Open XML SDK adds 0 MB — it is already a BFF dependency** (`Sprk.Bff.Api.csproj:128`; Spike 5). The only potential add is `Codeuctivity.OpenXmlPowerTools` (~1–2 MB), and ONLY if the diff/redline compare feature is built — the annotation writer/reader (FR-24/FR-25) do not need it. So the realistic ceiling exposure is **≈50–52 MB**, comfortably under both the 60 MB hard ceiling and the ≥55 MB architecture-review trigger. Mitigation lever if ever needed: PDB-exclusion (−3.76 MB). Will measure per-task.
 6. **No new HIGH-severity CVE expected** from MIT NuGet packages — verify at task close.
 7. **Test obligation**: every new service in `Services/Compose/` requires matching unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`.
 
@@ -657,7 +653,7 @@ All R2 endpoints belong in `Sprk.Bff.Api`. No new microservice. No Dataverse plu
 | Three-pane shell | SpaarkeAi `ThreePaneShell` | — |
 | Editor framework | TipTap OSS (R1) | + Custom ProseMirror marks: `insertion`, `deletion`, `commentAnchor`; + TipTap `BubbleMenu` extension wired for inline AI toolbar (per §2.0) |
 | Workspace pane host | `WorkspaceLayoutWidget` + Compose section (R1) | — |
-| Assistant pane | `ConversationPane` (R1) | + `compose_action_request` consumption + OutcomeCard rendering + coordination-prompt response formatter |
+| Assistant pane | `ConversationPane` (R1) | + dispatched-action render (via `dispatchConsumer`/`useConsumerChips`) + `compose_selection_offer` (Flow 2) subscription + OutcomeCard rendering + coordination-prompt response formatter |
 | Context pane | `@spaarke/legal-workspace` panes | + New section: `compose-playbook-comparison`; + hosting the core's D-F4 decision-traceability view |
 | Auth | `@spaarke/auth` (R1) | — |
 | BFF | `Sprk.Bff.Api` (R1) | + `Services/Compose/` directory (extends existing R1 `ComposeService` + `StaleCheckoutSweeperHostedService`); new endpoints (§12) — none for AI dispatch |
@@ -723,7 +719,7 @@ Phase 0 (dispatch validation) + Phase 1 (LLM patterns) + Phase 2 (DOCX shuttle) 
 
 | # | Spike | Days | Decision unlocked |
 |---|---|---|---|
-| 0 | **Validate the shipped session-dispatch path with one Compose Binding**: author a throwaway `compose-explain-clause` Action + Binding pair (mirror-first, §7.4); wire a stub toolbar button → PaneEventBus `compose_action_request` → `ConversationPane` → `dispatchConsumer(bindingId, args)` → `POST /api/ai/chat/sessions/{id}/dispatch`; confirm SSE streaming into the chat surface, ledger `SessionOutput` write, and gate non-interference for a Tier-0/1 action. This is a **validation of the shipped path, not a selection exercise** — the server surface is answered (§12.1); the spike proves the Compose-specific legs (event payload shape, scope payload assembly, selection args). | 0.5 | Confirms the end-to-end seam before Phase 1 builds on it |
+| 0 | ✅ **DONE (2026-07-08)** — `notes/spikes/spike-0-dispatch-path.md`. **Validated the shipped session-dispatch path for a Compose Binding** (static code trace): toolbar → direct `dispatchConsumer(bindingId, {slots})` → `POST /api/ai/chat/sessions/{id}/dispatch` → `SessionDispatchOrchestrator` → Binding resolution → prompted executor → SSE + ADR-040 ledger write; ZERO new BFF routes. **Correction surfaced**: `compose_action_request` does not exist — the real contract is `conversation.compose_selection_offer` (Flow 2) + direct dispatch + `workspace.compose_assistant_insert` (Flow 5); folded into §2.1/§3/§5/§7.2. SSE + ledger + Tier-0/1 gate non-interference are statically confirmed; live-frame observation deferred to a deployed run (note §6, needs a throwaway Binding — core-A0-gated). | 0.5 | ✅ End-to-end seam confirmed before Phase 1 builds on it |
 
 ### Phase 1 spikes — LLM patterns (priority)
 
@@ -757,7 +753,7 @@ Phase 0 (dispatch validation) + Phase 1 (LLM patterns) + Phase 2 (DOCX shuttle) 
 | Q | Resolution |
 |---|---|
 | **Editor framework** | TipTap OSS (R1 carry-forward; no Pro extensions per portfolio licensing policy) |
-| **DOCX engine** | Microsoft Open XML SDK 3.x + Codeuctivity.OpenXmlPowerTools (both MIT, both active) |
+| **DOCX engine** | Microsoft Open XML SDK 3.x (annotation writer/reader) + Codeuctivity.OpenXmlPowerTools (diff/redline only). **Spike 5 correction**: `DocumentFormat.OpenXml` 3.4.1 is ALREADY a BFF dependency (`Sprk.Bff.Api.csproj:128`; two shipped services already write `.docx` with it) — the annotation writer adds **zero package + zero publish-size delta**. `Codeuctivity.OpenXmlPowerTools` is NOT needed for the annotation writer path (Spike 5 validated w:ins/w:del/w:comment on the SDK alone); it is only required IF the diff/redline compare feature is built (reader/compare path). |
 | **Adeu integration** | Patterns only (Level 2 per IP discipline) — read source for understanding, port to .NET with vendor-neutral primitives. NO runtime dependency on adeu. |
 | **CriticMarkup role** | Read direction only — LLM consumes documents rendered with inline `{++/--/>>}` markers. LLM does NOT produce CriticMarkup; produces structured `{target_text, new_text, comment}` payloads instead. (Adeu's asymmetric design.) |
 | **Wire format (LLM → BFF)** | Structured JSON edit payloads with `match_mode` parameter; validator-enforced (no markup in LLM output) |

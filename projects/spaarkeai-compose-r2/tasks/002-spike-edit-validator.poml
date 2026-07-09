@@ -2,7 +2,7 @@
   <metadata>
     <title>Spike 2 — edit validator match_mode + ambiguity errors</title>
     <phase>0 Spikes</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>020</blocks>

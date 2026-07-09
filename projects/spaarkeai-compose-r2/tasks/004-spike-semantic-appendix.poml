@@ -2,7 +2,7 @@
   <metadata>
     <title>Spike 4 — semantic appendix hallucination delta</title>
     <phase>0 Spikes</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>023</blocks>

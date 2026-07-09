@@ -12,14 +12,14 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 
 | ID | Title | Phase | Gate | Deps | Status | Rigor | Model | Effort |
 |----|-------|-------|------|------|--------|-------|-------|--------|
-| 000 | Spike 0 — validate session-dispatch path (throwaway compose Binding) | 0 Spikes | 🟢 | none | 🔲 | STANDARD | opus | high |
+| 000 | Spike 0 — validate session-dispatch path (throwaway compose Binding) | 0 Spikes | 🟢 | none | ✅ | STANDARD | opus | high |
 | 001 | Spike 1 — Action row + structured OutputSchemaJson reliability | 0 Spikes | 🟢 | 000 | 🔲 | STANDARD | sonnet | high |
-| 002 | Spike 2 — edit validator match_mode + ambiguity errors | 0 Spikes | 🟢 | none | 🔲 | STANDARD | sonnet | high |
-| 003 | Spike 3 — atomic edit batch + rollback | 0 Spikes | 🟢 | none | 🔲 | STANDARD | sonnet | high |
-| 004 | Spike 4 — semantic appendix hallucination delta | 0 Spikes | 🟢 | none | 🔲 | STANDARD | sonnet | high |
-| 005 | Spike 5 — Open XML write w:ins+w:comment → Word for Web | 0 Spikes | 🟢 | none | 🔲 | STANDARD | sonnet | high |
+| 002 | Spike 2 — edit validator match_mode + ambiguity errors | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
+| 003 | Spike 3 — atomic edit batch + rollback | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
+| 004 | Spike 4 — semantic appendix hallucination delta | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
+| 005 | Spike 5 — Open XML write w:ins+w:comment → Word for Web | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 006 | Spike 6 — reverse round-trip (Word edit → webhook → read); tune re-anchor bands | 0 Spikes | 🟢 | 005 | 🔲 | STANDARD | sonnet | high |
-| 007 | Spike 7 — SPE checkout vs Word-for-Web open collision UX | 0 Spikes | 🟢 | none | 🔲 | STANDARD | sonnet | high |
+| 007 | Spike 7 — SPE checkout vs Word-for-Web open collision UX | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 008 | Spike 8 — docx-benchmark harness baseline | 0 Spikes | 🟢 | 005 | 🔲 | STANDARD | sonnet | high |
 | 010 | FR-01 wire 1a "Browse / open file" → transient mount | 1 Entry | 🟢 | 000 | 🔲 | FULL | sonnet | high |
 | 011 | FR-02 wire 1a "Search for Document" → reuse 1c load path | 1 Entry | 🟢 | none | 🔲 | FULL | sonnet | high |
