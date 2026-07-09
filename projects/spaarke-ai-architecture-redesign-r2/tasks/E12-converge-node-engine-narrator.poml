@@ -1,0 +1,69 @@
+<task id="AIR2-E12" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Converge AiCompletionNodeExecutor + retire DailyBriefingNarrator ## Input replica onto the shared PromptInputSection producer (Phase E Move 1 completion)</title>
+    <status>not-started</status>
+    <phase>Phase E — AI Execution Foundation</phase>
+    <gate>Phase-E gate</gate>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Migrates the playbook completion engine + a shipped narrator onto the shared ## Input producer without regressing playbook/insights/daily-briefing outputs. Call-site swap by design (E-10 proved fit), but regression-sensitive.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-safe>false</parallel-safe>
+    <tags>bff-api, ai, execution-foundation, node-engine, prompt-input, adr-043, non-regression</tags>
+    <dependencies>E-10 (PromptInputSection single-source ## Input producer + PreResolvedInput fit slot — DONE; E-10 proved a node-shaped inputBinding renders byte-identically through it). ADR-043.</dependencies>
+  </metadata>
+
+  <prompt>
+    Complete the completion-engine convergence (ADR-043 §1/§2): migrate `AiCompletionNodeExecutor` (the playbook node engine) and retire `DailyBriefingNarrator`'s hand-replicated `## Input` block so BOTH consume the SINGLE-SOURCE `PromptInputSection` producer E-10 built. E-10 designed the seam to fit these two (its `notes/E10-shared-seam-design.md` + the `PreResolvedInput`/`ContextBindingRequest` fit slot prove a node `inputBinding` renders byte-identically) — so this is a CALL-SITE SWAP, not a reshape.
+
+    ABSOLUTE MANDATE (operator): no shim/pseudocode; works end-to-end. BEST-ARCHITECTURE not consumer-unblock. And CRITICAL — NON-REGRESSION: `AiCompletionNodeExecutor` drives playbooks + insights, and `DailyBriefingNarrator` is a shipped feature. Their LLM prompt shape + outputs MUST be byte-for-behavior UNCHANGED. This is a refactor onto a shared seam, not a behavior change.
+  </prompt>
+
+  <role>Senior BFF engineer fluent in the playbook node engine (AiCompletionNodeExecutor), PromptSchemaRenderer / PromptInputSection (E-10), and the DailyBriefingNarrator direct-completion path.</role>
+
+  <goal>
+    `AiCompletionNodeExecutor` renders its `## Input` via the shared `PromptInputSection` producer (not its own inline render); `DailyBriefingNarrator`'s hand-replicated `## Input` block is retired onto the same producer (parity now STRUCTURAL, not conventional). Playbook/insights/daily-briefing outputs are unregressed (proven). A `tests/integration/seam/**` vertical-slice test covers the node-engine path through the shared producer, and the golden `## Input`-format assertion (E-10) now guards a real shared consumer instead of a replica.
+  </goal>
+
+  <inputs>
+    <file purpose="e10-design">projects/spaarke-ai-architecture-redesign-r2/notes/E10-shared-seam-design.md (the fit proof + PreResolvedInput slot)</file>
+    <file purpose="producer">src/server/api/Sprk.Bff.Api/Services/Ai/PromptInputSection.cs + PromptSchemaRenderer.cs</file>
+    <file purpose="node-engine">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</file>
+    <file purpose="narrator">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs (the hand-replicated ## Input at ~lines 89, 287-289)</file>
+    <file purpose="adr">docs/adr/ADR-043-ai-capability-execution-spine.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="call-site-swap">Use E-10's PreResolvedInput/shared producer — do NOT reshape the producer to fit the node engine (E-10 proved it fits). If it genuinely does not fit, escalate per §6.5 (do not fork the producer).</constraint>
+    <constraint source="non-regression">Playbook + insights + daily-briefing LLM prompt shape + structured outputs MUST be byte-for-behavior unchanged. Prove with the existing playbook/insights/briefing suites + a golden ## Input-format check on the node path + the DailyBriefingNarrator prompt shape.</constraint>
+    <constraint source="daily-briefing-coord">Daily-briefing (spaarke-daily-update-service-r5) is code-complete and expects this (their reply: retire the replica onto the shared producer). Their briefing-accuracy + groundedness tests are the regression net; ensure they stay green. Note in the summary if any daily-briefing test needs their attention.</constraint>
+    <constraint source="def-of-done">A tests/integration/seam/** vertical-slice test for the node-engine path through the shared producer; keep E-10's golden ## Input assertion green.</constraint>
+    <constraint source="bff-hygiene">.claude/constraints/bff-extensions.md; publish-size delta (baseline ~45.18 MB); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Confirm fit">Re-read E-10's design note + the node engine's inputBinding→runtimeInput path + the narrator's replicated ## Input. Confirm the shared PromptInputSection covers both (E-10 asserted it). If not, escalate.</step>
+    <step order="1" name="Migrate node engine">Swap AiCompletionNodeExecutor's ## Input rendering to the shared PromptInputSection (via PromptSchemaRenderer if that's the seam). Byte-identical output.</step>
+    <step order="2" name="Retire narrator replica">Replace DailyBriefingNarrator's hand-built ## Input block with a call to the shared producer. Byte-identical prompt shape.</step>
+    <step order="3" name="Prove non-regression">Playbook/insights/briefing suites green; add the node-path seam test; golden ## Input assertion green on the real shared consumers.</step>
+    <step order="4" name="Gates">code-review + adr-check; publish size + CVE.</step>
+  </steps>
+
+  <tools><tool name="dotnet">build + test</tool><tool name="git">MAIN-SESSION commit only — report changes, do not commit</tool></tools>
+
+  <outputs>
+    <output type="code">AiCompletionNodeExecutor + DailyBriefingNarrator consuming the shared PromptInputSection (## Input parity structural)</output>
+    <output type="test">node-path seam vertical-slice test; briefing/playbook non-regression proof</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AiCompletionNodeExecutor renders ## Input via the shared PromptInputSection (no inline replica); DailyBriefingNarrator's hand-replicated ## Input is retired onto the same producer.</criterion>
+    <criterion testable="true">NON-REGRESSION: playbook + insights + daily-briefing outputs byte-for-behavior unchanged (existing suites + briefing-accuracy/groundedness green).</criterion>
+    <criterion testable="true">A tests/integration/seam/** test covers the node-engine path through the shared producer; E-10's golden ## Input assertion stays green.</criterion>
+    <criterion testable="true">Build 0 errors; publish &lt; 60 MB; no new HIGH CVE; code-review + adr-check clean.</criterion>
+    <criterion testable="true">NEGATIVE: no forked/second ## Input producer remains; the seam wasn't reshaped to the node engine.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the shared PromptInputSection genuinely cannot render the node engine's or narrator's input without a format change (breaking parity / a shipped output), STOP and escalate per §6.5 — do not fork the producer or change a shipped prompt shape silently.</trigger>
+  </escalation>
+</task>
