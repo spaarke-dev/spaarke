@@ -185,8 +185,8 @@ Extracted from `spec.md` + applicable ADRs + CLAUDE.md §10/§11:
 - ❌ MUST NOT extend `sprk_analysis.sprk_chathistory` (superseded; use `ChatSession` model)
 - ❌ MUST NOT inject `IOpenAiClient`, `IPlaybookService`, or other AI internals into Compose CRUD code
 - ❌ MUST NOT build custom integrations for advanced DOCX features outside TipTap OOB (tracked changes, footnotes, fields, equations, SmartArt)
-- ❌ MUST NOT store comments as Word `<w:comment>` elements in R1 (use ChatSession annotations in R2+)
-- ❌ MUST NOT support tracked-changes round-trip with Word (out of architecture)
+- ❌ MUST NOT store comments as Word `<w:comment>` elements in R1 (use ChatSession annotations in R2+) — **R1-scoped; superseded by R2 FR-24/FR-25 (Path B amendment per CLAUDE.md §6.5, filed 2026-07-09 — see `projects/spaarkeai-compose-r1/spec.md` Out of Scope + `projects/spaarkeai-compose-r2/spec.md` FR-24/FR-25)**
+- ❌ MUST NOT support tracked-changes round-trip with Word (out of architecture) — **R1-scoped; superseded by R2 FR-24/FR-25 (Path B amendment per CLAUDE.md §6.5, filed 2026-07-09 — see `projects/spaarkeai-compose-r1/spec.md` Out of Scope + `projects/spaarkeai-compose-r2/spec.md` FR-24/FR-25)**
 - ❌ MUST NOT extend `HostContext` in R1 (transient state → JPS scope inputs)
 - ❌ MUST NOT use banned test patterns: `Mock<HttpMessageHandler>`, DI-registration tests, ctor null-check tests — **ADR-038**
 

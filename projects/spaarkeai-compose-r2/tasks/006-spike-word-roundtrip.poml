@@ -2,7 +2,7 @@
   <metadata>
     <title>Spike 6 — reverse round-trip (Word edit → webhook → read); tune re-anchor bands</title>
     <phase>0 Spikes</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>005</dependencies>
     <blocks>043, 051, 054</blocks>
@@ -82,4 +82,29 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-09 (STANDARD rigor, sonnet @ high). Spike note:
+    projects/spaarkeai-compose-r2/notes/spikes/spike-6-word-roundtrip.md. Standalone scratch
+    prototype (C:\tmp\spike6-word-roundtrip\ — a throwaway console app, NOT part of
+    Sprk.Bff.Api's build) built + ran a real Word-shaped edited .docx (real human author
+    "Jordan Ellis", not "Spaarke AI") and parsed it back with 100% author/date fidelity across
+    w:ins/w:del/w:comment (0 OpenXmlValidator errors on both artifacts). Re-anchor bands
+    (>=0.85 auto / 0.6-0.85 review / &lt;0.6 orphan) validated empirically against 8 drift
+    scenarios using a 0.75*content + 0.25*structural scorer — the scope-locked thresholds HOLD;
+    one complementary rule recommended (ambiguity guard: downgrade a would-be AUTO to REVIEW
+    when a second candidate scores within ~0.05 of the best — a byte-identical duplicate clause
+    elsewhere in the document is a real, empirically-reproduced coin-flip the 3 static bands
+    alone cannot see). Material finding: FR-26's webhook-subscription + delta-query substrate
+    (SpeSyncOrchestrator, SpeWebhookRenewalHostedService) already exists in this worktree,
+    Redis-backed (ADR-009) and BackgroundService-based (ADR-001) — confirmed by code
+    inspection, not just asserted. Still missing: the webhook receiver endpoint
+    (POST /api/compose/webhooks/spe-doc-changed) and DocxAnnotationReader/re-anchor engine
+    themselves (tasks 051/054, this spike's grounding). Two items runtime-deferred with a
+    recipe in spike note §7 (real Word-for-Web edit shape; live webhook fire against a
+    deployed BFF) — cannot be observed headlessly, disclosed rather than fabricated, same
+    pattern as spikes 5/7. Artifacts: word-roundtrip-prototype.cs, spike6-base.docx,
+    spike6-word-edited.docx (all under notes/spikes/). No files under src/ touched; no
+    Services/Ai/ dependency; Sprk.Bff.Api was not rebuilt (build-contention rule honored).
+  </notes>
 </task>
