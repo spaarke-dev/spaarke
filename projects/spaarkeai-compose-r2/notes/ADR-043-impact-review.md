@@ -37,7 +37,8 @@ Verified against code + git (not narrative):
 **Precise readiness:**
 - ✅ The **4 Informational actions** (explain / compare / summarize-changes / defined-terms) dispatch end-to-end **now** (E-10 fixed their input path; disposition+kind already passed).
 - ❌ **draft-alternative** (compose disposition) → **422 at the admit-gate until E-20**.
-- ❌ **FR-17 undo** (deterministic kind) → blocked until **E-30** (deps E-20; mechanism still an open operator decision).
+- ❌ **draft-alternative** dispatch → 422 at the admit-gate until **E-20**.
+- ⚠️ **FR-17 undo (034)** → gated on **E-20 ONLY** (CORRECTED by core, REPLY §2): the supersession-write mechanism is **already shipped in Phase A0** (`ComposeDisposition.BuildFrame`/`ResolveCurrent`, locked by `ComposeDispositionContractTests`) — **not** E-30. E-30's deterministic `ActionKind` is for coded chat-loop actions, orthogonal. Build 034's write mechanism against the A0 contract now; it dispatches once E-20 admits `Compose`.
 
 **Our routing promotion is half-landed / already drifting:** we updated `OutputRouter` case + `ToLedgerValue` (2 of 3 lists) but not the admit-gate (3rd). The OutputRouter compose leg is therefore **dead code on the dispatch path** until E-20. Core has **accepted** the promotion; E-20 will **delete** our 2 hand-added switch entries and fold them into the registry — so those are transitional (the enum member stays).
 
@@ -45,7 +46,7 @@ Verified against code + git (not narrative):
 1. **[HIGH]** Compose vertical slice 422-broken on master; the fix (E-20) is not started. Every compose-disposition dispatch task fails end-to-end until E-20.
 2. **[HIGH]** False "done" on **016** (and 033/042 framing) — verified only at the router/unit layer, 422 through the full seam. Exactly the failure E-40's vertical-slice KEEP test exists to catch.
 3. **[MED]** Merge-collision hazard on `OutputRouter.cs` / `Binding.cs` before E-20 → **freeze compose edits to those two files**.
-4. **[MED]** 034 (FR-17 undo) scoped against an undecided contract (E-30 unbuilt + mechanism is an open operator decision) → don't build the write leg; fire the escalation trigger.
+4. ~~**[MED]** 034 (FR-17 undo) scoped against an undecided contract~~ **RESOLVED by core (REPLY §2)**: 034's supersession mechanism is already shipped (A0); it is gated on **E-20 only**, not E-30. Buildable against the A0 contract now; dispatches once E-20 lands.
 5. **[LOW-MED]** 047 deploying the compose Binding row adds live drift → gate the compose row on E-20; the 4 informational rows are safe.
 
 ## 6. Actions taken / open
