@@ -32,6 +32,7 @@
 import type { IWebApiLike, IWebApiWithCreate } from '../types/WebApiLike';
 import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
 import { SdapApiClient, type IndexFileRequest, type IndexFileResult } from '@spaarke/sdap-client';
+import { cleanGuid } from './PolymorphicResolverService';
 // PolymorphicResolverService not needed — document records use canonical field set only
 
 // ---------------------------------------------------------------------------
@@ -288,7 +289,7 @@ export class EntityCreationService {
    * rejects brace-wrapped GUIDs with HTTP 400 "Error in query syntax".
    */
   private static _cleanGuid(id: string): string {
-    return id.replace(/[{}]/g, '').toLowerCase();
+    return cleanGuid(id);
   }
 
   /**

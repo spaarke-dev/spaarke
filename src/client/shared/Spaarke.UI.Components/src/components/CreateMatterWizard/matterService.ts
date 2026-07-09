@@ -31,6 +31,7 @@ import type {
   IUserBuCascadeDefaults,
 } from '../../services/EntityCreationService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
+import { cleanGuid } from '../../services/PolymorphicResolverService';
 
 // ---------------------------------------------------------------------------
 // Contact type (used by AssignCounselStep search results)
@@ -331,7 +332,10 @@ export class MatterService {
 
     for (const lk of lookups) {
       const navProp = navPropMap[lk.col] ?? lk.col;
-      entity[`${navProp}@odata.bind`] = `/${lk.entitySet}(${lk.guid})`;
+      // cleanGuid: some sources (Xrm picker/lookupObjects, created-record ids) return
+      // registry-format GUIDs wrapped in braces ("{GUID}"). Dataverse rejects
+      // `({GUID})` in the key predicate with "Bad Request - Error in query syntax."
+      entity[`${navProp}@odata.bind`] = `/${lk.entitySet}(${cleanGuid(lk.guid)})`;
     }
 
     // Field Mapping Framework (spec FR-12, task 020): apply the configured
@@ -479,7 +483,7 @@ export class MatterService {
     try {
       const navProp = _resolveNavProp(navPropMap, 'sprk_assignedlawfirm1');
       const updatePayload: Record<string, unknown> = {
-        [`${navProp}@odata.bind`]: `/contacts(${input.contactId})`,
+        [`${navProp}@odata.bind`]: `/contacts(${cleanGuid(input.contactId)})`,
       };
       await this._dataService.updateRecord('sprk_matter', matterId, updatePayload);
       return { success: true };

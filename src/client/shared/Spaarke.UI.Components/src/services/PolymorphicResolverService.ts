@@ -344,6 +344,32 @@ export function _resetDisplayNameFieldCacheForTests(): void {
 }
 
 // ---------------------------------------------------------------------------
+// GUID normalization (canonical) — the ONE place braces get stripped
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a GUID for use in a Dataverse OData `@odata.bind` key predicate
+ * (or any `/entityset(guid)` reference URL).
+ *
+ * Several sources hand back GUIDs in registry/braced format — e.g.
+ * `Xrm.Utility.lookupObjects` and `Xrm.Utility.getGlobalContext().userSettings`
+ * return `{39CDE3E3-9D15-...}`, and `Xrm.WebApi.createRecord` can return a braced
+ * id. Dataverse rejects `({GUID})` in a key predicate with a generic HTTP 400
+ * "Bad Request - Error in query syntax."
+ *
+ * This is the single canonical normalizer — strip braces + whitespace and
+ * lowercase (Dataverse GUID keys are case-insensitive). Every wizard/service/
+ * adapter that builds an `@odata.bind` value (or ingests an Xrm-sourced GUID)
+ * routes through here rather than interpolating it raw.
+ *
+ * Null/undefined-safe: returns '' for a falsy input. No-op on already-bare ids.
+ */
+export function cleanGuid(id: string | null | undefined): string {
+  if (!id) return '';
+  return id.replace(/[{}]/g, '').trim().toLowerCase();
+}
+
+// ---------------------------------------------------------------------------
 // Record URL builder
 // ---------------------------------------------------------------------------
 
@@ -353,7 +379,7 @@ export function _resetDisplayNameFieldCacheForTests(): void {
  * to a relative URL.
  */
 export function buildRecordUrl(entityLogicalName: string, recordId: string): string {
-  const cleanId = recordId.replace(/[{}]/g, '').toLowerCase();
+  const cleanId = cleanGuid(recordId);
 
   try {
     // Walk frames to find Xrm
@@ -573,7 +599,7 @@ export async function applyResolverFields(
   // (e.g. `{39CDE3E3-9D15-...}`). The OData `@odata.bind` URL syntax rejects
   // braced GUIDs with HTTP 400 "Error in query syntax". Normalize once here so
   // every downstream use sees a bare lowercase GUID.
-  const cleanRecordId = parentRecordId.replace(/[{}]/g, '').toLowerCase();
+  const cleanRecordId = cleanGuid(parentRecordId);
 
   // 1. Bind entity-specific regarding lookup
   const entityNavProp = findNavProp(navProps, parentEntityLogicalName, entityLookupHint);

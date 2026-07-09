@@ -42,6 +42,7 @@ import {
   applyResolverFields,
   findNavProp,
   discoverNavProps,
+  cleanGuid,
   _resetNavPropCacheForTests,
 } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
@@ -91,11 +92,6 @@ function _resolveEntitySet(entityLogicalName: string): string {
 
 function _resolveLookupHint(entityLogicalName: string): string {
   return entityLogicalName.startsWith('sprk_') ? entityLogicalName.slice('sprk_'.length) : entityLogicalName;
-}
-
-/** Strip braces + lowercase a GUID for @odata.bind URLs (mirrors PolymorphicResolverService). */
-function _cleanGuid(id: string): string {
-  return id.replace(/[{}]/g, '').toLowerCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +191,7 @@ export class ReportCardService {
     const bindLookup = (referencedEntity: string, entitySet: string, guid: string, columnHint: string) => {
       const navProp = findNavProp(navProps, referencedEntity, columnHint);
       if (navProp) {
-        entity[`${navProp}@odata.bind`] = `/${entitySet}(${_cleanGuid(guid)})`;
+        entity[`${navProp}@odata.bind`] = `/${entitySet}(${cleanGuid(guid)})`;
       } else {
         console.warn(
           `[ReportCardService] No nav-prop found for ${referencedEntity} (hint: ${columnHint}), skipping binding`
@@ -241,7 +237,7 @@ export class ReportCardService {
       // seeded profile/rules (task 030).
       const mappingResult = await applyFieldMappings({
         sourceEntity: association.entityType,
-        sourceId: _cleanGuid(association.recordId),
+        sourceId: cleanGuid(association.recordId),
         targetEntity: 'sprk_reportcard',
         payload: entity,
         dataService: this._dataService,
