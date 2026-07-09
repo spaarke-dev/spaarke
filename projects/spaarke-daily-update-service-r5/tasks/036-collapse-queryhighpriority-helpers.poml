@@ -3,7 +3,7 @@
   <metadata>
     <title>Collapse 7 QueryHighPriority*Async wrappers into one spec-driven method</title>
     <phase>B: Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>034</dependencies>
     <blocks>037</blocks>

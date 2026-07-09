@@ -26,13 +26,13 @@
 //
 // R5 AMENDMENT (task 010, FR-A3, 2026-07-08) — per-channel LLM narrate leg REMOVED.
 // R4 and R7 W12 tried prompt-steering to stop cross-item hallucination and failed; the
-// per-channel narrate LLM call (BRIEF-NARRATE-CHANNEL) was the primary hallucination
-// source. Channel/section content is now built DETERMINISTICALLY from the collector's
-// req.Channels view model (BuildDeterministicBullet below) — one bullet per source item,
-// zero LLM authorship, so cross-item hallucination is structurally impossible on this leg.
-// The TL;DR call remains the SOLE LLM invocation per briefing run. ChannelActionCode +
-// the BRIEF-NARRATE-CHANNEL catalog Action are left in place (unused) — retirement is a
-// separate task (012); this change only removes the call path.
+// per-channel narrate LLM call was the primary hallucination source. Channel/section
+// content is now built DETERMINISTICALLY from the collector's req.Channels view model
+// (BuildDeterministicBullet below) — one bullet per source item, zero LLM authorship, so
+// cross-item hallucination is structurally impossible on this leg.
+// The TL;DR call remains the SOLE LLM invocation per briefing run. R5 task 012 (FR-A2/NFR-05)
+// then retired the now-dead per-channel Action: its code constant was deleted here and its
+// catalog Action row retired, leaving grep-zero code consumers under src/.
 //
 // R5 AMENDMENT (task 013, FR-A4, 2026-07-08) — TL;DR call now receives DETERMINISTIC
 // SCAFFOLDING, not a raw data dump. Previously the TL;DR payload was the raw
@@ -81,14 +81,6 @@ namespace Sprk.Bff.Api.Services.Ai.Narrators;
 public class DailyBriefingNarrator : ICodedWorkflow
 {
     private const string TldrActionCode = "BRIEF-NARRATE-TLDR";
-
-    /// <summary>
-    /// R5 task 010 (FR-A3): the per-channel LLM narrate call path that consumed this code
-    /// was REMOVED — channel content is now deterministic (see <see cref="BuildDeterministicBullet"/>).
-    /// Left in place intentionally (dead-but-present); retiring the const + the
-    /// BRIEF-NARRATE-CHANNEL catalog Action row is a separate task (012).
-    /// </summary>
-    private const string ChannelActionCode = "BRIEF-NARRATE-CHANNEL";
 
     private static readonly JsonSerializerOptions InputSerializerOptions = new()
     {

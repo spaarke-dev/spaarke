@@ -1,0 +1,335 @@
+{
+  "schemaVersion": "briefing-accuracy-1.0",
+  "_comment": "R5 task 016 (FR-A7 / NFR-02) — item-level briefing-accuracy corpus. Each case feeds fixture source records through the REAL DailyBriefingNarrator (TL;DR LLM boundary mocked per ADR-038) and asserts one of four deterministic-accuracy properties. Cases are DATA (the FR-D1 harness fixture source): add a case by adding an object here, no code change. Families: zero-cross-pairing | aggregation-preference | grounding-round-trip | tldr-abstraction.",
+  "cases": [
+    {
+      "caseId": "BA-CP-001",
+      "family": "zero-cross-pairing",
+      "description": "Two confusable-title matters render as two bullets, each self-consistent (title, regarding, link all from ITS OWN item — never crossed).",
+      "totalNotificationCount": 2,
+      "categories": [{ "name": "matters", "count": 2, "unreadCount": 2 }],
+      "priorityItems": [{ "category": "matters", "title": "Acme merger review" }],
+      "channels": [
+        {
+          "category": "matters",
+          "label": "Matters",
+          "items": [
+            {
+              "id": "aaaa1111-0000-0000-0000-000000000001",
+              "title": "Acme merger review",
+              "regardingName": "Acme merger review",
+              "regardingEntityType": "sprk_matter",
+              "regardingId": "aaaa1111-0000-0000-0000-000000000001",
+              "sourceEntityType": "sprk_matter"
+            },
+            {
+              "id": "bbbb2222-0000-0000-0000-000000000002",
+              "title": "Acme lease review",
+              "regardingName": "Acme lease review",
+              "regardingEntityType": "sprk_matter",
+              "regardingId": "bbbb2222-0000-0000-0000-000000000002",
+              "sourceEntityType": "sprk_matter"
+            }
+          ]
+        }
+      ],
+      "expect": { "perItemProvenance": true }
+    },
+    {
+      "caseId": "BA-CP-002",
+      "family": "zero-cross-pairing",
+      "description": "REGRESSION CASE (would FAIL under the pre-R5 per-channel LLM narrate leg): a mixed channel with an event regarding Matter A and a document regarding Matter B. The old LLM could pair the event's text with Matter B's link; the deterministic renderer links each bullet to its OWN regarding record.",
+      "totalNotificationCount": 2,
+      "categories": [{ "name": "tasks", "count": 2, "unreadCount": 2 }],
+      "priorityItems": [{ "category": "tasks", "title": "File response brief" }],
+      "channels": [
+        {
+          "category": "tasks",
+          "label": "Tasks",
+          "items": [
+            {
+              "id": "ev110000-0000-0000-0000-0000000000e1",
+              "title": "File response brief",
+              "regardingName": "Northwind acquisition",
+              "regardingEntityType": "sprk_matter",
+              "regardingId": "11110000-0000-0000-0000-00000000aaaa",
+              "sourceEntityType": "sprk_event"
+            },
+            {
+              "id": "dc220000-0000-0000-0000-0000000000d1",
+              "title": "Signed NDA.pdf",
+              "regardingName": "Contoso divestiture",
+              "regardingEntityType": "sprk_matter",
+              "regardingId": "22220000-0000-0000-0000-00000000bbbb",
+              "sourceEntityType": "sprk_document"
+            }
+          ]
+        }
+      ],
+      "expect": { "perItemProvenance": true }
+    },
+    {
+      "caseId": "BA-AGG-001",
+      "family": "aggregation-preference",
+      "description": "Five overdue to-dos in one channel become five per-item bullets (no LLM aggregation loss), and the TL;DR receives the deterministic aggregate count = 5 (surface 'you have 5' rather than a computed-by-LLM number).",
+      "totalNotificationCount": 5,
+      "categories": [{ "name": "overdue-tasks", "count": 5, "unreadCount": 5 }],
+      "priorityItems": [{ "category": "overdue-tasks", "title": "Return client call" }],
+      "channels": [
+        {
+          "category": "overdue-tasks",
+          "label": "Overdue Tasks",
+          "items": [
+            {
+              "id": "td000000-0000-0000-0000-000000000001",
+              "title": "Return client call",
+              "regardingName": "",
+              "regardingEntityType": "",
+              "regardingId": "",
+              "sourceEntityType": "sprk_todo"
+            },
+            {
+              "id": "td000000-0000-0000-0000-000000000002",
+              "title": "Draft engagement letter",
+              "regardingName": "",
+              "regardingEntityType": "",
+              "regardingId": "",
+              "sourceEntityType": "sprk_todo"
+            },
+            {
+              "id": "td000000-0000-0000-0000-000000000003",
+              "title": "Review discovery request",
+              "regardingName": "",
+              "regardingEntityType": "",
+              "regardingId": "",
+              "sourceEntityType": "sprk_todo"
+            },
+            {
+              "id": "td000000-0000-0000-0000-000000000004",
+              "title": "Confirm filing deadline",
+              "regardingName": "",
+              "regardingEntityType": "",
+              "regardingId": "",
+              "sourceEntityType": "sprk_todo"
+            },
+            {
+              "id": "td000000-0000-0000-0000-000000000005",
+              "title": "Send retainer invoice",
+              "regardingName": "",
+              "regardingEntityType": "",
+              "regardingId": "",
+              "sourceEntityType": "sprk_todo"
+            }
+          ]
+        }
+      ],
+      "expect": { "perItemProvenance": true, "tldrFactsTotalMatches": true }
+    },
+    {
+      "caseId": "BA-AGG-002",
+      "family": "aggregation-preference",
+      "description": "Multi-category briefing (3 overdue tasks + 2 documents): the deterministic aggregate reaching the TL;DR equals the real total (5) and the per-category counts equal the real per-category totals.",
+      "totalNotificationCount": 5,
+      "categories": [
+        { "name": "Overdue Tasks", "count": 3, "unreadCount": 3 },
+        { "name": "Documents", "count": 2, "unreadCount": 2 }
+      ],
+      "priorityItems": [{ "category": "Overdue Tasks", "title": "Answer interrogatories" }],
+      "channels": [
+        {
+          "category": "overdue-tasks",
+          "label": "Overdue Tasks",
+          "items": [
+            {
+              "id": "t2000000-0000-0000-0000-000000000001",
+              "title": "Answer interrogatories",
+              "regardingName": "",
+              "regardingEntityType": "",
+              "regardingId": "",
+              "sourceEntityType": "sprk_event"
+            },
+            {
+              "id": "t2000000-0000-0000-0000-000000000002",
+              "title": "Prepare witness outline",
+              "regardingName": "",
+              "regardingEntityType": "",
+              "regardingId": "",
+              "sourceEntityType": "sprk_event"
+            },
+            {
+              "id": "t2000000-0000-0000-0000-000000000003",
+              "title": "Serve subpoena",
+              "regardingName": "",
+              "regardingEntityType": "",
+              "regardingId": "",
+              "sourceEntityType": "sprk_event"
+            }
+          ]
+        },
+        {
+          "category": "documents",
+          "label": "Documents",
+          "items": [
+            {
+              "id": "d2000000-0000-0000-0000-000000000001",
+              "title": "Settlement memo.docx",
+              "regardingName": "",
+              "regardingEntityType": "",
+              "regardingId": "",
+              "sourceEntityType": "sprk_document"
+            },
+            {
+              "id": "d2000000-0000-0000-0000-000000000002",
+              "title": "Deposition transcript.pdf",
+              "regardingName": "",
+              "regardingEntityType": "",
+              "regardingId": "",
+              "sourceEntityType": "sprk_document"
+            }
+          ]
+        }
+      ],
+      "expect": { "perItemProvenance": true, "tldrFactsTotalMatches": true }
+    },
+    {
+      "caseId": "BA-GRD-001",
+      "family": "grounding-round-trip",
+      "description": "Every fact the TL;DR LLM receives traces to the deterministic view model: total count, per-category counts, and the record-name allow-list all equal the request's own values — the LLM is handed facts, it does not compute them.",
+      "totalNotificationCount": 2,
+      "categories": [
+        { "name": "Overdue Tasks", "count": 1, "unreadCount": 1 },
+        { "name": "Documents", "count": 1, "unreadCount": 1 }
+      ],
+      "priorityItems": [{ "category": "Overdue Tasks", "title": "Respond to opposing counsel" }],
+      "channels": [
+        {
+          "category": "overdue-tasks",
+          "label": "Overdue Tasks",
+          "items": [
+            {
+              "id": "g1000000-0000-0000-0000-000000000001",
+              "title": "Respond to opposing counsel",
+              "regardingName": "Beta Holdings matter",
+              "regardingEntityType": "sprk_matter",
+              "regardingId": "b1000000-0000-0000-0000-00000000beef",
+              "sourceEntityType": "sprk_event"
+            }
+          ]
+        },
+        {
+          "category": "documents",
+          "label": "Documents",
+          "items": [
+            {
+              "id": "g1000000-0000-0000-0000-000000000002",
+              "title": "NDA draft.docx",
+              "regardingName": "Gamma Industries matter",
+              "regardingEntityType": "sprk_matter",
+              "regardingId": "c1000000-0000-0000-0000-00000000cafe",
+              "sourceEntityType": "sprk_document"
+            }
+          ]
+        }
+      ],
+      "expect": { "tldrFactsTotalMatches": true }
+    },
+    {
+      "caseId": "BA-TLDR-001",
+      "family": "tldr-abstraction",
+      "description": "The TL;DR names one REAL record ('Beta Holdings matter') and one FABRICATED record ('Zzyzx Global holdings') that exists in NO source item. Binary anchor resolution keeps the real anchor (itemRef points at the real item) and DROPS the fabricated one (no itemRef, no warning).",
+      "totalNotificationCount": 1,
+      "categories": [{ "name": "Overdue Tasks", "count": 1, "unreadCount": 1 }],
+      "priorityItems": [{ "category": "Overdue Tasks", "title": "Respond to opposing counsel" }],
+      "channels": [
+        {
+          "category": "overdue-tasks",
+          "label": "Overdue Tasks",
+          "items": [
+            {
+              "id": "a1000000-0000-0000-0000-000000000001",
+              "title": "Respond to opposing counsel",
+              "regardingName": "Beta Holdings matter",
+              "regardingEntityType": "sprk_matter",
+              "regardingId": "b1000000-0000-0000-0000-00000000beef",
+              "sourceEntityType": "sprk_event"
+            }
+          ]
+        }
+      ],
+      "tldrSummary": "Beta Holdings matter needs a response today; separately, Zzyzx Global holdings is trending up.",
+      "expect": {
+        "everyItemRefResolves": true,
+        "resolvedAnchors": ["Beta Holdings matter"],
+        "droppedAnchors": ["Zzyzx Global holdings"]
+      }
+    },
+    {
+      "caseId": "BA-TLDR-002",
+      "family": "tldr-abstraction",
+      "description": "A terse TL;DR that names no record produces an empty itemRefs array — empty is valid (not a low-quality signal), and the fabricated name never appears.",
+      "totalNotificationCount": 1,
+      "categories": [{ "name": "Documents", "count": 1, "unreadCount": 1 }],
+      "priorityItems": [{ "category": "Documents", "title": "Contract.pdf" }],
+      "channels": [
+        {
+          "category": "documents",
+          "label": "Documents",
+          "items": [
+            {
+              "id": "a2000000-0000-0000-0000-000000000001",
+              "title": "Contract.pdf",
+              "regardingName": "Delta Ventures matter",
+              "regardingEntityType": "sprk_matter",
+              "regardingId": "d2000000-0000-0000-0000-00000000dddd",
+              "sourceEntityType": "sprk_document"
+            }
+          ]
+        }
+      ],
+      "tldrSummary": "You have one item to review today.",
+      "expect": {
+        "everyItemRefResolves": true,
+        "resolvedAnchors": [],
+        "droppedAnchors": ["Delta Ventures matter"]
+      }
+    },
+    {
+      "caseId": "BA-TLDR-003",
+      "family": "tldr-abstraction",
+      "description": "Anchor resolution is per-item and binary: when the TL;DR names Matter A's record among two confusable matters, the resolved itemRef points at Matter A's OWN item id — never Matter B's.",
+      "totalNotificationCount": 2,
+      "categories": [{ "name": "matters", "count": 2, "unreadCount": 2 }],
+      "priorityItems": [{ "category": "matters", "title": "Northwind acquisition" }],
+      "channels": [
+        {
+          "category": "matters",
+          "label": "Matters",
+          "items": [
+            {
+              "id": "a3000000-0000-0000-0000-00000000000a",
+              "title": "Northwind acquisition",
+              "regardingName": "Northwind acquisition",
+              "regardingEntityType": "sprk_matter",
+              "regardingId": "a3000000-0000-0000-0000-00000000000a",
+              "sourceEntityType": "sprk_matter"
+            },
+            {
+              "id": "a3000000-0000-0000-0000-00000000000b",
+              "title": "Northwind divestiture",
+              "regardingName": "Northwind divestiture",
+              "regardingEntityType": "sprk_matter",
+              "regardingId": "a3000000-0000-0000-0000-00000000000b",
+              "sourceEntityType": "sprk_matter"
+            }
+          ]
+        }
+      ],
+      "tldrSummary": "The Northwind acquisition closes this week.",
+      "expect": {
+        "everyItemRefResolves": true,
+        "resolvedAnchors": ["Northwind acquisition"],
+        "droppedAnchors": ["Northwind divestiture"]
+      }
+    }
+  ]
+}

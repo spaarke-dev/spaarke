@@ -3,7 +3,7 @@
   <metadata>
     <title>Repo-wide @odata.bind PascalCase grep audit + fix in-use occurrences (FR-C9 part 2)</title>
     <phase>0: Quick fixes</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>none</blocks>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Promise-cache the primary-contact lookup; fix the truncation comment</title>
     <phase>B: Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>036</dependencies>
     <blocks>038</blocks>
