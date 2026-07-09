@@ -208,17 +208,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Comprehensive review of commercial contracts to extract obligations, parties, key dates, payment terms, and risk factors.",
-      "documentTypes": [
-        "Contract",
-        "MSA",
-        "PSA",
-        "VendorAgreement"
-      ],
-      "tags": [
-        "legal",
-        "contract",
-        "review"
-      ]
+      "documentTypes": ["Contract", "MSA", "PSA", "VendorAgreement"],
+      "tags": ["legal", "contract", "review"]
     },
     {
       "code": "ACT-003",
@@ -228,18 +219,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Analysis of commercial and residential lease agreements to extract rent obligations, lease term, renewal options, permitted use, and termination rights.",
-      "documentTypes": [
-        "CommercialLease",
-        "ResidentialLease",
-        "NNN",
-        "OfficeLease",
-        "RetailLease"
-      ],
-      "tags": [
-        "legal",
-        "lease",
-        "real-estate"
-      ]
+      "documentTypes": ["CommercialLease", "ResidentialLease", "NNN", "OfficeLease", "RetailLease"],
+      "tags": ["legal", "lease", "real-estate"]
     },
     {
       "code": "ACT-005",
@@ -249,16 +230,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Analysis of Service Level Agreements to identify service level objectives, performance metrics, measurement methodology, penalties and remedies, exclusions, and escalation procedures.",
-      "documentTypes": [
-        "SLA",
-        "ManagedServiceSLA",
-        "CloudSLA"
-      ],
-      "tags": [
-        "legal",
-        "sla",
-        "service-level"
-      ]
+      "documentTypes": ["SLA", "ManagedServiceSLA", "CloudSLA"],
+      "tags": ["legal", "sla", "service-level"]
     },
     {
       "code": "ACT-023",
@@ -400,16 +373,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Analysis of non-disclosure agreements to identify key restrictions, permitted disclosures, exclusions, effective dates, and mutual vs. unilateral obligations.",
-      "documentTypes": [
-        "NDA",
-        "ConfidentialityAgreement",
-        "CDA"
-      ],
-      "tags": [
-        "legal",
-        "nda",
-        "confidentiality"
-      ]
+      "documentTypes": ["NDA", "ConfidentialityAgreement", "CDA"],
+      "tags": ["legal", "nda", "confidentiality"]
     },
     {
       "code": "ACT-004",
@@ -419,17 +384,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Extraction and validation of invoice data including vendor details, invoice number, line items, amounts, taxes, payment terms, and due dates for accounts payable processing.",
-      "documentTypes": [
-        "Invoice",
-        "UtilityBill",
-        "SubscriptionInvoice",
-        "APDocument"
-      ],
-      "tags": [
-        "financial",
-        "invoice",
-        "accounts-payable"
-      ]
+      "documentTypes": ["Invoice", "UtilityBill", "SubscriptionInvoice", "APDocument"],
+      "tags": ["financial", "invoice", "accounts-payable"]
     },
     {
       "code": "ACT-006",
@@ -439,16 +395,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Analysis of employment agreements to extract compensation, benefits, equity, IP assignment, non-compete and non-solicitation restrictions, termination provisions, and severance terms.",
-      "documentTypes": [
-        "OfferLetter",
-        "EmploymentContract",
-        "ContractorAgreement"
-      ],
-      "tags": [
-        "legal",
-        "employment",
-        "HR"
-      ]
+      "documentTypes": ["OfferLetter", "EmploymentContract", "ContractorAgreement"],
+      "tags": ["legal", "employment", "HR"]
     },
     {
       "code": "ACT-007",
@@ -458,17 +406,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Analysis of Statements of Work to extract deliverables, milestones, acceptance criteria, payment schedules, change order procedures, and key dependencies or assumptions.",
-      "documentTypes": [
-        "SOW",
-        "WorkOrder",
-        "TaskOrder",
-        "ProjectOrder"
-      ],
-      "tags": [
-        "legal",
-        "sow",
-        "project"
-      ]
+      "documentTypes": ["SOW", "WorkOrder", "TaskOrder", "ProjectOrder"],
+      "tags": ["legal", "sow", "project"]
     },
     {
       "code": "ACT-008",
@@ -478,15 +417,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Catch-all legal document analysis for unclassified legal instruments. Identifies document type, parties, key obligations, critical dates, financial commitments, and risk factors for any legal document not covered by a more specific action.",
-      "documentTypes": [
-        "LegalDocument",
-        "Unclassified"
-      ],
-      "tags": [
-        "legal",
-        "general",
-        "triage"
-      ]
+      "documentTypes": ["LegalDocument", "Unclassified"],
+      "tags": ["legal", "general", "triage"]
     },
     {
       "code": "ACT-017",
@@ -654,17 +586,6 @@
       "tags": null
     },
     {
-      "code": "BRIEF-NARRATE-CHANNEL",
-      "id": "dc3533c0-fc70-f111-ab0e-7ced8ddc4cc6",
-      "name": "Brief Narrate Channel",
-      "kind": null,
-      "modelTier": null,
-      "workflowClass": null,
-      "description": "Generates per-channel narrative bullets for a single channel within the user's daily notification briefing. Used by the DAILY-BRIEFING-NARRATE playbook (R4) — invoked in parallel, once per channel. Grounded: model uses ONLY entity names present in the input payload.",
-      "documentTypes": null,
-      "tags": null
-    },
-    {
       "code": "BRIEF-VALIDATE-ENTITY-NAMES",
       "id": "290e786c-ff70-f111-ab0e-7ced8ddc4cc6",
       "name": "Brief Validate Entity Names",
@@ -715,7 +636,7 @@
       "kind": "Coded",
       "modelTier": null,
       "workflowClass": "DailyBriefingNarrator",
-      "description": "FR-P3-04 (spaarke-ai-architecture-redesign-r1 task 043): the platform's FIRST full coded composite Action. Executes the registered ICodedWorkflow class DailyBriefingNarrator (collect via DailyBriefingCollector feeder -> TL;DR + per-channel narration reading prompts hot-editable from the BRIEF-NARRATE-TLDR / BRIEF-NARRATE-CHANNEL Action rows -> entity-name scrub -> section-keyed output). Dispatched exclusively via its daily-briefing-narrate Binding rows (default=render/informational, email=email disposition). Control flow is code; behavior is data (ADR-039).",
+      "description": "FR-P3-04 (spaarke-ai-architecture-redesign-r1 task 043): the platform's FIRST full coded composite Action. Executes the registered ICodedWorkflow class DailyBriefingNarrator (collect via DailyBriefingCollector feeder -> TL;DR narration reading its prompt hot-editable from the BRIEF-NARRATE-TLDR Action row + deterministic per-channel bullets (R5 tasks 010/012 retired the former per-channel LLM Action) -> entity-name scrub -> section-keyed output). Dispatched exclusively via its daily-briefing-narrate Binding rows (default=render/informational, email=email disposition). Control flow is code; behavior is data (ADR-039).",
       "documentTypes": null,
       "tags": null
     },
@@ -737,98 +658,40 @@
       "id": "62518925-d310-f111-8342-7c1e520aa4df",
       "name": "Summary Generation",
       "description": "Generate an executive summary of 3-5 key bullet points at the start of the response",
-      "compatibleActions": [
-        "ACT-001",
-        "ACT-002",
-        "ACT-003",
-        "ACT-004",
-        "ACT-005",
-        "ACT-006",
-        "ACT-007",
-        "ACT-008"
-      ],
-      "tags": [
-        "summary",
-        "executive",
-        "overview"
-      ]
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-004", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["summary", "executive", "overview"]
     },
     {
       "code": "SKL-005",
       "id": "63518925-d310-f111-8342-7c1e520aa4df",
       "name": "Party Identification",
       "description": "Identify all parties with full legal names, roles, shortened forms, and any stated contact details",
-      "compatibleActions": [
-        "ACT-001",
-        "ACT-002",
-        "ACT-003",
-        "ACT-005",
-        "ACT-006",
-        "ACT-007",
-        "ACT-008"
-      ],
-      "tags": [
-        "parties",
-        "identification",
-        "entities"
-      ]
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["parties", "identification", "entities"]
     },
     {
       "code": "SKL-006",
       "id": "64518925-d310-f111-8342-7c1e520aa4df",
       "name": "Obligation Mapping",
       "description": "Map all mutual obligations into a structured table showing party, obligation, condition, and deadline",
-      "compatibleActions": [
-        "ACT-001",
-        "ACT-003",
-        "ACT-005",
-        "ACT-006",
-        "ACT-007",
-        "ACT-008"
-      ],
-      "tags": [
-        "obligations",
-        "mapping",
-        "structured"
-      ]
+      "compatibleActions": ["ACT-001", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["obligations", "mapping", "structured"]
     },
     {
       "code": "SKL-008",
       "id": "65518925-d310-f111-8342-7c1e520aa4df",
       "name": "Financial Terms",
       "description": "Extract all monetary amounts, payment schedules, rates, and financial obligations",
-      "compatibleActions": [
-        "ACT-001",
-        "ACT-003",
-        "ACT-004",
-        "ACT-005",
-        "ACT-007"
-      ],
-      "tags": [
-        "financial",
-        "monetary",
-        "payment"
-      ]
+      "compatibleActions": ["ACT-001", "ACT-003", "ACT-004", "ACT-005", "ACT-007"],
+      "tags": ["financial", "monetary", "payment"]
     },
     {
       "code": "SKL-010",
       "id": "66518925-d310-f111-8342-7c1e520aa4df",
       "name": "Jurisdiction and Governing Law",
       "description": "Identify applicable law, jurisdiction, dispute resolution mechanism, and arbitration body",
-      "compatibleActions": [
-        "ACT-001",
-        "ACT-002",
-        "ACT-003",
-        "ACT-005",
-        "ACT-006",
-        "ACT-007",
-        "ACT-008"
-      ],
-      "tags": [
-        "jurisdiction",
-        "governing-law",
-        "dispute-resolution"
-      ]
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["jurisdiction", "governing-law", "dispute-resolution"]
     },
     {
       "code": "SKL-025",
@@ -931,101 +794,40 @@
       "id": "1a434c23-d310-f111-8342-7ced8d1dc988",
       "name": "Citation Extraction",
       "description": "Inject citation instructions — every claim is followed by [Section: X, Page Y] references",
-      "compatibleActions": [
-        "ACT-001",
-        "ACT-002",
-        "ACT-003",
-        "ACT-005",
-        "ACT-006",
-        "ACT-007",
-        "ACT-008"
-      ],
-      "tags": [
-        "citation",
-        "sourcing",
-        "evidence"
-      ]
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["citation", "sourcing", "evidence"]
     },
     {
       "code": "SKL-002",
       "id": "1c434c23-d310-f111-8342-7ced8d1dc988",
       "name": "Risk Flagging",
       "description": "Highlight clauses requiring legal review with [RISK: HIGH/MEDIUM/LOW] prefixes",
-      "compatibleActions": [
-        "ACT-001",
-        "ACT-002",
-        "ACT-003",
-        "ACT-005",
-        "ACT-006",
-        "ACT-007",
-        "ACT-008"
-      ],
-      "tags": [
-        "risk",
-        "flagging",
-        "compliance"
-      ]
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["risk", "flagging", "compliance"]
     },
     {
       "code": "SKL-004",
       "id": "1e434c23-d310-f111-8342-7ced8d1dc988",
       "name": "Date Extraction",
       "description": "Extract and normalize all dates to ISO 8601 format in a structured Key Dates table",
-      "compatibleActions": [
-        "ACT-001",
-        "ACT-002",
-        "ACT-003",
-        "ACT-004",
-        "ACT-005",
-        "ACT-006",
-        "ACT-007",
-        "ACT-008"
-      ],
-      "tags": [
-        "dates",
-        "extraction",
-        "normalization"
-      ]
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-004", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["dates", "extraction", "normalization"]
     },
     {
       "code": "SKL-007",
       "id": "1f434c23-d310-f111-8342-7ced8d1dc988",
       "name": "Defined Terms",
       "description": "Extract all defined terms and their definitions into an alphabetical glossary",
-      "compatibleActions": [
-        "ACT-001",
-        "ACT-002",
-        "ACT-003",
-        "ACT-005",
-        "ACT-006",
-        "ACT-007",
-        "ACT-008"
-      ],
-      "tags": [
-        "definitions",
-        "glossary",
-        "terms"
-      ]
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["definitions", "glossary", "terms"]
     },
     {
       "code": "SKL-009",
       "id": "20434c23-d310-f111-8342-7ced8d1dc988",
       "name": "Termination Analysis",
       "description": "Analyze all termination triggers, notice periods, cure periods, and post-termination consequences",
-      "compatibleActions": [
-        "ACT-001",
-        "ACT-002",
-        "ACT-003",
-        "ACT-005",
-        "ACT-006",
-        "ACT-007",
-        "ACT-008"
-      ],
-      "tags": [
-        "termination",
-        "notice",
-        "cure"
-      ]
+      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
+      "tags": ["termination", "notice", "cure"]
     },
     {
       "code": "SKL-035",
@@ -1135,11 +937,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: definitions for 50+ standard contract terms including acceptance, amendment, arbitration, assignment, breach, cap on liability, confidentiality, force majeure, governing law, indemnification, IP, limitation of liability, representations and warranties, severability, termination, and waiver.",
       "contentType": "Reference",
-      "tags": [
-        "glossary",
-        "contract",
-        "definitions"
-      ]
+      "tags": ["glossary", "contract", "definitions"]
     },
     {
       "code": "KNW-003",
@@ -1148,11 +946,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: commercial lease standards covering base rent and escalation, operating expense structures, controllable vs. uncontrollable expense caps, permitted use, exclusive use rights, renewal/expansion/termination options, tenant improvement allowance, and holdover provisions.",
       "contentType": "Reference",
-      "tags": [
-        "lease",
-        "commercial",
-        "standards"
-      ]
+      "tags": ["lease", "commercial", "standards"]
     },
     {
       "code": "KNW-004",
@@ -1161,11 +955,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: AP invoice processing guide covering invoice types, required fields, three-way and two-way matching, matching tolerances, duplicate detection, vendor master file validation, PO validation, contract compliance, tax validation, exception handling, and approval workflow.",
       "contentType": "Reference",
-      "tags": [
-        "invoice",
-        "accounts-payable",
-        "processing"
-      ]
+      "tags": ["invoice", "accounts-payable", "processing"]
     },
     {
       "code": "KNW-007",
@@ -1174,11 +964,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: annotated IP assignment clauses including broad work product assignment, independent contractor work-for-hire, background IP definition and license-back, prior inventions exclusion, AI/ML model and training data assignment, open source compliance, moral rights waiver, and future patents assignment.",
       "contentType": "Reference",
-      "tags": [
-        "IP",
-        "assignment",
-        "clauses"
-      ]
+      "tags": ["IP", "assignment", "clauses"]
     },
     {
       "code": "KNW-008",
@@ -1187,11 +973,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: comprehensive termination and remedy reference covering termination for cause triggers, notice and cure periods, termination for convenience, termination fees, post-termination transition, return/destruction of data, survival provisions, damages types, liquidated damages, injunctive relief, and set-off rights.",
       "contentType": "Reference",
-      "tags": [
-        "termination",
-        "remedies",
-        "provisions"
-      ]
+      "tags": ["termination", "remedies", "provisions"]
     },
     {
       "code": "KNW-009",
@@ -1200,11 +982,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: governing law and dispute resolution reference covering common US/international law choices, conflict-of-law exclusions, exclusive vs. non-exclusive jurisdiction, arbitration institutions, tiered dispute resolution, interim relief, and New York Convention enforcement.",
       "contentType": "Reference",
-      "tags": [
-        "jurisdiction",
-        "governing-law",
-        "arbitration"
-      ]
+      "tags": ["jurisdiction", "governing-law", "arbitration"]
     },
     {
       "code": "KM-002",
@@ -1267,11 +1045,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: 20-item checklist for NDA review covering party identification, purpose, confidential information definition and scope, standard exclusions, standard of care, permitted use, permitted disclosure, agreement term, survival of obligations, return/destruction, injunctive relief, and governing law.",
       "contentType": "Reference",
-      "tags": [
-        "checklist",
-        "nda",
-        "review"
-      ]
+      "tags": ["checklist", "nda", "review"]
     },
     {
       "code": "KNW-005",
@@ -1280,11 +1054,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: SLA/SLO/SLI definitions, availability tiers, response time/latency metrics, throughput, error rate targets, incident severity levels with response time and resolution SLAs, tiered service credit schedules, and measurement methodology.",
       "contentType": "Reference",
-      "tags": [
-        "sla",
-        "metrics",
-        "availability"
-      ]
+      "tags": ["sla", "metrics", "availability"]
     },
     {
       "code": "KNW-006",
@@ -1293,11 +1063,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: US employment law fundamentals covering at-will employment, employee vs. independent contractor classification, FLSA wage and overtime, non-compete enforceability by state, DTSA immunity notice, work made for hire, invention assignment, FMLA, ADA, USERRA, WARN Act, and OWBPA requirements.",
       "contentType": "Reference",
-      "tags": [
-        "employment",
-        "labor-law",
-        "compliance"
-      ]
+      "tags": ["employment", "labor-law", "compliance"]
     },
     {
       "code": "KNW-010",
@@ -1306,11 +1072,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: 32 red flags across 10 categories with severity ratings covering liability/indemnification, payment/financial, termination, data/privacy, IP, contract structure, dispute resolution, confidentiality, employment/personnel, and miscellaneous flags.",
       "contentType": "Reference",
-      "tags": [
-        "red-flags",
-        "risk",
-        "compliance"
-      ]
+      "tags": ["red-flags", "risk", "compliance"]
     },
     {
       "code": "KM-005",
@@ -1590,11 +1352,7 @@
       "handler": "DocumentClassifierHandler",
       "sideEffectClass": null,
       "description": "Classify documents into categories/taxonomies",
-      "tags": [
-        "refinement",
-        "editing",
-        "formatting"
-      ]
+      "tags": ["refinement", "editing", "formatting"]
     },
     {
       "code": "TL-006",
@@ -1604,11 +1362,7 @@
       "handler": "SummaryHandler",
       "sideEffectClass": null,
       "description": "Generate structured summaries of document sections or complete documents",
-      "tags": [
-        "summary",
-        "generation",
-        "condensation"
-      ]
+      "tags": ["summary", "generation", "condensation"]
     },
     {
       "code": "TL-010",
@@ -1668,11 +1422,7 @@
       "handler": "SemanticSearchHandler",
       "sideEffectClass": null,
       "description": "Search knowledge bases using semantic similarity",
-      "tags": [
-        "extraction",
-        "parties",
-        "entities"
-      ]
+      "tags": ["extraction", "parties", "entities"]
     },
     {
       "code": "RISK-DETECTOR",
@@ -1842,17 +1592,8 @@
       "contextWindow": 128000,
       "costTier": "high",
       "speedTier": "medium",
-      "recommendedFor": [
-        "deep-analysis",
-        "extraction",
-        "legal-reasoning",
-        "financial-calculation"
-      ],
-      "avoidFor": [
-        "classification",
-        "triage",
-        "simple-summary"
-      ]
+      "recommendedFor": ["deep-analysis", "extraction", "legal-reasoning", "financial-calculation"],
+      "avoidFor": ["classification", "triage", "simple-summary"]
     },
     {
       "name": "gpt-4o-mini",
@@ -1860,17 +1601,8 @@
       "contextWindow": 128000,
       "costTier": "low",
       "speedTier": "fast",
-      "recommendedFor": [
-        "classification",
-        "triage",
-        "simple-summary",
-        "condition-routing"
-      ],
-      "avoidFor": [
-        "complex-reasoning",
-        "detailed-extraction",
-        "legal-reasoning"
-      ]
+      "recommendedFor": ["classification", "triage", "simple-summary", "condition-routing"],
+      "avoidFor": ["complex-reasoning", "detailed-extraction", "legal-reasoning"]
     },
     {
       "name": "gpt-4-turbo",
@@ -1878,12 +1610,8 @@
       "contextWindow": 128000,
       "costTier": "high",
       "speedTier": "slow",
-      "recommendedFor": [
-        "legacy-compatibility"
-      ],
-      "avoidFor": [
-        "new-playbooks"
-      ]
+      "recommendedFor": ["legacy-compatibility"],
+      "avoidFor": ["new-playbooks"]
     }
   ],
   "modelSelectionRules": [
