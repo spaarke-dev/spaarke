@@ -15,12 +15,12 @@
 | 002 | Measure-first prompt-assembly baseline ✅ 2026-07-08: measured (not source-only) via a temporary harness driving the REAL seam — `PlaybookChatContextProvider.GetContextAsync` + `SprkChatAgentFactory` static directives + `ChatHistoryManager.BuildLedgerOutputsContext` (harness deleted after capture, zero residual diff). Found the POML's stated anchor (`OrchestratorPromptBuilder.cs`) is DEAD CODE — no production call site; corrected to the real FR-27 seam. Escalated 3 findings to task 054: Environment measured 111 vs. ≤50 estimate (exceeds on every turn); Business measured 1,118 vs. ≤1,200 (near/at ceiling, two unconditional directives untracked by the shared budget tracker); Conversation structurally unbounded to ~8,000 via `BuildLedgerOutputsContext`'s ledger-window caps (outside `IPromptBudgetTracker` entirely). See `notes/prompt-assembly-baseline.md`; spec.md FR-B-05 annotated. | ✅ | sonnet·xhigh | ✅ | — | Phase 0 |
 | 003 | Business-slice determinism check ✅ 2026-07-08: CONFIRMED DETERMINISTIC — Business slice stays in the ContextEnvelope stable prefix (NFR-04 not re-scoped). Verified host-identity block (PlaybookChatContextProvider.cs:582) + hand-mirrored write-contract description (DataverseCreateRecordHandler.cs:111) on the existing assembly path (ADR-040); pinning test + 3 negative controls added (`tests/integration/contract/Api/Ai/BusinessSliceDeterminismContractTests.cs`, 6/6 passed). No production code changed. Note: `notes/business-slice-determinism.md` | ✅ | sonnet | ✅ | — | Phase 0 |
 | 004 | Discovery obligations confirm | ✅ | sonnet | ✅ | — | Phase 0 |
-| 010 | Contract: ComposeDisposition v1 (publish FIRST) | 🔲 | opus | ✅ | — | A0 |
-| 011 | Contract: OutcomeCard v1 | 🔲 | opus | ✅ | — | A0 |
-| 012 | Contract: GateDecision v2 | 🔲 | opus | ✅ | — | A0 |
-| 013 | Contract: TraceEvent v1 | 🔲 | opus | ✅ | — | A0 |
-| 014 | Contract: JobAwareCompletionState v1 | 🔲 | opus | ✅ | — | A0 |
-| 015 | Contract: ContextEnvelope v1 | 🔲 | opus | ✅ | — | A0 |
+| 010 | Contract: ComposeDisposition v1 (publish FIRST) ✅ 2026-07-08 (7/7 tests; unblocks Compose FR-04/16/17) | ✅ | opus | ✅ | — | A0 |
+| 011 | Contract: OutcomeCard v1 ✅ 2026-07-08 (10/10; FR-05/28) | ✅ | opus | ✅ | — | A0 |
+| 012 | Contract: GateDecision v2 ✅ 2026-07-08 (34/34; +association picker; engine 032 pending; FR-05/28) | ✅ | opus | ✅ | — | A0 |
+| 013 | Contract: TraceEvent v1 ✅ 2026-07-08 (7/7; view 038 pending; FR-32) | ✅ | opus | ✅ | — | A0 |
+| 014 | Contract: JobAwareCompletionState v1 ✅ 2026-07-08 (22/22; consumer-declared steps; FR-05/28) | ✅ | opus | ✅ | — | A0 |
+| 015 | Contract: ContextEnvelope v1 ✅ 2026-07-08 (12/12; budgets provisional→task 054) | ✅ | opus | ✅ | — | A0 |
 | 016 | Contract: MemoryItem v1 | 🔲 | opus | ✅ | — | A0 |
 | 017 | Seam-publication ordering + cross-project obligation | 🔲 | sonnet | ❌ | 010–016 | A0 |
 | 020 | **Triple-twin validator hoist (BLOCKS catalog tasks)** | 🔲 | opus·xhigh | ❌ | — | A-infra |

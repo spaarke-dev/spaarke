@@ -8,24 +8,26 @@
 
 ## Active Task
 
-- **Task**: none (P0 wave 001–004 ALL COMPLETE)
+- **Task**: none (P0 wave 001–004 + A0 contracts 010–015 COMPLETE)
 - **Status**: none
-- **Phase**: Phase 0 — Reconciliation & Discovery (closed)
+- **Phase**: Phase A0 — Contract-first (6 of 7 contracts published on branch)
 
 ## Next Action
 
-**P0 wave (001–004) is fully complete.** Task 002 (Measure-first prompt-assembly baseline)
-is ✅ complete — see `notes/prompt-assembly-baseline.md`; spec.md FR-B-05 annotated with
-estimate-vs-measured deltas; 3 findings escalated for task 054 (Environment exceeds
-estimate every turn; Business near/at ceiling from two untracked unconditional directives;
-Conversation structurally unbounded to ~8,000 tokens via the untracked ledger-outputs-context
-path). Task 001 (r1 P4-close reconciliation) ✅ — `notes/r1-p4-reconciliation.md`. Task 004
-(Discovery obligations confirm) ✅ — `notes/discovery-obligations.md`. Task 003
-(Business-slice determinism check) ✅ — CONFIRMED DETERMINISTIC; `notes/business-slice-determinism.md`.
-Per [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md), next eligible waves are A0 contracts
-(010–017), the 020 triple-twin hoist, and 030 D-F0 — awaiting operator dispatch decision
-(project remains under the pipeline's STOP-for-review gate for anything beyond the
-already-cleared P0 wave). Gates (049/069/079) are operator browser UAT on spaarkedev1 —
+**P0 (001–004) + A0 contracts (010–015) complete.** 6 contract seams green on the branch
+(010 ComposeDisposition 7/7, 011 OutcomeCard 10/10, 012 GateDecision v2 34/34, 013 TraceEvent
+7/7, 014 JobAwareCompletionState 22/22, 015 ContextEnvelope 12/12) — full test run 498 passed
+/ 0 failed; BFF 0 errors. SEAM-STATUS updated: 5 of 8 Compose seam contracts green (Compose
+can bind now). Notes per contract in `notes/*-contract*.md`.
+
+**Remaining A0 + A-infra + first J:** 016 MemoryItem (contract) · 017 seam-milestone (needs
+010–016) · 020 triple-twin hoist (serial, blocks catalog tasks) · 021 test-repair (parallel) ·
+030 D-F0 doctrine (serial). Then engine/impl waves. Follow-on production wiring flagged by
+the contract agents: promote `compose` to a routing disposition (BindingDisposition.Compose +
+OutputRouter) — deferred to 032/035; OutcomeCard/JobAware producers wire in 035/036.
+
+Per [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md), next: 016 + 020 + 021 + 030. Gates (049/069/079)
+are operator browser UAT on spaarkedev1 —
 never auto-run.
 
 ## Recovery Notes

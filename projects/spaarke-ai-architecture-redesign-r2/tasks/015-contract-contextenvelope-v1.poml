@@ -1,7 +1,7 @@
 <task id="AIR2-015" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Publish ContextEnvelope v1 contract (walking skeleton) — the canonical per-turn six-slice context shape</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>A0 — Contract-first</phase>
     <gate>G-R2-A (seam publication)</gate>
     <estimated-effort>1 day</estimated-effort>
@@ -102,4 +102,29 @@
   <escalation>
     <trigger>If the six-slice model cannot represent the Memory.Conversation slice as a ledger REFERENCE (forcing a content copy / parallel cache), STOP — that is an ADR-040 tension (CLAUDE.md §6.5); surface it before the Binder wave builds on the shape.</trigger>
   </escalation>
+
+  <notes>
+    Completed 2026-07-08. ContextEnvelope v1 published as a walking skeleton — NO ADR-040 tension:
+    the six-slice model represents Memory.Conversation as a ledger REFERENCE list
+    (LedgerEntryReference, no content member), so the escalation trigger did NOT fire.
+
+    Files created (NEW only; zero shared-file edits, zero DI):
+    - src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ContextEnvelope.cs — DTO (6 slices,
+      SliceStability, SliceMeta counts-only, LedgerEntryReference/MemoryItemReference/RetrievalReference,
+      CanonicalAssemblyOrder, JsonOptions tolerant-reader) + PlaceholderBudgets + thin reference
+      producer + consumer.
+    - tests/integration/contract/Api/Ai/ContextEnvelopeContractTests.cs — 12 self-contained tests
+      (shape, stability, NFR-04 ordering, ADR-040 ledger-facade + negative control, NFR-07 counts-only,
+      tolerant-reader, partial-slice states). No DI, no Mock&lt;HttpMessageHandler&gt;, no DI-reg tests.
+    - projects/.../notes/contextenvelope-v1-contract.md — slice→primitive map, budgets, invariants.
+
+    Build: BFF 0 errors; test proj 0 errors. Test: 12/12 pass.
+    Publish-size: 45.69 MB compressed excl PDB (~0 delta vs 45.87 MB baseline). No NEW HIGH CVE.
+    adr-check: clean (0 violations).
+
+    Budgets are PLACEHOLDERS (BudgetIsProvisional=true); task 054 (FR-B-05) finalizes vs FR-P0-02.
+    No csproj edit needed — test compiles via the existing tests/integration/contract/**/*.cs glob.
+    Follow-on wiring for the Binder (task 053) described in the notes doc (not done here per
+    parallel-safety).
+  </notes>
 </task>
