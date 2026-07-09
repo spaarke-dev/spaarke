@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Repo-wide @odata.bind PascalCase grep audit + fix in-use occurrences (FR-C9 part 2)</title>
+    <phase>0: Quick fixes</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>none</blocks>
+    <tags>refactoring, frontend, audit</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Produces a new audit report file and may edit existing source files; has explicit project constraints. Not FULL — scope is a mechanical convention fix, not feature implementation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical grep audit + convention fix against an explicit rule (task 001); each occurrence is a per-site verdict with a clear reference.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Grep the repository for @odata.bind usages, produce an audit report listing every occurrence with file:line and
+    a verdict, and fix any IN-USE occurrence that binds a lookup using the lowercase attribute LogicalName instead of
+    the required PascalCase SchemaName (per the task-001 convention doc). Explicitly EXCLUDE and leave untouched the
+    src/solutions/EventDetailSidePane/src/components/TodoSection.tsx occurrence — it is DEFERRED (side pane not in
+    use). This is FR-C9 part 2.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer performing a repo-wide convention audit. Comfortable with ripgrep, TypeScript/C#
+    source, and Dataverse OData @odata.bind navigation-property naming (SchemaName vs LogicalName).
+  </role>
+
+  <goal>
+    An audit report at projects/spaarke-daily-update-service-r5/notes/odata-bind-audit.md that lists every
+    @odata.bind occurrence in the repo with file:line and a verdict (compliant / violation-fixed / deferred), all
+    in-use lowercase-LogicalName violations corrected to PascalCase SchemaName in source, the EventDetailSidePane
+    occurrence recorded as deferred and left untouched, and a green build for any package whose source changed.
+  </goal>
+
+  <context>
+    <background>
+      R7 discovered that @odata.bind lookup binds using the lowercase attribute LogicalName are rejected by Dataverse
+      (OData 400). One instance was fixed in R7 (useInlineTodoCreate.ts:263); the EventDetailSidePane instance
+      (TodoSection.tsx:233) was deferred because the side pane is not currently in use (operator ruling 2026-07-08).
+      This task sweeps the whole repo for the pattern, documents every occurrence, and fixes any that are in use.
+      Task 001 established the convention this audit judges against.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r5/notes/odata-bind-audit.md</file>
+      <file>docs/standards/ODATA-NAMING-CONVENTION.md</file>
+      <file>src/solutions/EventDetailSidePane/src/components/TodoSection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useInlineTodoCreate.ts</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx</file>
+      <file>src/solutions/SmartTodo/src/components/SmartToDo.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/TodoDetail.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Do NOT touch src/solutions/EventDetailSidePane/src/components/TodoSection.tsx — its @odata.bind casing fix is DEFERRED per operator ruling 2026-07-08. List it in the audit report as "deferred (side pane not in use)" and leave the file byte-for-byte unchanged.</constraint>
+    <constraint source="project">A violation is an @odata.bind where the property name before "@odata.bind" is all-lowercase for a lookup that requires PascalCase SchemaName. Verify each suspected violation against the entity's SchemaName (use the known-correct reference sites: SmartTodoWidget.tsx, SmartToDo.tsx, TodoDetail.tsx, useInlineTodoCreate.ts) before editing. Do not "fix" a property that is already the correct SchemaName casing or is not a lookup bind.</constraint>
+    <constraint source="project">"In-use" means the occurrence is in a code path currently shipped/reachable. EventDetailSidePane is the ONLY explicitly out-of-scope occurrence; if you find another occurrence you believe is not in use, do NOT skip it silently — fix it if it violates, or record it with an explicit "not-in-use" rationale in the report.</constraint>
+    <constraint source="project">Only fix the @odata.bind casing on violating occurrences. Do not refactor surrounding code, rename other identifiers, or make unrelated edits in touched files.</constraint>
+    <constraint source="project">The audit grep MUST cover .ts, .tsx, .js, and .cs files under src/. Use the pattern from note 04: sprk_[a-z_]*@odata\.bind (and also scan for the general PascalCase-vs-lowercase @odata.bind pattern to catch non-sprk_ lookups).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/04-latent-bugs.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/03-code-review-followups.md</file>
+      <file>docs/standards/ODATA-NAMING-CONVENTION.md</file>
+    </files>
+    <patterns>
+      <pattern name="Correct @odata.bind usage" location="src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/TodoDetail.tsx">
+        PascalCase SchemaName navigation property, e.g. sprk_AssignedTo@odata.bind. Use these sites as the casing reference.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run a repo-wide grep for @odata.bind across src/ over .ts/.tsx/.js/.cs (start with sprk_[a-z_]*@odata\.bind, then a broader @odata\.bind scan to capture every occurrence including already-correct ones).</step>
+    <step order="2">For each occurrence, record file:line and the property name; classify: compliant (correct SchemaName casing), violation (lowercase LogicalName on a lookup bind), or deferred (EventDetailSidePane/TodoSection.tsx). Verify suspected violations against the entity SchemaName using the known-correct reference sites.</step>
+    <step order="3">Write projects/spaarke-daily-update-service-r5/notes/odata-bind-audit.md with a table of every occurrence (file:line, property, verdict) plus a summary count. Explicitly list the EventDetailSidePane occurrence as deferred/untouched.</step>
+    <step order="4">Fix each in-use violation by correcting only the property casing to the PascalCase SchemaName. Do not touch EventDetailSidePane.</step>
+    <step order="5">For each package whose source you changed, run its build (dotnet build for a .cs change; npm run build for a shared-lib/solution TS change) and confirm it passes.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a suspected lowercase @odata.bind occurrence cannot be confirmed against a known entity SchemaName (ambiguous whether lowercase is actually wrong for that entity), STOP and record it as "needs-verification" in the audit report rather than guessing a casing change, and escalate per CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects whose .cs source changed</tool>
+    <tool name="npm">Build shared-lib/solution TypeScript packages whose source changed</tool>
+    <tool name="terminal">Run grep/ripgrep and shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/odata-bind-audit.md</output>
+    <output type="code">any source file with an in-use @odata.bind casing violation (paths determined by the audit)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">projects/spaarke-daily-update-service-r5/notes/odata-bind-audit.md exists and lists every @odata.bind occurrence found under src/ with file:line and a verdict (compliant / violation-fixed / deferred / needs-verification).</criterion>
+    <criterion testable="true">Every in-use occurrence whose verdict is a lowercase-LogicalName violation has been corrected to the PascalCase SchemaName in source.</criterion>
+    <criterion testable="true">src/solutions/EventDetailSidePane/src/components/TodoSection.tsx is unchanged and is listed in the report as deferred.</criterion>
+    <criterion testable="true">No already-compliant @odata.bind property and no non-lookup-bind property was altered.</criterion>
+    <criterion testable="true">For every package whose source changed, its build passes; if no source changed, the report states "no in-use violations found — no builds required".</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The known-correct reference sites (SmartTodoWidget.tsx:759, SmartToDo.tsx:680, TodoDetail.tsx:636,
+    useInlineTodoCreate.ts:263) already use sprk_AssignedTo. useInlineTodoCreate.ts was fixed in R7 — expect it to be
+    compliant. The most likely (and only known-deferred) violation is EventDetailSidePane/TodoSection.tsx:233. If the
+    audit finds zero in-use violations, that is a valid outcome — the report + the deferred entry are still required.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

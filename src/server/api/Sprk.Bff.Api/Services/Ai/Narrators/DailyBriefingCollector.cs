@@ -137,6 +137,12 @@ public class DailyBriefingCollector : ICodedWorkflow
     // per wave12 §4 — config-table-with-rules is interpreter).
     private const int PerChannelMaxRows = 50;
 
+    // R5 task 013 (FR-A4) — TL;DR scaffolding aggregation caps. The TL;DR call's ground-truth
+    // payload MUST aggregate, not dump every source record (ADR-015 data minimization) — these
+    // caps bound RecordNames/KeyDates regardless of how many rows a channel returns.
+    internal const int TldrFactsMaxRecordNames = 20;
+    internal const int TldrFactsMaxKeyDates = 6;
+
     private readonly IGenericEntityService _entityService;
     private readonly IMembershipResolverService _membershipResolver;
     private readonly ILogger<DailyBriefingCollector> _logger;
@@ -215,28 +221,32 @@ public class DailyBriefingCollector : ICodedWorkflow
 
         // ── Phase 1: resolve candidate-set IDs for the 3 entities in parallel.
         //
-        // R7 W12 widget cutover (2026-06-30) — BYPASS of IMembershipResolverService.
-        //   The resolver returns 0 rows for users who own records via `ownerid` on
-        //   sprk_matter / sprk_project / sprk_event, despite the FetchXml running against
-        //   the correct systemUserId. Root cause is in the resolver's descriptor/condition
-        //   translation for the polymorphic Owner attribute; needs deeper investigation and
-        //   affects all consumers of IMembershipResolverService (chat scope resolution,
-        //   knowledge base filtering, etc.). Filed as DEF-NNN for follow-up.
+        // R5 task 033 (2026-07-08) — bypass reverted; routes through
+        // IMembershipResolverService again.
         //
-        //   For the Daily Briefing MVP tonight, this collector uses direct `owninguser`
-        //   queries — matches the Todos pattern below. Trade-off: collaborators (members
-        //   via sprk_assignedattorney*, sprk_assignedparalegal*, sprk_assignedtointernal,
-        //   etc.) are NOT included in the candidate set. Owner-only scope is the operator-
-        //   accepted MVP fallback until the resolver bug is fixed. Once the resolver is
-        //   fixed, revert to `ResolveMembershipsSafelyAsync` calls to restore collaborator
-        //   scope.
+        //   R7 W12 (2026-06-30) had introduced a temporary owner-only bypass here because
+        //   the resolver returned 0 rows for the polymorphic Owner attribute (DEF-NNN) —
+        //   `OwnerAttributeMetadata` doesn't inherit from the sealed `LookupAttributeMetadata`,
+        //   so the resolver's condition translation silently dropped Owner-based membership
+        //   fields. R7 ALSO shipped the root-cause fix in the same wave:
+        //   `MembershipFieldDiscoveryService.ProjectLookupAttributeRows` now synthesizes
+        //   Owner + Customer lookup targets from the base `AttributeMetadata`, so the resolver
+        //   returns rows for owner-based fields again.
         //
-        //   Reference: projects/spaarke-ai-platform-unification-r7/notes/handoffs/
-        //              daily-briefing-widget-cutover-restart.md §10 secondary risk.
+        //   With the root cause fixed, the owner-only bypass left in place silently
+        //   under-scoped the candidate set: it only matched `owninguser`, so collaborators
+        //   (assigned attorneys, paralegals, etc. — reachable via
+        //   IMembershipResolverService's other discovered roles) never appeared in the
+        //   briefing. This routes candidate-set resolution back through
+        //   `ResolveMembershipsSafelyAsync` to restore full membership scope (owner +
+        //   collaborator roles) for events/matters/projects.
+        //
+        //   Reference: projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/
+        //              03-code-review-followups.md item 1.
         var membershipsTask = Task.WhenAll(
-            ResolveOwnedIdsAsync(systemUserId, EntityEvent, "sprk_eventid", filterActive: false, ct),
-            ResolveOwnedIdsAsync(systemUserId, EntityMatter, "sprk_matterid", filterActive: true, ct),
-            ResolveOwnedIdsAsync(systemUserId, EntityProject, "sprk_projectid", filterActive: true, ct));
+            ResolveMembershipsSafelyAsync(systemUserId, EntityEvent, ct),
+            ResolveMembershipsSafelyAsync(systemUserId, EntityMatter, ct),
+            ResolveMembershipsSafelyAsync(systemUserId, EntityProject, ct));
 
         var memberships = await membershipsTask.ConfigureAwait(false);
         var eventIds = memberships[0];
@@ -244,7 +254,7 @@ public class DailyBriefingCollector : ICodedWorkflow
         var projectIds = memberships[2];
 
         _logger.LogInformation(
-            "DailyBriefingCollector owned IDs resolved (resolver bypass — R7 W12): events={EventCount}, matters={MatterCount}, projects={ProjectCount}",
+            "DailyBriefingCollector membership-resolved IDs: events={EventCount}, matters={MatterCount}, projects={ProjectCount}",
             eventIds.Count, matterIds.Count, projectIds.Count);
 
         // ── Phase 2: query per-channel candidate rows in parallel.
@@ -325,7 +335,15 @@ public class DailyBriefingCollector : ICodedWorkflow
             QueryHighPriorityTodoAsync(systemUserId, ct)
         ).ConfigureAwait(false);
 
+        // R5 task 034 (FR-C5) — de-dup before ordering. The 7 queries are one per
+        // flagged entity type so cross-entity collision is not possible today, but this
+        // keys on stable record identity (entity + GUID, NEVER display text) as a
+        // defensive boundary against any future entity/route addition that could surface
+        // the same record twice. DistinctBy preserves first-occurrence order, so applying
+        // it BEFORE the OrderBy/ThenBy below means the de-dup never reshuffles anything —
+        // it only removes duplicates ahead of the existing DueDate-then-Name ordering.
         var all = queries.SelectMany(x => x)
+            .DistinctBy(x => (x.EntityType, x.EntityId))
             .OrderBy(x => x.DueDate ?? DateTimeOffset.MaxValue)
             .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -597,64 +615,6 @@ public class DailyBriefingCollector : ICodedWorkflow
     // ──────────────────────────────────────────────────────────────────────────
     // Membership resolution (delegates to IMembershipResolverService)
     // ──────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// R7 W12 widget cutover (2026-06-30) — direct-owner ID query. Returns record IDs of
-    /// <paramref name="entityType"/> where <c>owninguser</c> equals <paramref name="systemUserId"/>.
-    /// Used in place of <see cref="ResolveMembershipsSafelyAsync"/> while the membership
-    /// resolver's polymorphic-Owner classification bug is being investigated (DEF-NNN).
-    /// </summary>
-    /// <param name="systemUserId">The calling user's systemuserid.</param>
-    /// <param name="entityType">Logical name of the target entity (sprk_matter / sprk_project / sprk_event).</param>
-    /// <param name="idColumn">Primary-key column name for the entity (e.g. sprk_matterid).</param>
-    /// <param name="filterActive">If true, adds statecode = 0 (Active). sprk_event doesn't have a statecode filter here — event status is checked in QueryEventsAsync.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>List of owned entity IDs. Empty on error (logged as warning) so downstream channels degrade gracefully.</returns>
-    private async Task<IReadOnlyList<Guid>> ResolveOwnedIdsAsync(
-        Guid systemUserId,
-        string entityType,
-        string idColumn,
-        bool filterActive,
-        CancellationToken ct)
-    {
-        try
-        {
-            var query = new QueryExpression(entityType)
-            {
-                NoLock = true,
-                TopCount = 500,
-                ColumnSet = new ColumnSet(idColumn)
-            };
-            query.Criteria.AddCondition("owninguser", ConditionOperator.Equal, systemUserId);
-            if (filterActive)
-            {
-                query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
-            }
-
-            var result = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            var ids = new List<Guid>(result.Entities.Count);
-            foreach (var e in result.Entities)
-            {
-                var id = e.GetAttributeValue<Guid>(idColumn);
-                if (id != Guid.Empty)
-                {
-                    ids.Add(id);
-                }
-            }
-            return ids;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "DailyBriefingCollector direct-owner lookup failed for entity={EntityType}; downstream channels will degrade",
-                entityType);
-            return Array.Empty<Guid>();
-        }
-    }
 
     /// <summary>
     /// Resolves membership for a single entity type. Returns empty list on any failure
@@ -1008,7 +968,10 @@ public class DailyBriefingCollector : ICodedWorkflow
     ///   1. Ownership filter changed from `ownerid = systemUserId` to
     ///      `owninguser = systemUserId`. The polymorphic Owner attribute doesn't
     ///      match plain Guid values reliably in QueryExpression (same class of
-    ///      bug as the membership resolver — see ResolveOwnedIdsAsync above).
+    ///      bug the R7 root-cause fix addressed for the membership resolver —
+    ///      see ResolveMembershipsSafelyAsync above). sprk_todo has no
+    ///      membership-bearing fields, so it stays a direct per-user query
+    ///      (out of scope for the R5 task 033 resolver-routing revert).
     ///   2. Date filter widened from `= today OR = tomorrow` (exact timestamp
     ///      match, misses records with any time-of-day) to `>= today start UTC`
     ///      (matches operator intent: "today, tomorrow, later"). Operator can
@@ -1221,6 +1184,24 @@ public class DailyBriefingCollector : ICodedWorkflow
         BriefingItem[] projects,
         BriefingItem[] todos)
     {
+        // R5 task 034 (FR-C5) — de-dup across the 6 channels before assembling
+        // categories/priorityItems/channels/total below. An item reachable via more than
+        // one channel — e.g. an sprk_event whose sprk_duedate falls in the Overdue window
+        // while its sprk_finalduedate falls in the Upcoming window (QueryEventsAsync's OR
+        // date-filter allows both) — must appear exactly once in the assembled output.
+        // Keys on stable record identity (EntityType + EntityId), NEVER display text, so
+        // two genuinely-distinct records sharing a title both survive. First-occurrence
+        // wins in this fixed channel-priority order (upcoming, overdue, documents,
+        // matters, projects, todos); each channel's OWN internal ordering (e.g. Documents'
+        // modifiedon desc) is untouched — de-dup only removes items, it never reorders.
+        var seenKeys = new HashSet<(string EntityType, string EntityId)>();
+        upcomingTasks = DeduplicateAcrossChannels(upcomingTasks, seenKeys);
+        overdueTasks = DeduplicateAcrossChannels(overdueTasks, seenKeys);
+        documents = DeduplicateAcrossChannels(documents, seenKeys);
+        matters = DeduplicateAcrossChannels(matters, seenKeys);
+        projects = DeduplicateAcrossChannels(projects, seenKeys);
+        todos = DeduplicateAcrossChannels(todos, seenKeys);
+
         var categories = new[]
         {
             new NotificationCategoryDto { Name = "Upcoming Tasks", Count = upcomingTasks.Length, UnreadCount = upcomingTasks.Length },
@@ -1256,12 +1237,105 @@ public class DailyBriefingCollector : ICodedWorkflow
         var total = upcomingTasks.Length + overdueTasks.Length + documents.Length
                   + matters.Length + projects.Length + todos.Length;
 
-        return new DailyBriefingNarrateRequest
+        var request = new DailyBriefingNarrateRequest
         {
             Categories = categories,
             PriorityItems = priorityItems,
             TotalNotificationCount = total,
             Channels = channels,
+        };
+
+        // R5 task 013 (FR-A4): stamp the deterministic TL;DR scaffolding onto the request here,
+        // while the view model is freshly assembled — this is the collector's "Layer 1" fact
+        // computation the narrator's TL;DR call consumes as ground truth (never computed by the
+        // LLM). See BuildTldrFacts for the aggregation rules.
+        return request with { TldrFacts = BuildTldrFacts(request) };
+    }
+
+    /// <summary>
+    /// R5 task 034 (FR-C5) — filter <paramref name="items"/> down to the entries whose
+    /// (EntityType, EntityId) identity has not already been claimed by an earlier-processed
+    /// channel, recording each surviving key into <paramref name="seenKeys"/> as it goes.
+    /// Keys on stable record identity, never display text (Title), so two distinct records
+    /// that happen to share a title both survive — only a true re-appearance of the SAME
+    /// record (same entity + same GUID) is dropped. Preserves the input array's relative
+    /// order; only removes items, never reshuffles.
+    /// </summary>
+    private static BriefingItem[] DeduplicateAcrossChannels(
+        BriefingItem[] items,
+        HashSet<(string EntityType, string EntityId)> seenKeys)
+    {
+        if (items.Length == 0)
+        {
+            return items;
+        }
+
+        var kept = new List<BriefingItem>(items.Length);
+        foreach (var item in items)
+        {
+            if (seenKeys.Add((item.EntityType, item.EntityId)))
+            {
+                kept.Add(item);
+            }
+        }
+
+        return kept.Count == items.Length ? items : kept.ToArray();
+    }
+
+    /// <summary>
+    /// R5 task 013 (FR-A4) — compute the TL;DR's factual scaffolding DETERMINISTICALLY from the
+    /// already-assembled request view model (categories/priorityItems/channels/total, themselves
+    /// sourced deterministically from Dataverse records above). This is the ONLY payload the
+    /// TL;DR LLM call receives as ground truth (see <see cref="DailyBriefingNarrator"/>'s
+    /// tldrPayload construction) — every count/date/name the TL;DR asserts traces back to this
+    /// method, never to LLM invention.
+    /// </summary>
+    /// <remarks>
+    /// Pure, static, and side-effect-free — callable from the collector (the primary path, via
+    /// <see cref="BuildNarrateRequest"/> above) AND from <see cref="DailyBriefingNarrator"/> as a
+    /// deterministic fallback for callers that construct a <see cref="DailyBriefingNarrateRequest"/>
+    /// directly without going through the collector (e.g. the legacy <c>/narrate</c> leg, or a
+    /// test driving the narrator in isolation) — both call sites reach the exact same computation,
+    /// so the ground-truth facts are identical regardless of entry path (ADR-039 Binding decides
+    /// dispatch; this method is what decides FACTS, and it decides them the same way everywhere).
+    /// Aggregates rather than dumps (ADR-015): RecordNames/KeyDates are capped
+    /// (<see cref="TldrFactsMaxRecordNames"/> / <see cref="TldrFactsMaxKeyDates"/>) so a
+    /// large channel cannot blow the TL;DR call's token budget.
+    /// </remarks>
+    internal static TldrFactsDto BuildTldrFacts(DailyBriefingNarrateRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Key dates: sourced from PriorityItems only — those are already the curated top-N
+        // most-urgent items (top overdue + top upcoming, see BuildNarrateRequest above), so
+        // their due dates ARE the "key dates" the TL;DR should be able to cite. Channel items
+        // (ChannelItemDto) don't carry a due-date field at all (only CreatedOn), so there is no
+        // additional due-date signal to mine there.
+        var keyDates = request.PriorityItems
+            .Where(p => p.DueDate.HasValue)
+            .Select(p => new TldrKeyDateDto { RecordName = p.Title, Date = p.DueDate!.Value })
+            .Take(TldrFactsMaxKeyDates)
+            .ToArray();
+
+        // Record names: the bounded set of names the TL;DR is permitted to reference. Priority-
+        // item titles first (already curated + most likely to be worth naming), then the
+        // regarding/record names surfaced across channels — deduplicated and capped so a
+        // 50-row channel does not dump every record name into the LLM call.
+        var recordNames = request.PriorityItems.Select(p => p.Title)
+            .Concat(request.Channels.SelectMany(ch => ch.Items.Select(i => i.RegardingName)))
+            .Concat(request.Channels.SelectMany(ch => ch.Items.Select(i => i.Title)))
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(TldrFactsMaxRecordNames)
+            .ToArray();
+
+        return new TldrFactsDto
+        {
+            TotalNotificationCount = request.TotalNotificationCount,
+            CategoryCounts = request.Categories,
+            PriorityItemCount = request.PriorityItems.Length,
+            KeyDates = keyDates,
+            RecordNames = recordNames,
         };
     }
 

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>De-duplicate collector output so an item reachable via two paths appears once</title>
+    <phase>B: Hardening</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>033</dependencies>
+    <blocks>036</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies BFF .cs on the hot path (collector output assembly) + adds a test; brownfield behavior change (Step 3.5.5 FULL: bff-api tag, .cs edit).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Localized de-dup on a known collection surface with a clear equivalence rule; no cross-cutting reasoning (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>DailyBriefingCollector.cs overlap (chain 033→034→036→037); depends on 033's resolver-routed output and must land before 036.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add de-duplication to the DailyBriefingCollector so an item reachable via two collection paths (e.g. via both a channel query and the high-priority scan, or via two entity paths) appears exactly once in the assembled output. A unique item must never be dropped. Per FR-C5.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in the DailyBriefing collector's candidate-set assembly, item/notification view-model construction, and Dataverse record identity.
+  </role>
+
+  <goal>
+    The collector's assembled output (the items[]/notifications built in BuildNarrateRequest, and the high-priority list in CollectHighPriorityAsync where cross-path overlap can occur) contains no duplicate items: an item reachable by two paths appears once, keyed by stable record identity (entity + record GUID). No unique item is dropped by the de-dup. A test proves single-appearance for a two-path fixture and no-drop for the unique-items case. BFF builds 0 errors; publish size reported per NFR-01.
+  </goal>
+
+  <context>
+    <background>
+      The collector fans out across channel queries (upcoming/overdue tasks, documents, matters, projects, todos in BuildNarrateRequest ~1216) and a separate high-priority scan (CollectHighPriorityAsync, 7 entity queries merged at 328-331). An item that qualifies via more than one path can currently be emitted twice. This task de-dups on stable identity so the briefing shows each record once.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">De-dup MUST key on stable record identity (entity logical name + record GUID), NOT on display text (title/name), so two genuinely-distinct records with the same title are both kept and one record surfaced via two paths collapses to one.</constraint>
+    <constraint source="project">De-dup MUST NOT drop unique items: verify with a fixture containing N distinct records across paths → N items out. Preserve existing ordering semantics (e.g. the high-priority OrderBy DueDate then Name at lines 328-331) — de-dup before/within ordering, do not reshuffle beyond removing duplicates.</constraint>
+    <constraint source="project">Apply de-dup at the assembly boundary (where the multiple query results are merged into the output), not by mutating the per-channel query methods — so each channel query stays independently correct and failure-soft.</constraint>
+    <constraint source="root-CLAUDE.md-§10">BFF-touching task: state the placement decision (change stays inside the existing collector; no new service/DI), run dotnet publish -c Release, report compressed size + diff vs ~49.63 MB baseline (incl PDBs), confirm no new HIGH-severity CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-039-coded-composite.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check for DailyBriefingCollector.cs against r2-core (root §7); confirm 033 landed.</step>
+    <step order="2">Identify the assembly boundaries where cross-path overlap can occur: BuildNarrateRequest item/notification assembly (~1216) and CollectHighPriorityAsync merge (328-331). Determine the stable identity key available on each item DTO (entity + GUID).</step>
+    <step order="3">Add de-dup keyed on entity+GUID at those boundaries, preserving existing ordering (e.g. the DueDate/Name ordering in CollectHighPriorityAsync).</step>
+    <step order="4">Add a test: a fixture where one record is reachable via two paths yields exactly one item; a fixture of N distinct records yields N items (no drop).</step>
+    <step order="5">Build (0 errors); dotnet test the collector project.</step>
+    <step order="6">Run dotnet publish -c Release, report size + diff vs 49.63 MB baseline; dotnet list package --vulnerable → no new HIGH CVE.</step>
+    <step order="7">Update TASK-INDEX.md task 034 → completed; record deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If item DTOs on some paths lack a stable record identity (no reliable GUID to key on), STOP and escalate per root CLAUDE.md §6 rather than de-duping on display text (which would drop distinct same-titled records).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, and publish the BFF</tool>
+    <tool name="terminal">Run grep / conflict-check</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/034-dedup-and-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a fixture where one record is reachable via two collection paths, when the collector assembles output, then that record appears exactly once — a test asserts count == 1 for that record.</criterion>
+    <criterion testable="true">Given a fixture of N distinct records (including two distinct records that share a display title), when the collector runs, then all N appear (no unique item dropped; same-titled distinct records both kept) — a test asserts this.</criterion>
+    <criterion testable="true">De-dup keys on entity+GUID identity, not on display text — verified by the same-title test above.</criterion>
+    <criterion testable="true">Existing ordering (e.g. CollectHighPriorityAsync DueDate-then-Name) is preserved after de-dup.</criterion>
+    <criterion testable="true">dotnet build exits 0 errors; the collector test project passes; publish size reported (absolute + diff vs 49.63 MB incl-PDBs); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-C5, plan.md Phase B.5. Part of the collector chain (033→034→036→037). BuildNarrateRequest item assembly is ~line 1216; CollectHighPriorityAsync merges 7 entity queries at 328-331.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. FULL rigor: code-review + adr-check at Step 9.5. Follow task-execute for BFF publish-size verification.
+    </protocol>
+  </execution>
+</task>

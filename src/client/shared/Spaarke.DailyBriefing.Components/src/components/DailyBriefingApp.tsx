@@ -49,10 +49,12 @@ import {
 import { DigestHeader } from './DigestHeader';
 import { EmptyState } from './EmptyState';
 import { TldrSection } from './TldrSection';
+import type { TldrResolvableItem } from './TldrSection';
 import { ActivityNotesSection } from './ActivityNotesSection';
 import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
 import { HighPrioritySection } from './HighPrioritySection';
+import { StatTiles, type StatTile } from './StatTiles';
 import { useBriefingRender, useInlineTodoCreate, useBriefingPreferences } from '../hooks';
 import { TOASTER_ID } from '../utils/toastUtils';
 import type { IWebApi, NotificationCategory, NotificationItem } from '../types/notifications';
@@ -285,6 +287,26 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     return map;
   }, [filteredNarratives]);
 
+  // R5 task 014 (FR-A5) — TL;DR anchor resolution map: itemId -> click-through target.
+  // Deliberately sourced from the UNFILTERED `renderData.channelNarratives` (not
+  // `filteredNarratives`) — the TL;DR's itemRefs[] were grounded server-side against the
+  // full request's items[], and a channel the user has since disabled in preferences is
+  // still a valid, real item the TL;DR may have named. Binary resolution only checks
+  // "does this itemId exist", never "is this channel currently visible".
+  const tldrResolvableItems = React.useMemo<Record<string, TldrResolvableItem>>(() => {
+    const map: Record<string, TldrResolvableItem> = {};
+    for (const channel of renderData?.channelNarratives ?? []) {
+      for (const bullet of channel.bullets) {
+        if (!bullet.primaryEntityType || !bullet.primaryEntityId) continue;
+        const ids = bullet.itemIds && bullet.itemIds.length > 0 ? bullet.itemIds : [bullet.primaryEntityId];
+        for (const id of ids) {
+          map[id] = { entityType: bullet.primaryEntityType, entityId: bullet.primaryEntityId };
+        }
+      }
+    }
+    return map;
+  }, [renderData]);
+
   const generatedAtIso = React.useMemo<string | null>(() => {
     if (!renderData?.generatedAtUtc) return null;
     const value = renderData.generatedAtUtc;
@@ -503,6 +525,19 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   const tldr = renderData?.tldr ?? null;
   const highPriorityItems = renderData?.highPriorityItems ?? [];
 
+  // Deterministic KPI tiles (task 021 redesign). Every count is derived from the
+  // already-deterministic render data — no LLM, no fabrication (FR-A4 posture):
+  //   Open items = total visible bullets · Overdue = the overdue channel's count
+  //   Critical = high-priority count · New matters = the matters channel's count
+  const overdueCount = filteredNarratives.find(cn => /overdue/i.test(cn.category))?.bullets.length ?? 0;
+  const newMattersCount = filteredNarratives.find(cn => /matter/i.test(cn.category))?.bullets.length ?? 0;
+  const statTiles: StatTile[] = [
+    { label: 'Open items', value: totalVisibleBullets, tone: 'neutral' },
+    { label: 'Overdue', value: overdueCount, tone: overdueCount > 0 ? 'danger' : 'neutral' },
+    { label: 'Critical', value: highPriorityItems.length, tone: highPriorityItems.length > 0 ? 'warning' : 'neutral' },
+    { label: 'New matters', value: newMattersCount, tone: 'brand' },
+  ];
+
   return (
     <div className={styles.container}>
       <Toaster toasterId={toasterId} position="bottom-end" />
@@ -513,8 +548,9 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         onBrowsePlaybooks={onBrowsePlaybooks}
       />
       <div className={styles.scrollContent}>
-        {/* R7 W12 feedback item 9 (2026-07-01): high-priority section above TL;DR. */}
-        <HighPrioritySection items={highPriorityItems} onOpenRecord={handleOpenRecord} />
+        {/* Task 021 redesign: deterministic KPI tiles at the top. */}
+        <StatTiles tiles={statTiles} />
+        {/* Operator order (2026-07-09): Today's summary above Critical Today. */}
         <TldrSection
           tldr={tldr}
           isLoading={false}
@@ -522,7 +558,10 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           unavailableReason={null}
           error={null}
           generatedAt={generatedAtIso}
+          resolvableItems={tldrResolvableItems}
+          onOpenRecord={handleOpenRecord}
         />
+        <HighPrioritySection items={highPriorityItems} onOpenRecord={handleOpenRecord} />
         <div className={styles.activitySection}>
           <ActivityNotesSection
             channelNarratives={filteredNarratives}
