@@ -112,6 +112,22 @@ public class PendingPlanManager
     /// </summary>
     public const string GateStatusDispatchFailed = "dispatch-failed";
 
+    /// <summary>
+    /// Ledger vocabulary: gate status <c>validation-failed</c> — the invocation was PROVABLY
+    /// doomed at the handler's <c>ValidateChat</c> (FR-A1-05 / spaarke-ai-architecture-redesign-r2
+    /// task 034 pre-suspend validation) and was REJECTED BEFORE it ever suspended into a
+    /// confirmation dialog. No user confirmation was sought and no resumable payload was stored —
+    /// distinct from <see cref="GateStatusRejected"/> (a USER rejection of a presented gate) and
+    /// <see cref="GateStatusDispatchFailed"/> (a CONFIRMED gate whose resumed execution failed).
+    /// The honest ❌ (real reason + D-F0(d) affordance) is the terminal outcome; the user is never
+    /// asked to confirm a call that cannot succeed (the R5-E Confirm→❌ dead-end, §10 row 16).
+    /// ADR-040 vocabulary extension — append-only, marker-only, correlated by gate id.
+    /// <see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.GateDecisionProjector.MapLedgerStatus"/>
+    /// maps every unknown-to-it terminal status (this one included) to a still-gated state — it
+    /// NEVER projects auto-execute, so introducing this status cannot weaken any gate.
+    /// </summary>
+    public const string GateStatusValidationFailed = "validation-failed";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase

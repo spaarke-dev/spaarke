@@ -191,3 +191,28 @@ public class StoredGate
     [JsonPropertyName("resolvedAt")]
     public DateTimeOffset? ResolvedAt { get; set; }
 }
+
+/// <summary>
+/// Cosmos-shape parallel of <c>Sprk.Bff.Api.Models.Ai.Chat.SessionContextFingerprint</c>
+/// (AIR2-038 / FR-A1-09). Fingerprint identifier + slice count only — never slice
+/// content (NFR-07). Additive to <see cref="StoredSession"/>; older documents
+/// deserialize to an empty list.
+/// </summary>
+public class StoredContextFingerprint
+{
+    /// <summary>1-based session turn the context selection applied to.</summary>
+    [JsonPropertyName("turn")]
+    public int Turn { get; set; }
+
+    /// <summary>Opaque ContextEnvelope fingerprint id (identifier only — NFR-07).</summary>
+    [JsonPropertyName("fingerprintId")]
+    public string FingerprintId { get; set; } = string.Empty;
+
+    /// <summary>Number of context slices the fingerprint covered (count only).</summary>
+    [JsonPropertyName("sliceCount")]
+    public int SliceCount { get; set; }
+
+    /// <summary>UTC timestamp the context selection was made / entry was written.</summary>
+    [JsonPropertyName("createdAt")]
+    public DateTimeOffset CreatedAt { get; set; }
+}

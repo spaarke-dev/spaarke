@@ -24,13 +24,17 @@
  * on mount before its live subscription takes over. Bounded FIFO — same cap
  * philosophy as the widget's own entry cap.
  *
- * ## Honest limitation (named follow-up, NOT covered here)
+ * ## Cross-reload backfill — now closed by the server read surface (AIR2-038)
  *
- * The buffer is in-memory per page load: a HARD REFRESH still loses prior
- * turns' trace because the server exposes no ToolChain read surface
- * (SessionRestoreResponse has no ToolChains field). Backfilling across reloads
- * requires a server contract change — recorded as an operator-verdict backlog
- * candidate in the round-4/5 findings note.
+ * The buffer is in-memory per page load: a HARD REFRESH loses prior turns'
+ * trace because it lives only in this module's memory. That leg is now closed
+ * by the NET-NEW server ToolChain read surface (AIR2-038 / FR-A1-09):
+ * `GET /api/ai/chat/sessions/{id}/trace` (via the ISessionTraceReader facade)
+ * projects the durable ADR-040 ledger into the TraceEvent v1 stream. When a
+ * host wires `ExecutionTraceData.restoreTrace`, the widget rehydrates from the
+ * server on mount and SKIPS this buffer (the server is authoritative across
+ * reloads). This buffer remains the fallback for hosts WITHOUT a server read
+ * fn — same-page-load backfill only.
  *
  * NFR-07: events stored here are the bridge's already-narrowed identifier-only
  * shapes (toolId / argsSummary / counts / durations) — never raw args.

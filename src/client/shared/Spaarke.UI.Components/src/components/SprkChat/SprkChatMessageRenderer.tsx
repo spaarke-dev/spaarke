@@ -39,6 +39,7 @@ import {
 } from '@fluentui/react-icons';
 import type { CitationSourceType, IPlaybookOptionCandidate } from './types';
 import { renderMarkdown as renderMarkdownHtml, SPRK_MARKDOWN_CSS } from '../../services/renderMarkdown';
+import { OutcomeCard, type IOutcomeCard } from './OutcomeCard';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Markdown CSS injection (one-time, idempotent)
@@ -157,6 +158,14 @@ export interface IPlaybookOptionsResponse {
   rerankReason?: string | null;
 }
 
+/**
+ * Response data for the `outcome_card` card type (spaarke-ai-architecture-redesign-r2
+ * task 035 / FR-A1-06). The server's `OutcomeCard v1` wire shape, rendered by the
+ * {@link OutcomeCard} component — upgrades the ad-hoc markdown "[Open record]" link into a
+ * structured completion card (server-composed link chip + next-step chips + job-aware steps).
+ */
+export type IOutcomeCardResponse = IOutcomeCard;
+
 /** Union of all structured response data types. */
 export type StructuredResponseData =
   | IMarkdownResponse
@@ -164,7 +173,8 @@ export type StructuredResponseData =
   | IDiffResponse
   | IEntityCardResponse
   | IActionConfirmationResponse
-  | IPlaybookOptionsResponse;
+  | IPlaybookOptionsResponse
+  | IOutcomeCardResponse;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component Props
@@ -173,7 +183,15 @@ export type StructuredResponseData =
 /** Props for the SprkChatMessageRenderer component. */
 export interface ISprkChatMessageRendererProps {
   /** Discriminates which card renderer to use */
-  responseType: 'markdown' | 'citations' | 'diff' | 'entity_card' | 'action_confirmation' | 'playbook_options' | string;
+  responseType:
+    | 'markdown'
+    | 'citations'
+    | 'diff'
+    | 'entity_card'
+    | 'action_confirmation'
+    | 'playbook_options'
+    | 'outcome_card'
+    | string;
   /** Structured data for the selected card renderer */
   data: StructuredResponseData;
   /**
@@ -733,6 +751,12 @@ export const SprkChatMessageRenderer: React.FC<ISprkChatMessageRendererProps> = 
     case 'playbook_options':
       // chat-routing-redesign-r1 task 117b — file-aware playbook routing card.
       return renderPlaybookOptions(data as IPlaybookOptionsResponse, styles, onSelectPlaybook, onOpenLibraryModal);
+
+    case 'outcome_card':
+      // task 035 / FR-A1-06 — structured side-effect completion card (Completion Engine).
+      // Presentational: the server-composed link opens in a new tab; next-step chips render
+      // for task 062 to wire live dispatch (it "reads the next-step chips added here").
+      return <OutcomeCard card={data as IOutcomeCardResponse} />;
 
     case 'markdown':
     default:

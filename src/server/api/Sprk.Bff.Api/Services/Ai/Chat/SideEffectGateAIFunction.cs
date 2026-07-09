@@ -59,6 +59,18 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// marker cannot land aborts the invocation rather than silently proceeding).
 /// </para>
 /// <para>
+/// <b>Pre-suspend validation (FR-A1-05, task 034)</b>: before suspending, the gate runs the
+/// wrapped handler's <c>ValidateChat</c> via
+/// <see cref="ToolHandlerToAIFunctionAdapter.ValidateForGate"/>. A call the handler can PROVE
+/// is doomed at validation time (e.g. the R5-E <c>sprk_document</c> hard block) renders an
+/// honest ❌ + D-F0(d) affordance and is REJECTED to a terminal
+/// <see cref="PendingPlanManager.GateStatusValidationFailed"/> ledger marker (store-before-render)
+/// WITHOUT ever presenting a confirmation dialog — instead of asking the user to confirm a call
+/// that cannot succeed (the R5-E Confirm→❌ dead-end). This only weakens the gate toward HONESTY:
+/// a validation PASS (or a faulting/uncertain validator) still suspends and confirms exactly as
+/// before, so the gate is NEVER weakened toward execution.
+/// </para>
+/// <para>
 /// <b>Resume surface</b>: <c>POST /sessions/{sessionId}/gates/{gateId}/resolve</c>
 /// (task 032). Reject works end-to-end; Confirm on a non-Binding invocation executes
 /// through <see cref="TypedHandlerResumeExecutor"/> (FR-P3-03, task 042 — the seam this
@@ -165,6 +177,44 @@ public sealed class SideEffectGateAIFunction : AIFunction
                    "do not fabricate a result.";
         }
 
+        // === FR-A1-05 (task 034) — PRE-SUSPEND VALIDATION ==========================
+        // Run the handler's ValidateChat BEFORE suspending. A call the handler can PROVE
+        // is doomed at validation time (e.g. the R5-E sprk_document hard block, a missing
+        // tenant, malformed args) renders an honest ❌ + D-F0(d) affordance NOW and is NEVER
+        // suspended into a confirmation dialog — the user is never asked to confirm a call
+        // that cannot succeed (the Confirm→❌ dead-end; spec FR-A1-05 / R16, policy §5).
+        //
+        // Invariant (project constraint + D-F0): this weakens the gate ONLY toward honesty —
+        // a doomed call becomes an honest ❌ instead of a doomed confirm. It NEVER weakens the
+        // gate toward execution: a call that PASSES validation still suspends and confirms
+        // exactly as before. Validation that cannot PROVE doom (returns valid, OR faults) falls
+        // through to the safe suspend floor, so a call whose failure is not certain at
+        // validation time keeps its legitimate confirm dialog (the escalation-trigger boundary).
+        if (_inner is ToolHandlerToAIFunctionAdapter validatingAdapter)
+        {
+            ToolValidationResult preValidation;
+            try
+            {
+                preValidation = validatingAdapter.ValidateForGate(arguments);
+            }
+            catch (Exception ex)
+            {
+                // A faulting validator is NOT proof the call is doomed — fall through to the
+                // suspend floor rather than fabricating an honest-❌ shortcut on uncertainty.
+                _logger.LogWarning(ex,
+                    "[FR-A1-05][gate] pre-suspend validation threw — tool={ToolName} session={SessionId}; " +
+                    "falling through to the confirmation gate (no honest-❌ shortcut on uncertain validation).",
+                    Name, _sessionId);
+                preValidation = ToolValidationResult.Success();
+            }
+
+            if (!preValidation.IsValid)
+            {
+                return await RenderPreSuspendRefusalAsync(pendingManager, arguments, preValidation, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
         var gateId = $"confirmation-{Guid.NewGuid():N}";
         var argsJson = arguments is { Count: > 0 }
             ? JsonSerializer.Serialize(arguments.ToDictionary(a => a.Key, a => a.Value))
@@ -216,6 +266,71 @@ public sealed class SideEffectGateAIFunction : AIFunction
                "NOT executed. A confirmation request has been presented to the user. Do NOT call this " +
                "tool again this turn, do NOT assume it succeeded, and do NOT fabricate its result. " +
                "Tell the user the action is awaiting their explicit confirmation.";
+    }
+
+    /// <summary>
+    /// FR-A1-05: a PROVABLY-doomed side-effecting call renders an honest ❌ BEFORE it suspends.
+    /// ADR-040 store-before-render: a terminal <c>validation-failed</c> Gate marker lands in the
+    /// session ledger FIRST (the ❌ is a persisted terminal entry, not an ephemeral render), then
+    /// the grounded ❌ instruction returns to the model carrying the handler's real reason + its
+    /// D-F0(d) affordance (e.g. the Document Upload deep link on the R5-E sprk_document block).
+    /// NO resumable payload is stored and NO <c>action_confirmation</c> event is presented — the
+    /// call was never suspended, so there is nothing to confirm and no dialog fires. A ledger
+    /// write failure (e.g. the session vanished) degrades to a loud log but STILL returns the
+    /// honest ❌ — never a fabricated success and never a silent suspend.
+    /// </summary>
+    private async Task<object?> RenderPreSuspendRefusalAsync(
+        PendingPlanManager pendingManager,
+        AIFunctionArguments? arguments,
+        ToolValidationResult validation,
+        CancellationToken cancellationToken)
+    {
+        var gateId = $"confirmation-{Guid.NewGuid():N}";
+        var reason = validation.Errors is { Count: > 0 }
+            ? string.Join(" ", validation.Errors)
+            : "The action failed validation and was not performed.";
+
+        // ADR-040: the terminal marker is stored BEFORE the render. Marker-only (no resumable
+        // payload) via WriteGateMarkerAsync — the invocation never suspended.
+        try
+        {
+            await pendingManager.WriteGateMarkerAsync(
+                _tenantId,
+                _sessionId,
+                gateId,
+                kind: PendingPlanManager.GateKindConfirmation,
+                status: PendingPlanManager.GateStatusValidationFailed,
+                sideEffectClass: PendingPlanManager.ToLedgerSideEffectClass(_declaredClass),
+                ct: cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The refusal still stands; a marker-write failure must not turn an honest ❌ into a
+            // 5xx or (worse) a fall-through to suspend. NFR-07: identifiers only, never the reason.
+            _logger.LogError(ex,
+                "[FR-A1-05][gate] terminal validation-failed marker write failed — gateId={GateId} " +
+                "tool={ToolName} session={SessionId}; returning the honest ❌ anyway (never suspend a doomed call).",
+                gateId, Name, _sessionId);
+        }
+
+        // NFR-07: identifiers + counts only — never argument values or the reason/affordance text.
+        _logger.LogInformation(
+            "[FR-A1-05][gate] side-effecting invocation REJECTED pre-suspend (doomed at validation) — " +
+            "gateId={GateId} tool={ToolName} declaredClass={DeclaredClass} argCount={ArgCount} session={SessionId}",
+            gateId, Name, _declaredClass, arguments?.Count ?? 0, _sessionId);
+
+        // Grounded ❌ turn instruction: the model relays the honest failure (reason + affordance
+        // link verbatim) and does NOT retry or fabricate a result. This is deliberately DISTINCT
+        // from the "ACTION SUSPENDED" text so the model cannot conflate a rejection with a
+        // pending confirmation.
+        return $"ACTION NOT PERFORMED — '{Name}' cannot succeed and was REJECTED before any " +
+               $"confirmation was requested: {reason} Relay this to the user honestly, include any " +
+               "link in the reason exactly as written, do NOT call this tool again this turn, and do " +
+               "NOT fabricate a result.";
     }
 
     /// <summary>
