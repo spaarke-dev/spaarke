@@ -60,12 +60,15 @@ startable now; core-gated tracks (⛔) wait on core R2 Phase A0.
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 031 |
+| **Task File** | tasks/031-custom-marks.poml |
+| **Title** | FR-15 custom ProseMirror marks (insertion/deletion/commentAnchor) |
+| **Phase** | 3 Inline Editing UX |
+| **Status** | ✅ completed (2026-07-09) |
+| **Started** | 2026-07-09 |
+| **Rigor** | FULL · sonnet@high (session on Opus) · directional |
+
+**031 done**: 3 `Mark.create` marks (`src/widgets/marks/`) registered additively in ComposeEditor; span+`data-compose-mark` render with provenance attrs + token-based redline classes (ADR-021). Code-review caught + fixed a StarterKit-Strike parse collision. jest 19/19; build green; zero new deps. Materialization from ledger = FR-16 / task 033.
 
 ---
 

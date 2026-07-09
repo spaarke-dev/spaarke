@@ -3,7 +3,7 @@
     <title>FR-15 custom ProseMirror marks (insertion/deletion/commentAnchor)</title>
     <phase>3 Inline Editing UX</phase>
     <gate>green</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
@@ -115,4 +115,28 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-09. Three TipTap `Mark.create` extensions added under `src/widgets/marks/`
+    (InsertionMark/DeletionMark/CommentAnchorMark), registered ADDITIVELY in ComposeEditor
+    (`extensions: [...LOCKED_EXTENSIONS, ...COMPOSE_R2_MARKS]` — locked list untouched). All three
+    render as `&lt;span data-compose-mark="…"&gt;` carrying provenance (`data-binding` /
+    `data-ledger-ref` / `data-comment-id`); redline/anchor look comes from token-based
+    `compose-mark-*` classes in ComposeEditor's `makeStyles` (ADR-021: no hex; palette tokens are
+    dark-mode-correct).
+
+    Code-review finding (fixed): initial `&lt;ins&gt;`/`&lt;del&gt;` rendering collided with
+    StarterKit's `Strike` mark (parses `del`/`s`) — Strike won the parse and dropped the deletion
+    mark + provenance. Switched all marks to `&lt;span data-compose-mark&gt;` (which also matches
+    the acceptance criteria's "added-style span / removed-style span"); added a regression test
+    asserting a bare `&lt;s&gt;` stays a Strike, not a pending deletion.
+
+    DOCX bridge unaffected: `docxBridge.textRunsFromInline` only maps bold/italic/strike/underline
+    and ignores unknown marks (text preserved) — redline marks are rendering-domain, not persisted
+    to the regenerated `.docx`, exactly as the constraint describes.
+
+    Verify: Compose typecheck clean; jest 19/19 (10 toolbar + 9 marks); `npm run build` green;
+    zero new npm deps (`@tiptap/core` already a dep) → negligible bundle impact. Materialization
+    FROM the ledger (FR-16) remains task 033 (consumes these marks).
+  </notes>
 </task>
