@@ -225,6 +225,13 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
   },
+  // FR-01 (task 010): the native file input backing "Browse / open file" is never
+  // visually rendered — it is triggered programmatically via a ref. `display: none`
+  // is layout, not color, so this is ADR-021-compliant (semantic tokens govern color;
+  // this token-free rule governs visibility only).
+  hiddenBrowseInput: {
+    display: 'none',
+  },
   loadingState: {
     display: 'flex',
     flex: 1,
@@ -262,6 +269,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   // Imperative editor ref for save (TipTap → DOCX bytes).
   const editorRef = React.useRef<ComposeEditorHandle | null>(null);
+
+  // FR-01 (task 010): hidden native file input backing "Browse / open file". Triggered
+  // programmatically from handleBrowseRequested; see the input element rendered below.
+  const browseFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   // Stable PaneEventBus dispatch.
   const busDispatch = useDispatchPaneEvent();
@@ -685,18 +696,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // Empty-state handlers — additive workspace-channel dispatch
   // -------------------------------------------------------------------------
 
-  const handleBrowseRequested = React.useCallback((): void => {
-    onBrowseRequested?.();
-    busDispatch(
-      'workspace',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      {
-        type: 'compose_browse_requested',
-        timestamp: new Date().toISOString(),
-      } as any
-    );
-  }, [onBrowseRequested, busDispatch]);
-
   const handleSearchRequested = React.useCallback((): void => {
     onSearchRequested?.();
     busDispatch(
@@ -724,6 +723,46 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const handleImportWarnings = React.useCallback((warnings: Array<{ type: string; message: string }>): void => {
     dispatch({ kind: 'importWarnings', warnings });
   }, []);
+
+  // -------------------------------------------------------------------------
+  // FR-01 (task 010) — Browse local-file transient mount
+  // -------------------------------------------------------------------------
+  // Browse opens a local `.docx` picker and mounts the picked file's bytes into the
+  // editor as a TRANSIENT working draft via the same `docxBytes` seam FR-03/task 012
+  // uses for Assistant-uploaded files (`mountTransient` reducer action). No
+  // `sprk_document` is created and no BFF round-trip occurs (ADR-040) — persistence
+  // happens on first Save (create-on-save, FR-05/task 013).
+  const handleBrowseRequested = React.useCallback((): void => {
+    onBrowseRequested?.();
+    browseFileInputRef.current?.click();
+  }, [onBrowseRequested]);
+
+  const handleBrowseFileSelected = React.useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>): void => {
+      const file = event.target.files?.[0] ?? null;
+      // Reset the input value so re-selecting the same file still fires a change event.
+      event.target.value = '';
+      if (!file) return; // user cancelled the picker — empty state unchanged, nothing mounts
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (!(result instanceof ArrayBuffer)) return;
+        dispatch({ kind: 'mountTransient', docxBytes: result, fileName: file.name });
+        // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
+        // (create-on-save, task 013) is enabled immediately.
+        setIsDirty(true);
+      };
+      reader.onerror = () => {
+        dispatch({
+          kind: 'loadFailed',
+          errorMessage: `Failed to read "${file.name}". The file may be corrupted or unreadable.`,
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    },
+    []
+  );
 
   // -------------------------------------------------------------------------
   // FR-03 (task 012) — transient upload-mount
@@ -832,6 +871,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       data-compose-checkout-status={state.checkoutStatus}
       data-testid="compose-workspace"
     >
+      {/*
+        FR-01 (task 010): hidden native file input backing "Browse / open file".
+        Always mounted (not gated on status === 'empty') so the ref stays stable
+        across the empty -> loaded transition triggered by a successful pick.
+      */}
+      <input
+        ref={browseFileInputRef}
+        type="file"
+        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        className={styles.hiddenBrowseInput}
+        onChange={handleBrowseFileSelected}
+        data-testid="compose-workspace-browse-file-input"
+        aria-hidden="true"
+        tabIndex={-1}
+      />
+
       {/* Empty state — Path A/B picker */}
       {state.status === 'empty' ? (
         <>

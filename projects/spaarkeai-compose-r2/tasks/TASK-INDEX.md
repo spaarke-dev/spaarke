@@ -21,10 +21,10 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 006 | Spike 6 — reverse round-trip (Word edit → webhook → read); tune re-anchor bands | 0 Spikes | 🟢 | 005 | ✅ | STANDARD | sonnet | high |
 | 007 | Spike 7 — SPE checkout vs Word-for-Web open collision UX | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 008 | Spike 8 — docx-benchmark harness baseline | 0 Spikes | 🟢 | 005 | 🔲 | STANDARD | sonnet | high |
-| 010 | FR-01 wire 1a "Browse / open file" → transient mount | 1 Entry | 🟢 | 000 | 🔲 | FULL | sonnet | high |
+| 010 | FR-01 wire 1a "Browse / open file" → transient mount | 1 Entry | 🟢 | 000 | ✅ | FULL | sonnet | high |
 | 011 | FR-02 wire 1a "Search for Document" → reuse 1c load path | 1 Entry | 🟢 | none | 🔲 | FULL | sonnet | high |
 | 012 | FR-03 1b upload → transient mount (flip send_workspace_artifact + feed bytes) | 1 Entry | 🟢 | none | ✅ | FULL | opus | high |
-| 013 | FR-05 create-on-save pipeline — extend PromoteIfEphemeralAsync (container/profile/indexing) | 1 Entry | 🟢 | none | 🔲 | FULL | opus | xhigh |
+| 013 | FR-05 create-on-save pipeline — extend PromoteIfEphemeralAsync (container/profile/indexing) | 1 Entry | 🟢 | none | 🛑 | FULL | opus | xhigh |
 | 014 | FR-05 optional parent-association prompt (Tier 2c dialog integration) | 1 Entry | 🟡 | 013 | 🔲 | FULL | sonnet | high |
 | 015 | FR-06a upload fidelity branch (original-if-unedited) | 1 Entry | 🟢 | 013 | 🔲 | FULL | sonnet | high |
 | 016 | FR-04 draft-into-editor via compose disposition | 1 Entry | 🟢 | 000 | 🔲 | FULL | opus | high |
