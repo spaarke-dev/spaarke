@@ -25,7 +25,7 @@
 | 013 | Deterministic TL;DR factual scaffolding | A | ✅ | 010 | 014,016 | FULL | sonnet/xhigh | ❌ composite/collector |
 | 014 | Binary anchor resolution (no threshold) | A | ✅ | 013 | 016 | FULL | sonnet/high | ❌ TldrSection/composite |
 | 015 | Groundedness guardrail (eval-only) | A | ✅ | none | — | STANDARD | sonnet/high | ✅ Group G |
-| 016 | Eval family — mixed-item corpus + gate | A | 🔲 | 011,013,014 | 017 | STANDARD(TEST-MOD) | **opus**/xhigh | ❌ |
+| 016 | Eval family — mixed-item corpus + gate | A | ✅ | 011,013,014 | 017 | STANDARD(TEST-MOD) | **opus**/xhigh | ❌ |
 | 017 | Phase A deploy + G-R5-A UAT + metering | A | 🔲 | 016 | 090 | FULL | sonnet/high | ❌ deploy |
 | 020 | Scaffold `/prototype` harness (cross-repo) | D | ✅ | none | 021 | FULL | sonnet/high | ❌ cross-repo |
 | 021 | Design iterations (UX params) | D | 🔲 | 020 | 022 | FULL | **opus**/high | ❌ |

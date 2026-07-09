@@ -1,6 +1,30 @@
-# Task 016 — Briefing-accuracy eval family: schema proposal (escalation-gated)
+# Task 016 — Briefing-accuracy eval family: schema proposal + BUILD RECORD
 
-> **Date**: 2026-07-09 · **FR-A7 / NFR-02** · **STATUS: PROPOSAL — awaiting confirmation before mass-authoring** (per the task's `<escalation>` trigger)
+> **Date**: 2026-07-09 · **FR-A7 / NFR-02** · **STATUS: ✅ BUILT & GREEN** (schema below was operator-approved 2026-07-09; suite authored + all green)
+
+## ✅ Build record (2026-07-09)
+
+Operator approved "build it". Delivered:
+
+| Artifact | What |
+|---|---|
+| `tests/integration/contract/Eval/briefing-accuracy-corpus.json` | 9 item-level cases across the 4 property families (2 zero-cross-pairing incl. the BA-CP-002 regression case, 2 aggregation, 1 grounding, 3 tldr-abstraction). Cases are DATA (FR-D1 harness source). |
+| `tests/integration/contract/Eval/BriefingAccuracyEvalSuiteTests.cs` | `[Trait("Category","GoldenUtteranceEval")]` suite — inventory integrity + one data-driven `[Theory]` per family; drives the REAL `DailyBriefingNarrator`, mocking only the TL;DR LLM at the `IOpenAiClient` boundary (Strict → also proves "exactly one LLM call"). |
+| `src/client/shared/Spaarke.DailyBriefing.Components/test/deterministicRenderer.test.tsx` | 3 client tests: the row link is built from structured props NOT the narrative text; orphan falls back to its own source row; two rows each link to their own item. |
+
+**Verification**: BriefingAccuracy suite **9/9**; full `Category=GoldenUtteranceEval` gate **58/58** (zero regression — my cases joined the existing suite); client `deterministicRenderer` **3/3**.
+
+**CI merge gate (NFR-02) — satisfied with NO `sdap-ci.yml` edit**: the `eval-gate` job runs `dotnet test --filter "Category=GoldenUtteranceEval"` (no `continue-on-error`), and the workflow explicitly documents *"the trait IS the registration — no YAML change needed to register a family."* The `[Trait("Category","GoldenUtteranceEval")]` on the new suite auto-enrolls it as a required merge check.
+
+**Deviations (directional step mode)**: (1) the C# suite home is `tests/integration/contract/Eval/` (KEEP-path `contract` + where the eval harness lives) — auto-compiled via the csproj `**\*.cs` contract glob + JSON via the `Eval\**\*.json` content glob, no csproj edit. (2) the client test is under the package's `test/` dir (its jest `testMatch`), not the POML-suggested `src/components/__tests__/`.
+
+**ADR-038**: module-boundary mocks only (`IOpenAiClient`/`AnalysisActionService`/`IEntityNameScrubber` — NO `Mock<HttpMessageHandler>`, no DI-registration/ctor-null tests); integration-heavy (drives the real pipeline); data-driven maintain-class cases at a KEEP path.
+
+---
+
+## Original proposal (approved)
+
+> **STATUS at proposal time: awaiting confirmation before mass-authoring** (per the task's `<escalation>` trigger)
 
 ## Why this is a proposal, not a finished suite
 
