@@ -303,8 +303,38 @@ describe('FieldMappingService — Copy engine (task 012)', () => {
     expect(thrown).toBeNull();
     expect(result!.fieldsMapped).toEqual([]);
     expect(result!.warnings).toHaveLength(1);
-    expect(result!.warnings[0]).toMatch(/could not resolve the referent entity/i);
+    expect(result!.warnings[0]).toMatch(/annotation is missing/i);
     expect('sprk_AssignedAttorney1@odata.bind' in payload).toBe(false);
+  });
+
+  it('empty source lookup (parent field unset) is skipped SILENTLY — no warning, no throw', async () => {
+    // A Matter with only some attorneys assigned: sprk_assignedattorney2 is unset,
+    // so neither _value nor lookuplogicalname annotation is present. There is nothing
+    // to copy — this is the normal case, not an error, so the engine must NOT warn.
+    const rule = makeRule({
+      sourceField: 'sprk_assignedattorney2',
+      targetField: 'sprk_assignedattorney2',
+      sourceFieldType: 'Lookup',
+      targetFieldType: 'Lookup',
+      mappingType: 'Copy',
+    });
+    // Source record has NO _sprk_assignedattorney2_value key at all (empty lookup).
+    const dataService = makeDataService({ sprk_name: 'Matter A' });
+    const payload: Record<string, unknown> = {};
+
+    const result = await applyFieldMappings({
+      sourceEntity: 'sprk_matter',
+      sourceId: SOURCE_ID,
+      targetEntity: 'sprk_event',
+      payload,
+      dataService,
+      authenticatedFetch: makeAuthenticatedFetch([rule]),
+      bffBaseUrl: 'https://bff.example.com',
+    });
+
+    expect(result.warnings).toEqual([]);
+    expect(result.fieldsMapped).toEqual([]);
+    expect('sprk_assignedattorney2@odata.bind' in payload).toBe(false);
   });
 
   it('multiple Copy rules (scalar + lookup) share ONE retrieveRecord call', async () => {
