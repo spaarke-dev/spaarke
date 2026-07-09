@@ -10,7 +10,7 @@
 | Field | Value |
 |-------|-------|
 | **Task** | Post-deployment UAT triage (task 090 wrap-up still pending, held until UAT bugs are resolved) |
-| **Step** | Owner ran full end-to-end UAT on VisualHost v1.4.30. 2 of 3 found bugs fixed + redeployed as v1.4.31. 3 lookup bugs still open, unexplained. |
+| **Step** | Work committed (`b026daf48`), merged with master, pushed, and **merged to master via PR #585** (merge commit `6df45d45b`, 2026-07-09). Main repo's local master synced. This worktree's branch (`work/visual-host-create-button-r1`) remains active for the still-open lookup-bug investigation + task 090. |
 | **Status** | in-progress — blocked on further lookup-bug diagnosis |
 | **Next Action** | Investigate why Vendor Organization (Invoice), Matter Type (Event→Assign Work), and Practice Area (Event→Assign Work) typeahead lookups return no results with **zero console errors** (owner confirmed 2026-07-09). Code/schema/data all verified correct (see "Investigation dead-end" below) — next step is determining whether `onSearch` fires at all vs. fires and silently returns empty. Ask owner to check the browser Network tab for the actual OData request (or temporarily add a visible on-screen debug echo) next UAT pass. |
 
