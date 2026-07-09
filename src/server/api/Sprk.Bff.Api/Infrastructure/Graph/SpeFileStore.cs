@@ -204,6 +204,15 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _uploadManager.ReplaceFileContentAsUserAsync(ctx, driveId, itemId, content, ct);
 
+    public Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        Stream content,
+        string? ifMatch,
+        CancellationToken ct = default)
+        => _uploadManager.ReplaceFileContentAsUserAsync(ctx, driveId, itemId, content, ifMatch, ct);
+
     public Task<UploadSessionResponse?> CreateUploadSessionAsUserAsync(
         HttpContext ctx,
         string driveId,

@@ -94,6 +94,7 @@ public sealed class CrossPillarIntegrationTests
             timeProvider,
             new WorkspaceLayoutService(entityService.Object, NullLogger<WorkspaceLayoutService>.Instance),
             new Mock<Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.IDataverseUserClient>().Object,
+            new Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IUiActionAckCoordinator>().Object,
             NullLogger<SendWorkspaceArtifactHandler>.Instance);
     }
 

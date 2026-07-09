@@ -128,6 +128,10 @@ const ComposeSectionMount: React.FC<ComposeSectionMountProps> = ({ bffBaseUrl })
     driveId: composeLaunch?.driveId ?? "",
     tenantId,
     initialDocumentRef: composeLaunch?.document ?? null,
+    // FR-03 (task 012): transient upload-mount pointer from a chat "open in Compose" on an
+    // Assistant-uploaded file (ComposeLaunchContext.upload). Null on the stored-document /
+    // picker paths.
+    initialUploadRef: composeLaunch?.upload ?? null,
     initialSessionId: "",
   });
 };

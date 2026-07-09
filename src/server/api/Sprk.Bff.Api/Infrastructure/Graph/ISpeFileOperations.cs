@@ -46,6 +46,30 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
+    /// Create a NEW small (&lt;4 MB) drive-item in a container/drive under the user's OBO
+    /// identity. PUTs the stream to <c>drives/{driveId}/root:/{path}:/content</c>, minting a
+    /// fresh drive-item, and returns its <see cref="FileHandleDto"/> (id + name + size + etag +
+    /// resolved drive id). Used by the Compose create-on-save backbone (FR-05) when a transient
+    /// draft has no <c>DocumentSpeId</c> yet — the drive-item must be created before the
+    /// <c>sprk_document</c> row + indexing. Distinct from
+    /// <see cref="ReplaceFileContentAsUserAsync(HttpContext, string, string, Stream, CancellationToken)"/>,
+    /// which overwrites an EXISTING item.
+    /// </summary>
+    /// <remarks>
+    /// ADR-007: no <c>Microsoft.Graph</c> type crosses this boundary — the facade returns the
+    /// <see cref="FileHandleDto"/> shape only. Throws <see cref="UnauthorizedAccessException"/> on
+    /// 403 ACL denial and <see cref="ArgumentException"/> on 413 (content &gt; 4 MB — use chunked
+    /// upload). The concrete <c>SpeFileStore</c> already implements this; it is surfaced here so
+    /// OBO callers can create drive-items through the same injected facade.
+    /// </remarks>
+    Task<FileHandleDto?> UploadSmallAsUserAsync(
+        HttpContext ctx,
+        string containerId,
+        string path,
+        Stream content,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Replace the content of an existing drive-item by itemId (OBO flow). PUTs the
     /// stream to the drive-item's /content endpoint, committing a new SPE version.
     /// Returns null when the drive-item doesn't exist. Throws
@@ -56,6 +80,26 @@ public interface ISpeFileOperations
         string driveId,
         string itemId,
         Stream content,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Replace the content of an existing drive-item by itemId (OBO flow) with optimistic
+    /// concurrency. Same as the etag-less overload, but sends an <c>If-Match</c> header when
+    /// <paramref name="ifMatch"/> is non-empty so a drive-item that moved under the caller is
+    /// rejected instead of blindly overwritten (FR-24 / Spike 7 gap G-1).
+    /// </summary>
+    /// <remarks>
+    /// Throws <see cref="EtagPreconditionFailedException"/> on HTTP 412 (ETag moved) and
+    /// <see cref="DocumentLockedByWordException"/> on HTTP 423 (open in Word for Web). ADR-007:
+    /// no <c>Microsoft.Graph</c> type crosses this boundary. When <paramref name="ifMatch"/> is
+    /// null/empty this behaves exactly like the etag-less overload (a blind PUT).
+    /// </remarks>
+    Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        Stream content,
+        string? ifMatch,
         CancellationToken ct = default);
 
     /// <summary>

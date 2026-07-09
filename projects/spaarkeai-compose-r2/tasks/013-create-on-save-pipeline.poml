@@ -1,82 +1,101 @@
 <task id="013" project="spaarkeai-compose-r2">
   <metadata>
-    <title>FR-05 create-on-save pipeline — extend PromoteIfEphemeralAsync (container/profile/indexing)</title>
+    <title>FR-05 create-on-save pipeline — extend PromoteIfEphemeralAsync (container/record/index; profile deferred to core)</title>
     <phase>1 Entry</phase>
-    <status>not-started</status>
-    <estimated-hours>24</estimated-hours>
+    <status>completed</status>
+    <estimated-hours>18</estimated-hours>
     <effort>xhigh</effort>
     <dependencies>none</dependencies>
     <blocks>014,015,017</blocks>
     <tags>bff-api,api,dataverse,spe</tags>
     <rigor-hint reason="Core persistence pipeline; modifies .cs backbone; BFF + Dataverse + SPE; FULL per TASK-INDEX">FULL</rigor-hint>
-    <model-tier reason="Architectural pipeline change enforcing the R5-E persistence invariant across container/record/profile/indexing; high blast radius; opus per TASK-INDEX">opus</model-tier>
+    <model-tier reason="Architectural pipeline change enforcing the R5-E persistence invariant across container/record/indexing; high blast radius; opus per TASK-INDEX">opus</model-tier>
     <parallel-group>W2</parallel-group>
-    <parallel-safe reason="BFF-only (ComposeService + SPE/Dataverse); does not touch the ComposeWorkspace/ComposeEmptyState files 010/011/012 edit">true</parallel-safe>
+    <parallel-safe reason="BFF-only (ComposeService + SPE/Dataverse + the promote/save DTO); does not touch the ComposeWorkspace/ComposeEmptyState files 010/011/012 edit">true</parallel-safe>
+    <rescope date="2026-07-09" by="owner" decision="Option 1">
+      Original scope assumed a SERVER-SIDE business-unit→SPE-container primitive that does not exist (spec Unresolved Q#2; escalated 2026-07-09, three coupled forks A/B/C — see notes/defer-issues.md "Open architectural escalations"). Owner chose Option 1:
+      • Fork A (BU→container) → CLIENT resolves the container id (existing wizard cascade `resolveBusinessUnitContainerId`) and passes it INTO the promote/save request. This IS the existing matter/project-creation convention (§6.5 path C, pivot-to-comply). Reject a new BFF resolver (contradicts multi-container INV-7 + project CLAUDE.md).
+      • Fork B (transient contract) → when the request carries no existing `DocumentSpeId`, this task CREATES the SPE drive-item in the supplied container under OBO before record/index. IN SCOPE (server half). The client half (supplying `containerId` + transient bytes on Save) couples to 010/012 → tracked as a small frontend follow-on, NOT this task.
+      • Fork C (profile analysis) → the `Services/Ai/PublicContracts/IDocumentProfileAi` facade is CORE's (redesign-r2) surface — handed off (notes/HANDOFF-to-core-profile-analysis-facade.md). This task treats profile as a NON-BLOCKING DEFERRED step: it emits a `deferred` job state for profile and back-fills when core ships the facade. Profile is OUT of this task's implementation.
+      INTERIM R5-E bar (documented exception, tied to core delivering C): a record with NO SPE file OR NO index is NEVER success; a record that is stored + created + indexed with profile=`deferred` IS acceptable interim success. The full R5-E bar (incl. profile) is restored when core ships `IDocumentProfileAi`.
+    </rescope>
   </metadata>
 
   <prompt>
     `ComposeService.PromoteIfEphemeralAsync` already runs on every Save and half-implements creation:
     idempotently it creates the `sprk_document` row + a new SPE version and rebinds the ChatSession. FR-05
-    upgrades it to FULL ingestion parity — the R-2 persistence standard: resolve an SPE container from the
-    user's business unit (REQUIRED — same mechanism as new matter/project record creation), create the
-    `sprk_document`, run document PROFILE ANALYSIS, run INDEXING, so first Save of a transient draft yields
-    a real Spaarke Document. A bare `sprk_document` with no SPE file / profile / index is NEVER reported as
-    success (UAT R5-E bar). Optional parent-association is a SEPARATE task (014); this task delivers the
-    container -&gt; record -&gt; profile -&gt; indexing backbone. Per-step OutcomeCard rendering is core-A0-gated
-    (`JobAwareCompletionState`) and NOT in this task's scope — this task produces the per-step job states
-    the card will later render.
+    (Option-1 re-scope) upgrades it to the create-on-save BACKBONE: accept a CLIENT-SUPPLIED container id on
+    the promote/save request (Fork A), CREATE the SPE drive-item in that container when the request has no
+    existing `DocumentSpeId` (Fork B — transient Browse/Upload/AI-drafted drafts), create the `sprk_document`,
+    and run INDEXING via the existing `IPostUploadIndexingEnqueuer` (sync-OBO). PROFILE ANALYSIS is a
+    NON-BLOCKING DEFERRED step (Fork C is core-owned — see &lt;rescope&gt;): emit a `deferred` job state for it, do
+    not implement it here. Interim R5-E: a record with no SPE file or no index is NEVER success; stored + created
+    + indexed with profile=`deferred` IS interim success. Idempotency preserved. Optional parent-association is a
+    SEPARATE task (014). Per-step OutcomeCard rendering is core-A0-gated (`JobAwareCompletionState`) and NOT in
+    scope — this task PRODUCES the per-step job states the card will later render (core's projector already names
+    the four steps `container → record → profile-analysis → indexing`).
   </prompt>
 
   <role>
     Senior .NET developer fluent in Minimal API, SharePoint Embedded (SpeFileStore facade), Dataverse
-    document ingestion, and the Spaarke document-profile + indexing pipeline. You extend an existing,
-    idempotent service method to full ingestion parity without breaking its idempotency.
+    document creation, and the Spaarke indexing pipeline + Job Contract. You extend an existing, idempotent
+    service method to the create-on-save backbone without breaking its idempotency, and you honor the
+    escalation-resolved boundary (container comes from the client; profile is deferred to core).
   </role>
 
   <goal>
-    First Save of a transient draft runs a full-parity creation pipeline: (1) resolve an SPE container
-    from the user's business unit, (2) create `sprk_document`, (3) run document profile analysis, (4) run
-    indexing — each step emitting a distinct job-aware state (queued/running/partial/completed/failed) via
-    the existing Job Contract / ServiceBusJobProcessor. The method stays idempotent; a fileless / unprofiled
-    / unindexed record is never returned as success.
+    First Save of a transient draft runs a create-on-save backbone: (1) validate the CLIENT-SUPPLIED container
+    id (fail the `container` step honestly if absent), (2) when no `DocumentSpeId` is supplied, create the SPE
+    drive-item in that container under OBO, (3) create `sprk_document`, (4) run indexing via
+    `IPostUploadIndexingEnqueuer`, (5) emit a `deferred` state for profile-analysis (core-owned). Each step emits
+    a distinct job-aware state (queued/running/deferred/partial/completed/failed) via the existing Job Contract,
+    projected through `JobAwareCompletionStateProjector`. The method stays idempotent; a fileless or unindexed
+    record is never returned as success; a profile-deferred record IS interim success.
   </goal>
 
   <context>
     <background>
-      Verified (design.md §5): create-on-save half-exists in `PromoteIfEphemeralAsync` (idempotent). The
-      business-unit -&gt; container resolution reuses the same platform mechanism as new matter/project record
-      creation (spec Unresolved Q#2 — confirm the exact API during this task, project-pipeline Step 2
-      discovery). Profile analysis + indexing are existing platform capabilities the ingestion path already
-      uses for other document sources; wire them into the create-on-save path.
+      Create-on-save half-exists in `PromoteIfEphemeralAsync` (idempotent; creates row + SPE version + rebinds).
+      The escalation (2026-07-09) established: the BU→container resolution is client-side and passed into the BFF
+      (Fork A); transient drafts have no SPE drive-item so Save must create one (Fork B); the only profile seam is
+      `IAppOnlyAnalysisService` which trips the ADR-013 NetArchTest facade rule and runs under MI (likely 403 on the
+      OBO-written file) — so profile is deferred to a core-owned `IDocumentProfileAi` facade (Fork C). Indexing
+      (`IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync`) is sync-OBO, always-registered, ADR-013-safe — use it.
     </background>
     <relevant-files>
       <file purpose="extend-backbone" edit="true">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file purpose="promote/save-DTO" edit="true">the promote/save request DTO (add client-supplied ContainerId; carry transient bytes/no-DocumentSpeId case) — locate in ComposeService.cs or its request models</file>
       <file purpose="save-endpoint" edit="maybe">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
-      <file purpose="spe-facade" edit="false">src/server/api/Sprk.Bff.Api/Infrastructure/**/SpeFileStore*.cs</file>
+      <file purpose="spe-facade" edit="false">src/server/api/Sprk.Bff.Api/Infrastructure/**/SpeFileStore*.cs — drive-item create + OBO write via facade (ADR-007)</file>
+      <file purpose="indexing-seam" edit="false">the IPostUploadIndexingEnqueuer registration + EnqueueIfApplicableAsync signature</file>
+      <file purpose="step-projection" edit="false">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/JobAwareCompletionState*.cs — Projector.Project(JobContract, IReadOnlyList&lt;StoredStepSignal&gt;, observedAt); already names container→record→profile-analysis→indexing</file>
       <file purpose="background-jobs" edit="false">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
     </relevant-files>
     <notes>
-      `PromoteIfEphemeralAsync` is at ComposeService.cs ~line 203, invoked from the Save path ~line 186.
-      Confirm the business-unit-&gt;container primitive before coding. Profile analysis + indexing are
-      long-running -&gt; report through the Job Contract so step states are real (they feed the future
-      OutcomeCard).
+      `PromoteIfEphemeralAsync` ~line 203, invoked from the Save path ~line 186. Container id is now an INPUT
+      (client-supplied) — do NOT resolve it server-side. Drive-item creation for the no-DocumentSpeId case goes
+      through the SpeFileStore facade under OBO. Profile step: enqueue nothing, emit `deferred` — a placeholder the
+      future core facade + a re-profile pass will satisfy. Indexing runs sync-OBO (the Compose user holds the file
+      ACL; MI does not — same constraint that deferred profile).
     </notes>
   </context>
 
   <constraints>
-    <constraint source="ADR-013">`Services/Compose` never injects `IOpenAiClient`/executor/routing types; profile-analysis is reached via its published service seam, not AI internals.</constraint>
-    <constraint source="ADR-007">No `Microsoft.Graph` types above the SpeFileStore/Infrastructure facade — container resolution + SPE writes go through the facade.</constraint>
-    <constraint source="ADR-005">SPE storage follows the flat-storage container model; a container id is REQUIRED for persistence.</constraint>
+    <constraint source="ADR-013">`Services/Compose` never injects `IOpenAiClient`/executor/routing types; do NOT inject `IAppOnlyAnalysisService` (would trip NFR-05 NetArchTest). Profile is deferred to core's facade, not reached here.</constraint>
+    <constraint source="ADR-007">No `Microsoft.Graph` types above the SpeFileStore/Infrastructure facade — container drive-item creation + SPE writes go through the facade.</constraint>
+    <constraint source="ADR-005">SPE storage follows the flat-storage container model; a container id is REQUIRED for persistence (now client-supplied — validate presence).</constraint>
     <constraint source="ADR-001">Any long-running step is a Minimal-API/`BackgroundService`/Job-Contract flow — no Azure Functions.</constraint>
     <constraint source="ADR-010">Keep `Services/Compose` DI additions minimal; internal helpers need not be DI-registered.</constraint>
-    <constraint source="project">R5-E bar: a bare `sprk_document` (no SPE file / no profile / no index) is NEVER success.</constraint>
-    <constraint source="project">Preserve idempotency: re-Save of an already-promoted document does not double-create.</constraint>
-    <constraint source="project">Parent association is OUT of this task (task 014); do NOT block creation on a parent — a standalone Document is valid.</constraint>
+    <constraint source="project (interim R5-E, exception 2026-07-09)">A `sprk_document` with no SPE file OR no index is NEVER success. A stored + created + indexed record with profile=`deferred` IS acceptable interim success (full R5-E incl. profile restored when core ships `IDocumentProfileAi`).</constraint>
+    <constraint source="project">Preserve idempotency: re-Save of an already-promoted document does not double-create the row, container, or drive-item.</constraint>
+    <constraint source="project">Container id is CLIENT-SUPPLIED (Fork A) — do NOT add a server-side BU→container resolver.</constraint>
+    <constraint source="project">Profile analysis is OUT (Fork C, core-owned) — emit `deferred`, do not implement.</constraint>
+    <constraint source="project">Parent association is OUT (task 014); do NOT block creation on a parent — a standalone Document is valid.</constraint>
     <constraint source="bff-hygiene">BFF-touching — state Placement Justification, measure publish-size delta vs 49.63 MB baseline, run CVE scan, add/update tests per §10.</constraint>
   </constraints>
 
   <knowledge>
-    <topic>compose/create-on-save, spe-ingestion, dataverse-document, background-jobs</topic>
+    <topic>compose/create-on-save, spe-ingestion, dataverse-document, background-jobs, job-aware-completion</topic>
     <files>
       <file>.claude/adr/ADR-013-ai-architecture.md</file>
       <file>.claude/adr/ADR-007-spefilestore.md</file>
@@ -84,41 +103,76 @@
       <file>.claude/constraints/bff-extensions.md</file>
       <file>projects/spaarkeai-compose-r2/spec.md</file>
       <file>projects/spaarkeai-compose-r2/design.md</file>
+      <file>projects/spaarkeai-compose-r2/notes/defer-issues.md</file>
     </files>
   </knowledge>
 
-  <justification component="Extended create-on-save pipeline (extends PromoteIfEphemeralAsync)">
-    <existing>`PromoteIfEphemeralAsync` already creates the row + SPE version + rebinds; profile analysis + indexing + BU-&gt;container resolution exist as platform primitives.</existing>
-    <extension>Extend the existing method to chain the existing primitives; no new service class introduced beyond internal helpers.</extension>
-    <cost-of-doing-nothing>Without it, create-on-save yields a fileless/unprofiled/unindexed orphan reported as success — exactly the R5-E defect the R-2 persistence standard bans; FR-05 and success criterion #4 fail.</cost-of-doing-nothing>
+  <justification component="Extended create-on-save backbone (extends PromoteIfEphemeralAsync)">
+    <existing>`PromoteIfEphemeralAsync` already creates the row + SPE version + rebinds; `IPostUploadIndexingEnqueuer` + the Job Contract + `JobAwareCompletionStateProjector` exist as platform primitives.</existing>
+    <extension>Extend the existing method to accept a client-supplied container id, create the drive-item for transient drafts, chain indexing, and project per-step states; no new service class beyond internal helpers. Profile deferred to core.</extension>
+    <cost-of-doing-nothing>Without it, a transient Browse/Upload/AI-drafted draft cannot be saved at all — the entire create→edit→save→find loop is dark, and success criterion #4 (first Save yields a real, searchable Spaarke Document) fails.</cost-of-doing-nothing>
   </justification>
 
   <steps mode="directional">
-    <step order="0">Load spec.md FR-05 + `.claude/constraints/bff-extensions.md`; state Placement Justification. Read `PromoteIfEphemeralAsync` and the Save path; confirm the business-unit-&gt;container primitive (Unresolved Q#2) and the profile/indexing service seams.</step>
-    <step order="1">Add container resolution from the user's business unit (REQUIRED) ahead of record creation; fail honestly if no container resolves.</step>
-    <step order="2">Keep the existing idempotent `sprk_document` + SPE-version creation; then chain document profile analysis and indexing as Job-Contract-tracked steps.</step>
-    <step order="3">Emit per-step job states (queued/running/partial/completed/failed) for container/record/profile-analysis/indexing so a bare record is never success; return a result shape the future OutcomeCard (core-A0) can render.</step>
-    <step order="4">Add/update unit tests in tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ per NFR-08 (incl. the R5-E negative: fileless/unprofiled record must not report success). Build BFF; measure publish-size; CVE scan.</step>
-    <step order="5">Run code-review + adr-check (Step 9.5). Update TASK-INDEX + current-task.md.</step>
+    <step order="0">Load spec.md FR-05 + `.claude/constraints/bff-extensions.md` + notes/defer-issues.md "Open architectural escalations". State Placement Justification. Read `PromoteIfEphemeralAsync` + the Save path + the promote/save DTO; confirm the `IPostUploadIndexingEnqueuer` signature + the `JobAwareCompletionStateProjector` seam.</step>
+    <step order="1">Add a CLIENT-SUPPLIED `ContainerId` (+ transient-bytes / no-`DocumentSpeId` case) to the promote/save request DTO. Validate container presence; fail the `container` step honestly if absent (do NOT resolve server-side).</step>
+    <step order="2">When no `DocumentSpeId` is supplied, create the SPE drive-item in the supplied container via the `SpeFileStore` facade under OBO. Keep the existing idempotent `sprk_document` creation + rebind.</step>
+    <step order="3">Chain indexing via `IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync` (sync-OBO). Emit a `deferred` job state for profile-analysis (core-owned; not implemented here).</step>
+    <step order="4">Emit per-step job states (container/record/profile-analysis[deferred]/indexing) and project via `JobAwareCompletionStateProjector` so a fileless/unindexed record is never success while profile-deferred is interim success. Return the projected state shape the future OutcomeCard renders.</step>
+    <step order="5">Add/update unit tests in tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ per NFR-08 (incl. negatives: missing container → container step fails; no-DocumentSpeId → drive-item created; fileless/unindexed → not success; profile-deferred → interim success; re-Save idempotent). Build BFF; measure publish-size; CVE scan; NetArchTest facade green (proves profile NOT injected).</step>
+    <step order="6">Run code-review + adr-check (Step 9.5). Update TASK-INDEX + current-task.md.</step>
   </steps>
 
   <outputs>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">the promote/save request DTO (client-supplied ContainerId)</output>
     <output type="code" optional="true">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
     <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceCreateOnSaveTests.cs</output>
   </outputs>
 
   <acceptance-criteria testable="true">
-    <criterion testable="true">First Save of a transient draft resolves an SPE container from the user's business unit and persists the file there (container id REQUIRED).</criterion>
-    <criterion testable="true">Creation produces `sprk_document` + document profile analysis + indexing, each with a distinct job-aware state.</criterion>
-    <criterion testable="true">(negative, R5-E) A `sprk_document` lacking an SPE file, profile, or index is never returned as success — the pipeline reports partial/failed instead.</criterion>
-    <criterion testable="true">The method remains idempotent: re-Save of an already-promoted document does not double-create the row or container.</criterion>
+    <criterion testable="true">First Save of a transient draft validates a CLIENT-SUPPLIED container id and persists the file there; missing container fails the `container` step honestly (no server-side resolver).</criterion>
+    <criterion testable="true">When the request carries no `DocumentSpeId`, the SPE drive-item is created in the supplied container under OBO before record/index.</criterion>
+    <criterion testable="true">Creation produces `sprk_document` + indexing, each with a distinct job-aware state; profile-analysis emits a `deferred` state (not implemented here).</criterion>
+    <criterion testable="true">(negative, interim R5-E) A record lacking an SPE file OR an index is never returned as success (partial/failed). A stored+created+indexed record with profile=`deferred` IS interim success.</criterion>
+    <criterion testable="true">The method remains idempotent: re-Save of an already-promoted document does not double-create the row, container, or drive-item.</criterion>
     <criterion testable="true">Creation does NOT require a parent association (a standalone Document is valid).</criterion>
-    <criterion testable="true">No `Microsoft.Graph` type leaks above the SpeFileStore facade (ADR-007); `Services/Compose` injects no AI internals (ADR-013); NetArchTest facade rule green.</criterion>
-    <criterion testable="true">BFF publish-size delta reported vs 49.63 MB baseline; no new HIGH CVE; unit tests (incl. R5-E negative) pass.</criterion>
+    <criterion testable="true">No `Microsoft.Graph` type leaks above the SpeFileStore facade (ADR-007); `Services/Compose` injects no AI internals incl. no `IAppOnlyAnalysisService` (ADR-013); NetArchTest facade rule green.</criterion>
+    <criterion testable="true">BFF publish-size delta reported vs 49.63 MB baseline; no new HIGH CVE; unit tests (incl. all negatives) pass.</criterion>
   </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the client-supplied-container contract cannot be added additively (e.g., the promote/save DTO is shared in a way that forces a breaking change), OR indexing cannot run OBO for the Compose-written file, STOP and escalate per CLAUDE.md §6/§6.5 rather than guessing.</trigger>
+  </escalation>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes date="2026-07-09" status="completed">
+    Implemented the Option-1 create-on-save backbone in ComposeService.SaveAsync (not a new method):
+    • Fork A — added client-supplied `ContainerId` (+ made `DocumentSpeId`/`DriveId` nullable) to
+      SaveComposeDocumentRequest; missing container fails the `container` step honestly (returns a
+      Failed-aggregate result, no server-side BU→container resolver).
+    • Fork B — when `DocumentSpeId` is absent, creates the SPE drive-item in the supplied container
+      under OBO via ISpeFileOperations.UploadSmallAsUserAsync (surfaced the already-implemented
+      SpeFileStore method on the interface — minimal ADR-007-preserving facade extension). Existing
+      item → replace-content path unchanged. Idempotent: drive-item created only when SpeId absent;
+      row creation reuses the existing alt-key idempotency.
+    • Indexing — sync-OBO via IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync (new ctor dep;
+      unconditional registration, no asymmetric-registration risk).
+    • Fork C — profile-analysis emitted as a DEFERRED step (Queued + "deferred" detail; no Deferred
+      enum member exists). NO IAppOnlyAnalysisService injected — ADR013_ComposeFacadeTests green.
+    • Result shape — SaveComposeDocumentResult.CompletionState carries the 4-step
+      JobAwareCompletionStateProjector projection (container→record→profile-analysis→indexing);
+      aggregate Partial on happy path (profile deferred). Interim R5-E bar exposed as
+      ComposeService.IsInterimCreateOnSaveSuccess (container+record+indexing all Completed);
+      fileless/unindexed never success.
+    DEVIATION: edited ISpeFileOperations.cs (outside literal file list) — additive, only prod impl
+    is SpeFileStore which already implements it; documented in adr-check.
+    ComposeEndpoints.cs NOT edited (client/HTTP half is the frontend follow-on; all 10 routes preserved).
+    Verify: BFF build 0 errors; Compose unit tests 232 pass (224 prior + 8 new); Compose endpoint
+    contract 15/15; facade arch test 1/1; publish 45.19 MB compressed (−4.44 vs 49.63 baseline);
+    CVE = pre-existing Microsoft.Kiota.Abstractions HIGH only (no new packages).
+  </notes>
 </task>

@@ -1,0 +1,59 @@
+<task id="AIR2-E42" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>ConsumerTypes registration + boot-reconciliation health parity (Phase E governance / compose B5, core-owned)</title>
+    <status>not-started</status>
+    <phase>Phase E — AI Execution Foundation</phase>
+    <gate>Phase-E gate</gate>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-scoped: register consumer-type constants so the boot-reconciliation health check has parity. Not architecture — a health invariant.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <tags>bff-api, ai, consumer-types, health-check, compose-b5</tags>
+    <dependencies>none (constants + health check). ADR-043 (core owns this as a boot invariant, not compose work).</dependencies>
+  </metadata>
+
+  <prompt>
+    Register the consumer-type constants so the boot-reconciliation health check maintains parity (ADR-043 governance / compose B5, taken by core as a platform health invariant). The `RoutingConsumerTypeHealthCheck` flips `/healthz` Unhealthy when live Dataverse `sprk_playbookconsumer` rows reference a `ConsumerTypes` constant that does not exist (or vice-versa: a constant with no row → `ConstantsWithoutRows`). Compose r2's 5 consumer types + create-matter's `ConsumerTypes.CreateMatter` (DEF-003) need their constants registered so a deployed catalog row does not flip health.
+
+    ABSOLUTE MANDATE: no shim; the health check must genuinely pass with the registered constants and real rows. Do NOT weaken the health check to make it green — register the real constants + keep the invariant strict.
+  </prompt>
+
+  <role>BFF engineer fluent in the ConsumerTypes catalog constants + RoutingConsumerTypeHealthCheck boot-reconciliation.</role>
+
+  <goal>
+    The `ConsumerTypes` constants include compose r2's 5 consumer types + `CreateMatter`, so a deployed catalog row referencing them does not flip `/healthz` Unhealthy; the health-check parity dimension (constants ↔ rows) holds strict. Tests cover the parity (a constant without a row / a row without a constant is caught).
+  </goal>
+
+  <inputs>
+    <file purpose="constants">src/server/api/Sprk.Bff.Api/ (ConsumerTypes.cs — the consumer-type constants)</file>
+    <file purpose="health">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs (the boot-reconciliation parity check)</file>
+    <file purpose="compose-types">projects/spaarkeai-compose-r2 handoff (the 5 compose consumer types) + create-matter DEF-003 (ConsumerTypes.CreateMatter)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="no-weaken">Register the real constants; do NOT relax the health check to force green. The strict parity invariant (constants ↔ live rows) is the point.</constraint>
+    <constraint source="scope">Constants + health-check parity only. Do NOT deploy live rows (that is the gate-deploy step); this task makes the CONSTANTS side ready so a deployed row does not flip health.</constraint>
+    <constraint source="bff-hygiene">.claude/constraints/bff-extensions.md; publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Enumerate">Identify the 5 compose consumer types + CreateMatter; read the health-check parity logic.</step>
+    <step order="1" name="Register">Add the constants; ensure the health check's parity dimension recognizes them.</step>
+    <step order="2" name="Test">Tests: constant-without-row + row-without-constant are caught; the registered types pass parity.</step>
+    <step order="3" name="Gates">code-review + adr-check; publish + CVE.</step>
+  </steps>
+
+  <tools><tool name="dotnet">build + test</tool><tool name="git">MAIN-SESSION commit only — report changes, do not commit</tool></tools>
+
+  <outputs><output type="code">ConsumerTypes constants (compose 5 + CreateMatter) + health-parity tests</output></outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ConsumerTypes includes the 5 compose consumer types + CreateMatter; the RoutingConsumerTypeHealthCheck parity dimension recognizes them (a deployed row does not flip Unhealthy).</criterion>
+    <criterion testable="true">Tests catch a constant-without-row and a row-without-constant; the health check is NOT weakened.</criterion>
+    <criterion testable="true">Build 0 errors; publish &lt; 60 MB; no new HIGH CVE; code-review + adr-check clean.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the exact 5 compose consumer-type names are ambiguous, use the compose-r2 handoff / their sprk_playbookconsumer rows as the source of truth; if still unclear, report the ambiguity rather than guessing the constant names.</trigger>
+  </escalation>
+</task>

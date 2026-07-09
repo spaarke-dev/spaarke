@@ -20,6 +20,7 @@
 
 import type { IDataService } from '../../types/serviceInterfaces';
 import { getXrm } from '../xrmContext';
+import { cleanGuid } from '../../services/PolymorphicResolverService';
 
 /**
  * Creates an IDataService implementation backed by Xrm.WebApi.
@@ -60,7 +61,10 @@ export function createXrmDataService(): IDataService {
     async createRecord(entityName: string, data: Record<string, unknown>): Promise<string> {
       const webApi = getWebApi();
       const ref = await webApi.createRecord(entityName, data);
-      return ref.id;
+      // Boundary normalization (follow-up #7): Xrm.WebApi.createRecord can return
+      // a registry-format id ("{ABC-...}"). Strip to a bare lowercase GUID so any
+      // subsequent @odata.bind using this id is valid. No-op on already-bare ids.
+      return cleanGuid(ref.id);
     },
 
     async retrieveRecord(entityName: string, id: string, options?: string): Promise<Record<string, unknown>> {

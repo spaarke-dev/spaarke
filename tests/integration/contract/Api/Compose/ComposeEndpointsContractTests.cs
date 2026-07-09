@@ -142,17 +142,20 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
     // ================================================================================
 
     [Fact]
-    public async Task PostUpload_Authenticated_Returns501_PerR1StubContract()
+    public async Task PostUpload_Authenticated_WithMissingIds_Returns400_PerActivatedContract()
     {
-        // Upload is intentionally R2-reserved in R1 — handler returns 501 Problem.
-        // Verifies the handler is reached past auth, not that it does work.
+        // FR-03 (spaarkeai-compose-r2 task 012): upload is ACTIVATED — it serves a
+        // session-uploaded file's retained bytes for a transient Compose mount (no longer
+        // the R1 501 stub). A body missing sessionId/documentId is rejected with 400 BEFORE
+        // any cache/tenant work, which also proves the handler is reached past auth.
         using var client = _fixture.CreateAuthenticatedClient();
 
         using var content = JsonContent.Create(new { });
         var response = await client.PostAsync("/api/compose/upload", content);
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotImplemented,
-            "R1 routes upload through the existing Assistant pipeline; the stub returns 501 (ComposeEndpoints.Upload)");
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "the activated upload endpoint requires sessionId + documentId (ComposeEndpoints.Upload); " +
+            "it no longer returns the R1 501 stub");
     }
 
     [Fact]

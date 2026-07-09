@@ -226,15 +226,15 @@ public sealed class PromptSchemaRenderer
         //      section so the Action JPS prompt body stays pure instructions and the data lives
         //      in its own structurally-distinct section the LLM clearly sees. See
         //      docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md for the authoring contract.
-        if (runtimeInput.HasValue
-            && runtimeInput.Value.ValueKind != JsonValueKind.Null
-            && runtimeInput.Value.ValueKind != JsonValueKind.Undefined)
+        //
+        //      ADR-043 (E-10): the "## Input" section is a SINGLE-SOURCE producer — this block now
+        //      delegates to PromptInputSection.Render so ActionRunner (dispatch operand), this node
+        //      engine, and the DailyBriefingNarrator replica all emit byte-identical "## Input"
+        //      output (the format is golden-pinned in tests/integration/seam/**). The trailing
+        //      AppendLine preserves the pre-E-10 blank-line separator before the next section.
+        if (PromptInputSection.HasInput(runtimeInput))
         {
-            sb.AppendLine("## Input");
-            sb.AppendLine();
-            sb.AppendLine(JsonSerializer.Serialize(
-                runtimeInput.Value,
-                new JsonSerializerOptions { WriteIndented = true }));
+            sb.Append(PromptInputSection.Render(runtimeInput));
             sb.AppendLine();
         }
 

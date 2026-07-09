@@ -29,7 +29,7 @@
  */
 
 import * as React from 'react';
-import type { ComposeDocumentRef } from '../types/compose-contracts';
+import type { ComposeDocumentRef, ComposeUploadRef } from '../types/compose-contracts';
 
 export interface ComposeLaunchContextValue {
   /** Set to `'editor'` when the app was launched via ribbon Open-in-Compose. */
@@ -38,6 +38,14 @@ export interface ComposeLaunchContextValue {
   document: ComposeDocumentRef | null;
   /** SPE container/drive id (may be empty; resolved at runtime if absent). */
   driveId: string;
+  /**
+   * FR-03 (task 012): transient upload-mount pointer. Present when the launch came from
+   * a chat "open in Compose" on an Assistant-UPLOADED file (via the `workspace_open_tab`
+   * frame's `widgetData.compose.upload`). Mutually exclusive with {@link document} — an
+   * upload has no SPE pointer; Compose fetches its retained bytes and mounts them
+   * transiently (create-on-save). Absent/undefined for the stored-document + picker paths.
+   */
+  upload?: ComposeUploadRef | null;
 }
 
 export const ComposeLaunchContext = React.createContext<ComposeLaunchContextValue | null>(null);

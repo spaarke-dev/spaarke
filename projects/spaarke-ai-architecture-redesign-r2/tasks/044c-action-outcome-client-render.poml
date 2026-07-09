@@ -1,0 +1,76 @@
+<task id="AIR2-044C" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Wire the SpaarkeAi client to consume the action_outcome SSE frame → render the auto-execute OutcomeCard (G-R2-A client-finisher / task-044 client half)</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A (client-finisher, added 2026-07-09)</phase>
+    <gate>G-R2-A</gate>
+    <estimated-effort>0.5 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Focused, well-scoped client wire: consume one SSE event type and map it to an EXISTING render path (outcome_card). The forcing function is a real render test, not new architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>spaarkeai, client, sse, outcome-card, g-r2-a, end-to-end, no-shim</tags>
+    <dependencies>044 (server emits action_outcome SSE — MERGED), 035 (client OutcomeCard render for the gate-resume path — MERGED). This closes the untracked client-half gap: 044 shipped the server action_outcome emit + the gate-resume client render, but the AUTO-EXECUTE client render was never wired.</dependencies>
+  </metadata>
+
+  <prompt>
+    Wire the SpaarkeAi chat client to consume the `action_outcome` SSE frame and render the auto-execute OutcomeCard. THE GAP (verified 2026-07-09): the server emits an `action_outcome` ChatSseEvent on the auto-execute (no-dialog) gate path (`SideEffectGateAIFunction.cs:490`), carrying the Completion Engine's OutcomeCard — but NO SpaarkeAi/shared client consumes it (repo-wide grep: zero client references to "action_outcome"). So a clear low-risk create ("create a follow-up task…") executes with no dialog, but the ✅ OutcomeCard + record chip + Undo chip never render — only grounded text. This fails G-R2-A UAT scenario S1 (the headline).
+
+    THE FIX: the client already renders the OutcomeCard for the GATE-RESUME path — `SprkChat.tsx:761` sets `metadata: { responseType: 'outcome_card', data: result.outcome }`, and `SprkChatMessageRenderer.tsx:755` renders `case 'outcome_card'`. This task routes the AUTO-EXECUTE `action_outcome` SSE frame to that SAME existing render (`responseType: 'outcome_card'`, `data` = the frame's OutcomeCard payload). Do NOT build a new card component — reuse the existing outcome_card render path.
+
+    ABSOLUTE MANDATE (operator): end-to-end, no shim/pseudocode. The definition-of-done is a REAL render test that would FAIL if the action_outcome frame were dropped. Match the exact OutcomeCard payload shape the server sends on action_outcome (inspect `ChatSseActionOutcomeData` / the SideEffectGateAIFunction.cs:490 emit site) so the client tolerates the real wire shape (string|numeric enums per 035's tolerant readers).
+  </prompt>
+
+  <role>Senior frontend engineer fluent in the SpaarkeAi chat surface (SprkChat / SprkChatMessageRenderer in @spaarke/ui-components), the chat SSE consumer, and the ChatSseEvent frame vocabulary.</role>
+
+  <goal>
+    The SpaarkeAi chat client consumes the `action_outcome` SSE frame and renders it via the existing `outcome_card` path — so a no-dialog auto-execute (create-task) shows the ✅ OutcomeCard with record chip + Undo chip, not just text. The gate-resume OutcomeCard path (035) is unchanged. A render test proves an `action_outcome` frame produces the OutcomeCard (and fails if the frame is dropped).
+  </goal>
+
+  <inputs>
+    <file purpose="server-emit">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SideEffectGateAIFunction.cs (~line 490 — the action_outcome emit + payload shape)</file>
+    <file purpose="server-payload">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (ChatSseActionOutcomeData record — the wire shape)</file>
+    <file purpose="client-chat">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx (the SSE consumer + the existing outcome_card emit at ~761)</file>
+    <file purpose="client-render">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx (case 'outcome_card' at ~755 — reuse)</file>
+    <file purpose="client-types">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts (responseType union)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="reuse-not-new">Reuse the EXISTING outcome_card render (SprkChatMessageRenderer case 'outcome_card'). Do NOT create a new card component or a second render path (that would re-create drift — the 035 card is the one renderer).</constraint>
+    <constraint source="wire-shape">Match the real server payload on action_outcome (inspect ChatSseActionOutcomeData). Use 035's tolerant enum readers (string|numeric) so the card status/mode parse correctly off the wire.</constraint>
+    <constraint source="no-regress">The gate-resume OutcomeCard path (035, SprkChat.tsx:761) MUST be unchanged. The streaming/text path and other SSE frames (context_event, workspace_open_tab, consumer_chips) MUST be unaffected.</constraint>
+    <constraint source="def-of-done">A real render/integration test (jest + Testing Library) that feeds an action_outcome SSE frame through the consumer and asserts the OutcomeCard renders (record chip + Undo present). It MUST fail if the action_outcome frame is dropped/ignored.</constraint>
+    <constraint source="scope">SpaarkeAi/@spaarke/ui-components client only. Do NOT modify the BFF (the server emit is correct + merged). Do NOT touch E-10's files or the gate stack.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Trace">Read the server emit (SideEffectGateAIFunction.cs:490 + ChatSseActionOutcomeData) to get the exact action_outcome frame shape + OutcomeCard payload. Find where SprkChat consumes the chat SSE stream + how it currently switches on frame/event types.</step>
+    <step order="1" name="Consume the frame">In the SprkChat SSE consumer, handle the action_outcome frame → push a chat message with metadata { responseType: 'outcome_card', data: &lt;the frame's OutcomeCard&gt; } — the SAME shape the gate-resume path uses at :761.</step>
+    <step order="2" name="Render (reuse)">Confirm SprkChatMessageRenderer case 'outcome_card' renders the payload (record chip + Undo). Extend types.ts only if a type gap blocks it.</step>
+    <step order="3" name="Test">Add the render test (feed an action_outcome frame → assert OutcomeCard + chips render; assert it fails if dropped). Keep existing SprkChat/renderer tests green.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">build + jest (build the shared lib; run the render test)</tool>
+    <tool name="git">commit is MAIN-SESSION only — report proposed changes, do not commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">SpaarkeAi/@spaarke/ui-components client: action_outcome SSE frame → existing outcome_card render</output>
+    <output type="test">Render test proving the auto-execute OutcomeCard renders from an action_outcome frame</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The SpaarkeAi chat client consumes the action_outcome SSE frame and renders it via the EXISTING outcome_card path (no new card component).</criterion>
+    <criterion testable="true">A real render test feeds an action_outcome frame through the consumer and asserts the OutcomeCard + record chip + Undo chip render; it fails if the frame is dropped.</criterion>
+    <criterion testable="true">The gate-resume OutcomeCard path (035) + all other SSE frames + the text/streaming path are unchanged (existing tests green).</criterion>
+    <criterion testable="true">The card parses the real server wire shape (tolerant string|numeric enums).</criterion>
+    <criterion testable="true">tsc + jest green on the touched packages; no BFF change.</criterion>
+    <criterion testable="true">NEGATIVE / anti-shim: no second/duplicate card component or render path; the test would FAIL if action_outcome were ignored.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the action_outcome frame cannot be routed to the existing outcome_card render without changing the server payload shape, STOP and escalate — do not change the merged server contract from the client task.</trigger>
+  </escalation>
+</task>

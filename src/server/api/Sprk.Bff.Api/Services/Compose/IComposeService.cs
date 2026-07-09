@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Compose;
 
@@ -143,6 +144,31 @@ public interface IComposeService
         PromoteComposeDocumentRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FR-24 push-annotations: download the current SPE bytes, render the accepted Compose
+    /// annotations into them as native Open XML track-changes + comments (via
+    /// <see cref="DocxAnnotationWriter"/>), and persist the result to SPE with optimistic
+    /// concurrency (<c>If-Match</c> ETag). Mirrors <see cref="SaveAsync"/>'s SPE-orchestration
+    /// role — the pure OOXML authoring is delegated to the writer, the SPE hop to the
+    /// <c>SpeFileStore</c> facade (ADR-007). No AI reach (ADR-013).
+    /// </summary>
+    /// <remarks>
+    /// The write uses the caller-supplied load-time ETag so a document changed under the caller
+    /// (e.g. a Word-for-Web autosave) is rejected, not overwritten. On rejection the facade throws
+    /// <see cref="Infrastructure.Graph.EtagPreconditionFailedException"/> (412, ETag moved) or
+    /// <see cref="Infrastructure.Graph.DocumentLockedByWordException"/> (423, open in Word); the
+    /// endpoint maps both to ProblemDetails. Nothing partially writes.
+    /// </remarks>
+    /// <param name="request">Push payload: SPE drive-item id + drive id + tenant id + load-time
+    /// ETag + the accepted annotations.</param>
+    /// <param name="httpContext">HTTP context for OBO auth into Graph. Required.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A <see cref="PushAnnotationsResult"/> with the new SPE version id + ETag + size.</returns>
+    Task<PushAnnotationsResult> PushAnnotationsAsync(
+        PushAnnotationsRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default);
 }
 
 // ---------------------------------------------------------------------------
@@ -228,13 +254,35 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
 }
 
 /// <summary>Save request payload.</summary>
+/// <remarks>
+/// <b>Create-on-save (FR-05)</b>: <see cref="DocumentSpeId"/> and <see cref="DriveId"/> are
+/// OPTIONAL. When <see cref="DocumentSpeId"/> is absent the caller is saving a TRANSIENT draft
+/// (Browse / Upload / AI-drafted — task 010/012) that has no SPE drive-item yet; the Save then
+/// CREATES the drive-item in the client-supplied <see cref="ContainerId"/> under OBO before the
+/// record + indexing steps. When <see cref="DocumentSpeId"/> is present the Save replaces the
+/// existing item's content (the original R1 behavior). Both cases are idempotent.
+/// </remarks>
 public sealed record SaveComposeDocumentRequest
 {
-    /// <summary>SPE drive (container) id. Required.</summary>
-    public required string DriveId { get; init; }
+    /// <summary>SPE drive (container) id. Required for the replace-content path (when
+    /// <see cref="DocumentSpeId"/> is present); ignored for the transient create path, where the
+    /// drive is derived from <see cref="ContainerId"/>.</summary>
+    public string? DriveId { get; init; }
 
-    /// <summary>SPE drive-item id. Required.</summary>
-    public required string DocumentSpeId { get; init; }
+    /// <summary>SPE drive-item id. Null/absent for a TRANSIENT create-on-save draft (FR-05,
+    /// Fork B) — the Save creates the drive-item in <see cref="ContainerId"/>. Present for the
+    /// replace-content path (a document already backed by SPE).</summary>
+    public string? DocumentSpeId { get; init; }
+
+    /// <summary>
+    /// CLIENT-SUPPLIED SPE container (or drive) id for the create-on-save path (FR-05, Fork A).
+    /// The client resolves this via the existing wizard cascade
+    /// (<c>resolveBusinessUnitContainerId</c> → <c>businessunit.sprk_containerid</c>) and passes
+    /// it in. Required when <see cref="DocumentSpeId"/> is absent; the BFF does NOT resolve a
+    /// business-unit → container mapping server-side (multi-container INV-7 — the resolver stays
+    /// in the wizards). Ignored when <see cref="DocumentSpeId"/> is present.
+    /// </summary>
+    public string? ContainerId { get; init; }
 
     /// <summary>DOCX bytes to save. Required.</summary>
     public required ReadOnlyMemory<byte> Content { get; init; }
@@ -252,14 +300,15 @@ public sealed record SaveComposeDocumentRequest
     public Guid? DocumentRecordId { get; init; }
 
     /// <summary>Optional display name used only on first-Save promotion (Path B initial
-    /// row creation).</summary>
+    /// row creation) and as the created drive-item's file name.</summary>
     public string? DisplayName { get; init; }
 }
 
 /// <summary>Save outcome — new SPE version id + resolved <c>sprk_documentid</c>.</summary>
 public sealed record SaveComposeDocumentResult : ComposeDocumentResult
 {
-    /// <summary>New SPE version id committed by this Save.</summary>
+    /// <summary>New SPE version id committed by this Save. Empty when the operation failed
+    /// before a version was committed (e.g. the create-on-save container step failed).</summary>
     public required string VersionId { get; init; }
 
     /// <summary>Updated ETag after the save (matches Graph's response ETag).</summary>
@@ -273,6 +322,19 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// or for Path A Saves where the row pre-existed. Useful for telemetry + UI signalling
     /// (e.g., enabling "View in record" UX after promotion).</summary>
     public bool WasPromotedThisSave { get; init; }
+
+    /// <summary>
+    /// FR-05 per-step create-on-save projection over the existing job pipeline
+    /// (<see cref="JobAwareCompletionState"/>): the ordered steps
+    /// <c>container → record → profile-analysis → indexing</c> with each step's state. The
+    /// <c>profile-analysis</c> step is DEFERRED (core-owned <c>IDocumentProfileAi</c> facade —
+    /// not implemented here), so the aggregate is <see cref="JobAwareState.Partial"/> on the
+    /// happy path (record exists + indexed, downstream profile pending). A record with no SPE
+    /// file OR no index is never a success — see
+    /// <see cref="ComposeService.IsInterimCreateOnSaveSuccess"/> for the interim R5-E bar. Null
+    /// only for legacy callers that predate FR-05 (always populated by the current Save path).
+    /// </summary>
+    public JobAwareCompletionState? CompletionState { get; init; }
 }
 
 /// <summary>Promote request payload.</summary>
@@ -299,4 +361,49 @@ public sealed record PromoteComposeDocumentResult : ComposeDocumentResult
     /// <summary>True when the <c>sprk_document</c> row was created in this call. False
     /// when an existing row was returned (idempotent behavior on repeated Save).</summary>
     public required bool WasCreated { get; init; }
+}
+
+/// <summary>FR-24 push-annotations request payload.</summary>
+public sealed record PushAnnotationsRequest
+{
+    /// <summary>SPE drive (container) id. Required.</summary>
+    public required string DriveId { get; init; }
+
+    /// <summary>SPE drive-item id. Required.</summary>
+    public required string DocumentSpeId { get; init; }
+
+    /// <summary>Tenant id (multi-tenant isolation per ADR-015 Tier 3). Required.</summary>
+    public required string TenantId { get; init; }
+
+    /// <summary>Load-time ETag sent as <c>If-Match</c> for optimistic concurrency. Required — a
+    /// blind overwrite is not offered on this path (FR-24 / Spike 7 G-1).</summary>
+    public required string IfMatch { get; init; }
+
+    /// <summary>The accepted annotations (track-change insertions/deletions + comments) to
+    /// materialize as native Open XML markup. Required, non-empty.</summary>
+    public required IReadOnlyList<DocxAnnotation> Annotations { get; init; }
+}
+
+/// <summary>FR-24 push-annotations outcome — new SPE version id + ETag + size. Standalone (not a
+/// <see cref="ComposeDocumentResult"/>): the push path is document-scoped and carries no
+/// ChatSession binding.</summary>
+public sealed record PushAnnotationsResult
+{
+    /// <summary>SPE drive-item id the annotations were written to.</summary>
+    public required string DocumentSpeId { get; init; }
+
+    /// <summary>SPE drive (container) id.</summary>
+    public string? DriveId { get; init; }
+
+    /// <summary>New SPE version id committed by the annotated write.</summary>
+    public required string VersionId { get; init; }
+
+    /// <summary>Updated ETag after the write (matches Graph's response ETag).</summary>
+    public string? ETag { get; init; }
+
+    /// <summary>New file size after the write.</summary>
+    public long? Size { get; init; }
+
+    /// <summary>Count of annotations materialized into the document.</summary>
+    public required int AnnotationCount { get; init; }
 }

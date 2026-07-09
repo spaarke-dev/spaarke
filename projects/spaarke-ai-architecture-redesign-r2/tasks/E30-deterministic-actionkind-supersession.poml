@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="E-30" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>E-30 — Coded-workflow dispatch seam (chat loop launches a coded Action; Daily-Briefing-via-email as the proving consumer)</title>
+    <phase>Phase E: AI Execution Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>E-00, E-20</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, ai, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies core dispatch .cs (SessionDispatchOrchestrator); high blast radius; ADR-039/040 compliance.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural change to the closed-catalog dispatch spine (the reserved Action-Engine front door); ADR-039 one-dispatch-protocol correctness.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>SERIAL after E-20 — shares SessionDispatchOrchestrator.cs (the ActionKind gate at ~215 is adjacent to E-20's admit-gate).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Make the chat dispatch loop able to launch a COMPOSITE (coded) Action, not only a prompted one. Today
+    SessionDispatchOrchestrator rejects every ActionKind != Prompted with 422; make the kind decision a
+    deterministic total function — Prompted→ActionRunner (unchanged), Coded→ICodedWorkflowRegistry (run the
+    workflow, route its output by disposition), unknown→the existing 422. Prove it end-to-end by making the
+    EXISTING Daily Briefing coded workflow launchable from chat ("give me / email me my daily briefing") and
+    delivered as a NOTIFICATION email via the existing Email disposition (auto-send, NO gate). This seam is the
+    reserved front door the future Action Engine plugs into; the engine's internals are OUT OF SCOPE.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the closed-catalog dispatch spine (ADR-039), the session ledger
+    (ADR-040 store-before-render), ICodedWorkflow, and .NET 8. Best-long-term-architecture work — build the
+    seam once, correctly, proven against a real consumer; add ZERO speculative surface.
+  </role>
+
+  <goal>
+    (1) The SessionDispatchOrchestrator ActionKind gate is a deterministic total function: Prompted→ActionRunner
+    (byte-unchanged), Coded→resolve the workflow via ICodedWorkflowRegistry and execute it through the SAME
+    dispatch loop (store-before-render preserved via OutputRouter), unknown/unsupported→the existing
+    DispatchRejectedException.ActionKindUnsupported 422 (no silent fallback, no second dispatch path).
+    (2) A chat request for the daily briefing dispatches the EXISTING Daily Briefing coded workflow through this
+    seam and delivers it as a notification email via the existing Email disposition (auto-send, no gate),
+    end-to-end, covered by a seam test. No new coded workflow is written; only the dispatch branch (+ catalog
+    Binding/Action wiring if a chat-dispatchable Daily Briefing Binding does not already exist).
+  </goal>
+
+  <context>
+    <background>
+      E-20 single-sourced the DISPOSITION admit-gate and documented that the ActionKind axis (non-prompted kinds)
+      is a SEPARATE axis owned by E-30 (SessionDispatchOrchestrator.cs:55). Reality check (2026-07-09, operator
+      decision): the "supersession-write" half originally in this task is ALREADY DELIVERED by Phase A0
+      (Services/Ai/PublicContracts/ComposeDisposition.cs — BuildFrame/Materialize/ResolveCurrent, locked by
+      tests/integration/contract/Api/Ai/ComposeDispositionContractTests.cs, consumed by compose-r2 task 034) —
+      so E-30 adds NOTHING there (a duplicate OutputRouter supersession leg would violate ADR-039). The real,
+      confirmed consumer for the ActionKind axis is the user-triggered Action Engine / agentic execution
+      (operator: "unequivocally yes"). The engine INTERNALS are unplanned (maybe Microsoft Agent Framework) and
+      deferred; the dispatch SEAM (loop → hand off to a coded workflow behind ICodedWorkflow.ExecuteAsync) is
+      stable and built now so the Engine plugs into the ONE dispatch protocol rather than bolting on a second.
+      DailyBriefingCompositeService already runs the coded workflow + routes to email/render via its OWN endpoint
+      + schedule; the ONLY missing piece is the CHAT-loop hand-off. Email split ruling (2026-07-09): notification/
+      subscription email (a daily-briefing digest) AUTO-SENDS with no gate (the Email disposition is correct);
+      only person-facing correspondence uses the gated email.draft path.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ICodedWorkflow.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ICodedWorkflowRegistry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCompositeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs</file>
+      <file>infra/dataverse/actions/</file>
+      <file>infra/dataverse/sprk_playbookconsumer-rows.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Exactly ONE dispatch protocol. Coded dispatch reuses the existing ICodedWorkflowRegistry resolution + the existing OutputRouter routing; the loop SELECTS the executor by ActionKind, it does not re-implement coded execution and does not add a parallel launch path. The kind decision lives in the ONE gate site (SessionDispatchOrchestrator ~215) — no scattered kind checks.</constraint>
+    <constraint source="ADR-040">Store before render. A coded workflow's output is written to the session ledger via OutputRouter.RouteAsync BEFORE any surface/email leg, exactly like the prompted path. Do not bypass the router.</constraint>
+    <constraint source="project (confirmation model)">The daily-briefing email is a NOTIFICATION/subscription email → auto-send via the Email disposition with NO confirmation gate. Do NOT route it through the gated email.draft correspondence path. (Person-facing correspondence stays gated; that is unchanged.)</constraint>
+    <constraint source="project (no speculative surface)">Do NOT write a new coded workflow — reuse the registered Daily Briefing workflow. Do NOT add a supersession-write leg (already shipped in Phase A0). Every new catalog row / type passes CLAUDE.md §11 (concrete cost-of-doing-nothing).</constraint>
+    <constraint source="CLAUDE.md §10">BFF-touching: verify publish size ≤60 MB compressed + report delta vs ~49.63 MB baseline; no new HIGH CVE; state Placement Justification (stays in Sprk.Bff.Api Services/Ai — dispatch-spine internal).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Deterministic total-function gate" location="src/server/api/Sprk.Bff.Api/Services/Ai/DispositionRoutability.cs">
+        E-20 made the disposition admit-gate a total function over a closed enum with a stable reject reason. Mirror that shape for the ActionKind gate: one total decision over ActionKind, no fallback branch that silently succeeds.
+      </pattern>
+      <pattern name="Coded workflow execution + disposition routing" location="src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCompositeService.cs">
+        Executes a coded workflow via ICodedWorkflowRegistry, ledger-writes before render, then routes by the Binding's disposition (informational → widget / email → send). The chat seam does the SAME composition — resolve the workflow, run, hand the result to OutputRouter.RouteAsync. Reuse; do not duplicate.
+      </pattern>
+      <pattern name="Prompted dispatch tail (the shape the Coded branch mirrors)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs">
+        Lines ~354-414: run executor → RouteAsync (store-before-render) → resolve pending gate → render the STORED entry. The Coded branch produces its output object, serializes to the same JsonElement shape, and joins this SAME tail (one router, one ledger write, one render boundary).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the ActionKind gate (SessionDispatchOrchestrator ~205-240) and the prompted dispatch tail (~354-423). Read DailyBriefingCompositeService to learn how it resolves the workflow via ICodedWorkflowRegistry + shapes the output object it hands to RouteAsync. Read ICodedWorkflow/CodedWorkflowContext (ArgumentsJson + UserId).</step>
+    <step order="2">Replace the "reject everything non-Prompted" block with a deterministic total decision over ActionKind: Prompted keeps the current ActionRunner path; Coded resolves the workflow (via ICodedWorkflowRegistry by the Action's workflow-class ref) and executes it, producing the output JsonElement that joins the SAME store-before-render tail (OutputRouter.RouteAsync → render stored entry). Any value outside the enum → the existing ActionKindUnsupported 422. Keep the decision in this ONE site.</step>
+    <step order="3">Determine the Coded workflow's input/identity needs from the Binding+Action (CodedWorkflowContext.ArgumentsJson from the resolved operand/args; UserId from the acting user for user-scoped briefing). Reuse ContextBinder/existing arg resolution — do not invent a new input path for Coded.</step>
+    <step order="4">Wire the proving consumer: confirm a chat-dispatchable Daily Briefing Binding exists (ActionKind=Coded, disposition=email for the notification path) OR add the minimal catalog Binding/Action row (mirror-first in infra/dataverse) so a chat request resolves by binding_id to the Daily Briefing coded Action. The email leg is the EXISTING Email disposition (auto-send notification — no gate). Do not add a new workflow or a new email mechanism.</step>
+    <step order="5">Author a seam test under tests/integration/seam/Ai/ (Phase E seam KEEP): a Coded Binding dispatches through the loop, executes the workflow, and its output is ledger-written before render + routed by disposition; Prompted is unchanged; an unknown ActionKind → 422 ActionKindUnsupported. Prove the Daily-Briefing-via-chat path resolves to the coded workflow and the email disposition delivers (mock the sender at the disposition boundary — do NOT Mock&lt;HttpMessageHandler&gt;).</step>
+    <step order="6">Build BFF (0 errors). Run the seam + affected unit + golden-utterance/dispatch eval suites; all green. dotnet publish -c Release → report compressed size + delta vs ~49.63 MB baseline; dotnet list package --vulnerable --include-transitive → no new HIGH CVE.</step>
+    <step order="7">Run Step 9.5 gates (code-review + adr-check) unconditionally. Flip TASK-INDEX row E-30 🔲→✅ with a one-line summary; update current-task.md.</step>
+    <step order="8">If dispatching Daily Briefing from chat needs anything beyond (a) the deterministic kind branch + (b) a catalog Binding row + (c) the existing Email disposition — i.e., it would require a second dispatch path, a new coded workflow, or a new email mechanism — STOP and document in projects/spaarke-ai-architecture-redesign-r2/notes/ before proceeding.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If launching the coded workflow from the chat loop cannot be done by reusing ICodedWorkflowRegistry + OutputRouter (i.e., it seems to need a second dispatch mechanism or a bypass of the closed-catalog gate), STOP and escalate per CLAUDE.md §6.5 (ADR-039 conflict) rather than adding a parallel path.</trigger>
+    <trigger>If the Daily Briefing coded workflow or its email-notification binding is NOT present/merged in this worktree (depends on the sibling Daily Briefing remediation project's unmerged branch), STOP and surface it — do not build against an unmerged dependency; pick a workflow that IS present or coordinate the merge.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish the BFF project.</tool>
+    <tool name="terminal">Run shell commands.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs</output>
+    <output type="test">tests/integration/seam/Ai/ (new seam test: Coded dispatch determinism + Daily-Briefing-via-chat)</output>
+    <output type="config">infra/dataverse/ (minimal Daily Briefing chat-dispatch Binding row, if not already present)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Binding with ActionKind.Coded targeting a registered coded workflow, when dispatched through SessionDispatchOrchestrator, then the workflow executes via ICodedWorkflowRegistry through the single dispatch loop, its output is ledger-written before render (ADR-040), and it is NOT rejected 422.</criterion>
+    <criterion testable="true">Given a Binding with ActionKind.Prompted, when dispatched, behavior is byte-unchanged from before this task.</criterion>
+    <criterion testable="true">Given a Binding whose ActionKind is not a defined enum member, when dispatched, then it fails clean with DispatchRejectedException.ActionKindUnsupported (422) — no silent fallback, no non-deterministic branch.</criterion>
+    <criterion testable="true">Given a chat request for the daily briefing, when dispatched, then the EXISTING Daily Briefing coded workflow runs and is delivered as a NOTIFICATION email via the existing Email disposition WITHOUT a confirmation gate (auto-send), and no new coded workflow was written.</criterion>
+    <criterion testable="true">The ActionKind decision exists in exactly one site; no scattered kind checks; no supersession-write leg added (already shipped in A0); no second dispatch protocol.</criterion>
+    <criterion testable="true">BFF builds 0 errors; seam + affected unit + golden-utterance/dispatch eval suites pass; publish ≤60 MB compressed with delta reported; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Scope corrected 2026-07-09 after a pre-implementation reality check (operator conversation): the supersession
+    half is already delivered by Phase A0 (ComposeDisposition.cs + contract test + compose-r2 034 consumer) — E-30
+    adds nothing there. Coded chat-dispatch has a CONFIRMED roadmap consumer (the Action Engine); the seam is built
+    now (ADR-039 one-protocol) while the engine internals (Agent Framework/planning) are deferred. Proving consumer
+    = Daily-Briefing-via-chat as a notification email (auto-send exception to the no-auto-send rule, per the
+    2026-07-09 email-split ruling — see memory confirmation-model-ambiguity-not-origin + flag for ADR-041). Only
+    net-new code is the deterministic kind branch + (maybe) one catalog Binding row. NO new workflow, NO duplicate
+    supersession leg, NO gate on the notification email.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-039, ADR-040, bff-extensions, testing, the two module CLAUDE.md before starting. RIGOR FULL,
+      model-tier opus, effort xhigh. Run Step 9.5 gates unconditionally. Honor the escalation triggers.
+    </protocol>
+  </execution>
+</task>

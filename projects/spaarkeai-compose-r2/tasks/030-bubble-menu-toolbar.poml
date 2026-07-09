@@ -3,7 +3,7 @@
     <title>FR-14 TipTap BubbleMenu inline AI toolbar (Explain/Compare/Draft/More)</title>
     <phase>3 Inline Editing UX</phase>
     <gate>green</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
@@ -123,4 +123,64 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Verified-complete (2026-07-09, this session). The implementation was already fully landed in a
+    prior session's "016/030/032 integration wave" (2026-07-08, see project current-task.md) — this
+    task-execute pass re-grounded in code, re-ran the corrected-contract checks the invoking prompt
+    specified, and confirmed nothing further was needed. No new edits made this pass.
+
+    CONTRACT CORRECTION already applied at authoring time (Spike 0, 2026-07-08): the POML's
+    `compose_action_request` PaneEventBus discriminant never existed and was never added. Confirmed
+    by repo-wide grep — every remaining occurrence of the string is an explanatory code comment
+    (in ComposeEditor.tsx, ComposeAiToolbar.tsx, ComposeWorkspace.tsx, useSerialActionQueue.ts)
+    stating it was retracted / must not be added; zero live discriminant/type/dispatch exists.
+
+    ACTUAL DISPATCH SEAM: `ComposeAiToolbar.tsx` calls a bound `dispatchConsumer(bindingId, { slots })`
+    (`createConsumerDispatcher` from `@spaarke/ui-components`, mirroring
+    `useConsumerChips.tsx`'s pattern) built via `useMemo` from `bffBaseUrl`/`sessionId`/`useAuth()`/the
+    inherited `dispatch` PaneEventBus function. When the host supplies the FR-18
+    `enqueueComposeAction` prop (threaded ComposeEditor -> ComposeAiToolbar), the click instead calls
+    `enqueueComposeAction({ id, bindingId, args })`, routing through the host's serial queue
+    (task 032); otherwise it falls back to the toolbar's own `dispatchConsumer` call. The toolbar
+    itself makes NO PaneEventBus emission and NO direct HTTP call — `dispatchConsumer`/
+    `enqueueComposeAction` own the actual POST to
+    `/api/ai/chat/sessions/{sessionId}/dispatch` (ADR-039).
+
+    Files (already in place, verified this pass — none newly created/modified):
+    - `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx` — the floating
+      AI toolbar; extensible action registry (`getComposeAiToolbarActions`/
+      `registerComposeAiToolbarAction`, replace-by-id); 3 primary actions (Explain/Compare/Draft, all
+      `bindingId: ''` Phase-4 stubs, rendered disabled per the "honest stub" rule) + "More actions…"
+      overflow menu.
+    - `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx` — mounts
+      `ComposeAiToolbar` inside the existing `BubbleMenu` render prop (the "AI TOOLBAR MOUNT" region);
+      threads `enqueueComposeAction` through from its own props.
+    - `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.test.tsx` —
+      co-located RTL suite, 10/10 passing (render/negative-collapsed/no-editor/disabled-stub;
+      light+dark no-hardcoded-hex; wired-dispatch call-shape; stub-does-not-dispatch;
+      registry-extensibility via `registerComposeAiToolbarAction`; empty-overflow placeholder).
+    - `src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts` — NOT modified;
+      no `compose_action_request` discriminant added (per the corrected contract). The POML's
+      referenced `src/solutions/SpaarkeAi/src/types/compose-contracts.ts` path does not exist /
+      was stale; the shared-lib path is canonical (already noted in ComposeEditor.tsx's JSDoc).
+
+    Verification run this pass: `npx tsc --noEmit` in `Spaarke.Compose.Components` — clean. Full
+    package `npx jest` — 6 suites / 53 tests passing (matches the prior session's recorded 53/53,
+    no regression). `ComposeAiToolbar` suite alone — 10/10 (matches the integration-wave record).
+
+    Tooltip text sources concise excerpts of the FR-23 task-024 enriched `compose-selection` scope
+    description (`EXPLAIN_TOOLTIP`/`COMPARE_TOOLTIP`/`DRAFT_TOOLTIP` constants), per the file's
+    "TOOLTIP SOURCING" header note — task 024's richer per-Action `description` field becomes the
+    more precise source once Phase 4 wires real Bindings (one-line swap via
+    `registerComposeAiToolbarAction`, no rearchitecting).
+
+    Reposition-in-viewport / dismiss-on-clear are inherited for free from the parent BubbleMenu's
+    tippy instance (`tippyOptions={{ placement: 'top' }}`; tippy's default popper `flip` modifier
+    handles the "below when no room" case) — `ComposeAiToolbar` additionally self-guards on
+    `editor.state.selection` (collapsed => renders null) so it is correct even mounted standalone.
+
+    Not touched (per write boundary): TASK-INDEX.md (still shows 🔄 for row 030 — main session should
+    flip to ✅), current-task.md, any `.cs` file, other compose test files.
+  </notes>
 </task>

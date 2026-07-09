@@ -217,9 +217,11 @@ public class OutputRouterTests
         var act = () => CreateSut().RouteAsync(BuildSession(), binding, ParseJson("{}"));
 
         var thrown = await act.Should().ThrowAsync<NotSupportedException>(
-            "P3 disposition legs FAIL LOUDLY — a silent inline-render fallback would " +
+            "a not-yet-routable disposition FAILS LOUDLY — a silent inline-render fallback would " +
             "violate the disposition-is-the-only-rendering-contract rule");
-        thrown.Which.Message.Should().Contain(expectedLedgerValue).And.Contain("P3");
+        // ADR-043 §3: the loud message is single-sourced in DispositionRoutability and names the
+        // disposition + the missing side-effect leg (no phase label — routability is registry data).
+        thrown.Which.Message.Should().Contain(expectedLedgerValue).And.Contain("no routing leg yet");
 
         // Storage preceded the (failed) routing: the entry exists and is addressable.
         _sessionManager.PersistedSessions.Should().ContainSingle()

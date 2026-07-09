@@ -1,0 +1,69 @@
+<task id="AIR2-E20" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Single-source disposition (DispositionRoutability registry — admit follows router) + realize needed router legs (Phase E Move 2 / compose B1)</title>
+    <status>not-started</status>
+    <phase>Phase E — AI Execution Foundation</phase>
+    <gate>Phase-E gate</gate>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Kills the triplicated disposition drift class (the exact defect that half-landed compose's routing promotion → live 422). Touches the dispatch admit-gate + OutputRouter — the shared routing spine.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <tags>bff-api, ai, execution-foundation, disposition, output-router, adr-043, compose-b1</tags>
+    <dependencies>E-00 (ADR-043). Compose-r2 already merged BindingDisposition.Compose + ToLedgerValue + the OutputRouter compose case (with the task-035 Outcome reconciliation).</dependencies>
+  </metadata>
+
+  <prompt>
+    Single-source disposition capability per ADR-043 §3. TODAY it is triplicated + drift-prone across THREE hand-maintained lists: the dispatch admit-gate (`SessionDispatchOrchestrator.cs:224`, a hardcoded `Informational or WorkProduct` allow-list), the `OutputRouter` routing switch, and `ToLedgerValue`. They drift — that's literally why compose's routing promotion half-landed (they added the router case; the admit-gate kept rejecting it → live 422). Collapse them to ONE `DispositionRoutability` registry where **admission derives from "can OutputRouter route this disposition?"** — the admit-gate and ToLedgerValue follow the registry, so drift becomes structurally impossible.
+
+    ABSOLUTE MANDATE (operator): no shim; end-to-end; BEST-ARCHITECTURE. Realize the router legs that r2 actually needs (compose already built; email STAYS draft+handoff per the confirmation model — no auto-send). Do NOT silently leave a disposition admittable-but-unroutable or routable-but-unadmitted.
+  </prompt>
+
+  <role>Senior BFF engineer fluent in the ADR-039 dispatch admit-gate, OutputRouter disposition switch, BindingDisposition/ToLedgerValue, and the ADR-040 store-before-render/OutcomeCard convergence.</role>
+
+  <goal>
+    One `DispositionRoutability` source of truth: the dispatch admit-gate (SessionDispatchOrchestrator) admits exactly the dispositions OutputRouter can route (no separate hardcoded allow-list); `ToLedgerValue` and the admit-gate derive from the same registry. Adding/realizing a disposition is ONE change in ONE place. The stubbed OutputRouter legs needed in r2 are realized (compose already done; email = draft+handoff, no auto-send; record/notification/overlay realized-or-explicitly-scoped-out with rationale). A seam test proves a newly-registered disposition dispatches end-to-end without editing three lists.
+  </goal>
+
+  <inputs>
+    <file purpose="admit-gate">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs (~line 224 hardcoded allow-list + ~209 ActionKind gate — leave ActionKind to E-30)</file>
+    <file purpose="router">src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs (the routing switch + ToLedgerValue + the stubbed NotImplemented legs)</file>
+    <file purpose="binding">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs (BindingDisposition enum incl. Compose 100000006)</file>
+    <file purpose="adr">docs/adr/ADR-043-ai-capability-execution-spine.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="single-source">The admit-gate MUST derive from "can the router route this?" — NOT a parallel hardcoded list. After this task there is ONE disposition-capability source; the three lists cannot disagree.</constraint>
+    <constraint source="email-draft-handoff">Email disposition STAYS draft + review/send handoff (no auto-send in r2) — do not realize an auto-send email leg.</constraint>
+    <constraint source="convergence">All realized legs converge at store-before-render → ledger SessionOutput → OutcomeCard (ADR-040/041). Preserve the task-035 Outcome composition + compose's reconciliation on the compose leg.</constraint>
+    <constraint source="scope-legs">Realize the legs r2 needs; for any stubbed leg you deliberately leave unrealized, keep it a LOUD explicit rejection routed through the registry (admittable=false) with a clear message + a one-line rationale — never a silent drop.</constraint>
+    <constraint source="def-of-done">A tests/integration/seam/** test: register a disposition once → it dispatches end-to-end (admit → route → store → render) with no three-list edit. Compose disposition end-to-end stays green.</constraint>
+    <constraint source="bff-hygiene">.claude/constraints/bff-extensions.md; publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Map the 3 lists">Enumerate the admit-gate allow-list, the OutputRouter switch, and ToLedgerValue; identify the single registry shape (disposition → {routable, ledgerValue, leg}).</step>
+    <step order="1" name="Build DispositionRoutability">One registry/source of truth; OutputRouter's capability is the authority; admit-gate + ToLedgerValue derive from it.</step>
+    <step order="2" name="Realize needed legs">Realize the r2-needed legs (compose done; email=draft+handoff; record/notification/overlay realized or explicitly registered-as-not-yet-routable with a loud rejection + rationale).</step>
+    <step order="3" name="Seam proof">Seam vertical-slice test: register once → dispatch end-to-end; compose leg green; no three-list divergence possible.</step>
+    <step order="4" name="Gates">code-review + adr-check; publish + CVE.</step>
+  </steps>
+
+  <tools><tool name="dotnet">build + test</tool><tool name="git">MAIN-SESSION commit only — report changes, do not commit</tool></tools>
+
+  <outputs>
+    <output type="code">DispositionRoutability single-source registry; admit-gate + ToLedgerValue derived; realized/registered router legs</output>
+    <output type="test">seam vertical-slice proving one-place disposition registration dispatches end-to-end</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The dispatch admit-gate admits exactly the dispositions OutputRouter can route (derived from ONE registry) — the hardcoded Informational-or-WorkProduct allow-list is gone; ToLedgerValue derives from the same source.</criterion>
+    <criterion testable="true">Registering/realizing a disposition is ONE change in ONE place; a seam test proves it dispatches end-to-end with no three-list edit.</criterion>
+    <criterion testable="true">Email stays draft+handoff (no auto-send); the compose leg (+ task-035 Outcome reconciliation) stays green; any unrealized leg is a LOUD explicit rejection, never a silent drop.</criterion>
+    <criterion testable="true">Build 0 errors; publish &lt; 60 MB; no new HIGH CVE; code-review + adr-check clean.</criterion>
+    <criterion testable="true">NEGATIVE: no path where a disposition is admittable-but-unroutable or routable-but-unadmitted; no second hardcoded disposition list remains.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If realizing a router leg (record/notification/overlay) requires a design decision beyond single-sourcing (e.g. a new side-effect mechanism), STOP and surface it — single-source the registry + register the leg as loud-not-yet-routable rather than inventing an unscoped side effect.</trigger>
+  </escalation>
+</task>

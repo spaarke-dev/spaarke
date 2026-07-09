@@ -3,8 +3,12 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Services.Compose;
 
@@ -39,20 +43,38 @@ public class ComposeService : IComposeService
     private const string DisplayNameAttribute = "sprk_documentname";
     private const string FileNameAttribute = "sprk_filename";
 
+    // FR-05 create-on-save backbone — the consumer-declared ordered step set the
+    // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).
+    // These string keys are the Compose contract the future OutcomeCard renders; keep stable.
+    internal const string StepContainer = "container";
+    internal const string StepRecord = "record";
+    internal const string StepProfileAnalysis = "profile-analysis";
+    internal const string StepIndexing = "indexing";
+
+    private const string ComposeCreateOnSaveJobType = "compose-create-on-save";
+    private const string DocxContentType =
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
     private readonly ISpeFileOperations _spe;
     private readonly ChatSessionManager _sessions;
     private readonly IGenericEntityService _dataverse;
+    private readonly DocxAnnotationWriter _annotationWriter;
+    private readonly IPostUploadIndexingEnqueuer _indexing;
     private readonly ILogger<ComposeService> _logger;
 
     public ComposeService(
         ISpeFileOperations spe,
         ChatSessionManager sessions,
         IGenericEntityService dataverse,
+        DocxAnnotationWriter annotationWriter,
+        IPostUploadIndexingEnqueuer indexing,
         ILogger<ComposeService> logger)
     {
         _spe = spe;
         _sessions = sessions;
         _dataverse = dataverse;
+        _annotationWriter = annotationWriter;
+        _indexing = indexing;
         _logger = logger;
     }
 
@@ -145,39 +167,95 @@ public class ComposeService : IComposeService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.DriveId))
-            throw new ArgumentException("DriveId is required for SPE drive-item access.", nameof(request));
-        if (string.IsNullOrWhiteSpace(request.DocumentSpeId))
-            throw new ArgumentException("DocumentSpeId (drive-item id) is required.", nameof(request));
         if (string.IsNullOrWhiteSpace(request.SessionId))
             throw new ArgumentException("SessionId is required for first-Save promotion rebind.", nameof(request));
         if (string.IsNullOrWhiteSpace(request.TenantId))
             throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
+        if (request.Content.IsEmpty)
+            throw new ArgumentException("Content is required and must be non-empty.", nameof(request));
+
+        var observedAt = DateTimeOffset.UtcNow;
+        var isTransientCreate = string.IsNullOrWhiteSpace(request.DocumentSpeId);
 
         _logger.LogInformation(
-            "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
-            request.TenantId, request.DriveId, request.DocumentSpeId, request.SessionId,
-            request.DocumentRecordId, request.Content.Length);
+            "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} container={ContainerId} transientCreate={IsTransientCreate} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
+            request.TenantId, request.DriveId, request.DocumentSpeId, request.ContainerId,
+            isTransientCreate, request.SessionId, request.DocumentRecordId, request.Content.Length);
 
-        // 1) PUT the new content to the existing drive-item. Commits a new SPE version.
-        //    Failure here MUST short-circuit before promotion so a broken save never leaves
-        //    a half-promoted Document record.
-        using var contentStream = new MemoryStream(request.Content.ToArray(), writable: false);
+        // ────────────────────────────────────────────────────────────────────────────
+        // STEP 1 — container (FR-05, Fork A + Fork B).
+        //   Transient draft (no DocumentSpeId): the container id is CLIENT-SUPPLIED (Fork A —
+        //   no server-side BU→container resolver); create the SPE drive-item in it under OBO
+        //   (Fork B). A missing container FAILS the container step honestly — never a success.
+        //   Existing item (DocumentSpeId present): replace the drive-item's content (R1 behavior).
+        // ────────────────────────────────────────────────────────────────────────────
+        string effectiveSpeId;
+        string? effectiveDriveId;
+        FileHandleDto saved;
+        var fileName = ResolveFileName(request.DisplayName);
 
-        var saved = await _spe.ReplaceFileContentAsUserAsync(
-                httpContext, request.DriveId, request.DocumentSpeId, contentStream, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (saved is null || string.IsNullOrEmpty(saved.Id))
+        if (isTransientCreate)
         {
-            throw new InvalidOperationException(
-                $"SPE save failed: drive-item not found or version not returned. drive={request.DriveId} item={request.DocumentSpeId}");
+            if (string.IsNullOrWhiteSpace(request.ContainerId))
+            {
+                _logger.LogWarning(
+                    "Compose create-on-save: transient draft with no client-supplied ContainerId — failing the '{Step}' step honestly (session={SessionId}). No server-side BU→container resolver (multi-container INV-7).",
+                    StepContainer, request.SessionId);
+                return BuildContainerFailedResult(request, observedAt);
+            }
+
+            // Fork B: mint the SPE drive-item in the supplied container under the user's OBO
+            // identity (the Compose user holds the file ACL; MI does not — same constraint that
+            // deferred profile). Idempotency: this branch only runs when DocumentSpeId is absent;
+            // once created, the client re-Saves with the returned id → the replace path below, so
+            // the drive-item is never double-created.
+            var driveId = await _spe.ResolveDriveIdAsync(request.ContainerId, cancellationToken).ConfigureAwait(false);
+            using var createStream = new MemoryStream(request.Content.ToArray(), writable: false);
+            var created = await _spe.UploadSmallAsUserAsync(
+                    httpContext, driveId, fileName, createStream, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (created is null || string.IsNullOrEmpty(created.Id))
+            {
+                _logger.LogError(
+                    "Compose create-on-save: SPE drive-item creation returned null/empty for container={ContainerId} — failing the '{Step}' step (session={SessionId}).",
+                    request.ContainerId, StepContainer, request.SessionId);
+                return BuildContainerFailedResult(request, observedAt);
+            }
+
+            saved = created;
+            effectiveSpeId = created.Id;
+            effectiveDriveId = created.DriveId ?? driveId;
+            fileName = created.Name ?? fileName;
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(request.DriveId))
+                throw new ArgumentException("DriveId is required for SPE drive-item access when DocumentSpeId is supplied.", nameof(request));
+
+            using var contentStream = new MemoryStream(request.Content.ToArray(), writable: false);
+            var replaced = await _spe.ReplaceFileContentAsUserAsync(
+                    httpContext, request.DriveId, request.DocumentSpeId!, contentStream, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (replaced is null || string.IsNullOrEmpty(replaced.Id))
+            {
+                throw new InvalidOperationException(
+                    $"SPE save failed: drive-item not found or version not returned. drive={request.DriveId} item={request.DocumentSpeId}");
+            }
+
+            saved = replaced;
+            effectiveSpeId = request.DocumentSpeId!;
+            effectiveDriveId = request.DriveId;
+            fileName = replaced.Name ?? fileName;
         }
 
-        // 2) First-Save promotion (FR-06). Idempotent — repeated saves see existing row.
+        // ────────────────────────────────────────────────────────────────────────────
+        // STEP 2 — record (FR-06 idempotent promotion). Repeated saves see the existing row.
+        // ────────────────────────────────────────────────────────────────────────────
         var promoteRequest = new PromoteComposeDocumentRequest
         {
-            DocumentSpeId = request.DocumentSpeId,
+            DocumentSpeId = effectiveSpeId,
             SessionId = request.SessionId,
             TenantId = request.TenantId,
             DisplayName = request.DisplayName,
@@ -186,16 +264,54 @@ public class ComposeService : IComposeService
         var promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
             .ConfigureAwait(false);
 
+        // ────────────────────────────────────────────────────────────────────────────
+        // STEP 4 — indexing (sync-OBO). The Compose user wrote the file, so indexing MUST run
+        // inline in the OBO request scope (Pattern 4) — a Service Bus job under MI would 403 on
+        // the download. IPostUploadIndexingEnqueuer is the always-registered, ADR-013-safe seam;
+        // it swallows its own failures (returns a result), so we read the result for the step
+        // state rather than relying on an exception.
+        // ────────────────────────────────────────────────────────────────────────────
+        var indexingResult = await _indexing.EnqueueIfApplicableAsync(
+                new PostUploadIndexingRequest(
+                    TenantId: request.TenantId,
+                    DriveId: effectiveDriveId ?? string.Empty,
+                    ItemId: effectiveSpeId,
+                    FileName: fileName,
+                    FileSizeBytes: saved.Size ?? request.Content.Length,
+                    ContentType: DocxContentType,
+                    DocumentId: promotion.DocumentRecordId?.ToString(),
+                    ParentEntity: null,          // parent association is task 014 — standalone Document is valid
+                    SearchIndexName: null,       // resolver cascade runs downstream
+                    Source: "ComposeCreateOnSave",
+                    CorrelationId: httpContext.TraceIdentifier),
+                httpContext,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        // ────────────────────────────────────────────────────────────────────────────
+        // Project per-step states (container → record → profile-analysis[deferred] → indexing)
+        // through the shared JobAwareCompletionStateProjector. A fileless/unindexed record can
+        // never be a success (aggregate Failed/Partial); profile is deferred to core (Fork C).
+        // ────────────────────────────────────────────────────────────────────────────
+        var completion = ProjectCreateOnSaveState(
+            subjectId: effectiveSpeId,
+            correlationId: httpContext.TraceIdentifier,
+            containerSignal: CompletedSignal(StepContainer),
+            recordSignal: CompletedSignal(StepRecord),
+            indexingSignal: IndexingSignal(indexingResult),
+            observedAt: observedAt);
+
         return new SaveComposeDocumentResult
         {
-            DocumentSpeId = request.DocumentSpeId,
-            DriveId = request.DriveId,
+            DocumentSpeId = effectiveSpeId,
+            DriveId = effectiveDriveId,
             SessionId = promotion.SessionId,
             DocumentRecordId = promotion.DocumentRecordId,
             VersionId = saved.Id,
             ETag = saved.ETag,
             Size = saved.Size,
             WasPromotedThisSave = promotion.WasCreated,
+            CompletionState = completion,
         };
     }
 
@@ -293,6 +409,241 @@ public class ComposeService : IComposeService
             SessionId = request.SessionId,
             DocumentRecordId = newId,
             WasCreated = true,
+        };
+    }
+
+    // =========================================================================
+    // FR-05 create-on-save backbone — helpers (per-step job-aware projection).
+    //
+    // The four steps container → record → profile-analysis → indexing are projected through the
+    // shared JobAwareCompletionStateProjector (store-before-render, ADR-040). profile-analysis is
+    // DEFERRED: the only profile seam (IAppOnlyAnalysisService) trips the ADR-013 NetArchTest
+    // facade rule AND runs under MI (which 403s on the OBO-written file). Core owns the
+    // Services/Ai/PublicContracts/IDocumentProfileAi facade (redesign-r2, notes/HANDOFF-…). Until
+    // it ships, profile emits a non-terminal deferred state and the aggregate stays Partial on the
+    // happy path — record exists + indexed, downstream profile pending (the ingestion-parity signal).
+    // =========================================================================
+
+    /// <summary>
+    /// The interim R5-E success bar for FR-05 create-on-save (documented exception, 2026-07-09):
+    /// a record is interim-successful ONLY when the <c>container</c>, <c>record</c>, AND
+    /// <c>indexing</c> steps all reached terminal success — a record with no SPE file OR no index
+    /// is NEVER a success. <c>profile-analysis</c> is excluded (deferred to core's
+    /// <c>IDocumentProfileAi</c>); the FULL R5-E bar (aggregate == <see cref="JobAwareState.Completed"/>,
+    /// which requires profile too) is restored when core ships the facade.
+    /// </summary>
+    public static bool IsInterimCreateOnSaveSuccess(JobAwareCompletionState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        bool Completed(string stepName) =>
+            state.Steps.Any(s => string.Equals(s.StepName, stepName, StringComparison.Ordinal)
+                && s.State == JobAwareState.Completed);
+        return Completed(StepContainer) && Completed(StepRecord) && Completed(StepIndexing);
+    }
+
+    /// <summary>Resolves the created drive-item's file name from the caller display name,
+    /// defaulting to a unique <c>compose-draft-…docx</c> and ensuring a <c>.docx</c> extension.</summary>
+    private static string ResolveFileName(string? displayName)
+    {
+        if (string.IsNullOrWhiteSpace(displayName))
+            return $"compose-draft-{Guid.NewGuid():N}.docx";
+        return displayName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase)
+            ? displayName
+            : displayName + ".docx";
+    }
+
+    /// <summary>A stored terminal-success signal for a step that this request completed inline.</summary>
+    private static StoredStepSignal CompletedSignal(string stepName) => new()
+    {
+        StepName = stepName,
+        StoredStatus = JobStatus.Completed,
+        Started = true,
+    };
+
+    /// <summary>
+    /// The DEFERRED profile-analysis signal (Fork C, core-owned). No stored outcome, not started —
+    /// projects to <see cref="JobAwareState.Queued"/> (the honest "nothing persisted yet" state,
+    /// since the contract has no dedicated Deferred member) with a <c>deferred</c> diagnostic so
+    /// the OutcomeCard and a future re-profile pass can distinguish it from a genuinely-queued step.
+    /// </summary>
+    private static StoredStepSignal DeferredProfileSignal() => new()
+    {
+        StepName = StepProfileAnalysis,
+        StoredStatus = null,
+        Started = false,
+        Detail = "deferred: core-owned Services/Ai/PublicContracts/IDocumentProfileAi (Fork C) — not implemented in this task",
+    };
+
+    /// <summary>Maps the indexing enqueue outcome to a stored step signal: submitted (sync-OBO ran)
+    /// → Completed; failed → terminal Failed (single attempt, so never RetryPending); skipped →
+    /// non-terminal (no stored outcome) so the record is never a success without an index.</summary>
+    private static StoredStepSignal IndexingSignal(PostUploadIndexingResult result)
+    {
+        if (result.JobSubmitted)
+        {
+            return new StoredStepSignal { StepName = StepIndexing, StoredStatus = JobStatus.Completed, Started = true };
+        }
+
+        if (result.FailureReason is not null)
+        {
+            return new StoredStepSignal
+            {
+                StepName = StepIndexing,
+                StoredStatus = JobStatus.Failed,
+                Started = true,
+                Attempt = 1,
+                MaxAttempts = 1,   // no retry budget → terminal Failed, not RetryPending
+                Detail = $"indexing failed: {result.FailureReason}",
+            };
+        }
+
+        // Skipped (feature flag off / non-indexable / empty / missing tenant): not indexed →
+        // not a terminal success. Keep it non-terminal so the aggregate never reads Completed.
+        return new StoredStepSignal
+        {
+            StepName = StepIndexing,
+            StoredStatus = null,
+            Started = false,
+            Detail = $"indexing skipped: {result.SkipReason}",
+        };
+    }
+
+    /// <summary>Projects the four create-on-save steps (with profile-analysis deferred) through the
+    /// shared <see cref="JobAwareCompletionStateProjector"/>.</summary>
+    private static JobAwareCompletionState ProjectCreateOnSaveState(
+        string subjectId,
+        string correlationId,
+        StoredStepSignal containerSignal,
+        StoredStepSignal recordSignal,
+        StoredStepSignal indexingSignal,
+        DateTimeOffset observedAt)
+    {
+        var job = new JobContract
+        {
+            JobType = ComposeCreateOnSaveJobType,
+            SubjectId = subjectId,
+            CorrelationId = correlationId,
+            IdempotencyKey = $"compose-create-on-save-{subjectId}",
+        };
+
+        var steps = new List<StoredStepSignal>
+        {
+            containerSignal,
+            recordSignal,
+            DeferredProfileSignal(),
+            indexingSignal,
+        };
+
+        return JobAwareCompletionStateProjector.Project(job, steps, observedAt);
+    }
+
+    /// <summary>Builds the create-on-save result for a FAILED container step (missing client-supplied
+    /// container, or SPE creation returned null): no record, no version, aggregate Failed — never a
+    /// success. record/indexing project as non-terminal since they never ran.</summary>
+    private SaveComposeDocumentResult BuildContainerFailedResult(
+        SaveComposeDocumentRequest request,
+        DateTimeOffset observedAt)
+    {
+        var containerFailed = new StoredStepSignal
+        {
+            StepName = StepContainer,
+            StoredStatus = JobStatus.Failed,
+            Started = true,
+            Attempt = 1,
+            MaxAttempts = 1,
+            Detail = "container step failed: no client-supplied ContainerId for a transient draft, or SPE drive-item creation failed",
+        };
+
+        var completion = ProjectCreateOnSaveState(
+            subjectId: request.DocumentSpeId ?? string.Empty,
+            correlationId: request.SessionId,
+            containerSignal: containerFailed,
+            recordSignal: new StoredStepSignal { StepName = StepRecord, StoredStatus = null, Started = false },
+            indexingSignal: new StoredStepSignal { StepName = StepIndexing, StoredStatus = null, Started = false },
+            observedAt: observedAt);
+
+        return new SaveComposeDocumentResult
+        {
+            DocumentSpeId = request.DocumentSpeId ?? string.Empty,
+            DriveId = request.DriveId,
+            SessionId = request.SessionId,
+            DocumentRecordId = null,
+            VersionId = string.Empty,
+            ETag = null,
+            Size = null,
+            WasPromotedThisSave = false,
+            CompletionState = completion,
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<PushAnnotationsResult> PushAnnotationsAsync(
+        PushAnnotationsRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.DriveId))
+            throw new ArgumentException("DriveId is required for SPE drive-item access.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.DocumentSpeId))
+            throw new ArgumentException("DocumentSpeId (drive-item id) is required.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.TenantId))
+            throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.IfMatch))
+            throw new ArgumentException("IfMatch (load-time ETag) is required — a blind overwrite is not offered on the push-annotations path.", nameof(request));
+        if (request.Annotations is null || request.Annotations.Count == 0)
+            throw new ArgumentException("At least one annotation is required.", nameof(request));
+
+        _logger.LogInformation(
+            "Compose push-annotations: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} annotations={AnnotationCount}",
+            request.TenantId, request.DriveId, request.DocumentSpeId, request.Annotations.Count);
+
+        // 1) Download the CURRENT bytes via the facade (ADR-007 — no Graph type here).
+        var stream = await _spe.DownloadFileAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
+            .ConfigureAwait(false);
+        if (stream is null)
+        {
+            throw new InvalidOperationException(
+                $"SPE drive-item not found or unreadable: drive={request.DriveId} item={request.DocumentSpeId}");
+        }
+
+        byte[] sourceBytes;
+        await using (stream.ConfigureAwait(false))
+        {
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+            sourceBytes = buffer.ToArray();
+        }
+
+        // 2) Render annotations into native OOXML markup. Pure — no I/O, no AI (ADR-013).
+        //    DocxAnnotationException (malformed / target-not-found) propagates to the endpoint,
+        //    which maps it to 400 / 422 ProblemDetails. This runs BEFORE the write, so a bad
+        //    annotation batch never leaves a partial SPE version.
+        var annotatedBytes = _annotationWriter.Annotate(sourceBytes, request.Annotations);
+
+        // 3) Persist with optimistic concurrency (If-Match). A drive-item that moved under the
+        //    caller (Word autosave) surfaces as EtagPreconditionFailedException (412); an open
+        //    Word co-authoring session surfaces as DocumentLockedByWordException (423). Both
+        //    propagate to the endpoint. Nothing partially writes.
+        using var annotatedStream = new MemoryStream(annotatedBytes, writable: false);
+        var saved = await _spe.ReplaceFileContentAsUserAsync(
+                httpContext, request.DriveId, request.DocumentSpeId, annotatedStream, request.IfMatch, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (saved is null || string.IsNullOrEmpty(saved.Id))
+        {
+            throw new InvalidOperationException(
+                $"SPE annotated-write failed: drive-item not found or version not returned. drive={request.DriveId} item={request.DocumentSpeId}");
+        }
+
+        return new PushAnnotationsResult
+        {
+            DocumentSpeId = request.DocumentSpeId,
+            DriveId = request.DriveId,
+            VersionId = saved.Id,
+            ETag = saved.ETag,
+            Size = saved.Size,
+            AnnotationCount = request.Annotations.Count,
         };
     }
 

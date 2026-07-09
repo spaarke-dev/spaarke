@@ -139,6 +139,8 @@ If you need to link the event to a different parent record:
 
 ## Field Mapping Features
 
+> ⚠️ **Correction (2026-07-09):** the field-mapping mechanism was rebuilt. **Auto-population on creation still works as described below.** However, the child-form **"Refresh from Parent" button described in this section no longer exists** — there is no pull-from-parent button on the Event form. To re-apply mappings to already-created Events after the parent changes, an admin uses the **"Push Updates to Related Records"** button on the **parent** (Matter/Project) form. Ignore the "Refresh from Parent" steps below; everything about auto-population at creation time remains accurate. See [`docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md`](../guides/FIELD-MAPPING-ADMIN-GUIDE.md).
+
 ### Auto-Population on Creation
 
 When you create an Event and link it to a parent record, the system automatically populates certain fields with information from that parent record.

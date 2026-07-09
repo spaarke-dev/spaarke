@@ -361,7 +361,17 @@ export async function readSseStream(options: ReadSseStreamOptions): Promise<void
 // ─────────────────────────────────────────────────────────────────────────────
 
 type PendingActionEvent = {
-  type: 'action_confirmation' | 'action_success' | 'action_error' | 'dialog_open' | 'navigate';
+  type:
+    | 'action_confirmation'
+    | 'action_success'
+    | 'action_error'
+    | 'dialog_open'
+    | 'navigate'
+    // spaarke-ai-architecture-redesign-r2 task 044c: the AUTO-EXECUTE (no-dialog)
+    // gate leg's OutcomeCard frame (SideEffectGateAIFunction.cs ~490). Routed
+    // through the same PendingActionEvent mechanism as its siblings above so
+    // SprkChat's existing action-event useEffect dispatches it — no new plumbing.
+    | 'action_outcome';
   data: IChatSseEventData;
 };
 
@@ -422,9 +432,12 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
     event.type === 'action_success' ||
     event.type === 'action_error' ||
     event.type === 'dialog_open' ||
-    event.type === 'navigate'
+    event.type === 'navigate' ||
+    // task 044c: the auto-execute (no-dialog) gate leg's OutcomeCard frame —
+    // reuses the SAME PendingActionEvent dispatch as its action_* siblings.
+    event.type === 'action_outcome'
   ) {
-    // R2-039/R2-052: Store action/dialog/navigate event for caller to handle via useEffect.
+    // R2-039/R2-052/044c: Store action/dialog/navigate/outcome event for caller to handle via useEffect.
     handlers.onActionEvent({
       type: event.type as PendingActionEvent['type'],
       data: event.data ?? {},

@@ -3,7 +3,7 @@
     <title>R1 spec.md amendment (two Word-native non-goals to "shipped in R2")</title>
     <phase>8 Wrap</phase>
     <gate>startable-now</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
@@ -87,4 +87,18 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-09 (MINIMAL rigor, docs-only). Amended `projects/spaarkeai-compose-r1/spec.md`:
+    (1) Out of Scope lines 49-50 — both "never" non-goals ("Tracked changes round-trip with Word" and
+    "Comments stored as Word `w:comment` elements") struck through and marked AMENDED, pointing to R2
+    FR-24 (push annotations) / FR-25 (pull annotations) and `projects/spaarkeai-compose-r2/design.md` §10
+    ADR Tensions; (2) MUST NOT rules (former lines 185-186) annotated "R1-scoped; superseded by R2
+    FR-24/FR-25 (Path B amendment per CLAUDE.md §6.5, filed 2026-07-09)". Also annotated the parallel MUST
+    NOT rules in `projects/spaarkeai-compose-r1/CLAUDE.md` with the same Path-B supersession note (history
+    preserved, not deleted, per step 3 instruction). Verified via `git diff --stat` that only these two
+    docs files were touched — zero code files modified. R2 design.md §10 / spec.md ADR Tensions "Actions"
+    note is now satisfied (amendment filed). Per write-boundary instructions for this parallel wave, did
+    NOT edit TASK-INDEX.md or current-task.md — main session reconciles those.
+  </notes>
 </task>

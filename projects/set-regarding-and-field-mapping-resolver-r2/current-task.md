@@ -1,48 +1,53 @@
-# Current Task — Set-Regarding and Field-Mapping Resolver R2
+# Current Task State — Set-Regarding and Field-Mapping Resolver R2
 
-> **Context recovery file.** Updated by `task-execute` during task work. See `docs/procedures/context-recovery.md`.
+> **Last Updated**: 2026-07-09 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. This project is CODE-COMPLETE, merged to master, and deployed to dev; it's in live UAT.
 
-## Active Task
-- **Project**: set-regarding-and-field-mapping-resolver-r2
-- **Task ID**: 090 (wrap-up) — next
-- **Phase**: 5: Wrap-up
-- **Status**: not-started
-- **Rigor Level**: FULL
+---
 
-## Next Action
-**090** wrap-up: project-wide code-review + adr-check, LIVE end-to-end verification (wizard-created record per mapping type + matter→matter + no-profile no-op + push regression), git-diff invariant check, /test-diet, README/plan → Complete, lessons-learned, repo-cleanup. Then merge decision. Live-verify + merge need owner engagement.
+## Quick Recovery (READ THIS FIRST)
 
-## Docs phase — COMPLETE
-- **040** ✅ architecture doc `docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md` + root CLAUDE.md §17 pointer (added by main session) + CHANGELOG entry.
-- **041** ✅ admin guide `docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md`.
+| Field | Value |
+|-------|-------|
+| **Project** | set-regarding-and-field-mapping-resolver-r2 |
+| **Status** | ✅ Implementation complete + merged to master + BFF deployed to dev + UAT in progress |
+| **Master HEAD** | `4d85deef7` (worktree = origin/master = main-repo master, all synced) |
+| **Next Action** | User imports **`VisualHostSolution_v1.4.34.zip`** (path below) + re-tests wizard create; expect warning-free inheritance for populated lookups |
 
-## Completed this session (11 of 16 tasks)
-- **001** ✅ schema `sprk_expression` (Memo 2000, nullable)
-- **002** ✅ BFF DTO (+5 rule fields) — gates CLEAN
-- **003** ✅ BFF tests + publish-size (7662 pass, 49.60 MB, no new CVE)
-- **010** ✅ engine shell (context-agnostic `applyFieldMappings`, never-throws, dispatch seams)
-- **011** ✅ nav-prop Path A (6-of-7 shared; matter→016)
-- **012** ✅ Copy engine (scalar + lookup @odata.bind)
-- **013** ✅ Default/Concat/Template (one `resolveExpression`, single source fetch)
-- **014** ✅ same-entity support (no guard; verified)
-- **015** ✅ engine unit tests (17 tests; caught+fixed FR-09 defect)
-- **020/021/022** ✅ Wave B wiring (event/matter/project · todo/workAssignment · invoice/reportCard)
-- **030** ✅ seed (all 3 pairs: Event 8 + Invoice 4 + Report Card 8; created missing Report Card `sprk_recordtype_ref` `5bc206a0-…` under owner approval)
+### The v1.4.34 zip to import
+`C:\code_files\spaarke-wt-set-regarding-and-field-mapping-resolver-r2\src\client\pcf\VisualHost\Solution\bin\VisualHostSolution_v1.4.34.zip`
+`pac solution import --path "…VisualHostSolution_v1.4.34.zip" --publish-changes` → hard-refresh → footer shows v1.4.34.
 
-## Verification (post-Wave-B, authoritative)
-`npm run build` (@spaarke/ui-components) = 0 errors. 157 field-mapping/wizard tests green. Full-suite 16 failures confirmed PRE-EXISTING on master (WorkspaceShell/FilePreview/recordHeader/XrmDataverseClient/EntityCreationService.cascade — untouched here), proven via stash-baseline run. Zero regressions from this project.
+### Critical Context
+All 16 tasks done. During UAT, the profile-fetch endpoint 500'd; root cause was **3 compounding latent BFF bugs** (all pre-existing; this engine was the first real consumer), now fixed + verified live (endpoint returns 200 with 8 rules). A 4th (cosmetic) client refinement removed noisy warnings for empty source lookups. Everything is on master; BFF is deployed to dev; VisualHost v1.4.34 is the only thing left to import.
 
-## Remaining
-- **040** architecture doc + root CLAUDE.md §17 pointer (deps 015/022/030 ✅)
-- **041** admin authoring guide docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md (deps 030 ✅)
-- **090** wrap-up (FULL: code-review + adr-check across project, live E2E verify, /test-diet, README/plan → Complete, repo-cleanup)
-- **016** matterService nav-prop convergence — DEFERRED, awaiting owner go-ahead (§6.5; create-payload-touching, needs payload-equivalence test)
+---
 
-## Follow-ups surfaced during Wave B (fold into 090/docs)
-- **021**: To Do follow-on child-creation path (`createTodoRegardingChild`, called from invoice/reportCard wizards) left unwired to respect 022's scope — gracefully no-ops today. Needs a follow-up task.
-- **020**: Matter/Project parent link is POST-create N:N, not a pre-create regarding value — engine fires only when an `association` is present (forward-compatible; matter→matter needs the association passed to the service).
-- **022**: ReportCardService + TodoService constructors extended with authenticatedFetch/bffBaseUrl (were dataService-only).
-- Report Card reverse-lookup: registry `sprk_regardingfield=sprk_regardingreportcard` names the convention only; confirm if a physical column is needed.
+## Deployment / environment facts
+- **BFF dev**: `spaarke-bff-dev` (`rg-spaarke-dev`) → Dataverse `spaarkedev1`; Dataverse app-user `1e40baad-e065-4aea-a8d4-4b7ab273458c` (client-secret). BFF API audience = `api://1e40baad…` (a token for it is gettable via `az account get-access-token --scope api://1e40baad…/.default`).
+- **BFF auto-deploy workflow is INACTIVE** — deploys are manual via `scripts/Deploy-BffApi.ps1` (pwsh). Package ~46.49 MB is CORRECT (skill's 55-65 MB figure is stale). Endpoint verified 200: `/api/v1/field-mappings/profiles/sprk_matter/sprk_event`.
+- **Dataverse (live in spaarkedev1)**: `sprk_expression` column added; 3 profiles seeded — Matter→Event (8 Copy), Matter→Invoice (4), Matter→Report Card (8); created the missing Report Card `sprk_recordtype_ref` row `5bc206a0-587b-f111-ab0e-7ced8ddc4a05`.
+- **VisualHost** is the sole wizard host (via VisualHostRoot.tsx "+" create-wizard button). It imports the shared-lib wizards/engine from SOURCE (relative paths), so rebuilds bundle the latest engine. `@spaarke/auth` must be built (`npm run build` in src/client/shared/Spaarke.Auth) before a VisualHost `build:prod`.
+
+## The 4 bugs fixed during UAT (all on master)
+1. **`DataverseWebApiService` BaseAddress missing trailing slash** — `…/api/data/v9.2` + relative URI drops `v9.2` → versionless URL → Dataverse 500. Shared-infra fix (affects ALL DataverseWebApiService HTTP calls). Commit in `772717fd5`.
+2. **Wrong `$expand` nav-prop** `sprk_fieldmappingprofile_fieldmappingrule` → `sprk_fieldmappingrule_FieldMappingProfile_sprk_fieldmappingprofile` (`5c340aa55`).
+3. **Unguarded `GetInt32()`/`GetBoolean()` on null response fields** in `MapToFieldMappingRuleEntity` (Dataverse `$expand` includes nulls) → guarded all reads (`772717fd5`).
+4. **Client engine warned on empty source lookups** → now skips silently; warns only for populated-lookup-missing-annotation anomaly (`c9dde24a4`); VisualHost v1.4.34 bundles it (`4d85deef7`).
+
+## Debugging lesson (recorded)
+Hand-built repro queries with hardcoded GUIDs diverged from the BFF's actual path (skipped Step 1 LookupRecordTypeIdsAsync). The **container-log stack trace** (Kudu `…/api/vfs/LogFiles/<date>_containerStream.log`) was the turning point — pull logs earlier next time.
+
+## Task status (all 16 + follow-ups)
+- Phase 0: 001 ✅ 002 ✅ 003 ✅ · Phase 1: 010 ✅ 011 ✅ 012 ✅ 013 ✅ 014 ✅ 015 ✅ · Phase 2: 020 ✅ 021 ✅ 022 ✅ · Phase 3: 030 ✅ · Phase 4: 040 ✅ 041 ✅.
+- **090 wrap-up NOT formally run** — live E2E is happening organically via UAT; `/test-diet`, `/repo-cleanup`, README/plan → Complete, lessons-learned still pending if a formal close is wanted.
+
+## Deferred / follow-ups
+- **016** matterService nav-prop convergence (create-payload-touching; needs payload-equivalence test + sign-off; §6.5).
+- **To Do follow-on** child-creation path (`createTodoRegardingChild`, from invoice/reportCard wizards) left unwired — gracefully no-ops.
+- **Matter/Project** parent link is post-create N:N, not pre-create regarding — engine fires only when an `association` is present (forward-compatible).
+- **Report Card reverse-lookup**: registry `sprk_regardingfield=sprk_regardingreportcard` names the convention only; confirm if a physical column is needed.
 
 ## Notes
-- Baseline: worktree synced to origin/master 2026-07-09 (0 behind). No plugins, no new PCF, BFF change additive-only (publish flat).
+- No Dataverse plugin, no form script, no new PCF (owner constraints honored). BFF change additive (publish flat).
+- Test posture: 18 engine unit tests; BFF DTO/push-regression tests; 16 pre-existing full-suite failures (WorkspaceShell/FilePreview/recordHeader/etc.) confirmed unrelated via stash-baseline.

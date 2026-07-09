@@ -224,7 +224,15 @@ export type ChatSseEventType =
   // FR-P2-03 task 032 — capture_mode: modal wizard escape for a suspended
   // capability invocation with missing required args (pending elicitation
   // Gate marker precedes this event — ADR-040).
-  | 'elicitation_modal';
+  | 'elicitation_modal'
+  // spaarke-ai-architecture-redesign-r2 task 044 / task 044c — emitted by
+  // SideEffectGateAIFunction.cs (~line 490) on the AUTO-EXECUTE (no-dialog) gate
+  // leg, AFTER the Confirmation Policy v2 engine resolved to Execute/ExecuteWithUndo
+  // and the tool ran without a confirmation dialog. Carries the task-035 Completion
+  // Engine's OutcomeCard view-projection (ChatSseActionOutcomeData) — the
+  // counterpart to `action_confirmation` for the no-dialog path. The client routes
+  // this to the SAME `outcome_card` render the gate-RESUME leg uses.
+  | 'action_outcome';
 
 /** A parsed SSE event from the stream, matching ChatSseEvent from the server. */
 export interface IChatSseEvent {
@@ -271,8 +279,14 @@ export interface IChatSseEventData {
   stepIndex?: number;
 
   // ── plan_step_complete fields (task 072, Phase 2F) ──────────────────────────
-  /** Execution status: "completed" or "failed". Only in 'plan_step_complete' events. */
-  status?: 'completed' | 'failed';
+  /**
+   * Execution status: "completed" or "failed" (plan_step_complete) — OR the
+   * OutcomeCard terminal disposition "succeeded" | "partial" | "failed"
+   * (action_outcome, task 044c). Widened beyond the two-value plan_step_complete
+   * union so both event shapes type-check without a literal-union collision;
+   * each handler reads only the values relevant to its own event type.
+   */
+  status?: 'completed' | 'failed' | 'succeeded' | 'partial' | string;
   /** Brief result snippet shown on success. Only in 'plan_step_complete' events. */
   result?: string | null;
   /** Machine-readable error code on failure. Only in 'plan_step_complete' events. */
@@ -464,6 +478,27 @@ export interface IChatSseEventData {
     prefill_slots?: Record<string, unknown>;
     requires_attachments?: boolean;
   }>;
+
+  // ── action_outcome fields (spaarke-ai-architecture-redesign-r2 task 044 / 044c) ──
+  //
+  // Mirrors `Sprk.Bff.Api.Api.Ai.ChatSseActionOutcomeData` (camelCase wire shape),
+  // emitted by SideEffectGateAIFunction.cs (~line 490) on the AUTO-EXECUTE
+  // (no-dialog) gate leg. `actionName` is reused from the action_confirmation
+  // fields above. The client maps these fields to an `IOutcomeCard` via
+  // `actionOutcomeDataToCard` (OutcomeCard.tsx) and renders it through the SAME
+  // `outcome_card` path the gate-RESUME leg uses (SprkChat.tsx ~761) — never a
+  // second card/render path.
+
+  /** User-facing outcome sentence (rendered verbatim). Only in 'action_outcome' events. */
+  userSummary?: string;
+  /** Server-composed record/deep link (Undo target or email review-and-send record); null when none. Only in 'action_outcome' events. */
+  linkUrl?: string | null;
+  /** Human-readable link label; null when no link. Only in 'action_outcome' events. */
+  linkLabel?: string | null;
+  /** Declared affordance chip labels (e.g. "Undo"). Only in 'action_outcome' events. */
+  nextSteps?: string[];
+  /** The stored `loop@t{n}` ledger key this card renders (ADR-040). Only in 'action_outcome' events. */
+  ledgerOutputKey?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1662,13 +1697,15 @@ export interface IUseSseStreamResult {
    */
   pendingPlanData: IChatSseEventData | null;
   /**
-   * Pending action/dialog event from the SSE stream (Task R2-039).
-   * Set when action_confirmation, action_success, action_error, dialog_open, or navigate events arrive.
+   * Pending action/dialog event from the SSE stream (Task R2-039; `action_outcome`
+   * added task 044c).
+   * Set when action_confirmation, action_success, action_error, dialog_open,
+   * navigate, or action_outcome events arrive.
    * SprkChat watches this via useEffect and dispatches to the appropriate handler.
    * Reset to null at the start of each new stream.
    */
   pendingActionEvent: {
-    type: 'action_confirmation' | 'action_success' | 'action_error' | 'dialog_open' | 'navigate';
+    type: 'action_confirmation' | 'action_success' | 'action_error' | 'dialog_open' | 'navigate' | 'action_outcome';
     data: IChatSseEventData;
   } | null;
   /**
