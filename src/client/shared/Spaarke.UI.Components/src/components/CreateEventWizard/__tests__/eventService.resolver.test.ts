@@ -90,7 +90,9 @@ function makeDataService(): IDataService & { _captured: Record<string, Record<st
         const entry = logical ? CATALOG[logical] : undefined;
         if (!entry) return { entities: [] };
         if (query.includes('sprk_recordtype_refid')) {
-          return { entities: [{ sprk_recordtype_refid: entry.recordTypeId, sprk_recorddisplayname: entry.recordTypeName }] };
+          return {
+            entities: [{ sprk_recordtype_refid: entry.recordTypeId, sprk_recorddisplayname: entry.recordTypeName }],
+          };
         }
         if (query.includes('sprk_regardingrecordnumberfield')) {
           return { entities: [{ sprk_regardingrecordnumberfield: entry.numberField }] };
@@ -225,10 +227,7 @@ describe('EventService — ADR-024 resolver migration', () => {
     // Exactly one entity-specific regarding lookup bind (excluding the resolver
     // discriminator bind sprk_RegardingRecordType).
     const regardingLookupBinds = Object.keys(payload).filter(
-      k =>
-        k.endsWith('@odata.bind') &&
-        k.startsWith('sprk_Regarding') &&
-        k !== 'sprk_RegardingRecordType@odata.bind'
+      k => k.endsWith('@odata.bind') && k.startsWith('sprk_Regarding') && k !== 'sprk_RegardingRecordType@odata.bind'
     );
     expect(regardingLookupBinds).toEqual(['sprk_RegardingMatter@odata.bind']);
   });

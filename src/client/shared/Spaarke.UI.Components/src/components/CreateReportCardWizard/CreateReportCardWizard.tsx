@@ -295,7 +295,10 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
     (query: string) => searchOrganizationsAsLookup(dataService, query),
     [dataService]
   );
-  const handleSearchUsers = React.useCallback((query: string) => searchUsersAsLookup(dataService, query), [dataService]);
+  const handleSearchUsers = React.useCallback(
+    (query: string) => searchUsersAsLookup(dataService, query),
+    [dataService]
+  );
   const handleSearchMatterTypes = React.useCallback(
     (query: string) => searchMatterTypes(dataService, query),
     [dataService]
@@ -341,7 +344,9 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
         icon: <MailRegular fontSize={28} />,
         description: 'Compose and queue an introductory email about this report card.',
         canAdvance: () =>
-          emailToRef.current.trim() !== '' && emailSubjectRef.current.trim() !== '' && emailBodyRef.current.trim() !== '',
+          emailToRef.current.trim() !== '' &&
+          emailSubjectRef.current.trim() !== '' &&
+          emailBodyRef.current.trim() !== '',
         renderStep: () => (
           <SendEmailFollowOnStep
             emailTo={emailToRef.current}
@@ -579,7 +584,9 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
           title: hasWarnings ? 'Report card created with warnings' : 'Report card created!',
           body: (
             <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{reportCardName}&rdquo;</span>{' '}
+              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
+                &ldquo;{reportCardName}&rdquo;
+              </span>{' '}
               has been created
               {hasWarnings
                 ? ', though some operations could not complete. See details below.'

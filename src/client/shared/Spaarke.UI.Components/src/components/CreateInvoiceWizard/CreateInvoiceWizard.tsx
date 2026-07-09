@@ -57,7 +57,12 @@ import type { IDataService, INavigationService } from '../../types/serviceInterf
 import type { ILookupItem } from '../../types/LookupTypes';
 
 import type { FollowOnCardConfig, WorkAssignmentPriorityValue } from '../WizardFollowOns';
-import { AssignWorkFollowOnStep, WORK_ASSIGNMENT_PRIORITY, AddTodoFollowOnStep, SendEmailFollowOnStep } from '../WizardFollowOns';
+import {
+  AssignWorkFollowOnStep,
+  WORK_ASSIGNMENT_PRIORITY,
+  AddTodoFollowOnStep,
+  SendEmailFollowOnStep,
+} from '../WizardFollowOns';
 import { createTodoRegardingChild } from '../WizardFollowOns';
 import { EMPTY_TODO_FORM } from '../CreateTodoWizard/formTypes';
 import type { ICreateTodoFormState } from '../CreateTodoWizard/formTypes';
@@ -290,7 +295,10 @@ const CreateInvoiceWizard: React.FC<ICreateInvoiceWizardProps> = ({
     (query: string) => searchOrganizationsAsLookup(dataService, query),
     [dataService]
   );
-  const handleSearchUsers = React.useCallback((query: string) => searchUsersAsLookup(dataService, query), [dataService]);
+  const handleSearchUsers = React.useCallback(
+    (query: string) => searchUsersAsLookup(dataService, query),
+    [dataService]
+  );
   const handleSearchMatterTypes = React.useCallback(
     (query: string) => searchMatterTypes(dataService, query),
     [dataService]
@@ -337,7 +345,9 @@ const CreateInvoiceWizard: React.FC<ICreateInvoiceWizardProps> = ({
         icon: <MailRegular fontSize={28} />,
         description: 'Compose and queue an introductory email about this invoice.',
         canAdvance: () =>
-          emailToRef.current.trim() !== '' && emailSubjectRef.current.trim() !== '' && emailBodyRef.current.trim() !== '',
+          emailToRef.current.trim() !== '' &&
+          emailSubjectRef.current.trim() !== '' &&
+          emailBodyRef.current.trim() !== '',
         renderStep: () => (
           <SendEmailFollowOnStep
             emailTo={emailToRef.current}
@@ -470,13 +480,15 @@ const CreateInvoiceWizard: React.FC<ICreateInvoiceWizardProps> = ({
       onFinish: async (context: IFinishContext): Promise<IWizardSuccessConfig> => {
         const association = context.association;
 
-        const invoiceService = new InvoiceService(dataService, authFetch ?? fetch.bind(window), bffBaseUrl ?? '', context.speContainerId, tenantId);
-
-        const result = await invoiceService.createInvoice(
-          formValuesRef.current,
-          association,
-          context.uploadedFiles
+        const invoiceService = new InvoiceService(
+          dataService,
+          authFetch ?? fetch.bind(window),
+          bffBaseUrl ?? '',
+          context.speContainerId,
+          tenantId
         );
+
+        const result = await invoiceService.createInvoice(formValuesRef.current, association, context.uploadedFiles);
 
         if (result.status === 'error') {
           throw new Error(result.errorMessage ?? 'Failed to create invoice');
@@ -548,7 +560,9 @@ const CreateInvoiceWizard: React.FC<ICreateInvoiceWizardProps> = ({
             }
           } catch (err) {
             const message = err instanceof Error ? err.message : 'Unknown error';
-            warnings.push(`To do could not be created (${message}). You can create it manually from the invoice record.`);
+            warnings.push(
+              `To do could not be created (${message}). You can create it manually from the invoice record.`
+            );
           }
         }
 

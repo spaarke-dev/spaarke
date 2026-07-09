@@ -75,9 +75,7 @@ const Harness: React.FC<{
 
 describe('FollowOnGrid', () => {
   it('renders an arbitrary FollowOnCardConfig[] — every card label + the empty-selection hint', () => {
-    renderWithProviders(
-      <Harness cards={buildCards()} addDynamicStep={jest.fn()} removeDynamicStep={jest.fn()} />
-    );
+    renderWithProviders(<Harness cards={buildCards()} addDynamicStep={jest.fn()} removeDynamicStep={jest.fn()} />);
 
     expect(screen.getByText('Send Email')).toBeInTheDocument();
     expect(screen.getByText('Add To Do')).toBeInTheDocument();
@@ -170,7 +168,7 @@ describe('FollowOnGrid', () => {
     expect(screen.getByText(/click Finish to create the record without follow-on steps/i)).toBeInTheDocument();
   });
 
-  it('renders a card\'s renderSelectedExtra inline only while that card is selected', () => {
+  it("renders a card's renderSelectedExtra inline only while that card is selected", () => {
     const cards: FollowOnCardConfig[] = [
       {
         id: 'send-email',

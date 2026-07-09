@@ -15,7 +15,16 @@
  * Not intended to be imported directly outside `wizardRegistry.ts`.
  */
 import * as React from 'react';
-import { Dialog, DialogSurface, DialogTitle, DialogBody, DialogActions, DialogContent, Button, Text } from '@fluentui/react-components';
+import {
+  Dialog,
+  DialogSurface,
+  DialogTitle,
+  DialogBody,
+  DialogActions,
+  DialogContent,
+  Button,
+  Text,
+} from '@fluentui/react-components';
 
 import type { WizardHostProps } from './wizardRegistry';
 

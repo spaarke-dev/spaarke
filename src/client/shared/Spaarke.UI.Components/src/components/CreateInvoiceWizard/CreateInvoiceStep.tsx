@@ -230,7 +230,12 @@ export const CreateInvoiceStep: React.FC<ICreateInvoiceStepProps> = ({
       </div>
 
       <Field label="Name" required>
-        <Input value={formValues.name} onChange={handleNameChange} placeholder="Enter invoice name" autoComplete="off" />
+        <Input
+          value={formValues.name}
+          onChange={handleNameChange}
+          placeholder="Enter invoice name"
+          autoComplete="off"
+        />
       </Field>
 
       <LookupField

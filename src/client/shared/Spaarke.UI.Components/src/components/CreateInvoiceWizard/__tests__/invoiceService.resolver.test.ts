@@ -86,7 +86,9 @@ function makeDataService(): IDataService & { _captured: Record<string, Record<st
         const entry = logical ? CATALOG[logical] : undefined;
         if (!entry) return { entities: [] };
         if (query.includes('sprk_recordtype_refid')) {
-          return { entities: [{ sprk_recordtype_refid: entry.recordTypeId, sprk_recorddisplayname: entry.recordTypeName }] };
+          return {
+            entities: [{ sprk_recordtype_refid: entry.recordTypeId, sprk_recorddisplayname: entry.recordTypeName }],
+          };
         }
         if (query.includes('sprk_regardingrecordnumberfield')) {
           return { entities: [{ sprk_regardingrecordnumberfield: entry.numberField }] };
@@ -226,7 +228,14 @@ describe('InvoiceService.createInvoice', () => {
   describe('manifest fields', () => {
     it('writes sprk_name, sprk_invoicenumber, sprk_description, and defaults sprk_invoicedate to today when omitted', async () => {
       const ds = makeDataService();
-      const service = new InvoiceService(ds, stubAuthenticatedFetch(), 'https://bff.example', undefined, undefined, NO_CASCADE_OVERRIDE);
+      const service = new InvoiceService(
+        ds,
+        stubAuthenticatedFetch(),
+        'https://bff.example',
+        undefined,
+        undefined,
+        NO_CASCADE_OVERRIDE
+      );
 
       const form = makeForm({
         invoiceNumber: 'INV-1001',
@@ -248,7 +257,14 @@ describe('InvoiceService.createInvoice', () => {
 
     it('preserves an explicit sprk_invoicedate rather than overwriting with today', async () => {
       const ds = makeDataService();
-      const service = new InvoiceService(ds, stubAuthenticatedFetch(), 'https://bff.example', undefined, undefined, NO_CASCADE_OVERRIDE);
+      const service = new InvoiceService(
+        ds,
+        stubAuthenticatedFetch(),
+        'https://bff.example',
+        undefined,
+        undefined,
+        NO_CASCADE_OVERRIDE
+      );
 
       const result = await service.createInvoice(makeForm({ name: 'X', invoiceDate: '2026-01-15' }), null, []);
 
@@ -259,7 +275,14 @@ describe('InvoiceService.createInvoice', () => {
 
     it('binds the vendor org lookup when vendorOrgId is supplied', async () => {
       const ds = makeDataService();
-      const service = new InvoiceService(ds, stubAuthenticatedFetch(), 'https://bff.example', undefined, undefined, NO_CASCADE_OVERRIDE);
+      const service = new InvoiceService(
+        ds,
+        stubAuthenticatedFetch(),
+        'https://bff.example',
+        undefined,
+        undefined,
+        NO_CASCADE_OVERRIDE
+      );
 
       await service.createInvoice(
         makeForm({ name: 'X', vendorOrgId: VENDOR_ORG_ID, vendorOrgName: 'Acme Vendor Co' }),
@@ -281,7 +304,14 @@ describe('InvoiceService.createInvoice', () => {
 
     it('writes the entity-specific lookup AND all 5 resolver fields for a Matter host', async () => {
       const ds = makeDataService();
-      const service = new InvoiceService(ds, stubAuthenticatedFetch(), 'https://bff.example', undefined, undefined, NO_CASCADE_OVERRIDE);
+      const service = new InvoiceService(
+        ds,
+        stubAuthenticatedFetch(),
+        'https://bff.example',
+        undefined,
+        undefined,
+        NO_CASCADE_OVERRIDE
+      );
 
       const result = await service.createInvoice(makeForm({ name: 'X' }), MATTER_ASSOCIATION, []);
 
@@ -298,7 +328,14 @@ describe('InvoiceService.createInvoice', () => {
 
     it('populates only ONE entity-specific regarding lookup (mutual exclusion) — Project NOT bound for a Matter host', async () => {
       const ds = makeDataService();
-      const service = new InvoiceService(ds, stubAuthenticatedFetch(), 'https://bff.example', undefined, undefined, NO_CASCADE_OVERRIDE);
+      const service = new InvoiceService(
+        ds,
+        stubAuthenticatedFetch(),
+        'https://bff.example',
+        undefined,
+        undefined,
+        NO_CASCADE_OVERRIDE
+      );
 
       await service.createInvoice(makeForm({ name: 'X' }), MATTER_ASSOCIATION, []);
 
@@ -309,7 +346,14 @@ describe('InvoiceService.createInvoice', () => {
 
     it('writes NO resolver fields when no association is supplied', async () => {
       const ds = makeDataService();
-      const service = new InvoiceService(ds, stubAuthenticatedFetch(), 'https://bff.example', undefined, undefined, NO_CASCADE_OVERRIDE);
+      const service = new InvoiceService(
+        ds,
+        stubAuthenticatedFetch(),
+        'https://bff.example',
+        undefined,
+        undefined,
+        NO_CASCADE_OVERRIDE
+      );
 
       const result = await service.createInvoice(makeForm({ name: 'X' }), null, []);
 
@@ -322,7 +366,14 @@ describe('InvoiceService.createInvoice', () => {
 
     it('graceful degradation (NFR-06): missing catalog row for Project still links + falls back on name, never throws', async () => {
       const ds = makeDataService();
-      const service = new InvoiceService(ds, stubAuthenticatedFetch(), 'https://bff.example', undefined, undefined, NO_CASCADE_OVERRIDE);
+      const service = new InvoiceService(
+        ds,
+        stubAuthenticatedFetch(),
+        'https://bff.example',
+        undefined,
+        undefined,
+        NO_CASCADE_OVERRIDE
+      );
 
       const result = await service.createInvoice(
         makeForm({ name: 'X' }),
@@ -343,7 +394,14 @@ describe('InvoiceService.createInvoice', () => {
     it('binds an uploaded file to BOTH the new Invoice (primary) and the host Matter (additionalBinds)', async () => {
       const ds = makeDataService();
       const authFetch = stubAuthenticatedFetch();
-      const service = new InvoiceService(ds, authFetch, 'https://bff.example', 'container-1', undefined, NO_CASCADE_OVERRIDE);
+      const service = new InvoiceService(
+        ds,
+        authFetch,
+        'https://bff.example',
+        'container-1',
+        undefined,
+        NO_CASCADE_OVERRIDE
+      );
 
       const association: AssociationResult = {
         entityType: 'sprk_matter',
@@ -366,7 +424,14 @@ describe('InvoiceService.createInvoice', () => {
     it('binds an uploaded file to the Invoice ONLY when no host association is supplied', async () => {
       const ds = makeDataService();
       const authFetch = stubAuthenticatedFetch();
-      const service = new InvoiceService(ds, authFetch, 'https://bff.example', 'container-1', undefined, NO_CASCADE_OVERRIDE);
+      const service = new InvoiceService(
+        ds,
+        authFetch,
+        'https://bff.example',
+        'container-1',
+        undefined,
+        NO_CASCADE_OVERRIDE
+      );
 
       await service.createInvoice(makeForm({ name: 'X' }), null, [makeUploadedFile()]);
 
@@ -379,7 +444,14 @@ describe('InvoiceService.createInvoice', () => {
 
     it('skips upload entirely (with a warning) when files are present but no container ID is configured', async () => {
       const ds = makeDataService();
-      const service = new InvoiceService(ds, stubAuthenticatedFetch(), 'https://bff.example', undefined, undefined, NO_CASCADE_OVERRIDE);
+      const service = new InvoiceService(
+        ds,
+        stubAuthenticatedFetch(),
+        'https://bff.example',
+        undefined,
+        undefined,
+        NO_CASCADE_OVERRIDE
+      );
 
       const result = await service.createInvoice(makeForm({ name: 'X' }), null, [makeUploadedFile()]);
 
@@ -393,7 +465,14 @@ describe('InvoiceService.createInvoice', () => {
     it('never throws — returns status "error" with a message when createRecord rejects', async () => {
       const ds = makeDataService();
       (ds.createRecord as jest.Mock).mockRejectedValueOnce(new Error('Dataverse unavailable'));
-      const service = new InvoiceService(ds, stubAuthenticatedFetch(), 'https://bff.example', undefined, undefined, NO_CASCADE_OVERRIDE);
+      const service = new InvoiceService(
+        ds,
+        stubAuthenticatedFetch(),
+        'https://bff.example',
+        undefined,
+        undefined,
+        NO_CASCADE_OVERRIDE
+      );
 
       const result = await service.createInvoice(makeForm({ name: 'X' }), null, []);
 
