@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="E-30" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>E-30 — Deterministic ActionKind dispatch + sanctioned supersession-write (Phase E Move 3 / compose B3 undo)</title>
+    <phase>Phase E: AI Execution Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>E-00, E-20</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, ai, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies core dispatch .cs (SessionDispatchOrchestrator, OutputRouter); high blast radius; ADR-039/040 compliance work.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural change to the closed-catalog dispatch spine + ledger supersession semantics (ADR-039/040); high blast radius on shared dispatch files.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>SERIAL after E-20 — shares SessionDispatchOrchestrator.cs + OutputRouter.cs with E-20 (now landed); the two edit sites (~209 ActionKind gate, ~258 Compose disposition) are adjacent to E-20's admit-gate.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Realize the two dispatch-spine sites E-20 deliberately left for E-30: (1) make ActionKind→executor
+    selection DETERMINISTIC so Coded composite Actions dispatch through the loop instead of being rejected
+    422, and (2) add the sanctioned supersession-write leg so a compose accept/replace/undo is realized as a
+    ledger supersession entry (ADR-040) — never a client DOM undo. Reuse the existing ICodedWorkflowRegistry
+    and OutputRouter/SessionOutput ledger seams; do NOT add a second dispatch protocol or a parallel path.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the closed-catalog dispatch spine (ADR-039), the session ledger
+    (ADR-040 store-before-render), and .NET 8. Follow ADRs strictly; this is best-long-term-architecture
+    work, not consumer-unblocking — do not shortcut to make one compose consumer pass.
+  </role>
+
+  <goal>
+    Two behaviors exist and are covered by seam + unit tests: (A) the SessionDispatchOrchestrator ActionKind
+    gate deterministically routes Prompted→ActionRunner and Coded→ICodedWorkflowRegistry (no non-deterministic
+    fallback; unknown/unsupported kinds still fail clean with the existing 422 contract); (B) OutputRouter's
+    Compose disposition can write a superseding SessionOutput ledger entry that references the prior entry by
+    its key ({bindingId}@t{n}) so accept/replace/undo is realized in the ledger (ADR-040), rejecting a
+    supersession of a non-existent or already-superseded entry.
+  </goal>
+
+  <context>
+    <background>
+      E-20 single-sourced the DISPOSITION admit-gate (DispositionRoutability) and explicitly documented that
+      the ActionKind axis (non-prompted kinds) is a SEPARATE, orthogonal axis owned by E-30
+      (SessionDispatchOrchestrator.cs:55). The compose B3 undo/replace flow (spaarkeai-compose-r2 FR-09,
+      compose-draft-alternative, BindingDisposition.Compose) requires that an attorney's accept/replace/undo of
+      a proposed track-change be a LEDGER supersession, not a client DOM undo — per ADR-040 the output is
+      ledger-written before render and undo/replace is ledger supersession. E-30 provides the server leg for
+      that; compose-r2 wires its client to it. Coded Actions (DailyBriefing composite is the shipped
+      ICodedWorkflow) currently execute via dedicated endpoints; the dispatch-loop gate rejects ActionKind.Coded
+      with 422 today — E-30 makes the loop able to dispatch Coded Bindings deterministically through the existing
+      registry rather than only the prompted executor.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ICodedWorkflow.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ICodedWorkflowRegistry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/CompletionEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DispositionRoutability.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Exactly ONE dispatch protocol. Do NOT introduce a second dispatch path, a parallel router, or a bypass of the closed-catalog gate. Coded dispatch reuses the existing ICodedWorkflowRegistry resolution; the loop selects the executor by ActionKind, it does not re-implement coded execution.</constraint>
+    <constraint source="ADR-040">Store before render. Every superseding entry is a NEW addressable SessionOutput written to the session ledger via the OutputRouter/session-manager write path BEFORE any surface renders it. Supersession is realized in the ledger (a superseding entry referencing the prior key), never by mutating or deleting the prior entry and never by client DOM undo.</constraint>
+    <constraint source="project">Reuse the existing CompletionEngine / OutputRouter / SessionDispatchOrchestrator seams. Every new type must pass the CLAUDE.md §11 justification (prefer extending DispositionRoutability's registry shape or OutputRouter's existing write path over a new service). Any new public type stays behind Services/Ai (PublicContracts facade for anything CRUD-facing).</constraint>
+    <constraint source="project">The ActionKind gate at SessionDispatchOrchestrator.cs ~209-222 is the ONLY place the kind decision is made — do not scatter kind checks. Deterministic = a total function over ActionKind: Prompted→prompted executor, Coded→ICodedWorkflowRegistry, any other/unknown→the existing DispatchRejectedException.ActionKindUnsupported 422 (no silent fallback).</constraint>
+    <constraint source="CLAUDE.md §10">BFF-touching task: verify publish size ≤60 MB compressed and report the delta vs the ~49.63 MB baseline; verify no new HIGH-severity CVE; state the Placement Justification (this stays in Sprk.Bff.Api Services/Ai — dispatch-spine internal).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Deterministic single-source gate (registry shape)" location="src/server/api/Sprk.Bff.Api/Services/Ai/DispositionRoutability.cs">
+        E-20's registry made the disposition admit-gate a total function over a closed enum with a stable reject reason. Mirror this shape for the ActionKind gate: one total switch over ActionKind, no fallback branch that silently succeeds.
+      </pattern>
+      <pattern name="Store-before-render ledger write" location="src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs">
+        RouteAsync writes an addressable SessionOutput (key {bindingId}@t{n}) via the session-manager BEFORE any render. The supersession-write reuses THIS path to append a new entry carrying a reference to the superseded key — it does not add a new persistence mechanism.
+      </pattern>
+      <pattern name="Coded execution via registry" location="src/server/api/Sprk.Bff.Api/Services/Ai/ICodedWorkflowRegistry.cs">
+        DailyBriefing composite resolves + executes through ICodedWorkflowRegistry (task-007 convention, ledger-written before render). The Coded dispatch leg resolves the workflow through this registry — it does not construct or execute coded workflows inline.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the ActionKind gate at SessionDispatchOrchestrator.cs ~200-225 and the OutputRouter Compose disposition case ~245-290. Confirm the current 422 contract (DispatchRejectedException.ActionKindUnsupported) and how OutputRouter writes SessionOutput entries. Read ICodedWorkflow.cs + ICodedWorkflowRegistry.cs to learn the resolve/execute signature the Coded leg must call.</step>
+    <step order="2">Make the ActionKind gate deterministic: replace the "reject everything non-Prompted" block with a total decision over ActionKind — Prompted keeps its current prompted-executor path; Coded resolves through ICodedWorkflowRegistry and dispatches the composite through the loop (store-before-render preserved); any value outside the enum keeps the existing ActionKindUnsupported 422. No silent fallback. Keep the kind decision in this ONE site.</step>
+    <step order="3">Read the existing ledger_resolution reference shape (SessionDispatchOrchestrator ~261-310 + SessionOutput key model) so the superseding entry references the prior key the same way the platform already reads it.</step>
+    <step order="4">Add the sanctioned supersession-write leg to the Compose disposition path: given a prior SessionOutput key, write a NEW addressable SessionOutput that records the supersession (superseded-key reference + resolution kind accept/replace/undo) via the existing OutputRouter/session-manager write path, before render. Reject a supersession whose referenced entry does not exist OR is already superseded, with a stable, loud error (mirror the DispatchRejected/NotSupported style already in OutputRouter) — never a silent no-op.</step>
+    <step order="5">Author seam tests under tests/integration/seam/Ai/ (Phase E seam KEEP category): (a) Coded Binding dispatches through the loop to the registry; Prompted unchanged; unknown kind → 422 ActionKindUnsupported. (b) Compose supersession writes a new ledger entry referencing the prior key and store precedes render; supersession of a missing/already-superseded key is rejected. Add/extend unit tests only where a pure decision (the kind switch) is cheaper to pin at unit level.</step>
+    <step order="6">Build BFF (0 errors). Run the seam + affected unit suites and the golden-utterance/dispatch eval suite; all green. Run dotnet publish -c Release and report compressed size + delta vs ~49.63 MB baseline; run dotnet list package --vulnerable --include-transitive and confirm no new HIGH CVE.</step>
+    <step order="7">Run Step 9.5 gates (code-review + adr-check). Then flip TASK-INDEX row E-30 🔲→✅ with a one-line completion summary, and update current-task.md.</step>
+    <step order="8">If the compose supersession contract or the Coded dispatch signature differs from this task's assumptions, document the deviation in projects/spaarke-ai-architecture-redesign-r2/notes/ before proceeding — do not improvise a second path.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If dispatching Coded Actions through the loop would require a second dispatch mechanism, a bypass of the closed-catalog gate, or duplicating ICodedWorkflowRegistry execution (i.e., it cannot be done by reusing the existing registry + store-before-render write path), STOP and escalate per CLAUDE.md §6.5 (ADR-039 conflict) rather than adding a parallel path.</trigger>
+    <trigger>If the sanctioned supersession-write cannot be expressed as a new SessionOutput referencing the prior key via the existing OutputRouter/session-manager path (e.g., it seems to need mutating/deleting the prior entry), STOP and escalate — mutating a stored ledger entry violates ADR-040.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish the BFF project.</tool>
+    <tool name="terminal">Run shell commands.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs</output>
+    <output type="test">tests/integration/seam/Ai/ (new seam tests for ActionKind determinism + supersession-write)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Binding with ActionKind.Coded and an Action target, when dispatched through SessionDispatchOrchestrator, then it executes via ICodedWorkflowRegistry through the single dispatch loop (no second protocol), store precedes render, and it is NOT rejected 422.</criterion>
+    <criterion testable="true">Given a Binding with ActionKind.Prompted, when dispatched, then behavior is byte-unchanged from before this task (prompted executor path).</criterion>
+    <criterion testable="true">Given a Binding whose ActionKind is not a defined enum member (or a kind the loop cannot execute), when dispatched, then it fails clean with DispatchRejectedException.ActionKindUnsupported (422) — no silent fallback and no non-deterministic branch.</criterion>
+    <criterion testable="true">Given a prior compose SessionOutput entry with key {bindingId}@t{n}, when a supersession (accept/replace/undo) is written, then a NEW addressable SessionOutput is stored referencing the prior key BEFORE any render, and the prior entry is neither mutated nor deleted.</criterion>
+    <criterion testable="true">Given a supersession referencing a key that does not exist OR is already superseded, when written, then it is rejected with a stable loud error (never a silent no-op).</criterion>
+    <criterion testable="true">The ActionKind decision exists in exactly one site (the SessionDispatchOrchestrator gate) — no scattered kind checks introduced elsewhere.</criterion>
+    <criterion testable="true">BFF builds with 0 errors; seam + affected unit + golden-utterance/dispatch eval suites pass; publish size ≤60 MB compressed with delta reported vs ~49.63 MB baseline; no new HIGH-severity CVE.</criterion>
+    <criterion testable="true">No new public type is introduced without a concrete CLAUDE.md §11 justification; no second dispatch protocol or parallel ledger-write mechanism is added.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    E-20 landed DispositionRoutability (disposition axis). E-30 is the ORTHOGONAL ActionKind axis (SessionDispatchOrchestrator.cs:55 names E-30 as its owner) plus the supersession-write leg for the Compose disposition (OutputRouter Compose case). The compose-r2 client (FR-09 compose-draft-alternative) consumes the supersession leg; this task provides the SERVER leg only — do not build client wiring here. Keep the two changes minimal and inside the existing seams; the whole point of Phase E is convergence onto single sources, not new surface.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in knowledge/files (ADR-039, ADR-040, bff-extensions, testing, the two module CLAUDE.md). Follow task-execute; declare RIGOR LEVEL FULL + model-tier opus + effort xhigh at Step 0.5. Run Step 9.5 gates unconditionally.
+    </protocol>
+  </execution>
+</task>
