@@ -29,4 +29,4 @@ Verified: BFF builds clean; 31 router/compose unit tests green. It rides the exi
 2. **Confirm the option-set value** `100000006` for the `sprk_disposition` global choice (the Dataverse OptionSet needs this member for a deployed Binding to carry it — a deploy-time concern; flagging so it's on your radar for the choice-column seed).
 3. **Do NOT re-implement this in a redesign-r2 task** — it's done. If you'd planned to own it, treat this as satisfied (avoid a duplicate/conflicting edit to `Binding.cs` / `OutputRouter.cs`).
 
-Commit ref: filled in at merge (see the compose-r2 branch commit "compose-disposition routing promotion").
+Commit ref: `540760eac` (compose-r2 branch `work/spaarkeai-compose-r2`) — "feat(bff): compose-disposition routing promotion (unblocks compose-r2 042/033/034)".
