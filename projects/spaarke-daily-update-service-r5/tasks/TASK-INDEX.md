@@ -24,7 +24,7 @@
 | 012 | Retire BRIEF-NARRATE-CHANNEL Action | A | ✅ | 010 | — | FULL | sonnet/high | ❌ narrator.cs |
 | 013 | Deterministic TL;DR factual scaffolding | A | ✅ | 010 | 014,016 | FULL | sonnet/xhigh | ❌ composite/collector |
 | 014 | Binary anchor resolution (no threshold) | A | ✅ | 013 | 016 | FULL | sonnet/high | ❌ TldrSection/composite |
-| 015 | Groundedness guardrail (eval-only) | A | 🔲 | none | — | STANDARD | sonnet/high | ✅ Group G |
+| 015 | Groundedness guardrail (eval-only) | A | ✅ | none | — | STANDARD | sonnet/high | ✅ Group G |
 | 016 | Eval family — mixed-item corpus + gate | A | 🔲 | 011,013,014 | 017 | STANDARD(TEST-MOD) | **opus**/xhigh | ❌ |
 | 017 | Phase A deploy + G-R5-A UAT + metering | A | 🔲 | 016 | 090 | FULL | sonnet/high | ❌ deploy |
 | 020 | Scaffold `/prototype` harness (cross-repo) | D | ✅ | none | 021 | FULL | sonnet/high | ❌ cross-repo |
@@ -33,7 +33,7 @@
 | 023 | Production port to shared lib | D | 🔲 | 022,011 | 024 | FULL | sonnet/high | ❌ client lib |
 | 024 | Phase D deploy + G-R5-D UAT | D | 🔲 | 023 | 090 | STANDARD | sonnet/high | ❌ deploy |
 | 030 | CoerceFieldValue String→Choice fix | B | ✅ | none | 032 | FULL | sonnet/xhigh | ❌ frozen-engine |
-| 031 | jps-validate Step 7.7 Choice check | B | 🔲 | none | — | STANDARD | sonnet/high | ❌ `.claude/` main-session |
+| 031 | jps-validate Step 7.7 Choice check | B | ✅ | none | — | STANDARD | sonnet/high | ❌ `.claude/` main-session |
 | 032 | fieldMapping sweep + restore documenttype | B | 🔲 | 030 | — | STANDARD | sonnet/high | ❌ |
 | 033 | Collaborator-scope fix + re-flip test | B | ✅ | none | 034 | FULL(TEST-MOD) | sonnet/xhigh | ❌ collector |
 | 034 | Collector de-duplication | B | ✅ | 033 | 036 | FULL | sonnet/high | ❌ collector |

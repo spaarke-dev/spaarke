@@ -178,7 +178,7 @@ LEGACY-DRIFT FAIL conditions (any of these = validator FAIL with LEGACY-* rule i
 
 ### Step 7.7: Typed Config-Schema Check (BINDING per spec FR-16; source-code schemas)
 
-For each node, read the executor's typed config schema from its `INodeExecutor.GetConfigSchema()` implementation in source (`src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/`) and validate the node's `sprk_configjson` against it. This catches authoring errors before Deploy-Playbook.ps1 sees them. (The former `GET /api/ai/playbook-builder/executor-config-schemas` endpoint was DELETED 2026-07-07 by ai-architecture-redesign-r1 task 050 with the AI-assisted builder surface.)
+For each node, read the executor's typed config schema from its `INodeExecutor.GetConfigSchema()` implementation in source (`src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/`) and validate the node's `sprk_configjson` against it. This catches authoring errors before Deploy-Playbook.ps1 sees them. (The former `GET /api/ai/playbook-builder/executor-config-schemas` endpoint was DELETED 2026-07-07 by ai-architecture-redesign-r1 task 050 with the AI-assisted builder surface.) This step also flags a specific authoring trap on column-writing nodes — an UpdateRecord fieldMapping declared `type:"string"` whose target Dataverse column is a Choice column (**R7-V-08 / FR-C2**, added 2026-07-09 by `spaarke-daily-update-service-r5` task 031 — the authoring-time complement to task 030's runtime String→Choice coercion).
 
 ```
   ✅/❌ R7-V-05: INodeExecutor.GetConfigSchema() implementations readable in source
@@ -192,6 +192,33 @@ For each node, read the executor's typed config schema from its `INodeExecutor.G
     — Empty schema (e.g., StartNodeExecutor) → configJson SHOULD be {} or absent
 
   ✅/⚠️ R7-V-07: If executor is Wave-3-rich-schema (AiAnalysis, AiCompletion, Condition, EntityNameValidator, CreateNotification), validate ALL declared fields. If executor is Wave-8-placeholder-schema (the other 28 per task 085), validate AT LEAST the 1 declared field. Both paths are FR-23 compliant.
+
+  ✅/⚠️ R7-V-08 (R5 task 031 / FR-C2): UpdateRecord-node string→Choice fieldMapping check.
+    For each node whose executor WRITES Dataverse columns via a fieldMappings map
+    (UpdateRecordNodeExecutor and any create/update-style executor with `fieldMappings`),
+    inspect each fieldMapping entry:
+      - IF mapping.type == "string" AND the target column's Dataverse metadata type is a Choice
+        (Picklist / State / Status / MultiSelectPicklist):
+          → EMIT WARNING (authoring guidance — NON-blocking, does NOT fail validation):
+            "fieldMapping '{field logical name}' → column '{targetEntity}.{targetColumn}' is
+             declared type:\"string\" but '{targetColumn}' is a Choice column. A verbatim string
+             label is rejected/mis-stored by Dataverse. Author it as type:\"choice\" with an
+             options map ({ \"<label>\": <optionValue> }). (Task 030's UpdateRecordNodeExecutor
+             coercion now recovers String-typed Choice writes at runtime, but type:\"choice\" is
+             the correct, self-documenting authoring form — this warning is the authoring-time
+             complement to that runtime coercion.)"
+    NON-FLAG cases — the check MUST NOT warn on any of these (no false positives):
+      - mapping.type == "string" AND target column is String / Memo / text → OK (the common case)
+      - mapping.type == "choice" already (correctly typed), with or without an options map → OK
+      - fieldMappings on nodes that do NOT write Dataverse columns (BRIEF-NARRATE and other
+        AiAnalysis / AiCompletion / AiEmbedding / Tool nodes) → out of scope, never flagged
+    METADATA ACCESS: resolve the target column's type via the SAME Dataverse metadata mechanism
+    this skill already uses for R7-V-04 Action-FK resolution (`mcp__dataverse__describe` on the
+    fieldMapping's target entity → the column's SQL/attribute type). Do NOT invent a new access
+    path. IF the target-column metadata cannot be resolved (entity not describable, offline run,
+    no Dataverse connection), DEGRADE to a single advisory note — "could not verify Choice-column
+    typing for UpdateRecord fieldMappings (target metadata unavailable)" — NEVER a false-positive
+    warning and NEVER a hard failure.
 ```
 
 ### Step 8: Render Test (Optional)

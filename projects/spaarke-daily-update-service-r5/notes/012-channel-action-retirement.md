@@ -23,13 +23,15 @@
 
 No new endpoint / service / DI registration / package. This task **removes** a dead constant and a retired catalog entry within the existing `Narrators/` surface + the code-side catalog mirror. Placement is unchanged; no facade or new dependency introduced.
 
-## ⚠️ DEFERRED — live Dataverse Action-row retirement (operator / deploy step)
+## ✅ DONE — live Dataverse Action-row retirement (completed 2026-07-09 via MCP)
 
-The **catalog Action row itself** (`sprk_analysisaction` `sprk_actioncode = 'BRIEF-NARRATE-CHANNEL'`, id `dc3533c0-fc70-f111-ab0e-7ced8ddc4cc6`, in **spaarkedev1**) must be retired (statecode → Inactive, or row delete) via **Dataverse MCP / BA editor**. The Dataverse MCP connector is **not authorized in this session**, so the live-data retirement could not be executed here.
+The catalog Action row (`sprk_analysisaction` `sprk_actioncode = 'BRIEF-NARRATE-CHANNEL'`, id `dc3533c0-fc70-f111-ab0e-7ced8ddc4cc6`, in **spaarkedev1**) has been **retired** (deactivated — reversible, non-destructive) via `mcp__dataverse__update_record` (`statecode → 1`, `statuscode → 2`). Read-back confirms `statecodename = "Inactive"`, `statuscodename = "Inactive"`.
 
-- **Code + mirror are already consistent with retirement** (mirror-first per ADR-040): the repo no longer references the Action; the scope index no longer lists it.
-- **Execute the live retirement at Phase A deploy (task 017)** against spaarkedev1, alongside the `BRIEF-NARRATE-TLDR` prompt PATCH bundled there. Verify: `read_query sprk_analysisaction WHERE sprk_actioncode='BRIEF-NARRATE-CHANNEL'` returns 0 Active rows post-retirement.
-- No runtime consumer remains (the coded composite `DailyBriefingNarrator` reads only `BRIEF-NARRATE-TLDR`; the R4 `DAILY-BRIEFING-NARRATE` playbook that referenced the channel Action is superseded by the coded composite per ADR-039/043), so the row is inert until formally retired — leaving it Active briefly is non-breaking.
+> **Note**: the Dataverse MCP connector turned out to BE authorized in this session (the earlier "MCP unavailable" assumption was wrong — the auth gate only covered Gmail/Calendar/Drive), so the live retirement was completed here rather than deferred to task 017.
+
+- **Code + mirror + live data are all now consistent** (mirror-first per ADR-040 satisfied end-to-end): repo has no reference, scope index no longer lists it, and the Dataverse row is Inactive.
+- `BRIEF-NARRATE-TLDR` (id `ce299eb4-…`) confirmed still **Active** — untouched, as required.
+- Reversible: reactivate via `update_record statecode=0, statuscode=1` if ever needed.
 
 ## Escalation check
 
