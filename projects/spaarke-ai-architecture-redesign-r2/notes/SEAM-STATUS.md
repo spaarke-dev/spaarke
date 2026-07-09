@@ -25,7 +25,7 @@
 | `GateDecision v2` / Policy v2 Tier 2c (**hosts parent-association picker**) | **012** + **032** | FR-05 (association prompt), FR-28 (push/save confirm) | ✅ **contract green** (34/34; engine 032 pending) | branch (merge pending) 2026-07-08 |
 | `MemoryItem v1` + `memory.write` (AI-initiated, provenance-tagged) | **016** + **057** | FR-30 (persist AI-derived insights) | ✅ **contract green** (10/10; memory.write 057 pending) | branch (merge pending) 2026-07-08 |
 | `TraceEvent v1` + D-F4 view (**host-embeddable**) | **013** + **038** | FR-32 (Context-pane trace hosting) | ✅ **contract green** (7/7; view 038 pending) | branch (merge pending) 2026-07-08 |
-| Triple-twin description hoist (single authored source) | **020** | FR-12 (catalog-row authoring quality) | 🔲 pending | — |
+| Triple-twin description hoist (single authored source) | **020** | FR-12 (catalog-row authoring quality) | ✅ **published** (Model 1; parity test + health-check) | branch (merge pending) 2026-07-08 |
 | D-F3 UI-ack contract (ack tokens over correlationId) | **037** | FR-34 (UI ack) | 🔲 pending | — |
 
 ## Notes on negotiated deltas (folded into core tasks 2026-07-08)

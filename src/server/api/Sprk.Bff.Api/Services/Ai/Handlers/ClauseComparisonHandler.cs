@@ -108,7 +108,8 @@ public sealed class ClauseComparisonHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Clause Comparison Handler",
-        Description: "Pure-deterministic structural diff between two clause texts. Emits added/removed/unchanged/modified segments plus a similarity score [0.0, 1.0]. No LLM call.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-clause-comparison-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Pure-deterministic structural text-diff between two clauses (clauseA + clauseB) at configurable granularity (word / sentence / paragraph). Emits ordered segments (added / removed / unchanged / modified) plus a normalized similarity score [0.0, 1.0]. Case- + punctuation- + whitespace-normalization configurable. NO LLM call.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

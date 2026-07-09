@@ -221,6 +221,14 @@ jobs:
   # rulesets are re-enabled, mark "Eval Gate (Golden Utterances)" as a
   # REQUIRED status check. Activation plan + rationale:
   # tests/integration/contract/Eval/README.md.
+  #
+  # Families joined to this gate via the Category=GoldenUtteranceEval trait (no
+  # YAML change needed to register a family — the trait IS the registration):
+  #   • Golden-utterance suite + P2 loop/injection (r1 tasks 011/026/037)
+  #   • D-F0(e) Resourcefulness family (r2 task 031 / FR-A1-02) —
+  #     ResourcefulnessEvalSuiteTests: no_fabrication is asserted MECHANICALLY
+  #     against the ADR-040 ledger ToolChain (ResourcefulnessFabricationOracle);
+  #     the four family dimensions are LLM-judge-scored on the live eval-gate run.
   # ──────────────────────────────────────────────────────────────────────────
   eval-gate:
     name: Eval Gate (Golden Utterances)

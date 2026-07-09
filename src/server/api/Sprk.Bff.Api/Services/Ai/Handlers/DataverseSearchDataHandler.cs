@@ -62,11 +62,8 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Dataverse Search Data",
-        Description: "Searches Dataverse records for keywords under the calling user's permissions and returns " +
-                     "matching records as citable paths (tables/{table}/records/{guid}). Use this when the user " +
-                     "asks to find records by name, keyword, or phrase and the exact table/column is unknown. " +
-                     "For structured filtering on known columns use dataverse.read_query instead. Use " +
-                     "dataverse.describe on returned paths to read full record details.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-dataverse-search-data-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Searches Dataverse records for keywords under the calling user's permissions and returns matching records as citable paths (tables/{table}/records/{guid}) with relevance scores. Use this when the user asks to find records by name, keyword, or phrase and the exact table or column is unknown. For structured filtering on known columns use dataverse.read_query instead. Use dataverse.describe on a returned path to read the full record. Results respect the current user's Dataverse security roles and row-level security. Spaarke entity map (use these logical names): 'matter'/'case'/'deal' = sprk_matter (key columns sprk_mattername, sprk_matternumber, sprk_matterdescription, statuscode; lookups sprk_practicearea, sprk_mattertype, sprk_assignedattorney1 to contact, sprk_externalaccount to account). 'project'/'workstream' = sprk_project (sprk_projectname, sprk_projectnumber). 'document'/'contract'/'file' = sprk_document (sprk_documentname, sprk_filename, sprk_documenttype, sprk_filesummary; lookups sprk_matter, sprk_project). People = contact; client companies = account; law firms/vendors = sprk_organization.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

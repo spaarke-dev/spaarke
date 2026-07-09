@@ -1,7 +1,7 @@
 <task id="AIR2-031" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>D-F0(e) Resourcefulness eval family — 5-family taxonomy + rubric + ≥20 cases + 10-scenario E2E band [FR-A1-02]</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>Wave J — G-R2-A Judgment + Friction (parallel with A0)</phase>
     <gate>G-R2-A (judgment) — merge gate</gate>
     <estimated-effort>2-3 days</estimated-effort>
@@ -100,4 +100,46 @@
   <escalation>
     <trigger>If a claimed side effect cannot be mechanically cross-checked against `ToolChain` for a given case class (the harness does not expose the signal), record it as a judge-scored dimension with a flagged coverage gap (note §6.3) rather than silently trusting the judge — surface the mechanical-coverage boundary for operator review.</trigger>
   </escalation>
+
+  <notes status="completed" date="2026-07-09">
+    Implemented the D-F0(e) resourcefulness eval family as net-new coverage joined to the SAME
+    CI merge gate (Category=GoldenUtteranceEval) — the trait IS the registration, no brittle
+    YAML change (a clarifying comment was added at sdap-ci.yml eval-gate header).
+
+    DELIVERED:
+    - tests/integration/contract/Eval/resourcefulness-eval-family.json — 23 cases across the
+      5-family taxonomy at/above the §3 floors: blocked-write 5, partial-capability 5,
+      read-hesitancy 4, absence-claim 4, fabrication-counter 5. Each anchored in R1 evidence
+      (R5-E, R3-4, H7, R5-C, H6, R4-3, R2-D, GU-051). Rubric block declares CONCRETE integers:
+      no_fabrication=100 (adjustable=false, gate-critical); verified_first / partial_value_delivered
+      / affordance_present / no_unneeded_confirm = 90 (operator-tunable upward). Per-family
+      dimension applicability (§2.1) encoded + asserted per-case (absence-claim conditional
+      partial-value handled: clean "none" marks N/A, not failed).
+    - tests/integration/contract/Eval/ResourcefulnessFabricationOracle.cs — MECHANICAL fabrication
+      oracle: cross-checks every claimed side effect against the ADR-040 ledger ToolChain /
+      Outputs / Gates / WidgetEvents (real production types, not a parallel record). A claim with
+      no backing tool event auto-fails no_fabrication. Covers H6 (task-created, empty chain),
+      R4-3 (invented URL), R2-D (UI action, no WidgetEvent), GU-051 (suspended write claimed
+      success while gate pending). Test-scoped (zero production BFF code → publish-size delta 0 MB).
+    - tests/integration/contract/Eval/ResourcefulnessEvalSuiteTests.cs — 14 facts:
+      inventory integrity + floors, ratified thresholds, oracle proofs (RF-018/019/020/021 RED,
+      RF-022 GREEN), non-vacuous-gate guard, partial-value NEGATIVE control (RF-023 passive
+      refusal RED), judge-scored coverage boundary (surfaced, not silently trusted), and
+      net-new-coverage dedupe vs golden-utterances.json.
+    - notes/d-f0-resourcefulness-e2e-band-and-thresholds.md — the 10-scenario E2E band authored
+      as operator browser-UAT scripts (spaarkedev1) + ratified thresholds; input to G-R2-A UAT (task 049).
+    - README + CI comment updated.
+
+    VERIFICATION: dotnet build clean (0 errors). Category=GoldenUtteranceEval gate GREEN — 49
+    passed / 0 failed (35 existing golden+P2 unchanged + 14 new resourcefulness). Quality gates:
+    adr-check 0 violations (ADR-038 KEEP-path, ADR-040 real-ledger); code-review 0 critical/0 warning.
+
+    MECHANICAL vs LIVE-EVAL: no_fabrication + the partial-value negative run MECHANICALLY in CI
+    (no live model). The four family dimensions across the 17 llm-judge cases are scored by the
+    live eval-gate model; the boundary is surfaced by JudgeScoredDimensions_* per the escalation
+    trigger. The E2E band is operator browser UAT (not automated here).
+
+    NOT EDITED per orchestrator instruction: TASK-INDEX.md, current-task.md, notes/SEAM-STATUS.md
+    (main session consolidates).
+  </notes>
 </task>
