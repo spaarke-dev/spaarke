@@ -288,6 +288,18 @@ public sealed class TypedHandlerResumeExecutor
         ToolResult result;
         try
         {
+            // FR-A1-05 (task 034) de-dupe note: task 034 added a PRE-SUSPEND ValidateChat at the
+            // gate (SideEffectGateAIFunction), so a provably-doomed call is rejected with an honest
+            // ❌ BEFORE it ever suspends and reaches this resume leg. This resume-side ValidateChat
+            // is NOT redundant and is deliberately RETAINED: it is a behavior-PRESERVING re-check
+            // for any call that passed pre-suspend (deterministic validation over the frozen Tier-3
+            // args yields the same PASS), AND it is the ONLY validation that runs under the
+            // CONFIRMING USER's OBO scope at execution time (this class resolves the handler +
+            // IDataverseUserClient from the gate-resolve request scope — see the class remarks) —
+            // it guards the suspend→confirm window against state drift (TOCTOU) that the
+            // loop-context pre-suspend pass cannot see. Removing it would be a security regression,
+            // not a de-dupe. It changes behavior only for a call that BECAME invalid after suspend,
+            // which is exactly the case it must still catch.
             var validation = resolution.Handler.ValidateChat(context, resolution.Tool);
             if (!validation.IsValid)
             {

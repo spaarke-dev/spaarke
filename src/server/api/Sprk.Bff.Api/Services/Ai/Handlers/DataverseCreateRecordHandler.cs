@@ -169,11 +169,15 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out var error))
             return ToolValidationResult.Failure(error!);
 
-        // R5-E HARD RULE: sprk_document creates never execute — the gate-resume leg
-        // (TypedHandlerResumeExecutor) runs ValidateChat BEFORE ExecuteChatAsync, so this
-        // rejection fires before any Dataverse wire call on every path. AIR2-040 (FR-A1-11):
-        // the refusal carries a server-composed, host-scoped Document Upload deep-link — the
-        // block itself is unconditional and unaffected by the affordance.
+        // R5-E HARD RULE: sprk_document creates never execute. This ValidateChat now runs at
+        // TWO points on the gated path, so the rejection fires before any Dataverse wire call on
+        // every path: (1) AIR2-034 (FR-A1-05) PRE-SUSPEND — SideEffectGateAIFunction runs it via
+        // ToolHandlerToAIFunctionAdapter.ValidateForGate BEFORE suspending, so a doomed
+        // sprk_document create renders this honest ❌ + affordance and is NEVER shown a confirm
+        // dialog (no Confirm→❌ dead-end); and (2) the gate-resume leg (TypedHandlerResumeExecutor)
+        // re-runs it under the confirming user's OBO scope BEFORE ExecuteChatAsync (defense in
+        // depth / TOCTOU). AIR2-040 (FR-A1-11): the refusal carries a server-composed, host-scoped
+        // Document Upload deep-link — the block itself is unconditional and unaffected by the affordance.
         if (string.Equals(tablename, BlockedTableLogicalName, StringComparison.Ordinal))
             return ToolValidationResult.Failure(BuildBlockedMessageWithAffordance(context.MatterId));
 

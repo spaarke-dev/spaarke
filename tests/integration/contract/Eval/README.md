@@ -72,6 +72,16 @@ A **net-new** family joined to the SAME merge gate (via the `Category=GoldenUtte
 - **Live eval-gate (LLM-judge)**: the 17 `llm-judge` cases' expected-behavior anchors score `verified_first` / `partial_value_delivered` / `affordance_present` / `no_unneeded_confirm`. The mechanical-vs-judge boundary is surfaced (never silently trusted) by `JudgeScoredDimensions_AreSurfacedWithMechanicalCoverageBoundary`.
 - **E2E band (§4)**: 10 operator browser-UAT scenarios on spaarkedev1 backing G-R2-A/B — authored at [`projects/spaarke-ai-architecture-redesign-r2/notes/d-f0-resourcefulness-e2e-band-and-thresholds.md`](../../../../projects/spaarke-ai-architecture-redesign-r2/notes/d-f0-resourcefulness-e2e-band-and-thresholds.md) as input to the G-R2-A UAT (task 049); NOT automated (r1 browser rule).
 
+## Origin-classification eval family (Policy v2 E-1..E-6 — r2 task 033 / FR-A1-04)
+
+A **net-new** family joined to the SAME merge gate (via the `Category=GoldenUtteranceEval` trait — no CI-YAML change). Generated from the RULED E-1..E-6 rows in [`notes/policy-v2-origin-classification-decision-tree.md`](../../../../projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md) §4 (design.md D-F1 adopted them). Unlike the resourcefulness family, the request-origin classifier (`RequestOriginClassifier`, task 032) and the Confirmation Policy v2 engine (`ConfirmationPolicyEngine` / `GateDecisionProjector`) are **deterministic production code**, so every case is a **hard-equality assertion against the real production types** — never an LLM judge.
+
+- **Seed data**: [`origin-classification-eval-family.json`](origin-classification-eval-family.json) — 12 cases across the **6 ruled rows** (E-1..E-6), one positive + one negative case each. Each case declares the structural `GateOriginRequest` input, the `PolicyEvaluationContext` overlay/risk inputs, and the expected `{origin, outcome, decisive overlay}` triple.
+- **Harness**: [`OriginClassificationEvalSuiteTests.cs`](OriginClassificationEvalSuiteTests.cs) — deserializes each case into the production `GateOriginRequest` / `PolicyEvaluationContext` types and asserts `RequestOriginClassifier.Classify(...)` + `ConfirmationPolicyEngine.Evaluate(...)` produce the ruled origin and gate outcome by hard equality.
+- **Not-vacuous guard**: `EveryEdgeCase_PositiveAndNegativeCases_ResolveToDifferentClassifierOrGateResults` asserts each row's pos/neg pair resolves to a DIFFERENT `(origin, outcome, overlay)` result, so a negative case can never be trivially green.
+- **Perturbation-verified** (2026-07-09, task 033): the E-1 negative case (`E1Negative_AffirmationAfterTwoProposals_ClassifiesInferred_NeverExplicit`) and the E-6 negative case (`E6Negative_DispatchUncertainOverExplicitRequest_ForcesDialogWithSuspicion_NeverAutoExecutes`) were each hand-verified to go RED against a deliberately perturbed production classifier/engine, then the perturbation was reverted (no net diff) — confirming the family is not a vacuous pass.
+- Net-new-coverage dedupe vs the golden + resourcefulness suites (`OC-` case-id namespace; `e1`..`e6` family keys).
+
 ## Deletion-safety
 
 KEEP-protected per ADR-038 (`tests/integration/contract/**`). Since P1 (task 026) the suite is an ACTIVE merge gate (NFR-02); every catalog/prompt change adds or updates cases (NFR-06).
