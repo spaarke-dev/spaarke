@@ -207,30 +207,61 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
     return null;
   }
 
+  // R5 task 021 (operator, 2026-07-09): merge the two task channels into ONE
+  // "Tasks" section, tagging each bullet with a deterministic due-status pill
+  // (Overdue from the overdue channel, Due soon from the upcoming channel).
+  const TASK_STATUS: Record<string, 'Overdue' | 'DueSoon'> = {
+    'overdue-tasks': 'Overdue',
+    'upcoming-tasks': 'DueSoon',
+  };
+  type DisplayBullet = ChannelNarrativeBullet & { dueStatus?: 'Overdue' | 'DueToday' | 'DueSoon' };
+  interface DisplaySection {
+    key: string;
+    label: string;
+    icon: React.ReactElement;
+    bullets: DisplayBullet[];
+  }
+  const sections: DisplaySection[] = [];
+  let tasksSection: DisplaySection | null = null;
+  for (const cn of filteredNarratives) {
+    if (cn.category in TASK_STATUS) {
+      if (!tasksSection) {
+        tasksSection = { key: 'tasks', label: 'Tasks', icon: resolveChannelIcon('upcoming-tasks'), bullets: [] };
+        sections.push(tasksSection);
+      }
+      const status = TASK_STATUS[cn.category];
+      for (const bullet of cn.bullets) tasksSection.bullets.push({ ...bullet, dueStatus: status });
+    } else {
+      sections.push({
+        key: cn.category,
+        label: resolveChannelLabel(cn.category),
+        icon: resolveChannelIcon(cn.category),
+        bullets: cn.bullets,
+      });
+    }
+  }
+
   // R7 W12 feedback item 10 (2026-07-01): "Activity Notes" title removed;
   // each ChannelHeading is now the top-level section anchor per operator request.
   return (
     <div>
-      {filteredNarratives.map(channel => (
-        <div key={channel.category} className={styles.channelSection}>
-          <ChannelHeading
-            icon={resolveChannelIcon(channel.category)}
-            label={resolveChannelLabel(channel.category)}
-            itemCount={channel.bullets.length}
-          />
-          {channel.bullets.map((bullet, idx) => {
+      {sections.map(section => (
+        <div key={section.key} className={styles.channelSection}>
+          <ChannelHeading icon={section.icon} label={section.label} itemCount={section.bullets.length} />
+          {section.bullets.map((bullet, idx) => {
             // Determine todo state from the first item ID. In the /render path
             // itemIds are source-record GUIDs (sprk_event, sprk_document, etc.).
             const firstItemId = bullet.itemIds[0] ?? '';
 
             return (
               <NarrativeBullet
-                key={`${channel.category}-${idx}`}
+                key={`${section.key}-${idx}`}
                 narrative={bullet.narrative}
                 primaryEntityName={bullet.primaryEntityName}
                 primaryEntityType={bullet.primaryEntityType}
                 primaryEntityId={bullet.primaryEntityId}
                 itemIds={bullet.itemIds}
+                dueStatus={bullet.dueStatus}
                 onAddToTodo={onAddToTodo}
                 onDismiss={onDismiss}
                 isTodoCreated={isTodoCreated(firstItemId)}

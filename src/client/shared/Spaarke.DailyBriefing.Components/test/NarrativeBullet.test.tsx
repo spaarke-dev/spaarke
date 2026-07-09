@@ -153,12 +153,9 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     // emphasis on three-dot menu for future tools).
     expect(screen.getByRole('button', { name: /More actions/i })).toBeInTheDocument();
 
-    // R7 W12 task 134: primary visible 'Add To Do' Checkmark button is present
-    // as a sibling BEFORE the menu trigger (operator MVP, wave12 plan §2.1).
-    // Distinct aria-label "Add To Do" — NOT "Add to To Do" (which is the
-    // SubRowTodo per-item button label) — so per-bullet vs per-sub-row
-    // targeting is unambiguous for tests and screen readers.
-    expect(screen.getByRole('button', { name: /^Add To Do$/i })).toBeInTheDocument();
+    // R5 task 021 (2026-07-09): "Add to To Do" moved INTO the overflow menu —
+    // the row no longer renders a standalone Add To Do button (menu closed → absent).
+    expect(screen.queryByRole('button', { name: /^Add To Do$/i })).toBeNull();
 
     // The inline 5-icon row (pre-R4) had buttons with these aria-labels
     // rendered. With the menu CLOSED, the menu-only aria-labels MUST NOT
@@ -175,7 +172,7 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     expect(screen.queryByRole('button', { name: /^Dismiss$/i })).toBeNull();
   });
 
-  it('OverflowMenu_Shows5Actions: open the menu and assert 5 MenuItems in canonical post-task-134 order (AC-18a)', () => {
+  it('OverflowMenu_Shows6Actions: open the menu and assert 6 MenuItems with "Add to To Do" first (task 021)', () => {
     const props = baseProps({
       itemIds: ['n-1'],
       onCheck: jest.fn(),
@@ -186,16 +183,16 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
 
     openOverflowMenu();
 
-    // Fluent v9 MenuItems have role="menuitem". Collect them in DOM order and
-    // assert the canonical labels match the post-task-134 sequence.
-    // ("Add to To Do" is now a primary visible button, NOT a menu item.)
+    // Fluent v9 MenuItems have role="menuitem". R5 task 021: "Add to To Do" is
+    // now the FIRST menu item (moved from a standalone button into the menu).
     const menuItems = screen.getAllByRole('menuitem');
-    expect(menuItems).toHaveLength(5);
+    expect(menuItems).toHaveLength(6);
     const labels = menuItems.map(el => (el.textContent ?? '').trim());
     expect(labels).toEqual([
       'Mark as read',
       'Remove from briefing',
       'Keep on briefing for 7 more days',
+      'Add to To Do',
       'Dismiss',
       'Open record',
     ]);
@@ -327,7 +324,7 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     expect(onKeep).toHaveBeenCalledWith('n-1', 604800);
   });
 
-  it('PrimaryAddToDoButton_CallsExistingPath: clicking the primary Add To Do Checkmark button invokes onAddToTodo(itemIds) — preserves ADR-024 useInlineTodoCreate path (AC-18c / task 134)', () => {
+  it('AddToDoMenuItem_CallsExistingPath: the overflow "Add to To Do" menu item invokes onAddToTodo(itemIds) — preserves ADR-024 useInlineTodoCreate path (task 021)', () => {
     const onAddToTodo = jest.fn();
     const props = baseProps({
       itemIds: ['n-1', 'n-2'],
@@ -339,23 +336,21 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     });
     renderWith(props);
 
-    // Task 134: Add To Do is now a PRIMARY VISIBLE Button with aria-label
-    // "Add To Do" — NOT a menu item. The overflow menu is not opened in this
-    // test because the primary button is reachable directly.
-    const addToDoButton = screen.getByRole('button', { name: /^Add To Do$/i });
+    // R5 task 021: Add to To Do is now the first overflow-menu item. Open the
+    // menu and click it (role="menuitem" — distinct from the aggregated
+    // sub-row's role="button" "Add to To Do", so this targets the bullet-level action).
+    openOverflowMenu();
     act(() => {
-      fireEvent.click(addToDoButton);
+      fireEvent.click(screen.getByRole('menuitem', { name: /^Add to To Do$/i }));
     });
 
     // ADR-024 regression-free invariant: the parent's `onAddToTodo` callback
-    // signature is unchanged (receives the full itemIds array). The parent
-    // (DailyBriefingApp) owns `useInlineTodoCreate` + `TODO_REGARDING_CATALOG`
-    // wiring; this component only invokes the prop unchanged.
+    // signature is unchanged (receives the full itemIds array).
     expect(onAddToTodo).toHaveBeenCalledTimes(1);
     expect(onAddToTodo).toHaveBeenCalledWith(['n-1', 'n-2']);
   });
 
-  it('PrimaryAddToDoButton_DisabledWhenCreated: button is disabled when isTodoCreated=true (no duplicate creates, task 134)', () => {
+  it('AddToDoMenuItem_DisabledWhenCreated: the "Added to To Do" menu item is disabled when isTodoCreated=true (no duplicate creates, task 021)', () => {
     const onAddToTodo = jest.fn();
     const props = baseProps({
       itemIds: ['n-1'],
@@ -367,15 +362,16 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     });
     renderWith(props);
 
-    const addToDoButton = screen.getByRole('button', { name: /^Add To Do$/i }) as HTMLButtonElement;
-    expect(addToDoButton.disabled).toBe(true);
+    openOverflowMenu();
+    const item = screen.getByRole('menuitem', { name: /Added to To Do/i });
+    expect(item).toHaveAttribute('aria-disabled', 'true');
     act(() => {
-      fireEvent.click(addToDoButton);
+      fireEvent.click(item);
     });
     expect(onAddToTodo).not.toHaveBeenCalled();
   });
 
-  it('PrimaryAddToDoButton_DisabledWhenPending: button is disabled when isTodoPending=true (no double-fire, task 134)', () => {
+  it('AddToDoMenuItem_DisabledWhenPending: the "Adding to To Do…" menu item is disabled when isTodoPending=true (no double-fire, task 021)', () => {
     const onAddToTodo = jest.fn();
     const props = baseProps({
       itemIds: ['n-1'],
@@ -387,10 +383,11 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     });
     renderWith(props);
 
-    const addToDoButton = screen.getByRole('button', { name: /^Add To Do$/i }) as HTMLButtonElement;
-    expect(addToDoButton.disabled).toBe(true);
+    openOverflowMenu();
+    const item = screen.getByRole('menuitem', { name: /Adding to To Do/i });
+    expect(item).toHaveAttribute('aria-disabled', 'true');
     act(() => {
-      fireEvent.click(addToDoButton);
+      fireEvent.click(item);
     });
     expect(onAddToTodo).not.toHaveBeenCalled();
   });

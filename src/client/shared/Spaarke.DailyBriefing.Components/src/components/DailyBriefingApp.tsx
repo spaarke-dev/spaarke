@@ -54,6 +54,7 @@ import { ActivityNotesSection } from './ActivityNotesSection';
 import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
 import { HighPrioritySection } from './HighPrioritySection';
+import { StatTiles, type StatTile } from './StatTiles';
 import { useBriefingRender, useInlineTodoCreate, useBriefingPreferences } from '../hooks';
 import { TOASTER_ID } from '../utils/toastUtils';
 import type { IWebApi, NotificationCategory, NotificationItem } from '../types/notifications';
@@ -524,6 +525,19 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   const tldr = renderData?.tldr ?? null;
   const highPriorityItems = renderData?.highPriorityItems ?? [];
 
+  // Deterministic KPI tiles (task 021 redesign). Every count is derived from the
+  // already-deterministic render data — no LLM, no fabrication (FR-A4 posture):
+  //   Open items = total visible bullets · Overdue = the overdue channel's count
+  //   Critical = high-priority count · New matters = the matters channel's count
+  const overdueCount = filteredNarratives.find(cn => /overdue/i.test(cn.category))?.bullets.length ?? 0;
+  const newMattersCount = filteredNarratives.find(cn => /matter/i.test(cn.category))?.bullets.length ?? 0;
+  const statTiles: StatTile[] = [
+    { label: 'Open items', value: totalVisibleBullets, tone: 'neutral' },
+    { label: 'Overdue', value: overdueCount, tone: overdueCount > 0 ? 'danger' : 'neutral' },
+    { label: 'Critical', value: highPriorityItems.length, tone: highPriorityItems.length > 0 ? 'warning' : 'neutral' },
+    { label: 'New matters', value: newMattersCount, tone: 'brand' },
+  ];
+
   return (
     <div className={styles.container}>
       <Toaster toasterId={toasterId} position="bottom-end" />
@@ -534,8 +548,9 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         onBrowsePlaybooks={onBrowsePlaybooks}
       />
       <div className={styles.scrollContent}>
-        {/* R7 W12 feedback item 9 (2026-07-01): high-priority section above TL;DR. */}
-        <HighPrioritySection items={highPriorityItems} onOpenRecord={handleOpenRecord} />
+        {/* Task 021 redesign: deterministic KPI tiles at the top. */}
+        <StatTiles tiles={statTiles} />
+        {/* Operator order (2026-07-09): Today's summary above Critical Today. */}
         <TldrSection
           tldr={tldr}
           isLoading={false}
@@ -546,6 +561,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           resolvableItems={tldrResolvableItems}
           onOpenRecord={handleOpenRecord}
         />
+        <HighPrioritySection items={highPriorityItems} onOpenRecord={handleOpenRecord} />
         <div className={styles.activitySection}>
           <ActivityNotesSection
             channelNarratives={filteredNarratives}

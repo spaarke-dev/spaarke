@@ -409,7 +409,7 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
       <div className={styles.headingRow}>
         <SparkleRegular className={styles.headingIcon} aria-hidden="true" />
         <Text as="h2" size={500} weight="semibold" style={{ margin: 0 }}>
-          TL;DR
+          Today&apos;s summary
         </Text>
       </div>
       <Badge className={styles.aiBadge} appearance="tint" color="brand" size="small">

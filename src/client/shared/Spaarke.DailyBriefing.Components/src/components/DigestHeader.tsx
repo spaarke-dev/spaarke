@@ -28,7 +28,6 @@ import * as React from 'react';
 import {
   makeStyles,
   tokens,
-  Title2,
   Text,
   Button,
   Tooltip,
@@ -133,7 +132,9 @@ export const DigestHeader: React.FC<DigestHeaderProps> = ({
     <div className={styles.root}>
       <NewsRegular className={styles.icon} />
       <div className={styles.titleGroup}>
-        <Title2>Daily Briefing</Title2>
+        <Text size={500} weight="semibold">
+          Daily Briefing
+        </Text>
         <Text size={200} className={styles.subtitle}>
           {formatToday()}
           {totalUnreadCount > 0 ? ` · ${totalUnreadCount} ${totalUnreadCount === 1 ? 'item' : 'items'}` : ''}
