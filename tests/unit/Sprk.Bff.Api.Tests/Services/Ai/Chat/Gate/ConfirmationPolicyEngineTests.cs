@@ -21,25 +21,34 @@ public class ConfirmationPolicyEngineTests
     // Catalog-declared profiles (mirror the task-020 seed rows).
     private static readonly GateRiskProfile Create2b = new()
     {
-        DeclaredTier = GateRiskTier.Tier2b, Reversible = true, RecordOfTruthImpact = true,
+        DeclaredTier = GateRiskTier.Tier2b,
+        Reversible = true,
+        RecordOfTruthImpact = true,
     };
     private static readonly GateRiskProfile EmailSend4 = new()
     {
-        DeclaredTier = GateRiskTier.Tier4, Reversible = false, ExternallyVisible = true,
+        DeclaredTier = GateRiskTier.Tier4,
+        Reversible = false,
+        ExternallyVisible = true,
     };
     private static readonly GateRiskProfile Deadline3 = new()
     {
-        DeclaredTier = GateRiskTier.Tier3, Reversible = true, DeadlineImpact = true,
+        DeclaredTier = GateRiskTier.Tier3,
+        Reversible = true,
+        DeadlineImpact = true,
     };
     private static readonly GateRiskProfile DocVersion2c = new()
     {
-        DeclaredTier = GateRiskTier.Tier2c, Reversible = true, RecordOfTruthImpact = true,
+        DeclaredTier = GateRiskTier.Tier2c,
+        Reversible = true,
+        RecordOfTruthImpact = true,
     };
     private static readonly GateRiskProfile Read0 = new() { DeclaredTier = GateRiskTier.Tier0 };
 
     private static GateOriginRequest ExplicitUtterance() => new()
     {
-        Source = GateRequestSource.UserUtterance, UtteranceEnumeratesCapability = true,
+        Source = GateRequestSource.UserUtterance,
+        UtteranceEnumeratesCapability = true,
     };
 
     // =========================================================================
