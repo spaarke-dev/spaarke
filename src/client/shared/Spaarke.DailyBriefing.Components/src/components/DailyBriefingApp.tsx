@@ -59,6 +59,7 @@ import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components'
 import { extractEmailKey } from '@spaarke/ui-components/services';
 import { useBriefingRender, useInlineTodoCreate, useBriefingPreferences } from '../hooks';
 import { TOASTER_ID } from '../utils/toastUtils';
+import { timeWindowToHours } from '../types/notifications';
 import type { IWebApi, NotificationCategory, NotificationItem } from '../types/notifications';
 import {
   emailBriefingToColleague,
@@ -285,12 +286,28 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     }
   }, [xrm]);
 
+  // Preferences (sprk_userpreference) — drive BOTH the client-side channel-disabled
+  // filter AND (r5 settings-wiring, 2026-07-09) the server-side collector date windows.
+  // Loaded first so the render call can pass the user's Display Parameters.
+  const { preferences, updatePreferences } = useBriefingPreferences(webApi, userId);
+
+  // Translate the user's Display Parameters into the /render window params. Memoized on the
+  // primitive fields so a Settings Save re-fetches the briefing with the new windows.
+  const briefingWindows = React.useMemo(
+    () => ({
+      dueWithinDays: preferences.dueWithinDays,
+      recencyHours: timeWindowToHours(preferences.timeWindow),
+    }),
+    [preferences.dueWithinDays, preferences.timeWindow]
+  );
+
   // ---------------------------------------------------------------------------
   // Data source — single /render call (R7 Wave 12 cutover).
   //
   // No appnotification dependency. /render queries Dataverse server-side via
   // DailyBriefingCollector across 6 entity types (sprk_event, sprk_document,
-  // sprk_matter, sprk_project, sprk_todo) and narrates the result.
+  // sprk_matter, sprk_project, sprk_todo) and narrates the result. The user's
+  // Display Parameters (briefingWindows) bound the per-channel date windows.
   // ---------------------------------------------------------------------------
   const {
     status: renderStatus,
@@ -298,12 +315,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     unavailableReason,
     error: renderError,
     refetch: refreshBriefing,
-  } = useBriefingRender();
-
-  // Preferences (sprk_userpreference, independent of appnotification) — used
-  // for the client-side channel-disabled filter applied to /render's
-  // channelNarratives output.
-  const { preferences, updatePreferences } = useBriefingPreferences(webApi, userId);
+  } = useBriefingRender(briefingWindows);
 
   // Inline To Do creation from narrative bullets — writes first-class sprk_todo
   // records per ADR-024 + smart-todo-decoupling-r3 FR-29.
@@ -598,16 +610,44 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         return;
       }
 
-      // mode === 'item' — create a DRAFT email activity (never auto-sent).
+      // mode === 'item' — create the email activity, then SEND it so the user is
+      // done after the dialog (UAT 2026-07-09: no "open from activities" step). If
+      // the send action fails (e.g. the sender mailbox isn't approved to send in
+      // this environment), the created activity remains a draft and we say so.
       if (!webApi) {
         throw new Error('Dataverse is not available.');
       }
-      await webApi.createRecord('email', buildEmailActivityRecord(userId, payload));
+      const created = await webApi.createRecord('email', buildEmailActivityRecord(userId, payload));
+      let sent = false;
+      try {
+        // Same-origin Dataverse Web API (the code page is served from the org URL);
+        // cookie auth via credentials:'include' — mirrors the EntityDefinitions fetch
+        // in useInlineTodoCreate. SendEmail is the bound action that delivers it.
+        const resp = await fetch(`/api/data/v9.2/emails(${created.id})/Microsoft.Dynamics.CRM.SendEmail`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'OData-MaxVersion': '4.0',
+            'OData-Version': '4.0',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ IssueSend: true }),
+        });
+        sent = resp.ok;
+        if (!resp.ok) {
+          console.warn('[DailyBriefing] SendEmail action failed:', resp.status, await resp.text().catch(() => ''));
+        }
+      } catch (sendErr) {
+        console.warn('[DailyBriefing] SendEmail action threw:', sendErr);
+      }
       dispatchToast(
         <Toast>
-          <ToastTitle>Draft email created</ToastTitle>
+          <ToastTitle>{sent ? 'Email sent' : 'Draft email created'}</ToastTitle>
           <ToastBody>
-            A draft email to {payload.to.name} was saved. Open it from your activities to review and send.
+            {sent
+              ? `Your email to ${payload.to.name} was sent.`
+              : `A draft to ${payload.to.name} was saved — open it from your activities to send.`}
           </ToastBody>
         </Toast>,
         { intent: 'success', timeout: 8000 }
@@ -784,6 +824,8 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           }
           onSearchUsers={handleSearchUsers}
           onSend={handleEmailSend}
+          maxWidth="720px"
+          height="70vh"
         />
       )}
     </div>

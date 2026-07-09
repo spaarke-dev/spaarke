@@ -86,6 +86,51 @@ public class MembershipResolverServiceTests
         result.CacheExpiresAt.Should().BeAfter(DateTimeOffset.UtcNow);
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Regression (r5 2026-07-09 — Daily Briefing completeness)
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ResolveAsync_GeneratedFetchXml_MustNotUseDistinct_SoRecordIdsAreReturned()
+    {
+        // REGRESSION: the resolver's FetchXml used distinct='true' but did NOT project the
+        // primary key. In Dataverse, distinct='true' dedupes on the PROJECTED columns and does
+        // not return the record id unless it is explicitly projected — so records sharing the
+        // same descriptor-lookup values (e.g. every matter a user owns → same ownerid) collapsed
+        // into a few rows WITH EMPTY IDS, which MaterializeResults then dropped (row.Id ==
+        // Guid.Empty). Net effect: membership resolved to 0 for a user who owned 45 matters, and
+        // the Daily Briefing silently omitted every membership-scoped record — a false "all
+        // caught up". The generated query MUST NOT use distinct (MaterializeResults already
+        // dedupes by id via a HashSet, and these single-entity queries have no link-entity that
+        // could multiply rows). Verified live: rows 0 → 49 after removing distinct.
+        var discovery = BuildDiscoveryMock(Descriptor("ownerid", "owner", "SystemUser"));
+        var identity = BuildIdentityMock(BuildFullIdentity());
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                MatterRow(MatterIdA, ("ownerid", new EntityReference("systemuser", TestSystemUserId))),
+            }));
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        // Act
+        var result = await sut.ResolveAsync(TestSystemUserId, EntityType, options: null, CancellationToken.None);
+
+        // Assert — the generated query must not use distinct…
+        captured.Should().NotBeNull();
+        captured!.Query.Should().NotContain(
+            "distinct",
+            "distinct='true' without projecting the primary key makes Dataverse return empty record ids, " +
+            "which silently zeroes membership resolution (r5 briefing-completeness regression)");
+        // …and the matched record's id must survive materialization (not be dropped as empty).
+        result.Ids.Should().Contain(MatterIdA);
+    }
+
     [Fact]
     public async Task ResolveAsync_ByRoleMap_PopulatedCorrectly()
     {
