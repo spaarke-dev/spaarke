@@ -796,7 +796,7 @@
       "utterance": "explain this clause",
       "notes": "spaarkeai-compose-r2 task 045 (FR-12/NFR-06) — golden family for compose-explain-clause (FR-07, task 040). Fits UC-G-2 (Contract negotiation cycle) step 3 (deeper analysis on the current draft). Row not yet in ConsumerTypes.All (no code change in 040/045 scope) — catalogStatus=planned per the create-matter GU-065-067 precedent; flips to existing once a follow-on gate adds the constant. actionCode/consumerType carry NO version suffix (owner hygiene).",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-07" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-explain-clause", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy) — live Binding row already authored mirror-first in sprk_playbookconsumer-rows.json; ConsumerTypes.cs constant + catalogStatus flip deferred to a follow-on gate task, matching the create-matter GU-065-067 precedent" }
     },
@@ -807,7 +807,7 @@
       "channel": "text",
       "utterance": "what does this clause mean?",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-07" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-explain-clause", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -818,7 +818,7 @@
       "channel": "text",
       "utterance": "can you break down this provision for me in plain language?",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-07" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-explain-clause", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -829,7 +829,7 @@
       "channel": "text",
       "utterance": "plain-english summary of the clause I just selected",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-07" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-explain-clause", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -840,7 +840,7 @@
       "channel": "text",
       "utterance": "help me understand what this section actually does",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-07" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-explain-clause", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -852,7 +852,7 @@
       "utterance": "[Explain] toolbar action on a selected indemnification clause, with matter playbook context available",
       "notes": "Dispatch family — exercises the Click-path seam: toolbar selection dispatches compose-explain-clause via dispatchConsumer(binding_id, {selectionText}) -> SessionDispatchOrchestrator, disposition=informational (100000000), surfaces=assistant per the Binding row.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-07" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-explain-clause", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -863,7 +863,7 @@
       "channel": "click",
       "utterance": "[Explain] toolbar action on a selected termination clause, no playbook context supplied",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-07" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-explain-clause", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -874,7 +874,7 @@
       "channel": "click",
       "utterance": "[Explain] toolbar action on a short single-sentence limitation-of-liability clause",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-07" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-explain-clause", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -885,7 +885,7 @@
       "channel": "click",
       "utterance": "[Explain] toolbar action re-invoked on a different clause within the same Compose session",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-07" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-explain-clause", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -896,7 +896,7 @@
       "channel": "click",
       "utterance": "[Explain] toolbar action on a multi-paragraph selection spanning an indemnification section",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-07" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-explain-clause", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-explain-clause", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -908,7 +908,7 @@
       "utterance": "compare this clause to our playbook",
       "notes": "spaarkeai-compose-r2 task 045 (FR-12/NFR-06) — golden family for compose-compare-to-playbook (FR-08, task 041). Fits UC-G-2 step 1 (compare inbound vs firm template).",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-08" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-compare-to-playbook", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -919,7 +919,7 @@
       "channel": "text",
       "utterance": "does this match our firm-standard language?",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-08" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-compare-to-playbook", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -930,7 +930,7 @@
       "channel": "text",
       "utterance": "check this clause against the playbook for deviations",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-08" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-compare-to-playbook", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -941,7 +941,7 @@
       "channel": "text",
       "utterance": "how risky is this indemnity clause compared to our standard position?",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-08" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-compare-to-playbook", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -952,7 +952,7 @@
       "channel": "text",
       "utterance": "is this clause consistent with matter playbook guidance?",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-08" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-compare-to-playbook", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -964,7 +964,7 @@
       "utterance": "[Compare to playbook] toolbar action on a clause with one matching playbook entry, low deviation",
       "notes": "Dispatch family — exercises the Click-path seam: toolbar dispatches compose-compare-to-playbook via dispatchConsumer(binding_id, {selectionText}); reads existing sprk_analysisplaybook entries as reference data only (NOT a routing target, FR-08).",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-08" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-compare-to-playbook", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -975,7 +975,7 @@
       "channel": "click",
       "utterance": "[Compare to playbook] toolbar action on a clause with no relevant playbook entry supplied",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-08" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-compare-to-playbook", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -986,7 +986,7 @@
       "channel": "click",
       "utterance": "[Compare to playbook] toolbar action on a clause flagged high risk against firm standard",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-08" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-compare-to-playbook", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -997,7 +997,7 @@
       "channel": "click",
       "utterance": "[Compare to playbook] toolbar action on a clause matching multiple playbook entries",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-08" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-compare-to-playbook", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1008,7 +1008,7 @@
       "channel": "click",
       "utterance": "[Compare to playbook] toolbar action re-invoked after the attorney edits the clause",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-08" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-compare-to-playbook", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-compare-to-playbook", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1020,7 +1020,7 @@
       "utterance": "draft an alternative for this clause",
       "notes": "spaarkeai-compose-r2 task 045 (FR-12/NFR-06) — golden family for compose-draft-alternative (FR-09, task 042), the ONE edit-producing Compose capability. Fits UC-G-2 step 4 (draft counter-proposal / redline).",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-09" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-draft-alternative", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1031,7 +1031,7 @@
       "channel": "text",
       "utterance": "propose a better version of this provision",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-09" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-draft-alternative", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1042,7 +1042,7 @@
       "channel": "text",
       "utterance": "rewrite this clause to favor us more",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-09" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-draft-alternative", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1053,7 +1053,7 @@
       "channel": "text",
       "utterance": "can you suggest different language here?",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-09" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-draft-alternative", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1064,7 +1064,7 @@
       "channel": "text",
       "utterance": "give me an alternative wording for this indemnification section",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-09" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-draft-alternative", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1076,7 +1076,7 @@
       "utterance": "[Draft alternative] toolbar action on a selected clause — strict match_mode replace of the whole selection",
       "notes": "FR-09/FR-17 — the compose-DISPOSITION ledger write. UNLIKE the four sibling read/informational compose dispatch families, this Binding declares disposition=100000006 (BindingDisposition.Compose, VERIFIED against Binding.cs by the spaarkeai-compose-r2 routing promotion: ToLedgerValue -> 'compose', OutputRouter pass-through store-before-render, ADR-040). The dispatched structured-edit payload ({target_text, new_text, match_mode:'strict', rationale, sources}) is written to the SessionOutput ledger BEFORE the Workspace materializes the pending track-change (never a client-only DOM edit). Live-asserted structurally by ComposeDraftAlternativeDispatchCases_AssertComposeDispositionLedgerWrite (GoldenUtteranceEvalSuiteTests.cs) against the real Binding row's declared disposition in sprk_playbookconsumer-rows.json.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-09" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-draft-alternative", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy); compose-disposition ledger write structurally asserted since task 045" }
     },
@@ -1088,7 +1088,7 @@
       "utterance": "[Draft alternative] toolbar action targeting the first occurrence of a repeated phrase (match_mode: first)",
       "notes": "FR-09/FR-17 compose-disposition ledger write (see GU-093 note); match_mode='first' variant.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-09" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-draft-alternative", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy); compose-disposition ledger write structurally asserted since task 045" }
     },
@@ -1100,7 +1100,7 @@
       "utterance": "[Draft alternative] toolbar action targeting every occurrence of a defined term (match_mode: all)",
       "notes": "FR-09/FR-17 compose-disposition ledger write (see GU-093 note); match_mode='all' variant.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-09" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-draft-alternative", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy); compose-disposition ledger write structurally asserted since task 045" }
     },
@@ -1112,7 +1112,7 @@
       "utterance": "[Draft alternative] toolbar action producing a pending track-change the attorney has not yet accepted",
       "notes": "FR-09/FR-17 compose-disposition ledger write (see GU-093 note); the pending redline IS the review surface (BindingRisk.None) — no confirmation turn.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-09" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-draft-alternative", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy); compose-disposition ledger write structurally asserted since task 045" }
     },
@@ -1124,7 +1124,7 @@
       "utterance": "[Draft alternative] toolbar action re-invoked after the attorney rejects the first proposal",
       "notes": "FR-09/FR-17 compose-disposition ledger write (see GU-093 note); each re-invocation writes a NEW addressable SessionOutput entry — undo/replace is ledger supersession, never client DOM undo (task 034).",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-09" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-alternative", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-draft-alternative", "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy); compose-disposition ledger write structurally asserted since task 045" }
     },
@@ -1136,7 +1136,7 @@
       "utterance": "summarize the changes the reviewer made in Word",
       "notes": "spaarkeai-compose-r2 task 045 (FR-12/NFR-06) — golden family for compose-summarize-word-changes (FR-10, task 043). Fits UC-G-2 step 2 (summarize what changed), applied to the Word round-trip specifically.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-10" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-summarize-word-changes", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1147,7 +1147,7 @@
       "channel": "text",
       "utterance": "what did the redline in Word change?",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-10" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-summarize-word-changes", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1158,7 +1158,7 @@
       "channel": "text",
       "utterance": "give me a plain-language summary of the tracked changes",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-10" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-summarize-word-changes", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1169,7 +1169,7 @@
       "channel": "text",
       "utterance": "what comments and edits came back from Word?",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-10" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-summarize-word-changes", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1180,7 +1180,7 @@
       "channel": "text",
       "utterance": "summarize what changed structurally in the reviewed document",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-10" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-summarize-word-changes", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1192,7 +1192,7 @@
       "utterance": "document returns from the Word round-trip with tracked changes present (return-from-Word flow)",
       "notes": "FR-10 — the RETURN-FROM-WORD INVOCATION. This Binding is invoked by the return-from-Word flow (task 054, not yet built) rather than a toolbar click; modeled as channel=event (auto-fired on document return) per the Binding row's own REVIEW FLAG ('an onEventBindings trigger may be wired when 053/054 land'). Until 054 lands the event wiring is NOT live (sprk_oneventbindings is null on the row today) — this family is the traceability record for that future wiring, consistent with the suite's pending-by-design declaration convention (never a silent skip).",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-10" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-summarize-word-changes", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "task 054 (return-from-Word event wiring) — currently pending-by-design; structurally traced since task 045" }
     },
@@ -1204,7 +1204,7 @@
       "utterance": "return-from-Word document containing only reviewer comments, no insertions/deletions",
       "notes": "Return-from-Word invocation (see GU-103 note); 'changes[].kind' = comment-only case.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-10" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-summarize-word-changes", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "task 054 (return-from-Word event wiring) — currently pending-by-design; structurally traced since task 045" }
     },
@@ -1216,7 +1216,7 @@
       "utterance": "return-from-Word document with structural changes (renumbered sections)",
       "notes": "Return-from-Word invocation (see GU-103 note); 'changes[].kind' = structural case.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-10" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-summarize-word-changes", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "task 054 (return-from-Word event wiring) — currently pending-by-design; structurally traced since task 045" }
     },
@@ -1228,7 +1228,7 @@
       "utterance": "return-from-Word document with multiple reviewers' tracked changes merged",
       "notes": "Return-from-Word invocation (see GU-103 note); multi-reviewer merge case.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-10" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-summarize-word-changes", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "task 054 (return-from-Word event wiring) — currently pending-by-design; structurally traced since task 045" }
     },
@@ -1240,7 +1240,7 @@
       "utterance": "return-from-Word document with zero tracked changes (clean round-trip)",
       "notes": "Return-from-Word invocation (see GU-103 note); empty-changes[] boundary case — summary must state no changes were made, never fabricate a change.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-10" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-summarize-word-changes", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-summarize-word-changes", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "task 054 (return-from-Word event wiring) — currently pending-by-design; structurally traced since task 045" }
     },
@@ -1252,7 +1252,7 @@
       "utterance": "check the defined terms in this document",
       "notes": "spaarkeai-compose-r2 task 045 (FR-12/NFR-06) — golden family for compose-defined-terms (FR-11, task 044). NOT selection-based (unlike the other four compose rows) — triggered from the popover 'More actions…' overflow or a doc-level command; results render READ-ONLY in the Context pane (Context is never an input surface).",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-11" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-defined-terms", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1263,7 +1263,7 @@
       "channel": "text",
       "utterance": "are the defined terms used consistently?",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-11" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-defined-terms", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1274,7 +1274,7 @@
       "channel": "text",
       "utterance": "scan this contract for term consistency issues",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-11" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-defined-terms", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1285,7 +1285,7 @@
       "channel": "text",
       "utterance": "find terms that are defined but never used",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-11" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-defined-terms", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1296,7 +1296,7 @@
       "channel": "text",
       "utterance": "which capitalized terms are missing a definition?",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-11" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-defined-terms", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1308,7 +1308,7 @@
       "utterance": "[More actions… → Defined Terms] overflow-menu action on a document with all terms used consistently",
       "notes": "Dispatch family — exercises the Click-path seam via the overflow-menu trigger (NOT selection-based, per FR-11); dispatchConsumer(binding_id) with no selectionText slot. surfaces='context' — results render read-only in the Context pane.",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-11" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-defined-terms", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1319,7 +1319,7 @@
       "channel": "click",
       "utterance": "[More actions… → Defined Terms] overflow-menu action on a document with one term used inconsistently",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-11" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-defined-terms", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1330,7 +1330,7 @@
       "channel": "click",
       "utterance": "[More actions… → Defined Terms] overflow-menu action on a document with a term defined but never used",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-11" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-defined-terms", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1341,7 +1341,7 @@
       "channel": "click",
       "utterance": "[More actions… → Defined Terms] overflow-menu action on a document with a capitalized term used but never defined",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-11" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-defined-terms", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     },
@@ -1352,7 +1352,7 @@
       "channel": "click",
       "utterance": "[More actions… → Defined Terms] overflow-menu action re-invoked after the attorney edits a definition",
       "context": { "surface": "compose-workspace", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-11" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-defined-terms", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
     }
