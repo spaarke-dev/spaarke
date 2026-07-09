@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Revert collector membership-resolver bypass; re-flip pinned test; add collaborator smoke test</title>
+    <phase>B: Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>034</blocks>
+    <tags>bff-api, ai, testing</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies tests/** (TEST-MODIFYING override → code-review + adr-check unconditionally) AND BFF .cs on the hot path; brownfield root-cause revert of a deliberately-pinned bypass (Step 3.5.5 FULL + TEST-MODIFYING).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-subsystem brownfield revert with a line-referenced target and a pinned test to re-flip; Sonnet-5 is strong at brownfield root-cause work (Step 3.5.5b sonnet default; effort xhigh carries the depth).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>DailyBriefingCollector.cs overlap (chain 033→034→036→037); also re-flips a deliberately-pinned test — must land before 034.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Revert the DailyBriefingCollector membership-resolver bypass (lines 216-248) so candidate-set resolution routes through IMembershipResolverService again (relying on the R7 root-cause fix to MembershipFieldDiscoveryService that synthesizes Owner/Customer targets). Re-flip the pinned test DailyBriefingCollectorTests.CollectAsync_OwnershipGate_UsesOwnerScopedQueryExpressions_ResolverBypassed (line 238) — which PR #558 deliberately rewrote to ASSERT the bypass — so it re-asserts resolver ROUTING. Add a collaborator smoke test proving a sprk_assignedattorney1 user sees an assigned, non-owned matter in the briefing. Per FR-C4.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in the DailyBriefing collector, IMembershipResolverService / MembershipFieldDiscoveryService membership resolution, and Dataverse polymorphic Owner attribute metadata.
+  </role>
+
+  <goal>
+    DailyBriefingCollector resolves event/matter/project candidate IDs via IMembershipResolverService (the bypass at 216-248, including the direct ResolveOwnedIdsAsync owner-only fan-out at 236-239, is removed and replaced with the resolver-routed path). The pinned test at line 238 now asserts resolver routing (not bypass) and passes. A new collaborator smoke test asserts that a sprk_assignedattorney1 user sees a matter they are assigned to but do not own. No regression for the owner-scoped case. BFF builds 0 errors; publish size reported per NFR-01.
+  </goal>
+
+  <context>
+    <background>
+      R7 W12 introduced an Owner-only bypass (comment at lines 216-235) because the resolver returned 0 rows for Owner-based membership fields — LookupAttributeMetadata is sealed and OwnerAttributeMetadata doesn't inherit from it. R7 ALSO root-cause-fixed MembershipFieldDiscoveryService.ProjectLookupAttributeRows to synthesize Owner/Customer targets. With the root cause fixed, the bypass now silently under-scopes: collaborators (assigned attorneys/paralegals) never appear in the briefing. PR #558 deliberately rewrote the test to assert the bypass so that removing it forces this conversation. See notes/inbound-from-r7/03 item 1.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/03-code-review-followups.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Remove the bypass at DailyBriefingCollector.cs lines 216-248: replace the direct ResolveOwnedIdsAsync(...) owner-only fan-out (236-239) with resolver-routed candidate resolution through IMembershipResolverService (the ResolveMembershipsSafelyAsync path the bypass comment says to revert to). Update the log line at 246-248 to drop the "resolver bypass — R7 W12" wording.</constraint>
+    <constraint source="project">Re-flip the pinned test at DailyBriefingCollectorTests.cs:238 (CollectAsync_OwnershipGate_UsesOwnerScopedQueryExpressions_ResolverBypassed). It currently asserts the bypass; rewrite it to assert the collector ROUTES through IMembershipResolverService. Rename the test if the "_ResolverBypassed" suffix no longer describes it. This is a deliberate re-flip of a PR #558 pin — expected, not accidental.</constraint>
+    <constraint source="project">Add a collaborator smoke test: a systemUser who is a sprk_assignedattorney1 (collaborator, NOT owner) of a matter sees that matter in the collected briefing candidate set. The test must fail against the old bypass and pass against the resolver-routed path.</constraint>
+    <constraint source="project">MUST NOT regress the owner-scoped case: a user who owns a matter/project/event still sees it. Keep or add a test asserting owner-scoped inclusion still holds.</constraint>
+    <constraint source="ADR-013">Do not widen the AI boundary; IMembershipResolverService is an existing dependency of the collector — reuse it, do not inject new AI-internal types.</constraint>
+    <constraint source="root-CLAUDE.md-§10">BFF-touching task: state the placement decision (change stays inside the existing collector; no new service/DI), run dotnet publish -c Release, report compressed size + diff vs ~49.63 MB baseline (incl PDBs), confirm no new HIGH-severity CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/procedures/test-fixture-contracts.md</file>
+      <file>.claude/adr/ADR-013-ai-service-boundaries.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/03-code-review-followups.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check for Services/Ai/Narrators/DailyBriefingCollector.cs against the r2-core worktree (root §7); register the touch in projects/INDEX.md.</step>
+    <step order="2">Read DailyBriefingCollector.cs 205-280 and confirm the resolver-routed helper the bypass comment says to revert to (ResolveMembershipsSafelyAsync). Replace the bypass fan-out (236-239) with resolver-routed candidate resolution for events/matters/projects; update the log line (246-248).</step>
+    <step order="3">Verify MembershipFieldDiscoveryService's R7 root-cause fix (Owner/Customer target synthesis) is present so the resolver returns rows for Owner-based fields. If it is NOT present, escalate (see escalation) rather than restoring the bypass.</step>
+    <step order="4">Re-flip DailyBriefingCollectorTests.cs:238 to assert resolver routing; rename if the _ResolverBypassed suffix is now wrong. Update fixture setup per test-fixture-contracts.md (inspect fixture config/claims/mocks first if the resolver returns unexpected rows).</step>
+    <step order="5">Add the collaborator smoke test (sprk_assignedattorney1 user sees a non-owned assigned matter) and an owner-scoped regression test (owner still sees owned records).</step>
+    <step order="6">Build: dotnet build src/server/api/Sprk.Bff.Api/ (0 errors). Run: dotnet test for the collector test project; confirm re-flipped + smoke + owner tests pass.</step>
+    <step order="7">Run dotnet publish -c Release, report compressed size + diff vs 49.63 MB baseline (incl PDBs); dotnet list package --vulnerable → no new HIGH CVE.</step>
+    <step order="8">Update TASK-INDEX.md task 033 → completed; record any deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If reverting the bypass reintroduces a real reason it existed — the resolver still returns 0 rows for Owner-based fields (the R7 root-cause fix is absent or incomplete), or a measurable performance/correctness regression appears — STOP and escalate per root CLAUDE.md §6.5 (ADR/decision conflict). Do NOT silently keep the bypass; surface the conflict and choose a resolution path.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, and publish the BFF</tool>
+    <tool name="terminal">Run grep / conflict-check</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/033-collaborator-scope-and-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DailyBriefingCollector resolves event/matter/project candidate IDs through IMembershipResolverService; the bypass fan-out (ResolveOwnedIdsAsync at 236-239) and the "resolver bypass" log wording are removed — a grep of the collector shows no remaining bypass path for these three entities.</criterion>
+    <criterion testable="true">The test at DailyBriefingCollectorTests.cs:238 now asserts resolver routing (not bypass) and passes; if renamed, the new name reflects routing.</criterion>
+    <criterion testable="true">Given a systemUser who is a sprk_assignedattorney1 (collaborator) but NOT the owner of a matter, when the collector runs, then that matter is in the candidate set — the collaborator smoke test asserts this and fails against the old bypass.</criterion>
+    <criterion testable="true">Given a systemUser who OWNS a matter/project/event, when the collector runs, then that record is still included — an owner-scoped regression test passes.</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ exits 0 errors; the collector test project passes; publish size reported (absolute + diff vs 49.63 MB incl-PDBs); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-C4, plan.md Phase B.4, notes/inbound-from-r7/03 item 1. This is the chain root for the collector chain (033→034→036→037) — all four touch DailyBriefingCollector.cs and must run sequentially. The pinned test re-flip is intentional (PR #558 forced this conversation). Gate G-R5-C is browser UAT (assigned attorney sees their matter) — the unit smoke test is necessary but not gate-sufficient.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. TEST-MODIFYING rigor: code-review + adr-check run unconditionally at Step 9.5. Follow task-execute for BFF publish-size verification and the fixture-config-first inspection protocol.
+    </protocol>
+  </execution>
+</task>

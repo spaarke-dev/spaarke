@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Binary anchor resolution: itemRefs[] schema; widget drops non-resolving anchors</title>
+    <phase>A: Accuracy core</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>016</blocks>
+    <tags>bff-api, frontend, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'frontend'; touches .cs (TL;DR schema/resolution) and .tsx (TldrSection/buildSegments) on both hot paths (Step 3.5.5 FULL triggers).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Schema + drop-logic across a well-specified server/client seam with an explicit reference (buildSegments); no cross-cutting migration (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits TldrSection.tsx/buildSegments + the TL;DR schema in the composite/narrator — overlaps 013; must sequence after it.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Make TL;DR + takeaways emit against a schema with itemRefs[]: any named anchor must carry an itemId that resolves against items[]. The widget DROPS non-resolving anchors — no warn band, no withhold-by-score. Per FR-A5.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Comfortable across the BFF TL;DR schema/output layer and the React TldrSection renderer with Fluent v9 + ADR-021 tokens.
+  </role>
+
+  <goal>
+    The TL;DR/takeaways output schema includes an itemRefs[] array where every named anchor carries an itemId. At render (or a server pre-render pass), any anchor whose itemId is not present in items[] is dropped from the rendered output. No code path shows a groundedness-score warning or withholds content by score. A test injects a non-resolving anchor and asserts it is dropped (removed, not warned). Both BFF and shared-lib build; publish size reported; dark-mode verified.
+  </goal>
+
+  <context>
+    <background>
+      Correctness is by construction (operator ruling 2026-07-08): the TL;DR rests on deterministic facts (task 013), and any anchor the LLM emits must point at a real item via itemId. Resolution is binary — resolves or is dropped. There is deliberately NO probabilistic groundedness threshold and NO warn/withhold band (FR-A6 locks this). This task extends the task-013 schema with itemRefs[] and the client TldrSection/buildSegments drop logic.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCompositeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/TldrSection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeCitedText.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/types</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">The TL;DR/takeaways schema MUST include itemRefs[] where each named anchor carries an itemId. An anchor without an itemId, or with an itemId absent from items[], MUST be dropped (removed from rendered output). Resolution is binary — resolve or drop.</constraint>
+    <constraint source="project">NO code path may show a groundedness-score warning or withhold content by score. Do NOT add a warn band, a confidence badge, or a "low-confidence" affordance. A dropped anchor renders as if the anchor was never present.</constraint>
+    <constraint source="project">Item-level text (task 011) stays deterministic; this task only governs TL;DR/takeaway anchors. Do NOT reintroduce LLM narrative into item rows.</constraint>
+    <constraint source="ADR-021">TldrSection changes use Fluent v9 semantic tokens; dark mode verified. No hard-coded colors.</constraint>
+    <constraint source="root-CLAUDE.md-§10">BFF-touching task: state placement decision, run dotnet publish, report size + diff vs baseline, confirm no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-tokens.md</file>
+      <file>.claude/adr/ADR-039-coded-composite.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+    </files>
+    <patterns>
+      <pattern name="Segment construction + citation resolution" location="src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeCitedText.tsx">
+        buildSegments (@107) builds text+citation segments; extend the TldrSection render to resolve each anchor's itemId against items[] and skip (drop) unresolved anchors.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Extend the TL;DR/takeaways output schema (task-013 payload/result) with itemRefs[] carrying itemId per named anchor. Update the BRIEF-NARRATE-TLDR Action output schema (catalog, mirror-first) accordingly and record it in notes.</step>
+    <step order="2">Decide the drop point (server pre-render pass in the composite OR client TldrSection) and implement: resolve each anchor's itemId against items[]; drop anchors that do not resolve.</step>
+    <step order="3">Update TldrSection.tsx to render only resolved anchors; ensure a dropped anchor leaves no visual residue (no placeholder, no warning).</step>
+    <step order="4">Add a test that injects a TL;DR anchor with an itemId absent from items[] and asserts the anchor is dropped (removed) and no warning/withhold element is rendered.</step>
+    <step order="5">Verify ADR-021 tokens in TldrSection; run the dark-mode UI test.</step>
+    <step order="6">dotnet build + npm run build:prod + tests; run dotnet publish and report size.</step>
+    <step order="7">Update TASK-INDEX.md: task 014 completed. Record deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If implementing binary anchor drop appears to require any score/threshold to decide what to render, STOP and escalate per root CLAUDE.md §6.5 — a threshold conflicts with FR-A6 (no groundedness gate). Resolution must be binary itemId presence, nothing probabilistic.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish BFF</tool>
+    <tool name="npm">Build/test shared lib</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="Non-resolving anchor is dropped, not warned">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_dailybriefing</url>
+      <steps>
+        <step>Render the briefing with a TL;DR containing an anchor whose itemId is not in items[] (test fixture / mock)</step>
+        <step>Verify the TL;DR renders with that anchor absent</step>
+        <step>Verify NO warning badge, confidence indicator, or withheld-content placeholder appears anywhere</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>The non-resolving anchor is silently removed; no warn/withhold affordance is shown; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Verify TL;DR background/text/anchor-link colors adapt (no white/black block)</step>
+        <step>Verify anchor links use currentColor</step>
+      </steps>
+      <expected>TldrSection uses Fluent v9 semantic tokens in both light and dark per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCompositeService.cs</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/TldrSection.tsx</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/src/components/__tests__/TldrSection.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The TL;DR/takeaways schema includes itemRefs[] and each named anchor carries an itemId.</criterion>
+    <criterion testable="true">An anchor whose itemId is absent from items[] is dropped from the rendered output; a test injects such an anchor and asserts it is removed.</criterion>
+    <criterion testable="true">NO code path renders a groundedness-score warning or withholds content by score; the test asserts no warn/withhold element appears when an anchor is dropped.</criterion>
+    <criterion testable="true">A resolving anchor (itemId present in items[]) renders normally and links to that item.</criterion>
+    <criterion testable="true">TldrSection uses ADR-021 semantic tokens; the dark-mode UI test passes.</criterion>
+    <criterion testable="true">dotnet build + npm run build:prod succeed; publish size reported (absolute + diff vs baseline); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-A5 and plan.md Phase A.5. Depends on task 013. FR-A6 (task 015) locks the no-threshold posture this task must honor. buildSegments is at NarrativeCitedText.tsx @107; TldrSection.tsx renders the TL;DR block.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist, FULL-rigor Step 9.5 gates, Step 9.7 UI-test invocation, and BFF publish-size verification.
+    </protocol>
+  </execution>
+</task>

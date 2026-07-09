@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Project wrap-up (quality gates, test-diet, defer, lessons, README)</title>
+    <phase>Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>017, 024, 038, 040</dependencies>
+    <blocks>none</blocks>
+    <tags>wrap-up, quality</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Runs the project quality gates (code-review + adr-check) over project code and reconciles tests (test-diet); mandatory final task per task-create Step 3.7.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Orchestrates existing closeout skills with a prescriptive sequence; no novel design. Findings from the gates are surfaced for the operator, not independently re-architected.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Main-session-only: invokes /test-diet and /defer and edits TASK-INDEX.md, README.md, plan.md; must run after all other tasks complete.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Close out the project: run /code-review and /adr-check over the project's code and surface all findings; run
+    /test-diet to reconcile tests added/modified during the project; run /defer to file the deferred Monitored-For
+    schema (D-3) and the EventDetailSidePane @odata.bind fix as tracked GitHub issues; write
+    notes/lessons-learned.md; set the README status to Complete; mark plan.md complete; and verify TASK-INDEX shows
+    all tasks completed.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer running the mandatory project closeout. Familiar with the code-review, adr-check,
+    test-diet, and project-defer-issue-tracking skills and the Spaarke wrap-up conventions.
+  </role>
+
+  <goal>
+    All project quality gates run with findings surfaced; a test-diet report exists; the two deferred items are filed
+    as tracked GitHub issues and recorded in project notes; notes/lessons-learned.md written; README status set to
+    Complete; plan.md marked complete; and TASK-INDEX.md shows every task completed.
+  </goal>
+
+  <context>
+    <background>
+      This is the mandatory final task (task-create Step 3.7). R5 deferred the Monitored-For schema (D-3) and the
+      EventDetailSidePane @odata.bind one-liner (D-5) — both must be captured as tracked issues via /defer so they
+      are not lost. The project touched BFF hot paths, the Daily Briefing shared-lib components, tests, and a
+      skill-directive edit (jps-validate); the quality gates run over that surface. Gates are for surfacing findings
+      to the operator — this task does not silently re-architect on gate output.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r5/notes/lessons-learned.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/test-diet-report.md</file>
+      <file>projects/spaarke-daily-update-service-r5/README.md</file>
+      <file>projects/spaarke-daily-update-service-r5/plan.md</file>
+      <file>projects/spaarke-daily-update-service-r5/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Run /code-review and /adr-check over the project's changed code and surface their full findings in the transcript and/or project notes. This task does not require fixing every finding, but any Critical finding must be either fixed or explicitly recorded (with rationale) — do not silently drop Critical findings.</constraint>
+    <constraint source="project">Run /test-diet per root CLAUDE.md §7 project-close gate; it is read-only and emits git rm / git mv suggestions for the reviewer. Do NOT auto-execute deletions — record its output at projects/spaarke-daily-update-service-r5/notes/test-diet-report.md.</constraint>
+    <constraint source="project">Use /defer (project-defer-issue-tracking) to file EXACTLY these two deferred items as tracked GitHub issues: (1) the deferred Monitored-For schema (D-3, sprk_monitorreason / sprk_monitornotes — also referenced as "Monitored-For (D-3)"); (2) the EventDetailSidePane/TodoSection.tsx @odata.bind casing fix (D-5). Record both in project notes as well. Do not invent additional deferred items beyond what the project actually deferred.</constraint>
+    <constraint source="project">lessons-learned.md is APPENDED to the existing per-project file (one lesson per entry, one-line summary, both corrections and confirmed non-obvious approaches). Do not create a new central lessons store.</constraint>
+    <constraint source="project">Set README.md status to Complete (status, phase, progress 100%, completed date, changelog entry, graduation criteria checked) and set plan.md status to Complete with milestone statuses updated. Verify TASK-INDEX.md shows every task completed before marking the project complete.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run /code-review over the project's changed code; capture findings. Fix or explicitly record every Critical finding.</step>
+    <step order="2">Run /adr-check over the project's changed code; capture findings, including the documented frozen-engine Path A exception for the UpdateRecordNodeExecutor Choice-coercion change (ADR-039/ADR-013). Fix or explicitly record every violation.</step>
+    <step order="3">Run /test-diet; write its output to projects/spaarke-daily-update-service-r5/notes/test-diet-report.md. Do not auto-execute its git rm / git mv suggestions.</step>
+    <step order="4">Run /defer to file the two deferred items (Monitored-For schema D-3; EventDetailSidePane @odata.bind fix D-5) as tracked GitHub issues, and record them in project notes.</step>
+    <step order="5">Append lessons-learned entries to projects/spaarke-daily-update-service-r5/notes/lessons-learned.md (create if absent).</step>
+    <step order="6">Update README.md: status Complete, phase Complete, progress 100%, completed date, graduation criteria checked, changelog entry.</step>
+    <step order="7">Update plan.md: status Complete, milestone statuses updated.</step>
+    <step order="8">Verify TASK-INDEX.md shows every task completed; then mark this wrap-up task completed in TASK-INDEX.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If /code-review or /adr-check surfaces a Critical finding that cannot be fixed within this task's scope (e.g. an ADR conflict needing the §6.5 resolution protocol), STOP and escalate per CLAUDE.md §6 / §6.5 rather than marking the project Complete with an unresolved Critical finding.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET projects if a fix is required</tool>
+    <tool name="npm">Build/test TypeScript packages if a fix is required</tool>
+    <tool name="terminal">Run skills, gh CLI, and shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/test-diet-report.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/README.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/plan.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">/code-review and /adr-check have been run over the project code and their findings are surfaced (in transcript and/or notes); no Critical finding is left silently unrecorded.</criterion>
+    <criterion testable="true">projects/spaarke-daily-update-service-r5/notes/test-diet-report.md exists with the /test-diet output; no test file was auto-deleted by this task.</criterion>
+    <criterion testable="true">The Monitored-For schema (D-3) and the EventDetailSidePane @odata.bind fix (D-5) are each filed as a tracked GitHub issue via /defer and recorded in project notes.</criterion>
+    <criterion testable="true">projects/spaarke-daily-update-service-r5/notes/lessons-learned.md contains at least one appended lessons entry from this project.</criterion>
+    <criterion testable="true">README.md status is Complete (progress 100%, completed date set) and plan.md status is Complete.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows every task, including this one, marked completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Dependencies 017/024/038/040 are the last tasks of Phases A/D/B and the deploy-convention task respectively — all
+    project work must be landed before wrap-up. The frozen-engine Path A exception (UpdateRecordNodeExecutor Choice
+    coercion) is expected in adr-check output and is pre-approved via the PR description; record it as a documented
+    exception, not an unresolved violation. Only two items were deferred by R5 — do not file additional /defer issues.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

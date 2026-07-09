@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Remove per-channel LLM narrate leg; simplify composite to one TL;DR call</title>
+    <phase>A: Accuracy core</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>011,012,013</blocks>
+    <tags>bff-api, refactoring, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + modifies .cs files on the BFF hot path; brownfield surgical removal of an LLM leg from the coded composite (Step 3.5.5 FULL triggers).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-subsystem brownfield removal with an explicit line-referenced surgical target; no new pattern authoring or cross-cutting migration (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Chain root for Phase A; edits DailyBriefingNarrator.cs + DailyBriefingCompositeService.cs which 011/012/013 also depend on. Must land before them.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Remove the per-channel LLM narrate leg from DailyBriefingNarrator (the fan-out over req.Channels, lines ~197-231) and simplify DailyBriefingCompositeService so the coded workflow is exactly: collect → assemble deterministic view model → ONE TL;DR LLM call → render. After this task there must be exactly one LLM call per briefing run (the TL;DR call). Per FR-A3.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core Minimal API, the ADR-039/040 coded-composite + catalog-Action architecture, and the DailyBriefing narrator/collector/composite pipeline.
+  </role>
+
+  <goal>
+    DailyBriefingNarrator no longer calls the LLM per channel; the only remaining LLM invocation in the briefing coded path is the single BRIEF-NARRATE-TLDR call. DailyBriefingCompositeService's dispatch reduces to collect → deterministic view model → one TL;DR call → render. The BFF builds with 0 errors, all three narrator legs (RenderAsync/NarrateAsync/EmailAsync dispatch) still compile, existing narrator tests are updated to reflect single-call behavior and pass, and publish size is reported per NFR-01.
+  </goal>
+
+  <context>
+    <background>
+      R4 and R7 W12 tried prompt-steering to stop cross-item hallucination and failed. R5 mechanizes correctness: item facts render deterministically from source records; the LLM keeps only the TL;DR abstraction layer. The per-channel narrate leg (BRIEF-NARRATE-CHANNEL) is the primary hallucination source and is being removed. This task is the chain root — it removes the leg in code; task 011 makes the client render deterministically, task 012 retires the catalog Action, task 013 adds deterministic TL;DR scaffolding.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCompositeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">The briefing stays a coded composite (ICodedWorkflow). Do NOT introduce a new playbook, dispatch table, or manifest to replace the removed leg. The removal must leave the coded-composite posture intact — no new orchestration surface.</constraint>
+    <constraint source="ADR-013">Do NOT inject AI-internal types (IOpenAiClient, IPlaybookService) into CRUD code. The narrator already holds _llm (IOpenAiClient); keep that dependency internal to the narrator. Do not widen the AI boundary in this task.</constraint>
+    <constraint source="project">After this task, exactly ONE LLM call executes per briefing run: the BRIEF-NARRATE-TLDR call at DailyBriefingNarrator lines ~166-194. The per-channel CallLlmStructuredAsync fan-out (lines ~197-231) and its GetActionByCodeAsync(ChannelActionCode) resolution must be deleted from the execution path in this task.</constraint>
+    <constraint source="project">Do NOT delete the ChannelActionCode const or retire the catalog Action in THIS task — that is task 012. This task removes the call path; task 012 removes the now-unreferenced const + catalog row. Leaving the const temporarily unreferenced is expected.</constraint>
+    <constraint source="project">Preserve the deterministic view model produced by DailyBriefingCollector (items[]/channels[] in BuildNarrateRequest). Do NOT alter the collector's output shape here — only stop feeding channels through the LLM.</constraint>
+    <constraint source="root-CLAUDE.md-§10">BFF-touching task: state the placement decision (change stays in existing narrator; no new service/DI) in the PR/notes, run dotnet publish, report compressed size + diff vs ~49.63 MB baseline (incl PDBs), and confirm no new HIGH-severity CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-039-coded-composite.md</file>
+      <file>.claude/adr/ADR-013-ai-service-boundaries.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+    </files>
+    <patterns>
+      <pattern name="Single-call TL;DR narration" location="src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs">
+        The TL;DR call at lines ~166-194 is the reference for the retained single LLM leg: GetActionByCodeAsync(TldrActionCode) → CallLlmStructuredAsync → deserialize TldrResult. Keep this leg; delete the parallel channel fan-out that follows it.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run /conflict-check for Services/Ai/Narrators/DailyBriefing* against the r2-core worktree before editing (root §7 coordination); register touch in projects/INDEX.md.</step>
+    <step order="2">In DailyBriefingNarrator.cs, delete the per-channel narrate leg: the GetActionByCodeAsync(ChannelActionCode) resolution + OutputSchemaJson guard, the tldrContextForChannels construction, the req.Channels.Select(async ch => ... CallLlmStructuredAsync(ChannelActionCode ...)) fan-out, and its await/aggregation (lines ~197-231). Leave the ChannelActionCode const in place (task 012 removes it).</step>
+    <step order="3">Rewire the narrator's result assembly so channel/section content comes straight from the deterministic req.Channels view model (no LLM-authored per-channel narrative). Ensure the returned narrate result still carries the channels for the render/email legs to consume deterministically.</step>
+    <step order="4">In DailyBriefingCompositeService.cs, confirm the dispatch reduces to: CollectAsync → deterministic view model → single narrator TL;DR call → render. Remove any composite-side plumbing that only existed to carry per-channel LLM output.</step>
+    <step order="5">Update existing narrator tests (and any collector tests asserting per-channel LLM invocation) to assert exactly one LLM call per run and that channels pass through deterministically. Do NOT touch the resolver-bypass test at DailyBriefingCollectorTests.cs:238 (owned by Phase B FR-C4).</step>
+    <step order="6">Build: dotnet build src/server/api/Sprk.Bff.Api/ (0 errors). Run: dotnet test for the narrator/collector test projects.</step>
+    <step order="7">Run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/, measure compressed size, and record absolute size + diff vs 49.63 MB baseline (incl PDBs) in notes.</step>
+    <step order="8">Update TASK-INDEX.md: change task 010 status to completed.</step>
+    <step order="9">Record any deviations in projects/spaarke-daily-update-service-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If removing the per-channel leg breaks the RenderAsync / NarrateAsync / EmailAsync dispatch contract in a way not anticipated here (e.g. an email path depends on LLM-authored channel narrative), STOP and escalate per root CLAUDE.md §6 rather than re-adding an LLM call or improvising a new narrative source.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, and publish the BFF</tool>
+    <tool name="terminal">Run grep / conflict-check</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCompositeService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/010-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a briefing run on the coded entry path, exactly one LLM call executes (the BRIEF-NARRATE-TLDR call); a test asserts CallLlmStructuredAsync (or the _llm invocation) is called exactly once per run.</criterion>
+    <criterion testable="true">The per-channel narrate fan-out (req.Channels.Select(... CallLlmStructuredAsync(ChannelActionCode ...))) is deleted from DailyBriefingNarrator.cs; grep for CallLlmStructuredAsync in the narrator returns only the single TL;DR call site.</criterion>
+    <criterion testable="true">Channel/section content in the narrate result is sourced deterministically from req.Channels (the collector view model), with no LLM-authored per-channel narrative text.</criterion>
+    <criterion testable="true">DailyBriefingCompositeService dispatch is collect → deterministic view model → one TL;DR call → render, with no composite-side plumbing carrying per-channel LLM output.</criterion>
+    <criterion testable="true">All three legs (render/narrate/email) compile; dotnet build src/server/api/Sprk.Bff.Api/ exits 0 errors.</criterion>
+    <criterion testable="true">Existing narrator/collector tests are updated for single-call behavior and pass; the resolver-bypass test at DailyBriefingCollectorTests.cs:238 is NOT modified (out of scope — owned by FR-C4).</criterion>
+    <criterion testable="true">The ChannelActionCode const remains in the file (retirement is task 012); this task does not edit the catalog.</criterion>
+    <criterion testable="true">Publish size is measured and reported (absolute compressed size + diff vs 49.63 MB incl-PDBs baseline); no new HIGH-severity CVE from dotnet list package --vulnerable.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-A3 and plan.md Phase A.1. The single-call helper is CallLlmStructuredAsync (~lines 297-328). _llm is IOpenAiClient (internal to the narrator). This is the chain root: 011/012/013 depend on the deterministic view model being the sole channel source after this lands. Do not force-fit a new narration source — deterministic channels are the design.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the mandatory pre-execution checklist, FULL-rigor Step 9.5 gates (code-review + adr-check), and BFF publish-size verification.
+    </protocol>
+  </execution>
+</task>

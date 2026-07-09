@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Render channel/section item rows deterministically from items[] source fields</title>
+    <phase>A: Accuracy core</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>016</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .tsx renderers on the SpaarkeAi hot path (Spaarke.DailyBriefing.Components); Fluent UI + ADR-021 dark-mode surface (Step 3.5.5 FULL triggers).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component client change with an explicit reference (HighPrioritySection deterministic-card precedent); no cross-cutting migration (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Spaarke.DailyBriefing.Components client renderers shared with Phase D port and Phase B FR-C6 helper tests; must land after 010's view model is the sole channel source.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Make every channel/section item row in Spaarke.DailyBriefing.Components render only from items[] source fields (title/subject, party/sender, date, flags, regarding record name, server-composed link). Remove NarrativeBullet and NarrativeCitedText's dependency on any per-channel LLM (CHANNEL) output — after this task item rows contain zero LLM-authored text. Per FR-A1.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in React 18, TypeScript, and Fluent UI v9 with ADR-021 design tokens; familiar with the DailyBriefing component tree.
+  </role>
+
+  <goal>
+    NarrativeBullet.tsx and NarrativeCitedText.tsx (and any SubRow*/section renderer they feed) compose each row's title, party/sender, date, flags, regarding-record name, and link exclusively from the item's own source fields in items[]. No renderer reads an LLM-authored per-channel narrative string. Every link's navigation target is the record named in the same row (title/regarding/citation always from the same item — cross-item pairing structurally impossible). Jest + UI tests pass including an ADR-021 dark-mode check.
+  </goal>
+
+  <context>
+    <background>
+      Two rounds of prompt-steering failed to stop cross-item hallucination where a row's title, regarding name, and citation came from different items. R5 removes item-level LLM entirely: after task 010 the server emits a deterministic view model (items[]/channels[]) with no per-channel LLM narrative. This task makes the client render straight from those fields so a row is, by construction, a single item's facts. HighPrioritySection's mini-report cards (R7 W12) are the deterministic-card precedent to follow.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeCitedText.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/ActivityNotesSection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/SubRow.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/SubRowLink.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingRender.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/types</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Every color, spacing, and typography value in the touched renderers uses Fluent v9 semantic design tokens (tokens.color*, tokens.spacing*). No hard-coded hex/rgb; icons use currentColor. Dark mode must be verified.</constraint>
+    <constraint source="project">Each item row's title/subject, party/sender, date, flags, regarding record name, and link MUST all be read from the SAME item object in items[]. Do NOT compose a row from fields drawn across different items — pass one item to one row renderer so cross-item pairing is structurally impossible, not merely discouraged.</constraint>
+    <constraint source="project">Item rows MUST contain zero LLM-authored text. NarrativeBullet/NarrativeCitedText must not consume any per-channel CHANNEL narrative field. If buildSegments (NarrativeCitedText.tsx @107) currently splices LLM narrative around citations, replace it with deterministic segment construction from the item's own title + regarding + link fields.</constraint>
+    <constraint source="project">The link target rendered for a row MUST resolve to the record named by that row (server-composed link from the item). Do NOT synthesize link URLs client-side from narrative text.</constraint>
+    <constraint source="root-CLAUDE.md-§11">This task ONLY modifies existing renderers — no new component tree. Do NOT introduce a parallel component. If a new shared helper seems needed, extend the existing renderer/util instead (§11 default-to-reuse).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-tokens.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+    </files>
+    <patterns>
+      <pattern name="Deterministic mini-report card" location="src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx">
+        HighPrioritySection composes each card from source fields (actionToBadge/reasonToLabel map enum flags to labels deterministically). Mirror this pattern: one item → one row, fields read directly, no LLM string.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Inspect the items[]/channels[] type in src/types to confirm the per-item source fields available after task 010 (title/subject, party/sender, date, flags, regarding name, server-composed link).</step>
+    <step order="2">Rewrite NarrativeBullet.tsx to render a row purely from a single item's source fields; remove any prop/branch that consumed per-channel LLM narrative.</step>
+    <step order="3">Rewrite NarrativeCitedText.buildSegments (@107) so segments (text + citation + link) are constructed deterministically from the same item's title/regarding/link — no LLM narrative splicing.</step>
+    <step order="4">Verify SubRow*/ActivityNotesSection renderers pass exactly one item per row renderer; fix any call site that assembles a row from multiple items.</step>
+    <step order="5">Confirm all touched components use ADR-021 tokens (no hard-coded colors); verify icons use currentColor.</step>
+    <step order="6">Add/update Jest tests: a row renders from a single item; the link target equals the item's server-composed link; buildSegments produces segments only from the passed item.</step>
+    <step order="7">Run npm test (Jest) for the shared lib; run npm run build:prod to confirm the component builds.</step>
+    <step order="8">Update TASK-INDEX.md: task 011 status to completed. Record deviations in projects/spaarke-daily-update-service-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the items[] view model emitted after task 010 does NOT carry a source field a row needs (e.g. no server-composed link, no regarding name), STOP and escalate per root CLAUDE.md §6 — do not synthesize the missing fact on the client (that would reintroduce a non-deterministic source).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build and test the shared component library</tool>
+    <tool name="terminal">Run grep / jest</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="Item rows render deterministically">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_dailybriefing</url>
+      <steps>
+        <step>Open the Daily Briefing surface on spaarkedev1</step>
+        <step>Verify each channel/section row shows a title, party/sender, date, and regarding name</step>
+        <step>Click a row's link and confirm the opened record matches the row's title/regarding exactly</step>
+        <step>Check the browser console for JavaScript errors</step>
+      </steps>
+      <expected>Every row's link navigates to the record named in that row; no console errors; no cross-item mismatch</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Verify row backgrounds adapt (no white block in dark mode)</step>
+        <step>Verify row text and citation link colors adapt (no black-on-dark)</step>
+        <step>Verify icons use currentColor</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens per ADR-021 in both light and dark</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeCitedText.tsx</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/src/components/__tests__/NarrativeCitedText.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a rendered briefing, item rows contain zero LLM-authored text; grep of the renderers shows no consumption of a per-channel CHANNEL narrative field.</criterion>
+    <criterion testable="true">Given any item row, clicking its link navigates to the record named in that same row (title/regarding); a Jest test asserts the rendered link target equals the item's server-composed link.</criterion>
+    <criterion testable="true">A row renderer receives exactly one item; title, regarding name, and citation for a row always originate from that one item — a test passing a two-item array proves each row's fields come from a single item (cross-item pairing structurally impossible).</criterion>
+    <criterion testable="true">buildSegments (NarrativeCitedText.tsx) constructs segments only from the passed item's fields; a test asserts no segment text is sourced outside that item.</criterion>
+    <criterion testable="true">All touched components use ADR-021 semantic tokens (no hard-coded hex/rgb); the dark-mode UI test passes.</criterion>
+    <criterion testable="true">npm test (Jest) passes and npm run build:prod succeeds for the shared lib.</criterion>
+    <criterion testable="true">No new component tree is introduced (§11); only the listed existing renderers are modified.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-A1 and plan.md Phase A.2. Depends on task 010 (deterministic view model is the sole channel source). buildSegments is at NarrativeCitedText.tsx @107; isEmptyResponse is at useBriefingRender.ts @60 (FR-C6 adds its Jest tests — not this task). Use build:prod, NOT build (root §12 / AP-1).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist, FULL-rigor Step 9.5 gates, and Step 9.7 UI-test invocation if Chrome integration is enabled.
+    </protocol>
+  </execution>
+</task>

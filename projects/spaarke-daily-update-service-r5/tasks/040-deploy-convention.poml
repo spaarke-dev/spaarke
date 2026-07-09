@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Adopt master-sync-first deploy convention + branch-behind warning (FR-E1, D-6)</title>
+    <phase>E: Deploy convention</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>devops, deploy, docs</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Documents a binding convention (new notes file) and may add a small warning snippet to an existing deploy script; has explicit project constraints. Not FULL — no new deploy mechanism, no application code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified: document a stated convention + add a one-line branch-behind check from an explicit sequence; no architectural design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Document master-sync-first as a binding project convention (in the project notes) and add a one-line
+    "branch behind origin/master" warning check to any deploy script this project actually touches. Do NOT build a
+    new deploy mechanism — the reserved-window flag-file idea was rejected; this is convention + a one-line warning
+    only. This is FR-E1 / D-6.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer establishing a deploy-safety convention. Comfortable with PowerShell deploy scripts
+    under scripts/Deploy-*.ps1 and git branch-behind detection (git fetch + rev-list).
+  </role>
+
+  <goal>
+    A convention doc at projects/spaarke-daily-update-service-r5/notes/deploy-convention.md stating the
+    master-sync-first rule and the standard deploy sequence, a specified one-line branch-behind-origin/master warning
+    snippet, that snippet added to any Deploy-*.ps1 script this project touches (Deploy-BffApi.ps1,
+    Deploy-SpaarkeAi.ps1, Deploy-DailyBriefing.ps1 are the relevant candidates), and a stated PR-description
+    obligation for deploy-touching work.
+  </goal>
+
+  <context>
+    <background>
+      During R7 W12, a concurrent team's CI auto-deploy briefly overwrote R7's Daily Briefing widget bundle in
+      spaarkedev1 because two worktrees deployed to the same shared BFF + widget environment without cross-team
+      awareness. The adopted governance rule is: ALWAYS sync origin/master into the worktree BEFORE building and
+      deploying locally, so a local deploy never overwrites in-flight merged work. R5 formalizes this as a binding
+      convention and adds a lightweight branch-behind warning to touched deploy scripts. The operator rejected a new
+      deploy mechanism (reserved-window flag file); this task adds no new mechanism.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r5/notes/deploy-convention.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>scripts/Deploy-SpaarkeAi.ps1</file>
+      <file>scripts/Deploy-DailyBriefing.ps1</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/05-deploy-safety-governance.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Do NOT build a new deploy mechanism. No reserved-window flag file, no new GitHub Actions workflow, no deploy-namespace scheme, no new script. The deliverable is a convention doc plus a one-line branch-behind warning snippet.</constraint>
+    <constraint source="project">The warning is a WARNING, not a hard stop: if the local branch is behind origin/master, the script prints a clearly-marked warning line and continues. It MUST NOT block, prompt, or abort the deploy. Keep it to a minimal git fetch + behind-count check (e.g. git rev-list --count HEAD..origin/master) emitting one Write-Warning line.</constraint>
+    <constraint source="project">Only add the snippet to a deploy script if THIS project touches that script. The relevant candidates are the Daily Briefing / BFF / SpaarkeAi deploy scripts (Deploy-BffApi.ps1, Deploy-SpaarkeAi.ps1, Deploy-DailyBriefing.ps1). Do not add the snippet to unrelated Deploy-*.ps1 scripts. If the project ends up touching none of these scripts, specify the reusable snippet in the doc and state that no script was edited.</constraint>
+    <constraint source="project">The convention doc MUST state: the master-sync-first rule, the standard deploy sequence (git fetch -> merge --ff-only / rebase origin/master -> git log origin/master..HEAD -> build -> deploy), and the PR-description obligation (deploy-touching PRs must state the master-sync-first convention was followed).</constraint>
+    <constraint source="project">Any script edit MUST be additive and idempotent — the warning block runs once near the start of the script and does not alter existing deploy behavior on the success path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/05-deploy-safety-governance.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="Master-sync-first deploy sequence" location="projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/05-deploy-safety-governance.md">
+        git fetch origin; git merge --ff-only origin/master (or rebase if diverged); git log origin/master..HEAD --oneline; build; deploy.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read note 05-deploy-safety-governance.md and .claude/constraints/azure-deployment.md for the governance rule and deploy-script conventions.</step>
+    <step order="2">Write projects/spaarke-daily-update-service-r5/notes/deploy-convention.md: state master-sync-first as a binding project convention, the standard deploy sequence, the reusable one-line branch-behind warning snippet (PowerShell), and the PR-description obligation. Note explicitly that no new deploy mechanism is introduced (reserved-window flag file rejected).</step>
+    <step order="3">Determine which of Deploy-BffApi.ps1 / Deploy-SpaarkeAi.ps1 / Deploy-DailyBriefing.ps1 this project deploys through; add the branch-behind warning snippet near the start of each such script (git fetch origin then a behind-count check emitting Write-Warning when behind, continuing regardless).</step>
+    <step order="4">Verify each edited script still parses (e.g. PowerShell parse check) and that the warning path does not abort.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status to completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run git and PowerShell parse/verification commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/deploy-convention.md</output>
+    <output type="code">scripts/Deploy-*.ps1 (only those this project touches; may be none)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">projects/spaarke-daily-update-service-r5/notes/deploy-convention.md exists and states the master-sync-first convention, the standard deploy sequence, and the PR-description obligation.</criterion>
+    <criterion testable="true">The doc specifies a concrete one-line branch-behind-origin/master warning snippet (PowerShell).</criterion>
+    <criterion testable="true">If this project touches a deploy script, that script contains the branch-behind warning snippet; if it touches none, the doc explicitly states no script was edited and why.</criterion>
+    <criterion testable="true">Any added snippet emits a warning and CONTINUES — it does not block, prompt, or abort the deploy.</criterion>
+    <criterion testable="true">No new deploy mechanism (flag file, workflow, namespace scheme, or new script) is introduced, and no unrelated Deploy-*.ps1 script is modified.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Behind-count recipe: git fetch origin; then $behind = git rev-list --count HEAD..origin/master; if $behind -gt 0
+    emit Write-Warning "Branch is $behind commit(s) behind origin/master — sync master before deploying to avoid
+    overwriting in-flight work." Keep it minimal and non-blocking. The reserved-window flag-file idea from note 05
+    section "Additional guardrails" was REJECTED — do not implement it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

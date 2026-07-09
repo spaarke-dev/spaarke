@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Confirm and lock the groundedness guardrail (no score gates briefing content)</title>
+    <phase>A: Accuracy core</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, ai, testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification + documentation task with a guardrail test; no production behavior change (Step 3.5.5 STANDARD: has explicit constraints, tests touch). Note: adding a test invokes TEST-MODIFYING gates.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Grep-driven confirmation + a short assertion test + a note; mechanical, low-ambiguity (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Confirm and lock the guardrail: no Daily Briefing code path gates user-facing content on a groundedness score. GroundednessCheckService stays out of the briefing path (chat-only), usable only as an eval/telemetry signal. Add a guardrail test and a short note documenting the posture. Per FR-A6.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Familiar with the chat SafetyPipelineMiddleware, GroundednessCheckService wiring, and the DailyBriefing coded path.
+  </role>
+
+  <goal>
+    A grep-backed confirmation that GroundednessCheckService is referenced only under Chat safety middleware and never in DailyBriefing*; a guardrail test asserting no briefing code path warns or withholds user-facing content based on a groundedness score; and a short note documenting the eval/telemetry-only posture. No production behavior change.
+  </goal>
+
+  <context>
+    <background>
+      The operator rejected a groundedness threshold / warn-withhold band (2026-07-08): existence is not probabilistic; correctness is by construction (deterministic item rows + deterministic-fact TL;DR + binary anchor resolution). GroundednessCheckService is wired ONLY into the chat SafetyPipelineMiddleware today. This task locks that boundary so a future change cannot silently route the briefing through a score gate.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Safety/GroundednessCheckService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCompositeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">GroundednessCheckService MUST be referenced only under Chat middleware (SafetyPipelineMiddleware). It MUST NOT appear in any DailyBriefing* file. Confirm via grep and document the result.</constraint>
+    <constraint source="project">No user-facing briefing content may be warned or withheld based on a groundedness score. The guardrail test MUST fail if any DailyBriefing code path introduces a score-based warn/withhold.</constraint>
+    <constraint source="project">Do NOT delete GroundednessCheckService — it is retained for chat safety and permitted as an eval/telemetry signal. This task confirms placement; it does not remove the service.</constraint>
+    <constraint source="ADR-032">If GroundednessCheckService is feature-gated, its Null-Object / kill-switch posture stays chat-scoped; do not extend a gate into the briefing path.</constraint>
+    <constraint source="root-CLAUDE.md-§10">BFF-touching (test-only + doc): report publish size unchanged; confirm no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Chat-only safety wiring" location="src/server/api/Sprk.Bff.Api/Services/Ai/Safety/GroundednessCheckService.cs">
+        Reference the existing chat SafetyPipelineMiddleware registration as the ONLY permitted consumer; the guardrail asserts the briefing path has no such registration.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">grep -rn "GroundednessCheckService" src/ and enumerate every reference; confirm each is under Chat safety middleware, not DailyBriefing*.</step>
+    <step order="2">Add a guardrail test (unit or architecture-style) asserting no DailyBriefing* type references GroundednessCheckService and no briefing code path warns/withholds by score.</step>
+    <step order="3">Write a short note (notes/015-groundedness-posture.md) documenting the eval/telemetry-only posture and the grep evidence.</step>
+    <step order="4">Run the test suite; confirm the guardrail test passes; report publish size unchanged + no new HIGH CVE.</step>
+    <step order="5">Update TASK-INDEX.md: task 015 completed. Record deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If grep finds GroundednessCheckService already referenced inside a DailyBriefing* file (i.e. the guardrail is already violated), STOP and escalate per root CLAUDE.md §6 — removing a live briefing-path dependency is a behavior change beyond this confirmation task's scope.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test BFF</tool>
+    <tool name="terminal">grep for references</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingGroundednessGuardrailTests.cs</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/015-groundedness-posture.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep -rn "GroundednessCheckService" src/ confirms references only under Chat safety middleware; zero references in any DailyBriefing* file (evidence in the note).</criterion>
+    <criterion testable="true">A guardrail test asserts no DailyBriefing code path warns or withholds user-facing content based on a groundedness score, and the test passes.</criterion>
+    <criterion testable="true">A note documents the eval/telemetry-only posture with the grep evidence.</criterion>
+    <criterion testable="true">GroundednessCheckService is NOT deleted (retained for chat + eval/telemetry).</criterion>
+    <criterion testable="true">Test suite passes; publish size unchanged; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-A6 and plan.md Phase A.6. GroundednessCheckService is wired ONLY into chat SafetyPipelineMiddleware today (plan.md Architecture Context). This task is confirm-and-lock, not remove. Adding a test triggers TEST-MODIFYING rigor (code-review + adr-check unconditionally) per root §8.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute; because this task touches tests/**, run the TEST-MODIFYING Step 9.5 gates (code-review + adr-check) unconditionally.
+    </protocol>
+  </execution>
+</task>

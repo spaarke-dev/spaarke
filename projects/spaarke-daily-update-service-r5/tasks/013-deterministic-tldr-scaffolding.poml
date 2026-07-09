@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Compute TL;DR factual scaffolding deterministically; LLM composes prose only</title>
+    <phase>A: Accuracy core</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>014,016</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; brownfield contract design on the BFF hot path (collector/composite → TL;DR payload) touching .cs files (Step 3.5.5 FULL triggers).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deterministic-fact computation + prompt-payload shaping within one subsystem, following the two-layer narrative pattern doc as reference; not a cross-cutting migration (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits DailyBriefingCollector.cs + DailyBriefingCompositeService.cs + DailyBriefingNarrator TL;DR payload — overlaps 010/014; must sequence after 010.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Compute the TL;DR's factual scaffolding — counts, dates, record names, "you have N …" figures — deterministically in the collector/composite from source records, and pass it to the BRIEF-NARRATE-TLDR call as ground truth. The LLM composes concise prose and prioritizes only; it never introduces a fact of its own. Per FR-A4.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in the DailyBriefing collector/composite pipeline and the two-layer playbook LLM-output pattern (deterministic Layer-1 facts + Layer-2 prose).
+  </role>
+
+  <goal>
+    The TL;DR LLM request payload carries deterministically-computed facts (counts, dates, record names, aggregate "you have N …" figures) built in DailyBriefingCollector/DailyBriefingCompositeService from source records. The BRIEF-NARRATE-TLDR system prompt instructs the LLM to compose prose and prioritize over ONLY the provided facts and to introduce no new fact. A test asserts the TL;DR output's counts/dates equal the deterministic view-model counts/dates across fixtures. BFF builds 0 errors; publish size reported.
+  </goal>
+
+  <context>
+    <background>
+      Per the operator ruling (2026-07-08) correctness is by construction, not by score. The TL;DR stays LLM-authored for prose/prioritization but must rest only on facts the code computes. This task adds the deterministic scaffolding layer (SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md Layer 1) that feeds the single TL;DR call retained by task 010. Task 014 then adds itemRefs[] binary anchor resolution on top of this schema.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCompositeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every fact the TL;DR asserts — counts, dates, record names, "you have N …" totals — MUST be computed in C# from source records (collector/composite) and passed into the TL;DR payload. The TL;DR prompt MUST NOT ask the LLM to count, date, or name anything itself.</constraint>
+    <constraint source="project">The TL;DR system prompt MUST instruct the LLM to compose prose and prioritize over the provided facts ONLY, and to never introduce a fact not present in the provided scaffolding. The TL;DR must never assert a fact absent from the deterministic view model.</constraint>
+    <constraint source="ADR-039">Compute the scaffolding inside the existing coded composite (collector/composite). Do NOT add a new orchestration node or playbook to compute facts.</constraint>
+    <constraint source="ADR-015">Respect briefing data tiers/budgets — the scaffolding payload must not exceed the TL;DR call's token budget; aggregate rather than dumping every record.</constraint>
+    <constraint source="root-CLAUDE.md-§11">Prefer extending BuildNarrateRequest / the existing collector methods over adding a new service. If a new fact-computation helper is needed, justify it (three-question template) in the PR.</constraint>
+    <constraint source="root-CLAUDE.md-§10">BFF-touching task: state placement decision, run dotnet publish, report size + diff vs 49.63 MB baseline, confirm no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-039-coded-composite.md</file>
+      <file>.claude/adr/ADR-015-briefing-tiers.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Two-layer narrative output" location="docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md">
+        Layer 1 (orchestrator/collector) computes deterministic facts; Layer 2 (PromptSchemaRenderer ## Input) feeds them to the LLM as ground truth. Daily Briefing is the shipped reference — follow it for the TL;DR scaffolding payload.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">In DailyBriefingCollector/composite, compute the TL;DR scaffolding from the already-collected items[]: total notification count, per-category counts, key dates, and the record names the TL;DR should be able to reference. Reuse existing collector aggregates where present (BuildNarrateRequest ~1216, ToChannel ~1273).</step>
+    <step order="2">Extend the TL;DR payload (DailyBriefingNarrator tldrPayload ~lines 179-190) to carry this computed scaffolding as explicit ground-truth fields.</step>
+    <step order="3">Update the BRIEF-NARRATE-TLDR system prompt (catalog Action, BA editor/MCP, mirror-first) to instruct: compose prose + prioritize over the provided facts only; introduce no new fact. Record the prompt change in notes.</step>
+    <step order="4">Add a test asserting the TL;DR output counts/dates equal the deterministic view-model counts/dates across ≥2 fixtures (including a multi-category fixture).</step>
+    <step order="5">dotnet build (0 errors); run narrator/collector tests; run dotnet publish and report size.</step>
+    <step order="6">Update TASK-INDEX.md: task 013 completed. Record deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a fact the TL;DR needs (e.g. a per-category count or a record name) is not derivable deterministically from the collector's source records, STOP and escalate per root CLAUDE.md §6 — do not let the LLM compute or infer it (that violates the determinism contract).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish BFF</tool>
+    <tool name="terminal">grep / run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The TL;DR request payload carries deterministically-computed counts, dates, and record names built in the collector/composite from source records.</criterion>
+    <criterion testable="true">A test asserts the TL;DR output's counts and dates equal the deterministic view-model counts and dates across ≥2 fixtures.</criterion>
+    <criterion testable="true">The BRIEF-NARRATE-TLDR system prompt instructs prose-composition + prioritization over provided facts only, with an explicit "introduce no new fact" instruction (change recorded in notes).</criterion>
+    <criterion testable="true">No fact computation (count/date/name) is delegated to the LLM; grep of the TL;DR prompt/payload shows facts are supplied, not requested.</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ exits 0 errors; publish size reported (absolute + diff vs 49.63 MB baseline); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-A4 and plan.md Phase A.4. Depends on task 010. This is the Layer-1 deterministic-fact half of the two-layer pattern; task 014 adds itemRefs[] binary anchor resolution on the same schema. ClassifyAction is at DailyBriefingCollector.cs:574.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist, FULL-rigor Step 9.5 gates, and BFF publish-size verification.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Port approved design into existing Spaarke.DailyBriefing.Components (extend, no parallel tree) (FR-D4)</title>
+    <phase>D: Visual redesign</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>022, 011</dependencies>
+    <blocks>024</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation on production shared-lib React/Fluent v9 components (.tsx); tags include frontend/fluent-ui.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The design decision is already made (approved variant + concrete token/spacing/layout spec from task 022); this is a faithful implementation port into named existing files, not open-ended design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the shared client lib Spaarke.DailyBriefing.Components (SpaarkeAi hot path); overlaps Phase-A/B work on the same components — must be sequenced.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Port the task-022 operator-approved design into the EXISTING Spaarke.DailyBriefing.Components components by
+    extending them (no parallel component tree, no new widget framework) under Fluent v9 + ADR-021 design tokens,
+    verified in light and dark. Preserve the D-1/D-2 fact contract — the redesign changes PRESENTATION only, never
+    the data contract (deterministic item rows, TL;DR-on-facts, resolving-anchor links). This is FR-D4; it lands
+    after the FR-A1 deterministic view-model (task 011) is stable.
+  </prompt>
+
+  <role>
+    SPAARKE platform frontend developer. Expert in React 18 + Fluent UI v9, the Spaarke.DailyBriefing.Components
+    component set, ADR-021 semantic-token theming, and faithful implementation of an approved design spec into
+    existing components without introducing parallel structures.
+  </role>
+
+  <goal>
+    The task-022 approved design is implemented by modifying the existing Spaarke.DailyBriefing.Components components
+    (DailyBriefingApp, HighPrioritySection/"Critical Today", TldrSection, item renderers, SubRow*) under Fluent v9 +
+    ADR-021 tokens; it renders identically in intent to the approved screenshots in light and dark; zero new parallel
+    component tree is introduced; and the D-1/D-2 item-level fact contract is unchanged (links still resolve to the
+    correct records; no LLM in item rows).
+  </goal>
+
+  <context>
+    <background>
+      Per FR-D4 the approved harness design lands by EXTENDING the existing shared lib — no parallel tree, no new
+      widget framework (root CLAUDE.md §11). The port must preserve the accuracy contract established in Phase A:
+      item rows are deterministic (task 010/011 view-model), the TL;DR asserts only deterministic facts, and TL;DR
+      anchors that do not resolve are dropped. This task changes only how that data is presented. It depends on task
+      011 (deterministic view-model) being stable so the port targets the final data shape, and on task 022 (the
+      approved design + concrete port spec).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/TldrSection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeCitedText.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/SubRow.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/SubRowLink.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/ChannelHeading.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/DigestHeader.tsx</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/design/APPROVED.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Implement the approved design by MODIFYING the existing Spaarke.DailyBriefing.Components components listed in relevant-files. MUST NOT create a parallel component tree, a duplicate briefing renderer, or a new widget framework (root CLAUDE.md §11 / spec MUST rules).</constraint>
+    <constraint source="ADR-021">Use Fluent v9 semantic tokens for all spacing/typography/color per the task-022 approved port spec. MUST NOT hard-code hex colors. MUST verify dark mode renders correctly (no white surfaces / black text / non-token icons in dark).</constraint>
+    <constraint source="project">Preserve the D-1/D-2 fact contract exactly: item rows remain composed only from deterministic source fields (zero LLM in item rows); item links still resolve to the correct detail records; TL;DR still asserts only deterministic facts and drops non-resolving anchors. The redesign is PRESENTATION-ONLY — do NOT change the view-model/data contract, prop shapes that carry facts, or the anchor-resolution logic.</constraint>
+    <constraint source="project">Match the task-022 APPROVED.md port spec (named tokens, spacing scale, layout region structure/order, TL;DR + "Critical Today" placement/prominence). Do NOT re-open the design or substitute your own layout.</constraint>
+    <constraint source="project">Surface the "Critical Today" framing as the user-facing label/treatment of the existing High-Priority section (presentation/naming), not a new data surface.</constraint>
+    <constraint source="ADR-022">Follow PCF/shared-lib platform-library conventions; no new heavy dependencies added for styling.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/design/APPROVED.md</file>
+      <file>projects/spaarke-daily-update-service-r5/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r5/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Mini-report card (Critical Today)" location="src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx">
+        Extend this existing deterministic card for the "Critical Today" treatment; do not fork it.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>This task MODIFIES existing Spaarke.DailyBriefing.Components components (DailyBriefingApp, HighPrioritySection, TldrSection, item renderers). No new component surface is intended.</existing>
+    <extension>Yes — extend the existing components in place. A parallel tree is explicitly forbidden by FR-D4 / root CLAUDE.md §11.</extension>
+    <cost-of-doing-nothing>N/A — modification-only task. If a net-new component proves unavoidable during the port, it MUST cite a specific BUILD-A-NEW-WORKSPACE-WIDGET.md archetype and answer the three-question template before being added; otherwise it is out of scope.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check for Spaarke.DailyBriefing.Components (r2-core + Phase-A/B same-file coordination) and confirm task 011's deterministic view-model is merged/stable before porting.</step>
+    <step order="2">Read notes/design/APPROVED.md for the approved variant and its concrete port spec (tokens, spacing, layout regions, TL;DR + Critical Today placement).</step>
+    <step order="3">Map each approved layout region to the existing component(s) that render it (DailyBriefingApp composition; TldrSection; HighPrioritySection → "Critical Today"; item renderers/SubRow*); plan edits that extend those components rather than replacing them.</step>
+    <step order="4">Apply the presentation changes using Fluent v9 semantic tokens per the port spec — restyle/recompose within the existing components; rename the High-Priority section's user-facing label to "Critical Today"; elevate TL;DR + Critical Today prominence. Do NOT touch fact-carrying prop shapes, the view-model, or anchor-resolution logic.</step>
+    <step order="5">Verify the item-level fact contract is intact: item text still derives from deterministic source fields, each item link resolves to the correct record, and non-resolving TL;DR anchors are still dropped.</step>
+    <step order="6">Build the shared lib and run its unit/Jest tests; add/adjust Jest tests only where presentation logic changed (KEEP paths), leaving fact-contract tests intact.</step>
+    <step order="7">Verify light AND dark rendering against the approved screenshots; confirm no hard-coded colors (ADR-021).</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to completed. If any deviation from the approved spec was necessary, document it in projects/spaarke-daily-update-service-r5/notes/design/port-deviations.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If porting the approved design appears to REQUIRE changing a fact-carrying prop, the deterministic view-model, or the anchor-resolution logic (i.e. it cannot be done presentation-only), STOP and escalate per root CLAUDE.md §6 — do NOT alter the D-1/D-2 fact contract to make the visual fit.</trigger>
+    <trigger>If a net-new component seems unavoidable, STOP and justify it against a BUILD-A-NEW-WORKSPACE-WIDGET.md archetype (three-question template) before adding it, per root CLAUDE.md §11.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build the shared lib and run Jest tests (npm install --legacy-peer-deps per root CLAUDE.md §12)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/*.tsx (modified in place)</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/ Jest tests updated for changed presentation logic (KEEP paths)</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/design/port-deviations.md (only if deviations occurred)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The task-022 approved design is implemented in the EXISTING Spaarke.DailyBriefing.Components files (modification in place); no parallel component tree or new widget framework was added.</criterion>
+    <criterion testable="true">The redesigned briefing renders correctly in both light and dark using Fluent v9 semantic tokens; grep for hard-coded hex colors in touched files returns none (ADR-021 dark-mode check passes).</criterion>
+    <criterion testable="true">The item-level fact contract is unchanged: item rows derive only from deterministic source fields (no LLM in rows), and each item link still resolves to the correct detail record.</criterion>
+    <criterion testable="true">The TL;DR still asserts only deterministic facts and still drops non-resolving anchors (anchor-resolution logic unchanged).</criterion>
+    <criterion testable="true">The "Critical Today" framing is applied to the existing High-Priority section as presentation/label only (no new data surface).</criterion>
+    <criterion testable="true">The shared lib builds and its unit/Jest tests pass; any net-new component (if unavoidable) cites a BUILD-A-NEW-WORKSPACE-WIDGET.md archetype.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Redesigned briefing renders">
+      <steps>
+        <step>Render DailyBriefingApp (harness or code page) with the redesigned components against mixed-item data</step>
+        <step>Verify the layout matches the approved variant (TL;DR band, Critical Today section, item rows)</step>
+        <step>Check the browser console for JavaScript errors</step>
+      </steps>
+      <expected>The redesigned briefing renders per the approved design with no console errors.</expected>
+    </test>
+    <test name="Item links resolve to correct records">
+      <steps>
+        <step>Click each item's navigation affordance</step>
+        <step>Verify navigation targets the item's own detail record id (matching the row text)</step>
+      </steps>
+      <expected>Every item link resolves to the correct record; the fact contract is preserved.</expected>
+    </test>
+    <test name="TL;DR and Critical Today prominent">
+      <steps>
+        <step>Confirm the TL;DR and Critical Today sections are the most prominent elements in the redesigned briefing</step>
+      </steps>
+      <expected>TL;DR + Critical Today are surfaced/highlighted per FR-D2.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Verify background colors adapt (no white in dark mode)</step>
+        <step>Verify text colors adapt (no black in dark mode)</step>
+        <step>Verify icons/badges use Fluent v9 semantic tokens (currentColor / token-driven), no hard-coded hex</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens per ADR-021; no hard-coded colors in touched files.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Presentation-only port: the accuracy work (tasks 010/011, TL;DR/anchor logic) is the load-bearing contract — this
+    task must not touch it. Depends on task 011 being stable so the port targets the final deterministic view-model.
+    Extend the existing HighPrioritySection for "Critical Today" rather than forking it. Browser UAT of the deployed
+    result is task 024 (G-R5-D).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
