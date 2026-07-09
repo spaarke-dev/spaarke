@@ -1,0 +1,127 @@
+<task id="033" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-16 pending track-change materialization from ledger (compose disposition)</title>
+    <phase>3 Inline Editing UX</phase>
+    <gate>red</gate>
+    <status>blocked</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>phase3-gated</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>031,016</deps>
+    <tags>frontend,fluent-ui,react,testing</tags>
+    <estimated-effort>high</estimated-effort>
+    <blocked-on>core R2 Phase A0 — ComposeDisposition v1 (ledger materialization) + SSE frame per HANDOFF §1</blocked-on>
+  </metadata>
+
+  <prompt>
+    Materialize the Draft-Alternative edit as a pending insertion/deletion pair rendered FROM the stored `compose`-disposition
+    ledger entry (NOT a client-only buffer), carrying `{bindingId}@t{n}` provenance, with inline accept/reject controls, and
+    made refresh-durable. When the SSE frame signals "compose output ready, ledger_ref = X", the Workspace fetches the ledger
+    entry and materializes the redline from stored state (storage-precedes-rendering, ADR-040). A pending suggestion MUST
+    survive a page refresh because it is re-materialized from the ledger, not held in a client buffer.
+  </prompt>
+
+  <role>
+    Senior frontend developer expert in ProseMirror mark application, SSE consumption, and ledger-first (storage-precedes-render)
+    UI materialization; fluent in Fluent v9 dark mode.
+  </role>
+
+  <goal>
+    Given the core's published `ComposeDisposition v1` payload + SSE frame (HANDOFF §1), the Workspace materializes a pending
+    insertion/deletion pair (using the FR-15 marks) from the stored ledger entry, tags it `{bindingId}@t{n}`, offers inline
+    accept/reject, and re-materializes correctly after a page refresh. RTL tests cover render, dark mode, accept/reject, and
+    the refresh-durability property.
+  </goal>
+
+  <context>
+    <background>
+      BLOCKED until core R2 publishes Phase A0 `ComposeDisposition v1` (+ SSE frame). Author against HANDOFF §1: the `compose`
+      SessionOutput carries `{target_text, new_text, match_mode, rationale, sources[]}`; the entry is addressable as
+      `{bindingId}@t{n}`; the SSE frame carries the LEDGER REFERENCE + disposition, NOT the payload as source of truth — the
+      client materializes from the ledger entry. This depends on FR-15 marks (task 031) for rendering and FR-04 draft-into-editor
+      (task 016) for the disposition seam. Do NOT build a client-only DOM path — that dies on refresh (the failure mode this FR exists to prevent).
+    </background>
+    <relevant-files>
+      <file change="create">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts (materialize from ledger_ref on SSE frame)</file>
+      <file change="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (apply FR-15 marks from materialized ledger entry + accept/reject controls)</file>
+      <file change="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/ (FR-15 insertion/deletion/commentAnchor marks — task 031)</file>
+      <file change="reference">projects/spaarkeai-compose-r2/notes/HANDOFF-core-r2-A0-contract-requirements.md §1 (ComposeDisposition v1 + SSE frame contract)</file>
+      <file change="reference">src/solutions/SpaarkeAi/src/types/compose-contracts.ts (PaneEventBus compose_edit_apply_request discriminant)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="031" status="pending">FR-15 custom marks — the rendering primitives.</dependency>
+      <dependency task="016" status="blocked">FR-04 draft-into-editor via compose disposition — the ledger-first seam.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-040">Storage precedes rendering — materialize the redline FROM the stored ledger entry addressed by `ledger_ref`; the SSE frame carries the reference + disposition, never the payload as source of truth. No client-only pending-edit buffer.</constraint>
+    <constraint source="ADR-030">PaneEventBus `compose_edit_apply_request` on the `workspace` channel is the choreography signal — it references the ledger entry, never carries the payload as source of truth.</constraint>
+    <constraint source="ADR-021">Accept/reject controls + redline are Fluent v9 dark-mode-correct; reuse the FR-15 marks' token-based styling.</constraint>
+    <constraint source="ADR-033">The compose-disposition SSE frame rides the established `DocumentStreamWriter` side channel — do not invent a new streaming interface.</constraint>
+    <constraint source="project">Consume the core's `ComposeDisposition v1` AS PUBLISHED — no local variant (charter §3.4).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ledger-first UI materialization; SSE frame consumption; ProseMirror mark application; refresh-durable pending state</topic>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/spaarkeai-compose-r2/notes/HANDOFF-core-r2-A0-contract-requirements.md</file>
+      <file>projects/spaarkeai-compose-r2/design.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Ledger-first edit flow" location="design.md §2.3">Edit payload = compose SessionOutput FIRST; Workspace materializes the pending track-change from the stored entry with {bindingId}@t{n} provenance; refresh-durable.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    NEW hook `usePendingRedline.ts`. (1) Existing — no ledger-materialization path exists; FR-15 provides marks but not the
+    ledger-fetch-and-apply flow. (2) Extension — materialization (fetch ledger entry by ref → apply marks → wire accept/reject)
+    is a distinct concern from mark definition. (3) Cost-of-doing-nothing — without ledger materialization the pending
+    suggestion is client-only and dies on refresh (the refresh-loses-the-suggestion failure mode FR-16's acceptance bar
+    explicitly tests).
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Context check + confirm core Phase A0 `ComposeDisposition v1` is PUBLISHED and matches HANDOFF §1. If not published, STOP (task is blocked).</step>
+    <step order="1">Implement `usePendingRedline`: on the compose-disposition SSE frame, read `ledger_ref`, fetch the stored ledger entry (`{target_text,new_text,match_mode,rationale,sources}`), resolve the target span (reuse FR-19 validator semantics), and apply the FR-15 insertion/deletion marks tagged `{bindingId}@t{n}`.</step>
+    <step order="2">Render inline accept/reject controls near the suggestion; accept commits the edit to document state, reject removes the pending marks (both are ledger-aware, not raw DOM).</step>
+    <step order="3">On page load/refresh, re-materialize any un-accepted pending redlines from current ledger state (refresh-durability).</step>
+    <step order="4">Handle negatives: ambiguous `target_text` (surface the FR-19 ambiguity error, do not guess), superseded entry (do not re-render a superseded suggestion), missing ledger_ref (fail honestly).</step>
+    <step order="5">Write RTL tests (see ui-tests); `npm run build`; report.</step>
+  </steps>
+
+  <ui-tests>
+    <ui-test name="materializes from ledger">Given an SSE frame with a `ledger_ref`, the Workspace renders a pending insertion/deletion pair (FR-15 marks) tagged with `{bindingId}@t{n}` provenance; assert the marks + provenance attributes are present.</ui-test>
+    <ui-test name="dark mode (ADR-021)">The redline + accept/reject controls render dark-mode-correctly via semantic tokens.</ui-test>
+    <ui-test name="refresh-durable + accept/reject">A pending suggestion survives a simulated refresh (re-materialized from ledger state, not a client buffer); accept commits it and reject removes it (NEGATIVE: superseded/ambiguous entries do not silently render).</ui-test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (materialize + accept/reject)</output>
+    <output type="test">usePendingRedline RTL tests (co-located)</output>
+    <output type="report">Task completion report incl. bundle impact + confirmation the published ComposeDisposition v1 matched HANDOFF §1</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">On the compose-disposition SSE frame, the Workspace materializes a pending insertion/deletion pair from the stored ledger entry (addressed by `ledger_ref`), tagged `{bindingId}@t{n}`.</criterion>
+    <criterion testable="true">A pending suggestion survives a page refresh — re-materialized from the ledger, NOT from a client-only buffer (the FR-16 refresh-durability bar).</criterion>
+    <criterion testable="true">Inline accept commits the edit to document state; reject removes the pending marks; both are ledger-aware operations.</criterion>
+    <criterion testable="true">An ambiguous `target_text` surfaces the FR-19 ambiguity error rather than guessing; a superseded ledger entry does not re-render (NEGATIVE cases).</criterion>
+    <criterion testable="true">The core's `ComposeDisposition v1` is consumed AS PUBLISHED (no local variant); redline + controls are Fluent v9 dark-mode-correct; `npm run build` green.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Consumes core Phase A0 ComposeDisposition v1 per HANDOFF §1 (ledger materialization + SSE frame carrying ledger_ref + disposition). If the published contract differs from HANDOFF §1 in payload shape, provenance addressing (`{bindingId}@t{n}`), or the storage-precedes-rendering SSE-frame semantics, STOP and reconcile before implementing — do NOT build against a guessed shape.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

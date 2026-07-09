@@ -1,7 +1,7 @@
 <task id="AIR2-004" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Discovery obligations confirm — pin the five citeable seams with file:line evidence</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>0 — Reconciliation &amp; Discovery</phase>
     <gate>none (foundation; de-risks the citations later waves rely on)</gate>
     <estimated-effort>0.5 day</estimated-effort>
@@ -90,4 +90,15 @@
   <escalation>
     <trigger>If any of the five seams is MISSING or materially different from the plan's §3 assumption (e.g. the validator has no extension point the hoist can use), STOP and surface it — task 020 (triple-twin hoist, which BLOCKS all catalog-row tasks) or the eval-family tasks may need re-planning before they start.</trigger>
   </escalation>
+
+  <notes>
+    Completed 2026-07-08. All five obligations CONFIRMED with file:line evidence; recorded in `notes/discovery-obligations.md`.
+    (1) Golden-utterance suite: `tests/integration/contract/Eval/golden-utterances.json` (schemaVersion 1.0, `cases[]` array) + CI `eval-gate` job at `.github/workflows/sdap-ci.yml:225`.
+    (2) Validator extension seam: `Services/Ai/Chat/OpenAiFunctionSchemaValidator.cs:70` (class decl; `FindFirstError` at line 87) — single-source parity check per ADR-039, confirmed no second validation mechanism.
+    (3) Gate-ledger surface: `Models/Ai/Chat/SessionLedgerEntries.cs` — `SessionGate` record at line 242, `Status` property at line 251 (`pending|confirmed|rejected|expired|superseded`); append-only ledger makes a second ask structurally impossible.
+    (4) `dispatchUncertain`: CONFIRMED behavioral, no literal symbol — `Services/Ai/Chat/ElicitationTurnRouter.cs:34` (class decl); exposes `IsHardSlash`/`IsExplicitRestart`/`BuildClarifyInstruction`.
+    (5) Job status surface: `Services/Jobs/JobContract.cs:9` (envelope, no Status field) + `Services/Jobs/JobOutcome.cs:67` (`JobStatus` enum) + `Services/Jobs/ServiceBusJobProcessor.cs` + `Services/Jobs/BatchJobStatusStore.cs` all confirmed as expected.
+    **ONE CORRECTION**: `JobStatusService.cs` actually lives at `Services/Office/JobStatusService.cs` (namespace `Sprk.Bff.Api.Services.Office`), not `Services/Jobs/` as plan.md's grouping implied. Non-blocking (file exists, fully functional) — task 014 should cite the corrected path. Escalation trigger did NOT fire (no missing/materially-different seam).
+    Quality gates: N/A (docs-only task; Step 9.5 skip criteria met — no code changes).
+  </notes>
 </task>

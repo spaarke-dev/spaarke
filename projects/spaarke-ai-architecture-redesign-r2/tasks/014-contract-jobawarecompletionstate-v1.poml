@@ -1,7 +1,7 @@
 <task id="AIR2-014" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Publish JobAwareCompletionState v1 contract (walking skeleton) — project the EXISTING Job Contract, no new job model</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>A0 — Contract-first</phase>
     <gate>G-R2-A (seam publication)</gate>
     <estimated-effort>1 day</estimated-effort>
@@ -100,6 +100,25 @@
     <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
     <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-05 / FR-28). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-07-08. JobAwareCompletionState v1 shipped as a PROJECTION over the existing
+    JobContract/JobStatus/ServiceBusJobProcessor — NO new job model (escalation trigger did NOT
+    fire: the existing 3-value JobStatus + Attempt/MaxAttempts + processor disposition + stored
+    started/cancel/gate signals are sufficient to derive all nine states without adding job-model
+    fields). Files: Services/Ai/PublicContracts/JobAwareCompletionState.cs (enum JobAwareState [9
+    states], JobStepCompletion, JobAwareCompletionState record w/ Version+IsTerminal map+
+    ComputeAggregate, StoredStepSignal, JobAwareCompletionStateProjector producer,
+    JobAwareCompletionStateView consumer); test tests/integration/contract/Api/Ai/
+    JobAwareCompletionStateContractTests.cs (22 tests, all green — incl. ingestion-parity
+    Partial≠Completed, store-before-render NEGATIVE, consumer-declared step set + DIFFERENT-set
+    NEGATIVE, tolerant-reader unknown-field). Contract doc: notes/jobawarecompletionstate-v1-contract.md.
+    Test project builds clean; 22/22 pass. Ordered step set is consumer-declared (generic; Compose's
+    container→record→profile-analysis→indexing proven + a different draft→review→send set proven).
+    Unblocks Compose r2 FR-05 + FR-28. SEAM-STATUS.md row left for main session to flip (shared file,
+    parallel-safety). Publish-size: negligible single dependency-free source file; authoritative
+    measure deferred to integrating merge to avoid contention with concurrent contract agents.
+  </notes>
 
   <escalation>
     <trigger>If the existing Job Contract cannot express one of the nine states (e.g. no poisoned/retry-pending distinction) without EXTENDING the job model, STOP and surface it — the plan mandates "no new job model"; adding job-model fields is a scope decision the operator must ratify (and it touches the shared jobs pipeline other consumers depend on).</trigger>

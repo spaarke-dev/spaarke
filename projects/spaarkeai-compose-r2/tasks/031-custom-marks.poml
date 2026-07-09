@@ -1,0 +1,118 @@
+<task id="031" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-15 custom ProseMirror marks (insertion/deletion/commentAnchor)</title>
+    <phase>3 Inline Editing UX</phase>
+    <gate>green</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>phase3-ui</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend,fluent-ui,react,testing</tags>
+    <estimated-effort>high</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add three custom ProseMirror marks to the Compose editor schema: `insertion`, `deletion`, and `commentAnchor`.
+    These are the rendering primitives for pending AI track-changes (insertion/deletion pairs render as redline;
+    comments anchor to spans). This task adds the SCHEMA + visual rendering only — the materialization of pending
+    redlines FROM the ledger (FR-16) is a separate, core-gated task (033) that consumes these marks.
+  </prompt>
+
+  <role>
+    Frontend developer with ProseMirror/TipTap schema-extension expertise and Fluent v9 dark-mode discipline.
+  </role>
+
+  <goal>
+    Three registered TipTap marks (`insertion`, `deletion`, `commentAnchor`) added to the ComposeEditor schema, each with
+    correct DOM parse/serialize rules and Fluent v9 dark-mode-correct styling (insertion = underline/added color,
+    deletion = strikethrough/removed color, commentAnchor = highlighted anchor span). Marks carry provenance attributes
+    (e.g. `data-binding`, `data-ledger-ref`) so FR-16/17 can address them. RTL tests cover render + dark mode + mark
+    application.
+  </goal>
+
+  <context>
+    <background>
+      This task serializes AFTER task 030 because both modify ComposeEditor.tsx (file overlap — parallel-safe=false; run 030
+      then 031). The marks must survive the TipTap↔DOCX bridge appropriately (redline marks are Compose-domain rendering,
+      not necessarily persisted to the regenerated `.docx` — coordinate with the FR-06a save-fidelity behavior). The marks
+      expose provenance attributes so FR-16 can materialize `{bindingId}@t{n}`-tagged suggestions and FR-17 can supersede them.
+    </background>
+    <relevant-files>
+      <file change="create">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/InsertionMark.ts</file>
+      <file change="create">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/DeletionMark.ts</file>
+      <file change="create">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/CommentAnchorMark.ts</file>
+      <file change="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (register the three marks in the editor extensions)</file>
+      <file change="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx §"LOCKED Spike #1 extension list" (marks are ADDITIVE R2 schema additions per design §5)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">FR-14 BubbleMenu toolbar — shares ComposeEditor.tsx; run 030 first (file overlap).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Mark styling is Fluent v9 dark-mode-correct via semantic `tokens.*` — no hardcoded hex; must read correctly in both light and dark themes.</constraint>
+    <constraint source="ADR-030">Marks carry provenance attributes only; they do not themselves dispatch. Any apply/accept/reject signal flows via PaneEventBus (`compose_edit_apply_request`) in FR-16, not here.</constraint>
+    <constraint source="project">These are R2 SCHEMA ADDITIONS (design §5 "Custom marks: insertion, deletion, commentAnchor") — additive to, and distinct from, the LOCKED Spike #1 extension list (do not modify that locked list; add marks as new extensions).</constraint>
+    <constraint source="project">This task renders marks only; it does NOT materialize from the ledger (that is FR-16 / task 033, core-gated). Do not build a client-only pending-edit buffer here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>TipTap/ProseMirror custom marks; DOM parse/render specs; Fluent v9 dark-mode styling</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>projects/spaarkeai-compose-r2/design.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Custom marks" location="design.md §5 / spec FR-15">insertion, deletion, commentAnchor added to the editor schema; pending edits render as redline insertion/deletion; comments anchor to spans.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    NEW marks `insertion`/`deletion`/`commentAnchor`. (1) Existing — the LOCKED Spike #1 extension set has no track-change or
+    comment-anchor marks (verified in ComposeEditor.tsx). (2) Extension — these are net-new schema primitives; nothing existing
+    provides redline rendering. (3) Cost-of-doing-nothing — without the marks, FR-16 has no way to render a pending
+    insertion/deletion pair and FR-17 has no addressable span to supersede; the entire inline-redline UX cannot render.
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Context check. Load ADR-021/030 + design §5 + the ComposeEditor locked-extension note.</step>
+    <step order="1">Implement `InsertionMark`, `DeletionMark`, `CommentAnchorMark` as TipTap `Mark.create` extensions with `parseHTML`/`renderHTML`, provenance attributes (`data-binding`, `data-ledger-ref`, `data-comment-id`), and inclusive/exclusive boundary semantics appropriate to each.</step>
+    <step order="2">Add Fluent v9 dark-mode-correct styling for each mark via semantic tokens.</step>
+    <step order="3">Register the three marks in ComposeEditor's editor extensions (ADDITIVE — do not touch the locked list).</step>
+    <step order="4">Confirm the marks round-trip through TipTap serialize without corrupting the DOCX bridge (redline marks are rendering-domain; verify save behavior is unaffected).</step>
+    <step order="5">Write RTL tests (see ui-tests); `npm run build`; report bundle impact.</step>
+  </steps>
+
+  <ui-tests>
+    <ui-test name="marks render">Applying the `insertion` mark renders an added-style span; `deletion` renders a strikethrough/removed-style span; `commentAnchor` renders a highlighted anchor span carrying its `data-comment-id`. Anchor to ComposeEditor's existing token-based styling.</ui-test>
+    <ui-test name="dark mode (ADR-021)">Under a dark FluentProvider theme, each mark's colors come from semantic `tokens.*` and remain legible in both light and dark (no hardcoded hex).</ui-test>
+    <ui-test name="provenance attributes">A materialized insertion/deletion pair carries `data-binding` / `data-ledger-ref` attributes on its rendered DOM so FR-16/17 can address it (assert attributes present after applying the mark with provenance).</ui-test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/InsertionMark.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/DeletionMark.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/CommentAnchorMark.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (register marks)</output>
+    <output type="test">Mark RTL tests (co-located)</output>
+    <output type="report">Task completion report incl. bundle impact + DOCX-bridge round-trip note</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">`insertion`, `deletion`, and `commentAnchor` marks are registered in the ComposeEditor schema and can be applied/removed via editor commands.</criterion>
+    <criterion testable="true">Pending edits render as redline: insertion as an added-style span, deletion as a strikethrough/removed-style span; comments anchor to a highlighted span.</criterion>
+    <criterion testable="true">Each mark carries provenance attributes (`data-binding`/`data-ledger-ref`/`data-comment-id`) on its rendered DOM so FR-16/17 can address and supersede it.</criterion>
+    <criterion testable="true">All mark styling is Fluent v9 dark-mode-correct via semantic tokens (ADR-021), legible in light and dark.</criterion>
+    <criterion testable="true">The marks are additive to the LOCKED Spike #1 extension list (that list is unchanged); the DOCX save bridge is unaffected; `npm run build` green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

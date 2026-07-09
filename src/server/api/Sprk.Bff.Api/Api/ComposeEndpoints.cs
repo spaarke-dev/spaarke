@@ -90,12 +90,45 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // (8) POST /api/compose/edit-batch/validate — FR-19 deterministic edit validation (task 020)
+        group.MapPost("/edit-batch/validate", ValidateEditBatch)
+            .WithName("ComposeValidateEditBatch")
+            .WithSummary("Deterministically resolve match_mode edits against document text; 422 on ambiguity/no-match/empty-target/overlap")
+            .RequireRateLimiting("ai-context")
+            .Produces<BatchValidationResult>(StatusCodes.Status200OK)
+            .Produces<BatchValidationResult>(StatusCodes.Status422UnprocessableEntity)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized);
+
         return routes;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Handlers
     // ─────────────────────────────────────────────────────────────────────────
+
+    // FR-19 (task 020): deterministic match_mode edit validation. Pure — delegates to
+    // IComposeEditValidator (ADR-013: no AI internals). 200 when the batch resolves cleanly,
+    // 422 with the structured ambiguity/no-match/empty-target/overlap result otherwise.
+    private static IResult ValidateEditBatch(
+        [FromBody] EditBatchValidateRequest? body,
+        IComposeEditValidator validator,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+        if (body is null) return Results.BadRequest("Request body is required.");
+        if (body.DocumentText is null) return Results.BadRequest("documentText is required.");
+        if (body.Edits is null || body.Edits.Count == 0) return Results.BadRequest("edits must contain at least one proposed edit.");
+
+        var result = validator.Validate(body.DocumentText, body.Edits);
+        logger.LogInformation("Compose edit-batch validate: edits={EditCount} isValid={IsValid} TraceId={TraceId}",
+            body.Edits.Count, result.IsValid, httpContext.TraceIdentifier);
+
+        return result.IsValid
+            ? Results.Ok(result)
+            : Results.Json(result, statusCode: StatusCodes.Status422UnprocessableEntity);
+    }
 
     private static IResult Upload(ILoggerFactory loggerFactory, HttpContext httpContext)
     {

@@ -1,0 +1,139 @@
+<task id="052" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-26 SPE webhook subscription + BackgroundService renewal + delta query</title>
+    <phase>5 Word</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>W1-BFF-services</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api,spe,azure</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement the FR-26 change-detection substrate: create an SPE (Graph) webhook subscription on
+    `drives/{containerId}/root` for `updated` events, a `BackgroundService` renewal cron that renews
+    each subscription before its &lt;4230-minute lifespan expires, and a delta-query helper that
+    enumerates changed driveItems (`/drives/{id}/root/delta`). This is the plumbing task; the
+    inbound webhook receiver + poll endpoints are task 053 (deps 052), and re-anchoring is task 054.
+    The subscription-lifecycle state (subscription id, expiry, delta token, per-item etag) is
+    cross-request and MUST live in Redis (ADR-009), not `IMemoryCache`. The renewal loop is a
+    `BackgroundService` — NOT an Azure Function (ADR-001) — modeled on
+    `StaleCheckoutSweeperHostedService`.
+  </prompt>
+
+  <role>
+    Senior .NET 8 developer experienced with Microsoft Graph change-notification subscriptions +
+    delta queries, `BackgroundService`/`IHostedService` patterns, Redis-backed distributed state,
+    and the Spaarke SPE facade + managed-identity (app-only) auth path.
+  </role>
+
+  <goal>
+    A `SpeSyncOrchestrator` (subscription create/renew/delete + delta enumeration, all behind the SPE
+    facade) plus a `SpeWebhookRenewalHostedService` (`BackgroundService`) that keeps subscriptions
+    alive under the 4230-minute ceiling with margin, persisting all lifecycle state in Redis. On
+    startup/renewal failure the system degrades to the delta-poll fallback rather than silently
+    losing change detection. Matching unit tests cover the renewal-window logic (via `TimeProvider`),
+    the Redis state round-trip, and the renewal-failure → fallback path.
+  </goal>
+
+  <context>
+    <background>
+      design §2.5 + §5 + §6.2: SPE webhook subscription (`drives/{containerId}/root`, `updated`,
+      4230-min lifespan + renewal cron) + delta query to enumerate changed driveItems. This feeds
+      return-from-Word detection (§2.5). Graph subscriptions are app-only (managed identity per
+      ADR-028); the renewal cron runs under the BFF's MI, not a user OBO context. `StaleCheckoutSweeperHostedService`
+      is the proven in-repo `BackgroundService` template (per-iteration try/catch, `TimeProvider`,
+      scoped-service resolution, cancellation handling).
+    </background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Compose/SpeSyncOrchestrator.cs — NEW: subscription create/renew/delete + delta enumeration (etag/subscription state machine)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Compose/SpeWebhookRenewalHostedService.cs — NEW: BackgroundService renewal cron</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ComposeModule.cs — register the orchestrator + AddHostedService&lt;SpeWebhookRenewalHostedService&gt;()</file>
+      <file role="canonical-pattern">src/server/api/Sprk.Bff.Api/Services/Compose/StaleCheckoutSweeperHostedService.cs — THE BackgroundService template to follow (ExecuteAsync loop, ScanInterval, TimeProvider, per-iteration try/catch, CreateScope for scoped deps, ADR-001 + ADR-010 comments)</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs / ISpeFileOperations.cs — extend the facade with any subscription/delta Graph calls; ALL Microsoft.Graph usage stays here, NOT in Services/Compose/</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs — Redis-backed cache pattern (ADR-009) to mirror for subscription/etag/delta-token state</file>
+      <file role="design">projects/spaarkeai-compose-r2/design.md §2.5, §5, §6.2</file>
+    </relevant-files>
+    <dependencies></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">The webhook renewal cron is a `BackgroundService` (`IHostedService`), NOT an Azure Function. Model it on `StaleCheckoutSweeperHostedService` — in-process async loop, per-iteration try/catch so a transient Graph failure never crashes the host.</constraint>
+    <constraint source="ADR-007">NO `Microsoft.Graph` types above the `SpeFileStore`/Infrastructure facade. Subscription-create, renew, delete, and delta-query Graph calls live INSIDE the `SpeFileStore`/`ISpeFileOperations` facade (or an Infrastructure/Graph helper); `SpeSyncOrchestrator` in `Services/Compose/` calls the facade with primitive/DTO types only — never a `Subscription`, `DriveItem`, or `GraphServiceClient`.</constraint>
+    <constraint source="ADR-009">Subscription id, expiry, delta token, and per-item etag are cross-request → Redis, not `IMemoryCache`. Mirror `GraphTokenCache`.</constraint>
+    <constraint source="ADR-010">Keep DI minimal — one orchestrator + one hosted service registration in `ComposeModule`. Internal helpers need not be registered.</constraint>
+    <constraint source="ADR-028">The renewal cron + subscription management run app-only via `DefaultAzureCredential` (managed identity), not user OBO — there is no acting user for a background renewal.</constraint>
+    <constraint source="ADR-013 / NFR-05">No AI-internal injection in `Services/Compose/` — this is SPE plumbing only.</constraint>
+    <constraint source="ADR-029 / CLAUDE.md §10">Report publish-size + delta + CVE for this BFF-touching task. State Placement Justification.</constraint>
+    <constraint source="NFR-08">Matching unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/` — drive the renewal window with `TimeProvider`, no wall-clock sleeps.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph change-notification subscriptions + delta; BackgroundService; Redis state</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/spe-integration/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="BackgroundService renewal loop" location="src/server/api/Sprk.Bff.Api/Services/Compose/StaleCheckoutSweeperHostedService.cs">
+        Copy the ExecuteAsync structure: static interval, TimeProvider-driven Task.Delay, per-iteration + per-item try/catch, CreateScope for scoped deps, cancellation-aware. Swap the sweep body for subscription-renewal.
+      </pattern>
+      <pattern name="Redis distributed state" location="src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs">
+        Redis-backed cross-request state (ADR-009) — mirror key naming + serialization for subscription/etag/delta-token records.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context check">Declare FULL rigor; load knowledge files + bff-extensions.md; state Placement Justification.</step>
+    <step order="1" name="Extend the SPE facade">Add subscription create/renew/delete + delta-enumeration methods to `ISpeFileOperations`/`SpeFileStore` (app-only MI). Keep all Graph types behind the facade; expose DTOs (subscription id, expiry, changed-item list, delta token).</step>
+    <step order="2" name="Redis state store">Define the Redis-persisted lifecycle record (subscription id, containerId, expiry, delta token, per-item etag) mirroring `GraphTokenCache`.</step>
+    <step order="3" name="SpeSyncOrchestrator">Implement create-subscription-if-absent, renew-before-expiry, and delta-enumeration-since-token, updating Redis state. Encode the etag/subscription state machine.</step>
+    <step order="4" name="SpeWebhookRenewalHostedService">Implement the `BackgroundService` on the `StaleCheckoutSweeperHostedService` template: scan interval well under 4230 min, renew subscriptions inside the safety margin, per-iteration try/catch. On renewal failure mark the subscription for delta-poll fallback (task 053 poll endpoint reads this).</step>
+    <step order="5" name="DI registration">Register the orchestrator + `AddHostedService&lt;SpeWebhookRenewalHostedService&gt;()` in `ComposeModule` (ADR-010 minimal).</step>
+    <step order="6" name="Unit tests">Renewal-window logic via `TimeProvider` (renews before expiry, not after); Redis state round-trip; renewal-failure → fallback-flag path; delta enumeration returns changed items since token.</step>
+    <step order="7" name="Verify">Build + tests; publish-size/CVE; NetArchTest facade check; update TASK-INDEX.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/SpeSyncOrchestrator.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/SpeWebhookRenewalHostedService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs + ISpeFileOperations.cs (subscription/delta facade methods)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ComposeModule.cs (registrations)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/SpeWebhookRenewalHostedServiceTests.cs + SpeSyncOrchestratorTests.cs</output>
+    <output type="report">Publish-size delta; CVE; Placement Justification</output>
+  </outputs>
+
+  <justification>
+    <existing>No existing SPE subscription/delta machinery — R1 SPE plumbing is load/save/promote/checkout only. `StaleCheckoutSweeperHostedService` is a checkout sweeper, not a subscription renewer (different cadence, different Graph surface). No overlap.</existing>
+    <extension>The hosted service reuses the sweeper's proven loop template but has a distinct responsibility (Graph subscription lifecycle vs checkout release) — a separate `BackgroundService` is correct, not an extension of the sweeper. Subscription Graph calls extend the existing `SpeFileStore` facade rather than adding a new SPE client.</extension>
+    <cost-of-doing-nothing>Without a renewal cron, SPE subscriptions expire silently at 4230 min and return-from-Word detection dies — FR-26 acceptance ("a Word save fires the webhook → BFF enumerates changed driveItems") stops working within ~3 days of uptime. Without Redis state, a multi-instance BFF double-subscribes / loses the delta token.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">An SPE webhook subscription is created on `drives/{containerId}/root` for `updated`, with its id/expiry persisted to Redis.</criterion>
+    <criterion testable="true">The `BackgroundService` renews each subscription before its &lt;4230-min expiry (verified via `TimeProvider` in a unit test — renews inside the margin, does not renew when far from expiry).</criterion>
+    <criterion testable="true">A delta query enumerates changed driveItems since the stored delta token and advances the token in Redis.</criterion>
+    <criterion testable="true">Negative: a renewal (or subscription-create) failure is caught, logged, does NOT crash the host, and flags the subscription for delta-poll fallback.</criterion>
+    <criterion testable="true">Subscription id, expiry, delta token, and per-item etag are stored in Redis (ADR-009), not `IMemoryCache`.</criterion>
+    <criterion testable="true">No `Microsoft.Graph` type appears in `Services/Compose/` — all Graph calls are behind the `SpeFileStore` facade (ADR-007).</criterion>
+    <criterion testable="true">The renewal service is registered via `AddHostedService` (BackgroundService), not a Function (ADR-001).</criterion>
+    <criterion testable="true">Matching unit tests pass (no wall-clock sleeps); BFF build green; publish-size + CVE reported.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

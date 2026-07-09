@@ -1,0 +1,119 @@
+<task id="022" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-21 ComposeEditTransaction (snapshot/rollback)</title>
+    <phase>2 LLM Editing Patterns</phase>
+    <gate>green</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>phase2-llm</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>021</deps>
+    <tags>bff-api,testing</tags>
+    <estimated-effort>high</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Wrap `ComposeEditBatch` (FR-20) in `ComposeEditTransaction` — the adeu snapshot/rollback pattern (design §6.1):
+    atomic suggest-or-fail. If ANY edit in a batch fails validation or application, NONE apply and the document is
+    left byte-identical to the pre-batch snapshot. This guarantees a partially-applied batch never becomes document state.
+  </prompt>
+
+  <role>
+    Senior .NET developer focused on atomicity guarantees and deterministic, well-tested transformation code.
+  </role>
+
+  <goal>
+    A `ComposeEditTransaction` service in `src/server/api/Sprk.Bff.Api/Services/Compose/` that snapshots the input,
+    runs the FR-20 batch, and commits only if every edit succeeds — otherwise rolls back to the snapshot and returns
+    the failure report. Full unit coverage of the closed acceptance set, build green, publish size measured.
+  </goal>
+
+  <context>
+    <background>
+      FR-21 completes the FR-19 → FR-20 → FR-21 deterministic-edit stack. Spike 3 (task 003) validated rollback atomicity
+      alongside the batch pipeline. Keep the transaction a thin wrapper: snapshot, delegate to the batch, and either
+      commit or restore — do not re-implement batch logic.
+    </background>
+    <relevant-files>
+      <file change="create">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditTransaction.cs</file>
+      <file change="reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditBatch.cs (FR-20 — wrapped)</file>
+      <file change="reference">src/server/api/Sprk.Bff.Api/Services/Compose/IComposeEditValidator.cs (FR-19 — validation gate)</file>
+      <file change="reference">projects/spaarkeai-compose-r2/notes/spikes/ (Spike 3 output — rollback atomicity)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">FR-20 ComposeEditBatch — the pipeline this transaction wraps.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Services/Compose/ MUST NOT inject any AI internal. The transaction is pure deterministic logic.</constraint>
+    <constraint source="ADR-010">DI minimalism — register only `ComposeEditTransaction` if an endpoint consumes it directly; keep helpers internal.</constraint>
+    <constraint source="ADR-038">Integration-heavy pyramid; NO banned test shapes. Test the atomicity property with a batch containing a deliberately-failing edit and assert the document is unchanged.</constraint>
+    <constraint source="project">BFF publish size ≤ 60 MB compressed (NFR-01); measure and report delta.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>snapshot/rollback; atomic suggest-or-fail; transactional text application</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r2/design.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Snapshot / rollback" location="design.md §6.1">Atomic suggest-or-fail; if any edit in a batch fails validation, none applied.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    NEW service `ComposeEditTransaction`. (1) Existing — no atomicity wrapper exists; FR-20 applies best-effort with a
+    skipped-list but does not guarantee all-or-nothing. (2) Extension — a thin wrapper over FR-20 rather than folding
+    atomicity into the batch keeps the batch reusable for non-atomic callers. (3) Cost-of-doing-nothing — without it, a
+    batch where one edit fails validation leaves a partially-edited document as state, violating the FR-21 acceptance bar
+    (an intentionally-failing batch must leave the document unchanged).
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Context check. Load ADRs/constraints + Spike 3 notes.</step>
+    <step order="1">Implement `ComposeEditTransaction.Execute`: capture the pre-batch document snapshot; run FR-20 batch; if any edit failed validation/application, discard results and return the snapshot + failure report; else commit the transformed text.</step>
+    <step order="2">Ensure the failure path returns the SAME snapshot reference/content (byte-identical) — no partial mutation leaks.</step>
+    <step order="3">Add `// EDGE-N:` comments for: single failing edit among many, all-failing batch, empty batch (trivially commits unchanged).</step>
+    <step order="4">Register in DI only if consumed by an endpoint.</step>
+    <step order="5">Write unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeEditTransactionTests.cs` covering the closed acceptance set.</step>
+    <step order="6">Build; run tests; measure + report publish size delta.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditTransaction.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeEditTransactionTests.cs</output>
+    <output type="report">Task completion report incl. publish-size delta</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A batch where all edits validate and apply commits the transformed document.</criterion>
+    <criterion testable="true">A batch containing one edit that fails validation applies NONE — the returned document is byte-identical to the pre-batch snapshot (NEGATIVE: partial-apply prevented).</criterion>
+    <criterion testable="true">An all-failing batch returns the original document plus a failure report enumerating each failed edit.</criterion>
+    <criterion testable="true">An empty batch commits the unchanged document (NEGATIVE: degenerate transaction).</criterion>
+    <criterion testable="true">`ComposeEditTransaction` injects zero AI internals; `dotnet build` green; publish size ≤ 60 MB reported with delta.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    Implemented as a thin wrapper: ComposeEditTransaction(ComposeEditBatch batch) with Execute(documentText, edits, validation)
+    -> ComposeEditTransactionResult, plus caller-requested Rollback(ComposeEditTransactionResult) for post-commit abort.
+    Snapshot = plain string reference (no clone needed; strings immutable, ComposeEditBatch always builds a NEW string on apply).
+    DI: ComposeEditBatch + ComposeEditTransaction both registered AddSingleton in ComposeModule.AddComposeModule (both stateless;
+    no per-operation instance fields). Build green; full Compose test filter: 70/70 pass (63 prior + 7 new). Publish size delta
+    (this task only, via git-stash before/after): 46.45 MB -> 46.46 MB compressed incl. PDBs (+0.01 MB) -- well under 60 MB ceiling.
+    ADR-013/ADR-010 clean by construction (verified via code-review + grep). Follow-up for task 025 NetArchTest: ComposeEditTransaction
+    should join the same Tier-1 facade-boundary guard as ComposeEditBatch/ComposeEditValidator (assert no Services/Ai/* references
+    from Services/Compose/*).
+  </notes>
+</task>

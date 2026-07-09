@@ -1,7 +1,7 @@
 <task id="AIR2-013" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Publish TraceEvent v1 contract (walking skeleton) — name the existing ledger ToolChain markers as a read contract</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>A0 — Contract-first</phase>
     <gate>G-R2-A (seam publication)</gate>
     <estimated-effort>1 day</estimated-effort>
@@ -99,4 +99,27 @@
   <escalation>
     <trigger>If the existing ledger markers cannot be projected into a coherent request→context→tools→gate→outcome trace WITHOUT adding a parallel trace store (violating ADR-040's ledger-as-source-of-truth), STOP and surface it — the traceability view may need a different sourcing strategy before task 038.</trigger>
   </escalation>
+
+  <notes>
+    Completed 2026-07-08. TraceEvent v1 published as a READ projection over the existing
+    ledger markers (no parallel store — ADR-040 honored; escalation trigger did NOT fire, the
+    request→context→tools→gate→outcome trace projects coherently from SessionToolChain +
+    SessionGate + one justified new `context` type).
+    - Contract: src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/TraceEvent.cs
+      (TraceEvent DTO + TraceEventKind + TraceContextFingerprint [new type, §11-justified] +
+      TraceEventProjection [producer] + TraceEventRenderer [consumer] + TraceEventContract
+      [version stamp + tolerant-reader options + NFR-07 emission guard]).
+    - Test (self-contained, no DI): tests/integration/contract/Api/Ai/TraceEventContractTests.cs
+      — 7 tests green (ordering/version, marker-naming, partial pending-gate state,
+      tolerant-reader ignores unknown field, producer↔consumer round-trip, NFR-07 no-content
+      positive, NFR-07 negative content-field rejection).
+    - Doc: projects/spaarke-ai-architecture-redesign-r2/notes/contract-traceevent-v1.md
+      (marker→TraceEvent mapping, versioning, example payload, Placement Justification).
+    - Build: tests/unit/Sprk.Bff.Api.Tests green (0 errors). Placement: PublicContracts facade;
+      no new endpoint/DI/package/CVE; publish-size delta sub-0.1 MB (additive .cs, no new deps).
+    - Unblocks Compose r2 FR-32 (Context-pane trace hosting). Follow-ons (NOT done here per
+      parallel-safety): main session flips SEAM-STATUS.md TraceEvent row → published; task 038
+      builds the FR-A1-09 view on this contract + binds `context.fingerprintId` to ContextEnvelope
+      v1 (task 015).
+  </notes>
 </task>

@@ -14,10 +14,29 @@
  * React 19 testing via @testing-library/react.
  */
 
+import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen, act, waitFor } from '@testing-library/react';
 import { createWorkspaceWrapper, WorkspaceWidgetHandle } from '../WorkspaceWidgetWrapper';
 import type { WorkspaceWidgetWrapperProps } from '../WorkspaceWidgetWrapper';
+import { PaneEventBusProvider } from '../../../events/PaneEventBusContext';
+
+// NOTE (test-repair task 021, 2026-07-08): this file used
+// `expect(...).toBeInTheDocument()` without importing '@testing-library/jest-dom',
+// which registers that matcher. This was previously masked by the
+// PaneEventBusProvider crash below (every test failed before reaching the
+// jest-dom assertions), so the missing import went unnoticed until that bug
+// was fixed.
+
+// NOTE (test-repair task 021, 2026-07-08): WorkspaceWidgetWrapper's
+// WrappedWidget calls useCitationLink() unconditionally (see
+// WorkspaceWidgetWrapper.tsx around the `useCitationLink` call site), which
+// requires a <PaneEventBusProvider> ancestor (usePaneEventBus() throws
+// otherwise). This test file never wrapped its render() calls in a provider
+// — every test crashed with "[PaneEventBus] ... must be called inside a
+// <PaneEventBusProvider>". Wrapping with <PaneEventBusProvider> (no explicit
+// bus needed — it creates its own stable instance) fixes this without
+// touching production code or weakening any assertion.
 
 // ---------------------------------------------------------------------------
 // Mock Fluent UI components used by the wrapper's loading/error states
@@ -110,15 +129,17 @@ const defaultQueryParams = {
 function renderBudgetWrapper(props: Partial<WorkspaceWidgetWrapperProps<BudgetData>> = {}) {
   const handle: { current: WorkspaceWidgetHandle | null } = { current: null };
   const result = render(
-    <BudgetWrapper
-      data={defaultBudgetData}
-      widgetType="BudgetDashboard"
-      queryParams={defaultQueryParams}
-      onRegisterHandle={h => {
-        handle.current = h;
-      }}
-      {...props}
-    />
+    <PaneEventBusProvider>
+      <BudgetWrapper
+        data={defaultBudgetData}
+        widgetType="BudgetDashboard"
+        queryParams={defaultQueryParams}
+        onRegisterHandle={h => {
+          handle.current = h;
+        }}
+        {...props}
+      />
+    </PaneEventBusProvider>
   );
   return { ...result, handle };
 }
@@ -126,15 +147,17 @@ function renderBudgetWrapper(props: Partial<WorkspaceWidgetWrapperProps<BudgetDa
 function renderSearchWrapper(props: Partial<WorkspaceWidgetWrapperProps<SearchData>> = {}) {
   const handle: { current: WorkspaceWidgetHandle | null } = { current: null };
   const result = render(
-    <SearchWrapper
-      data={defaultSearchData}
-      widgetType="SearchResults"
-      queryParams={defaultQueryParams}
-      onRegisterHandle={h => {
-        handle.current = h;
-      }}
-      {...props}
-    />
+    <PaneEventBusProvider>
+      <SearchWrapper
+        data={defaultSearchData}
+        widgetType="SearchResults"
+        queryParams={defaultQueryParams}
+        onRegisterHandle={h => {
+          handle.current = h;
+        }}
+        {...props}
+      />
+    </PaneEventBusProvider>
   );
   return { ...result, handle };
 }
@@ -195,7 +218,11 @@ describe('WorkspaceWidgetWrapper — renders from data prop', () => {
     const pendingLoader = jest.fn(() => new Promise<{ default: React.ComponentType<any> }>(() => {}));
     const FrozenWrapper = createWorkspaceWrapper<BudgetData>(pendingLoader, 'BudgetDashboard');
 
-    render(<FrozenWrapper data={defaultBudgetData} widgetType="BudgetDashboard" queryParams={defaultQueryParams} />);
+    render(
+      <PaneEventBusProvider>
+        <FrozenWrapper data={defaultBudgetData} widgetType="BudgetDashboard" queryParams={defaultQueryParams} />
+      </PaneEventBusProvider>
+    );
 
     // While the module promise is pending, the wrapper shows its own Spinner
     expect(screen.getByTestId('spinner')).toBeInTheDocument();
@@ -276,14 +303,16 @@ describe('WorkspaceWidgetWrapper — serializeState()', () => {
 
     // Update queryParams via rerender (simulates shell updating props after a new turn)
     rerender(
-      <BudgetWrapper
-        data={defaultBudgetData}
-        widgetType="BudgetDashboard"
-        queryParams={{ sessionId: 'sess-initial', turnId: '5' }}
-        onRegisterHandle={h => {
-          handle.current = h;
-        }}
-      />
+      <PaneEventBusProvider>
+        <BudgetWrapper
+          data={defaultBudgetData}
+          widgetType="BudgetDashboard"
+          queryParams={{ sessionId: 'sess-initial', turnId: '5' }}
+          onRegisterHandle={h => {
+            handle.current = h;
+          }}
+        />
+      </PaneEventBusProvider>
     );
 
     const state = handle.current!.serializeState();
@@ -377,6 +406,33 @@ describe('WorkspaceWidgetWrapper — restoreState()', () => {
       expect(screen.getByTestId('budget-dashboard')).toBeInTheDocument();
     });
 
+    // NOTE (test-repair task 021, 2026-07-08): per WorkspaceWidgetWrapper.tsx's
+    // own contract (see its restoreState()/useEffect comments), isRestoring
+    // is cleared as soon as isLoadingProp is (or becomes) false — restoreState()
+    // itself does NOT set isLoading; the SHELL is responsible for setting
+    // isLoading=true (typically before/at the same time it dispatches the
+    // restore), and the wrapper clears isRestoring only on isLoadingProp's
+    // true->false transition. The ORIGINAL version of this test called
+    // restoreState() while isLoadingProp was STILL false — the effect's
+    // `!isLoadingProp && isRestoring` check fired within the same act() batch
+    // and immediately cleared isRestoring back to false before the spinner
+    // assertion ever ran. Simulate the shell's real sequencing: set
+    // isLoading=true FIRST, then trigger the restore, so isRestoring is set
+    // while isLoadingProp is already true and the clearing effect can't fire.
+    rerender(
+      <PaneEventBusProvider>
+        <BudgetWrapper
+          data={defaultBudgetData}
+          widgetType="BudgetDashboard"
+          queryParams={{ sessionId: 'sess-x', turnId: '0' }}
+          isLoading={true}
+          onRegisterHandle={h => {
+            handle.current = h;
+          }}
+        />
+      </PaneEventBusProvider>
+    );
+
     // Trigger restore
     await act(async () => {
       await handle.current!.restoreState({
@@ -392,15 +448,17 @@ describe('WorkspaceWidgetWrapper — restoreState()', () => {
 
     // Simulate shell completing re-fetch by setting isLoading=false
     rerender(
-      <BudgetWrapper
-        data={{ title: 'Refreshed Budget', items: [] }}
-        widgetType="BudgetDashboard"
-        queryParams={{ sessionId: 'sess-x', turnId: '0' }}
-        isLoading={false}
-        onRegisterHandle={h => {
-          handle.current = h;
-        }}
-      />
+      <PaneEventBusProvider>
+        <BudgetWrapper
+          data={{ title: 'Refreshed Budget', items: [] }}
+          widgetType="BudgetDashboard"
+          queryParams={{ sessionId: 'sess-x', turnId: '0' }}
+          isLoading={false}
+          onRegisterHandle={h => {
+            handle.current = h;
+          }}
+        />
+      </PaneEventBusProvider>
     );
 
     // After loading completes, isRestoring clears and real widget renders again
@@ -421,18 +479,22 @@ describe('WorkspaceWidgetWrapper — loader called once', () => {
     const TrackedWrapper = createWorkspaceWrapper<BudgetData>(trackedLoader, 'BudgetDashboard');
 
     const { rerender } = render(
-      <TrackedWrapper data={defaultBudgetData} widgetType="BudgetDashboard" queryParams={defaultQueryParams} />
+      <PaneEventBusProvider>
+        <TrackedWrapper data={defaultBudgetData} widgetType="BudgetDashboard" queryParams={defaultQueryParams} />
+      </PaneEventBusProvider>
     );
 
     await waitFor(() => expect(screen.getByTestId('budget-dashboard')).toBeInTheDocument());
 
     // Re-render with different data — should NOT call the loader again
     rerender(
-      <TrackedWrapper
-        data={{ title: 'New Budget', items: [] }}
-        widgetType="BudgetDashboard"
-        queryParams={defaultQueryParams}
-      />
+      <PaneEventBusProvider>
+        <TrackedWrapper
+          data={{ title: 'New Budget', items: [] }}
+          widgetType="BudgetDashboard"
+          queryParams={defaultQueryParams}
+        />
+      </PaneEventBusProvider>
     );
 
     expect(trackedLoader).toHaveBeenCalledTimes(1);

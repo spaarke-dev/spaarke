@@ -98,4 +98,29 @@
     <trigger>If a suite is red because the PRODUCTION component contract actually regressed (not the test), STOP repairing the test — surface the production defect; a test must not be edited to conform to broken behavior.</trigger>
     <trigger>If a repair would require converting an AnalysisWorkspace jest-ESM suite, STOP — that debt is explicitly OUT (Compose r2 retire-at-parity), not this task.</trigger>
   </escalation>
+
+  <notes>
+    Completed 2026-07-08. Pinned red set was much larger than the plan's ~3+8 estimate — see
+    projects/spaarke-ai-architecture-redesign-r2/notes/task-021-test-repair-findings.md for the
+    full inventory. Root causes: (1) missing node_modules for transitively-imported shared libs
+    (Spaarke.UI.Components, Spaarke.Compose.Components, Spaarke.AI.Outputs, Spaarke.AI.Context) —
+    environmental; (2) jest.config.ts missing d3-force/marked/sdap-client/react-dedupe stubs
+    that SpaarkeAi's config already had — environmental, added mirrored stubs to
+    Spaarke.AI.Widgets/jest.config.ts; (3) a real jest.resetModules()-vs-static-import
+    module-instance-mismatch bug in 2 test files; (4) mock paths not matching real import paths
+    in 2 files (factory-resolution tests were passing vacuously against the fallback); (5)
+    missing PaneEventBusProvider wrapper + missing jest-dom import in WorkspaceWidgetWrapper.test.tsx;
+    (6) a beforeEach-triggered jest.resetModules() heap-exhaustion crash, fixed via beforeAll;
+    (7) several tests asserting stale counts/strings against intentionally-shipped production
+    growth (widget registry counts, 80% modal sizing, Quick-Start-always-wins context pane
+    default, playbook-selected event type); (8) one flaky wall-clock timing assertion; (9) one
+    genuinely hollow assertion + one legitimate multi-element query in SafetyAnnotationOverlay.
+    ONE genuine PRODUCTION defect found + fixed (escalation trigger #1 applied): EntityInfoWidget.tsx's
+    formatDate() rendered date-only ISO strings one day early in any timezone behind UTC — fixed
+    with timeZone: 'UTC'. No test was classified SCAFFOLDING; all repaired tests guard real
+    behavior. Final: SpaarkeAi 28/28 suites (378/378 tests) green; Spaarke.AI.Widgets 34/34 suites
+    (638/638 tests) green. Quality gates (code-review + adr-check) run per TEST-MODIFYING rigor —
+    both clean (code-review surfaced 3 minor trade-off findings, 1 fixed inline, 2 accepted with
+    documented rationale; adr-check: 0 violations, 0 warnings).
+  </notes>
 </task>

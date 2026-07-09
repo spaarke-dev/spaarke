@@ -1,0 +1,110 @@
+<task id="063" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-30 workspace-scope MemoryItems via gated memory.write</title>
+    <phase>6 Memory</phase>
+    <gate>blocked-on-core-A0</gate>
+    <status>blocked</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>post-A0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none (core Phase A0 `memory.write` gated tool)</dependencies>
+    <tags>bff-api, testing</tags>
+    <fr>FR-30</fr>
+  </metadata>
+
+  <prompt>
+    Persist AI-derived Compose insights as workspace-scope `MemoryItem`s via the core's GATED `memory.write`
+    tool, carrying the full governance envelope (tenant, scope, provenance, trustLevel, expiration). Un-gated
+    AI-derived content writing itself into persistent memory is the memory-poisoning vector; the gated tool
+    makes each insight-persist a governed, Policy-v2-visible side effect. Compose consumes the published
+    `MemoryItem v1` contract with NO local variant (charter §3.4). This task is BLOCKED until core R2 Phase A0
+    publishes the `memory.write` gated tool + `MemoryItem v1` contract (HANDOFF §5).
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the AI facade seam (ADR-013), the core memory service (D-M1/D-M3), and
+    governed side-effect writes in Sprk.Bff.Api.
+  </role>
+
+  <goal>
+    Compose-derived insights persist as workspace-scope `MemoryItem`s through the gated `memory.write` tool with
+    the full governance envelope; an insight-persist is a governed, Policy-v2-visible side effect; no local
+    MemoryItem variant exists. Tests prove the governance envelope is populated (tenant/scope/provenance/
+    trustLevel/expiration) and that an untrusted-origin write is gated.
+  </goal>
+
+  <context>
+    <background>
+      design.md §8 re-bases the 2026-07-03 `derivedInsights: DerivedInsight[]` proposal onto the core memory
+      model: derived insights become workspace-scope MemoryItems written via the gated `memory.write` tool
+      (core D-M3). The proposed `source: "ai-playbook"` shape is exactly what D-M3's untrusted-origin write
+      rules gate. Compose is the primary consumer; HANDOFF §5 states Compose's exact `memory.write` requirements
+      to the core.
+    </background>
+    <relevant-files>
+      <file path="projects/spaarkeai-compose-r2/notes/HANDOFF-core-r2-A0-contract-requirements.md" role="contract">§5 memory.write gated tool + workspace-scope MemoryItem governance envelope — author against these shapes.</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs" role="edit">Emit insight-persist calls through the gated tool seam (never a direct store write).</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs" role="reference">Dispatch/tool-invocation seam through which gated tools are reached.</file>
+      <file path="projects/spaarkeai-compose-r2/design.md" role="spec">§8 derivedInsights disposition + explicit deviation note.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="core-A0" status="blocked">Core R2 Phase A0 must publish the `memory.write` gated tool + `MemoryItem v1` contract (HANDOFF §5). Do NOT build against a guessed shape.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-015">Memory tiers: insights are workspace-scope (Cosmos), governed, and carry retention/expiration semantics per the memory model.</constraint>
+    <constraint source="charter-3.4">Consume the published `MemoryItem v1` contract — NO local MemoryItem variant. (Contrast: `AnchoredAnnotation` in task 060 is the argued Path-A exception; insights are NOT — they are true MemoryItems.)</constraint>
+    <constraint source="ADR-013">`Services/Compose/` never injects AI/memory internals directly; the write goes through the gated `memory.write` tool seam (Tier-1 NetArchTest).</constraint>
+    <constraint source="ADR-040">Provenance on each MemoryItem references the ledger (`bindingId`/`ledgerRef`), never a duplicated payload.</constraint>
+    <constraint source="spec">Untrusted-origin (AI-derived) writes are gated — the write is a Policy-v2-visible side effect, not a silent persist.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm core Phase A0 has published `memory.write` + `MemoryItem v1`; read the published shapes against HANDOFF §5. If not published, remain blocked and escalate.</step>
+    <step order="2">Map Compose-derived insight shapes (playbook deviations, defined-term findings, decisions) to `MemoryItem v1` fields; do NOT create a local variant.</step>
+    <step order="3">Emit insight-persist through the gated `memory.write` tool with the full governance envelope (tenant, scope=workspace, provenance{bindingId,ledgerRef}, trustLevel=AI-derived, expiration).</step>
+    <step order="4">Verify the untrusted-origin gate fires for AI-derived writes (Policy-v2-visible side effect).</step>
+    <step order="5">Add tests: envelope populated; gate fires on AI-derived write; no local MemoryItem type introduced.</step>
+    <step order="6">Verify build + NetArchTest facade rule; report publish-size delta.</step>
+  </steps>
+
+  <justification>
+    <existing>Overlaps with the core Memory Service / `MemoryItem v1`. Verified: Compose consumes it; no Compose-owned store is needed.</existing>
+    <extension>Extends the core memory model by CONSUMING `memory.write` — Compose adds no memory store and no MemoryItem subtype.</extension>
+    <cost-of-doing-nothing>Without gated persistence, AI-derived insights either vanish between sessions (no continuity) or get written un-gated (memory-poisoning vector) — both are FR-30 failures.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — gated insight-persist calls</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/MemoryWriteGatedTests.cs</output>
+    <output type="docs">projects/spaarkeai-compose-r2/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Compose insights persist as workspace-scope `MemoryItem`s via the gated `memory.write` tool.</criterion>
+    <criterion testable="true">Each write carries the full governance envelope: tenant, scope=workspace, provenance{bindingId,ledgerRef}, trustLevel, expiration.</criterion>
+    <criterion testable="true">Untrusted-origin (AI-derived) writes are gated (Policy-v2-visible side effect) — test-verified.</criterion>
+    <criterion testable="true">No local MemoryItem variant is introduced; the published `MemoryItem v1` contract is consumed as-is.</criterion>
+    <criterion testable="true">BFF build + Tier-1 NetArchTest facade rule green.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Core R2 Phase A0 has not published the `memory.write` gated tool + `MemoryItem v1` contract per HANDOFF §5. Do NOT build against a guessed shape (charter §3.4). Remain `blocked`; confirm core timing and the published envelope shape before starting. If the published envelope diverges from HANDOFF §5, negotiate the delta with the core rather than forking a local variant.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

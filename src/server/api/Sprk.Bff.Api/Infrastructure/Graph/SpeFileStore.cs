@@ -1,3 +1,4 @@
+using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Sprk.Bff.Api.Models;
 
@@ -15,16 +16,23 @@ public class SpeFileStore : ISpeFileOperations
     private readonly UploadSessionManager _uploadManager;
     private readonly UserOperations _userOps;
 
+    // Optional so existing 4-arg construction (unit tests, legacy callers) keeps compiling.
+    // The DI container (DocumentsModule: AddScoped&lt;SpeFileStore&gt;) resolves the registered
+    // IGraphClientFactory into this slot, enabling the FR-26 subscription/delta facade.
+    private readonly IGraphClientFactory? _graphClientFactory;
+
     public SpeFileStore(
         ContainerOperations containerOps,
         DriveItemOperations driveItemOps,
         UploadSessionManager uploadManager,
-        UserOperations userOps)
+        UserOperations userOps,
+        IGraphClientFactory? graphClientFactory = null)
     {
         _containerOps = containerOps ?? throw new ArgumentNullException(nameof(containerOps));
         _driveItemOps = driveItemOps ?? throw new ArgumentNullException(nameof(driveItemOps));
         _uploadManager = uploadManager ?? throw new ArgumentNullException(nameof(uploadManager));
         _userOps = userOps ?? throw new ArgumentNullException(nameof(userOps));
+        _graphClientFactory = graphClientFactory;
     }
 
     // Container Operations - delegate to ContainerOperations
@@ -253,4 +261,133 @@ public class SpeFileStore : ISpeFileOperations
         string itemId,
         CancellationToken ct = default)
         => _driveItemOps.GetContentStreamAsUserAsync(ctx, driveId, itemId, ct);
+
+    // =========================================================================
+    // SPE change-detection facade (spaarkeai-compose-r2 FR-26, task 052)
+    //
+    // ADR-007: this is the ONLY place the Graph subscription/delta SDK types live.
+    // Callers above the facade (Services/Compose/SpeSyncOrchestrator) receive DTOs.
+    // App-only (managed identity, ADR-028) via IGraphClientFactory.ForApp().
+    // API shape mirrors the proven Services/Communication/GraphSubscriptionManager.
+    // =========================================================================
+
+    /// <inheritdoc />
+    public async Task<SpeSubscriptionDto> CreateDriveRootSubscriptionAsync(
+        string driveId,
+        string notificationUrl,
+        string clientState,
+        DateTimeOffset expirationDateTime,
+        CancellationToken ct = default)
+    {
+        var graph = RequireGraphForApp();
+        var subscription = new Subscription
+        {
+            ChangeType = "updated",
+            NotificationUrl = notificationUrl,
+            Resource = $"drives/{driveId}/root",
+            ExpirationDateTime = expirationDateTime,
+            ClientState = clientState
+        };
+
+        var created = await graph.Subscriptions.PostAsync(subscription, cancellationToken: ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException(
+                $"Graph returned a null subscription creating a webhook for drive {driveId}.");
+
+        return MapSubscription(created);
+    }
+
+    /// <inheritdoc />
+    public async Task<SpeSubscriptionDto> RenewSubscriptionAsync(
+        string subscriptionId,
+        DateTimeOffset newExpirationDateTime,
+        CancellationToken ct = default)
+    {
+        var graph = RequireGraphForApp();
+        var renewal = new Subscription { ExpirationDateTime = newExpirationDateTime };
+
+        var updated = await graph.Subscriptions[subscriptionId]
+            .PatchAsync(renewal, cancellationToken: ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException(
+                $"Graph returned a null subscription renewing {subscriptionId}.");
+
+        return MapSubscription(updated);
+    }
+
+    /// <inheritdoc />
+    public async Task DeleteSubscriptionAsync(string subscriptionId, CancellationToken ct = default)
+    {
+        var graph = RequireGraphForApp();
+        await graph.Subscriptions[subscriptionId].DeleteAsync(cancellationToken: ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<SpeDeltaResult> EnumerateDriveDeltaAsync(
+        string driveId,
+        string? deltaLink,
+        CancellationToken ct = default)
+    {
+        var graph = RequireGraphForApp();
+        var changes = new List<SpeDriveChange>();
+
+        // Initial call: /drives/{id}/items/root/delta. Subsequent rounds replay the stored
+        // @odata.deltaLink (which carries the token). Page through @odata.nextLink until the
+        // response carries a terminal @odata.deltaLink — that becomes the advanced token.
+        var response = deltaLink is null
+            ? await graph.Drives[driveId].Items["root"].Delta
+                .GetAsDeltaGetResponseAsync(cancellationToken: ct).ConfigureAwait(false)
+            : await graph.Drives[driveId].Items["root"].Delta
+                .WithUrl(deltaLink)
+                .GetAsDeltaGetResponseAsync(cancellationToken: ct).ConfigureAwait(false);
+
+        string? advancedDeltaLink = null;
+
+        while (response is not null)
+        {
+            if (response.Value is not null)
+            {
+                foreach (var item in response.Value)
+                {
+                    if (!string.IsNullOrEmpty(item.Id))
+                    {
+                        changes.Add(new SpeDriveChange(
+                            ItemId: item.Id!,
+                            Name: item.Name,
+                            ETag: item.ETag,
+                            Deleted: item.Deleted is not null));
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(response.OdataDeltaLink))
+            {
+                advancedDeltaLink = response.OdataDeltaLink;
+                break;
+            }
+
+            if (string.IsNullOrEmpty(response.OdataNextLink))
+            {
+                break;
+            }
+
+            response = await graph.Drives[driveId].Items["root"].Delta
+                .WithUrl(response.OdataNextLink)
+                .GetAsDeltaGetResponseAsync(cancellationToken: ct).ConfigureAwait(false);
+        }
+
+        return new SpeDeltaResult(changes, advancedDeltaLink);
+    }
+
+    private GraphServiceClient RequireGraphForApp()
+        => (_graphClientFactory ?? throw new InvalidOperationException(
+                "SpeFileStore was constructed without an IGraphClientFactory; SPE subscription/delta " +
+                "operations require app-only Graph access. Resolve SpeFileStore from DI."))
+            .ForApp();
+
+    private static SpeSubscriptionDto MapSubscription(Subscription subscription)
+        => new(
+            SubscriptionId: subscription.Id
+                ?? throw new InvalidOperationException("Graph subscription is missing its id."),
+            Resource: subscription.Resource ?? string.Empty,
+            ExpirationDateTime: subscription.ExpirationDateTime
+                ?? throw new InvalidOperationException("Graph subscription is missing its expirationDateTime."));
 }

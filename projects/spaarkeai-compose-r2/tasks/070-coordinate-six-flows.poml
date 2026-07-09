@@ -1,0 +1,93 @@
+<task id="070" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-34 activate six coordinated flows (PaneEventBus choreography)</title>
+    <phase>7 Coord</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>030, 031</dependencies>
+    <blocks>071</blocks>
+    <tags>frontend, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Activates the six cross-pane coordination flows across PaneEventBus + all three panes — high blast radius on the ADR-030 choreography contract and the R2 three-pane differentiator. FULL per TASK-INDEX.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-pane choreography touching PaneEventBus + Workspace + Assistant + Context — architectural integration surface. Opus per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase7-coord</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Activate the six coordinated three-pane flows (design §3) that R1 wired stub-only — the CHOREOGRAPHY half of FR-34. Fill each flow with real behavior over the typed PaneEventBus (ADR-030): Workspace→Context (selection surfaces playbook matches / precedent / prior negotiation, source-attributed + D-F4 trace host), Workspace→Assistant (selection → inline toolbar → `compose_action_request` dispatch), Context→Workspace (drag precedent / click-to-navigate), Context→Assistant ("use this precedent" as next-action input), Assistant→Workspace (draft-alternative ledger entry materializes the pending track-change), Assistant→Context (AI-derived insight surfaces with source attribution). This task delivers the choreography; the D-F3 UI-ack-on-frame-id contract is the separate, gated task 071 (leave correlationIds as trace keys here, ack upgrade lands in 071).
+  </prompt>
+
+  <role>
+    Senior React/TypeScript developer fluent in the SpaarkeAi three-pane architecture, the PaneEventBus typed-discriminant contract (ADR-030), the ledger-reference choreography (ADR-040), and Fluent v9 conventions.
+  </role>
+
+  <goal>
+    All six coordinated flows from design §3 activated with real behavior over the typed PaneEventBus, each flow lighting up at least two panes, source attribution present on every Context entry. The draft-alternative Assistant→Workspace flow materializes from the ledger entry; the Assistant→Context flow surfaces insights with full attribution. The choreography works with correlationIds as trace keys; the ack-on-frame-id upgrade is explicitly deferred to task 071.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-34 (choreography half) + design §3 (the six-flow table + the AI-dispatch invariant + the UI-action-acknowledgment note). R1 wired the six flows with stub receivers; R2 fills them. This is the 🟡 splittable, independent half — it does NOT consume a gated core contract (unlike 071's D-F3 ack). Depends on FR-14 inline toolbar (030) and FR-15 custom marks (031) for the Workspace-side emitters and redline render targets.
+    </background>
+    <relevant-files>
+      <file purpose="event-bus">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts — the typed discriminants + four channels the six flows ride (ADR-030)</file>
+      <file purpose="event-bus-context">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBusContext.tsx — the provider wiring the panes subscribe through</file>
+      <file purpose="assistant-pane">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx — Assistant side of Workspace→Assistant, Context→Assistant, Assistant→Workspace, Assistant→Context</file>
+      <file purpose="workspace-editor">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — Workspace side: selection emitters, redline materialization target, drag-drop citation drop</file>
+      <file purpose="context-pane">@spaarke/legal-workspace Context pane — Context side: playbook/precedent surfacing (source-attributed), D-F4 trace host, navigate-on-click; audit-only (no input surface)</file>
+      <file purpose="marks">src/client/shared/Spaarke.Compose.Components — FR-15 custom marks (insertion/deletion/commentAnchor) the Assistant→Workspace flow renders into</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="not-started">Requires FR-14 inline AI toolbar — the Workspace→Assistant emitter.</dependency>
+      <dependency task="031" status="not-started">Requires FR-15 custom marks — the Assistant→Workspace redline render target.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-030">All six flows ride the typed PaneEventBus (no `any` payloads); the four channels are the only choreography surface. Every R2 feature lights up at least two of the six flows.</constraint>
+    <constraint source="ADR-040">The Assistant→Workspace draft-alternative flow references the ledger entry and materializes the pending track-change from stored state; it never carries the payload as source of truth.</constraint>
+    <constraint source="ADR-039">No flow introduces a new AI dispatch endpoint; Workspace→Assistant dispatches through the shipped session-dispatch seam.</constraint>
+    <constraint source="project">Context pane is audit-only — Context→Workspace / Context→Assistant read FROM Context; Context never becomes an interactive input surface. Every Context entry is source-attributed (FR-32).</constraint>
+    <constraint source="ADR-021">All touched UI is Fluent v9 + dark mode.</constraint>
+    <constraint source="project">Scope boundary: this task delivers choreography only; the D-F3 UI-ack-on-frame-id contract is task 071 — do NOT implement the ack here (leave correlationIds as trace keys).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ui/pane-event-bus, ui/three-pane-coordination, ai/ledger-disposition</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + load">Load task, project CLAUDE.md, design §3, the PaneEventBus contract, and the three pane components.</step>
+    <step order="1" name="Workspace-originating flows">Activate Workspace→Context (selection → source-attributed playbook/precedent surfacing) and Workspace→Assistant (selection → inline toolbar → `compose_action_request` dispatch through the seam).</step>
+    <step order="2" name="Context-originating flows">Activate Context→Workspace (drag precedent as inline citation / click-to-navigate) and Context→Assistant ("use this precedent" → next-action input); Context stays audit-only.</step>
+    <step order="3" name="Assistant-originating flows">Activate Assistant→Workspace (draft-alternative ledger entry materializes the pending track-change with provenance) and Assistant→Context (AI-derived insight surfaces with full source attribution).</step>
+    <step order="4" name="Verify two-pane rule">Confirm each activated flow lights up at least two panes and every Context entry is source-attributed; leave the ack-on-frame-id upgrade for task 071.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts (flow discriminants as needed)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (Assistant-side flow handlers)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (Workspace-side emitters + render targets)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">All six flows from design §3 are activated with real behavior (not stubs) over the typed PaneEventBus; each lights up at least two panes.</criterion>
+    <criterion testable="true">Workspace→Assistant dispatches through the shipped session-dispatch seam (no new endpoint); Assistant→Workspace materializes the pending track-change from the ledger entry.</criterion>
+    <criterion testable="true">Every Context entry (Workspace→Context, Assistant→Context) is source-attributed; the Context pane remains audit-only (no input affordance).</criterion>
+    <criterion testable="true">PaneEventBus payloads are typed with no `any` (ADR-030); touched UI is Fluent v9 + dark mode.</criterion>
+    <criterion testable="true">The D-F3 ack-on-frame-id upgrade is NOT implemented here (correlationIds remain trace keys); it is left to task 071.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

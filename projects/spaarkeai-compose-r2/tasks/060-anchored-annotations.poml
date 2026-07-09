@@ -1,0 +1,117 @@
+<task id="060" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-29 anchored annotations in Compose session payload (doc-adjacent)</title>
+    <phase>6 Memory</phase>
+    <gate>startable-now</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W2b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <tags>bff-api, frontend, testing</tags>
+    <fr>FR-29</fr>
+  </metadata>
+
+  <prompt>
+    Persist anchored annotations as Compose-domain, document-adjacent state inside the Compose session
+    payload so that AI/human annotations (comments, insertion/deletion suggestions, explanations) restore
+    across sessions and Word handoffs within drift tolerance. This is the argued Path-A exception to the
+    core charter's "no local MemoryItem variants" rule: `AnchoredAnnotation` is positional UI state (like a
+    cursor or a fold), NOT recallable memory. It is never written via `memory.*`, never retrieved by the
+    Context Binder, and never surfaced in the user's memory review/delete view. See design.md §8 and the
+    ADR Tensions Path-A row.
+  </prompt>
+
+  <role>
+    Senior full-stack developer familiar with the Sprk.Bff.Api ChatSession three-tier session stack
+    (Redis/Cosmos/Dataverse), the ADR-040 session ledger, and the Spaarke.Compose.Components TipTap editor.
+  </role>
+
+  <goal>
+    `anchoredAnnotations: AnchoredAnnotation[]` (and `definedTermsTracking: DefinedTerm[]`) added to the
+    Compose session payload, persisted on the existing three-tier stack (no new entity), scoped tenant+matter,
+    and rehydrated on session load so a mounted document restores its prior annotations within drift tolerance.
+    The AnchoredAnnotation shape carries `{ id, type, anchor{textPattern,paragraphHint,spanId}, body, author,
+    timestamp, source, provenance?{bindingId,ledgerRef} }` exactly as declared in design.md §8. Unit tests cover
+    round-trip persistence + restore.
+  </goal>
+
+  <context>
+    <background>
+      R1 wired `ChatSession.DocumentId` binding but left sessions content-thin. R2 fills them. The 2026-07-03
+      draft proposed three stored structures; two were re-based onto the core memory model (action log becomes
+      ledger queries — see task 061; derivedInsights become gated memory.write MemoryItems — see task 063).
+      `anchoredAnnotations` is the one structure that stays Compose-domain, argued in design.md §8 as document-
+      adjacent state. This task implements ONLY that structure. Provenance uses the `{bindingId}@t{n}` ledger
+      ref convention (ADR-040).
+    </background>
+    <relevant-files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs" role="edit">Compose session rebind + load; extend payload to carry anchoredAnnotations.</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Compose/IComposeService.cs" role="edit">Contract surface for the extended payload.</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs" role="reference">Three-tier session payload persistence (Redis/Cosmos/Dataverse) that anchoredAnnotations rides — no new entity.</file>
+      <file path="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx" role="edit">Client session payload consumer; rehydrate annotations on mount.</file>
+      <file path="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx" role="reference">TipTap marks host (insertion/deletion/commentAnchor from tasks 031) that annotations anchor to.</file>
+      <file path="projects/spaarkeai-compose-r2/design.md" role="spec">§8 payload shape + AnchoredAnnotation type + explicit deviation note.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependency. Anchor rendering integrates with custom marks (task 031) but does not block persistence work.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="charter-3.4">`AnchoredAnnotation` is the ARGUED Path-A exception to "no local MemoryItem variants": it MUST NOT be a MemoryItem, MUST NOT be written via `memory.*`, MUST NOT be retrieved by the Context Binder, MUST NOT appear in the memory review/delete view. If code-review (task 083) rejects the argument, fall back to a MemoryItem sub-type negotiated WITH the core — never a silent local variant.</constraint>
+    <constraint source="ADR-040">Provenance carries `{bindingId}@t{n}` ledger refs; annotations reference the ledger entry, never duplicate a `SessionOutput` payload as a second source of truth.</constraint>
+    <constraint source="ADR-015">Anchored annotations are document-adjacent session state, not a memory tier; they honor tenant+matter scoping (matter work product; ethical-wall authorization).</constraint>
+    <constraint source="ADR-009">If any anchor/etag state is cross-request, it lives in Redis, not `IMemoryCache`.</constraint>
+    <constraint source="ADR-013">`Services/Compose/` never injects AI internals (`IOpenAiClient`, executor, `IConsumerRoutingService`) — Tier-1 NetArchTest enforces.</constraint>
+    <constraint source="spec">No new Dataverse entity — extend the existing Compose session payload on the three-tier stack.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read design.md §8 for the exact `AnchoredAnnotation` + `ComposeSessionPayload` shapes; read ComposeService + ChatSessionManager to locate the current payload persistence path.</step>
+    <step order="2">Add `AnchoredAnnotation` (+ `DefinedTerm` for definedTermsTracking) types to the BFF Compose payload contract and the client types; keep field names verbatim from §8.</step>
+    <step order="3">Persist `anchoredAnnotations` through the existing three-tier session payload (no new entity); ensure tenant+matter scope is carried on write.</step>
+    <step order="4">Rehydrate annotations on Compose session load (ComposeService load path) and on client mount (ComposeWorkspace) so a re-opened document restores prior annotations.</step>
+    <step order="5">Wire provenance: AI-sourced annotations carry `provenance{bindingId, ledgerRef}`; verify the ref format matches ADR-040 `{bindingId}@t{n}`.</step>
+    <step order="6">Add unit tests in tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ for write→persist→restore round-trip incl. tenant/matter scoping; verify no memory.* path is touched.</step>
+    <step order="7">Verify publish-size + build; report absolute + delta per §10 BFF hygiene.</step>
+  </steps>
+
+  <justification>
+    <existing>Overlaps with the core `MemoryItem` contract and the session ledger. Verified: neither carries editor-positional span/paragraph anchor mechanics.</existing>
+    <extension>Cannot extend `MemoryItem` — forcing span/paragraph mechanics into it bloats a contract no other consumer needs (design.md §8). Cannot use the ledger — annotations are mutable positional UI state, not immutable outputs. Extends the existing Compose session payload instead (no new entity).</extension>
+    <cost-of-doing-nothing>Without persisted anchored annotations, a pending AI suggestion or user comment is lost on refresh and across a Word handoff — the exact "refresh-loses-the-suggestion" failure FR-16/FR-29 exist to prevent.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (+IComposeService.cs) — payload extension + rehydrate</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — client restore</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/AnchoredAnnotationPersistenceTests.cs</output>
+    <output type="docs">projects/spaarkeai-compose-r2/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">`anchoredAnnotations` and `definedTermsTracking` are added to the Compose session payload with the exact field shapes in design.md §8.</criterion>
+    <criterion testable="true">Annotations persist on the existing three-tier stack with no new Dataverse entity introduced.</criterion>
+    <criterion testable="true">Re-opening a mounted document restores prior annotations within drift tolerance (round-trip unit test green).</criterion>
+    <criterion testable="true">AI-sourced annotations carry `provenance{bindingId, ledgerRef}` in `{bindingId}@t{n}` form.</criterion>
+    <criterion testable="true">No code path writes annotations via `memory.*`, retrieves them via the Context Binder, or lists them in the memory review/delete view (grep-verified).</criterion>
+    <criterion testable="true">Tenant+matter scope is enforced on read and write.</criterion>
+    <criterion testable="true">BFF build green; Tier-1 NetArchTest facade rule green; publish-size reported with delta.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

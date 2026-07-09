@@ -1,0 +1,123 @@
+<task id="034" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-17 undo/replace via ledger supersession</title>
+    <phase>3 Inline Editing UX</phase>
+    <gate>red</gate>
+    <status>blocked</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>phase3-gated</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>033</deps>
+    <tags>frontend,fluent-ui,react,testing</tags>
+    <estimated-effort>high</estimated-effort>
+    <blocked-on>core R2 Phase A0 — ComposeDisposition v1 supersession semantics per HANDOFF §1 (items 3 &amp; 5)</blocked-on>
+  </metadata>
+
+  <prompt>
+    Support "undo that / try another approach" in the Assistant: retract the last AI-applied redline as a LEDGER
+    SUPERSESSION — write a NEW `compose` SessionOutput that supersedes the prior one (addressable by ref), then re-materialize
+    the Workspace from current ledger state. This is NOT a client-side DOM undo. Both the retraction and any fresh proposal
+    are ledger-durable, carrying the same provenance/durability guarantees as the original edit (design §2.3, spec FR-17).
+  </prompt>
+
+  <role>
+    Senior frontend developer expert in ledger-first (supersession) state models, SSE consumption, and ProseMirror re-materialization.
+  </role>
+
+  <goal>
+    Given the core's published supersession semantics (HANDOFF §1 items 3 &amp; 5), the Assistant can undo/replace a prior AI
+    edit: a supersession writes a new `compose` SessionOutput superseding the prior addressable entry; the Workspace
+    re-materializes from current ledger state (the prior redline disappears, a fresh proposal appears when replacing). Both
+    operations are ledger-durable (survive refresh). RTL tests cover undo, replace, and durability.
+  </goal>
+
+  <context>
+    <background>
+      BLOCKED until core R2 publishes Phase A0 `ComposeDisposition v1` supersession semantics. Author against HANDOFF §1:
+      (item 3) the entry is addressable as `{bindingId}@t{n}` so the Workspace can supersede it; (item 5) undo/replace = write
+      a NEW `compose` SessionOutput that supersedes the prior one; the Workspace re-materializes from current ledger state —
+      NO client-side-only DOM undo. Depends on FR-16 (task 033) materialization. Reuse task 033's `usePendingRedline`
+      re-materialization path for the "re-render from current ledger state" step.
+    </background>
+    <relevant-files>
+      <file change="create">src/solutions/SpaarkeAi/src/components/conversation/useEditSupersession.ts (issue supersession; trigger re-materialization)</file>
+      <file change="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts (re-materialize on supersession — FR-16 hook)</file>
+      <file change="reference">projects/spaarkeai-compose-r2/notes/HANDOFF-core-r2-A0-contract-requirements.md §1 items 3 &amp; 5 (addressable provenance + supersession semantics)</file>
+      <file change="reference">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (Assistant "undo that / try another approach" affordance)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="033" status="blocked">FR-16 pending track-change materialization — provides the addressable, ledger-materialized redline this task supersedes.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-040">Undo/replace = ledger supersession (write a new superseding `compose` SessionOutput); re-materialize from current ledger state. NO client-side DOM undo; the retraction has the same durability/provenance rules as the original edit.</constraint>
+    <constraint source="ADR-030">Any Workspace re-materialization signal flows via PaneEventBus (`compose_edit_apply_request`) referencing the ledger entry — never carrying the payload as source of truth.</constraint>
+    <constraint source="ADR-021">Any UI affordance for undo/replace is Fluent v9 dark-mode-correct.</constraint>
+    <constraint source="ADR-033">Supersession SSE frames ride the established `DocumentStreamWriter` side channel.</constraint>
+    <constraint source="project">Consume the core's supersession contract AS PUBLISHED — no local variant (charter §3.4).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ledger supersession; addressable session outputs; re-materialization from current ledger state</topic>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/spaarkeai-compose-r2/notes/HANDOFF-core-r2-A0-contract-requirements.md</file>
+      <file>projects/spaarkeai-compose-r2/design.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Ledger supersession" location="design.md §2.3 / HANDOFF §1 item 5">Undo/replace writes a new compose SessionOutput superseding the prior addressable one; Workspace re-materializes from current ledger state.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    NEW hook `useEditSupersession.ts`. (1) Existing — no supersession issuance path exists; FR-16 materializes but does not
+    retract. (2) Extension — issuing a superseding SessionOutput + triggering re-materialization is distinct from initial
+    materialization; it reuses FR-16's re-render path rather than duplicating it. (3) Cost-of-doing-nothing — without ledger
+    supersession, "undo that / try another approach" would be a client DOM undo that is not durable and loses provenance —
+    exactly what FR-17's ledger-durable bar forbids.
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Context check + confirm core Phase A0 supersession semantics (HANDOFF §1 items 3 &amp; 5) are PUBLISHED and match. If not, STOP (blocked).</step>
+    <step order="1">Implement `useEditSupersession`: given the addressable prior entry (`{bindingId}@t{n}`), issue a supersession — for "undo that" a retraction; for "try another approach" a retraction chained to a fresh Draft-Alternative dispatch.</step>
+    <step order="2">On supersession, trigger FR-16's `usePendingRedline` to re-materialize from current ledger state (prior redline disappears; fresh proposal appears when replacing).</step>
+    <step order="3">Ensure both operations are ledger-durable (survive refresh) and carry provenance.</step>
+    <step order="4">Handle negatives: superseding an already-superseded entry is idempotent/no-op; superseding a non-existent ref fails honestly; a fresh proposal that is ambiguous surfaces the FR-19 error.</step>
+    <step order="5">Wire the Assistant affordance in ConversationPane; write RTL tests (see ui-tests); `npm run build`; report.</step>
+  </steps>
+
+  <ui-tests>
+    <ui-test name="undo via supersession">"undo that" removes the prior redline by writing a superseding ledger entry; the Workspace re-materializes without the prior suggestion (assert prior marks gone + supersession recorded, NOT a DOM undo).</ui-test>
+    <ui-test name="replace + dark mode">"try another approach" removes the prior redline and applies a fresh proposal; the undo/replace affordance is Fluent v9 dark-mode-correct.</ui-test>
+    <ui-test name="ledger-durable">Both the retraction and the fresh proposal survive a simulated refresh (re-materialized from current ledger state); superseding an already-superseded entry is a no-op (NEGATIVE: idempotency).</ui-test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/useEditSupersession.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts (re-materialize on supersession)</output>
+    <output type="test">useEditSupersession RTL tests (co-located)</output>
+    <output type="report">Task completion report incl. confirmation the published supersession semantics matched HANDOFF §1 items 3 &amp; 5</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">"undo that and try another approach" removes the prior AI-applied redline and applies a fresh proposal; both operations are recorded as ledger operations (supersession), not client DOM undo.</criterion>
+    <criterion testable="true">Undo (retraction) supersedes the prior addressable `{bindingId}@t{n}` entry; the Workspace re-materializes from current ledger state with the prior suggestion gone.</criterion>
+    <criterion testable="true">Both the retraction and any fresh proposal are ledger-durable (survive a page refresh).</criterion>
+    <criterion testable="true">Superseding an already-superseded or non-existent entry is handled honestly (idempotent no-op / honest failure) — NEGATIVE cases.</criterion>
+    <criterion testable="true">The core's supersession contract is consumed AS PUBLISHED (no local variant); undo/replace UI is Fluent v9 dark-mode-correct; `npm run build` green.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Consumes core Phase A0 ComposeDisposition v1 supersession semantics per HANDOFF §1 (item 3 addressable provenance `{bindingId}@t{n}`; item 5 undo/replace = new superseding compose SessionOutput + re-materialize from current ledger state). If the published contract differs in how supersession is expressed or addressed, STOP and reconcile before implementing — do NOT build against a guessed shape.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

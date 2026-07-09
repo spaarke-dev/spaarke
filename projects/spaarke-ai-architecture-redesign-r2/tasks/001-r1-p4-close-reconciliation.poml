@@ -1,7 +1,7 @@
 <task id="AIR2-001" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>r1 P4-close reconciliation of design §10 contingent rows (4/5/6/8/12)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>0 — Reconciliation &amp; Discovery</phase>
     <gate>none (foundation; gates FR-D-06 / FR-D-07 / FR-B-15 disposition)</gate>
     <estimated-effort>0.5 day</estimated-effort>
@@ -91,4 +91,8 @@
   <escalation>
     <trigger>If any contingent row reveals that r1 P4 did NOT actually close the work (e.g. legacy workspace tools still wired to the orphaned IWorkspaceStateService, or the size-cap enforcement home never landed), STOP and surface it as scope-expansion input — do not silently pull unbounded r1 remediation into r2. The operator decides whether it becomes an r2 FR or returns to r1.</trigger>
   </escalation>
+
+  <notes>
+    Completed 2026-07-08. Reconciliation written to `projects/spaarke-ai-architecture-redesign-r2/notes/r1-p4-reconciliation.md`. Dispositions: row 4 = in-scope-FR (r1 P4 did NOT close it — Track-B audit item O-2; escalation trigger fired per this task's own named example; unblocks FR-D-06/task 075 with a "not closed" starting assumption); row 5 = verified-closed (r1 task 055 shipped `SessionLedger.CapInlinePayload` at the ledger write seam, grep-confirmed in `OutputRouter.cs`/`TypedHandlerResumeExecutor.cs`/`SessionLedgerEntries.cs`; unblocks FR-B-15/task 064 as a documented no-op); row 6 = accept-as-ruled (r1 gate 048 ruled `sprk_event`, shipped + UAT-verified live end-to-end); row 8 = accept-as-ruled (r1 tasks 045/048 kept office-addins SseClient with reason, grep-verified still present as-ruled); row 12 = in-scope-FR (DAILY-BRIEFING-NARRATE sub-item verified-closed via Dataverse Active→Inactive re-read; `spaarke-playbook-embeddings` index sub-item is the residual — zero code consumers but not yet deleted, registered by r1 as O-1 — unblocks FR-D-07/task 076). Escalation surfaced for row 4 (and noted, lower-severity, for row 12's residual) per CLAUDE.md §6 format; recommended path in both cases is to proceed with the already-scoped downstream tasks (075/076), not to expand scope or reopen r1.
+  </notes>
 </task>

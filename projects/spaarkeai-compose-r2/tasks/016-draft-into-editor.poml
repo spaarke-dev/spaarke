@@ -1,0 +1,111 @@
+<task id="016" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-04 draft-into-editor via compose disposition</title>
+    <phase>1 Entry</phase>
+    <status>blocked</status>
+    <estimated-hours>16</estimated-hours>
+    <effort>high</effort>
+    <dependencies>000</dependencies>
+    <blocks>033,042,046,082</blocks>
+    <tags>bff-api,frontend</tags>
+    <rigor-hint reason="Ledger-first disposition wiring (ADR-040); modifies .cs + .tsx; FULL per TASK-INDEX">FULL</rigor-hint>
+    <model-tier reason="Consumes core ComposeDisposition v1 + SSE frame; ledger-first materialization is architectural and provenance-sensitive; opus per TASK-INDEX">opus</model-tier>
+    <parallel-group>blocked-core-A0</parallel-group>
+    <parallel-safe reason="Blocked on core Phase A0; not scheduled into a wave until ComposeDisposition v1 publishes">false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    BLOCKED ON CORE R2 PHASE A0. Assistant-drafted content must land in the Compose editor as a transient
+    working draft, materialized ledger-first (ADR-040): the structured `compose`-disposition SessionOutput
+    is written to the session ledger BEFORE any render, and the client materializes the editor content from
+    the stored ledger entry (never from a client-only payload). This consumes the core's `ComposeDisposition
+    v1` (+ SSE frame) exactly as specified in the handoff doc §1 — it does NOT invent a local disposition or
+    payload path. Because the contract is unpublished, this task is authored against the handoff §1 shapes
+    and MUST NOT be executed against a guessed shape.
+  </prompt>
+
+  <role>
+    Full-stack developer fluent in the Spaarke session ledger (ADR-040), the `compose`-disposition SSE side
+    channel (ADR-033 `DocumentStreamWriter`), and the Compose editor materialization seam. You consume a
+    published core contract; you never fork it.
+  </role>
+
+  <goal>
+    "Draft an engagement letter into Compose" writes a `compose`-disposition SessionOutput to the ledger,
+    emits the core SSE frame (ledger_ref + disposition, not the payload as source of truth), and the client
+    materializes the drafted content into the editor from the stored ledger entry — refresh-durable, carrying
+    `{bindingId}@t{n}` provenance.
+  </goal>
+
+  <context>
+    <background>
+      Handoff §1 (`ComposeDisposition v1`): (1) `compose` disposition enum member; (2) payload shape
+      { target_text, new_text, match_mode, rationale, sources[] }; (3) addressable provenance `{bindingId}@t{n}`;
+      (4) SSE frame carrying ledger_ref + disposition (storage-precedes-rendering); (5) supersession semantics
+      for undo/replace (FR-17, task 034). FR-04 is the draft-into-editor leg — the first consumer of the
+      disposition. Depends on Spike 0 (000) validating the dispatch/mount path.
+    </background>
+    <relevant-files>
+      <file purpose="handoff-contract" edit="false">projects/spaarkeai-compose-r2/notes/HANDOFF-core-r2-A0-contract-requirements.md</file>
+      <file purpose="editor-materialize" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file purpose="conversation-pane" edit="true">src/solutions/SpaarkeAi/src/components/conversation/**</file>
+      <file purpose="dispatch-seam" edit="false">src/server/api/Sprk.Bff.Api/Services/Ai/**</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-040">Storage precedes rendering: the `compose` SessionOutput is written to the ledger BEFORE render; the client materializes from the stored entry; no parallel session cache.</constraint>
+    <constraint source="ADR-039">Content arrives via the shipped session-dispatch seam; no new AI dispatch endpoint; no string-key routing.</constraint>
+    <constraint source="ADR-033">The `compose`-disposition SSE frame rides `ChatInvocationContext.DocumentStreamWriter` — not a new interface.</constraint>
+    <constraint source="ADR-013">`Services/Compose` injects no AI internals; AI is reached via the HTTP seam + core contracts.</constraint>
+    <constraint source="core-A0">Consumes core R2 Phase A0 `ComposeDisposition v1` per handoff §1 — no local variant.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose/ledger-first, session-ledger, sse-side-channel</topic>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>projects/spaarkeai-compose-r2/notes/HANDOFF-core-r2-A0-contract-requirements.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <justification component="Draft-into-editor materialization (consumes core disposition)">
+    <existing>The session-dispatch seam + ledger + `DocumentStreamWriter` side channel exist; the editor materialization seam (`docxBytes`/setContent) exists.</existing>
+    <extension>Wire the core `compose` disposition to the existing materialization seam; no new endpoint, no local payload path.</extension>
+    <cost-of-doing-nothing>Without it, "draft into Compose" produces nothing durable in the editor (or a refresh-losing client buffer); FR-04 unmet and the flagship gate's draft-into-editor leg (082) fails.</cost-of-doing-nothing>
+  </justification>
+
+  <escalation>
+    <trigger>Consumes core R2 Phase A0 ComposeDisposition v1 per notes/HANDOFF-core-r2-A0-contract-requirements.md §1. If the published contract differs, STOP and reconcile — do not adapt silently.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step order="0">CONFIRM core Phase A0 `ComposeDisposition v1` is published and matches handoff §1. If not published or divergent, STOP (see &lt;escalation&gt;).</step>
+    <step order="1">Load spec.md FR-04 + handoff §1. Read the dispatch seam, ledger write path, and the editor materialization seam.</step>
+    <step order="2">On a draft-into-Compose dispatch, write the `compose`-disposition SessionOutput to the ledger first; emit the core SSE frame (ledger_ref + disposition).</step>
+    <step order="3">Client: on the SSE frame, materialize the editor content FROM the stored ledger entry (not the frame payload), tagging `{bindingId}@t{n}` provenance; make it refresh-durable.</step>
+    <step order="4">Add tests (ledger-first ordering; refresh-durability; provenance). Build BFF + package; measure publish-size; CVE scan.</step>
+    <step order="5">Run code-review + adr-check (Step 9.5). Update TASK-INDEX + current-task.md.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/**</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDraftDispositionTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">"Draft ... into Compose" writes a `compose`-disposition SessionOutput to the ledger before any render (storage-precedes-rendering, ADR-040).</criterion>
+    <criterion testable="true">The SSE frame carries ledger_ref + disposition, not the payload as source of truth; the client materializes from the stored ledger entry.</criterion>
+    <criterion testable="true">The drafted content is refresh-durable (survives a page refresh, materialized from the ledger) and carries `{bindingId}@t{n}` provenance.</criterion>
+    <criterion testable="true">No new AI dispatch endpoint and no string-key routing are added (ADR-039); the SSE rides `DocumentStreamWriter` (ADR-033).</criterion>
+    <criterion testable="true">(blocked-gate) The task is executed only after core `ComposeDisposition v1` is published and matches handoff §1; a divergent contract triggers the escalation.</criterion>
+    <criterion testable="true">BFF + package build succeed; tests pass; publish-size delta + CVE reported.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

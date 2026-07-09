@@ -1,0 +1,126 @@
+<task id="030" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-14 TipTap BubbleMenu inline AI toolbar (Explain/Compare/Draft/More)</title>
+    <phase>3 Inline Editing UX</phase>
+    <gate>green</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>phase3-ui</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend,fluent-ui,react,testing</tags>
+    <estimated-effort>high</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add the inline AI toolbar to the Compose editor: on text selection, a discrete floating Fluent v9 toolbar appears near
+    the selection with Explain / Compare to playbook / Draft alternative / "More actions…" (extensible overflow). It uses
+    the TipTap `BubbleMenu` extension (already imported in ComposeEditor.tsx). The toolbar dismisses when the selection
+    clears and repositions to stay in viewport (above by default, below if no room). This is the PRIMARY AI-feature
+    discovery surface (design §2.0). Each button dispatches a PaneEventBus `compose_action_request` on the `conversation`
+    channel carrying `{bindingId, selection, args}` — the button DISPATCHES; it does not call the model directly.
+  </prompt>
+
+  <role>
+    PCF/Code-Page frontend developer with deep Fluent UI v9 + TipTap/ProseMirror expertise; writes context-agnostic,
+    dark-mode-correct components with React Testing Library coverage.
+  </role>
+
+  <goal>
+    An inline `BubbleMenu`-based AI toolbar in `ComposeEditor.tsx` (Fluent v9, dark-mode-correct) that appears on
+    non-collapsed selection, exposes Explain / Compare / Draft / More via a registration-extensible action model, dispatches
+    `compose_action_request` PaneEventBus events, and dismisses/repositions correctly. Tooltip text sources the FR-23 scope
+    descriptions (task 024). RTL tests cover render, dark mode, and selection interaction.
+  </goal>
+
+  <context>
+    <background>
+      ComposeEditor.tsx already imports `BubbleMenu` from `@tiptap/react` and already emits `compose_selection_offer` on the
+      `conversation` channel and `compose_selection_changed` on `context` (Flows 1/2). FR-14 adds the VISIBLE toolbar on top
+      of that selection machinery. The overflow ("More actions…") MUST be registration-extensible so a follow-on project can
+      add clause-insertion actions without rearchitecting (design §2.0 extensibility guarantee). This task builds the toolbar
+      + dispatch signal; the actual catalog Bindings (FR-07/08/09) are Phase 4 (core-gated) — wire the dispatch contract now
+      with the bindingIds as configuration so Phase 4 fills them in.
+    </background>
+    <relevant-files>
+      <file change="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (add BubbleMenu AI toolbar + dispatch)</file>
+      <file change="create">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx (the floating toolbar + extensible action registry)</file>
+      <file change="reference">src/solutions/SpaarkeAi/src/types/compose-contracts.ts (PaneEventBus compose flow contracts — add/confirm compose_action_request discriminant)</file>
+      <file change="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx (existing Fluent v9 toolbar pattern to mirror)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="024" status="pending">FR-23 scope descriptions — the source of the toolbar button tooltips (author-once).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 + dark mode ONLY — semantic `tokens.*`, no v8, no hardcoded hex. Match ComposeEditor's existing `makeStyles`/`tokens` usage.</constraint>
+    <constraint source="ADR-030">Dispatch via PaneEventBus typed discriminant `compose_action_request` on the `conversation` channel; no `any` payloads. The toolbar emits the event; the ConversationPane is the dispatcher (design §2.1/§3).</constraint>
+    <constraint source="ADR-028">Any client fetch uses `@spaarke/auth` — but note the toolbar itself does NOT fetch; it dispatches an event. No raw Bearer.</constraint>
+    <constraint source="project">No new AI dispatch endpoint and no client-side routing — the toolbar only emits the event; resolution is the shipped session-dispatch seam (ADR-039).</constraint>
+    <constraint source="project">The overflow action model MUST be registration-extensible (clause-insertion addable later without rearchitecting) — design §2.0.</constraint>
+    <constraint source="project">Do NOT add to or remove from the LOCKED Spike #1 TipTap extension list in ComposeEditor.tsx; `BubbleMenu` is a render prop, not a schema extension.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>TipTap BubbleMenu; Fluent v9 floating toolbar; PaneEventBus dispatch; dark-mode tokens</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>projects/spaarkeai-compose-r2/design.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Inline AI toolbar on selection" location="design.md §2.0">Floating BubbleMenu; dismiss on clear; auto-reposition to stay in viewport; single-tap; extensible overflow.</pattern>
+      <pattern name="Fluent v9 toolbar" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx">Existing Toolbar/ToolbarButton + tokens usage to mirror.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    NEW component `ComposeAiToolbar.tsx`. (1) Existing — `ComposeFormatToolbar` is the FORMATTING toolbar (bold/italic/link);
+    it is not selection-anchored and not an AI-action surface. (2) Extension — the AI toolbar is a distinct floating,
+    selection-anchored, registration-extensible surface; folding AI actions into the format toolbar would break the §2.0
+    "discrete floating toolbar on selection" pattern. (3) Cost-of-doing-nothing — without it, AI features have no discovery
+    surface (design §2.0: "hidden in a top toolbar = invisible feature") and the three-pane Workspace→Assistant flow has no
+    trigger.
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Context check. Load ADR-021/030 + design §2.0/§2.1/§3 + the existing ComposeEditor/ComposeFormatToolbar.</step>
+    <step order="1">Confirm/extend the `compose_action_request` discriminant in compose-contracts.ts (typed `{bindingId, selection, args}` on the `conversation` channel).</step>
+    <step order="2">Build `ComposeAiToolbar.tsx`: a Fluent v9 floating toolbar with Explain / Compare / Draft buttons + a "More actions…" overflow menu backed by an action REGISTRY (array of `{id, label, tooltip, bindingId}`) so later actions register without editing the component.</step>
+    <step order="3">Render it inside ComposeEditor's `BubbleMenu` render prop; show on non-collapsed selection ≥ threshold, dismiss on clear, auto-reposition (BubbleMenu `tippyOptions` placement flip).</step>
+    <step order="4">Wire each button to dispatch `compose_action_request` via the editor's `useDispatchPaneEvent` with the button's `bindingId` + current selection + args.</step>
+    <step order="5">Source each button's tooltip from the FR-23 scope descriptions (task 024) — single authored source.</step>
+    <step order="6">Write RTL tests (see ui-tests); run `npm run build` for the package; report bundle impact.</step>
+  </steps>
+
+  <ui-tests>
+    <ui-test name="renders on selection">Toolbar renders its Explain/Compare/Draft buttons + overflow when a non-collapsed selection is active; renders nothing when selection is collapsed/cleared (NEGATIVE: empty/collapsed selection shows no toolbar). Anchor to ComposeEditor's existing `makeStyles`/`tokens` styling.</ui-test>
+    <ui-test name="dark mode (ADR-021)">Rendered under a dark FluentProvider theme, the toolbar uses semantic `tokens.*` (no hardcoded hex); snapshot/computed-style asserts token-driven colors in both light and dark.</ui-test>
+    <ui-test name="selection interaction + dispatch">Clicking Explain dispatches a `compose_action_request` PaneEventBus event carrying the expected `{bindingId, selection, args}`; the overflow menu opens and lists registered actions; a registered test action proves extensibility without editing the component.</ui-test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (mount BubbleMenu toolbar)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/types/compose-contracts.ts (compose_action_request discriminant)</output>
+    <output type="test">ComposeAiToolbar RTL tests (co-located per package convention)</output>
+    <output type="report">Task completion report incl. bundle impact</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Selecting text in the editor shows the floating AI toolbar near the selection; clearing/collapsing the selection dismisses it (NEGATIVE: no toolbar on empty/collapsed selection).</criterion>
+    <criterion testable="true">The toolbar exposes Explain / Compare to playbook / Draft alternative + a "More actions…" overflow; the overflow is registration-extensible (a test action registers without editing ComposeAiToolbar).</criterion>
+    <criterion testable="true">Each button dispatches a typed `compose_action_request` PaneEventBus event on the `conversation` channel with `{bindingId, selection, args}`; the toolbar makes NO direct model/HTTP call (ADR-030/ADR-039).</criterion>
+    <criterion testable="true">The toolbar repositions to stay in viewport (above by default, below when no room) and is single-tap (no modal).</criterion>
+    <criterion testable="true">All UI is Fluent v9 with dark-mode-correct semantic tokens (ADR-021); button tooltips source the FR-23 scope-description text; `npm run build` for the package is green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

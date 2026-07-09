@@ -1,0 +1,80 @@
+<task id="008" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Spike 8 — docx-benchmark harness baseline</title>
+    <phase>0 Spikes</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, docx, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Exploratory spike — throwaway MCP stub + external benchmark harness recorded as a spike note; no production code. STANDARD per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Harness integration + baseline measurement; bounded, no architectural blast radius. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W0b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Wrap the Compose BFF DOCX endpoints as an MCP server stub and integrate the external dealfluence/docx-benchmark harness (AGPL — used EXTERNALLY only, never linked into Spaarke) to measure a baseline quality figure for the annotation write/read pipeline. This establishes a quality regression gate before the production DOCX shuttle (FR-24/25) is built out. Deliverable is a spike note recording the harness wiring, the baseline score, and how to re-run it as a regression check.
+  </prompt>
+
+  <role>
+    Engineer building MCP server stubs + external benchmark harnesses; conscious of license boundaries (AGPL benchmark used externally, never linked into the product) and the Spaarke eval/testing standard (ADR-038).
+  </role>
+
+  <goal>
+    A spike note at projects/spaarkeai-compose-r2/notes/spikes/spike-8-docx-benchmark.md that unlocks the quality-regression-gate decision: a working MCP-stub + docx-benchmark harness wiring and a recorded baseline score, with instructions to re-run it as the DOCX-shuttle quality regression gate.
+  </goal>
+
+  <context>
+    <background>
+      Design §13 Spike 8 + §14 (docx-benchmark is AGPL, used externally only) + spec NFR-06 (eval/quality). The benchmark gives an objective quality baseline for the annotation pipeline so regressions in FR-24/25 are caught. It builds on Spike 5's working forward-path writer. Decision unlocked (design §13): quality regression gate.
+    </background>
+    <relevant-files>
+      <file purpose="docx-endpoints">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — the Compose endpoint group the MCP stub wraps (annotation push/pull routes land here in FR-24/25)</file>
+      <file purpose="spike-5-note">projects/spaarkeai-compose-r2/notes/spikes/spike-5-openxml-write.md — the working forward-path writer the harness benchmarks</file>
+      <file purpose="target-service-dir">src/server/api/Sprk.Bff.Api/Services/Compose/ — the DOCX-shuttle services (FR-24/25) the gate protects</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="not-started">Requires the Spike-5 working Open XML writer as the pipeline under benchmark.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Follow the eval/testing standard — the benchmark is an observation harness, not a merge-gate that mutates production code; document how it plugs into the eval strategy (NFR-06). Mock at module boundaries for any stub checks; no Mock&lt;HttpMessageHandler&gt;.</constraint>
+    <constraint source="project">dealfluence/docx-benchmark is AGPL — used EXTERNALLY only, NEVER linked/vendored into Spaarke. The MCP stub + harness live under notes/spikes/; deliverable is a spike note. Throwaway.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing/benchmark-harness, mcp/server-stub, docx/quality</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + load">Load this task, project CLAUDE.md, Spike-5 note, and the knowledge files.</step>
+    <step order="1" name="MCP stub">Wrap the Compose DOCX endpoints (or the Spike-5 writer directly) as a minimal MCP server stub the benchmark can call.</step>
+    <step order="2" name="Wire benchmark">Integrate dealfluence/docx-benchmark externally (separate process; no vendoring) pointed at the stub.</step>
+    <step order="3" name="Measure baseline">Run the harness; record the baseline quality score.</step>
+    <step order="4" name="Write spike note">Record the harness wiring, baseline score, license boundary, and re-run instructions.</step>
+  </steps>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/spikes/spike-8-docx-benchmark.md</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Spike note records a working MCP-stub + docx-benchmark harness wiring and a baseline quality score — the quality-regression-gate decision the spike unlocks (design §13).</criterion>
+    <criterion testable="true">Re-run instructions are documented so the harness can serve as a DOCX-shuttle regression check.</criterion>
+    <criterion testable="true">The note explicitly confirms the AGPL benchmark is used externally only and never linked/vendored into Spaarke (design §14).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

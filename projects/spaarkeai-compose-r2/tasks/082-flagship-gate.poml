@@ -1,0 +1,120 @@
+<task id="082" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Flagship gate G-R2-C — browser-verified full chain on spaarkedev1</title>
+    <phase>8 Wrap</phase>
+    <gate>blocked-on-core-A0</gate>
+    <status>blocked</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>terminal</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>016,033,042,046,047,014,055</dependencies>
+    <tags>e2e-test, testing, deploy</tags>
+    <fr>Success Criterion 1 (transferred G-R2-C)</fr>
+  </metadata>
+
+  <prompt>
+    Execute the transferred flagship gate G-R2-C: the assistant-driven document lifecycle — open → pre-seed →
+    draft-into-editor → AI edit rounds → save-back with provenance — performed by the operator on spaarkedev1
+    IN ONE CONVERSATION, browser-verified. The create leg MUST end with the document OPEN in Compose (never a
+    record id the user has to go find). A passing curl or green test does NOT satisfy this gate — it requires a
+    live browser run. This gate is BLOCKED until the full core-gated chain lands (draft-into-editor, pending
+    redline/undo, the catalog rows, dispatch wiring, catalog deploy, optional-association prompt, push/save).
+  </prompt>
+
+  <role>
+    QA/operator running an end-to-end browser verification of the SpaarkeAi three-pane Compose workspace on the
+    spaarkedev1 environment, using the Claude Code Chrome integration (ui-test skill).
+  </role>
+
+  <goal>
+    A browser-verified pass of the full assistant-driven chain on spaarkedev1 in one conversation: the operator
+    opens/pre-seeds a document, drafts into the editor from chat, runs AI edit rounds (draft-alternative +
+    accept/reject with visible provenance), and saves back — with the create leg ending with the document OPEN
+    in Compose. Evidence (screenshots + narrative) captured. If any leg fails honestly, the gate FAILS and the
+    failure mode is reported.
+  </goal>
+
+  <context>
+    <background>
+      This gate transferred verbatim from the r2 core charter (former G-R2-A/B/C table) and is THIS project's
+      flagship. Spec Success Criterion 1 + design.md §1.5 define it. The create leg's operator-ratified
+      refinement: creation completion chains into the chat→Compose bridge + pre-seed automatically; a run where
+      the operator must manually open Compose and look up the new document FAILS the leg.
+    </background>
+    <relevant-files>
+      <file path="projects/spaarkeai-compose-r2/spec.md" role="spec">Success Criteria §1 (flagship gate) + §6 (inline redline ledger-durable).</file>
+      <file path="projects/spaarkeai-compose-r2/design.md" role="spec">§1.5 delivered-product synopsis + flagship gate script refinement (create leg ends OPEN in Compose).</file>
+      <file path="src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx" role="reference">Assistant pane hosting the conversation the gate runs in.</file>
+      <file path="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx" role="reference">Compose editor surface where the document must end OPEN.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="016" status="blocked">FR-04 draft-into-editor via compose disposition (core-gated).</dependency>
+      <dependency task="033" status="blocked">FR-16 pending track-change materialization from ledger.</dependency>
+      <dependency task="042" status="blocked">FR-09 compose-draft-alternative Action + Binding (compose disposition).</dependency>
+      <dependency task="046" status="blocked">FR-13 dispatch wiring (PaneEventBus compose_action_request).</dependency>
+      <dependency task="047" status="blocked">Deploy catalog rows to Dataverse.</dependency>
+      <dependency task="014" status="pending">FR-05 optional parent-association prompt (Tier 2c dialog).</dependency>
+      <dependency task="055" status="pending">FR-28 push/save deterministic path (gate dialog + OutcomeCard).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Verify by a LIVE browser run on spaarkedev1 in ONE conversation. A passing curl / green test does NOT satisfy the gate.</constraint>
+    <constraint source="spec">The create leg MUST end with the document OPEN in Compose (chained via the chat→Compose bridge + pre-seed) — a manual lookup FAILS the leg.</constraint>
+    <constraint source="ADR-040">Inline redline + undo/replace must be ledger-durable (survive refresh) during the AI edit rounds.</constraint>
+    <constraint source="ADR-039">All AI actions dispatch through the shipped session-dispatch seam — zero new endpoints (route audit during the run).</constraint>
+    <constraint source="ADR-021">Fluent v9 + dark-mode surfaces (toolbar, OutcomeCard, Context sections, banner) render correctly in the browser.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm all dependency legs (016/033/042/046/047/014/055) are ✅ and deployed to spaarkedev1; if any is missing, remain blocked and escalate.</step>
+    <step order="2">Deploy the BFF + SpaarkeAi + catalog rows to spaarkedev1; verify build + smoke.</step>
+    <step order="3">Run the ui-test browser flow (below) in one conversation; capture screenshots + narrative at each leg.</step>
+    <step order="4">Assert the create leg ends with the document OPEN in Compose (no manual lookup); assert redline survives a mid-suggestion refresh.</step>
+    <step order="5">Record PASS/FAIL with evidence; on any honest failure, report the failure mode and mark the gate FAILED.</step>
+  </steps>
+
+  <ui-tests>
+    <ui-test name="open-and-preseed">Operator asks the assistant to open a real document in Compose; verify it mounts under OBO, refresh-surviving (1c path).</ui-test>
+    <ui-test name="draft-into-editor">Operator asks "draft an engagement letter into Compose"; verify content materializes in the editor from the stored ledger entry (compose disposition).</ui-test>
+    <ui-test name="ai-edit-round-draft-alternative">Operator selects a clause, clicks "Draft alternative"; verify a pending insertion/deletion pair renders with {bindingId}@t{n} provenance and accept/reject controls.</ui-test>
+    <ui-test name="redline-refresh-durability">Mid-suggestion, refresh the page; verify the pending redline survives (materialized from the ledger, not a client buffer).</ui-test>
+    <ui-test name="undo-replace">Operator says "undo that and try another approach"; verify the prior redline is retracted (ledger supersession) and a fresh proposal applies.</ui-test>
+    <ui-test name="provenance-visible">Verify each AI recommendation surfaces clickable sources in the Context pane (audit-only).</ui-test>
+    <ui-test name="save-back-and-create-leg">Operator saves; verify the Tier-2c gate dialog (one dialog) + per-step OutcomeCard (container/record/profile/indexing), and that the create leg ends with the document OPEN in Compose — not a bare record id.</ui-test>
+    <ui-test name="one-conversation">Verify the entire chain executes within a single conversation (no manual context re-entry).</ui-test>
+  </ui-tests>
+
+  <outputs>
+    <output type="report">projects/spaarkeai-compose-r2/notes/flagship-gate-G-R2-C-run.md — screenshots + narrative + PASS/FAIL</output>
+    <output type="docs">projects/spaarkeai-compose-r2/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The full chain open → pre-seed → draft-into-editor → AI edit rounds → save-back with provenance runs in ONE conversation on spaarkedev1, browser-verified.</criterion>
+    <criterion testable="true">The create leg ends with the document OPEN in Compose (no manual lookup).</criterion>
+    <criterion testable="true">Inline redline + undo/replace survive a mid-suggestion refresh (ledger-durable).</criterion>
+    <criterion testable="true">Every AI recommendation surfaces provenance in the Context pane.</criterion>
+    <criterion testable="true">A route audit confirms zero new AI dispatch endpoints were used.</criterion>
+    <criterion testable="true">Evidence (screenshots + narrative) is captured; a green test alone is explicitly NOT accepted as satisfying the gate.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The full core-gated chain is not yet landed + deployed to spaarkedev1: this gate depends on 016 (draft-into-editor), 033 (pending redline), 042 (draft-alternative catalog row), 046 (dispatch wiring), 047 (catalog deploy) — all core-A0-gated — plus 014 + 055. Remain `blocked` until every dependency is ✅ and deployed. Do NOT attempt a partial run; a curl/green test cannot substitute for the live browser verification (spec Success Criterion 1).</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

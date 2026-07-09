@@ -1,0 +1,145 @@
+<task id="050" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-24 DocxAnnotationWriter (comments + track changes, edge cases) + push endpoint</title>
+    <phase>5 Word</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+    <parallel-group>W3-Word</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>005</deps>
+    <tags>bff-api,api,spe,docx,azure</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-24: a deterministic `DocxAnnotationWriter` service that renders pending Compose
+    annotations (accepted track-change insertions/deletions + user/AI comments) into a `.docx` as
+    native Open XML `&lt;w:comment&gt;` + `&lt;w:ins&gt;` / `&lt;w:del&gt;` elements, then a `POST
+    /api/compose/document/{spe-id}/push-annotations` endpoint that persists the rewritten file to SPE
+    via `SpeFileStore.ReplaceFileContentAsUserAsync` with an `If-Match` etag. This is a purely
+    deterministic operation (NO LLM call) — the value is Word for Web rendering pushed annotations
+    natively. The hard part is the edge cases (comments-before-track-changes ordering; paragraph-
+    boundary `&lt;w:del&gt;`; monotonic revision-id/author/date metadata) captured by Spike 5 and adeu's
+    bug-numbered wisdom (design §6.2). Spike 5 (dep 005) validated the Open XML write → SPE → Word
+    for Web render path; this task productionizes it.
+  </prompt>
+
+  <role>
+    Senior .NET 8 developer fluent in the Microsoft Open XML SDK 3.x (`DocumentFormat.OpenXml`) and
+    OOXML WordprocessingML revision/comment markup, plus Minimal API endpoint authoring and the
+    Spaarke SPE facade (`SpeFileStore` / `ISpeFileOperations`). Comfortable encoding hard-won
+    edge-case handling as `// EDGE-N:` numbered comments.
+  </role>
+
+  <goal>
+    A `DocxAnnotationWriter` in `Services/Compose/` that, given a source `.docx` byte stream + a
+    structured set of Compose annotations, produces a byte-identical-where-untouched `.docx`
+    carrying valid `&lt;w:comment&gt;` and `&lt;w:ins&gt;`/`&lt;w:del&gt;` markup that Word for Web renders natively
+    with correct author/date/id; plus an authorized `POST
+    /api/compose/document/{spe-id}/push-annotations` endpoint that saves the result to SPE with
+    optimistic-concurrency (`If-Match`). Matching unit tests in
+    `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/` cover the ordering, paragraph-boundary, and
+    metadata-uniqueness edge cases plus malformed-input and etag-conflict negatives.
+  </goal>
+
+  <context>
+    <background>
+      Phase 2 of the two-phase architecture (design §6.2 — "DOCX shuttle, well-trodden
+      engineering"). Microsoft Learn + the Open XML SDK typed classes (`Comments`, `Comment`,
+      `CommentReference`, `InsertedRun`, `DeletedRun`) cover ~90%; adeu's narrow value is the
+      edge-case wisdom below. Open XML SDK 3.x + Codeuctivity.OpenXmlPowerTools (both MIT, NFR-07)
+      add ~3-5 MB to publish — measure per NFR-01/ADR-029 and report absolute + delta (baseline
+      49.63 MB incl. PDBs; this is the FIRST task to add the SDK, so it crosses toward the ≥55 MB
+      architecture-review trigger — apply the PDB-exclusion lever if needed and state it).
+    </background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs — NEW service (this task)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — add POST /document/{spe-id}/push-annotations to the existing MapGroup("/api/compose").RequireAuthorization() group</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs — ReplaceFileContentAsUserAsync (item-based content replacement with If-Match; added PR #544); reuse, do NOT reimplement SPE I/O</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/ISpeFileOperations.cs — facade contract; all SPE access stays behind it (ADR-007)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — existing ReplaceFileContentAsUserAsync call site + OBO usage pattern to mirror</file>
+      <file role="reference">projects/spaarkeai-compose-r2/notes/spikes/ — Spike 5 notes (Open XML write w:ins+w:comment → Word for Web); the validated write recipe</file>
+      <file role="design">projects/spaarkeai-compose-r2/design.md §6.2 (DOCX shuttle engineering + edge cases), §2.4 (push), §12.2 (endpoints)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">Spike 5 — Open XML write w:ins+w:comment renders in Word for Web. Its validated write recipe + notes are the starting point; do not re-derive from scratch.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">NO `Microsoft.Graph` types above the `SpeFileStore`/Infrastructure facade. `DocxAnnotationWriter` operates on byte streams; all SPE read/write goes through `SpeFileStore.ReplaceFileContentAsUserAsync` / the download facade — never a `GraphServiceClient`, `DriveItem`, or other `Microsoft.Graph` type in `Services/Compose/`.</constraint>
+    <constraint source="ADR-008">The push-annotations endpoint uses `.RequireAuthorization()` (inherited from the `/api/compose` group) and resource authorization via endpoint filter where applicable — no global middleware for the resource check.</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/DocxAnnotationWriter` MUST NOT inject `IOpenAiClient`, executor types, or `IConsumerRoutingService`. This is a deterministic DOCX operation with zero AI reach. Tier-1 NetArchTest enforces.</constraint>
+    <constraint source="ADR-010">Keep DI additions minimal. `DocxAnnotationWriter` may be a single registered service; internal helpers (revision-id generator, ordering pass) need not be DI-registered.</constraint>
+    <constraint source="ADR-029 / CLAUDE.md §10">Measure BFF publish size after adding the Open XML SDK: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report absolute compressed size + delta vs 49.63 MB baseline. ≥+5 MB single-task delta → justify; ≥55 MB cumulative → flag architecture review. Verify no new HIGH CVE (`dotnet list package --vulnerable --include-transitive`). State the PDB convention when reporting.</constraint>
+    <constraint source="NFR-07">Only MIT runtime deps — Open XML SDK 3.x + Codeuctivity.OpenXmlPowerTools. Zero commercial license fees.</constraint>
+    <constraint source="NFR-08">Every new/modified `Services/Compose/` service ships matching unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`.</constraint>
+    <constraint source="project / §10 Placement Justification">State the Placement Justification for the new service + endpoint in the PR description, citing bff-extensions.md decision criteria.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Open XML WordprocessingML revisions + comments; SPE facade write with etag</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/spe-integration/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="SPE write via facade" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs">
+        Existing `ReplaceFileContentAsUserAsync` call site — copy the OBO + If-Match pattern; the writer produces bytes, the endpoint persists them.
+      </pattern>
+      <pattern name="Compose endpoint group" location="src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs">
+        Add the new route to the existing `MapGroup("/api/compose").RequireAuthorization().WithTags("Compose")` group; follow the `.WithName/.WithSummary/.RequireRateLimiting/.Produces` convention already used by Load/Save/Promote.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Confirm Spike 5 (005) notes are available; read the validated write recipe. Run the rigor-level declaration (FULL). Load the knowledge files + bff-extensions.md before designing.</step>
+    <step order="1" name="Add Open XML SDK packages">Add `DocumentFormat.OpenXml` 3.x + `Codeuctivity.OpenXmlPowerTools` (MIT) to `Sprk.Bff.Api.csproj`. Immediately measure publish size + CVE per ADR-029 and record the baseline delta before writing code.</step>
+    <step order="2" name="Design the annotation input contract">Define the structured input the writer consumes (comments with anchor spans; insertion/deletion pairs with target text + author/date). Reuse the compose-disposition edit-payload shape where it aligns (`target_text`/`new_text`); do not invent a parallel schema. Keep the DTO in `Services/Compose/`.</step>
+    <step order="3" name="Implement DocxAnnotationWriter">Open the source `.docx` with the SDK; apply comments then track-changes in the correct order. Encode each edge case as a `// EDGE-N:` numbered comment: (a) comments-before-track-changes ordering (adeu + pandoc #9833); (b) paragraph-boundary `&lt;w:del&gt;` deleting the paragraph mark via `w:pPr/w:rPr/w:del` (adeu BUG-23-3); (c) monotonic per-document revision-id + unique author/date metadata. Leave untouched runs byte-stable.</step>
+    <step order="4" name="Wire the push-annotations endpoint">Add `POST /api/compose/document/{spe-id}/push-annotations` to `ComposeEndpoints.cs`: download current bytes via the facade, run the writer, persist via `ReplaceFileContentAsUserAsync` with the caller-supplied `If-Match` etag. Return the new etag/version. Handle etag-conflict (412) and malformed-DOCX (400) as ProblemDetails.</step>
+    <step order="5" name="Unit tests">Author `DocxAnnotationWriterTests` in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`: assert emitted markup for each edge case; assert byte-stability of untouched content; negative cases for malformed input and etag conflict. Mock at the SPE facade boundary (ADR-038; no `Mock&lt;HttpMessageHandler&gt;`).</step>
+    <step order="6" name="Verify + size/CVE report">Build BFF + run the new tests. Re-run publish-size + CVE, report absolute + delta. Run the NetArchTest facade check (Services/Compose has no AI-internal injection). Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (push-annotations route added)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (Open XML SDK + OpenXmlPowerTools packages)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/DocxAnnotationWriterTests.cs</output>
+    <output type="report">Publish-size absolute + delta; CVE scan result; Placement Justification</output>
+  </outputs>
+
+  <justification>
+    <existing>No existing service writes OOXML comment/revision markup — `ComposeService` handles SPE load/save/promote only; `DocxAnnotationReader` (task 051) is the read direction. No overlap.</existing>
+    <extension>Cannot be folded into `ComposeService`: that class is the SPE-lifecycle facade with a distinct responsibility; annotation authoring is a cohesive, testable OOXML concern with heavy edge-case surface that warrants its own unit-tested unit (SRP). The endpoint reuses `ComposeEndpoints.cs` and `SpeFileStore` — no new SPE plumbing.</extension>
+    <cost-of-doing-nothing>Without it, every accepted AI suggestion and comment stays locked inside Compose — Word for Web shows none of it natively, defeating the competitive-parity requirement (design §2.4). Concrete failing contract: FR-24 acceptance "Word for Web renders pushed comments + track changes natively" cannot be met.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Given a source `.docx` + a comment + an insertion/deletion pair, the writer emits valid `&lt;w:comment&gt;`, `&lt;w:ins&gt;`, `&lt;w:del&gt;` with correct author/date and a monotonic per-document revision id, and Word for Web renders them natively (validated against the Spike 5 recipe).</criterion>
+    <criterion testable="true">Comments are emitted before track changes in the pipeline order; a unit test asserts the ordering rule.</criterion>
+    <criterion testable="true">A paragraph-boundary deletion deletes the paragraph mark via `w:pPr/w:rPr/w:del`; a unit test asserts the EDGE handler fires.</criterion>
+    <criterion testable="true">`POST /api/compose/document/{spe-id}/push-annotations` requires authorization and persists via `ReplaceFileContentAsUserAsync` with the caller's `If-Match` etag, returning the new version.</criterion>
+    <criterion testable="true">Negative: a malformed/non-DOCX input returns 400 ProblemDetails, not an unhandled exception.</criterion>
+    <criterion testable="true">Negative: a stale `If-Match` etag (SPE version changed under the caller) returns 412 and does NOT partially write.</criterion>
+    <criterion testable="true">`Services/Compose/DocxAnnotationWriter` injects no AI-internal type (NetArchTest green); no `Microsoft.Graph` type appears in `Services/Compose/` (ADR-007).</criterion>
+    <criterion testable="true">Publish size reported absolute + delta vs 49.63 MB baseline, ≤60 MB; no new HIGH CVE; only MIT deps added.</criterion>
+    <criterion testable="true">Matching unit tests exist and pass; BFF build is green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -77,4 +77,35 @@ Spike #4 §13 lists prototype files at `notes/spikes/spike-4-prototype/scopes/`.
 
 ---
 
+## R2 enrichment (2026-07-08, spaarkeai-compose-r2 task 024, FR-23)
+
+Per the adeu "tool descriptions ARE the prompt" pattern (spaarkeai-compose-r2 design.md §2.0/§6.1), both scope-level
+`description` fields and each field-level `description` were enriched in place with GOTCHA / RECOVERY PATH / EXAMPLE
+guidance — the SAME text primes the LLM invoking a playbook against this scope AND is intended to serve as the
+user-visible tooltip surface described below. This is a content-only change to the two locked R1 files; field names,
+types, `required` flags, and `totalCharCap` are unchanged (no schema regression).
+
+**Tooltip-source contract for FR-14 (task 030, TipTap `BubbleMenu` inline AI toolbar)**:
+
+- The **scope-level** `description` (`compose-selection.description` / `compose-document.description`) is the source
+  for a GENERIC selection-affordance tooltip — e.g., an info affordance on the BubbleMenu container itself explaining
+  what "AI actions on this selection" means, gotchas (char cap, staleness), and what's safe to expect.
+- **Per-field** descriptions (e.g. `selectionText`, `documentVersionEtag`) are the source for validation-error /
+  gotcha tooltips surfaced when a specific input triggers a constraint (selection too long, stale etag, missing
+  session).
+- **Per-BUTTON** tooltips (the individual "Explain" / "Compare to playbook" / "Draft alternative" labels on the
+  BubbleMenu) are NOT sourced from this scope file — they belong to the respective **Action row's** `description`
+  (`compose-explain-clause`, `compose-compare-to-playbook`, `compose-draft-alternative`), a different artifact class
+  authored by the Phase 4 catalog-authoring tasks (040-044), which are core-A0-blocked at the time of this enrichment.
+  Task 030 should wire per-button tooltips to those Action descriptions once Phase 4 lands; until then it may fall
+  back to the relevant scope-level description above for a generic tooltip.
+
+No new `sprk_analysisplaybook` record was created; no new dispatch/config surface introduced. The `jps-scope/v1`
+per-field boolean `required` shape used here is this scope schema family's own convention (established by R1 task
+012) — it is NOT the OpenAI Structured Outputs function-schema shape that the "property-level boolean `required` is
+BANNED" rule (design.md §7.1 / `OpenAiFunctionSchemaValidator`) targets; that rule applies to `sprk_analysisaction`
+catalog-row output schemas, a different artifact class not touched by this task.
+
+---
+
 *Locked 2026-06-29 by task 012. Reopen only if Phase 2 BFF endpoint contract surfaces a field gap not anticipated here.*
