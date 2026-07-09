@@ -3,7 +3,7 @@
   <metadata>
     <title>"+" button (CardChrome + VisualHostRoot) + Fluent Dialog host + host-record seed</title>
     <phase>A: Visual Host + Registry + Event</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>010,011</dependencies>
     <blocks>015</blocks>
@@ -56,6 +56,167 @@
     <criterion>Unknown key → toast, no crash.</criterion>
     <criterion>No regression to spaarkle/open buttons; dark mode correct.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <summary>
+      Implemented the "+" Create Wizard button end-to-end: CardChrome icon slot,
+      VisualHostRoot's legacy toolbar path, a Fluent v9 Dialog + React.Suspense
+      wizard host, and — for the first time in Visual Host — real
+      `@spaarke/auth` wiring (previously this PCF had zero auth/BFF plumbing).
+    </summary>
+    <files-touched>
+      <file>src/client/pcf/VisualHost/control/components/CardChrome.tsx — added
+        optional `onCreateClick` prop + `AddRegular` icon rendered between the
+        AI-sparkle and expand icons, gated by presence (same pattern as
+        `hasExpand`/`hasAiSparkle`).</file>
+      <file>src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx —
+        added: (a) "+" wiring in both the CardChrome-opt-in path (`chromeOnCreate`,
+        gated on `chromeOptIn && createWizardEnabled`) and the legacy toolbar path
+        (both the inline and float variants, plus widened the toolbar's visibility
+        condition so it renders when ONLY createWizardEnabled is set); (b)
+        `handleCreateClick` — resolves the wizard via `resolveWizard`, shows a
+        Fluent Toast on unknown key, opens a Dialog, and lazily kicks off auth
+        init + host-record-name resolution; (c) a module-level singleton promise
+        (`ensureCreateWizardAuthInitialized`) so `@spaarke/auth`'s `initAuth` runs
+        at most once per page even with multiple Visual Host instances; (d)
+        `resolveHostRecordName` — reuses the existing
+        `PolymorphicResolverService.resolveRecordDisplayNameFieldName` catalog
+        lookup (generic across every entity in `sprk_recordtype_ref`, not a
+        hardcoded Matter/Project map); (e) `resolveSpeContainerId` copied verbatim
+        from `CreateEventWizard/src/main.tsx:57-67`; (f) the Dialog/Suspense/Toaster
+        JSX at the root return.</file>
+      <file>src/client/pcf/VisualHost/package.json — added
+        `"@spaarke/auth": "file:../../shared/Spaarke.Auth"` (dependencies) and
+        `"@azure/msal-browser": "^3.30.0"` (devDependencies, `@spaarke/auth`'s
+        peer dep) — mirrors `SemanticSearchControl/package.json`'s exact reference
+        format.</file>
+      <file>src/client/pcf/VisualHost/tsconfig.json — removed a stale
+        `"module": "es2015"` override. `wizardRegistry.ts` (task 011) uses
+        `React.lazy(() => import(...))`, which TS rejects under `es2015` (TS1323).
+        The override served no purpose visible in this repo (every other PCF, e.g.
+        SemanticSearchControl, has no override and already inherits `"es2020"`
+        from `pcf-scripts/tsconfig_base.json`) — removing it was the minimal fix.
+        Verified safe via a full `npm run build:prod` (recompiles the whole
+        `control/**/*` glob, not just the 2 files this task touched).</file>
+    </files-touched>
+    <host-record-name-resolution>
+      Chose to REUSE `PolymorphicResolverService.resolveRecordDisplayNameFieldName`
+      (queries `sprk_recordtype_ref.sprk_recorddisplaynamefield`, then retrieves
+      that field from the host record) rather than a hardcoded Matter/Project
+      field map. This is the same catalog mechanism `applyResolverFields` uses
+      internally for `sprk_regardingrecordname` — reuse over new logic per
+      CLAUDE.md §11. It is generic across every entity registered in the catalog
+      (not just Matter/Project), gracefully falls back to an empty string when
+      there is no host record, no catalog mapping, or the lookup throws (mirrors
+      the service's own NFR-06 graceful-blank convention), and does not block
+      the wizard from opening. Host entity type comes from
+      `context.mode.contextInfo.entityTypeName` (confirmed as the correct PCF SDK
+      extension property via 3 existing consumers in this repo: SemanticSearchControl,
+      ScopeConfigEditor, DocumentRelationshipViewer — none of which are in the
+      public ComponentFramework typings, hence the existing `as any` cast
+      convention, reused here).
+    </host-record-name-resolution>
+    <lazy-auth-init>
+      `@spaarke/auth`'s `initAuth`/`resolveRuntimeConfig`/`authenticatedFetch` are
+      imported ONLY as a type (`import type { AuthenticatedFetchFn }`) at module
+      scope; the runtime module is loaded via dynamic `import('@spaarke/auth')`
+      inside a module-level singleton function
+      (`ensureCreateWizardAuthInitialized`), invoked for the first time only on
+      the first "+" click (not on mount). The singleton promise is declared
+      OUTSIDE the component (module scope), so every VisualHost instance mounted
+      on the same form (they share one JS module registry/iframe) reuses the same
+      in-flight/resolved promise — a second "+" click, on the same or a different
+      visual, never re-runs `initAuth`. On failure, the promise resets to `null`
+      (so the next click retries) and the component falls back to a plain
+      unauthenticated `fetch` for `authenticatedFetch` rather than leaving the
+      dialog stuck — this degrades more gracefully than the
+      `CreateEventWizard/src/main.tsx` reference (which would hard-throw on the
+      wizard's first real `authenticatedFetch` call if init failed, since it
+      still references the real, uninitialized function).
+      IMPORTANT CAVEAT (verified empirically): PCF's webpack config emits a
+      SINGLE `bundle.js` — there is no secondary-chunk mechanism for this control,
+      so the dynamic `import()` does NOT reduce the shipped byte count the way it
+      would in a chunked web app. `@azure/msal-browser` (~787 KiB uncompressed) is
+      physically present in `bundle.js` either way. The dynamic import is kept
+      because it still defers *executing* `@spaarke/auth`'s module-init code
+      until first use (not on every Visual Host mount) and matches this file's
+      other lazy-on-first-use pattern (`wizardRegistry`'s `React.lazy()` wizards
+      have the same single-bundle characteristic — code-split in principle,
+      not in this PCF's actual output).
+    </lazy-auth-init>
+    <dependency-and-build-changes>
+      <step>Built `src/client/shared/Spaarke.Auth`'s `dist/` for the first time in
+        this worktree (`npm install --legacy-peer-deps --no-audit --no-fund` then
+        `npm run build` — tsc). It had no `dist/` at all prior to this task (unlike
+        the master repo's copy, which was already built for SemanticSearchControl's
+        use).</step>
+      <step>Ran `npm install --legacy-peer-deps --no-audit --no-fund` in
+        `src/client/pcf/VisualHost/` — resolved `@spaarke/auth` as a symlink to
+        `src/client/shared/Spaarke.Auth` (confirmed via `readlink`) and
+        `@azure/msal-browser` into `node_modules/@azure/msal-browser`, both
+        verified present before writing any import of them.</step>
+      <step>`npm run build:prod` succeeds cleanly (webpack 0 errors, 3 pre-existing
+        performance-budget WARNINGS only — asset-size / entrypoint-size / "use
+        import() to code-split", all expected for a PCF bundling its full
+        dependency graph into one file).</step>
+    </dependency-and-build-changes>
+    <bundle-size>
+      Baseline (pre-task, `out/controls/control/bundle.js`): 759,685 bytes
+      (~742 KiB) — matches the 741 KiB figure cited in the task brief.
+      After this task: 1,250,528 bytes (~1.19 MiB) — a delta of ~490 KiB.
+      Almost entirely attributable to `@azure/msal-browser` (~787 KiB per the
+      webpack module-size breakdown) entering Visual Host's dependency graph for
+      the very first time via `@spaarke/auth`. This is a first-time,
+      structural cost of wiring real BFF/auth into this PCF (as scoped by the
+      task brief) — NOT reducible by lazy/dynamic import in this PCF's
+      single-bundle webpack output (see lazy-auth-init caveat above). Per
+      design.md §12 point 9 / spec NFR-01, the <5 KB delta budget applies to the
+      FINAL wired-up state across all Phase A tasks, not this task in isolation —
+      flagging the number here for the owner/architecture-review checkpoint
+      rather than blocking on it.
+    </bundle-size>
+    <quality-gates>
+      <code-review>No Critical issues. Hooks dependency arrays verified correct
+        (no missing deps, no stale closures). ADR-021/ADR-022/ADR-012/ADR-028 all
+        compliant (see adr-check below for detail). Non-blocking Warning:
+        `VisualHostRoot.tsx` grew from 797 to ~1130 lines, past the file-size
+        guideline — flagged for a future extraction (e.g. a
+        `useCreateWizardDialog` hook) but out of THIS task's scope since both
+        files are the POML's explicit `<relevant-files>`. Non-blocking Suggestion:
+        `handleCreateClick` bundles several concerns (registry resolution, toast,
+        dialog-open, two async bootstraps) — acceptable given they're all
+        dispatched from one user action and the two bootstraps are already
+        factored into named helper functions.</code-review>
+      <adr-check>0 violations. ADR-021: all new UI uses Fluent v9 semantic tokens
+        (`tokens.*`) and `@fluentui/react-icons`; no hex/rgb. ADR-022: no React
+        18-exclusive APIs introduced (React.Suspense has shipped since 16.6;
+        `useState`/`useCallback`/`useMemo` are baseline). ADR-012: new imports
+        follow this file's PRE-EXISTING direct-relative-source-import convention
+        into `Spaarke.UI.Components/src/` (same as `AiSummaryPopover`/
+        `AppInsightsService` already in this file) rather than the npm-published
+        package. ADR-028: uses `authenticatedFetch` function reference exclusively;
+        no token snapshotting; no direct `PublicClientApplication` instantiation;
+        the auth-init-failure fallback uses plain unauthenticated `fetch` (not a
+        fabricated bearer token) — a deliberate, defensible degrade, documented
+        above.</adr-check>
+    </quality-gates>
+    <known-gap-out-of-scope>
+      `CreateEventWizard.tsx`'s own prop interface (`ICreateEventWizardProps`)
+      does not currently accept `initialAssociation`/`lockAssociation` — it does
+      not use `AssociateToStep` at all yet (per design.md §5.6, it still bypasses
+      the polymorphic resolver with an ad-hoc matter/project map). VisualHostRoot
+      correctly passes a full `WizardHostProps`-shaped object (including
+      `initialAssociation`/`lockAssociation: true`) through the registry per the
+      contract in `wizardRegistry.ts` ("each wizard reads the subset of fields it
+      needs"), so today the Event wizard silently ignores those two fields at
+      runtime — the host-record seed will not yet visibly lock/pre-fill step 1
+      for `CreateEventWizard` until the separate, already-tracked ADR-024
+      `eventService` resolver migration task (Phase A, opus-tier per this
+      project's CLAUDE.md) lands and wires `AssociateToStep` in. This is a
+      pre-existing gap in a file NOT in this task's `<relevant-files>` list, not
+      a defect introduced here — flagging for owner visibility.
+    </known-gap-out-of-scope>
+  </notes>
 
   <ui-tests>
     <test name="Plus button gated by config">

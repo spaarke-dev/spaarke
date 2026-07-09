@@ -5,6 +5,8 @@
 > **Branch**: `work/visual-host-create-button-r1`
 > **Owner**: ralph.schroeder@hotmail.com
 > **Date**: 2026-07-05 (rev 2 — standard wizard template, polymorphic association, AI-prefill stub, file dual-bind)
+>
+> **⚠️ Post-Phase-D amendment (2026-07-08, owner decision)**: §5.6/§5.10/§8/§12's "KPI Assessment" wizard is retargeted to build `CreateReportCardWizard` against `sprk_reportcard` instead of `sprk_kpiassessment` directly — `sprk_kpiassessment` records are line-items belonging to a parent `sprk_reportcard`; adding KPI line-items to a report card is a separate, later capability. `sprk_reportcard` is already fully ADR-024 resolver-ready (Matter+Project only, matching schema). Enter Info also gained 8 assigned-resource lookups per owner decision. No files step (unchanged from the original KPI decision). Registry key renamed `kpi-assessment` → `report-card`. One additive schema change folded into task 040: `sprk_todo` → `sprk_reportcard` lookup (owner-approved Path A), needed for the Add-To-Do follow-on. Authoritative detail: `notes/field-manifests/reportcard.md` + `tasks/040-create-reportcard-wizard.poml`. Everything else in this design is unaffected.
 
 ---
 

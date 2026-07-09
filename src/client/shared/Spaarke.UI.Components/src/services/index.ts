@@ -38,6 +38,7 @@ export type {
   IFileUploadResult,
   ISpeFileMetadata,
   IDocumentLinkResult,
+  IAdditionalBind,
   ISendEmailInput,
   ISendEmailResult,
   IUploadProgress,

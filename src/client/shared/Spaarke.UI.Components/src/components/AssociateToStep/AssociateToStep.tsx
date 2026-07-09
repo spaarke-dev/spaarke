@@ -79,6 +79,7 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
   onChange,
   onSkip,
   disabled = false,
+  locked = false,
 }) => {
   const styles = useAssociateToStepStyles();
 
@@ -180,6 +181,37 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
   // ── Render ────────────────────────────────────────────────────────────────
 
   const isInteractionDisabled = disabled || isLookupPending;
+
+  // Locked mode (design §5.5): the parent is fixed (e.g. launched from a Visual
+  // Host visual). Show the association read-only — no dropdown, no Select, no
+  // Clear — so the user cannot re-target it. Header is still rendered for
+  // wizard-step continuity.
+  if (locked) {
+    return (
+      <div className={styles.root}>
+        <div className={styles.header}>
+          <Text as="h2" size={500} weight="semibold" className={styles.title}>
+            Associate To
+          </Text>
+          <Text size={200} className={styles.subtitle}>
+            This record will be linked to the record you started from.
+          </Text>
+        </div>
+
+        {value?.recordId && (
+          <div className={styles.selectedRecord} data-testid="associate-to-step-locked-record">
+            <CheckmarkCircleRegular fontSize={20} className={styles.selectedIcon} />
+            <Text size={300} weight="semibold" className={styles.selectedName}>
+              {value.recordName}
+            </Text>
+            <Text size={200} className={styles.selectedType}>
+              ({selectedTypeDef?.label ?? value.entityType})
+            </Text>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={styles.root}>

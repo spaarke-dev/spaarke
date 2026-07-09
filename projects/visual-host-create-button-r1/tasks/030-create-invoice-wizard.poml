@@ -3,7 +3,7 @@
   <metadata>
     <title>CreateInvoiceWizard + invoiceService (end-to-end)</title>
     <phase>B: CreateInvoiceWizard</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>021</dependencies>
     <blocks>050</blocks>
@@ -66,4 +66,59 @@
       <expected>Valid sprk_invoice regarding the host; no console errors</expected>
     </test>
   </ui-tests>
+
+  <notes>
+    <completion-summary>
+      Completed 2026-07-08. Built CreateInvoiceWizard end-to-end under
+      src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/:
+      formTypes.ts, invoiceService.ts, CreateInvoiceStep.tsx, CreateInvoiceWizard.tsx,
+      index.ts, plus 3 test files under __tests__/ (23 tests, all passing).
+
+      invoiceService.createInvoice mirrors workAssignmentService.createWorkAssignment
+      exactly: nav-prop discovery (sprk_invoice + sprk_document) -> manifest payload
+      (sprk_invoicenumber/sprk_name/sprk_description/sprk_vendororg bind/sprk_invoicedate
+      defaulting to today) -> BU cascade (applyUserBuDefaults) -> applyResolverFields
+      (Matter/Project host regarding, ADR-024 5-field write) -> createRecord('sprk_invoice')
+      -> file pipeline with dual-bind (Invoice primary + host additionalBinds via
+      createDocumentRecords) -> warnings array, never throws.
+
+      CreateInvoiceWizard.tsx wraps CreateRecordWizard: associateToStep uses new
+      INVOICE_REGARDING_TARGETS (Matter+Project only, added to AssociateToStep/types.ts
+      per the Phase-0 manifest — narrower than Event's 9-entity list), CreateInvoiceStep
+      for Enter Info (useAiPrefill wired via PREFILL_ENABLED=false inert seam — verified
+      by test: no spinner, no network call), and a CUSTOM Next Steps card set
+      (Send Email / Add To Do / Assign Work) via a new opt-in `followOnCards?:
+      FollowOnCardConfig[]` override added to ICreateRecordWizardConfig
+      (CreateRecordWizard/types.ts + one-line consumption change in
+      CreateRecordWizard.tsx: `cards={config.followOnCards ?? followOnCards}`).
+      This was necessary because CreateRecordWizard's built-in default card set
+      (Assign Work/Create Event/Send Email) doesn't include Add To Do — required by
+      this task's spec — and forking CreateRecordWizard or hand-rolling a 5th wizard
+      directly on WizardShell would have duplicated more scaffolding than the override.
+      Fully backward compatible: existing consumers (CreateEventWizard, CreateMatterWizard,
+      CreateProjectWizard) don't pass followOnCards and are unaffected (regression-tested).
+      CreateInvoiceWizard owns all 3 follow-on cards' state locally via refs (mirroring
+      WorkAssignmentWizardDialog.tsx/SummarizeFilesDialog.tsx's established pattern) and
+      reads it directly in onFinish rather than via IFinishContext.followOn (documented
+      explicitly in the followOnCards JSDoc as a footgun for future maintainers).
+      Also widened FollowOnActionId to `... | (string & {})` for backward-compatible
+      typing of non-default card ids.
+
+      Wired wizardRegistry.ts: `invoice` key now imports CreateInvoiceWizard (was
+      PlaceholderWizard). Added CreateInvoiceWizard barrel export to components/index.ts.
+
+      Quality gates: code-review (clean — 0 Critical, 1 Warning re: file-size/footgun
+      both assessed as acceptable-by-design, 1 informational note re: pre-existing
+      unrelated wizardRegistry.test.ts failure caused by a concurrent task's rename)
+      and adr-check (clean — ADR-024/012/021/038 all compliant) both passed unconditionally
+      per FULL rigor. `tsc --noEmit` clean; full regression suite for all touched shared
+      consumers passes.
+
+      Note: this task ran concurrently with task 040 (CreateReportCardWizard, formerly
+      "kpi-assessment") editing the same shared files (wizardRegistry.ts,
+      CreateRecordWizard.tsx/types.ts, components/index.ts). Both tasks' additive
+      changes coexist cleanly (verified via re-run of typecheck + tests after each
+      concurrent edit landed) — no conflicts.
+    </completion-summary>
+  </notes>
 </task>

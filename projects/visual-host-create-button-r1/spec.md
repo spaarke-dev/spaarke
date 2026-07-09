@@ -4,6 +4,8 @@
 > **Created**: 2026-07-05 · **Regenerated**: 2026-07-08 (clean pass from design.md rev 2, post-#549)
 > **Source**: `design.md` (rev 2)
 > **Project**: `visual-host-create-button-r1`
+>
+> **⚠️ Post-Phase-D amendment (2026-07-08, owner decision)**: every reference below to "KPI Assessment" / `sprk_kpiassessment` as the third wizard's TARGET entity is superseded. The third wizard now creates `sprk_reportcard` (the parent review artifact `sprk_kpiassessment` line-items belong to), via `CreateReportCardWizard`/`reportCardService`, registry key `report-card`. Enter Info also now includes 8 assigned-resource lookups (owner decision) that weren't in the original KPI manifest. See `notes/field-manifests/reportcard.md` (authoritative) and `tasks/040-create-reportcard-wizard.poml`. Everything else in this spec (Event, Invoice, WizardFollowOns, resolver pattern, AI-prefill-inert-seam) is unaffected.
 
 ## Executive Summary
 

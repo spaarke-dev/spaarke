@@ -3,7 +3,7 @@
   <metadata>
     <title>Migrate eventService.createEvent to applyResolverFields + lockAssociation support</title>
     <phase>A: Visual Host + Registry + Event</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>001,002</dependencies>
     <blocks>015</blocks>
@@ -60,4 +60,68 @@
     <criterion>lockAssociation=true hides step 1; false leaves it visible.</criterion>
     <criterion>adr-check passes for ADR-024; code-review clean.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-07-08 (opus-tier, FULL rigor). ADR-024 migration of shipped non-compliant code.
+
+    ## What changed (files)
+    - **eventService.ts** (`components/CreateEventWizard/`): replaced the ad-hoc matter/project-only
+      regarding map (+ questionable hardcoded `fallbackMap` bind) with the canonical ADR-024 flow —
+      `applyResolverFields(polyWebApi, entity, navProps, regardingEntityName, entitySet, regardingRecordId,
+      regardingRecordName, hint)` before `createRecord('sprk_event', entity)`. Copied the pattern from
+      `workAssignmentService.ts`. Now writes the entity-specific `@odata.bind` AND all 5 resolver fields
+      (`sprk_regardingrecordtype`/`id`/`name`/`url`/`number`, post-#549). Added two small pure helpers
+      `_resolveEntitySet` (logical-name → entity-set map + `${name}s` fallback; covers matter/project/
+      invoice/workassignment/budget/analysis/account/contact) and `_resolveLookupHint` (strips `sprk_`
+      for findNavProp disambiguation). Existing BU-cascade + event-type + AI-index binding logic untouched.
+    - **AssociateToStep.tsx + types.ts**: added `locked?: boolean` prop — read-only render of the fixed
+      association (no dropdown / Select / Clear); header still shown; distinct from transient `disabled`.
+    - **CreateRecordWizard.tsx + types.ts**: added `lockAssociation?: boolean` to `IAssociateToStepConfig`.
+      When true, the Associate-To step is REMOVED from the sequence (not merely disabled); the seeded
+      `initialAssociation` still reaches `onFinish` via the existing reset-effect + `associationRef`.
+      Default false = step visible/skip-able exactly as before.
+    - **Tests (ADR-038-compliant — assert on real payloads/DOM; no Mock&lt;HttpMessageHandler&gt;,
+      no DI-registration, no ctor-null-check):**
+      - NEW `__tests__/eventService.resolver.test.ts` (4 tests): entity-lookup + all 5 resolver fields for
+        Matter; mutual exclusion (only one entity-specific lookup); no-regarding case writes nothing; NFR-06
+        graceful degradation (missing catalog → still links + name fallback, skips number/type, no throw).
+      - NEW `CreateRecordWizard/__tests__/CreateRecordWizard.lockAssociation.test.tsx` (2 tests): step shown
+        when false, hidden when true (asserts against rendered wizard stepper).
+      - EXTENDED `AssociateToStep.test.tsx` with a "locked mode" block (3 tests).
+
+    ## Regression findings (traced every shared EventService.createEvent caller)
+    - `CreateEventWizard.onFinish` → `createEvent(formValues)` with NO regarding arg → unchanged (resolver
+      path not taken). Note: wiring the wizard's `context.association`/`initialAssociation` into createEvent
+      is task 015's job (this task deliberately did NOT touch CreateEventWizard.tsx — not in relevant-files).
+    - `CreateMatterWizard` "Create Event" follow-on → `createEvent({...regardingRecordId:matterId,
+      regardingRecordName:matterName}, 'sprk_matter')` → now ADDITIVELY writes the 5 resolver fields on top
+      of the Matter lookup. No throw path (graceful-blank). Strict correctness upgrade.
+    - `CreateProjectWizard` "Create Event" follow-on → same, `'sprk_project'`. Correctness upgrade.
+    - Existing `eventService.cascade.test.ts` (7 tests incl. one with `regardingRecordId`+`'sprk_matter'`):
+      STILL GREEN — BU-cascade payload unaffected; resolver degrades cleanly on the empty mock.
+    Conclusion: no existing surface loses its link; Matter/Project follow-on events upgrade lookup-only →
+    full ADR-024. No functional regression.
+
+    ## Behavioral note (intentional, low risk)
+    Old code had a hardcoded metadata fallback (`sprk_regardingmatterid_sprk_matter@odata.bind`) when
+    nav-prop discovery returned nothing. New `applyResolverFields` warns + skips the entity-specific lookup
+    instead (ADR-024-correct, matches workAssignmentService). Nav-prop discovery is the same mechanism
+    already trusted for event-type/AI-index binds in this method, so real-world impact is nil.
+
+    ## Quality gates (UNCONDITIONAL for this task)
+    - typecheck (`tsc --noEmit`): clean. ESLint (modified files): clean. Tests: 50/50 green across the 4
+      affected suites.
+    - **adr-check**: 0 violations. ADR-024/012/021 compliant. This change REMOVES a shipped ADR-024
+      violation (design §5.6/R2) — no §6.5 escalation needed. One informational warning: extend
+      `_ENTITY_SET_MAP` when future irregular-plural Event host types are wired.
+    - **code-review**: Approve. 0 critical / 0 warning. Clean on all 5 AI-code-smell dimensions. Regression
+      assessment: no regression across all three Event-creation surfaces.
+
+    ## Follow-ups for downstream tasks (not blockers)
+    - Task 015 wires the `event` registry key and should pass the host `context.association`/
+      `initialAssociation` into `eventService.createEvent` (deriving `regardingEntityName` from
+      `association.entityType`, seeding `regardingRecordId`/`Name`) so the resolver is exercised end-to-end
+      from Visual Host, and configure `associateToStep` with `lockAssociation: true` when launched from a visual.
+    - No ADR conflict requiring human sign-off surfaced.
+  </notes>
 </task>

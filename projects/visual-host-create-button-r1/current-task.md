@@ -1,7 +1,7 @@
-# Current Task State
+# Current Task State - visual-host-create-button-r1
 
-> **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-08
+> **Last Updated**: 2026-07-09 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" section first
 
 ---
 
@@ -9,45 +9,66 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — tasks generated, not started |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | Switch session to Sonnet 5 (`/model sonnet`), then execute task 001 (Phase 0 discovery). opus-tagged tasks auto-escalate. |
+| **Task** | Post-deployment UAT triage (task 090 wrap-up still pending, held until UAT bugs are resolved) |
+| **Step** | Owner ran full end-to-end UAT on VisualHost v1.4.30. 2 of 3 found bugs fixed + redeployed as v1.4.31. 3 lookup bugs still open, unexplained. |
+| **Status** | in-progress — blocked on further lookup-bug diagnosis |
+| **Next Action** | Investigate why Vendor Organization (Invoice), Matter Type (Event→Assign Work), and Practice Area (Event→Assign Work) typeahead lookups return no results with **zero console errors** (owner confirmed 2026-07-09). Code/schema/data all verified correct (see "Investigation dead-end" below) — next step is determining whether `onSearch` fires at all vs. fires and silently returns empty. Ask owner to check the browser Network tab for the actual OData request (or temporarily add a visible on-screen debug echo) next UAT pass. |
+
+### Files Modified This Session
+- `src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx` — dialog-size fix (two iterations: first wrongly matched WizardShell's internal 95vw/70vh default, corrected to the REAL repo-wide standard **60% × 70%** found in `src/client/webresources/js/sprk_wizard_commands.js`'s `DIALOG_OPTIONS` — "standardized... per UAT feedback E-03"); toolbar icon gap tightened (`toolbarIcons`/`toolbarFloat`: hardcoded 10px/8px → `tokens.spacingHorizontalXXS`); version footer bumped to v1.4.31.
+- `src/client/pcf/VisualHost/control/components/CardChrome.tsx` — icon slots gap tightened (`spacingHorizontalXS` → `spacingHorizontalXXS`).
+- 5 version-bump locations (`ControlManifest.Input.xml`, `VisualHostRoot.tsx` footer, `Solution/solution.xml`, `Solution/Controls/.../ControlManifest.xml`, `Solution/pack.ps1`) — now at **v1.4.31**, deployed + confirmed live on spaarkedev1 (`pac solution list`).
+- `C:\code_files\spaarke\projects\set-regarding-and-field-mapping-resolver-r2\design.md` (**different repo/worktree** — `C:\code_files\spaarke`, not this worktree) — new project design doc, drafted per owner request, NOT yet spec'd or executed. Covers restoring field-mapping inheritance (Matter→child auto-populate) that was found working (Feb 2026) then deleted as collateral damage (July 2026, AssociationResolver retirement). Recommends reusing the already-live BFF `/api/v1/field-mappings/*` endpoints rather than rebuilding client-side, and NOT rebuilding the 4 retired admin PCFs (native Dataverse forms instead).
 
 ### Critical Context
-Pipeline run 2026-07-08 after prerequisites #549 (resolver API + picker) and #525 (VisualHost files) merged. Build on the post-#549 `applyResolverFields`. Execute on Sonnet 5; the Event resolver migration (Phase A) and `WizardFollowOns` consolidation (Phase D) are `<model-tier>opus`.
+UAT results across all 3 wizards (Event/Invoice/Report Card): **Report Card fully works** (record + email + todo + work assignment all created correctly). Invoice and Event both work for their core create-flow (record/email/work-assignment/file-upload all correct) but each has ONE broken typeahead lookup: Invoice's "Vendor Organization" field, and Event's downstream "Assign Work" follow-on step's "Matter Type"/"Practice Area" fields. Investigated thoroughly (see below) — no code bug found. Owner confirms **no console errors** appear when using the broken lookups, which rules out a thrown exception/network 403 (those get caught and logged via `console.error` in `LookupField.tsx`). Root cause still unknown.
 
 ---
 
-## Active Task (Full Details)
+## Investigation dead-end (2026-07-08/09) — read before re-investigating
 
-| Field | Value |
-|-------|-------|
-| **Task ID** | none |
-| **Phase** | Planning complete → execution pending |
-| **Status** | none |
+Verified ALL of the following are correct — do not re-check these, move to a different hypothesis:
+- **Field/entity names correct**: `sprk_organization.sprk_organizationname` (Vendor Org), `sprk_mattertype_ref.sprk_mattertypename` (Matter Type), `sprk_practicearea_ref.sprk_practiceareaname` (Practice Area) — all confirmed via live `mcp__dataverse__describe`.
+- **Data exists**: sprk_organization has records ("Morrison Foerster LLP" etc.), sprk_mattertype_ref has 5 rows, sprk_practicearea_ref has 6 rows (confirmed via live query).
+- **Query/wiring code correct**: `searchOrganizationsAsLookup`/`searchMatterTypes`/`searchPracticeAreas` (all in `CreateMatterWizard/matterService.ts`, re-exported into `CreateInvoiceWizard` and `CreateWorkAssignmentWizard`) use correct OData syntax, correct entity names, correct field names.
+- **`dataService` wiring correct**: `VisualHostRoot.tsx`'s `createWizardDataService = createXrmDataService()` — genuine Xrm.WebApi-backed adapter, same as every other Code-Page-hosted wizard.
+- **`LookupField.tsx` component itself has no entity-specific bug** — fully generic, debounced (300ms), catches+logs errors.
+
+**Not yet checked / next hypotheses to try**:
+1. Is `onSearch` actually being invoked at all when the user types? (Add a temporary `console.log` at the very top of `LookupField`'s debounced effect, or ask owner to confirm the `[MatterService] search... query:` info-level console log appears at all — owner only confirmed no *errors*, not whether the info logs are present.)
+2. Check the browser Network tab for the actual outgoing OData request — does it fire, what's the response body/status?
+3. Security-role/privilege gap on `sprk_organization`/`sprk_mattertype_ref`/`sprk_practicearea_ref` for the browser session's user (would not throw if Dataverse just returns 0 rows rather than 403 for a privilege-filtered query — worth double-checking this assumption, since a true 403 WOULD throw and get caught+logged, but Dataverse's `retrieveMultipleRecords` under certain privilege configurations can silently return an empty set instead of erroring).
+4. Whether the built/deployed bundle (v1.4.31) actually contains the current `matterService.ts` source (VisualHost imports shared-lib SOURCE directly per project CLAUDE.md, not a possibly-stale `dist/` — should be fine, but worth a sanity `grep` of the deployed `bundle.js` for one of these query strings to rule out a stale-bundle theory).
 
 ---
 
-## Progress
+## Full State (Detailed)
 
-*Planning artifacts + tasks generated. No task steps yet.*
+### Project status
+All 16 implementation tasks (001–050) complete and previously verified via live-record-creation (not full browser click-through — this was the FIRST real browser UAT pass). **Task 090 (wrap-up) is the only task left** in `tasks/TASK-INDEX.md`, deliberately held pending resolution of the 3 UAT-found lookup bugs plus any other findings from continued UAT.
 
-### Decisions Made
-- 2026-07-08: Pipeline run; execution on Sonnet 5 with opus escalation for Event migration + WizardFollowOns.
+### Decisions made this session
+- 2026-07-08/09: Dialog sizing — corrected twice; final value **60vw × 70vh** matches the documented repo-wide ribbon-launch standard (`sprk_wizard_commands.js` `DIALOG_OPTIONS`, "per UAT feedback E-03").
+- 2026-07-08/09: Toolbar icon spacing tightened per owner request ("reduce spacing... a little bit") — used the next-smaller Fluent semantic token (`spacingHorizontalXXS`) rather than a hardcoded pixel value, consistent with this repo's token-based styling convention.
+- 2026-07-08: Field-mapping inheritance (Matter→child auto-populate, e.g. Assigned Attorney 1) confirmed OUT of `visual-host-create-button-r1`'s scope (was always deferred in spec.md) — spun into a new project `set-regarding-and-field-mapping-resolver-r2`, design.md drafted at `C:\code_files\spaarke\projects\set-regarding-and-field-mapping-resolver-r2\design.md`. This is a SEPARATE project/repo path from this worktree — not part of this project's remaining work.
+
+### Owner gates / pending ratifications (carried forward, still valid)
+- Task 023's Path-A exception (WorkAssignment kept 2 local follow-on steps instead of migrating) — **already ratified** by owner 2026-07-08 after concrete investigation.
+- Human UI click-through — **now done** (this session's UAT), superseding the earlier "never verified live" gap. New gap: 3 lookup bugs found by that UAT, unresolved.
 
 ---
 
 ## Next Action
 
-**Next Step**: `/model sonnet`, then execute task 001 (Phase 0 — discovery + manifest validation).
-**Pre-conditions**: prerequisites #549/#525 merged (✅); tasks generated (✅).
+**Next Step**: Resume lookup-bug investigation per the 4 untried hypotheses above, most likely starting with asking the owner to check the Network tab or confirm whether the `[MatterService] search...` info-level console logs appear at all during their next UAT attempt.
+**Pre-conditions**: None — this is pure investigation, no deploy needed until a fix is identified.
+**After that's resolved**: Execute task 090 (wrap-up): `/test-diet`, maker-facing valid-keys note (`event`/`invoice`/`report-card`), README → Complete, lessons-learned (must capture: the KPI→Report Card pivot, task 023's exception, the two-iteration dialog-sizing bug, the toolbar-spacing tweak, the field-mapping discovery spun into r2, and however the lookup bugs get resolved), PR citing hot-path declaration + `git diff --stat`.
 
 ---
 
 ## Blockers
 
-**Status**: None (prerequisites merged 2026-07-07/08).
+**Status**: Soft blocker — 3 lookup bugs (Vendor Org, Matter Type, Practice Area) unresolved; root cause unknown despite thorough code/schema/data verification. Not blocking further UAT of other areas, but should be resolved before task 090 wrap-up.
 
 ---
 
@@ -57,3 +78,4 @@ Pipeline run 2026-07-08 after prerequisites #549 (resolver API + picker) and #52
 - **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
 - **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
 - **ADRs**: ADR-024 (central; amended by #549), ADR-022/021 (PCF+Fluent), ADR-007/028 (SPE+auth)
+- **Related but separate project** (different repo path): `C:\code_files\spaarke\projects\set-regarding-and-field-mapping-resolver-r2\design.md` — field-mapping inheritance restoration, drafted not yet executed.

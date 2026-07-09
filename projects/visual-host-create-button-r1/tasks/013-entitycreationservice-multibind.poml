@@ -3,7 +3,7 @@
   <metadata>
     <title>EntityCreationService.createDocumentRecords multi-bind</title>
     <phase>A: Visual Host + Registry + Event</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>015,030</blocks>
@@ -21,7 +21,7 @@
   <goal>createDocumentRecords accepts an optional additionalBinds: {entitySet, id, navProp}[] and emits extra @odata.bind entries alongside the primary one; backward compatible (absent → current single-bind behavior).</goal>
 
   <context>
-    <background>sprk_document has separate typed lookups (sprk_matter, sprk_project, sprk_Event, sprk_invoice) — one row can bind to multiple parents natively (design §5.8). Single seam at the create-payload assembly.</background>
+    <background>sprk_document has separate typed lookups (sprk_matter, sprk_project, sprk_invoice) for multi-parent binding (design §5.8). Task 001 found NO sprk_event lookup existed at discovery time — design's assumption was wrong, and it explained a latent silent-failure bug in shipped CreateEventWizard.tsx. Task 002 adds the missing sprk_event lookup (owner-approved Path A, see notes/field-manifests/event.md) so this multi-bind capability works for Event too once 002 completes. This task's job is generic: accept any additionalBinds array — it does not depend on which specific lookup columns exist.</background>
     <relevant-files>
       src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts
       src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts (findNavProp)
@@ -53,4 +53,55 @@
     <criterion>Omitting additionalBinds preserves current single-bind behavior (no regression).</criterion>
     <criterion>Shared lib builds; tests pass.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Implemented per design.md §5.8. Added `IAdditionalBind { entitySet, id, navProp }` (exported type)
+    and an `additionalBinds?: IAdditionalBind[]` field on `createDocumentRecords`'s existing `options`
+    bag (kept the call signature's arity unchanged — options is already the idiomatic extension point
+    used by other callers). For each entry, emits `${navProp}@odata.bind = /${entitySet}(${cleanId})`
+    alongside the primary bind. Added a new private static `_cleanGuid()` helper (strip `{}`, lowercase)
+    mirroring `PolymorphicResolverService.applyResolverFields`'s GUID normalization convention, and
+    applied it to BOTH the primary bind and every additionalBinds entry (the primary bind previously had
+    NO normalization at all — a pre-existing gap, now fixed defensively; this is a no-op for already-clean
+    GUIDs so it introduces no regression). Duplicate nav-props (an additionalBinds entry colliding with
+    the primary bind's nav-prop, or with another additionalBinds entry) are skipped + pushed to the
+    `warnings` array rather than silently overwriting an already-set bind — the primary bind (or the
+    first-seen additionalBinds entry) always wins.
+
+    Files touched:
+    - src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts (IAdditionalBind type,
+      _cleanGuid helper, additionalBinds loop in createDocumentRecords)
+    - src/client/shared/Spaarke.UI.Components/src/services/index.ts (barrel-export IAdditionalBind)
+    - src/client/shared/Spaarke.UI.Components/src/services/__tests__/EntityCreationService.multibind.test.ts (NEW — 8 tests)
+
+    Tests (ADR-038 compliant — no Mock&lt;HttpMessageHandler&gt;, no DI-registration/ctor-null tests;
+    all assert on the actual createRecord payload shape via a jest.fn() WebApi stub):
+    1. Omitting additionalBinds preserves the single-bind payload (no regression).
+    2. additionalBinds emits both @odata.bind entries on one create call.
+    3. Supports 2+ additionalBinds entries on the same document.
+    4. GUID brace/case normalization applies to both the primary bind and additionalBinds.
+    5. Duplicate additionalBinds nav-prop colliding with the primary bind is skipped + warned (primary wins).
+    6. Duplicate nav-prop across two additionalBinds entries is skipped + warned (first wins).
+    7. additionalBinds applies identically across multiple uploaded files.
+    8. Empty additionalBinds array behaves identically to omitting the option.
+    All 8 pass. Also ran the full EntityCreationService.cascade.test.ts suite (pre-existing, untouched by
+    this task) — 26/27 pass; the 1 failure is in `resolveUserBuDefaults` (unrelated method) and pre-dates
+    this task: commit 7142e06da added `_sprk_ai_search_index_value` to that method's `$select` clause
+    without updating the corresponding assertion. Not fixed here (out of scope for task 013's seam).
+
+    Build/typecheck: `npx tsc -p . --noEmit` in Spaarke.UI.Components — clean, no errors. Had to first run
+    `npx tsc -p .` inside the sibling `Spaarke.SdapClient` package (its `dist/` was missing, blocking module
+    resolution for `@spaarke/sdap-client` in ALL EntityCreationService tests, pre-existing env gap unrelated
+    to this task's code — fixed by building the workspace dependency, not by changing source).
+
+    Quality gates (task-execute Step 9.5, FULL rigor):
+    - code-review: Clean, no blockers. File grew 690→758 lines (+9.9%, under the 20% warning threshold).
+      `createDocumentRecords` is now the largest method in the file (~101 lines incl. JSDoc) — flagged as
+      a Warning for a possible future refactor, not a blocker for this additive-only task. No AI code
+      smells found (no single-impl interfaces, no catch-log-rethrow, no non-nullable null checks, no
+      restating comments, no >3-responsibility methods).
+    - adr-check: Compliant. ADR-012 (shared lib stays context-agnostic — no Xrm/PCF-specific types
+      added); ADR-024 untouched (this is a sibling mechanism on sprk_document's own typed lookups, not
+      the sprk_regarding* resolver-field contract). 0 violations, 0 warnings.
+  </notes>
 </task>

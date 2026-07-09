@@ -3,7 +3,7 @@
   <metadata>
     <title>Migrate CreateWorkAssignmentWizard onto WizardFollowOns (delete duplicate)</title>
     <phase>D: WizardFollowOns Consolidation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>none</blocks>
@@ -52,4 +52,99 @@
     <criterion>workAssignmentService.ts unchanged.</criterion>
     <criterion>WorkAssignment creation + follow-ons unchanged (regression + existing tests pass).</criterion>
   </acceptance-criteria>
+
+  <notes date="2026-07-08" rigor="FULL" model-tier="opus">
+    <summary>
+      Migrated CreateWorkAssignmentWizard's "Next Steps" onto the shared WizardFollowOns
+      module. NextStepsSelectionStep replaced by config-driven FollowOnGrid + a
+      FollowOnCardConfig[] (Assign Work / Send Email / Create an Event). The Send Email
+      step body swapped from the CreateRecordWizard-owned SendEmailStep fork to the shared
+      SendEmailFollowOnStep. workAssignmentService.ts is byte-for-byte unchanged.
+    </summary>
+
+    <files-changed>
+      <file action="modified">.../CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.tsx —
+        NextStepsSelectionStep -> FollowOnGrid; removed the hand-rolled dynamic-step
+        add/remove useEffect + prevSelectedActionsRef (FollowOnGrid now drives
+        addDynamicStep/removeDynamicStep at click-time); added followOnCards
+        FollowOnCardConfig[]; Send Email card renders shared SendEmailFollowOnStep;
+        dropped import of CreateRecordWizard/steps/SendEmailStep and the WA_FOLLOW_ON_*
+        maps; added a reset-time cleanup that removes any leftover follow-on dynamic
+        steps on reopen (parity with the old selection-diff cleanup — the shell's own
+        reset only re-homes to step 0, it does not trim injected steps).</file>
+      <file action="modified">.../CreateWorkAssignmentWizard/index.ts — removed
+        NextStepsSelectionStep + INextStepsSelectionStepProps exports and the dead
+        WA_FOLLOW_ON_STEP_ID_MAP / _STEP_LABEL_MAP / _CANONICAL_ORDER re-exports.</file>
+      <file action="modified">.../CreateWorkAssignmentWizard/formTypes.ts — removed the
+        now-dead WA_FOLLOW_ON_STEP_ID_MAP / _STEP_LABEL_MAP / _CANONICAL_ORDER constants
+        (replaced by a pointer comment; step ids now derived via followOnStepId()).</file>
+      <file action="deleted">.../CreateWorkAssignmentWizard/NextStepsSelectionStep.tsx (git rm).</file>
+      <file action="unchanged">.../CreateWorkAssignmentWizard/workAssignmentService.ts —
+        VERIFIED byte-for-byte unchanged (git diff empty). Canonical ADR-024 reference.</file>
+      <file action="retained">.../CreateWorkAssignmentWizard/AssignWorkStep.tsx and
+        CreateFollowOnEventStep.tsx — KEPT (documented exception, see adr-tension).</file>
+    </files-changed>
+
+    <adr-tension resolution-path="A" needs="owner-ratification">
+      <title>POML step 2 says delete AssignWorkStep.tsx + CreateFollowOnEventStep.tsx, but the
+        shared WizardFollowOns steps are contract-incompatible with the unchangeable service.</title>
+      <detail>
+        The shared AssignWorkFollowOnStep and CreateEventFollowOnStep are the CreateRecordWizard
+        follow-ons that CREATE CHILD records: AssignWorkFollowOnStep collects a new
+        sprk_workassignment (name/description/matterType/practiceArea/priority/responseDueDate/
+        attorney/paralegal/outsideCounsel) with NO lawFirmAttorney and NO notifyResources;
+        CreateEventFollowOnStep produces ICreateEventFormState (eventTypeId, regardingRecordId,
+        dueDate). CreateWorkAssignmentWizard's local steps have DIFFERENT semantics that feed the
+        canonical, UNCHANGEABLE workAssignmentService: AssignWorkStep populates resource lookups
+        (attorney/paralegal/lawFirm/lawFirmAttorney/notify) ON the WA being created via
+        createWorkAssignment(...assignWork: IAssignWorkState); CreateFollowOnEventStep feeds
+        createFollowOnEvent(waId, ICreateFollowOnEventState) (eventDescription/eventPriority/
+        eventFinalDueDate/assignedToId). Swapping to the shared steps would require EITHER
+        changing the service (forbidden — criterion #2 + orchestrator hard rule) OR changing
+        follow-on fields/behavior (violates criterion #3). Per CLAUDE.md §6.5 + §11 this is a
+        Path A (project-scoped exception): the two wizard-specific local step BODIES are retained;
+        only the genuinely-duplicated surfaces (Next-Steps grid + Send Email) were consolidated.
+        This matches the WizardFollowOns barrel's own stated target: "the four duplicated
+        Next-Steps / SendEmail implementations" (it does NOT claim to unify AssignWork/CreateEvent
+        across all wizards). Inlining the two bodies to satisfy a literal "delete" would be pure
+        churn (relocating, not removing, the code) with regression risk and zero reuse benefit.
+      </detail>
+      <recommendation>Ratify Path A. If instead the owner wants zero local follow-on step files,
+        that requires either extending the shared steps to carry IAssignWorkState /
+        ICreateFollowOnEventState (a WizardFollowOns change, out of this task's scope) or a
+        service change (forbidden). Neither is done here.</recommendation>
+    </adr-tension>
+
+    <acceptance-verification>
+      <criterion id="1" status="met-with-exception">NextStepsSelectionStep local copy removed
+        (grep clean) and Send Email migrated to shared. AssignWorkStep/CreateFollowOnEventStep
+        retained under the documented Path-A exception above (service-coupled, not duplicates of
+        the shared steps).</criterion>
+      <criterion id="2" status="met">workAssignmentService.ts byte-for-byte unchanged
+        (git diff --stat empty).</criterion>
+      <criterion id="3" status="met">Behavior preserved: same 3 cards/icons/descriptions,
+        same canAdvance gates (Send Email requires To+Subject+Body; Create Event requires
+        eventName), same finish-handler actions.includes('assign-work'|'send-email'|'create-event')
+        ids, canonical order (assign-work, send-email, create-event) preserved via card-array
+        order, reset cleanup replicated. All 6 pre-existing tests in
+        __tests__/workAssignmentService.cascade.test.ts pass.</criterion>
+    </acceptance-verification>
+
+    <build-test>tsc build (npm run build) clean. jest CreateWorkAssignmentWizard: 6/6 pass.
+      eslint: 0 errors; 3 warnings all pre-existing (exhaustive-deps on the container-resolution
+      effect/tenantId, prefill effect/formState, steps memo/navigationService — none introduced
+      by this change).</build-test>
+
+    <quality-gates>code-review: clean (no Critical/Warning introduced; net -238 lines incl. the
+      deleted 209-line duplicate; no AI code smells introduced; comments added explain WHY).
+      adr-check: ADR-012 (prop-driven, no PCF/solution imports) compliant; ADR-021/022 (Fluent v9
+      semantic tokens, icons from @fluentui/react-icons) compliant; ADR-024 service unchanged
+      compliant; no BFF files touched.</quality-gates>
+
+    <regression-note>Step-3 regression ("create a WorkAssignment, exercise each card") verified by
+      static trace + the existing service test suite; no browser/UAT harness was run in this
+      headless task. The dynamic-step injection now flows through FollowOnGrid (click-time) instead
+      of the old selection-diff effect; the added reset cleanup preserves the reopen behavior the
+      old effect provided.</regression-note>
+  </notes>
 </task>

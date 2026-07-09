@@ -85,6 +85,12 @@ export * from './CreateProjectWizard';
 // CreateEventWizard - Extracted event creation wizard (IDataService abstraction)
 export * from './CreateEventWizard';
 
+// CreateInvoiceWizard - Create New Invoice wizard (IDataService abstraction, task 030)
+export * from './CreateInvoiceWizard';
+
+// CreateReportCardWizard - Create New Report Card wizard (IDataService abstraction, task 040)
+export * from './CreateReportCardWizard';
+
 // CreateTodoWizard - Extracted todo creation wizard (IDataService, todoflag=true)
 export * from './CreateTodoWizard';
 
@@ -172,3 +178,19 @@ export * from './HeaderToolbar';
 // and four field renderers (TextField, LookupField, OptionSetField, TextareaField)
 // (record-header-and-notepad-r1 FR-02/03/04, tasks 003–008)
 export * from './RecordHeader';
+
+// WizardRegistry - Central dispatch table mapping a maker-configured key to a
+// lazy-loaded Create wizard component + the shared WizardHostProps injection
+// contract (visual-host-create-button-r1 FR-03/FR-04, task 011)
+export * from './WizardRegistry';
+
+// WizardFollowOns - Shared, config-driven "Next Steps" follow-on card grid +
+// reusable follow-on steps (incl. net-new AddTodoFollowOnStep), the generalized
+// successors to the duplicated Next-Steps/SendEmail copies in CreateRecordWizard/
+// CreateMatterWizard/CreateWorkAssignmentWizard/SummarizeFilesWizard
+// (visual-host-create-button-r1 §5.9, task 020).
+//
+// Task 021 deleted CreateRecordWizard's old FollowOnSteps/AssignWork/CreateEvent
+// copies, removing the name collision that previously forced a curated re-export
+// here — so this is now a plain `export *`.
+export * from './WizardFollowOns';

@@ -1,27 +1,26 @@
 /**
  * AssignWorkFollowOnStep.tsx
- * Follow-on step for creating a Work Assignment linked to the parent entity.
+ * Follow-on step for creating a Work Assignment linked to the just-created
+ * record, shared across all Spaarke create wizards.
  *
- * Replaces the old "Assign Resources" step. Collects all fields needed to
- * create a sprk_workassignment Dataverse record, linked to the parent matter
- * or project via N:1 relationship.
+ * Generalized into the WizardFollowOns module from
+ * CreateRecordWizard/steps/AssignWorkFollowOnStep (the canonical pure-form
+ * implementation). It is a controlled form only — the `sprk_workassignment`
+ * record is created by the wizard's `onFinish` after the parent record exists
+ * and its GUID + regarding are available (via `applyResolverFields`).
  *
  * Fields:
  *   - Name (required, free text)
  *   - Description (optional, multi-line)
- *   - Matter Type (optional, lookup — auto-filled from parent matter)
- *   - Practice Area (optional, lookup — auto-filled from parent record)
- *   - Priority (option set: Low / Normal / High / Critical; defaults to Normal)
+ *   - Matter Type (optional, lookup — auto-filled from parent by the wizard)
+ *   - Practice Area (optional, lookup — auto-filled from parent by the wizard)
+ *   - Priority (option set: Low / Normal / High / Critical; default Normal)
  *   - Response Due Date (optional, date picker)
- *   - Assigned Attorney (optional, contact lookup)
- *   - Assigned Paralegal (optional, contact lookup)
- *   - Assigned Outside Counsel (optional, organization lookup)
+ *   - Assigned Attorney / Paralegal (contact lookups)
+ *   - Assigned Outside Counsel (organization lookup)
  *
- * Constraints:
- *   - Fluent v9 only — ZERO hard-coded colors
- *   - makeStyles with semantic tokens throughout
- *   - ADR-021: dark mode support via colorNeutral/colorBrand tokens
- *   - ADR-012: shared library component, no solution-specific imports
+ * Constraints: Fluent v9 only, semantic tokens (ADR-021), no domain imports
+ * (ADR-012).
  */
 import * as React from 'react';
 import { Text, Input, Textarea, Select, Field, makeStyles, tokens } from '@fluentui/react-components';
@@ -141,7 +140,7 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// AssignWorkStep (exported)
+// Component
 // ---------------------------------------------------------------------------
 
 export const AssignWorkFollowOnStep: React.FC<IAssignWorkFollowOnStepProps> = ({
@@ -300,3 +299,5 @@ export const AssignWorkFollowOnStep: React.FC<IAssignWorkFollowOnStepProps> = ({
     </div>
   );
 };
+
+AssignWorkFollowOnStep.displayName = 'AssignWorkFollowOnStep';

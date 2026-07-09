@@ -3,7 +3,7 @@
   <metadata>
     <title>Migrate CreateRecordWizard onto WizardFollowOns (delete duplicate)</title>
     <phase>D: WizardFollowOns Consolidation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>030,040</blocks>
@@ -54,4 +54,79 @@
     <criterion>CreateEventWizard + CreateProjectWizard Next Steps behave identically (regression pass).</criterion>
     <criterion>Shared lib builds; tests pass.</criterion>
   </acceptance-criteria>
+
+  <completion-notes date="2026-07-08" rigor="FULL" model-tier="opus">
+    <summary>
+      CreateRecordWizard now renders "Next Steps" via the shared WizardFollowOns FollowOnGrid,
+      declaring its card set as a FollowOnCardConfig[] (assign-counsel / create-event / send-email).
+      The selectedActions-diffing sync useEffect (~165 lines) was removed — FollowOnGrid drives
+      addDynamicStep/removeDynamicStep imperatively at click time via the shell handle. A slim
+      selection-watching effect retains the assign-work-defaults behavior (getAssignWorkDefaults
+      applied once on first 'assign-counsel' selection). Follow-on step bodies now come from
+      WizardFollowOns (AssignWorkFollowOnStep, CreateEventFollowOnStep, SendEmailFollowOnStep).
+    </summary>
+
+    <files-changed>
+      <edited>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateRecordWizard.tsx</edited>
+      <edited>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/index.ts (dropped exports of deleted files; removed IRecipientItem re-export to avoid root-barrel collision with WizardFollowOns)</edited>
+      <edited>src/client/shared/Spaarke.UI.Components/src/components/index.ts (flipped WizardFollowOns curated re-export block to plain `export * from './WizardFollowOns'` — the collision cause is gone)</edited>
+      <deleted>CreateRecordWizard/FollowOnSteps.tsx</deleted>
+      <deleted>CreateRecordWizard/steps/AssignWorkFollowOnStep.tsx</deleted>
+      <deleted>CreateRecordWizard/steps/CreateEventFollowOnStep.tsx</deleted>
+      <deleted>CreateRecordWizard/steps/DraftSummaryStep.tsx</deleted>
+      <deleted>CreateRecordWizard/steps/RecipientField.tsx</deleted>
+      <kept reason="not migrated — no WizardFollowOns successor">CreateRecordWizard/steps/AssignResourcesStep.tsx</kept>
+      <kept reason="sibling CreateWorkAssignmentWizard (parallel task 023) still imports ../CreateRecordWizard/steps/SendEmailStep; that folder is task-023-owned and off-limits to task 021">CreateRecordWizard/steps/SendEmailStep.tsx</kept>
+    </files-changed>
+
+    <behavior-preservation>
+      <item>Card ids unchanged (assign-counsel/create-event/send-email) → derived step ids (followon-*), canonical sidebar order, and IFinishContext.selectedActions values reaching wrappers are byte-identical.</item>
+      <item>Sidebar step label for send-email kept as 'Send Email' (via stepLabel) even though the card reads 'Send Notification Email' — matches the old FOLLOW_ON_STEP_LABEL_MAP split exactly.</item>
+      <item>Send Email canAdvance gate (To+Subject+Body all non-empty) preserved on the card config.</item>
+      <item>Next Steps heading/subtitle/empty-hint text passed explicitly to FollowOnGrid to match the old NextStepsStep entityLabel-interpolated copy.</item>
+      <item>Follow-on form state still owned by CreateRecordWizard refs; renderStep reads .current so state survives step navigation identically.</item>
+    </behavior-preservation>
+
+    <regression-findings>
+      <wrapper name="CreateEventWizard">
+        Interacts with CreateRecordWizard only via config/props (ICreateRecordWizardConfig, IFinishContext).
+        Uses context.selectedActions.includes('send-email') + context.followOn.email*. Card id + gate preserved →
+        behaves identically. Its task-015 associateToStep/initialAssociation/lockAssociation work lives entirely in
+        CreateEventWizard.tsx + the CreateRecordWizard associate-step logic, NEITHER of which task 021 touched
+        (CreateEventWizard.tsx not modified). Test CreateEventWizard.associateToStep passes.
+      </wrapper>
+      <wrapper name="CreateProjectWizard">
+        Uses context.selectedActions.includes('assign-counsel'|'create-event'|'send-email') + context.followOn.* and
+        getAssignWorkDefaults. All three card ids + the assign-work-defaults semantics preserved (defaults applied once on
+        first selection via the new slim effect). projectService test passes. CreateProjectWizard.tsx not modified.
+      </wrapper>
+    </regression-findings>
+
+    <shared-barrel-flip>
+      Task 021 owns flipping the root components/index.ts WizardFollowOns block from the curated re-export to a plain
+      `export * from './WizardFollowOns'`, because task 021 deleted the actual collision cause (CreateRecordWizard's
+      duplicate exports of AssignWorkFollowOnStep / CreateEventFollowOnStep / WORK_ASSIGNMENT_PRIORITY /
+      FOLLOW_ON_CANONICAL_ORDER / IRecipientItem + prop types). Removed the now-stale transitional comment. Also removed
+      IRecipientItem from the CreateRecordWizard barrel to prevent a duplicate-export (TS2308) with WizardFollowOns at root.
+      No CreateMatterWizard/CreateWorkAssignmentWizard/SummarizeFilesWizard sections of that file were touched.
+    </shared-barrel-flip>
+
+    <deferral note="parallel-safety, path A per CLAUDE.md §6.5">
+      POML step 2 says delete SendEmailStep. Kept CreateRecordWizard/steps/SendEmailStep.tsx because a sibling-owned file
+      (CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.tsx, parallel task 023) still imports it directly and that
+      folder is off-limits to task 021. Deleting now would red-build a file task 021 cannot edit. SendEmailStep is fully
+      migrated as WizardFollowOns/SendEmailFollowOnStep; its physical removal should follow task 023 migrating off the
+      direct import. Barrel still exports SendEmailStep for that consumer. This is the single acceptance-criterion nuance:
+      "no local SendEmailStep remains in CreateRecordWizard" is satisfied for CreateRecordWizard's OWN usage (it now uses
+      SendEmailFollowOnStep) but the file itself remains for the cross-task consumer.
+    </deferral>
+
+    <verification>
+      <build>npm run build (tsc) — PASS, 0 errors. Confirms CreateRecordWizard on WizardFollowOns + both barrel flips are collision-free and all wrappers (Event/Project/Todo/Matter/WorkAssignment/SummarizeFiles) typecheck.</build>
+      <lint>eslint on the 3 edited files — clean (no errors; no unused vars / hook-dep issues).</lint>
+      <tests>jest — affected suites: CreateRecordWizard/CreateEventWizard/CreateProjectWizard/CreateTodoWizard/WizardFollowOns = 9 suites / 58 tests PASS. Sibling suites CreateMatterWizard/CreateWorkAssignmentWizard = 2 suites / 11 tests PASS.</tests>
+      <grep>No live references to NextStepsStep/FollowOnSteps/deleted step paths/FOLLOW_ON_STEP_*_MAP remain (only descriptive comments).</grep>
+      <quality-gates>code-review: clean (ADR-012 context-agnostic prop-driven preserved; ADR-021 Fluent v9 semantic tokens, 0 hardcoded hex, 0 v8 imports, 0 any-types; net LOC roughly flat, complexity reduced by removing the diffing effect). adr-check: no violations (no BFF changes; ADR-012/021/011 compliant).</quality-gates>
+    </verification>
+  </completion-notes>
 </task>

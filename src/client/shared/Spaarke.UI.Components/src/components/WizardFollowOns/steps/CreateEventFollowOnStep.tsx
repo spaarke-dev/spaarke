@@ -1,27 +1,23 @@
 /**
  * CreateEventFollowOnStep.tsx
- * Follow-on step for collecting event details to create a sprk_event record
- * linked to the parent matter/project.
+ * Follow-on step for collecting event details to create a `sprk_event` record
+ * linked to the just-created record, shared across all Spaarke create wizards.
  *
- * Replaces the "AI Summary" (draft-summary) follow-on. Reuses the
- * CreateEventStep form component from the shared CreateEventWizard set.
+ * Generalized into the WizardFollowOns module from
+ * CreateRecordWizard/steps/CreateEventFollowOnStep. Reuses the shared
+ * `CreateEventStep` form (from CreateEventWizard) — this component only supplies
+ * follow-on framing. Like the other follow-on form steps, it collects field
+ * values only; the `sprk_event` record is created by the wizard's `onFinish`
+ * after the parent record exists (its regarding is seeded via
+ * `applyResolverFields`).
  *
- * Pattern matches AssignWorkFollowOnStep: this is a pure form that collects
- * event field values. Actual sprk_event record creation happens in the entity
- * wizard's onFinish callback (CreateMatterWizard / CreateProjectWizard), after
- * the parent record has been created and its GUID is available.
- *
- * Constraints:
- *   - Fluent v9 only — ZERO hard-coded colors
- *   - makeStyles with semantic tokens throughout
- *   - ADR-021: dark mode support via colorNeutral/colorBrand tokens
- *   - ADR-012: shared library component, no solution-specific imports
+ * Constraints: Fluent v9 only, semantic tokens (ADR-021), no domain imports
+ * (ADR-012).
  */
 import * as React from 'react';
 import { Text, makeStyles, tokens } from '@fluentui/react-components';
 import { CreateEventStep } from '../../CreateEventWizard/CreateEventStep';
 import type { ICreateEventFormState } from '../../CreateEventWizard/formTypes';
-import { EMPTY_EVENT_FORM as _EMPTY_EVENT_FORM } from '../../CreateEventWizard/formTypes';
 import type { IDataService } from '../../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
@@ -30,17 +26,13 @@ import type { IDataService } from '../../../types/serviceInterfaces';
 
 export interface ICreateEventFollowOnStepProps {
   /**
-   * Data service for Dataverse operations.
-   * Passed to CreateEventStep/EventService for sprk_eventtype_ref lookups.
+   * Data service for Dataverse operations. Passed to CreateEventStep /
+   * EventService for `sprk_eventtype_ref` lookups.
    */
   dataService: IDataService;
-  /**
-   * Current event form field values (controlled by parent CreateRecordWizard).
-   */
+  /** Current event form field values (controlled by the parent wizard). */
   formValues: ICreateEventFormState;
-  /**
-   * Called whenever any field in the event form changes.
-   */
+  /** Called whenever any field in the event form changes. */
   onFormValues: (values: ICreateEventFormState) => void;
   /**
    * Called with the current validity state on every form change.
@@ -101,3 +93,5 @@ export const CreateEventFollowOnStep: React.FC<ICreateEventFollowOnStepProps> = 
     </div>
   );
 };
+
+CreateEventFollowOnStep.displayName = 'CreateEventFollowOnStep';
