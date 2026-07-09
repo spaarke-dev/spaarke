@@ -179,8 +179,7 @@ const EXPLAIN_TOOLTIP =
   'Explain this clause in plain language, using matter playbook and precedent context where available.';
 const COMPARE_TOOLTIP =
   'Compare this clause against the matter/firm playbook — surfaces matches, deviations, and a risk score.';
-const DRAFT_TOOLTIP =
-  'Draft an alternative version of this clause as a pending suggestion you can accept or reject.';
+const DRAFT_TOOLTIP = 'Draft an alternative version of this clause as a pending suggestion you can accept or reject.';
 
 /**
  * The three R2-committed primary actions (design.md §2.0/§2.1-§2.3). All
@@ -289,7 +288,16 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Element | null {
-  const { editor, documentRef, sessionId, bffBaseUrl, dispatch, actions, enqueueComposeAction, dispatchConsumerOverride } = props;
+  const {
+    editor,
+    documentRef,
+    sessionId,
+    bffBaseUrl,
+    dispatch,
+    actions,
+    enqueueComposeAction,
+    dispatchConsumerOverride,
+  } = props;
   const styles = useStyles();
 
   // Monotonic per-instance click counter → stable correlation ids for the FR-18

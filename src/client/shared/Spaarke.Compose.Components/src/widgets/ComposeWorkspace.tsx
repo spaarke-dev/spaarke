@@ -564,9 +564,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       try {
         // Session-ledger read projection of the session's compose outputs (task-016 report
         // INTEGRATION HOOK #1). `@spaarke/auth` per ADR-028.
-        const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(
-          state.sessionId
-        )}/compose-outputs`;
+        const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/compose-outputs`;
         const response = await authenticatedFetch(url, { method: 'GET' });
         if (!response.ok) {
           if (response.status === 404) return; // no compose outputs yet — nothing to materialize
@@ -576,12 +574,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
         const outputs = (await response.json()) as ComposeLedgerOutput[];
         const composeOutputs = Array.isArray(outputs)
-          ? outputs.filter((o) => o.disposition === 'compose' && o.payload)
+          ? outputs.filter(o => o.disposition === 'compose' && o.payload)
           : [];
         if (composeOutputs.length === 0) return;
 
         const target = targetLedgerRef
-          ? composeOutputs.find((o) => o.key === targetLedgerRef)
+          ? composeOutputs.find(o => o.key === targetLedgerRef)
           : composeOutputs.reduce((a, b) => (b.turn > a.turn ? b : a));
         if (!target) return;
 
