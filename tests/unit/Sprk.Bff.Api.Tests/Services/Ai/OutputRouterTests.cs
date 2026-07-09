@@ -85,6 +85,10 @@ public class OutputRouterTests
         routed.Entry.Key.Should().Be(SessionLedger.BuildOutputKey(BindingId.ToString(), 1));
         // The router stores the Compose-owned payload verbatim — it never parses it.
         routed.Entry.Payload.GetProperty("new_text").GetString().Should().Be("sixty (60) days' written notice");
+        // Task 035 / NFR-09: the compose case returns the Completion Engine OutcomeCard exactly
+        // like Informational — omitting it would silently drop compose outputs' completion coverage
+        // (redesign-r2 reconciliation 2026-07-09).
+        routed.Outcome.Should().NotBeNull();
     }
 
     [Fact]
