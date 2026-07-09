@@ -12,8 +12,8 @@
 | **Progress** | **15 of 53 tasks complete** — the entire FOUNDATION is done |
 | **Done** | Phase 0 (001–004), all A0 contracts (010–016), test-repair (021), triple-twin hoist (020), D-F0 doctrine (030), D-F0 eval family (031) |
 | **Status** | between tasks; working tree CLEAN (all committed through `fd20e0abe`) |
-| **Branch** | `work/spaarke-ai-architecture-redesign-r2` — **3 commits ahead of master** (020, 030, 031 not yet merged) |
-| **Next Action** | (1) RECOMMENDED: push + merge branch to master (so Compose sees the 020 hoist + SEAM-STATUS). (2) Then next task = **032 Policy v2 gate engine** (opus, serial, dep 020✅). |
+| **Branch** | `work/spaarke-ai-architecture-redesign-r2` — **0/0 with master** (all merged via PR #586, 2026-07-09). Master @ `4148bb8ec`. |
+| **Next Action** | **Task 032 — Policy v2 gate engine** (opus, serial, dep 020✅). Dispatch a subagent running `task-execute` for `tasks/032-confirmation-policy-v2-gate-engine.poml`; implement per `notes/policy-v2-origin-classification-decision-tree.md` (tier table + fail-closed origin classifier + E-1..E-6 + GateDecision v2 producer + association picker). Then 033/034 + the parallel-safe J batch. |
 
 ### Immediate next tasks (per TASK-INDEX Parallel Groups)
 - **032** Confirmation Policy v2 gate engine (opus, parallel-safe=false, dep 020✅) — implements the GateDecision v2 PRODUCER + tier table + origin classifier + E-1..E-6 (per `notes/policy-v2-origin-classification-decision-tree.md`). Unblocks Compose FR-05 (association-picker live behavior) + 033/034.
