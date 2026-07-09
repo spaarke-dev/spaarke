@@ -117,11 +117,8 @@ public sealed class ClauseAnalyzerHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Clause Analyzer",
-        Description: "LLM-assisted contract clause structuring with structural span validation. " +
-                     "Identifies typed clauses (indemnity, liability, termination, payment, IP assignment, " +
-                     "confidentiality, governing-law, warranty, force-majeure, assignment) and returns " +
-                     "per-clause structured fields plus span boundaries. Configurable type filter and " +
-                     "obligation / party extraction.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-clause-analyzer-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"LLM-assisted contract clause structuring. Identifies typed clauses (indemnity, liability, termination, payment, ip-assignment, confidentiality, governing-law, warranty, force-majeure, assignment) and returns per-clause structured fields plus non-overlapping span boundaries. Configurable clauseTypes filter and optional obligation / party extraction. Distinct from ClauseComparisonHandler (which DIFFS two clauses deterministically).",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

@@ -8,9 +8,9 @@
 
 ## Active Task
 
-- **Task**: none (P0 001–004 + ALL A0 contracts 010–016 + test-repair 021 COMPLETE)
+- **Task**: none (P0 + A0 contracts 010–016 + 021 + **020 triple-twin hoist** COMPLETE)
 - **Status**: none
-- **Phase**: Phase A0 done (7/7 contracts green) → A-infra (020) + D-F0 (030) next
+- **Phase**: A0 + A-infra hoist done → **030 D-F0 doctrine** (+ 031 eval family) next; catalog-row tasks now unblocked (author through the JSON source)
 
 ## Next Action
 

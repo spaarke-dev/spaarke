@@ -194,14 +194,8 @@ public sealed class ManagePinnedContextHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Manage Pinned Context",
-        Description: "Manage a user's persistent 'pinned memory' — the small set of always-in-context facts and " +
-                     "preferences the assistant keeps across sessions. Use this when the user says \"remember X\" " +
-                     "(action=create, pinType=user-preference), \"always X\" (action=create, pinType=system-rule), " +
-                     "or \"forget X\" (action=delete; match by title against existing pins). Pinned items are " +
-                     "user-curated memory; titles and content are user-authored and persisted verbatim. The " +
-                     "\"matter-fact\" pinType exists for completeness but is normally written through the Pinned " +
-                     "Memory UI rather than via voice. Title should be a short identifying label (≤200 chars); " +
-                     "content carries the body (≤1000 chars; defaults to the title when omitted on create).",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-manage-pinned-context-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Manage the user's persistent 'pinned memory' — the small set of always-in-context facts and preferences the assistant keeps across sessions. Use this when the user says 'remember X' (action=create, pinType=user-preference), 'always X' (action=create, pinType=system-rule), or 'forget X' (action=delete, pinType matches the existing pin; matched case-insensitively against the user's pins by title). Pinned items are user-curated memory; titles and content are user-authored and persisted verbatim. The 'matter-fact' pinType exists for completeness but is normally written through the Pinned Memory UI rather than via voice. Title is a short identifying label (≤200 chars); content carries the body (≤1000 chars; defaults to the title when omitted on create). On delete, only pinType + title are needed; content is ignored.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

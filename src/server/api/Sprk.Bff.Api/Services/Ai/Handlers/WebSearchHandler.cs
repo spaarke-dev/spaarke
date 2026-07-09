@@ -149,11 +149,8 @@ public sealed class WebSearchHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Web Search",
-        Description: "Search the web for information relevant to the user's query. " +
-                     "Use this when the user asks a question that cannot be answered from internal documents " +
-                     "alone — for example: recent news, industry regulations, public company information, " +
-                     "or general knowledge topics. Results are marked as [External Source] to indicate they " +
-                     "originate from the public web and have not been verified against internal knowledge.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-web-search-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Search the web for information relevant to the user's query. Use when the question cannot be answered from internal documents alone.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

@@ -43,12 +43,21 @@ public sealed class RoutingConsumerTypeHealthCheckTests
     private static Entity[] BindingRowsForAllConstants() =>
         ConsumerTypes.All.Select(BindingRow).ToArray();
 
-    private static Entity ToolRow(string name, string? handlerClass, string? toolId = null)
+    /// <summary>
+    /// The <see cref="FakeToolHandler"/>'s compiled Metadata.Description. Single-row tool
+    /// rows default their live sprk_description to this so the FR-A-01 description-parity
+    /// dimension (AIR2-020) is satisfied — tests targeting OTHER dimensions stay Healthy.
+    /// A test override with a different value exercises the parity drift path.
+    /// </summary>
+    private const string FakeHandlerDescription = "Reconciliation test double";
+
+    private static Entity ToolRow(string name, string? handlerClass, string? toolId = null, string? description = FakeHandlerDescription)
     {
         var entity = new Entity("sprk_analysistool");
         entity["sprk_name"] = name;
         entity["sprk_handlerclass"] = handlerClass;
         entity["sprk_toolid"] = toolId;
+        entity["sprk_description"] = description;
         return entity;
     }
 
@@ -285,6 +294,45 @@ public sealed class RoutingConsumerTypeHealthCheckTests
         result.Status.Should().Be(HealthStatus.Healthy);
     }
 
+    // ── Drift class (d): description parity (FR-A-01 triple-twin hoist, AIR2-020) ──
+
+    [Fact]
+    public async Task CheckHealthAsync_SingleRowLiveDescriptionDivergesFromHandlerMetadata_ReturnsUnhealthy()
+    {
+        // The LLM-facing description is authored ONCE in the seed-row JSON and PATCHed
+        // live by Seed-TypedHandlers.ps1; the compiled handler Metadata.Description is the
+        // in-code mirror. A hand-edit to the LIVE row that the seed would silently revert
+        // must surface as drift (Unhealthy), not pass unnoticed.
+        SetupBindingRows(BindingRowsForAllConstants());
+        SetupToolRows(ToolRow(
+            "Alpha Tool", "AlphaHandler", "dataverse.alpha",
+            description: "a hand-edited live description that drifts from the compiled mirror"));
+        var sut = CreateSut(handlerIds: new[] { "AlphaHandler" });
+
+        var result = await CheckAsync(sut);
+
+        result.Status.Should().Be(HealthStatus.Unhealthy);
+        result.Description.Should().Contain("diverges from the compiled handler Metadata.Description");
+        result.Description.Should().Contain("Alpha Tool");
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_MultiRowHandlerWithVaryingDescriptions_IsExemptFromParity()
+    {
+        // A handler serving several rows has ONE combined Metadata.Description that cannot
+        // mirror N method-specific rows; those are authored per-row in JSON and are exempt.
+        SetupBindingRows(BindingRowsForAllConstants());
+        SetupToolRows(
+            ToolRow("Alpha Tool", "AlphaHandler", "dataverse.alpha", description: "row-specific description A"),
+            ToolRow("Alpha Tool Sibling", "AlphaHandler", "dataverse.alpha_sibling", description: "row-specific description B"));
+        var sut = CreateSut(handlerIds: new[] { "AlphaHandler" });
+
+        var result = await CheckAsync(sut);
+
+        result.Status.Should().Be(HealthStatus.Healthy,
+            "multi-row handlers are outside the single-row description-parity scope");
+    }
+
     [Fact]
     public async Task CheckHealthAsync_DuplicateToolIdAcrossRows_ReturnsUnhealthyNamingToolId()
     {
@@ -463,7 +511,7 @@ public sealed class RoutingConsumerTypeHealthCheckTests
 
         public ToolHandlerMetadata Metadata { get; } = new(
             Name: "Fake Tool Handler",
-            Description: "Reconciliation test double",
+            Description: FakeHandlerDescription,
             Version: "1.0.0",
             SupportedInputTypes: Array.Empty<string>(),
             Parameters: Array.Empty<ToolParameterDefinition>());

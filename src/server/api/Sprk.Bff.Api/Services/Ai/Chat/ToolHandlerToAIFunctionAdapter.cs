@@ -357,6 +357,14 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     /// <remarks>
     /// FR-10: this is the natural-language description the LLM consults when deciding
     /// whether to invoke this tool. Sourced from <c>sprk_analysistool.sprk_description</c>.
+    /// <para>
+    /// FR-A-01 triple-twin hoist (AIR2-020): that live value is a SEED-MANAGED MIRROR of the
+    /// single authored source — the row JSON at <c>infra/dataverse/sprk_analysistool-*-row.json</c>
+    /// (<c>scripts/Seed-TypedHandlers.ps1</c> PATCHes it). Do NOT hand-edit the live row; edit the
+    /// JSON. The compiled handler <c>ToolHandlerMetadata.Description</c> is a second mirror kept
+    /// byte-equal in CI (CatalogToolDescriptionParityContractTests); live-vs-code drift is caught
+    /// at runtime by <c>RoutingConsumerTypeHealthCheck</c>'s description-parity dimension.
+    /// </para>
     /// </remarks>
     public override string Description => _tool.Description ?? string.Empty;
 

@@ -77,6 +77,57 @@ public static class OpenAiFunctionSchemaValidator
     private static readonly string[] CompositionKeywords = { "anyOf", "oneOf", "allOf" };
 
     /// <summary>
+    /// Catalog description-parity check (FR-A-01 / AIR2-020 triple-twin hoist). The
+    /// <b>single authored source</b> for a handler tool's LLM-facing description is the
+    /// seed row JSON (<c>infra/dataverse/sprk_analysistool-*-row.json</c> →
+    /// <c>sprk_description</c>). The handler's compiled <c>ToolHandlerMetadata.Description</c>
+    /// and the live <c>sprk_analysistool.sprk_description</c> are <b>managed mirrors</b> that
+    /// MUST equal the authored source byte-for-byte. Returns <c>null</c> when the two texts
+    /// are in parity; otherwise a divergence descriptor.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Component Justification (CLAUDE.md §11)</b>: (1) <i>Existing</i> — description
+    /// parity had no check; the three copies were hand-synced (the r1 G-P3 UAT round-4
+    /// "three mirrors updated" discipline) and drifted cosmetically. (2) <i>Extension</i> —
+    /// this static validator is already the single reused catalog-structure check on the
+    /// projection path; adding the text-parity rule here keeps ONE catalog validator rather
+    /// than a second component. (3) <i>Cost-of-doing-nothing</i> — silent drift ships a
+    /// handler-vs-live description mismatch into three downstream catalog-row waves (032 /
+    /// 042 / 057) with no forcing function.
+    /// </para>
+    /// <para>
+    /// <b>NFR-07</b>: the returned error carries only string LENGTHS and the first-diverging
+    /// character INDEX — never the description content itself (tool-selection guidance an
+    /// operator may treat as sensitive). Comparison is <see cref="StringComparison.Ordinal"/>
+    /// (byte-exact): the authored source is the contract, so whitespace/wording differences
+    /// are real drift, not noise. Null/empty inputs normalise to empty string so a missing
+    /// mirror diverges from a non-empty authored source (two empties are parity).
+    /// </para>
+    /// </remarks>
+    public static string? FindDescriptionParityError(string? authored, string? mirror)
+    {
+        var a = authored ?? string.Empty;
+        var m = mirror ?? string.Empty;
+
+        if (string.Equals(a, m, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var min = Math.Min(a.Length, m.Length);
+        var firstDiff = 0;
+        while (firstDiff < min && a[firstDiff] == m[firstDiff])
+        {
+            firstDiff++;
+        }
+
+        return
+            $"description parity mismatch (authored length {a.Length}, mirror length {m.Length}, " +
+            $"first divergence at index {firstDiff})";
+    }
+
+    /// <summary>
     /// Validates raw catalog schema text (e.g. <c>sprk_inputschema</c> /
     /// <c>sprk_jsonschema</c>) against the OpenAI function-parameters subset.
     /// Returns <c>null</c> when the text is safe to project (including the

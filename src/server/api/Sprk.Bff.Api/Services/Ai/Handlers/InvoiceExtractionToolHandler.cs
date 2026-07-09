@@ -213,9 +213,8 @@ public sealed class InvoiceExtractionToolHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Invoice Extraction Tool Handler",
-        Description: "LLM-assisted invoice extraction with deterministic decimal line-item arithmetic. " +
-                     "Supports inclusive/exclusive tax + pre-tax/post-tax discount order. Surfaces " +
-                     "arithmetic mismatches in arithmeticErrors[] (does not auto-correct).",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-invoice-extractor-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"LLM-assisted invoice extraction with deterministic decimal line-item arithmetic. Extracts invoice header (number, dates, vendor, customer) and line items (description, quantity, unit price, tax rate, tax amount, line total) from invoice document text. Code-side decimal math verifies line totals, subtotal, tax total, discount total, and grand total per configured tax method (inclusive/exclusive) and discount order (pre-tax/post-tax). Arithmetic mismatches surface in arithmeticErrors[] (NOT auto-corrected — FR-19 binding).",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain", "application/pdf", "application/json" },
         Parameters: new[]

@@ -23,7 +23,7 @@
 | 015 | Contract: ContextEnvelope v1 ✅ 2026-07-08 (12/12; budgets provisional→task 054) | ✅ | opus | ✅ | — | A0 |
 | 016 | Contract: MemoryItem v1 (2026-07-08: 10/10; Record+User scope, provenance envelope; FR-30) | ✅ | opus | ✅ | — | A0 |
 | 017 | Seam-publication ordering + cross-project obligation | 🔲 | sonnet | ❌ | 010–016 | A0 |
-| 020 | **Triple-twin validator hoist (BLOCKS catalog tasks)** | 🔲 | opus·xhigh | ❌ | — | A-infra |
+| 020 | **Triple-twin validator hoist** (2026-07-08: Model 1 GitOps + Option C; JSON=source, live=managed mirror, code parity via KEEP-path test + health-check dimension; 23 handlers reconciled; eval 35/35; unblocks catalog tasks + Compose FR-12) | ✅ | opus·xhigh | ❌ | — | A-infra |
 | 021 | Test-repair (2026-07-08: found 16 SpaarkeAi + 10 AI.Widgets suites red, not ~3+8; fixed all — SpaarkeAi 378/378, AI.Widgets 638/638; found+fixed a real prod bug in EntityInfoWidget date rendering) | ✅ | sonnet·xhigh | ✅ | — | A-infra |
 | 030 | D-F0 Resourcefulness Doctrine (FIRST; ∥ A0) | 🔲 | opus | ❌ | — | G-R2-A |
 | 031 | D-F0(e) resourcefulness eval family | 🔲 | opus | ❌ | 030 | G-R2-A |

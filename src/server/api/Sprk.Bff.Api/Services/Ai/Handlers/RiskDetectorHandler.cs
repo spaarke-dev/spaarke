@@ -156,12 +156,8 @@ public sealed class RiskDetectorHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Risk Detector",
-        Description: "LLM-assisted risk identification with deterministic code-based severity " +
-                     "scoring. Identifies legal, financial, operational, reputational, compliance, " +
-                     "data-privacy, and contract risks. The LLM identifies the risks + raw confidence; " +
-                     "code assigns the final severity bucket (low/medium/high/critical) using a " +
-                     "configurable per-category weight × confidence formula. Severity assignment is " +
-                     "deterministic — same LLM output + same config → same severity bucket.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-risk-detector-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"LLM-assisted risk identification with deterministic code-based severity scoring. The LLM identifies risks across legal, financial, operational, reputational, compliance, data-privacy, and contract categories with raw confidence values; the handler then assigns a final severity bucket (low / medium / high / critical) using a configurable per-category-weight × confidence formula. Severity is deterministic — identical LLM output + identical configuration produces byte-identical severity output across runs (FR-15 binding for legal-review reproducibility).",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]
