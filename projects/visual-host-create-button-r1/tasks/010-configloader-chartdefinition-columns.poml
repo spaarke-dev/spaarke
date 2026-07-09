@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="visual-host-create-button-r1">
+  <metadata>
+    <title>Read chart-def columns into ConfigurationLoader + ChartDefinition</title>
+    <phase>A: Visual Host + Registry + Event</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>012</blocks>
+    <tags>pcf, config, visualhost</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies PCF .ts source</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped single-file config read; two existing columns</model-tier-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Read the two existing sprk_chartdefinition columns (sprk_createwizardenabled, sprk_createwizardkey) into the ChartDefinition TypeScript type and ConfigurationLoader so the toolbar can gate the "+" button.</prompt>
+  <role>SPAARKE PCF developer. React + Fluent v9 + PCF virtual control. Follow ADR-022.</role>
+  <goal>ChartDefinition type carries createWizardEnabled: boolean and createWizardKey: string|null; ConfigurationLoader populates them from the sprk_chartdefinition record. No behavior change when the columns are null/false.</goal>
+
+  <context>
+    <background>Columns already exist in Dataverse (owner-confirmed). This task only READS them client-side; no schema work. FR-01.</background>
+    <relevant-files>
+      src/client/pcf/VisualHost/control/services/ConfigurationLoader.ts
+      src/client/pcf/VisualHost/control/(ChartDefinition type location)
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      projects/visual-host-create-button-r1/spec.md
+      projects/visual-host-create-button-r1/CLAUDE.md
+      docs/guides/PCF-DEPLOYMENT-GUIDE.md
+      src/client/pcf/CLAUDE.md
+      src/client/pcf/VisualHost/control/services/ConfigurationLoader.ts
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Locate the ChartDefinition type; add createWizardEnabled (bool, default false) + createWizardKey (string|null).</step>
+    <step>In ConfigurationLoader, map sprk_createwizardenabled → createWizardEnabled and sprk_createwizardkey → createWizardKey from the retrieved record.</step>
+    <step>Default createWizardEnabled to false when the column is absent/null (backward compat — NFR-05).</step>
+  </steps>
+
+  <tools>Read, Grep, Edit</tools>
+  <outputs>Updated ConfigurationLoader.ts + ChartDefinition type.</outputs>
+
+  <acceptance-criteria>
+    <criterion>ChartDefinition exposes createWizardEnabled + createWizardKey.</criterion>
+    <criterion>Existing chart-def records with null columns yield createWizardEnabled=false (no "+" button later).</criterion>
+    <criterion>npm run build:prod (VisualHost) compiles.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <summary>
+      Read the two existing sprk_chartdefinition columns (sprk_createwizardenabled,
+      sprk_createwizardkey) into the local IChartDefinition type and ConfigurationLoader.ts.
+      Both new fields are OPTIONAL on the interface (createWizardEnabled?: boolean,
+      createWizardKey?: string | null) rather than required — this keeps existing
+      IChartDefinition object literals (e.g. control/configurations/matterMainCards.ts,
+      which is in the tsconfig `include` and does not set these fields) compiling
+      unchanged, consistent with the fact that almost every other field on the
+      interface is already optional. ConfigurationLoader.mapToChartDefinition always
+      populates a definitive value at runtime: createWizardEnabled defaults to `false`
+      unless the Dataverse Yes/No column is strictly `true` (NFR-05 backward compat);
+      createWizardKey is trimmed and returns `null` for absent/empty/whitespace-only
+      values so task 012's "+" handler can safely fall back to sprk_entitylogicalname.
+    </summary>
+    <files-touched>
+      <file>src/client/pcf/VisualHost/control/types/index.ts — added createWizardEnabled?/createWizardKey? to IChartDefinition</file>
+      <file>src/client/pcf/VisualHost/control/services/ConfigurationLoader.ts — added FIELDS entries, SELECT_COLUMNS entries, parseCreateWizardEnabled()/parseCreateWizardKey() helpers, mapping in mapToChartDefinition()</file>
+      <file>src/client/pcf/VisualHost/control/services/__tests__/ConfigurationLoader.test.ts — fixed a pre-existing stale assertion (missing sprk_configurationjson, unrelated to this task, discovered while re-running the suite) + added 3 new test cases: default-false/null on absent columns, populate-true/key when set, trim + whitespace-only-to-null</file>
+    </files-touched>
+    <build-verification>
+      `npm run build:prod` (the wired script) could not complete end-to-end: its `prebuild:prod` hook force-rebuilds the shared lib (`@spaarke/ui-components`) whenever its src/ is newer than dist/, and that rebuild currently fails with
+      `EntityCreationService.ts(34,76): error TS2307: Cannot find module '@spaarke/sdap-client'` — traced via `git stash`/`git stash pop` to parallel task 013's in-progress edits to that same shared-lib file (confirmed: the identical failure reproduces with task 010's changes fully stashed out, i.e. on the unmodified base commit + task 013's concurrent WIP). Not caused by, or fixable within, task 010's scope.
+      Verified instead via two equivalent checks that isolate task 010's actual surface:
+      1. `npx tsc --noEmit -p tsconfig.json` in VisualHost (covers the full `control/**/*` tree per the tsconfig `include`, i.e. every consumer of IChartDefinition including matterMainCards.ts, ChartRenderer.tsx, CardChrome.tsx) — zero errors.
+      2. `npx pcf-scripts build --buildMode production` run directly (same command `build:prod` invokes, minus the broken prebuild hook) — webpack compiled and emitted bundle.js successfully (741 KiB, pre-existing bundle-size advisory warnings only, no errors).
+      Both re-verified clean after the parseCreateWizardKey trim fix below.
+    </build-verification>
+    <quality-gates>
+      <code-review>
+        Executed the code-review checklist directly against the diff (Skill invocation loads the procedure; execution performed inline). Findings:
+        - Correctness/backward-compat (NFR-05): confirmed correct — createWizardEnabled strictly requires `=== true`; any null/undefined/non-boolean defaults to false.
+        - One real issue found and FIXED: parseCreateWizardKey trimmed the string only for the emptiness check but returned the untrimmed original value — a maker's accidental trailing/leading whitespace (e.g. "event ") would silently fail task 012's registry lookup. Fixed to trim-and-return.
+        - One real regression found and FIXED: the existing ConfigurationLoader.test.ts "should load a chart definition by ID" test uses strict `toEqual` and was already stale before this task (missing `sprk_configurationjson`, confirmed pre-existing via stash comparison); adding createWizardEnabled/createWizardKey made the diff more visible. Fixed the assertion fully (3 missing keys) and added 3 new dedicated test cases for the new fields. Full suite: 23/23 passing.
+        - AI code smell scan: clean — no single-impl interfaces, no catch-log-rethrow, no null-checks-on-non-nullable, no code-restating comments (JSDoc added explains WHY/backward-compat, not WHAT), no multi-responsibility methods (two new parse* helpers are single-purpose, mirroring existing parseXxx pattern in the file).
+        - Verdict: Clean after fixes.
+      </code-review>
+      <adr-check>
+        Checked against ADR-022 (PCF Platform Libraries), ADR-021 (Fluent v9), ADR-012 (Shared Component Library). No violations.
+        - ADR-022/021: not implicated — no PCF manifest/property or UI change in this task (that's task 012).
+        - ADR-012: informational note (not a violation) — `control/types/index.ts` is a deliberate local mirror of `@spaarke/ui-components` types (per the file's own header comment, pre-existing pattern). The shared lib's own `Spaarke.UI.Components/src/types/ChartDefinitionTypes.ts` was NOT updated with these two fields, since this task's scope (per POML `<relevant-files>`) is VisualHost-only and task 012's CardChrome.tsx consumes the VisualHost-local type, not the shared-lib mirror. Flagging for awareness only in case a future task needs the shared-lib mirror to carry these fields too.
+        - Verdict: Compliant, no resolution paths needed.
+      </adr-check>
+    </quality-gates>
+  </notes>
+</task>

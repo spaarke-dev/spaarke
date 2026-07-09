@@ -91,46 +91,8 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Dataverse Create Record",
-        Description: "Inserts one row into a Dataverse table under the calling user's permissions and returns " +
-                     "the created record's id as a citable path (tables/{table}/records/{guid}). Call " +
-                     "dataverse.describe first if the table's schema is unknown — do NOT guess column logical " +
-                     "names from display names. Choice columns require numeric option values, not labels. " +
-                     "LOOKUP columns REQUIRE a recordId GUID: resolve the target record's GUID FIRST via " +
-                     "dataverse.search_data or dataverse.read_query — in the same turn you draft the proposal, " +
-                     "BEFORE asking the user to confirm; a lookup object without recordId is " +
-                     "rejected. If you cannot resolve a GUID for an optional lookup/choice, OMIT the column " +
-                     "(mention the value in a text column instead). Records you create belong to the calling " +
-                     "user automatically — never set owner/assignee columns for the requesting user themselves. " +
-                     // G-P3 UAT round-4 R4-1 (2026-07-07): the model invented an
-                     // `sprk_practicearea@odata.bind` annotation on a create-matter proposal. The
-                     // write mapper rejects @-annotation keys by design (injection hardening) —
-                     // ban them explicitly and give the sprk_matter contract from REAL metadata.
-                     "NEVER use OData annotations as item keys — no '@odata.bind', no '@' or '.' in any key: " +
-                     "the ONLY way to set a lookup on this transport is the {relatedTable, recordId} object " +
-                     "form, and choice columns take plain numeric values. " +
-                     "sprk_matter write contract (from live metadata — verify anything else with " +
-                     "dataverse.describe): sprk_mattername (text, REQUIRED); sprk_matternumber (text); " +
-                     "sprk_matterdescription (multiline text); sprk_mattertype is a LOOKUP to " +
-                     "sprk_mattertype_ref and sprk_practicearea is a LOOKUP to sprk_practicearea_ref — " +
-                     "resolve the reference row's GUID via dataverse.read_query first and send " +
-                     "{\"relatedTable\":\"sprk_mattertype_ref\",\"recordId\":\"guid\"} (same pattern for " +
-                     "practice area), or OMIT the column and put the value in sprk_matterdescription. " +
-                     // G-P3 UAT round-3 R3-4 (2026-07-07): description-level ban on bare
-                     // sprk_document rows. Round-5 R5-E (2026-07-07): the model IGNORED that
-                     // guidance and created an orphan fileless document — the ban is now a HARD
-                     // rule enforced by this handler (ValidateChat + ExecuteChatAsync reject
-                     // sprk_document with VALIDATION_FAILED before any Dataverse call).
-                     "HARD RULE — sprk_document creates are BLOCKED: this tool REJECTS any create on the " +
-                     "sprk_document table before anything is written (VALIDATION_FAILED). Spaarke document " +
-                     "records require the full ingestion pipeline (file upload → SharePoint Embedded storage → " +
-                     "document profile → indexing) that only the Document Upload wizard drives; no chat tool " +
-                     "can upload file content. Never attempt or retry a sprk_document create — no argument " +
-                     "change makes it valid. If asked to create a document or save chat output 'to documents', " +
-                     "say honestly that documents can't be created from chat and point the user to the Document " +
-                     "Upload wizard (or offer an alternative: work with a file uploaded into this chat, create " +
-                     "a task, draft an email, or open a workspace tab). " +
-                     "SIDE-EFFECT tool (write): the create is executed with the user's own privileges; " +
-                     "if the user cannot create rows in the table, the call fails with their access error.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-dataverse-create-record-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Inserts one row into a Dataverse table under the calling user's permissions and returns the created record id as a citable path (tables/{table}/records/{guid}). Call dataverse.describe first if the table's schema is unknown — do NOT guess column logical names from display names. Values: strings/numbers/booleans for simple fields; numeric option values for choice columns (NEVER labels — use dataverse.describe to find the numeric values); comma-separated numeric values for multi-select choice; lookup fields as {""relatedTable"": ""..."", ""recordId"": ""guid""} — recordId is REQUIRED: resolve the target record's GUID FIRST via dataverse.search_data or dataverse.read_query IN THE SAME TURN you draft the proposal, BEFORE asking the user to confirm; a lookup without recordId is rejected. NEVER use OData annotations as item keys — no '@odata.bind', no '@' or '.' in any key: the ONLY way to set a lookup on this transport is the {relatedTable, recordId} object form, and choice columns take plain numeric values. If you cannot resolve a GUID for an optional lookup or the numeric value for an optional choice, OMIT that column and mention the value in a text column instead — never guess. sprk_matter write contract (from live metadata — verify anything else with dataverse.describe): sprk_mattername (text, REQUIRED); sprk_matternumber (text); sprk_matterdescription (multiline text); sprk_mattertype is a LOOKUP to sprk_mattertype_ref and sprk_practicearea is a LOOKUP to sprk_practicearea_ref — resolve the reference row's GUID via dataverse.read_query first and send {""relatedTable"":""sprk_mattertype_ref"",""recordId"":""guid""} (same pattern for practice area with sprk_practicearea_ref), or OMIT the column and put the value in sprk_matterdescription. Records you create belong to the calling user automatically — never set owner/assignee columns for the requesting user themselves. HARD RULE — sprk_document creates are BLOCKED: this tool REJECTS any create on the sprk_document table before anything is written (VALIDATION_FAILED). Spaarke document records require the full ingestion pipeline (file upload → SharePoint Embedded storage → document profile → indexing) that only the Document Upload wizard drives; no chat tool can upload file content. Never attempt or retry a sprk_document create — no argument change makes it valid. If asked to create a document or save chat output 'to documents', say honestly that documents can't be created from chat and point the user to the Document Upload wizard (or offer an alternative: work with a file uploaded into this chat, create a task, draft an email, or open a workspace tab). WRITE tool: executes with the user's own privileges; if the user cannot create rows in the table, the call fails with their access error. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname — creation BLOCKED on this tool, Document Upload wizard only); people = contact, companies = account.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

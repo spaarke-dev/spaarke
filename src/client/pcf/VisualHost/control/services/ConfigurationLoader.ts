@@ -84,6 +84,9 @@ const FIELDS = {
   colorSource: 'sprk_colorsource',
   // Card shape (v1.2.44)
   metricCardShape: 'sprk_metriccardshape',
+  // "+" Create Wizard button configuration (visual-host-create-button-r1 / FR-01)
+  createWizardEnabled: 'sprk_createwizardenabled',
+  createWizardKey: 'sprk_createwizardkey',
 } as const;
 
 /**
@@ -112,6 +115,8 @@ const SELECT_COLUMNS = [
   FIELDS.valueFormat,
   FIELDS.colorSource,
   FIELDS.metricCardShape,
+  FIELDS.createWizardEnabled,
+  FIELDS.createWizardKey,
 ].join(',');
 
 /**
@@ -293,6 +298,28 @@ function parseColorSource(value: unknown): ColorSource | undefined {
 }
 
 /**
+ * Validate and convert the "+" create-wizard enabled flag (Yes/No column).
+ * Defaults to `false` when the column is null/absent — existing chart-def
+ * records must render unchanged (NFR-05 backward compatibility).
+ */
+function parseCreateWizardEnabled(value: unknown): boolean {
+  return value === true;
+}
+
+/**
+ * Validate and convert the create-wizard registry key (Single Line of Text).
+ * Returns `null` for absent/empty values so callers can fall back to
+ * `sprk_entitylogicalname` (per FR-01 / FR-03).
+ */
+function parseCreateWizardKey(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+/**
  * Map Dataverse record to IChartDefinition
  */
 function mapToChartDefinition(record: Record<string, unknown>): IChartDefinition {
@@ -328,6 +355,9 @@ function mapToChartDefinition(record: Record<string, unknown>): IChartDefinition
     sprk_colorsource: parseColorSource(record[FIELDS.colorSource]),
     // Card shape (v1.2.44)
     sprk_metriccardshape: record[FIELDS.metricCardShape] as number | undefined,
+    // "+" Create Wizard button configuration (visual-host-create-button-r1 / FR-01)
+    createWizardEnabled: parseCreateWizardEnabled(record[FIELDS.createWizardEnabled]),
+    createWizardKey: parseCreateWizardKey(record[FIELDS.createWizardKey]),
   };
 
   // Validate optionsJson is valid JSON (for early warning)

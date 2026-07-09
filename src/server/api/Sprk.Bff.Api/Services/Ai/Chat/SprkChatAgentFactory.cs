@@ -121,6 +121,79 @@ public class SprkChatAgentFactory
         "it was done.";
 
     /// <summary>
+    /// D-F0 Resourcefulness Doctrine (redesign-r2 task 030, spec FR-A1-01, design §7.1 D-F0(a)–(d)).
+    /// The strategy-level judgment layer appended to every tool-bearing session's system prompt,
+    /// EXTENDING <see cref="SideEffectHonestyDirective"/> (it is composed right after it at the
+    /// same call site — there is NO second directive/steering mechanism; CLAUDE.md §11 reuse).
+    ///
+    /// R1's anti-fabrication hardening (three of six G-P3 UAT rounds) installed caution that
+    /// generalized into passivity: the assistant refuses/hedges/asks where it should verify, act,
+    /// approximate, or hand a working next step. This block fixes that WITHOUT reopening
+    /// "never lie". Four components:
+    ///   (a) strategy meta-prompt — decompose → inventory tools → VERIFY state before acting →
+    ///       act or approximate → always deliver partial value + a concrete next step;
+    ///   (b) read/write safety asymmetry — reads/searches/metadata-describes/verification are
+    ///       ALWAYS free (use liberally, never ask permission / hedge / skip); only side effects
+    ///       need care, and that care is the platform's confirmation gate, not model timidity;
+    ///   (c) graceful-degradation ladder — full action → partial action → structured assistance
+    ///       → refusal LAST, operating strictly BELOW the side-effect line;
+    ///   (d) every refusal/block hands the user a concrete, working affordance (never a dead end).
+    ///
+    /// SAFETY (design §13 Risk row 2 — over-correction into fabrication): this block changes
+    /// READ-side willingness only. It does NOT weaken any gate or hard block; the ladder never
+    /// authorizes claiming an outcome/link/id/tool-call that did not happen — the Action Honesty
+    /// rules above stay in force verbatim (no_fabrication remains a 100% floor). Side-effect
+    /// caution is deferred to deterministic Confirmation Policy v2 (task 032), NOT to this prompt.
+    /// ADR-039: reads stay free WITHIN the budget-8 loop bound — this changes willingness, not the
+    /// bound. Deterministic constant text (NFR-04 prompt-cache stability). Exposed internal for
+    /// the directive-presence tests + the task-031 resourcefulness eval family.
+    /// </summary>
+    internal const string ResourcefulnessDoctrineDirective =
+        "\n\n## Being Resourceful (Spaarke platform strategy)\n" +
+        "Your job is to HELP, not to hedge. Work every request as a strategy, not a single step:\n" +
+        "1. DECOMPOSE the request into what it actually needs.\n" +
+        "2. INVENTORY your tools — the read/search tools AND the action tools.\n" +
+        "3. VERIFY state before you act or claim anything: run the relevant read, search, " +
+        "duplicate-check, or metadata/schema lookup FIRST. Never assert that something exists, is " +
+        "absent, or already happened without checking, and never reuse a stale answer from an " +
+        "earlier turn when a tool can give you the current one.\n" +
+        "4. Then ACT — or, when you cannot fully act, APPROXIMATE with what the tools do give you.\n" +
+        "5. ALWAYS deliver partial value plus one concrete next step. A bare \"I can't do that\" " +
+        "with no path forward is itself a failure.\n" +
+        "### Reads are free — only side effects need care\n" +
+        "Reads, searches, metadata/schema describes, and verification calls are ALWAYS safe and " +
+        "ALWAYS allowed. Use them liberally and on your own initiative. NEVER ask permission to " +
+        "read, search, or look something up; NEVER hedge with \"I could check…\" instead of just " +
+        "checking; NEVER skip a read that would answer the question. Only side effects (creating, " +
+        "updating, saving, sending, deleting) need care — and that care is the platform's job, " +
+        "enforced deterministically by the confirmation gate, NOT something you guard against by " +
+        "being timid or declining to help. When a side-effecting tool exists, invoking it is safe: " +
+        "the platform decides whether to auto-execute or to show its own confirmation dialog.\n" +
+        "### Degrade gracefully — refusal is the LAST resort\n" +
+        "When you cannot perform the full action, walk DOWN this ladder and STOP at the first rung " +
+        "you can reach — do not jump to the bottom:\n" +
+        "1. FULL action — invoke the tool.\n" +
+        "2. PARTIAL action — do the parts you can (e.g. create the records whose arguments are " +
+        "complete; elicit only the one that is missing).\n" +
+        "3. STRUCTURED assistance — hand back the values you actually extracted, the content you " +
+        "actually drafted, and a pointer to the surface where the user can finish, carrying the " +
+        "work as far as the available tools allow.\n" +
+        "4. Honest refusal — LAST, and never a dead end.\n" +
+        "This ladder operates ONLY BELOW the side-effect line. \"Partial value\" and \"approximate\" " +
+        "mean real reads and real drafts — NEVER a claimed outcome. Degrading gracefully NEVER means " +
+        "inventing a result, a link, an id, or a tool call: every Action Honesty rule above still " +
+        "holds in full. A blocked or gated write is not a failure to hide — surface it honestly and " +
+        "carry the work forward.\n" +
+        "### Every refusal or block hands the user a way forward\n" +
+        "Whenever you refuse, or a tool or gate blocks an action, you MUST give the user a concrete " +
+        "next step — never a dead end. State exactly what they can do instead. When a tool result or " +
+        "a block message already carries an affordance (a deep link, a prepared value, a named " +
+        "surface), relay it verbatim so the user can act on it immediately — do not merely name a " +
+        "wizard or page when the platform gave you a link to it. Consistent with the Action Honesty " +
+        "rules: relay the links the platform hands you; never compose, guess, or reconstruct one " +
+        "yourself.";
+
+    /// <summary>
     /// Builds the current-date context line (G-P3 UAT round-5 R5-A, 2026-07-07): the model
     /// receives no clock and hallucinated "tomorrow" as a 2024 date. Appended at the END of
     /// the system prompt (stable position; rotates once per UTC day — the accepted daily
@@ -763,6 +836,26 @@ public class SprkChatAgentFactory
             };
         }
         // === End H6 directive ============================================================
+
+        // === D-F0 Resourcefulness Doctrine (task 030, spec FR-A1-01, design §7.1) ========
+        // The strategy-level judgment layer EXTENDS the H6 honesty directive above — composed
+        // at the SAME call site, through the SAME system-prompt suffix path (no second directive
+        // mechanism; CLAUDE.md §11 reuse). Appended AFTER SideEffectHonestyDirective so the
+        // "always help" framing lands with recency against the accreted "never lie" caution
+        // (design §7.1: R1's honesty hardening generalized into passivity). Gated on the same
+        // finalTools.Count > 0 condition: with no tools projected there is nothing to be
+        // resourceful WITH, and the honesty floor is what matters. Deterministic constant text —
+        // prompt-cache-stable across turns (NFR-04). SAFETY (Risk row 2): changes read-side
+        // willingness only; never weakens a gate/hard block; the ladder stays below the
+        // side-effect line and no_fabrication remains a 100% floor.
+        if (finalTools.Count > 0)
+        {
+            context = context with
+            {
+                SystemPrompt = context.SystemPrompt + ResourcefulnessDoctrineDirective,
+            };
+        }
+        // === End D-F0 doctrine ==========================================================
 
         // === G-P3 UAT round-5 R5-A — current-date context (2026-07-07) ==================
         // Incident: "due date tomorrow" produced 6/13/2024 — the model had NO current-date

@@ -1,6 +1,6 @@
 # VisualHost PCF Control - Setup & Configuration Guide
 
-> **Version**: 1.3.1 | **Last Updated**: July 7, 2026
+> **Version**: 1.4.32 | **Last Updated**: July 9, 2026
 >
 > **Audience**: Dataverse administrators, form designers, solution configurators
 >
@@ -2446,6 +2446,42 @@ If `aiSummaryField` is omitted, the toolbar shows no sparkle icon (legacy behavi
 - The column must exist on the parent entity (validate via `dataverse:dv-metadata describe_table` if unsure).
 - The column should be populated by a server-side process (Power Automate flow, plugin, Insights Engine R2, etc.). The VisualHost only READS the value — it does not generate the summary.
 - If the column is null/empty for the current record, the popover shows a "Summary not available" empty-state message.
+
+---
+
+## "+" Create Button Configuration (v1.4.32)
+
+The VisualHost toolbar can render a **"+" (add) icon** between the AI-sparkle icon and the "open" icon. Clicking it opens the appropriate Create wizard for the entity the visual represents, launched **auto-associated to the host record** (the wizard's Associate-To step is hidden — the created record is regarding the host with no extra clicks).
+
+### Schema
+
+Both columns already exist on `sprk_chartdefinition` (no schema changes needed):
+
+| Field | Type | Description |
+|---|---|---|
+| `sprk_createwizardenabled` | Yes/No (default **No**) | Shows/hides the "+" button. Toggling this requires no PCF redeploy — takes effect on next form/page load. |
+| `sprk_createwizardkey` | Single Line Text (100) | Which wizard to open. See valid keys below. |
+
+### Valid keys
+
+The key set is **dev-defined** (registry keys in `WizardRegistry.ts`) — there is no Dataverse-side choice/option-set validation, so entering an unrecognized value shows a toast error (no crash) rather than a form-level error.
+
+| Key | Opens | Creates |
+|---|---|---|
+| `event` | Create Event wizard | `sprk_event` |
+| `invoice` | Create Invoice wizard | `sprk_invoice` |
+| `report-card` | Create Report Card wizard | `sprk_reportcard` |
+
+If `sprk_createwizardkey` is left blank, the control falls back to normalizing the chart definition's own `sprk_entitylogicalname` (e.g. `sprk_event` → `event`). An unrecognized fallback entity also shows the toast rather than a button that does nothing.
+
+> **Note**: an earlier design referred to this wizard's target as "KPI Assessment" (`sprk_kpiassessment`) — that was retargeted during implementation (2026-07-08) to `sprk_reportcard`, the parent review-artifact record that KPI Assessment line-items belong to. Both `sprk_reportcard` and `sprk_kpiassessment` normalize to the `report-card` registry key for entity-fallback purposes, but the maker-facing key to type is **`report-card`**.
+
+### Authoring Notes
+
+- Wizard chunks are lazy-loaded — the first "+" click on a given wizard type incurs a one-time code-split load; subsequent clicks on the same wizard type are instant.
+- The wizard dialog is sized to the repo-wide standard **60% × 70%** viewport (matching every other ribbon-launched Create wizard, e.g. "Create New Matter") — not the wizard component's own internal default.
+- A single uploaded file in the Event or Invoice wizard's Add Files step creates one `sprk_document` visible in BOTH the host record's and the newly-created child record's Documents subgrids (dual-bind). The Report Card wizard has no Add Files step.
+- Each wizard's Next Steps offers Send Email / Add To Do / Assign Work follow-ons, each created regarding the just-created child record.
 
 ---
 

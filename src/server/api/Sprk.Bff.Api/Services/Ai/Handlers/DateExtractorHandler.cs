@@ -67,10 +67,8 @@ public sealed class DateExtractorHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Date Extractor",
-        Description: "Pure-deterministic date normalization + relative-date resolution. " +
-                     "Parses ISO 8601, US/EU short formats, named months, quarter notation, and " +
-                     "relative phrases (\"next quarter\", \"tomorrow\", \"in 30 days\") into " +
-                     "canonical ISO 8601 dates. No LLM call.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-date-extractor-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Pure deterministic date normalization + relative-date resolution. Parses ISO 8601, US/EU short formats, named months, quarter notation, and relative phrases ('next quarter', 'tomorrow', 'in 30 days') into canonical ISO 8601 dates. NO LLM call.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

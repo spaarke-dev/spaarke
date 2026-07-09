@@ -1,7 +1,7 @@
 <task id="AIR2-030" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>D-F0 Resourcefulness Doctrine — strategy meta-prompt + read/write asymmetry + degradation ladder + affordances [FR-A1-01]</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>Wave J — G-R2-A Judgment + Friction (FIRST work item, parallel with A0)</phase>
     <gate>G-R2-A (judgment)</gate>
     <estimated-effort>2-3 days</estimated-effort>
@@ -94,6 +94,35 @@
     <criterion testable="true">NEGATIVE: the doctrine block introduces NO instruction that would let the model claim an outcome/link/id/tool-call it did not perform — `no_fabrication` stays a 100% floor (verified against fabrication-counter seed cases from 031).</criterion>
     <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-07-08 (opus, FULL rigor). D-F0 doctrine implemented as ONE new deterministic
+    constant `ResourcefulnessDoctrineDirective` in `SprkChatAgentFactory.cs` (added right after
+    `SideEffectHonestyDirective` :65), composed at the EXISTING `finalTools.Count > 0` suffix site
+    immediately after the H6 directive (:851-857) — same system-prompt path, NO second mechanism
+    (CLAUDE.md §11 reuse). Block carries all four components: (a) strategy meta-prompt
+    (decompose→inventory→VERIFY→act/approximate→partial-value+next-step); (b) reads-are-free
+    asymmetry; (c) degradation ladder (full→partial→structured assistance→refusal LAST), scoped
+    strictly BELOW the side-effect line; (d) affordance-on-every-refusal, written to be consistent
+    with the R4-3 no-URL-fabrication pin (relay platform links, never compose).
+
+    Pin audit → `notes/d-f0-pin-accretion-audit.md`: 0 pins folded, 11 kept. All G-P3 rounds-1–6
+    pins are honesty-floor / write-determinism / confirmation / block-backing contracts at-or-above
+    the side-effect line — none are read-passivity instances, several back hard blocks (R5-E) or
+    the confirmation gate; the doctrine ADDS the read-freedom + ladder + affordance that no pin
+    provided. Scenario-specific contracts (per-table write contracts, tool-description guidance,
+    the task-040 Document Upload deep-link) correctly stay catalog/handler DATA.
+
+    SAFETY (Risk row 2): no gate/hard block weakened; ladder below the side-effect line;
+    no_fabrication 100% floor intact; budget-8 bound unchanged (ADR-039). Verification: BFF build
+    0 errors; golden-utterance eval 35/35 GREEN; full BFF unit suite 7580 passed / 101 skipped /
+    1 flaky (SseStreamingIntegrationTests.Cancellation_NoLingeringBackgroundTask_AfterClientAbort —
+    TaskCanceledException race; passes in isolation; unrelated to a prompt-constant change).
+    Quality gates: adr-check clean (ADR-039/040 compliant, §F test obligation met via the parallel
+    031 eval family + green golden eval); code-review PASS. Publish-size 45.10 MB compressed incl
+    PDBs (under the 60 MB ceiling; ~0 delta — string-constant-only, zero new packages → no new CVE).
+    Enforcement forcing function lands in task 031 (resourcefulness eval family).
+  </notes>
 
   <escalation>
     <trigger>If honoring the resourcefulness ladder for a given class of request would require the model to make a side-effect caution DECISION at runtime (rather than deferring to Policy v2's catalog-declared class), STOP — that is the ADR-039 one-intent boundary; surface it per CLAUDE.md §6.5 rather than encoding runtime risk judgment in the directive.</trigger>

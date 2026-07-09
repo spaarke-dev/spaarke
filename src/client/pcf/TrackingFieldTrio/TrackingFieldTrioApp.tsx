@@ -248,7 +248,7 @@ export const TrackingFieldTrioApp: React.FC<ITrackingFieldTrioAppProps> = ({
         })}
       </div>
 
-      {showVersion && <span className={styles.versionFooter}>v1.0.4 • Built 2026-06-30</span>}
+      {showVersion && <span className={styles.versionFooter}>v1.0.5 • Built 2026-07-07</span>}
     </div>
   );
 };

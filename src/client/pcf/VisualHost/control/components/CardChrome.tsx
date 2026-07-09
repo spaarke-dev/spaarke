@@ -17,6 +17,11 @@
  *  - `showAiSparkle` defaults to `false`. v1 callers should pass `false` (or
  *    omit). The AI sparkle button is contract-only in v1; r2 Insights Engine
  *    will flip the flag per chart def.
+ *  - `onCreateClick` (visual-host-create-button-r1 / task 012) renders the
+ *    "+" corner-icon BETWEEN the AI sparkle and expand icons, gated by the
+ *    caller on `chartDefinition.createWizardEnabled === true`. `VisualHostRoot`
+ *    owns the click handler (registry resolution, Dialog, auth bootstrap) —
+ *    CardChrome stays a dumb slot-renderer per the file-level doc above.
  *
  * Standards:
  *  - ADR-021: Fluent v9 + semantic tokens only (no hex/rgb).
@@ -25,7 +30,7 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, Button, Tooltip, Text, shorthands } from '@fluentui/react-components';
-import { OpenRegular, Sparkle20Regular } from '@fluentui/react-icons';
+import { AddRegular, OpenRegular, Sparkle20Regular } from '@fluentui/react-icons';
 import {
   AiSummaryPopover as RawAiSummaryPopover,
   type IAiSummaryPopoverProps,
@@ -63,6 +68,14 @@ export interface ICardChromeProps {
    * Default: false. v1 ships with the slot hidden (Insights Engine is r2 work).
    */
   showAiSparkle?: boolean;
+  /**
+   * Optional callback invoked when the "+" (create) corner-icon is clicked.
+   * Rendered BETWEEN the AI sparkle and expand icons. The caller (
+   * `VisualHostRoot`) gates this on `chartDefinition.createWizardEnabled ===
+   * true` (visual-host-create-button-r1 / task 012). If omitted, the "+"
+   * icon is not rendered.
+   */
+  onCreateClick?: () => void;
   /** The actual card content (chart visual) rendered below the chrome header. */
   children: React.ReactNode;
 }
@@ -102,7 +115,9 @@ const useStyles = makeStyles({
   iconSlots: {
     display: 'flex',
     alignItems: 'center',
-    ...shorthands.gap(tokens.spacingHorizontalXS),
+    // v1.4.30 — tightened from spacingHorizontalXS per UAT feedback ("reduce
+    // spacing between the toolbar buttons a little bit").
+    ...shorthands.gap(tokens.spacingHorizontalXXS),
     flexShrink: 0,
   },
   body: {
@@ -122,6 +137,7 @@ export const CardChrome: React.FC<ICardChromeProps> = ({
   onExpand,
   onAiSummary,
   showAiSparkle = false,
+  onCreateClick,
   children,
 }) => {
   const styles = useStyles();
@@ -132,7 +148,10 @@ export const CardChrome: React.FC<ICardChromeProps> = ({
   // caller explicitly opts in via `showAiSparkle === true` AND supplies an
   // `onAiSummary` callback. v1 callers in VisualHostRoot pass false.
   const hasAiSparkle = showAiSparkle === true && !!onAiSummary;
-  const hasAnyIcon = hasExpand || hasAiSparkle;
+  // "+" (create) slot — visual-host-create-button-r1 / task 012. Caller gates
+  // this on `chartDefinition.createWizardEnabled === true`.
+  const hasCreate = !!onCreateClick;
+  const hasAnyIcon = hasExpand || hasAiSparkle || hasCreate;
   const renderHeader = hasTitle || hasAnyIcon;
 
   return (
@@ -164,6 +183,17 @@ export const CardChrome: React.FC<ICardChromeProps> = ({
                   onFetchSummary={onAiSummary}
                   positioning="below"
                 />
+              )}
+              {hasCreate && (
+                <Tooltip content="Create new" relationship="label">
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<AddRegular />}
+                    onClick={onCreateClick}
+                    aria-label="Create new record"
+                  />
+                </Tooltip>
               )}
               {hasExpand && (
                 <Tooltip content="View details" relationship="label">

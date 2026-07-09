@@ -113,13 +113,8 @@ public sealed class CloseWorkspaceTabHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Close Workspace Tab",
-        Description: "Closes an open workspace tab in the user's current session. The 'tabId' " +
-                     "argument is the stable id of the tab the user wants to close. Pinned tabs " +
-                     "are NOT closable through this tool — the user must explicitly unpin first " +
-                     "(the handler returns a refusal response so the agent can relay the guidance). " +
-                     "Closing an unpinned tab removes its Redis hot-tier row only — any Cosmos " +
-                     "durable rows for previously-pinned data are preserved. The operation is " +
-                     "idempotent: closing a non-existent or already-closed tab returns success.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-close-workspace-tab-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Closes an open workspace tab in the user's current chat-session workspace. Use this when the user asks to close a tab, dismiss a panel, or clear something from their workspace. Pass the stable 'tabId' of the tab. Pinned tabs cannot be closed through this tool — the response will indicate the tab is pinned and the user must explicitly unpin it first. Closing a non-existent or already-closed tab returns success (idempotent). Cosmos durable rows for previously-pinned data are preserved when a tab is closed.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

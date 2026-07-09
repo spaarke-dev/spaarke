@@ -123,8 +123,8 @@ public sealed class FinancialCalculationToolHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Financial Calculation Tool Handler",
-        Description: "Pure-deterministic, currency-aware financial formulas (simple/compound interest, present/future value, loan payment, ROI). " +
-                     "No LLM call; all monetary math in decimal.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-financial-calculation-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Pure-deterministic, currency-aware financial formulas: simple/compound interest, present/future value, loan payment (amortization), ROI. All monetary math uses decimal. No LLM call.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "application/json" },
         Parameters: new[]

@@ -25,6 +25,19 @@
       - VerifyCitationsHandler            (1 row, capability-gated via sprk_requiredcapability)
           CITATION-VERIFY (gated by 'verify_citations' capability)
 
+    ── sprk_description is a SEED-MANAGED MIRROR (FR-A-01 triple-twin hoist, AIR2-020) ──
+    The single AUTHORED source for each tool's LLM-facing description is the sprk_description
+    field IN THE ROW JSON below (infra/dataverse/sprk_analysistool-*-row.json). Do NOT hand-edit
+    the live sprk_description on the Dataverse row — this script PATCHes it back from the JSON on
+    every run, so a live edit is silently reverted. To change a description, edit the JSON row and
+    re-run this seed. Two mirrors are kept byte-equal to the authored JSON and enforced:
+      * the compiled handler Metadata.Description (Services/Ai/Handlers/*.cs) — guarded in CI by
+        tests/integration/contract/Catalog/CatalogToolDescriptionParityContractTests.cs;
+      * the live sprk_description — guarded at runtime by RoutingConsumerTypeHealthCheck's
+        description-parity dimension (a live hand-edit → Unhealthy at /healthz until re-seeded).
+    Field-security lockdown / form read-only for sprk_description on the sprk_analysistool form is
+    a recommended follow-up; until then the seed-revert + health-check are the enforcement.
+
     Source rows are JSON files in infra/dataverse/ (one per row, not per handler). This
     script reads each row, upserts to sprk_analysistools. Upsert key is sprk_toolcode with
     a safety filter requiring sprk_name to start with 'SYS-' (refined 2026-06-08 from the
