@@ -80,6 +80,7 @@ public class SessionDispatchOrchestrator
     private readonly IScopeResolverService _scopeResolver;
     private readonly IActionRunner _actionRunner;
     private readonly IContextBinder _contextBinder;
+    private readonly ICodedWorkflowRegistry _codedWorkflows;
     private readonly ISessionFileTextSource _sessionFileTextSource;
     private readonly IOutputRouter _outputRouter;
     private readonly PendingPlanManager _pendingPlanManager;
@@ -93,6 +94,7 @@ public class SessionDispatchOrchestrator
         IScopeResolverService scopeResolver,
         IActionRunner actionRunner,
         IContextBinder contextBinder,
+        ICodedWorkflowRegistry codedWorkflows,
         ISessionFileTextSource sessionFileTextSource,
         IOutputRouter outputRouter,
         PendingPlanManager pendingPlanManager,
@@ -105,6 +107,7 @@ public class SessionDispatchOrchestrator
         _scopeResolver = scopeResolver ?? throw new ArgumentNullException(nameof(scopeResolver));
         _actionRunner = actionRunner ?? throw new ArgumentNullException(nameof(actionRunner));
         _contextBinder = contextBinder ?? throw new ArgumentNullException(nameof(contextBinder));
+        _codedWorkflows = codedWorkflows ?? throw new ArgumentNullException(nameof(codedWorkflows));
         _sessionFileTextSource = sessionFileTextSource ?? throw new ArgumentNullException(nameof(sessionFileTextSource));
         _outputRouter = outputRouter ?? throw new ArgumentNullException(nameof(outputRouter));
         _pendingPlanManager = pendingPlanManager ?? throw new ArgumentNullException(nameof(pendingPlanManager));
@@ -132,6 +135,7 @@ public class SessionDispatchOrchestrator
         _scopeResolver = null!;
         _actionRunner = null!;
         _contextBinder = null!;
+        _codedWorkflows = null!;
         _sessionFileTextSource = null!;
         _outputRouter = null!;
         _pendingPlanManager = null!;
@@ -212,13 +216,21 @@ public class SessionDispatchOrchestrator
                 "The requested binding has no Action target; the dispatch path executes catalog Actions only.");
         }
 
-        if (binding.ActionKind != ActionKind.Prompted)
+        // ── ADR-043 §4 (E-30): the ActionKind decision is a deterministic total function over the
+        // closed kind vocabulary — Prompted → the prompted executor (ActionRunner), Coded → the
+        // registered ICodedWorkflow via ICodedWorkflowRegistry (the reserved Action-Engine front door;
+        // engine internals stay behind ICodedWorkflow.ExecuteAsync), and ANY other/undefined kind →
+        // the same loud 422 as before (no silent fallback, no second dispatch protocol — ADR-039).
+        // The kind decision lives ONLY here; the two executor legs below join the SAME
+        // store-before-render tail (OutputRouter.RouteAsync), so there is one ledger write and one
+        // render boundary regardless of kind.
+        if (binding.ActionKind is not (ActionKind.Prompted or ActionKind.Coded))
         {
             throw new DispatchRejectedException(
                 DispatchRejectedException.ActionKindUnsupported,
                 StatusCodes.Status422UnprocessableEntity,
                 $"The requested binding targets an Action of kind '{binding.ActionKind}'; " +
-                "the P1 dispatch path executes prompted Actions only.");
+                "the dispatch path executes prompted or coded Actions only.");
         }
 
         // ── ADR-043 §3 single-source disposition admission: the dispatch seam admits EXACTLY the
@@ -254,6 +266,86 @@ public class SessionDispatchOrchestrator
             binding.BindingId, binding.Ucid, binding.ConsumerType, action.Id, action.Name,
             binding.Disposition, request.TenantId, request.SessionId, requestedFileIds?.Count ?? 0);
 
+        // Both executor legs (prompted / coded) produce the output JsonElement + its grounding source
+        // refs, then join the SAME store-before-render tail (OutputRouter.RouteAsync) below — one ledger
+        // write, one render boundary, regardless of ActionKind (ADR-039 / ADR-040).
+        JsonElement output;
+        IReadOnlyList<string> sourceRefs = Array.Empty<string>();
+
+        if (binding.ActionKind == ActionKind.Coded)
+        {
+            // ── Coded leg (E-30 / ADR-043 §4): a registered ICodedWorkflow fulfils the coded Action —
+            // the reserved front door the future Action Engine plugs into (engine internals stay behind
+            // ICodedWorkflow.ExecuteAsync). Resolution is closed-catalog: the Action's sprk_workflowclass
+            // MUST name a registered workflow — unknown/missing refs reject loud (ADR-039, no fallback).
+            // Self-contained workflows read their inputs from the operand args (CodedWorkflowContext.
+            // ArgumentsJson = the dispatch args verbatim); they do NOT use the prompted ContextBinder
+            // grounding. The workflow's result serializes to the output JsonElement the router stores.
+            var workflowClassRef = binding.WorkflowClass;
+            if (string.IsNullOrWhiteSpace(workflowClassRef))
+            {
+                throw new DispatchRejectedException(
+                    DispatchRejectedException.ActionKindUnsupported,
+                    StatusCodes.Status422UnprocessableEntity,
+                    $"Binding {binding.BindingId} targets a coded Action but declares no sprk_workflowclass; " +
+                    "a coded dispatch requires a registered workflow class ref (ADR-039 closed catalog).");
+            }
+
+            var workflow = _codedWorkflows.GetWorkflow(workflowClassRef)
+                ?? throw new DispatchRejectedException(
+                    DispatchRejectedException.ActionKindUnsupported,
+                    StatusCodes.Status422UnprocessableEntity,
+                    $"Binding {binding.BindingId} names coded workflow class '{workflowClassRef}', which is not " +
+                    $"in the coded-workflow registry (registered: {string.Join(", ", _codedWorkflows.GetRegisteredWorkflowClassRefs())}). " +
+                    "Fix the Action row or the registration — there is no fallback (ADR-039).");
+
+            string? codedError = null;
+            JsonElement codedOutput = default;
+            try
+            {
+                var result = await workflow
+                    .ExecuteAsync(
+                        new CodedWorkflowContext
+                        {
+                            ArgumentsJson = request.Args is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } a
+                                ? a.GetRawText()
+                                : "{}",
+                            UserId = null,
+                        },
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+                codedOutput = SerializeWorkflowResult(result, workflowClassRef);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "SessionDispatchOrchestrator: coded workflow '{WorkflowClass}' failed for binding {BindingId} action {ActionId}. TenantId={TenantId} SessionId={SessionId}",
+                    workflowClassRef, binding.BindingId, action.Id, request.TenantId, request.SessionId);
+                codedError = "The action failed. Please try again.";
+            }
+
+            _aiTelemetry.RecordCapabilityInvocation(
+                request.TenantId,
+                userId: null,
+                entryPath: Sprk.Bff.Api.Telemetry.AiMeteringContext.EntryPathCoded,
+                capability: binding.Ucid ?? binding.ConsumerType,
+                outcome: codedError is null ? "success" : "failed");
+
+            if (codedError is not null)
+            {
+                yield return AnalysisChunk.FromError(codedError);
+                yield break;
+            }
+
+            output = codedOutput;
+        }
+        else
+        {
         // ── ADR-043 (E-10) input resolution: ContextBinder resolves the Action's DECLARED inputs into
         // grounding context (ContextEnvelope) + the typed operand, and writes the ContextEnvelope
         // fingerprint (task-038's dark seam, now live; ADR-040 store-before-render; NFR-07 ids/counts).
@@ -275,7 +367,6 @@ public class SessionDispatchOrchestrator
         var conversationTail = BuildConversationTail(session);
 
         BoundInputs boundInputs;
-        IReadOnlyList<string> sourceRefs = Array.Empty<string>();
 
         if (_contextBinder.HasStructuredOperand(binding.InputSchemaJson, request.Args))
         {
@@ -351,7 +442,7 @@ public class SessionDispatchOrchestrator
         // was written (e.g. the session vanished from the store mid-turn).
         session = boundInputs.UpdatedSession ?? session;
 
-        JsonElement output = default;
+        output = default;
         string? llmError = null;
         try
         {
@@ -384,6 +475,7 @@ public class SessionDispatchOrchestrator
         {
             yield return AnalysisChunk.FromError(llmError);
             yield break;
+        }
         }
 
         // ── ADR-040 SEAM (FR-P1-02): the universal ledger write BEFORE render. The OutputRouter writes
@@ -420,6 +512,34 @@ public class SessionDispatchOrchestrator
         {
             yield return AnalysisChunk.FromChips(transitionChips);
         }
+    }
+
+    private static readonly JsonSerializerOptions WorkflowResultSerializerOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Serialize a coded workflow's result into the <see cref="JsonElement"/> the
+    /// <see cref="OutputRouter"/> stores as the <c>SessionOutput</c> payload (ADR-040 store-before-render).
+    /// A result that is already a <see cref="JsonElement"/> is cloned (detached from any caller-owned
+    /// <c>JsonDocument</c> lifetime); anything else is serialized with the shared web options. A null
+    /// result is a coded-contract violation — fail loud, never store null.
+    /// </summary>
+    private static JsonElement SerializeWorkflowResult(object? result, string workflowClassRef)
+    {
+        if (result is null)
+        {
+            throw new InvalidOperationException(
+                $"Coded workflow '{workflowClassRef}' returned null; a coded dispatch must return a " +
+                "serializable result object (the SessionOutput payload — ADR-040 stores it before render).");
+        }
+
+        if (result is JsonElement element)
+        {
+            return element.Clone();
+        }
+
+        var json = JsonSerializer.Serialize(result, WorkflowResultSerializerOptions);
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
     }
 
     /// <summary>
