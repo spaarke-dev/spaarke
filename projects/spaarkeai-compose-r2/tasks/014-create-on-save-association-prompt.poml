@@ -2,7 +2,7 @@
   <metadata>
     <title>FR-05 optional parent-association prompt (Tier 2c dialog integration)</title>
     <phase>1 Entry</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>12</estimated-hours>
     <effort>high</effort>
     <dependencies>013</dependencies>
@@ -116,4 +116,55 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Built the independent association-selection + write half entirely within
+    `src/solutions/SpaarkeAi/src/components/compose/`:
+    - `documentAssociationWrite.ts` — `associateDocumentToParent`, reusing
+      `discoverNavProps`/`findNavProp` from `@spaarke/ui-components` (the same
+      nav-prop discovery mechanism consolidated by
+      `set-regarding-and-field-mapping-resolver-r2` task 011 and used by
+      CreateMatterWizard/CreateEventWizard/etc.). Confirmed live via
+      `describe('tables/sprk_document')` that matter/project/invoice/
+      work-assignment are DIRECT single-valued lookups on `sprk_document`
+      (`sprk_matter`, `sprk_project`, `sprk_invoice`, `sprk_workassignment`) —
+      NOT the 11-field ADR-024 polymorphic-resolver pattern used by
+      sprk_todo/sprk_event/sprk_communication.
+    - `CreateOnSaveAssociationPrompt.tsx` — reuses the shared `AssociateToStep`
+      (`@spaarke/ui-components`) UNMODIFIED for the record-type+lookup UI
+      (same component `CreateMatterWizard`/`CreateProjectWizard`/
+      `CreateInvoiceWizard`/`CreateWorkAssignmentWizard` use), wrapped in a
+      5-choice radio group (None/Matter/Project/Invoice/Work Assignment).
+      Plain content section — NOT a Dialog/overlay of its own, so a host can
+      mount it inside the existing Tier-2c gate dialog without a bespoke
+      confirmation banner.
+    - `useCreateOnSaveAssociation.ts` — hook wiring selection state to the
+      write, exposing `associate(documentId)` for a future save-completion
+      host to call.
+    - `gateAssociationContract.ts` — the GUARD: a TS mirror of the BFF's
+      `GateAssociationAffordance`/`GateAssociationTargetType`
+      (`GateDecisionV2.cs`) plus adapter functions, inert until a future task
+      wires it into the real gate-dialog host. Documents explicitly why
+      `ActionConfirmationDialog.tsx` (the actual Tier-2c dialog, living in
+      `Spaarke.UI.Components`, outside this task's write boundary) is not
+      touched here.
+
+    Deviation from POML step 3 (directional): "the gate-dialog-hosting
+    integration" is guarded via the adapter above rather than wired live —
+    `ActionConfirmationDialog.tsx` is out of this task's write boundary
+    (`src/solutions/SpaarkeAi/src/components/**` only; a parallel task 060 is
+    concurrently editing `Spaarke.Compose.Components`). Per the POML's own
+    "Build the independent half; stub/guard the gate-hosting half"
+    instruction, this is the intended split, not a silent gap — flagged for
+    the main session / next task to pick up the live hosting wiring.
+
+    Verification: `tsc-surface-gate.mjs` — 0 surface-owned errors (67
+    pre-existing shared-lib errors deferred, unrelated). Jest —
+    `CreateOnSaveAssociation.test.tsx` 8/8 passing (association-choices-render
+    x2, write-on-select x2, none-is-standalone x3, dark-mode x1). code-review
+    + adr-check (Step 9.5): no Critical/Warning findings; one lazy-ref-in-hook
+    Suggestion self-fixed (switched to `useState` lazy initializer). No new
+    npm packages; no package-lock changes. Stayed entirely within
+    `src/solutions/SpaarkeAi/`.
+  </notes>
 </task>
