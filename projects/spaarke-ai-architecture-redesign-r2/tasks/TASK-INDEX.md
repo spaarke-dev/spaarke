@@ -26,7 +26,7 @@
 | 020 | **Triple-twin validator hoist** (2026-07-08: Model 1 GitOps + Option C; JSON=source, live=managed mirror, code parity via KEEP-path test + health-check dimension; 23 handlers reconciled; eval 35/35; unblocks catalog tasks + Compose FR-12) | ✅ | opus·xhigh | ❌ | — | A-infra |
 | 021 | Test-repair (2026-07-08: found 16 SpaarkeAi + 10 AI.Widgets suites red, not ~3+8; fixed all — SpaarkeAi 378/378, AI.Widgets 638/638; found+fixed a real prod bug in EntityInfoWidget date rendering) | ✅ | sonnet·xhigh | ✅ | — | A-infra |
 | 030 | D-F0 Resourcefulness Doctrine (2026-07-08: ResourcefulnessDoctrineDirective on existing suffix site; pin audit 0-fold/11-keep — adds read-freedom+ladder+affordance, no gate/block weakened; eval 35/35) | ✅ | opus | ❌ | — | G-R2-A |
-| 031 | D-F0(e) resourcefulness eval family | 🔲 | opus | ❌ | 030 | G-R2-A |
+| 031 | D-F0(e) resourcefulness eval family (2026-07-08: 23 cases across 5 families + mechanical fabrication oracle vs ledger; wired into eval-gate; 49/49 green) | ✅ | opus | ❌ | 030 | G-R2-A |
 | 032 | Confirmation Policy v2 gate engine | 🔲 | opus | ❌ | **020** | G-R2-A |
 | 033 | Origin-classification eval family | 🔲 | sonnet | ❌ | 032 | G-R2-A |
 | 034 | Gate pre-suspend validation | 🔲 | opus | ❌ | 032 | G-R2-A |
