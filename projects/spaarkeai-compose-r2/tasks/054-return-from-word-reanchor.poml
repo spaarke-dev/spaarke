@@ -3,7 +3,7 @@
     <title>FR-27 return-from-Word re-anchoring (bands ≥0.85/0.6–0.85/&lt;0.6) + conflict banner</title>
     <phase>5 Word</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>opus</model-tier>
     <effort>high</effort>
@@ -126,4 +126,32 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-09 (FULL rigor, opus @ high). Delivered:
+    - BFF: NEW Services/Compose/AnnotationReanchorService.cs — deterministic re-anchor engine
+      (0.75·contentSim + 0.25·structuralProx, Levenshtein; bands ≥0.85 auto / 0.6–0.85 review /
+      &lt;0.6 orphan as named ReanchorBands constants seeded from Spike 6). Implements the Spike-6
+      §5.3 ambiguity guard: a would-be AUTO with a second-best content candidate within 0.05 is
+      flagged Ambiguous and demoted AUTO→REVIEW (never silently pinned to a duplicate). Orphans
+      surfaced with matchedParagraphIndex=-1, never dropped. Redis persistence (ADR-009) via
+      IDistributedCache key sdap:compose:reanchor:{id}. Pure static scoring surface + static docx
+      paragraph extraction (no LLM/AI-internal per ADR-013/NFR-05; no Microsoft.Graph per ADR-007).
+    - BFF endpoint: added route (13) POST /api/compose/document/{documentSpeId}/reanchor-annotations
+      to ComposeEndpoints.cs — all 12 prior routes preserved. Dedicated route (not a pull ride) so
+      the client's prior anchors travel in the body.
+    - Frontend (Spaarke.Compose.Components/src/widgets/): ComposeReanchorBanner (Fluent v9 banner
+      "N re-anchored, M need review"), ComposeReanchorConflictPanel (resolve flagged/orphaned:
+      Accept/Keep/Discard), useComposeReanchor (authenticatedFetch, ADR-028), ComposeReanchor.types
+      (mirrors BFF DTO + typed compose_reanchor_ready PaneEventBus discriminant, ADR-030). Exported
+      from index.ts.
+    - Tests: AnnotationReanchorServiceTests.cs (14 — band boundaries, ambiguity guard + control,
+      orphan-never-dropped, Redis round-trip, docx extraction). Compose BFF suite 262 pass (was
+      248). Co-located ComposeReanchorBanner.test.tsx (11 — incl. dark-mode no-hex assertion);
+      package suite 64 pass.
+    - Verify: BFF build 0 errors; integration test project builds 0 errors; frontend tsc + build
+      clean; ADR013_ComposeFacadeTests green. Publish 46.54 MB compressed incl PDBs (zero new
+      packages → ~0 delta; under 60 MB ceiling). CVE: only pre-existing HIGH Microsoft.Kiota.
+      Abstractions (via Graph). code-review + adr-check: 0 critical, 0 violations.
+  </notes>
 </task>

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Distributed;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -203,6 +204,27 @@ public static class ComposeEndpoints
             .Produces<CheckChangesResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        // (13) POST /api/compose/document/{documentSpeId}/reanchor-annotations — FR-27 (task 054):
+        // after a Word round-trip produced a new SPE version (detected by 052/053), download the
+        // CURRENT bytes, extract paragraph text, and re-anchor the client's prior Compose anchors
+        // against it with confidence bands (≥0.85 auto / 0.6–0.85 review / <0.6 orphan) + the
+        // Spike-6 ambiguity guard. Returns the per-band summary the Workspace banner + conflict UX
+        // render; persists it to Redis (ADR-009) so it survives the gap until the user returns.
+        // Deterministic scoring — NO LLM call (ADR-013/NFR-05); SPE download stays behind the
+        // ISpeFileOperations facade (ADR-007). A dedicated route (not a ride on pull-annotations)
+        // because re-anchoring needs the CLIENT's prior anchors in the request body — pull's
+        // contract carries none.
+        group.MapPost("/document/{documentSpeId}/reanchor-annotations", ReanchorAnnotations)
+            .WithName("ComposeReanchorAnnotations")
+            .WithSummary("Re-anchor prior Compose annotations against the reloaded Word document; return banded summary (FR-27)")
+            .RequireRateLimiting("ai-context")
+            .Produces<ReanchorAnnotationsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
         return routes;
@@ -638,6 +660,106 @@ public static class ComposeEndpoints
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 detail: "An unexpected error occurred while checking for changes.");
+        }
+    }
+
+    // FR-27 (task 054): re-anchor prior Compose annotations against the reloaded Word document.
+    // Downloads the CURRENT SPE bytes (facade, like PullAnnotations), extracts paragraph text, and
+    // scores each client-supplied prior anchor into auto/review/orphan bands via the deterministic
+    // AnnotationReanchorService (no LLM — ADR-013/NFR-05). Persists the summary to Redis (ADR-009,
+    // via the injected IDistributedCache) so the banner survives the user's return. The service is
+    // instantiated directly (not DI-registered) — same footprint-scoping choice as the
+    // DocxAnnotationReader above, keeping this task off the shared ComposeModule.cs DI surface.
+    private static async Task<IResult> ReanchorAnnotations(
+        string documentSpeId,
+        [FromBody] ReanchorAnnotationsBody? body,
+        ISpeFileOperations spe,
+        IDistributedCache cache,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.DriveId)) return BadRequest("driveId is required in the request body.");
+        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+        if (body.PriorAnchors is null) return BadRequest("priorAnchors is required (may be empty, but must be present).");
+
+        logger.LogInformation(
+            "Compose reanchor-annotations: tenant={TenantId} drive={DriveId} item={DocumentSpeId} priorAnchors={AnchorCount} TraceId={TraceId}",
+            body.TenantId, body.DriveId, documentSpeId, body.PriorAnchors.Count, httpContext.TraceIdentifier);
+
+        try
+        {
+            var stream = await spe.DownloadFileAsUserAsync(httpContext, body.DriveId, documentSpeId, ct)
+                .ConfigureAwait(false);
+
+            if (stream is null)
+            {
+                logger.LogWarning(
+                    "Compose reanchor-annotations: SPE drive-item not found or unreadable. TraceId={TraceId}",
+                    httpContext.TraceIdentifier);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Document Not Found",
+                    detail: $"SPE drive-item '{documentSpeId}' was not found or is unreadable.",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+            }
+
+            byte[] sourceBytes;
+            await using (stream.ConfigureAwait(false))
+            {
+                using var buffer = new MemoryStream();
+                await stream.CopyToAsync(buffer, ct).ConfigureAwait(false);
+                sourceBytes = buffer.ToArray();
+            }
+
+            var service = new AnnotationReanchorService(cache);
+            var summary = await service
+                .ComputeAndPersistAsync(documentSpeId, body.PriorAnchors, sourceBytes, ct)
+                .ConfigureAwait(false);
+
+            logger.LogInformation(
+                "Compose reanchor-annotations: item={DocumentSpeId} total={Total} auto={Auto} review={Review} orphan={Orphan} TraceId={TraceId}",
+                documentSpeId, summary.Total, summary.AutoCount, summary.ReviewCount, summary.OrphanCount, httpContext.TraceIdentifier);
+
+            return Results.Ok(new ReanchorAnnotationsResponse(
+                DocumentSpeId: documentSpeId,
+                DriveId: body.DriveId,
+                Summary: summary,
+                CorrelationId: httpContext.TraceIdentifier));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (DocxAnnotationException ex) when (ex.Kind == DocxAnnotationErrorKind.MalformedDocument)
+        {
+            logger.LogWarning(ex, "Compose reanchor-annotations: malformed DOCX. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Malformed Document",
+                detail: "The stored document could not be read as a valid .docx; annotations were not re-anchored.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            logger.LogWarning(ex, "Compose reanchor-annotations: OBO denied. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Forbidden",
+                detail: "Caller lacks SPE ACL read permission for this drive-item.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.3");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose reanchor-annotations: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while re-anchoring annotations.");
         }
     }
 
@@ -1190,6 +1312,24 @@ public sealed record PullAnnotationsResponse(
     [property: JsonPropertyName("driveId")] string? DriveId,
     [property: JsonPropertyName("comments")] IReadOnlyList<RecoveredComment> Comments,
     [property: JsonPropertyName("revisions")] IReadOnlyList<RecoveredRevision> Revisions,
+    [property: JsonPropertyName("correlationId")] string CorrelationId);
+
+/// <summary>Request body for <c>POST /api/compose/document/{id}/reanchor-annotations</c> (FR-27).
+/// Carries the CLIENT's prior Compose anchored-annotations (from Compose session state) to
+/// re-locate against the reloaded document; the reloaded bytes are fetched server-side by driveId
+/// + documentSpeId (OBO), so the client sends only the anchors + tenant/drive scoping.</summary>
+public sealed record ReanchorAnnotationsBody(
+    [property: JsonPropertyName("driveId")] string DriveId,
+    [property: JsonPropertyName("tenantId")] string TenantId,
+    [property: JsonPropertyName("priorAnchors")] IReadOnlyList<PriorAnchor> PriorAnchors);
+
+/// <summary>Response shape for <c>POST /api/compose/document/{id}/reanchor-annotations</c> (FR-27) —
+/// the banded re-anchor <see cref="ReanchorSummary"/> the Workspace banner ("N re-anchored, M need
+/// review") + conflict UX render.</summary>
+public sealed record ReanchorAnnotationsResponse(
+    [property: JsonPropertyName("documentSpeId")] string DocumentSpeId,
+    [property: JsonPropertyName("driveId")] string? DriveId,
+    [property: JsonPropertyName("summary")] ReanchorSummary Summary,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
 /// <summary>Response shape for <c>POST /api/compose/webhooks/spe-doc-changed</c> (FR-26) — a
