@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | W0 ✅ + W1 partial ✅ (020/023/024/052 integrated, build+53 tests green). NEXT: **021** (held — dep 020 ✅ now met) |
+| **Task** | W0 ✅ + **W1 wave ✅ COMPLETE** (020/021/023/024/052 integrated, build + 63 Compose tests green, committed). NEXT: 022 (dep 021 ✅) then 025 (dep 020/021/022/023) to close Phase 2 |
 | **Step** | — |
-| **Status** | 020/023/024/052 done + wired + verified; 021 ready to dispatch |
-| **Next Action** | Execute **021** (FR-20 ComposeEditBatch) via task-execute — apply Spike-3 two-path rule (overlap=skip / validation-fail=rollback). Then 022 (dep 021), 025 (dep 020/021/022/023). ⛔ tasks wait on core A0. |
+| **Status** | W1 done + committed (96d334761 + 021 commit). Phase 2 LLM services: 020/021/023/024 done; 022/025 remain |
+| **Next Action** | Execute **022** (FR-21 ComposeEditTransaction — wraps ComposeEditBatch.Apply with snapshot/rollback; register `ComposeEditBatch` + transaction in ComposeModule when 022 needs it). Then **025** (consolidated NetArchTest facade verification + coverage). ⛔ tasks wait on core A0. |
 
 ### Files Modified This Session
 - `notes/spikes/spike-0-dispatch-path.md` - Created - Spike 0 (dispatch seam confirmed; `compose_action_request` correction)

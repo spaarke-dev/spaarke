@@ -161,3 +161,48 @@ public sealed record BatchValidationResult(
 public sealed record EditBatchValidateRequest(
     [property: JsonPropertyName("documentText")] string DocumentText,
     [property: JsonPropertyName("edits")] IReadOnlyList<ProposedEdit> Edits);
+
+// ---------------------------------------------------------------------------
+// FR-20 (task 021) — result models for ComposeEditBatch.Apply. BFF-authored (not
+// LLM-facing), so these use the BFF's normal camelCase JSON convention (see file header).
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// One edit that was actually applied by <see cref="ComposeEditBatch"/> — the resolved span it
+/// replaced and the replacement text (task 021 / FR-20 §Phase 4).
+/// </summary>
+public sealed record AppliedEdit(
+    [property: JsonPropertyName("editIndex")] int EditIndex,
+    [property: JsonPropertyName("match")] ResolvedMatch Match,
+    [property: JsonPropertyName("newText")] string NewText);
+
+/// <summary>
+/// One edit that was skipped because its resolved span overlapped an already-accepted span in
+/// the same batch. This is the NON-FATAL failure path (Spike 3 §2 —
+/// <c>notes/spikes/spike-3-edit-batch.md</c>): the batch still commits when only overlaps are
+/// present; see <see cref="ComposeEditBatchResult.ValidationErrors"/> for the FATAL counterpart.
+/// </summary>
+public sealed record SkippedEdit(
+    [property: JsonPropertyName("editIndex")] int EditIndex,
+    [property: JsonPropertyName("match")] ResolvedMatch Match,
+    [property: JsonPropertyName("reason")] string Reason);
+
+/// <summary>
+/// Outcome of <see cref="ComposeEditBatch.Apply"/>. Two DISTINCT failure semantics, deliberately
+/// kept as separate code paths (Spike 3 §2, the whole point of task 021):
+/// <list type="bullet">
+/// <item><b>Validation failure</b> (a resolved <see cref="EditVerdict.IsValid"/> is <c>false</c>
+/// — <c>not-found</c> / <c>ambiguous</c> / <c>empty-target</c>) is FATAL: <see cref="Committed"/>
+/// is <c>false</c>, <see cref="DocumentText"/> equals the untouched input verbatim, NOTHING
+/// applies, and <see cref="ValidationErrors"/> names every failing edit.</item>
+/// <item><b>Within-batch span overlap</b> is NON-FATAL: the later-claimed span lands in
+/// <see cref="Skipped"/>, every other edit still applies, and <see cref="Committed"/> is
+/// <c>true</c>.</item>
+/// </list>
+/// </summary>
+public sealed record ComposeEditBatchResult(
+    [property: JsonPropertyName("committed")] bool Committed,
+    [property: JsonPropertyName("documentText")] string DocumentText,
+    [property: JsonPropertyName("applied")] IReadOnlyList<AppliedEdit> Applied,
+    [property: JsonPropertyName("skipped")] IReadOnlyList<SkippedEdit> Skipped,
+    [property: JsonPropertyName("validationErrors")] IReadOnlyList<EditValidationError> ValidationErrors);
