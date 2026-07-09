@@ -54,8 +54,11 @@ public interface IOutputRouter
     /// to the session's host Dataverse record via <see cref="IWorkProductRecordPersister"/>
     /// AFTER the ledger write, then returns the stored entry (callers may still render it —
     /// storage, persistence, and rendering are independent contracts).
-    /// Remaining dispositions throw <see cref="NotSupportedException"/> AFTER the ledger
-    /// write (loud P3 stubs — never a silent fallback to inline render).
+    /// Dispositions the ADR-043 §3 <see cref="DispositionRoutability"/> registry marks
+    /// not-yet-routable (overlay/record/notification) throw <see cref="NotSupportedException"/>
+    /// AFTER the ledger write (a loud, registry-single-sourced stub — never a silent fallback to
+    /// inline render). The dispatch admit-gate rejects those same dispositions PRE-RUN from the
+    /// same registry, so admission and routing cannot disagree.
     /// </returns>
     Task<RoutedOutput> RouteAsync(
         ChatSession session,
@@ -221,6 +224,19 @@ public sealed class OutputRouter : IOutputRouter
 
         // ── 3. ROUTE by disposition — the ONLY rendering contract (ADR-040 / ADR-039).
         // No branching by capability name, consumer type, or any second routing surface.
+        //
+        // ADR-043 §3 single-source: a disposition the ONE registry marks NOT routable is a LOUD
+        // rejection AFTER the store (never a silent inline render). The dispatch admit-gate rejects
+        // these PRE-RUN from the SAME registry (DispositionRoutability.IsAdmissible); this is the
+        // post-store backstop for any caller that reaches the router directly (e.g. the event path)
+        // with a not-yet-routable disposition. The message is single-sourced in the registry so the
+        // admit-gate and the router cannot describe the same gap two different ways.
+        if (!DispositionRoutability.IsRoutable(binding.Disposition))
+        {
+            throw new NotSupportedException(
+                DispositionRoutability.NotRoutableMessage(binding.Disposition, entry.Key));
+        }
+
         switch (binding.Disposition)
         {
             // Informational: pass-through — the caller renders from the STORED entry on its
@@ -261,24 +277,19 @@ public sealed class OutputRouter : IOutputRouter
                 await PersistWorkProductAsync(entry, binding, session, cancellationToken).ConfigureAwait(false);
                 return new RoutedOutput { Entry = entry, Session = updated, Outcome = outcome };
 
-            // Remaining P3 dispositions: LOUD NotSupported stubs (task-021 contract — no
-            // silent fallback to inline render). The ledger entry above IS stored and
-            // addressable; only the rendering leg is missing until its task lands
-            // (overlay/record/notification → later waves).
-            case BindingDisposition.Overlay:
-            case BindingDisposition.Record:
-            case BindingDisposition.Notification:
-                throw new NotSupportedException(
-                    $"OutputRouter: disposition '{binding.Disposition.ToLedgerValue()}' routing is not implemented yet " +
-                    $"(lands at phase P3 of spaarke-ai-architecture-redesign-r1). The output WAS stored to the session " +
-                    $"ledger as '{entry.Key}' (storage precedes rendering — ADR-040); only the rendering leg is missing. " +
-                    "Do NOT work around this by rendering inline — that would silently violate the disposition contract.");
-
+            // Not-yet-routable dispositions (overlay/record/notification) are rejected by the
+            // registry check ABOVE the switch — they never reach here. This default is the
+            // registry/router-drift guard: a disposition the registry marks Routable=true but for
+            // which no leg above matched (e.g. a new routable disposition registered without its
+            // OutputRouter leg). Fail loudly rather than silently drop — the seam tests
+            // (tests/integration/seam/**) also assert admit ⇔ route ⇔ store per disposition.
             default:
                 throw new ArgumentOutOfRangeException(
                     nameof(binding),
                     binding.Disposition,
-                    "Unknown BindingDisposition value — Binding contract / OutputRouter drift.");
+                    $"DispositionRoutability marks '{binding.Disposition.ToLedgerValue()}' routable, but OutputRouter " +
+                    "has no routing leg for it — registry/router drift (ADR-043 §3). Add the leg here alongside its " +
+                    "registry entry. The output WAS stored to the ledger (ADR-040); only the routing leg is missing.");
         }
     }
 
@@ -375,21 +386,16 @@ public sealed class OutputRouter : IOutputRouter
 /// <summary>
 /// Maps <see cref="BindingDisposition"/> (raw <c>sprk_disposition</c> option-set values)
 /// to the ledger wire vocabulary on <see cref="SessionOutput.Disposition"/>
-/// (<c>informational | work_product | overlay | email | record | notification</c> —
+/// (<c>informational | work_product | overlay | email | record | notification | compose</c> —
 /// canonical §6.2 / ADR-040).
 /// </summary>
+/// <remarks>
+/// <b>ADR-043 §3 single-source</b>: this is a thin delegate to <see cref="DispositionRoutability"/>,
+/// the ONE disposition source of truth. The mapping table lives in the registry alongside routability,
+/// so the ledger vocabulary and the admit-gate can never disagree (they read the same table).
+/// </remarks>
 internal static class BindingDispositionLedgerExtensions
 {
-    internal static string ToLedgerValue(this BindingDisposition disposition) => disposition switch
-    {
-        BindingDisposition.Informational => "informational",
-        BindingDisposition.WorkProduct => "work_product",
-        BindingDisposition.Overlay => "overlay",
-        BindingDisposition.Email => "email",
-        BindingDisposition.Record => "record",
-        BindingDisposition.Notification => "notification",
-        BindingDisposition.Compose => ComposeDisposition.DispositionValue, // "compose" (ComposeDisposition v1 seam)
-        _ => throw new ArgumentOutOfRangeException(nameof(disposition), disposition,
-            "Unknown BindingDisposition value — Binding contract / ledger vocabulary drift."),
-    };
+    internal static string ToLedgerValue(this BindingDisposition disposition) =>
+        DispositionRoutability.ToLedgerValue(disposition);
 }

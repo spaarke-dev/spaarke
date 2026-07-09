@@ -47,11 +47,12 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// clean stable error (ADR-039: no fallback, no consumer-type re-detection).
 /// </para>
 /// <para>
-/// <b>P1 execution envelope</b>: prompted Actions with Informational disposition only.
-/// Non-prompted kinds and non-informational dispositions reject PRE-RUN with stable
-/// error codes (cheaper and more honest than letting <see cref="OutputRouter"/>'s
-/// loud P3 stubs throw after the LLM spend). The P2/P3 phases widen this envelope
-/// where the coded-workflow executor and the remaining disposition legs land.
+/// <b>Execution envelope</b>: prompted Actions whose disposition <see cref="OutputRouter"/> can
+/// route. The disposition gate derives from the ADR-043 §3 <see cref="DispositionRoutability"/>
+/// registry (admission = routability — the ONE source; no parallel allow-list), so it admits exactly
+/// the routable set and rejects not-yet-routable dispositions PRE-RUN with a stable error code
+/// (cheaper and more honest than letting the router's loud post-store stub throw after the LLM spend).
+/// The ActionKind gate (non-prompted kinds) is a SEPARATE, orthogonal axis owned by E-30.
 /// </para>
 /// <para>
 /// <b>Args contract</b>: chip <c>args</c> forward verbatim from the client; THIS
@@ -220,19 +221,22 @@ public class SessionDispatchOrchestrator
                 "the P1 dispatch path executes prompted Actions only.");
         }
 
-        // Disposition envelope: the dispatch seam executes the dispositions whose
-        // OutputRouter legs are IMPLEMENTED — Informational (P1 task 021) and WorkProduct
-        // (FR-P3-08 task 047: host-record persistence). Rejecting the still-stubbed legs
-        // PRE-RUN is cheaper and more honest than letting OutputRouter's loud stubs throw
-        // after the LLM spend. (Email is deliberately NOT dispatchable here — its only
-        // consumer is the coded briefing composite, which routes directly; see task 043.)
-        if (binding.Disposition is not (BindingDisposition.Informational or BindingDisposition.WorkProduct))
+        // ── ADR-043 §3 single-source disposition admission: the dispatch seam admits EXACTLY the
+        // dispositions OutputRouter can route (DispositionRoutability — the ONE registry). There is
+        // NO separate hardcoded allow-list here: admission DERIVES from routability, so the admit-gate,
+        // the OutputRouter switch, and ToLedgerValue can never disagree. This is precisely the drift
+        // that half-landed compose's routing promotion (router case added, admit-gate un-widened) →
+        // a live 422. Rejecting a not-yet-routable disposition PRE-RUN is cheaper and more honest than
+        // letting the router's loud post-store stub throw after the LLM spend. Realizing a disposition
+        // is now ONE change in DispositionRoutability, and the admit-gate follows automatically.
+        if (!DispositionRoutability.IsAdmissible(binding.Disposition))
         {
             throw new DispatchRejectedException(
                 DispatchRejectedException.DispositionUnsupported,
                 StatusCodes.Status422UnprocessableEntity,
-                $"The requested binding declares disposition '{binding.Disposition}'; " +
-                "only informational and work_product outputs execute on the dispatch path.");
+                $"The requested binding declares disposition '{binding.Disposition}', whose OutputRouter " +
+                $"routing leg is not yet implemented ({DispositionRoutability.NotRoutableReason(binding.Disposition)}). " +
+                "Only dispositions the router can route are admitted on the dispatch path.");
         }
 
         var action = await _scopeResolver

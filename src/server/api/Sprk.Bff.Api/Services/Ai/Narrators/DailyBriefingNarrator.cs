@@ -55,6 +55,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Services.Ai; // PromptInputSection — the single-source `## Input` producer (ADR-043 / E-12)
 
 namespace Sprk.Bff.Api.Services.Ai.Narrators;
 
@@ -82,11 +83,18 @@ public class DailyBriefingNarrator : ICodedWorkflow
 {
     private const string TldrActionCode = "BRIEF-NARRATE-TLDR";
 
+    // ADR-043 / E-12: these options bake the operand's SHAPE (camelCase keys + null-omission)
+    // into the JsonElement that is handed to the single-source `## Input` producer
+    // (PromptInputSection.Render). The producer re-serializes WriteIndented; WriteIndented is
+    // retained here to document the intended output form (it is a no-op during SerializeToElement,
+    // which does not carry whitespace). Casing/null-handling MUST match what the retired hand-built
+    // block emitted so the TL;DR prompt stays byte-for-behavior identical (golden-pinned in
+    // tests/integration/seam/**).
     private static readonly JsonSerializerOptions InputSerializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        WriteIndented = true  // matches PromptSchemaRenderer's `## Input` section formatting
+        WriteIndented = true
     };
 
     private static readonly JsonSerializerOptions OutputDeserializerOptions = new()
@@ -283,11 +291,19 @@ public class DailyBriefingNarrator : ICodedWorkflow
     }
 
     /// <summary>
-    /// Single LLM call. Composes the prompt as the Action.SystemPrompt followed by a
-    /// "## Input" section containing the indented runtime JSON (mirrors what
-    /// PromptSchemaRenderer's Layer 2 does in the playbook path, so the LLM sees the
-    /// same prompt shape it sees today).
+    /// Single LLM call. Composes the prompt as the Action.SystemPrompt followed by the
+    /// "## Input" section produced by the SINGLE-SOURCE <see cref="PromptInputSection"/> producer.
     /// </summary>
+    /// <remarks>
+    /// ADR-043 / E-12: the flat-text narrator Action does not go through
+    /// <see cref="PromptSchemaRenderer"/> (that seam is JPS-only), so before E-12 this method
+    /// HAND-REPLICATED the renderer's <c>## Input</c> format by convention. That replica is now
+    /// RETIRED onto the one producer: the payload is serialized to a <see cref="JsonElement"/> with
+    /// the same casing/null-handling the replica used (<see cref="InputSerializerOptions"/>) and
+    /// rendered by <see cref="PromptInputSection.Render(System.Text.Json.JsonElement?)"/>. Output is
+    /// byte-for-behavior identical to the previous hand-built block — <c>## Input</c> parity is now
+    /// STRUCTURAL, not conventional (frozen + golden-pinned in <c>tests/integration/seam/**</c>).
+    /// </remarks>
     private async Task<string> CallLlmStructuredAsync(
         string actionCode,
         string systemPrompt,
@@ -296,8 +312,8 @@ public class DailyBriefingNarrator : ICodedWorkflow
         decimal? temperature,
         CancellationToken ct)
     {
-        var inputJson = JsonSerializer.Serialize(inputPayload, InputSerializerOptions);
-        var fullPrompt = systemPrompt + "\n\n## Input\n\n" + inputJson + "\n";
+        var inputElement = JsonSerializer.SerializeToElement(inputPayload, InputSerializerOptions);
+        var fullPrompt = systemPrompt + "\n\n" + PromptInputSection.Render(inputElement);
 
         _logger.LogDebug(
             "DailyBriefingNarrator calling LLM: action={ActionCode}, promptLen={PromptLen}, schemaLen={SchemaLen}",

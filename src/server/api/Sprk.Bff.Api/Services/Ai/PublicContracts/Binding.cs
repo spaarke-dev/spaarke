@@ -111,9 +111,15 @@ public sealed record Binding
 
 /// <summary>
 /// Output routing disposition (canonical §6.2:
-/// <c>informational | work_product | overlay | email | record | notification</c>).
+/// <c>informational | work_product | overlay | email | record | notification | compose</c>).
 /// Enum values are the raw <c>sprk_disposition</c> option-set values.
 /// </summary>
+/// <remarks>
+/// This enum is the disposition VOCABULARY. Disposition CAPABILITY — the ledger wire value, whether
+/// <c>OutputRouter</c> can route it, and (therefore, per ADR-043 §3) whether the dispatch admit-gate
+/// admits it — is single-sourced in <see cref="Sprk.Bff.Api.Services.Ai.DispositionRoutability"/>.
+/// Do NOT re-list which dispositions are routable/admissible anywhere else; read the registry.
+/// </remarks>
 public enum BindingDisposition
 {
     /// <summary>Rendered to the Assistant pane only (platform default).</summary>
