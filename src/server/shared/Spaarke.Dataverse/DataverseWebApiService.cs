@@ -2041,7 +2041,7 @@ public class DataverseWebApiService : IDataverseService
             }
 
             // Step 2: query profile + expand rules in one round-trip filtered by resolved GUIDs.
-            // sprk_fieldmappingprofile_fieldmappingrule is the 1:N navigation property name.
+            // sprk_fieldmappingrule_FieldMappingProfile_sprk_fieldmappingprofile is the 1:N navigation property name.
             var ruleSelect = "$select=sprk_fieldmappingruleid,sprk_name,_sprk_fieldmappingprofile_value,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_mapping_type,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_expression,sprk_iscascadingsource,sprk_executionorder,sprk_isactive";
             var ruleFilter = activeRulesOnly ? ";$filter=sprk_isactive eq true" : "";
             var ruleOrderBy = ";$orderby=sprk_executionorder asc";
@@ -2050,7 +2050,7 @@ public class DataverseWebApiService : IDataverseService
                 $"sprk_fieldmappingprofiles?" +
                 $"$filter=_sprk_sourcerecordtype_value eq {sourceRefId} and _sprk_targetrecordtype_value eq {targetRefId} and statecode eq 0" +
                 $"&$select=sprk_fieldmappingprofileid,sprk_name,_sprk_sourcerecordtype_value,_sprk_targetrecordtype_value,sprk_capabilitymode,sprk_defaultvalue,sprk_description,statecode" +
-                $"&$expand=sprk_fieldmappingprofile_fieldmappingrule({ruleSelect}{ruleFilter}{ruleOrderBy})";
+                $"&$expand=sprk_fieldmappingrule_FieldMappingProfile_sprk_fieldmappingprofile({ruleSelect}{ruleFilter}{ruleOrderBy})";
 
             var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
@@ -2069,7 +2069,7 @@ public class DataverseWebApiService : IDataverseService
             var profile = MapToFieldMappingProfileEntity(data.Value[0], idToName);
 
             // Extract expanded rules from the response
-            if (data.Value[0].TryGetValue("sprk_fieldmappingprofile_fieldmappingrule", out var rulesElement)
+            if (data.Value[0].TryGetValue("sprk_fieldmappingrule_FieldMappingProfile_sprk_fieldmappingprofile", out var rulesElement)
                 && rulesElement.ValueKind == JsonValueKind.Array)
             {
                 var rules = new List<FieldMappingRuleEntity>();
