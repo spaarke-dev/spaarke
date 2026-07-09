@@ -525,13 +525,20 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   const highPriorityItems = renderData?.highPriorityItems ?? [];
 
   // Deterministic KPI tiles (task 021 redesign). Every count is derived from the
-  // already-deterministic render data — no LLM, no fabrication (FR-A4 posture):
-  //   Open items = total visible bullets · Overdue = the overdue channel's count
-  //   Critical = high-priority count · New matters = the matters channel's count
+  // already-deterministic render data — no LLM, no fabrication (FR-A4 posture).
+  // These are four INDEPENDENT lenses, not a total-and-subsets hierarchy:
+  //   Updates = the activity-feed bullet count (the sections below)
+  //   Overdue / New matters = subsets of that feed (the overdue / matters channels)
+  //   Critical = the SEPARATE high-priority flagged-records section (own data source,
+  //     bypasses the narrator) — so it can legitimately exceed "Updates". It was
+  //     labelled "Open items" before (2026-07-09 operator UAT): that implied a grand
+  //     total and made "Critical > Open items" read as a contradiction. "Updates" is
+  //     the honest label; summing the two sources is deliberately avoided (records can
+  //     appear in both → double-count would violate the by-construction accuracy rule).
   const overdueCount = filteredNarratives.find(cn => /overdue/i.test(cn.category))?.bullets.length ?? 0;
   const newMattersCount = filteredNarratives.find(cn => /matter/i.test(cn.category))?.bullets.length ?? 0;
   const statTiles: StatTile[] = [
-    { label: 'Open items', value: totalVisibleBullets, tone: 'neutral' },
+    { label: 'Updates', value: totalVisibleBullets, tone: 'neutral' },
     { label: 'Overdue', value: overdueCount, tone: overdueCount > 0 ? 'danger' : 'neutral' },
     { label: 'Critical', value: highPriorityItems.length, tone: highPriorityItems.length > 0 ? 'warning' : 'neutral' },
     { label: 'New matters', value: newMattersCount, tone: 'brand' },
