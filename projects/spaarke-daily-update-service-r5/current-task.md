@@ -9,10 +9,12 @@
 
 | Field | Value |
 |---|---|
-| **Project** | spaarke-daily-update-service-r5 (26 tasks; **15 done**) |
-| **Branch** | `work/spaarke-daily-update-service-r5` — merged to master (PR #590, e5e43c97c); post-merge hardening in progress, local commits not yet pushed |
-| **Status** | Code-hardening bucket. This session: 002 ✅, 012 ✅, 036 ✅, 037 ✅. 032 BLOCKED (needs Dataverse MCP). |
-| **Next Action** | Remaining executable-now: **015** (groundedness eval-only) → **031** (jps-validate Step 7.7, `.claude/` main-session) → **016** (eval corpus, opus tier — session is Opus 4.8 so OK). BLOCKED-on-env: 032 (MCP restore), 017/024/038 (deploy + browser UAT), 022 (operator harness sign-off), 090 (wrap, deps deploys). |
+| **Project** | spaarke-daily-update-service-r5 (26 tasks; **19 done**) |
+| **Branch** | `work/spaarke-daily-update-service-r5` — merged to master once (PR #590, e5e43c97c); **6 post-merge commits local, NOT pushed**: `c3b49e46a` `3390067b3` `585d9ceab` `e76ee15ce` `634bf64a9` `78ccb9c5b` |
+| **Status** | ALL executable code/eval/data tasks DONE. This session: 002, 012 (+live MCP retirement), 036, 037, 015, 031, 032 (MCP restore), 016. Dataverse MCP confirmed authorized. |
+| **Next Action** | Only operator/live-env tasks remain: **017/024/038** (Azure deploy + browser UAT on spaarkedev1), **022** (operator harness sign-off), **021/023** (design — done via live loop, formalize at wrap), **090** (wrap, deps deploys). None doable autonomously here. Decide: push the 6 commits to origin? Re-merge to master? |
+
+### ✅ Done ledger (TASK-INDEX): 001,002,010,011,012,013,014,015,016,020,030,031,032,033,034,035,036,037,040 (19). 🔲 remaining: 017,021,022,023,024,038,090 (all need operator/live env).
 
 ### Session progress (post-merge hardening)
 - **002 ✅** (@odata.bind audit): report `notes/odata-bind-audit.md`; 0 fixes (only provable violation is operator-deferred EventDetailSidePane), 1 deferred, 10 needs-verification (recorded not guessed — no live Dataverse metadata). Escalation: casing inconsistencies (`sprk_outputtypeid` vs `sprk_OutputTypeId`) need metadata pass → suggest /defer at 090.
