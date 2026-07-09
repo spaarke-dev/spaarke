@@ -12,8 +12,23 @@
 |-------|-------|
 | **Task** | W0 ✅ + W1 ✅. **Merged master 2026-07-08 → A0 contract seams now in worktree** (04f90caea, pushed). Build+63 tests green post-merge. |
 | **Step** | — |
-| **Status** | 13 tasks done. **Phase 0 ✅ + Phase 2 LLM services ✅ COMPLETE** (020-025). Merged to master through 8652d535a. |
-| **Next Action** | **016** (FR-04 draft-into-editor) — A0-unblocked keystone; consumes `PublicContracts/ComposeDisposition.cs` (opus-tier, client editor + BFF). Other startable-now: W1b UI (030/031/032), entry paths (010-013/015), Word (050/051/053/054), memory (060/061/062). Catalog 040-044/045/047 still blocked on **core task 020**; 071→037; 063→057; 064→038. See SEAM-STATUS.md. |
+| **Status** | 13 tasks done + master current (c5cfe04bc). **016/030/032 IMPLEMENTED but FRONTEND INTEGRATION PENDING** (BFF half of 016 committed + verified). |
+| **Next Action** | **Frontend integration pass** for 016/030/032, THEN dispatch 031. See "Integration WIP" below. |
+
+### ⚠️ Integration WIP — uncommitted frontend changes on disk (016/030/032)
+BFF half of 016 (`ComposeDraftDisposition.cs` + tests) is COMMITTED + verified (10 tests green). The following are **written to the working tree but UNCOMMITTED + not yet typechecked** (no `node_modules` installed):
+- 016: `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx`
+- 030: `.../widgets/ComposeEditor.tsx` (toolbar mount ~654-666), `.../widgets/ComposeAiToolbar.tsx` (+test), `index.ts`, `package.json` (added `@spaarke/ui-components`)
+- 032: `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`, `.../useSerialActionQueue.ts` (+test)
+
+**Integration steps required (in order):**
+1. `npm install --legacy-peer-deps --no-audit --no-fund` (Compose.Components needs it; 030 added a dep). Root has no node_modules.
+2. Wire 016's 3 hooks: (a) BFF `GET /api/ai/chat/sessions/{id}/compose-outputs` read endpoint (reserved to main session; reuse `ComposeDraftDisposition.ResolveCurrent`); (b) `materializeComposeDraft(draft,{ledgerRef,bindingId,turn})` on `ComposeEditorHandle` in ComposeEditor.tsx (~L220/537); (c) dispatcher→Flow-5 `ledgerRef` bridge + add additive `ledgerRef?` to `ComposeAssistantToWorkspaceFlow` in `compose-contracts.ts`.
+3. **DESIGN DECISION — toolbar→queue seam (FR-18)**: 030's toolbar dispatches directly; 032's serial queue is separate. To serialize toolbar actions, thread a host-provided `enqueueComposeAction` (backed by 032's queue) from the SpaarkeAi host → ComposeWorkspace → ComposeEditor → toolbar, so the toolbar routes through the queue (its own `dispatchConsumer` becomes the standalone fallback). RECOMMENDED default.
+4. `npm run typecheck` in Compose.Components + SpaarkeAi; fix errors.
+5. jest config for `Spaarke.Compose.Components` (first test file — 030's + others can't run without it) OR defer `.tsx` test execution with a note.
+6. Commit the frontend wave; THEN dispatch **031** (custom marks — edits ComposeEditor.tsx, serialized after 030).
+Core follow-up: full server routing (`BindingDisposition.Compose` + `OutputRouter` case) is core task 010, not yet present.
 
 ### Files Modified This Session
 - `notes/spikes/spike-0-dispatch-path.md` - Created - Spike 0 (dispatch seam confirmed; `compose_action_request` correction)
