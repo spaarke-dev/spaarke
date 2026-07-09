@@ -12,8 +12,8 @@
 |-------|-------|
 | **Task** | W0 ✅ + W1 ✅ + **016/030/032 FRONTEND INTEGRATION ✅** (2026-07-08). A0 seams in worktree. |
 | **Step** | — |
-| **Status** | 13 tasks done + integration wave committed. **016/030/032 IMPLEMENTED + INTEGRATED + verified.** All 3 of 016's hooks landed; FR-18 near-side threaded; jest enabled for Compose.Components. |
-| **Next Action** | Dispatch **031** (custom ProseMirror marks — edits ComposeEditor.tsx, upgrades `materializeComposeDraft` to positioned pending-redline). Then consider `/merge-to-master`. |
+| **Status** | 13 tasks done + integration wave **MERGED TO MASTER** (2026-07-09, master @ `978333245`; merged origin/master DailyBriefing fix #584 en route). **016/030/032 IMPLEMENTED + INTEGRATED + verified.** All 3 of 016's hooks landed; FR-18 near-side threaded; jest enabled for Compose.Components. |
+| **Next Action** | Dispatch **031** (custom ProseMirror marks — edits ComposeEditor.tsx, upgrades `materializeComposeDraft` to positioned pending-redline). |
 
 ### ✅ Integration wave complete (016/030/032) — 2026-07-08
 Committed the frontend+BFF integration wave. Verification:
