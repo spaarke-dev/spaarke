@@ -24,7 +24,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 010 | FR-01 wire 1a "Browse / open file" → transient mount | 1 Entry | 🟢 | 000 | ✅ | FULL | sonnet | high |
 | 011 | FR-02 wire 1a "Search for Document" → reuse 1c load path | 1 Entry | 🟢 | none | ✅ | FULL | sonnet | high |
 | 012 | FR-03 1b upload → transient mount (flip send_workspace_artifact + feed bytes) | 1 Entry | 🟢 | none | ✅ | FULL | opus | high |
-| 013 | FR-05 create-on-save pipeline — extend PromoteIfEphemeralAsync (container/profile/indexing) | 1 Entry | 🟢 | none | 🛑 | FULL | opus | xhigh |
+| 013 | FR-05 create-on-save pipeline — extend PromoteIfEphemeralAsync (container/record/index; profile→core) | 1 Entry | 🟢 | none | ✅ | FULL | opus | xhigh |
 | 014 | FR-05 optional parent-association prompt (Tier 2c dialog integration) | 1 Entry | 🟡 | 013 | 🔲 | FULL | sonnet | high |
 | 015 | FR-06a upload fidelity branch (original-if-unedited) | 1 Entry | 🟢 | 013 | 🔲 | FULL | sonnet | high |
 | 016 | FR-04 draft-into-editor via compose disposition | 1 Entry | 🟢 | 000 | 🔲 | FULL | opus | high |
@@ -35,7 +35,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 023 | FR-22 SemanticAppendixGenerator + CriticMarkup read direction | 2 LLM | 🟢 | 004 | ✅ | FULL | sonnet | high |
 | 024 | FR-23 enriched compose-selection/compose-document scope descriptions | 2 LLM | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 025 | Unit tests for Services/Compose LLM services (NFR-05/08 + NetArchTest) | 2 LLM | 🟢 | 020,021,022,023 | ✅ | STANDARD | sonnet | high |
-| 030 | FR-14 TipTap BubbleMenu inline AI toolbar (Explain/Compare/Draft/More) | 3 Inline | 🟢 | none | 🔲 | FULL | sonnet | high |
+| 030 | FR-14 TipTap BubbleMenu inline AI toolbar (Explain/Compare/Draft/More) | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
 | 031 | FR-15 custom ProseMirror marks (insertion/deletion/commentAnchor) | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
 | 032 | FR-18 serial action queueing in ConversationPane | 3 Inline | 🟢 | none | 🔲 | FULL | sonnet | high |
 | 033 | FR-16 pending track-change materialization from ledger (compose disposition) | 3 Inline | 🟢 | 031,016 | ✅ | FULL | opus | high |
