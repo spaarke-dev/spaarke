@@ -2,8 +2,8 @@
   <metadata>
     <title>FR-16 pending track-change materialization from ledger (compose disposition)</title>
     <phase>3 Inline Editing UX</phase>
-    <gate>red</gate>
-    <status>blocked</status>
+    <gate>green</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>opus</model-tier>
     <effort>high</effort>
@@ -120,6 +120,33 @@
   <escalation>
     <trigger>Consumes core Phase A0 ComposeDisposition v1 per HANDOFF §1 (ledger materialization + SSE frame carrying ledger_ref + disposition). If the published contract differs from HANDOFF §1 in payload shape, provenance addressing (`{bindingId}@t{n}`), or the storage-precedes-rendering SSE-frame semantics, STOP and reconcile before implementing — do NOT build against a guessed shape.</trigger>
   </escalation>
+
+  <notes completed="2026-07-09" by="task-execute (main session, opus)">
+    Implemented FR-16 pending-redline materialization. NEW `widgets/hooks/usePendingRedline.ts`
+    (materialize from stored ledger draft → FR-15 insertion/deletion marks tagged {bindingId}@t{n};
+    strict/first/all target resolution + ambiguity/not-found "do-not-guess"; ledger-keyed
+    accept/reject; supersession + idempotency). ComposeEditor.tsx: `materializeComposeDraft` (016
+    seam, sole caller ComposeWorkspace:589) repointed to the redline path + NEW
+    `materializePendingRedline` on the handle + accept/reject affordances + unresolved-target banner
+    (semantic tokens, dark-mode). Barrel exports added.
+
+    Verification: compose-components jest 36/36 (16 new incl. full ComposeEditor dark-theme UI render
+    via BubbleMenu passthrough mock + virtual @spaarke/ai-widgets/events mock); `npm run build` (tsc)
+    0 errors; typecheck clean; BFF build 0/0 (wave co-tenant 061). ESLint N/A (no eslint.config in
+    package). All 5 acceptance criteria met.
+
+    Directional-mode deviations (grounded in shipped code, not the POML's stale refs):
+    (1) contracts file is src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts,
+    NOT src/solutions/SpaarkeAi/...; (2) the POML's `compose_edit_apply_request` PaneEventBus event
+    does NOT exist (spike-0 correction; ComposeEditor JSDoc bans adding it) — real seam is the shipped
+    Flow 5 `compose_assistant_insert` + additive `ledgerRef`, already wired in ComposeWorkspace's
+    render-follows-store path (task 016), left UNTOUCHED; (3) no client FR-19 validator ships (task 020
+    is BFF-side) → strict/first/all + ambiguity implemented locally in the hook (adeu match_mode; fuzzy
+    matching remains Phase-2 deferred per Spike 2). Escalation trigger NOT fired: the published
+    ComposeDisposition v1 shape (payload {target_text,new_text,match_mode,rationale,sources}, provenance
+    {bindingId}@t{n}, store-before-render) matched HANDOFF §1. FR-17 undo/replace LEDGER-WRITE supersession
+    is task 034 (this hook is its foundation; accept/reject here are FR-16 doc-state ops).
+  </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

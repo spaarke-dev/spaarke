@@ -2,7 +2,7 @@
   <metadata>
     <title>FR-12 eval cases per row (golden + dispatch ≥5) + schema validation</title>
     <phase>4 Catalog</phase>
-    <status>blocked</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <dependencies>040, 041, 042, 043, 044</dependencies>
     <blocks>047</blocks>
@@ -96,4 +96,29 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-09. Added 50 cases (GU-068..GU-117) to golden-utterances.json: 10 families
+    (5 rows × golden + dispatch), 5 cases each. All 5 consumer types use catalogStatus=planned
+    (plannedBy FR-07..FR-11) since none are in ConsumerTypes.All yet — matches the create-matter
+    GU-065-067 precedent (no C# code change in 040-045 scope). Added 3 new Facts to
+    GoldenUtteranceEvalSuiteTests.cs: a per-row ≥5/≥5 floor proof, the compose-draft-alternative
+    compose-disposition ledger-write assertion (grounded against the real Binding.cs
+    BindingDisposition.Compose enum + the live sprk_playbookconsumer-rows.json mirror, with a
+    non-vacuous sibling-Informational guard), and the compose-summarize-word-changes
+    return-from-Word structural assertion (channel=event; task 054 event wiring not yet built,
+    so this is pending-by-design, not a live dispatch). Added new
+    tests/integration/contract/Catalog/ComposeR2OutputSchemaContractTests.cs (15 tests) —
+    no equivalent OutputSchemaJson validator coverage existed (CatalogInputSchemaContractTests
+    only covers infra/dataverse/inputschemas/); all 5 compose OutputSchemaJson mirrors pass
+    OpenAiFunctionSchemaValidator with zero property-level boolean required. Full suite green:
+    dotnet test --filter "Category=GoldenUtteranceEval" (60/60), Contract.Catalog namespace
+    (52/52), combined Eval+Compose sweep (447/447). Step 9.5 gates (code-review + adr-check)
+    ran unconditionally per the TEST-MODIFYING override — both clean, zero violations. No
+    Mock&lt;HttpMessageHandler&gt;/DI-registration/ctor-null-check shapes introduced; no version
+    suffix in any case id/family/schemaConformance value. Live-Azure-OpenAI dispatch was NOT
+    exercised (no deployed env in this session) — coverage is the offline structure/schema/
+    grounding validation the harness runs today (same posture as every other P3/planned family
+    in this suite, e.g. create-matter GU-065-067).
+  </notes>
 </task>

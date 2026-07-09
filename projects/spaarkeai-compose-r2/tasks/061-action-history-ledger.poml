@@ -3,7 +3,7 @@
     <title>FR-31 action history via ledger queries (no duplicate structure)</title>
     <phase>6 Memory</phase>
     <gate>startable-now</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
@@ -98,4 +98,19 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-09. Added `ComposeService.GetActionHistory(ChatSession, string? bindingId)`
+    (static, pure) + the `ComposeActionHistoryEntry` query-result record to
+    `Services/Compose/ComposeService.cs` — projects `ChatSession.Outputs` (SessionOutput) correlated
+    with `ChatSession.ToolChains` (SessionToolChain, best-effort args by matching Turn) into
+    binding/args/output-ref/timestamp entries. Supersession generalizes
+    `ComposeDisposition.ResolveCurrent` (highest-Turn-per-BindingId = current) to every disposition.
+    No new stored structure, no new DI/package/endpoint. 6 new unit tests in
+    `ActionHistoryLedgerQueryTests.cs` (projection, args-correlation-null-case, supersession,
+    cross-binding isolation, bindingId filter, reflection-based anti-actionLog/derivedInsight
+    assertion) — all green; existing 80 Compose tests + 2 ADR-013 Tier-1 NetArchTest facade tests
+    still green. Grep of src/server/api confirms zero actionLog/derivedInsight declarations
+    (only this task's own doc comments, which state the structure does NOT exist).
+  </notes>
 </task>

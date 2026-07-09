@@ -549,10 +549,12 @@ export interface CreateEventPayload {
   /** Event status option set value */
   sprk_status?: number;
   /**
-   * OData binding syntax to associate the event with a project.
-   * Example: "sprk_projects(b1c2d3e4-0000-0000-0000-000000000001)"
+   * OData binding to associate the event with a project. The navigation property is the
+   * PascalCase SchemaName sprk_RegardingProject (metadata-verified, R5 task 002 — sprk_event
+   * has no "sprk_projectid" lookup; its project lookup is sprk_regardingproject).
+   * Example: "/sprk_projects(b1c2d3e4-0000-0000-0000-000000000001)"
    */
-  'sprk_projectid@odata.bind'?: string;
+  'sprk_RegardingProject@odata.bind'?: string;
 }
 
 /**
@@ -583,8 +585,8 @@ export interface UpdateEventPayload {
 export async function createEvent(projectId: string, payload: CreateEventPayload): Promise<ODataEvent> {
   const body: CreateEventPayload = {
     ...payload,
-    // Bind to the project using OData navigation property syntax
-    'sprk_projectid@odata.bind': `sprk_projects(${projectId})`,
+    // Bind to the project using the OData navigation property (PascalCase SchemaName).
+    'sprk_RegardingProject@odata.bind': `/sprk_projects(${projectId})`,
   };
 
   return createRecord<CreateEventPayload, ODataEvent>(`/api/v1/external/projects/${projectId}/events`, body);

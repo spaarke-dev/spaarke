@@ -1098,6 +1098,135 @@ public class GoldenUtteranceEvalSuiteTests
     }
 
     // -------------------------------------------------------------------------
+    // Compose R2 catalog dispatch families (task 045, FR-12/NFR-06) — golden +
+    // dispatch eval coverage for the five compose-* catalog rows authored in
+    // tasks 040-044. None of the five consumer types are in ConsumerTypes.All
+    // yet (no code change in 040-045 scope — the constant + catalogStatus
+    // flip to "existing" is deferred to a follow-on gate task, matching the
+    // create-matter GU-065-067 precedent), so every case declares
+    // catalogStatus=planned + plannedBy citing its introducing FR. The generic
+    // AssertConsumerTypeGrounding check above still grounds them (planned
+    // types must NOT already exist in ConsumerTypes.All). These facts add the
+    // per-row acceptance-criteria proof the generic checks don't cover:
+    // family-count floors (NFR-06: ≥5 golden + ≥5 dispatch per row) and the
+    // two row-specific behavioral assertions the task calls out by name.
+    // -------------------------------------------------------------------------
+
+    private static readonly string[] ComposeR2ConsumerTypes =
+    {
+        "compose-explain-clause",
+        "compose-compare-to-playbook",
+        "compose-draft-alternative",
+        "compose-summarize-word-changes",
+        "compose-defined-terms",
+    };
+
+    [Fact]
+    public void ComposeR2CatalogRows_EachHaveGoldenAndDispatchFamilies_WithAtLeastFiveCasesEach()
+    {
+        var suite = LoadSuite();
+
+        foreach (var consumerType in ComposeR2ConsumerTypes)
+        {
+            var golden = suite.Cases
+                .Where(c => string.Equals(c.Family, consumerType, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var dispatch = suite.Cases
+                .Where(c => string.Equals(c.Family, consumerType + "-dispatch", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            golden.Should().HaveCountGreaterOrEqualTo(5,
+                $"{consumerType}: FR-12/NFR-06 requires a golden-utterance family with at least 5 cases");
+            dispatch.Should().HaveCountGreaterOrEqualTo(5,
+                $"{consumerType}: FR-12/NFR-06 requires a dispatch family (Click-path seam) with at least 5 cases");
+
+            foreach (var c in golden.Concat(dispatch))
+            {
+                c.Expected.OutcomeClass.Should().Be("dispatch",
+                    $"case {c.CaseId}: {consumerType} golden/dispatch cases assert closed-catalog dispatch, not clarify/refuse");
+                c.Expected.ConsumerType.Should().Be(consumerType,
+                    $"case {c.CaseId}: must target the {consumerType} Binding — no second intent-detection mechanism (ADR-039)");
+                c.Assertions.Should().NotBeNull(
+                    $"case {c.CaseId}: every {consumerType} case must carry a schemaConformance assertion (NFR-06)");
+                c.Assertions!.SchemaConformance.Should().Be(consumerType,
+                    $"case {c.CaseId}: schemaConformance must reference the {consumerType} OutputSchemaJson mirror " +
+                    "by its bare actionCode (NO version suffix — owner hygiene)");
+            }
+        }
+    }
+
+    [Fact]
+    public void ComposeDraftAlternativeDispatchCases_AssertComposeDispositionLedgerWrite()
+    {
+        var suite = LoadSuite();
+        var dispatchCases = suite.Cases
+            .Where(c => string.Equals(c.Family, "compose-draft-alternative-dispatch", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        dispatchCases.Should().HaveCountGreaterOrEqualTo(5,
+            "FR-09/FR-17: the compose-draft-alternative dispatch family needs at least 5 cases");
+        dispatchCases.Should().OnlyContain(c => c.Channel.Equals("click", StringComparison.OrdinalIgnoreCase),
+            "compose-draft-alternative dispatches through the Compose inline-toolbar Click-path seam");
+
+        // Ground the "asserts the compose-disposition ledger write" acceptance criterion
+        // against the REAL Binding row (not a restated fixture): the row this family
+        // targets must carry disposition=100000006 (BindingDisposition.Compose), the
+        // spaarkeai-compose-r2 routing promotion verified against Binding.cs.
+        var mirrorPath = Path.Combine(FindRepoRoot(), "infra", "dataverse", "sprk_playbookconsumer-rows.json");
+        using var mirror = JsonDocument.Parse(File.ReadAllText(mirrorPath));
+        var draftAlternativeRow = mirror.RootElement.GetProperty("rows").EnumerateArray()
+            .Single(r => r.GetProperty("consumerType").GetString() == "compose-draft-alternative"
+                         && r.GetProperty("consumerCode").GetString() == "default");
+
+        draftAlternativeRow.GetProperty("disposition").GetInt32().Should().Be((int)BindingDisposition.Compose,
+            "the compose-draft-alternative Binding row must declare the compose disposition — the structured-edit " +
+            "payload is written to the SessionOutput ledger BEFORE the Workspace materializes the pending " +
+            "track-change (ADR-040), never a client-only DOM edit");
+
+        // Non-vacuous guard: the four sibling read/informational compose rows stay
+        // Informational — proves this assertion actually discriminates, not a tautology.
+        foreach (var siblingConsumerType in ComposeR2ConsumerTypes.Where(t => t != "compose-draft-alternative"))
+        {
+            var siblingRow = mirror.RootElement.GetProperty("rows").EnumerateArray()
+                .Single(r => r.GetProperty("consumerType").GetString() == siblingConsumerType
+                             && r.GetProperty("consumerCode").GetString() == "default");
+            siblingRow.GetProperty("disposition").GetInt32().Should().Be((int)BindingDisposition.Informational,
+                $"{siblingConsumerType} is a read/informational compose capability — ONLY compose-draft-alternative " +
+                "carries the compose disposition, so the assertion above is discriminating, not vacuous");
+        }
+    }
+
+    [Fact]
+    public void ComposeSummarizeWordChangesDispatchCases_AssertReturnFromWordInvocation()
+    {
+        var suite = LoadSuite();
+        var dispatchCases = suite.Cases
+            .Where(c => string.Equals(c.Family, "compose-summarize-word-changes-dispatch", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        dispatchCases.Should().HaveCountGreaterOrEqualTo(5,
+            "FR-10: the compose-summarize-word-changes dispatch family needs at least 5 cases");
+        dispatchCases.Should().OnlyContain(c => c.Channel.Equals("event", StringComparison.OrdinalIgnoreCase),
+            "compose-summarize-word-changes is invoked by the return-from-Word flow (task 054), not a manual click — " +
+            "modeled as channel=event per the Binding row's own REVIEW FLAG");
+        dispatchCases.Should().OnlyContain(
+            c => c.Utterance.Contains("return-from-Word", StringComparison.OrdinalIgnoreCase),
+            "every dispatch case must describe the return-from-Word invocation shape it exercises");
+
+        // Ground against the REAL Binding row's toolDescription — proves the family
+        // targets the row the design.md/spec.md actually wire the return-from-Word
+        // flow to (task 054), not an invented capability.
+        var mirrorPath = Path.Combine(FindRepoRoot(), "infra", "dataverse", "sprk_playbookconsumer-rows.json");
+        using var mirror = JsonDocument.Parse(File.ReadAllText(mirrorPath));
+        var row = mirror.RootElement.GetProperty("rows").EnumerateArray()
+            .Single(r => r.GetProperty("consumerType").GetString() == "compose-summarize-word-changes"
+                         && r.GetProperty("consumerCode").GetString() == "default");
+
+        row.GetProperty("toolDescription").GetString().Should().Contain("tracked changes",
+            "the Binding's tool description grounds what the return-from-Word flow summarizes");
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 

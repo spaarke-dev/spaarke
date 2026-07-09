@@ -26,3 +26,15 @@ export const TODO_REGARDING_CATALOG: any[] = [];
 export function applyResolverFields(..._args: any[]): any {
   return {};
 }
+
+// ---------------------------------------------------------------------------
+// r5 email-share (2026-07-09): DailyBriefingApp imports extractEmailKey from
+// `@spaarke/ui-components/services`. Mirror the real implementation so tests
+// that exercise the briefing-share recipient resolution behave faithfully.
+// ---------------------------------------------------------------------------
+export function extractEmailKey(name: string): string | null {
+  const match = name.match(/\(([^)]+)\)\s*$/);
+  if (!match) return null;
+  const candidate = match[1].trim().toLowerCase();
+  return candidate.includes('@') ? candidate : null;
+}
