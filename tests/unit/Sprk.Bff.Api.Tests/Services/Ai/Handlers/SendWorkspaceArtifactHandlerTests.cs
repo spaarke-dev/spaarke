@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Workspace;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Workspace;
 using Xunit;
 
@@ -35,6 +36,11 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
     // R4-2 (2026-07-07): user-OBO Dataverse client for the Compose pre-seed
     // sprk_document → SPE pointer resolution.
     private readonly Mock<Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.IDataverseUserClient> _dataverse = new();
+    // D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): defaults to immediate
+    // Acknowledged so every pre-existing success-path test (authored before ack-gating
+    // landed) keeps passing without per-test setup. Ack-timeout behavior is exercised by
+    // its own dedicated facts below, which override this default.
+    private readonly Mock<IUiActionAckCoordinator> _ackCoordinator = new();
 
     public SendWorkspaceArtifactHandlerTests()
     {
@@ -45,6 +51,10 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
             .Setup(s => s.RetrieveMultipleAsync(
                 It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection());
+        _ackCoordinator
+            .Setup(a => a.WaitForAckAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(UiActionAckOutcome.Acknowledged);
     }
 
     /// <summary>Adds the "Compose" system layout row to the mocked Dataverse layout query.</summary>
@@ -66,6 +76,7 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
         _timeProvider,
         new WorkspaceLayoutService(_entityService.Object, CreateLogger<WorkspaceLayoutService>()),
         _dataverse.Object,
+        _ackCoordinator.Object,
         CreateLogger<SendWorkspaceArtifactHandler>());
 
     private static AnalysisTool BuildArtifactTool() =>
@@ -289,6 +300,75 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
 
         // The client owns tab persistence (PATCH /sessions/{id}/tabs); the orphaned
         // R6 workspace state store is NOT written for layout tabs.
+        _workspaceStateService.Verify(
+            s => s.UpsertTabAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<WorkspaceTab>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // D-F3 UI-action truthfulness — client-ack gating (FR-A1-08 / NFR-08 / task AIR2-037)
+    //
+    // The tool result must complete ONLY on a client ack referencing the emitted frame
+    // id (the SSE frame's tabId), or fail honestly on timeout (R2-D: no fabricated
+    // "I opened the tab" when no backing client event exists).
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task ExecuteChatAsync_WorkspaceLayout_WaitsForAck_ReferencingTheEmittedFrameId()
+    {
+        SeedComposeSystemLayout();
+        var handler = CreateHandler();
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: BuildWorkspaceArgsJson()) with
+        {
+            SseWriter = (_, _) => Task.CompletedTask
+        };
+        var tool = BuildArtifactTool();
+
+        var result = await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        // The frame id the ack MUST reference is the SAME tabId the SSE frame carried —
+        // never a different/local identifier (that would let a stale or unrelated ack
+        // falsely complete this tool result).
+        _ackCoordinator.Verify(
+            a => a.WaitForAckAsync(
+                ctx.ChatSessionId.ToString("N"),
+                DeterministicTabGuid.ToString("N"),
+                SendWorkspaceArtifactHandler.WorkspaceTabAckTimeout,
+                It.IsAny<CancellationToken>()),
+            Times.Once,
+            failMessage: "the tool result must gate on an ack referencing the exact frame id emitted on the SSE frame");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_WorkspaceLayout_AckTimesOut_FailsHonestly_NeverClaimsTabOpened()
+    {
+        SeedComposeSystemLayout();
+        _ackCoordinator
+            .Setup(a => a.WaitForAckAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(UiActionAckOutcome.TimedOut);
+
+        var handler = CreateHandler();
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: BuildWorkspaceArgsJson()) with
+        {
+            SseWriter = (_, _) => Task.CompletedTask
+        };
+        var tool = BuildArtifactTool();
+
+        var result = await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
+
+        // R2-D structural prevention: NO client ack within the timeout means the tool
+        // result MUST be an honest failure — never the success summary a fabricating
+        // model would relay as "I opened the tab".
+        result.Success.Should().BeFalse(
+            because: "FR-A1-08: an un-acked UI-affecting tool call must fail honestly, not fabricate success");
+        result.ErrorCode.Should().Be(ToolErrorCodes.Timeout);
+        result.ErrorMessage.Should().Contain("Could not confirm");
+        result.ErrorMessage.Should().NotContain("Opened the",
+            because: "the honest-failure path must never emit the success-claim wording (negative R2-D guard)");
+
+        // No workspace-state fallback write either — the tab is NOT confirmed open.
         _workspaceStateService.Verify(
             s => s.UpsertTabAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<WorkspaceTab>(), It.IsAny<CancellationToken>()),
             Times.Never);

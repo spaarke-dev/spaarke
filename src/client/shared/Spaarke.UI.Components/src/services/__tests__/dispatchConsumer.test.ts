@@ -111,6 +111,10 @@ function makeDispatcher(
     getSessionId: () => sessionId,
     getAccessToken: async () => 'test-token',
     publishPaneEvent: publish,
+    // Ordering-focused tests below don't care about pacing (task 039) — 0 reveals
+    // all sections back-to-back so assertions stay fast and deterministic. Pacing
+    // itself is covered by the dedicated describe block further down.
+    sectionRevealDelayMs: 0,
   });
 }
 
@@ -576,5 +580,80 @@ describe('dispatchConsumer result + chips capture (G-P1 Defect 1)', () => {
 
     expect(result.status).toBe('complete');
     expect(result.chips).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Progressive section reveal pacing (task 039 / D-F5, FR-A1-10)
+//
+// D-F5 wants long dispatched outputs to render progressively (≥2 visible
+// steps) rather than as one terminal blob, WITHOUT weakening ADR-040
+// store-before-render. `chunk.result` here is the terminal, already-STORED
+// payload the BFF only emits after IOutputRouter.RouteAsync's ledger write
+// (asserted server-side by ProgressiveRenderGuard.EnsureStored) — these
+// tests prove the client reveals it in real, perceptible steps rather than
+// one synchronous batch, using genuine (short) delays rather than fake
+// timers to avoid coupling to Jest's timer-mock internals.
+// ---------------------------------------------------------------------------
+
+describe('dispatchConsumer progressive section reveal pacing (task 039 / D-F5)', () => {
+  it('reveals sections with a real pacing gap — the second section is NOT visible before the delay elapses', async () => {
+    const { publish, events } = makePublishSpy();
+    const dispatchConsumer = createConsumerDispatcher({
+      bffBaseUrl: BFF_BASE,
+      getSessionId: () => SESSION_ID,
+      getAccessToken: async () => 'test-token',
+      publishPaneEvent: publish,
+      sectionRevealDelayMs: 150,
+    });
+    mockFetch.mockResolvedValueOnce(
+      sseResponse([JSON.stringify({ type: 'complete', done: true, result: { tldr: 'A', keywords: ['x'] } })])
+    );
+
+    const dispatchPromise = dispatchConsumer(BINDING_ID, { streamId: 'pace-1' });
+
+    // Well before the 150ms inter-section gap: only the FIRST section's pair
+    // (plus streaming_started) should have been published.
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(events.map(e => e.event.type)).toEqual(['streaming_started', 'section_started', 'section_completed']);
+
+    const result = await dispatchPromise;
+
+    // After the reveal (and its trailing streaming_complete) finishes, both
+    // sections are present, in order, and the dispatch has resolved.
+    expect(events.map(e => e.event.type)).toEqual([
+      'streaming_started',
+      'section_started',
+      'section_completed',
+      'section_started',
+      'section_completed',
+      'streaming_complete',
+    ]);
+    expect(result.status).toBe('complete');
+  });
+
+  it('never reveals a section for a non-"complete" chunk — pacing cannot introduce a render-ahead-of-store event', async () => {
+    const { publish, events } = makePublishSpy();
+    const dispatchConsumer = createConsumerDispatcher({
+      bffBaseUrl: BFF_BASE,
+      getSessionId: () => SESSION_ID,
+      getAccessToken: async () => 'test-token',
+      publishPaneEvent: publish,
+      sectionRevealDelayMs: 0,
+    });
+    // A malformed/adversarial "text" chunk carrying a result-shaped payload —
+    // section reveal must only ever be driven by a "complete" chunk (the ONE
+    // chunk type the BFF emits after the ADR-040 ledger write).
+    mockFetch.mockResolvedValueOnce(
+      sseResponse([
+        JSON.stringify({ type: 'text', content: 'not a completion', result: { tldr: 'should never render' } }),
+        '{"type":"complete","done":true}',
+      ])
+    );
+
+    await dispatchConsumer(BINDING_ID, { streamId: 'pace-2' });
+
+    expect(events.map(e => e.event.type)).toEqual(['streaming_started', 'streaming_complete']);
+    expect(events.some(e => e.event.type === 'section_started' || e.event.type === 'section_completed')).toBe(false);
   });
 });

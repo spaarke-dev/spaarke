@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -16,6 +17,10 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///   2. AddScoped&lt;AiLatencyTracker&gt;                  — AIPU2-066: per-request latency stopwatch
 ///   3. AddSingleton&lt;OrchestratorPromptBuilder&gt; (and as IOrchestratorPromptBuilder)
 ///      — chat-routing-redesign-r1 task 141 / FR-22: orchestrator-side prompt builder.
+///   4. AddSingleton&lt;IUiActionAckCoordinator&gt; — D-F3 UI-action truthfulness (FR-A1-08 /
+///      task AIR2-037): client-ack coordination for UI-affecting tool results. Singleton so a
+///      pending wait registered by the tool-call's scoped request survives to be resolved by
+///      the ack endpoint's LATER, separate scoped request.
 ///
 /// (The AIPU2-008 provider-agnostic agent boundary registration was removed by
 /// spaarke-ai-architecture-redesign-r1 Track-B batch 1 — the implementation was
@@ -70,6 +75,14 @@ public static class AiChatModule
         // (the top-N candidate selector, the hybrid LLM reranker, and the options SSE builder)
         // were DELETED with the dispatcher stack — the agent-turn loop is the ONE dispatch
         // protocol (ADR-039); nothing emits or consumes their SSE projection anymore.
+
+        // D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): the ONE ack-gating
+        // mechanism for UI-affecting tool results (SendWorkspaceArtifactHandler today;
+        // any future UI-claiming tool reuses this SAME coordinator — no second ack
+        // mechanism per CLAUDE.md §11). Singleton: an in-process ConcurrentDictionary of
+        // pending waits keyed by (sessionId, frameId); see UiActionAckCoordinator remarks
+        // for why in-process (not Redis/Cosmos) is the right scope for a sub-10s wait.
+        services.AddSingleton<IUiActionAckCoordinator, UiActionAckCoordinator>();
 
         return services;
     }

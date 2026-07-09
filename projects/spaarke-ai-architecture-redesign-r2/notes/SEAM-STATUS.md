@@ -6,7 +6,7 @@
 
 ## Overall status
 
-🟡 **IN PROGRESS (2026-07-08)** — **all 6 A0 contract shapes green on the branch** (010 ComposeDisposition, 011 OutcomeCard, 012 GateDecision v2, 013 TraceEvent, 014 JobAwareCompletionState, 016 MemoryItem; +015 ContextEnvelope foundational). Remaining for full seam publication: **020** triple-twin hoist, **037** UI-ack, and the engine/impl halves (**032** gate engine, **038** trace view, **057** memory.write). Header flips to ✅ **ALL SEAMS PUBLISHED — Compose UNBLOCKED** when task **017** completes (after 020/037 land). *Compose can bind to all 6 green contract shapes now (frozen); full publication = merge to master.*
+🟡 **IN PROGRESS (2026-07-09)** — **all 6 A0 contract shapes green** + **020 hoist ✅, 037 UI-ack ✅, 032 gate engine ✅** (Wave J parallel batch merged 2026-07-09). Remaining for full seam publication: the impl halves **038** (trace view) + **057** (memory.write), then the **017** milestone. Header flips to ✅ **ALL SEAMS PUBLISHED — Compose UNBLOCKED** when task **017** completes (after 038/057 land). *Compose can bind to all 6 green contract shapes + the live GateDecision v2 engine (association picker) + UI-ack coordinator now; full publication = merge to master.*
 
 ## Protocol
 
@@ -22,11 +22,11 @@
 | `ComposeDisposition v1` (+ SSE frame, provenance, **supersession**) | **010** | FR-04 (draft-into-editor), FR-16 (pending redline), FR-17 (undo/replace) | ✅ **contract green** (7/7 tests) | branch (merge pending) 2026-07-08 |
 | `JobAwareCompletionState v1` (**consumer-declared ordered steps**) | **014** | FR-05 (create-on-save card), FR-28 (push/save completion) | ✅ **contract green** (22/22 tests) | branch (merge pending) 2026-07-08 |
 | `OutcomeCard v1` (hosts job state + next-step chips) | **011** | FR-05, FR-28 | ✅ **contract green** (10/10 tests) | branch (merge pending) 2026-07-08 |
-| `GateDecision v2` / Policy v2 Tier 2c (**hosts parent-association picker**) | **012** + **032** | FR-05 (association prompt), FR-28 (push/save confirm) | ✅ **contract green** (34/34; engine 032 pending) | branch (merge pending) 2026-07-08 |
+| `GateDecision v2` / Policy v2 Tier 2c (**hosts parent-association picker**) | **012** + **032** | FR-05 (association prompt), FR-28 (push/save confirm) | ✅ **contract + engine green** (34/34 contract; **engine 032 ✅ 2026-07-09** — ConfirmationPolicyEngine PRODUCER, 7 tiers + E-1..E-6, 138/138 gate suite; producer-side unblocked, live gate-call-site origin wiring→034/042) | branch (merge pending) 2026-07-09 |
 | `MemoryItem v1` + `memory.write` (AI-initiated, provenance-tagged) | **016** + **057** | FR-30 (persist AI-derived insights) | ✅ **contract green** (10/10; memory.write 057 pending) | branch (merge pending) 2026-07-08 |
 | `TraceEvent v1` + D-F4 view (**host-embeddable**) | **013** + **038** | FR-32 (Context-pane trace hosting) | ✅ **contract green** (7/7; view 038 pending) | branch (merge pending) 2026-07-08 |
 | Triple-twin description hoist (single authored source) | **020** | FR-12 (catalog-row authoring quality) | ✅ **published** (Model 1; parity test + health-check) | branch (merge pending) 2026-07-08 |
-| D-F3 UI-ack contract (ack tokens over correlationId) | **037** | FR-34 (UI ack) | 🔲 pending | — |
+| D-F3 UI-ack contract (ack tokens over correlationId) | **037** | FR-34 (UI ack) | ✅ **published** (IUiActionAckCoordinator PublicContracts facade; frameId ack after tab materializes; honest 8s Timeout; 12/12 tests) | branch (merge pending) 2026-07-09 |
 
 ## Notes on negotiated deltas (folded into core tasks 2026-07-08)
 

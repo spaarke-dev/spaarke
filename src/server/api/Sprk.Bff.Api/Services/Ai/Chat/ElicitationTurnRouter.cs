@@ -43,9 +43,51 @@ public static class ElicitationTurnRouter
         "restart", "start over", "cancel", "never mind", "nevermind", "forget it", "stop",
     };
 
+    /// <summary>
+    /// The closed, exact-match (case-insensitive, trimmed, trailing punctuation ignored) bare-
+    /// affirmation vocabulary. An utterance equal to one of these is a bare "go ahead" with no
+    /// content of its own — the Confirmation Policy v2 origin classifier
+    /// (<c>Services/Ai/Chat/Gate/RequestOriginClassifier.cs</c>, E-1) binds it to the immediately-
+    /// preceding model proposal instead of treating it as an independent explicit request.
+    /// Deliberately closed (ADR-039 MUST NOT: no growing heuristic) — the same discipline as
+    /// <see cref="RestartPhrases"/>.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> AffirmationPhrases = new[]
+    {
+        "go ahead", "yes", "yes please", "do it", "ok", "okay", "sure",
+        "proceed", "confirm", "go for it", "yep", "yeah", "please do",
+    };
+
     /// <summary>Hard-slash escape: the utterance is a slash command (deterministic prefix check).</summary>
     public static bool IsHardSlash(string? message)
         => !string.IsNullOrWhiteSpace(message) && message.TrimStart().StartsWith('/');
+
+    /// <summary>
+    /// Deterministic bare-affirmation check (Policy v2 note E-1): true when the utterance is
+    /// exactly one of the closed <see cref="AffirmationPhrases"/> (trimmed, trailing
+    /// <c>. ! ?</c> ignored, case-insensitive). A bare affirmation carries no request of its
+    /// own — the origin classifier binds it to the preceding single-complete proposal or
+    /// falls back to <c>inferred</c>. Anything with additional content (e.g. "yes, and also …")
+    /// is NOT a bare affirmation and does not match.
+    /// </summary>
+    public static bool ClassifyBareAffirmation(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        var normalized = message.Trim().TrimEnd('.', '!', '?').Trim();
+        foreach (var phrase in AffirmationPhrases)
+        {
+            if (string.Equals(normalized, phrase, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>Explicit-restart escape: exact match against the closed restart vocabulary.</summary>
     public static bool IsExplicitRestart(string? message)

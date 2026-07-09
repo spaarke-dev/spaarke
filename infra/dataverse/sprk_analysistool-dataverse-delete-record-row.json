@@ -52,6 +52,15 @@
     }
   },
   "sprk_configuration": {
-    "_comment": "No method-discriminator dispatch — single LLM-facing function. Reserved for per-environment defaults."
+    "_comment": "No method-discriminator dispatch — single LLM-facing function. Reserved for per-environment defaults.",
+    "_comment_riskprofile": "Confirmation Policy v2 (FR-A1-03, task 032) catalog-declared risk factors — DATA extending sprk_sideeffectclass per policy-v2-origin-classification-decision-tree.md §1. Consumed by GateRiskProfile.FromConfiguration + RiskTierResolver; NEVER a runtime model judgment. Delete is irreversible destruction of a record-of-truth row ⇒ Tier 4 (external/irreversible class — always dialog). The factor floor (!reversible && recordOfTruthImpact) independently escalates to Tier 4, so an under-declaration here fails closed.",
+    "riskProfile": {
+      "tier": "4",
+      "reversible": false,
+      "externallyVisible": false,
+      "deadlineImpact": false,
+      "confidentialityImpact": false,
+      "recordOfTruthImpact": true
+    }
   }
 }

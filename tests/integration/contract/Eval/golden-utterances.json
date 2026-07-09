@@ -751,6 +751,42 @@
       "expected": { "outcomeClass": "clarify", "consumerType": null, "consumerCode": null, "catalogStatus": null },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P2", "activatedBy": "G-P3 round-5 R5-E fix wave (directive bullet + handler hard block + row 18b3531f… HARD RULE); live-LLM proof in the round-6 UAT script" }
+    },
+    {
+      "caseId": "GU-065",
+      "family": "create-matter",
+      "ucId": "UC-B-6",
+      "channel": "text",
+      "utterance": "create a matter from this file, practice area Employment, type Litigation",
+      "notes": "§3 UC-B-6 trigger (spaarke-ai-architecture-redesign-r2 task 042, FR-A1-13 / R19): the exact utterance shape from the r1 G-P3 UAT round-5 script's R4-1 create-matter guidance check. Catalog artifacts authored (CREATE-MATTER@v1 JPS Action + input/output schema mirrors + staged Binding row — see projects/spaarke-ai-architecture-redesign-r2/notes/jps/create-matter-binding-row-pending-seed.json); live Binding/Action seeding + ConsumerTypes.CreateMatter activation deferred to the gate G-R2-A deploy step. The write leg is the EXISTING dataverse.create_record typed handler (side_effect_class=Write) under the ONE confirmation gate — the same mechanism create-task's write leg already proves end-to-end.",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "create-matter", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-A1-13" },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "gate G-R2-A deploy step (task 049) — live catalog seeding per create-matter-binding-row-pending-seed.json; flip to catalogStatus=existing once the live Binding row lands" }
+    },
+    {
+      "caseId": "GU-066",
+      "family": "create-matter",
+      "ucId": "UC-B-6",
+      "channel": "text",
+      "utterance": "open a new matter for the Acme NDA I just uploaded",
+      "notes": "§3 UC-B-6 trigger: conversational matter-intake phrasing without explicit practice-area/matter-type — the drafted proposal still names practice_area_suggestion/matter_type_suggestion as best-guess LABELS (or empty string) per CREATE-MATTER@v1's output schema; the assistant may still ask conversationally, but no JPS-level required-arg elicitation forces a clarify turn (mirrors R19's minimal, create-task-like shape).",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "create-matter", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-A1-13" },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "gate G-R2-A deploy step (task 049) — live catalog seeding per create-matter-binding-row-pending-seed.json; flip to catalogStatus=existing once the live Binding row lands" }
+    },
+    {
+      "caseId": "GU-067",
+      "family": "create-matter",
+      "ucId": "UC-B-6",
+      "channel": "click",
+      "utterance": "[Create a matter] next-step affordance after a prior AI output implies a new matter",
+      "notes": "§3 UC-B-6 trigger: offered as a next-step affordance from UC-A-1/UC-A-3/UC-A-7 (mirrors create-task's GU-029 click-path case). Chip dispatch: invoke(binding_id, args) -> SessionDispatchOrchestrator -> same executor stack as text.",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "create-matter", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-A1-13" },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "gate G-R2-A deploy step (task 049) — live catalog seeding per create-matter-binding-row-pending-seed.json; flip to catalogStatus=existing once the live Binding row lands" }
     }
   ]
 }
