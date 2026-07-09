@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Default/Constant + Concat + Template mapping engines</title>
+    <phase>1: Client Engine</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>012</dependencies>
+    <blocks>014,015</blocks>
+    <tags>frontend, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core engine logic (3 mapping types incl. a placeholder resolver); modifies .ts.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified string/literal logic building on the task-010 seams; a clear reference (the deleted engine's default-fallback semantics).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits FieldMappingService.ts, shared with tasks 012/014 — serialize.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement the remaining three mapping types in the engine: Default/Constant (sprk_mapping_type = 1) writes
+    the sprk_defaultvalue literal to the target; Concat (2) and Template (3) both resolve the sprk_expression
+    format string, substituting {sprk_field} placeholders from the parent record, into a text/memo target.
+    One placeholder resolver serves Concat and Template.
+  </prompt>
+
+  <role>SPAARKE shared-lib developer. Precise with string templating + non-fatal degradation.</role>
+
+  <goal>Default, Concat, and Template rules produce correct target values. A Concat/Template rule with expression "{sprk_matternumber} - {sprk_mattername}" yields the joined string from the parent record.</goal>
+
+  <context>
+    <background>Owner directive: build all four mapping types for real (decision 2). sprk_expression (task 001/002) holds the format string; sprk_defaultvalue holds the Default literal. Concat vs Template differ only by author intent — one resolver serves both.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Default (1): write rule.defaultValue to payload[targetField]; if defaultValue is empty, warn + skip.</constraint>
+    <constraint source="project">Concat (2) + Template (3): resolve rule.expression, replacing each {sprk_field} token with the parent record's value for that field (fetched via IDataService). Unresolved placeholder → leave a warning and omit that token (do NOT throw, do NOT leave the literal "{...}").</constraint>
+    <constraint source="project">Concat/Template targets are text/memo. If the target is a lookup, warn + skip (a format string cannot bind a lookup).</constraint>
+    <constraint source="project">Reuse the source-value fetch established in task 012; do not add a second IDataService round-trip per rule if the fields can be batched.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Implement the Default branch (literal from rule.defaultValue).</step>
+    <step order="2">Implement a resolveExpression(expression, parentValues) helper: replace {sprk_field} tokens; unresolved → warning + omit token.</step>
+    <step order="3">Wire Concat + Template branches to resolveExpression; guard non-text targets with a warning+skip.</step>
+    <step order="4">Ensure all source fields referenced by Default(n/a)/Concat/Template placeholders are included in the batched source $select.</step>
+    <step order="5">Run the shared-lib build.</step>
+    <step order="6">Update TASK-INDEX.md: mark 013 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the shared library</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Default rule writes the sprk_defaultvalue literal to the target.</criterion>
+    <criterion testable="true">A Concat/Template rule with "{sprk_matternumber} - {sprk_mattername}" resolves to the joined parent values.</criterion>
+    <criterion testable="true">An unresolved {placeholder} yields a warning and is omitted (not thrown, not left literal).</criterion>
+    <criterion testable="true">A Concat/Template rule targeting a lookup warns and skips.</criterion>
+    <criterion testable="true">Shared-lib build passes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md FR-05, FR-06, FR-07, design.md §4.1.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

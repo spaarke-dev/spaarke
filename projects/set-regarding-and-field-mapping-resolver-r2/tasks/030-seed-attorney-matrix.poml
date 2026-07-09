@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Cleanup stale UAT data + seed attorney matrix (per-pair, verified names)</title>
+    <phase>3: Configuration Seed</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>040,041</blocks>
+    <tags>dataverse, data-seed</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Config data seed with explicit constraints; no code files.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Data authoring against describe-verified schema; per-pair mapping table is explicit.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Dataverse data ops; no source-file overlap with engine/wiring tasks. Can run alongside Phase 1/2.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Clean up stale field-mapping test data, then seed the attorney/assigned-resource mapping matrix as config
+    DATA (sprk_fieldmappingprofile + sprk_fieldmappingrule Copy rules) for the Matter→Event, Matter→Invoice,
+    and Matter→Report Card pairs, mapping ONLY describe-verified source→target logical names.
+  </prompt>
+
+  <role>SPAARKE platform developer. Careful data steward — verify every field name against describe before seeding.</role>
+
+  <goal>Live, active profiles + Copy rules exist so a wizard-created Event/Invoice/Report Card inherits the seeded attorney fields; stale UAT profiles handled; orphan rule deleted.</goal>
+
+  <context>
+    <background>Two stale "SRFR-084 UAT" profiles map only description/priorityreason (not the tested attorney fields), plus one orphaned empty rule. R2 seeds the real matrix so the owner's re-test succeeds out-of-the-box (decision 6). Target field names DIVERGE per entity — must be authored per-pair against describe.</background>
+    <relevant-files>
+      <file>sprk_fieldmappingprofile (Dataverse)</file>
+      <file>sprk_fieldmappingrule (Dataverse)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Delete the orphaned empty sprk_fieldmappingrule; deactivate (or repurpose) the two stale "SRFR-084 UAT" profiles.</constraint>
+    <constraint source="project">Seed Copy rules against VERIFIED names: Event = Matter's 8 identical (sprk_assignedattorney1/2, sprk_assignedparalegal1/2, sprk_assignedlawfirm1/2, sprk_assignedtoexternal, sprk_assignedtointernal). Invoice = sprk_assignedattorney1→sprk_assignedtoattorney1, ...2, paralegal1/2→sprk_assignedtoparalegal1/2, external/internal→(confirm target), NO law-firm rules. Report Card = attorney/paralegal/external/internal same names; sprk_assignedlawfirm1→sprk_assignedtolawfirm1, sprk_assignedlawfirm2→sprk_assignedlawfirm2.</constraint>
+    <constraint source="project">Re-run describe on sprk_event/sprk_invoice/sprk_reportcard at seed time to confirm names before creating rules — never assume.</constraint>
+    <constraint source="project">Rules are mapping_type = Copy (0); set sprk_sourcefieldtype/sprk_targetfieldtype = Lookup for the lookup fields; set sprk_executionorder.</constraint>
+    <constraint source="project">Resolve the sprk_assignedto1/2 (Invoice) question: only add a mapping if a clean Matter source counterpart exists; otherwise omit and note it.</constraint>
+    <constraint source="project">No Dataverse plugin — this is data only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/set-regarding-and-field-mapping-resolver-r2/design.md</file>
+      <file>projects/set-regarding-and-field-mapping-resolver-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">describe sprk_event, sprk_invoice, sprk_reportcard; confirm the assigned-resource field names.</step>
+    <step order="2">Delete the orphaned empty sprk_fieldmappingrule; deactivate the two stale SRFR-084 UAT profiles.</step>
+    <step order="3">Create/activate a profile per Matter→(Event/Invoice/Report Card) pair (source/target recordtype refs) and its Copy rules per the verified matrix.</step>
+    <step order="4">Query back the profiles+rules to confirm they persisted correctly.</step>
+    <step order="5">Record the final seeded matrix (incl. the sprk_assignedto1/2 decision) in notes/.</step>
+    <step order="6">Update TASK-INDEX.md: mark 030 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a target's assigned-resource field name does not match the spec's recorded matrix (schema drifted again), STOP and reconcile with the owner before seeding a guessed mapping.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Dataverse Web API / MCP data operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Matter→Event/Invoice/Report Card profiles + Copy rules (spaarkedev1)</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r2/notes/ (seeded matrix record)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Orphaned empty rule deleted; stale UAT profiles deactivated/repurposed.</criterion>
+    <criterion testable="true">Active profiles + Copy rules exist for the three Matter→target pairs, with rules matching describe-verified target names.</criterion>
+    <criterion testable="true">Invoice rules include no law-firm mapping; Report Card lawfirm1 maps to sprk_assignedtolawfirm1.</criterion>
+    <criterion testable="true">Seeded matrix (+ sprk_assignedto1/2 decision) recorded in notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md FR-14, design.md §4.5. Depends on task 001 (sprk_expression exists, though Copy rules don't use it — future Concat/Template rules will).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

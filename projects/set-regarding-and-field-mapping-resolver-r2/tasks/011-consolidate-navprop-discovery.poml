@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Consolidate nav-prop discovery into a shared util</title>
+    <phase>1: Client Engine</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>012,020,021,022</blocks>
+    <tags>frontend, typescript, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Cross-cutting refactor touching the shared resolver service + multiple wizard services (.ts).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting de-duplication across 7 service files with behavior-preservation risk (high blast radius).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches PolymorphicResolverService + the 7 *Service.ts files; task 010 touches only FieldMappingService.ts / FieldMappingTypes.ts.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    The per-service private _discoverNavProps (identical copies in eventService/invoiceService/etc.) plus the
+    already-shared findNavProp/INavPropEntry in PolymorphicResolverService need to become ONE shared
+    implementation the engine and all services reuse for lookup @odata.bind binding. Behavior must be identical.
+  </prompt>
+
+  <role>SPAARKE shared-lib developer. Careful refactorer — preserve exact runtime behavior across 7 services.</role>
+
+  <goal>A single shared discoverNavProps (co-located with findNavProp in PolymorphicResolverService or a sibling util); each wizard service imports it instead of its private copy; all regarding-link + resolver behavior unchanged.</goal>
+
+  <context>
+    <background>The field-mapping engine needs nav-prop discovery to build lookup @odata.bind strings (task 012). Rather than re-implement, consolidate the duplicated _discoverNavProps so there is one implementation (spec FR-08). findNavProp/INavPropEntry already live in PolymorphicResolverService.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/invoiceService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/reportCardService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/projectService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/todoService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shared util stays context-agnostic; discovery uses the existing fetch('/api/data/v9.0/EntityDefinitions...') pattern already in the private copies.</constraint>
+    <constraint source="project">Behavior-preserving ONLY. Keep the module-level nav-prop cache semantics. Each service's test-reset helper (e.g. _resetInvoiceServiceNavPropCacheForTests) must still function or be re-pointed at the shared cache.</constraint>
+    <constraint source="project">Do NOT change any service's create-payload output in this task — only the source of the nav-prop discovery function.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add a shared discoverNavProps(entityLogicalName) (with cache) to PolymorphicResolverService (or a sibling nav-prop util), mirroring the existing private implementation exactly.</step>
+    <step order="2">Replace each service's private _discoverNavProps with an import of the shared one; re-point or remove the per-service test-reset helpers accordingly.</step>
+    <step order="3">Run the shared-lib build + existing service tests (eventService.cascade, invoiceService, workAssignmentService.cascade, etc.) — all green, behavior unchanged.</step>
+    <step order="4">Update TASK-INDEX.md: mark 011 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If two services' _discoverNavProps differ in any non-trivial way, STOP and escalate rather than silently collapsing them.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build/test the shared library</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts (or new nav-prop util)</output>
+    <output type="code">the 7 *Service.ts files (import swap)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Exactly one discoverNavProps implementation remains; the 7 services import it.</criterion>
+    <criterion testable="true">All existing service tests pass unchanged.</criterion>
+    <criterion testable="true">No service's create-payload output changed.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md FR-08, design.md §4.1a. This unblocks lookup binding in task 012.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

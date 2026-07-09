@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Add sprk_expression column to sprk_fieldmappingrule</title>
+    <phase>0: BFF Contract + Schema Extension</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002,030</blocks>
+    <tags>dataverse, solution, fields, data-seed</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema change (new column); no code files, but touches Dataverse schema + has explicit constraints.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single additive column via a documented schema procedure; no cross-cutting judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add one new nullable column, sprk_expression (NVARCHAR/Memo, 2000 chars), to the sprk_fieldmappingrule
+    Dataverse table in spaarkedev1. This column holds the Concat/Template format string. sprk_defaultvalue
+    (NVARCHAR 100) is retained unchanged for the Default/Constant literal.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse schema via Web API + PowerShell (dataverse-create-schema).</role>
+
+  <goal>sprk_expression exists on sprk_fieldmappingrule (nullable, 2000-char text), verified via describe. No existing rule is modified; sprk_defaultvalue untouched.</goal>
+
+  <context>
+    <background>Building all four mapping-type engines (design decision 2/4). Concat/Template need a roomy config field; the existing sprk_defaultvalue (100 chars) is too small and semantically wrong. This is the additive schema piece so those types are genuinely configurable and the contract never reopens.</background>
+    <relevant-files>
+      <file>sprk_fieldmappingrule (Dataverse table, spaarkedev1)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Column MUST be nullable and additive — no existing rule record is altered.</constraint>
+    <constraint source="project">Do NOT modify sprk_defaultvalue; it stays as the Default/Constant literal field.</constraint>
+    <constraint source="project">Use dataverse-create-schema (Web API + PowerShell), not a Dataverse plugin (owner constraint: no plugins ever).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/set-regarding-and-field-mapping-resolver-r2/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Describe sprk_fieldmappingrule to confirm current columns (sprk_mapping_type, sprk_defaultvalue present; sprk_expression absent).</step>
+    <step order="2">Create the sprk_expression column (Memo / NVARCHAR 2000, nullable) on sprk_fieldmappingrule via dataverse-create-schema.</step>
+    <step order="3">Publish customizations and re-describe to verify sprk_expression exists with the expected type/length.</step>
+    <step order="4">Update TASK-INDEX.md: mark 001 ✅.</step>
+    <step order="5">Record any deviation in projects/set-regarding-and-field-mapping-resolver-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_fieldmappingrule already has a differently-named expression/template column, STOP and escalate (root CLAUDE.md §6) rather than adding a duplicate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Run PowerShell / Web API schema commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">sprk_fieldmappingrule.sprk_expression (new column)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">describe(tables/sprk_fieldmappingrule) shows sprk_expression as a nullable ~2000-char text column.</criterion>
+    <criterion testable="true">sprk_defaultvalue is unchanged (still NVARCHAR 100).</criterion>
+    <criterion testable="true">No existing sprk_fieldmappingrule record was modified.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md FR-11, design.md §4.3.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Engine unit tests — all four types, lookup, same-entity, graceful degradation</title>
+    <phase>1: Client Engine</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>012,013,014</dependencies>
+    <blocks>020,021,022</blocks>
+    <tags>frontend, testing, unit-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>TEST-MODIFYING; comprehensive engine coverage.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test authoring against the finished engine with a clear coverage checklist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Consolidates tests over FieldMappingService.ts after 012-014.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author the engine's unit-test suite: Copy (scalar + lookup @odata.bind), Default, Concat, Template,
+    same-entity self-map (positive + negative-guard), and graceful degradation (no profile / missing source
+    field / unresolved placeholder / unresolvable lookup → warning, never throw, record still creatable).
+  </prompt>
+
+  <role>SPAARKE shared-lib developer. Expert in the @spaarke/ui-components jest/vitest test conventions.</role>
+
+  <goal>A passing test file covering all four mapping types + lookup binding + same-entity + every graceful-degradation path, mocking IDataService + authenticatedFetch.</goal>
+
+  <context>
+    <background>Closes the engine phase with the coverage the spec requires (FR-02..FR-09, FR-15). Consolidates any focused fixtures added during 012-014.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/__tests__/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Mock IDataService + authenticatedFetch (BFF profiles response). Do NOT hit a live BFF.</constraint>
+    <constraint source="project">Cover the CLOSED set: Copy-scalar, Copy-lookup, Default, Concat, Template, same-entity self-map, no-source===target guard, no-profile no-op, missing-source-field warning, unresolved-placeholder warning, unresolvable-lookup warning, never-throw.</constraint>
+    <constraint source="ADR-038">Follow KEEP-path test categories; no Mock&lt;HttpMessageHandler&gt;-style anti-patterns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Set up mocks: authenticatedFetch returns a profiles-with-rules payload; IDataService.retrieveRecord returns parent field values incl. a lookup with the lookuplogicalname annotation.</step>
+    <step order="2">Write one test per mapping type asserting the resulting payload.</step>
+    <step order="3">Write the same-entity positive + negative-guard tests (may reference/consolidate task 014's).</step>
+    <step order="4">Write graceful-degradation tests (each failure path → warning, no throw, other rules still applied).</step>
+    <step order="5">Run the suite green.</step>
+    <step order="6">Update TASK-INDEX.md: mark 015 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Run the shared-lib test suite</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/services/__tests__/FieldMappingService.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Tests exist and pass for Copy-scalar, Copy-lookup, Default, Concat, Template.</criterion>
+    <criterion testable="true">Same-entity self-map + no-guard tests pass.</criterion>
+    <criterion testable="true">Every graceful-degradation path is covered and asserts no throw.</criterion>
+    <criterion testable="true">npm test for the shared lib passes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md Success Criteria 2 + NFR-07.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

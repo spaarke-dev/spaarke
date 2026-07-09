@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Copy mapping engine — scalar + lookup @odata.bind</title>
+    <phase>1: Client Engine</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010,011</dependencies>
+    <blocks>013,014,015</blocks>
+    <tags>frontend, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core engine logic; the lookup-binding path is the highest-reasoning part of the project.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Complex but fully specified against a live reference binding pattern (applyResolverFields); Sonnet 5 @ xhigh fits this brownfield depth.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits FieldMappingService.ts, shared with tasks 013/014 — serialize.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement the Copy mapping type (sprk_mapping_type = 0) in the engine. Scalar targets: assign the parent's
+    source-field value to the target payload field. Lookup targets: build navProp@odata.bind = /entitySet(guid),
+    resolving the referent entity from the source record's _field_value + @Microsoft.Dynamics.CRM.lookuplogicalname
+    annotation, pluralizing to the entity set, and discovering the target nav-prop via the shared discoverNavProps.
+  </prompt>
+
+  <role>SPAARKE shared-lib developer. Expert in Dataverse OData lookup binding (@odata.bind) and the annotation model.</role>
+
+  <goal>The engine correctly applies Copy rules for both scalar and lookup fields onto the create payload. A Matter→Event Copy of sprk_assignedattorney1 (→contact) produces the correct navProp@odata.bind on the payload.</goal>
+
+  <context>
+    <background>Unlike the deleted FieldMappingHandler (which set values on an open form), the wizards build an OData create payload where a lookup MUST be written as navProp@odata.bind = /entityset(guid) — the same dance invoiceService/eventService already do for the regarding link. All 8 attorney/assigned-resource fields are lookups, so lookup binding is the primary path, not an edge case.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/invoiceService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">For a scalar source field, read the plain value and assign to payload[targetField].</constraint>
+    <constraint source="project">For a lookup source field (rule targetFieldType === "Lookup"), retrieve the source record's _field_value + its @Microsoft.Dynamics.CRM.lookuplogicalname annotation; that logical name is the referent → pluralize to its entity set; discover the target nav-prop on the target entity via the shared discoverNavProps; write payload[`${navProp}@odata.bind`] = `/${entitySet}(${cleanGuid})`.</constraint>
+    <constraint source="project">Reuse the GUID-clean + entity-set + bind pattern from invoiceService (findNavProp + `/sprk_organizations(${_cleanGuid(id)})`). Do NOT re-invent it.</constraint>
+    <constraint source="project">If the referent entity-set or target nav-prop cannot be resolved, append a warning and skip that rule (never throw).</constraint>
+    <constraint source="project">Fetch source field values via the injected IDataService; $select the lookup _value form so the annotation is available.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+    </files>
+    <patterns>
+      <pattern name="lookup @odata.bind" location="src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/invoiceService.ts">findNavProp + `/sprk_organizations(${_cleanGuid(id)})` binding — the exact pattern to mirror for lookup Copy.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">In the engine's per-rule dispatch, implement the Copy branch. Group rules by whether the source read needs annotations (lookups) vs plain scalars; fetch source fields once via IDataService with the appropriate $select.</step>
+    <step order="2">Scalar Copy: assign value to payload[targetField].</step>
+    <step order="3">Lookup Copy: read _value + lookuplogicalname annotation → entity set (pluralize) → shared discoverNavProps on the target entity → find the target nav-prop → write `${navProp}@odata.bind`.</step>
+    <step order="4">Unresolvable binding → warning + skip; record the mapped target field in fieldsMapped on success.</step>
+    <step order="5">Add a focused test fixture (or extend task 015 scope) exercising one scalar + one lookup Copy; run the shared-lib build.</step>
+    <step order="6">Update TASK-INDEX.md: mark 012 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the source lookup annotation is unavailable via IDataService (so the referent entity can't be derived), STOP and escalate rather than hard-coding an entity-set map for every possible referent.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build/test the shared library</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A scalar Copy rule assigns the source value to the target payload field.</criterion>
+    <criterion testable="true">A lookup Copy rule (e.g. sprk_assignedattorney1 → contact) writes navProp@odata.bind = /contacts(guid) on the payload.</criterion>
+    <criterion testable="true">An unresolvable lookup binding produces a warning and is skipped — no throw.</criterion>
+    <criterion testable="true">fieldsMapped lists successfully-applied target fields.</criterion>
+    <criterion testable="true">Shared-lib build passes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md FR-03, FR-04, design.md §4.1a. This is the long pole.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

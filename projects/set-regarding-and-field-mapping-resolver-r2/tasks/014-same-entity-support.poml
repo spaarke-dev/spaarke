@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Same-entity (matter→matter) support + no source===target guard</title>
+    <phase>1: Client Engine</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>015</blocks>
+    <tags>frontend, typescript, testing</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Engine correctness guarantee with a negative-test requirement; modifies .ts.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-specified correctness guarantee + a negative test.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits FieldMappingService.ts, shared with tasks 012/013.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Guarantee the engine supports same-entity mapping (e.g. matter→matter, where source === target === 'sprk_matter'):
+    no code path may short-circuit when sourceEntity equals targetEntity, and a Copy rule mapping a field to the
+    same-named field on a different record must apply (not no-op). Add a negative test proving no source===target guard exists.
+  </prompt>
+
+  <role>SPAARKE shared-lib developer. Correctness-focused.</role>
+
+  <goal>Same-entity pairs flow through the engine identically to cross-entity pairs; a self-named Copy rule applies; a test asserts the absence of any source===target guard.</goal>
+
+  <context>
+    <background>Owner requirement (decision 9): the framework must support matter→matter inheritance at creation time (not needed today, but must not be foreclosed). Storage/BFF/engine are already pair-agnostic; the risk is an accidental guard or a "same field name = no-op" optimization. Creation-time same-entity is single-hop and recursion-safe by construction.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">No `if (sourceEntity === targetEntity)` guard anywhere in the engine.</constraint>
+    <constraint source="project">A Copy rule where sourceField === targetField (e.g. sprk_practicearea → sprk_practicearea) MUST apply — source record and target record are different records, so it is a real copy, not a no-op.</constraint>
+    <constraint source="project">Do NOT implement update-time or multi-hop cascade — that is an explicit non-goal (spec §8). Creation-time single-hop only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Audit the engine (and the BFF fetch URL construction) for any source===target or sourceField===targetField short-circuit; remove/avoid.</step>
+    <step order="2">Add a unit test: matter→matter profile with a self-named Copy rule → the target payload receives the parent's value.</step>
+    <step order="3">Add a negative unit test asserting no same-entity guard (e.g. same-entity pair still triggers the BFF fetch + apply path).</step>
+    <step order="4">Run the shared-lib tests.</step>
+    <step order="5">Update TASK-INDEX.md: mark 014 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the shared library</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</output>
+    <output type="test">FieldMappingService same-entity tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A matter→matter self-named Copy rule applies the parent value to the target payload.</criterion>
+    <criterion testable="true">A test asserts no source===target guard (same-entity pairs are not short-circuited).</criterion>
+    <criterion testable="true">Shared-lib tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md FR-15, §9 item 4, design.md §10.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>

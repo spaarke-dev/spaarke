@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Field Mapping Framework architecture doc + CLAUDE.md pointer</title>
+    <phase>4: Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>015,022,030</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task; no code implementation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Synthesis of shipped behavior into an architecture doc.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits root CLAUDE.md §17 pointer table — main-session-only coordination.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Write the Field Mapping Framework architecture doc: the two Dataverse tables, the BFF contract (single
+    GET, additive rule DTO), the client engine, the four mapping types, the sprk_expression extensibility model,
+    the creation-time-vs-update-time boundary, and the same-entity support + recursion note. Add a pointer row
+    to root CLAUDE.md §17.
+  </prompt>
+
+  <role>SPAARKE architecture writer. Use the docs-architecture skill conventions.</role>
+
+  <goal>A published architecture doc under docs/architecture/ describing the shipped framework + extensibility, referenced from root CLAUDE.md §17.</goal>
+
+  <context>
+    <background>Owner requirement (decision 8): make the framework + four-type/extensibility model discoverable. Document what shipped, including how a future Concat/Template rule uses sprk_expression and why creation-time is safe for same-entity while update-time cascade is a non-goal.</background>
+    <relevant-files>
+      <file>docs/architecture/</file>
+      <file>CLAUDE.md</file>
+      <file>projects/set-regarding-and-field-mapping-resolver-r2/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Describe SHIPPED behavior (verify against the merged engine + BFF + seed), not the design's aspirations.</constraint>
+    <constraint source="project">Document the four mapping types + the sprk_expression seam + the creation-vs-update boundary + same-entity/recursion note.</constraint>
+    <constraint source="project">Add exactly one pointer row to root CLAUDE.md §17 (main-session edit).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>projects/set-regarding-and-field-mapping-resolver-r2/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Draft docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md covering tables, BFF contract, engine, four types, sprk_expression extensibility, creation-vs-update boundary, same-entity note.</step>
+    <step order="2">Add a pointer row to root CLAUDE.md §17.</step>
+    <step order="3">Update TASK-INDEX.md: mark 040 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">File edits</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</output>
+    <output type="docs">CLAUDE.md (§17 pointer row)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The architecture doc exists and covers all four mapping types + sprk_expression extensibility + creation-vs-update boundary + same-entity.</criterion>
+    <criterion testable="true">Root CLAUDE.md §17 has a pointer row to the new doc.</criterion>
+    <criterion testable="true">Doc reflects shipped behavior (matches the merged code + seed).</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md FR-17, §11, design.md §11.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before starting.</protocol>
+  </execution>
+</task>
