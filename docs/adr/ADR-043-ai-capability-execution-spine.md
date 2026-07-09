@@ -31,9 +31,18 @@ The AI capability execution spine is defined as **three execution surfaces with 
 
 **Explicitly NOT decided here**: unifying the agent-loop tool spine into the completion engine. That split is legitimate (interactive tool use ≠ linear completion) and out of scope. Only the two redundant *completion* engines converge.
 
-### 2. One input-resolution model — `ContextBinder` / `ContextEnvelope`
+### 2. One input-resolution model — `ContextBinder`, resolving TWO roles (context + operand)
 
-Every completion resolves its Action's declared inputs (`selectionText` / `documentText` / `changesText` / `fileIds` / `ledger_resolution`) into `ContextEnvelope` slices via **`ContextBinder`**. This realizes ADR-040's "reads by `ledger_resolution` reference — no capability reads surface/screen state." The two completion engines converge on this single resolver; `runtimeInput` / `## Input` (`PromptSchemaRenderer`) is the single rendering seam. **No engine reads hardcoded session state.** There is no transitional "args-only" input path — the envelope is the contract from the start (Binder slices ship incrementally, but the consumed contract is stable).
+A completion is fed two architecturally distinct things, and conflating them was part of the disease:
+
+- **Grounding context** — *who/what/where*: host record + Dataverse schema (Business), environment (Workspace), caller (User), ledger tail + memory references (Memory). Mostly **stable across turns** (the NFR-04 prompt-cache prefix). Home: **`ContextEnvelope`** (task 015, frozen).
+- **The operand** — *the thing the action operates on*: the selected clause (`selectionText`), tracked changes (`changesText`), open document (`documentText`), or a `ledger_resolution` to a prior output. **Volatile** (changes every invocation) and **per-action-typed** (follows the Action's declared `sprk_inputschema`). Home: the **`## Input` channel** (`PromptSchemaRenderer` Layer 2).
+
+**`ContextBinder` is the single resolver for both roles** (this is the "one input-resolution model"): it resolves an Action's declared inputs into (a) `ContextEnvelope` slices for grounding context, and (b) the Action's `sprk_inputschema`-typed primary input rendered to `## Input`. The operand is NOT a `ContextEnvelope` slice — putting a volatile, per-action-typed operand into the platform-standard, stable-prefix envelope would break both its stability contract and its standard shape. The envelope stays **context-only and unchanged** (no v1.1 needed).
+
+**`## Input` is a single-source producer.** It is already load-bearing (the playbook node engine renders through it; `DailyBriefingNarrator` hand-*replicates* its format by convention). All producers converge on ONE `## Input` renderer — `ActionRunner` (E-10) and the node engine (E-12) consume it, and existing hand-replicas (e.g. `DailyBriefingNarrator`) are retired onto it (E-12) so `## Input` parity is **structural, not conventional**. Its output format (indentation, key order, casing, null handling) is a **stable contract** guarded by a golden `## Input`-format assertion in `tests/integration/seam/**` from E-10 onward.
+
+This realizes ADR-040's "reads by `ledger_resolution` reference — no capability reads surface/screen state." **No engine reads hardcoded session state.** There is no transitional "args-only" straddle — context is the envelope contract and the operand is the `## Input` contract from the start.
 
 ### 3. One disposition registry — `DispositionRoutability`
 
