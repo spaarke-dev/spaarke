@@ -31,6 +31,7 @@ import {
   applyResolverFields,
   findNavProp,
   discoverNavProps,
+  cleanGuid,
   _resetNavPropCacheForTests,
 } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
@@ -221,7 +222,7 @@ export class InvoiceService {
     if (form.vendorOrgId) {
       const vendorNavProp = findNavProp(navProps, 'sprk_organization', 'vendororg');
       if (vendorNavProp) {
-        entity[`${vendorNavProp}@odata.bind`] = `/sprk_organizations(${_cleanGuid(form.vendorOrgId)})`;
+        entity[`${vendorNavProp}@odata.bind`] = `/sprk_organizations(${cleanGuid(form.vendorOrgId)})`;
       } else {
         console.warn('[InvoiceService] No nav-prop found for sprk_organization (hint: vendororg), skipping binding');
       }
@@ -240,7 +241,7 @@ export class InvoiceService {
         if (defaults.searchIndexId) {
           const aiNavProp = findNavProp(navProps, 'sprk_aisearchindex');
           if (aiNavProp) {
-            entity[`${aiNavProp}@odata.bind`] = `/sprk_aisearchindexes(${defaults.searchIndexId})`;
+            entity[`${aiNavProp}@odata.bind`] = `/sprk_aisearchindexes(${cleanGuid(defaults.searchIndexId)})`;
           }
         }
       } else {
@@ -280,7 +281,7 @@ export class InvoiceService {
       // hard-coded here — they come from the seeded profile/rules (task 030).
       const mappingResult = await applyFieldMappings({
         sourceEntity: association.entityType,
-        sourceId: _cleanGuid(association.recordId),
+        sourceId: cleanGuid(association.recordId),
         targetEntity: 'sprk_invoice',
         payload: entity,
         dataService: this._dataService,
@@ -405,15 +406,6 @@ export class InvoiceService {
       warnings,
     };
   }
-}
-
-// ---------------------------------------------------------------------------
-// Small local helpers
-// ---------------------------------------------------------------------------
-
-/** Strip braces + lowercase a GUID for @odata.bind URLs (mirrors PolymorphicResolverService). */
-function _cleanGuid(id: string): string {
-  return id.replace(/[{}]/g, '').toLowerCase();
 }
 
 /** Fallback "today" ISO date — used only if a caller passes an empty invoiceDate. */

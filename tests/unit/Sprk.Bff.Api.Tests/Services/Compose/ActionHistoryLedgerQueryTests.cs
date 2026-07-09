@@ -39,15 +39,15 @@ public class ActionHistoryLedgerQueryTests
         int turn,
         string disposition = "informational",
         DateTimeOffset? createdAt = null) => new()
-    {
-        Key = SessionLedger.BuildOutputKey(bindingId, turn),
-        BindingId = bindingId,
-        UcId = UcId,
-        Turn = turn,
-        Disposition = disposition,
-        Payload = JsonSerializer.SerializeToElement(new { note = $"turn-{turn}" }),
-        CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
-    };
+        {
+            Key = SessionLedger.BuildOutputKey(bindingId, turn),
+            BindingId = bindingId,
+            UcId = UcId,
+            Turn = turn,
+            Disposition = disposition,
+            Payload = JsonSerializer.SerializeToElement(new { note = $"turn-{turn}" }),
+            CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
+        };
 
     private static SessionToolChain BuildToolChain(int turn, params SessionToolCall[] calls) => new()
     {
@@ -66,10 +66,10 @@ public class ActionHistoryLedgerQueryTests
         CreatedAt: DateTimeOffset.UtcNow,
         LastActivity: DateTimeOffset.UtcNow,
         Messages: Array.Empty<ChatMessage>())
-    {
-        Outputs = outputs,
-        ToolChains = toolChains,
-    };
+        {
+            Outputs = outputs,
+            ToolChains = toolChains,
+        };
 
     // ── Projection: binding, args, output ref, timestamp — sourced from ToolChain + SessionOutput ──
 

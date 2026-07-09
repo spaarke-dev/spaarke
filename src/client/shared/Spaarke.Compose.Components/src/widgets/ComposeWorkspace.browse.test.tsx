@@ -78,19 +78,17 @@ const editorDocxBytes: { current: ArrayBuffer | null | undefined } = { current: 
 jest.mock('./ComposeEditor', () => {
   const ReactLib = require('react');
   return {
-    ComposeEditor: ReactLib.forwardRef(
-      (props: { docxBytes: ArrayBuffer | null }, ref: React.Ref<unknown>) => {
-        editorDocxBytes.current = props.docxBytes;
-        ReactLib.useImperativeHandle(ref, () => ({
-          serialize: async () => new ArrayBuffer(0),
-          getCounts: () => ({ characters: 0, words: 0 }),
-          isDirty: () => true,
-          materializeComposeDraft: () => undefined,
-          materializePendingRedline: () => 'applied',
-        }));
-        return <div data-testid="compose-editor-stub" />;
-      }
-    ),
+    ComposeEditor: ReactLib.forwardRef((props: { docxBytes: ArrayBuffer | null }, ref: React.Ref<unknown>) => {
+      editorDocxBytes.current = props.docxBytes;
+      ReactLib.useImperativeHandle(ref, () => ({
+        serialize: async () => new ArrayBuffer(0),
+        getCounts: () => ({ characters: 0, words: 0 }),
+        isDirty: () => true,
+        materializeComposeDraft: () => undefined,
+        materializePendingRedline: () => 'applied',
+      }));
+      return <div data-testid="compose-editor-stub" />;
+    }),
   };
 });
 

@@ -811,35 +811,32 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     browseFileInputRef.current?.click();
   }, [onBrowseRequested]);
 
-  const handleBrowseFileSelected = React.useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>): void => {
-      const file = event.target.files?.[0] ?? null;
-      // Reset the input value so re-selecting the same file still fires a change event.
-      event.target.value = '';
-      if (!file) return; // user cancelled the picker — empty state unchanged, nothing mounts
+  const handleBrowseFileSelected = React.useCallback((event: React.ChangeEvent<HTMLInputElement>): void => {
+    const file = event.target.files?.[0] ?? null;
+    // Reset the input value so re-selecting the same file still fires a change event.
+    event.target.value = '';
+    if (!file) return; // user cancelled the picker — empty state unchanged, nothing mounts
 
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result;
-        if (!(result instanceof ArrayBuffer)) return;
-        // A Browse mount has no SPE drive — clear any stale Search-resolved drive id
-        // (FR-02/task 011) so a later Save doesn't key off the WRONG drive.
-        setSearchResolvedDriveId(null);
-        dispatch({ kind: 'mountTransient', docxBytes: result, fileName: file.name });
-        // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
-        // (create-on-save, task 013) is enabled immediately.
-        setIsDirty(true);
-      };
-      reader.onerror = () => {
-        dispatch({
-          kind: 'loadFailed',
-          errorMessage: `Failed to read "${file.name}". The file may be corrupted or unreadable.`,
-        });
-      };
-      reader.readAsArrayBuffer(file);
-    },
-    []
-  );
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (!(result instanceof ArrayBuffer)) return;
+      // A Browse mount has no SPE drive — clear any stale Search-resolved drive id
+      // (FR-02/task 011) so a later Save doesn't key off the WRONG drive.
+      setSearchResolvedDriveId(null);
+      dispatch({ kind: 'mountTransient', docxBytes: result, fileName: file.name });
+      // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
+      // (create-on-save, task 013) is enabled immediately.
+      setIsDirty(true);
+    };
+    reader.onerror = () => {
+      dispatch({
+        kind: 'loadFailed',
+        errorMessage: `Failed to read "${file.name}". The file may be corrupted or unreadable.`,
+      });
+    };
+    reader.readAsArrayBuffer(file);
+  }, []);
 
   // -------------------------------------------------------------------------
   // FR-03 (task 012) — transient upload-mount

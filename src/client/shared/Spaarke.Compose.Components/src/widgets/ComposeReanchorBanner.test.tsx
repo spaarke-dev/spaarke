@@ -32,7 +32,9 @@ class ResizeObserverStub {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function annotation(overrides: Partial<ReanchoredAnnotation> & Pick<ReanchoredAnnotation, 'id' | 'band'>): ReanchoredAnnotation {
+function annotation(
+  overrides: Partial<ReanchoredAnnotation> & Pick<ReanchoredAnnotation, 'id' | 'band'>
+): ReanchoredAnnotation {
   return {
     id: overrides.id,
     type: overrides.type ?? 'comment',
@@ -59,7 +61,13 @@ function summary(overrides: Partial<ReanchorSummary> = {}): ReanchorSummary {
       annotation({ id: 'auto-1', band: 'auto', confidence: 0.96 }),
       annotation({ id: 'auto-2', band: 'auto', confidence: 0.92 }),
       annotation({ id: 'review-1', band: 'review', confidence: 0.72 }),
-      annotation({ id: 'orphan-1', band: 'orphan', confidence: 0.4, matchedParagraphIndex: -1, matchedParagraphPreview: null }),
+      annotation({
+        id: 'orphan-1',
+        band: 'orphan',
+        confidence: 0.4,
+        matchedParagraphIndex: -1,
+        matchedParagraphPreview: null,
+      }),
     ],
     ...overrides,
   };
@@ -112,7 +120,10 @@ describe('ComposeReanchorBanner — summary + review affordance', () => {
 
     rerender(
       <FluentProvider theme={webLightTheme}>
-        <ComposeReanchorBanner summary={summary({ total: 0, autoCount: 0, reviewCount: 0, orphanCount: 0 })} onReview={jest.fn()} />
+        <ComposeReanchorBanner
+          summary={summary({ total: 0, autoCount: 0, reviewCount: 0, orphanCount: 0 })}
+          onReview={jest.fn()}
+        />
       </FluentProvider>
     );
     expect(screen.queryByTestId('compose-reanchor-banner')).not.toBeInTheDocument();
@@ -196,15 +207,25 @@ describe('ComposeReanchorConflictPanel — flagged/orphaned resolution', () => {
     });
     renderWithTheme(<ComposeReanchorConflictPanel open summary={s} onResolve={jest.fn()} onClose={jest.fn()} />);
 
-    expect(within(screen.getByTestId('compose-reanchor-conflict-band-plain')).getByText('Needs review')).toBeInTheDocument();
-    expect(within(screen.getByTestId('compose-reanchor-conflict-band-ambig')).getByText('Ambiguous')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('compose-reanchor-conflict-band-plain')).getByText('Needs review')
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('compose-reanchor-conflict-band-ambig')).getByText('Ambiguous')
+    ).toBeInTheDocument();
   });
 
   it('shows the clean-state message when nothing needs resolution', () => {
     renderWithTheme(
       <ComposeReanchorConflictPanel
         open
-        summary={summary({ total: 2, autoCount: 2, reviewCount: 0, orphanCount: 0, annotations: [annotation({ id: 'a', band: 'auto' }), annotation({ id: 'b', band: 'auto' })] })}
+        summary={summary({
+          total: 2,
+          autoCount: 2,
+          reviewCount: 0,
+          orphanCount: 0,
+          annotations: [annotation({ id: 'a', band: 'auto' }), annotation({ id: 'b', band: 'auto' })],
+        })}
         onResolve={jest.fn()}
         onClose={jest.fn()}
       />
