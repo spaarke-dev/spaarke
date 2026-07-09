@@ -1,7 +1,7 @@
 <task id="AIR2-011" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Publish OutcomeCard v1 contract (walking skeleton) — formalize shipped UserSummary + server-link primitives</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>A0 — Contract-first</phase>
     <gate>G-R2-A (seam publication)</gate>
     <estimated-effort>1 day</estimated-effort>
@@ -102,4 +102,27 @@
   <escalation>
     <trigger>If formalizing the two primitives into one contract would require CHANGING the shipped `UserSummary`/`HandoffUrlBuilder` behavior (not just wrapping it), STOP — that is scope beyond an A0 walking skeleton and risks breaking live R1 rendering; surface it before altering shipped primitives.</trigger>
   </escalation>
+
+  <notes>
+    Completed 2026-07-08. OutcomeCard v1 shipped as a walking skeleton.
+    - Contract DTO: src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/OutcomeCard.cs
+      (OutcomeCard + OutcomeSummary audience split + OutcomeCardLink server-composed guard +
+      NextStepChip + OutcomeCompletion single-shot/job-aware + OutcomeStep + OutcomeCardView render).
+      Zero dependency on AI-internal types (ADR-013 facade-clean). Two invariants enforced by
+      construction in ForStoredOutcome: store-before-render (ADR-040) + server-composed link.
+    - Contract test: tests/integration/contract/Api/Ai/OutcomeCardContractTests.cs — 10 tests, all
+      green. Self-contained (construct → serialize → deserialize round-trip; no DI/WebApplicationFactory).
+      Covers shape+version, audience split, next-step chips, single-shot AND job-aware completion,
+      tolerant reader (unknown field ignored), and both NEGATIVE invariants (model-claimed link throws;
+      missing stored key throws).
+    - Contract doc: notes/outcome-card-v1-contract.md (versioning + tolerant-reader + example payload
+      + audience-split rule + Placement Justification).
+    - Escalation trigger did NOT fire — the two shipped primitives (UserSummary, HandoffUrlBuilder)
+      are WRAPPED, not changed.
+    - Deferred to main session (parallel-safety; shared files): flip SEAM-STATUS.md OutcomeCard row
+      (011) to published with commit ref; unblocks Compose r2 FR-05 + FR-28.
+    - Production wiring (thin server-side producer mapping SessionOutput.Key + HandoffUrlBuilder into
+      the guard factory) intentionally deferred to FR-A1-06/07 tasks 035/036 — the self-contained test
+      plays the producer→consumer round-trip for the skeleton.
+  </notes>
 </task>

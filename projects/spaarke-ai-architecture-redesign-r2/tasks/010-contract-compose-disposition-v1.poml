@@ -1,7 +1,7 @@
 <task id="AIR2-010" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Publish ComposeDisposition v1 contract (walking skeleton) — FIRST seam for Compose r2</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>A0 — Contract-first</phase>
     <gate>G-R2-A (seam publication)</gate>
     <estimated-effort>1 day</estimated-effort>
@@ -108,4 +108,40 @@
   <escalation>
     <trigger>If extending the disposition enum requires a second rendering path (i.e., the `compose` member cannot ride the existing disposition-rendering contract), STOP — this is an ADR-040 tension (CLAUDE.md §6.5), surface it rather than forking rendering.</trigger>
   </escalation>
+
+  <notes>
+    ComposeDisposition v1 published as a walking skeleton. Files:
+    - NEW src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ComposeDisposition.cs
+      (`compose` string constant + Version "1.0" + status vocab; `ComposeDispositionFrame` SSE
+      envelope DTO — version, disposition, ledger_ref, binding_id, turn, supersedes_ref, status,
+      created_at, JsonExtensionData tolerant-reader sink; reference producer BuildFrame /
+      consumer Materialize + ResolveCurrent — pure over an in-memory ledger, no DI).
+    - EDIT src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs — SessionOutput.Disposition
+      doc-comment vocabulary extended to include `compose` (the ADR-040 rendering-contract member),
+      pointing at the PublicContracts frame; payload-ownership boundary documented. Minimal, doc-only.
+    - NEW tests/integration/contract/Api/Ai/ComposeDispositionContractTests.cs — 7 tests, all green:
+      shape+version pin, envelope-only wire (no editor semantics leak), tolerant-reader (unknown field
+      ignored), store-before-render round-trip (positive), store-before-render NEGATIVE (throws),
+      non-compose-entry guard, supersession round-trip ({bindingId}@t{n} supersedes prior; consumer
+      re-materializes current from ledger; both entries remain addressable).
+    - NEW projects/.../notes/contract-compose-disposition-v1.md — versioning + tolerant-reader +
+      example payload + failure/partial states + production-wiring-not-in-skeleton.
+
+    Payload-ownership honored: core owns envelope (disposition member + provenance + SSE ledger-ref
+    frame + supersession keying); Compose owns the structured-edit payload (opaque inside SessionOutput).
+    Escalation trigger did NOT fire — compose rides the existing disposition-rendering contract; no
+    second rendering path.
+
+    Build: BFF 0 errors; test csproj compiles tests/integration/contract; 7/7 pass.
+    ADR-check: clean (ADR-040/039/013/038/010 compliant; BFF hygiene checklist passed).
+    Publish-size: negligible (~0 delta; zero new dependencies) — full publish skipped to avoid
+    collision with concurrent contract agents in the shared worktree.
+
+    Unblocks Compose r2 FR-04 (draft-into-editor), FR-16 (pending redline), FR-17 (undo/replace).
+
+    Deferred to MAIN SESSION (parallel-safety): flip SEAM-STATUS.md row 010 → published (with commit
+    ref); update TASK-INDEX.md / current-task.md. Production routing promotion (BindingDisposition.Compose
+    in Binding.cs + ToLedgerValue case + OutputRouter routing case) DESCRIBED in the contract doc — not
+    applied here, as it touches shared routing files owned by other agents this wave.
+  </notes>
 </task>

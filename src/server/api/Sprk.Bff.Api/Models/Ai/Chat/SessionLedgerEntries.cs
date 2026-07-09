@@ -137,8 +137,14 @@ public sealed record SessionOutput
     public required int Turn { get; init; }
 
     /// <summary>
-    /// Rendering contract: <c>informational | work_product | overlay | email | record | notification</c>.
+    /// Rendering contract: <c>informational | work_product | overlay | email | record | notification | compose</c>.
     /// The only contract between storage and rendering (ADR-040).
+    /// The <c>compose</c> member (ComposeDisposition v1 seam — spaarke-ai-architecture-redesign-r2
+    /// task 010, FR-A0-06/08) rides this SAME string field and the existing SSE/ledger surface;
+    /// it is NOT a second rendering path. Its SSE frame + supersession keying live in
+    /// <see cref="Services.Ai.PublicContracts.ComposeDispositionFrame"/> / <see cref="Services.Ai.PublicContracts.ComposeDisposition"/>.
+    /// The structured-edit payload inside <see cref="Payload"/> (target_text / new_text / match_mode / …)
+    /// is Compose-owned and opaque to the platform — the core owns the envelope only.
     /// </summary>
     public required string Disposition { get; init; }
 

@@ -1,7 +1,7 @@
 <task id="AIR2-012" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Publish GateDecision v2 contract (walking skeleton) — tier/origin/completeness gate-outcome shape</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>A0 — Contract-first</phase>
     <gate>G-R2-A (seam publication)</gate>
     <estimated-effort>1 day</estimated-effort>
@@ -99,6 +99,24 @@
     <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
     <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-05 / FR-28). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-07-08. Published GateDecision v2 as a Phase-A0 walking skeleton.
+    - Contract: src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/GateDecisionV2.cs
+      (GateDecisionV2 record + GateDecisionProjector reference producer + GateDecisionConsumer
+      reference consumer; carries tier/origin/completeness/overlays/confirmation-state/outcome,
+      schemaVersion=2 tolerant reader, TierProvenance ADR-039 guard, optional
+      GateAssociationAffordance picker).
+    - Test: tests/integration/contract/Api/Ai/GateDecisionV2ContractTests.cs (34 cases, all green;
+      KEEP-path, no Mock&lt;HttpMessageHandler&gt;, no DI-registration tests).
+    - Doc: projects/spaarke-ai-architecture-redesign-r2/notes/gatedecision-v2-contract.md.
+    Extends the EXISTING gate (projects the ADR-040 ledger status + catalog DATA); no second gate.
+    Did NOT edit shared files (SideEffectGateAIFunction/PendingPlanManager/SessionLedgerEntries/DI/
+    SEAM-STATUS) per parallel-safety rules. Production wiring into the live gate + SEAM-STATUS flip
+    are follow-ups (task 032 wires the engine; SEAM-STATUS row 25 to flip to published at merge).
+    Unblocks Compose r2 FR-05 (association prompt) + FR-28 (push/save confirm).
+    Publish-size delta: negligible — one pure-DTO source file, zero new packages / endpoints / DI.
+  </notes>
 
   <escalation>
     <trigger>If the existing gate cannot express `tier`/`origin`/`completeness` as stored catalog-derived data without adding a runtime judgment step, STOP — that is an ADR-039 tension (CLAUDE.md §6.5); surface it rather than smuggling model risk-judgment into the gate.</trigger>

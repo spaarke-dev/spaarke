@@ -1,7 +1,7 @@
 <task id="AIR2-003" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Business-slice determinism check — schema-card render must be prompt-cache stable</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>0 — Reconciliation &amp; Discovery</phase>
     <gate>none (foundation; settles NFR-04 cache-stability scope for the Business slice)</gate>
     <estimated-effort>0.5 day</estimated-effort>
@@ -94,4 +94,25 @@
   <escalation>
     <trigger>If the Business-slice render is non-deterministic AND the non-determinism is intrinsic (cannot be cheaply fixed without a broad refactor), STOP and surface the NFR-04 re-scope decision — moving Business out of the stable prefix has a prompt-cache-cost the operator should ratify, and it changes the ContextEnvelope layout task 053 will build.</trigger>
   </escalation>
+
+  <notes>
+    Verdict: CONFIRMED DETERMINISTIC — Business slice stays in the ContextEnvelope's stable
+    prefix; NFR-04 not re-scoped. Verified both anchor sites on the existing assembly path
+    (ADR-040): (1) PlaybookChatContextProvider.AppendEntityEnrichmentAsync host-identity block
+    (PlaybookChatContextProvider.cs:582) — pure function of ChatHostContext, no
+    Guid.NewGuid()/DateTime in rendered text, only GUID present is the caller-supplied host
+    record id; (2) DataverseCreateRecordHandler.Metadata write-contract description
+    (DataverseCreateRecordHandler.cs:111, the "hand-mirrored schema card" design.md §D-M2
+    names) — a compile-time string literal, byte-identical by construction. Added a
+    repeat-render pinning test with 3 negative controls (GUID-injection, timestamp-variance,
+    source-ordering) proving the byte-identity assertion actually detects non-determinism —
+    tests/integration/contract/Api/Ai/BusinessSliceDeterminismContractTests.cs (6/6 passed, no
+    Mock&lt;HttpMessageHandler&gt;, no DI-registration assertions). No production code changed
+    (verification-only); dotnet build src/server/api/Sprk.Bff.Api/ succeeded; publish-size
+    delta N/A. Full evidence: notes/business-slice-determinism.md. Flagged (not fixed, out of
+    scope): the parallel task 002 scratch fixture
+    (tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/_Scratch_PromptAssemblyMeasurement.cs) has
+    a pre-existing unrelated compile error (SessionOutput.Key does not exist) that task 002
+    should fix before its own build verification.
+  </notes>
 </task>
