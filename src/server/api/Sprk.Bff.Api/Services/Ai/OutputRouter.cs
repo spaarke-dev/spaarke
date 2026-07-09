@@ -228,6 +228,20 @@ public sealed class OutputRouter : IOutputRouter
             case BindingDisposition.Informational:
                 return new RoutedOutput { Entry = entry, Session = updated, Outcome = outcome };
 
+            // Compose (ComposeDisposition v1 seam — spaarkeai-compose-r2, production routing
+            // promotion of the task-010 contract): draft-into-editor. Pass-through like
+            // Informational — the compose SessionOutput is STORED above (store-before-render,
+            // ADR-040) carrying the Compose-owned structured-edit payload, and the client
+            // re-materializes it from the ledger (the compose-outputs read endpoint + the
+            // ComposeDisposition SSE frame's ledger_ref — ADR-039, no second dispatch path). The
+            // router stores + returns; it NEVER parses the opaque payload (Compose owns it).
+            // Returns the Completion Engine OutcomeCard (Outcome = outcome) exactly like the
+            // Informational case — the OutcomeCard rides this same disposition surface (task 035 /
+            // NFR-09 completion coverage; redesign-r2 reconciliation 2026-07-09). Omitting it would
+            // silently drop compose outputs' OutcomeCard.
+            case BindingDisposition.Compose:
+                return new RoutedOutput { Entry = entry, Session = updated, Outcome = outcome };
+
             // Email (FR-P3-04, task 043): deliver via the Communication (Email) service.
             // The capability supplies presentation IN the stored payload (`email` object:
             // to[] / subject / htmlBody — see IEmailDispositionSender remarks); the router
@@ -374,6 +388,7 @@ internal static class BindingDispositionLedgerExtensions
         BindingDisposition.Email => "email",
         BindingDisposition.Record => "record",
         BindingDisposition.Notification => "notification",
+        BindingDisposition.Compose => ComposeDisposition.DispositionValue, // "compose" (ComposeDisposition v1 seam)
         _ => throw new ArgumentOutOfRangeException(nameof(disposition), disposition,
             "Unknown BindingDisposition value — Binding contract / ledger vocabulary drift."),
     };

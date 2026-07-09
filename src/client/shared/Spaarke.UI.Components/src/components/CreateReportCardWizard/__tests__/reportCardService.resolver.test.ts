@@ -191,6 +191,23 @@ function stubFetchNavProps() {
   });
 }
 
+/**
+ * Authenticated-fetch stub for the field-mapping engine's profile fetch
+ * (task 022 wiring) — always reports "no profile configured" (404), which is
+ * the engine's graceful no-op path (`profileFound:false`, no warning). These
+ * tests exercise resolver/manifest behavior, not field-mapping application,
+ * and `ReportCardService` has no other `authenticatedFetch` consumer (no
+ * file-upload pipeline, unlike `InvoiceService`).
+ */
+function stubAuthenticatedFetch(): jest.Mock {
+  return jest.fn(async () => ({
+    ok: false,
+    status: 404,
+    statusText: 'Not Found',
+    text: async () => '',
+  })) as unknown as jest.Mock;
+}
+
 function makeForm(overrides?: Partial<ICreateReportCardFormState>): ICreateReportCardFormState {
   return { ...buildEmptyReportCardForm(), ...overrides };
 }
@@ -224,7 +241,7 @@ describe('ReportCardService.createReportCard', () => {
   describe('manifest fields', () => {
     it('writes sprk_name (trimmed), sprk_narrative, and sprk_duedate', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds);
+      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
 
       const form = makeForm({
         name: '  Q3 Compliance Review  ',
@@ -244,7 +261,7 @@ describe('ReportCardService.createReportCard', () => {
 
     it('omits sprk_narrative and sprk_duedate when not supplied', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds);
+      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
 
       await service.createReportCard(makeForm({ name: 'Minimal Report Card' }), null);
 
@@ -255,7 +272,7 @@ describe('ReportCardService.createReportCard', () => {
 
     it('NEVER sets sprk_reportcardnumber client-side (autonumber/server-side per manifest)', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds);
+      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
 
       await service.createReportCard(makeForm({ name: 'X' }), null);
 
@@ -267,7 +284,7 @@ describe('ReportCardService.createReportCard', () => {
   describe('assigned-resource lookups (8 fields, manifest §)', () => {
     it('binds all 8 assigned-resource lookups using the real (asymmetric) schema field names when supplied', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds);
+      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
 
       await service.createReportCard(
         makeForm({
@@ -298,7 +315,7 @@ describe('ReportCardService.createReportCard', () => {
 
     it('omits all 8 resource-lookup binds when none are supplied (all optional)', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds);
+      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
 
       await service.createReportCard(makeForm({ name: 'X' }), null);
 
@@ -328,7 +345,7 @@ describe('ReportCardService.createReportCard', () => {
 
     it('writes the entity-specific lookup AND all 5 resolver fields for a Matter host', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds);
+      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
 
       const result = await service.createReportCard(makeForm({ name: 'X' }), MATTER_ASSOCIATION);
 
@@ -345,7 +362,7 @@ describe('ReportCardService.createReportCard', () => {
 
     it('populates only ONE entity-specific regarding lookup (mutual exclusion) — Project NOT bound for a Matter host', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds);
+      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
 
       await service.createReportCard(makeForm({ name: 'X' }), MATTER_ASSOCIATION);
 
@@ -356,7 +373,7 @@ describe('ReportCardService.createReportCard', () => {
 
     it('writes NO resolver fields when no association is supplied', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds);
+      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
 
       const result = await service.createReportCard(makeForm({ name: 'X' }), null);
 
@@ -369,7 +386,7 @@ describe('ReportCardService.createReportCard', () => {
 
     it('graceful degradation (NFR-06): missing catalog row for Project still links + falls back on name, never throws', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds);
+      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
 
       const result = await service.createReportCard(makeForm({ name: 'X' }), {
         entityType: 'sprk_project',
@@ -390,7 +407,7 @@ describe('ReportCardService.createReportCard', () => {
     it('never throws — returns status "error" with a message when createRecord rejects', async () => {
       const ds = makeDataService();
       (ds.createRecord as jest.Mock).mockRejectedValueOnce(new Error('Dataverse unavailable'));
-      const service = new ReportCardService(ds);
+      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
 
       const result = await service.createReportCard(makeForm({ name: 'X' }), null);
 

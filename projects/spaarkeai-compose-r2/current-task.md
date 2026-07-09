@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-08
+> **Last Updated**: 2026-07-09 (by context-handoff)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,21 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | W0 ✅ + W1 ✅ + **016/030/032 FRONTEND INTEGRATION ✅** (2026-07-08). A0 seams in worktree. |
-| **Step** | — |
-| **Status** | 13 tasks done + integration wave committed. **016/030/032 IMPLEMENTED + INTEGRATED + verified.** All 3 of 016's hooks landed; FR-18 near-side threaded; jest enabled for Compose.Components. |
-| **Next Action** | Dispatch **031** (custom ProseMirror marks — edits ComposeEditor.tsx, upgrades `materializeComposeDraft` to positioned pending-redline). Then consider `/merge-to-master`. |
+| **Task** | Phase 3+4 progressing. **DONE this session**: 031 (custom marks), catalog 040/041/043/044, **compose-disposition routing promotion**. |
+| **Step** | — (between tasks) |
+| **Status** | Branch `work/spaarkeai-compose-r2` is **8 commits ahead of origin/master, NOT pushed/merged** (last merge to master was 016/030/032 @ `978333245`; everything since is branch-only). Master merged into branch 2026-07-09 (Wave J: core 032 gate engine + 037 UI-ack). BFF builds clean; 31 router/compose tests green. |
+| **Next Action** | **PUSH + MERGE to master** (8 commits: 031, catalog wave, routing promotion, gating, handoff) — Path B direct (master unprotected) per merge-to-master; verify build then `git push origin HEAD:master` + sync main repo. THEN 042 (draft-alternative, now routable) or 033 (pending-redline). |
+
+### 🔑 Newest work — compose-disposition routing promotion (2026-07-09), commit `540760eac`
+Core task 010 published the ComposeDisposition CONTRACT only + deferred the routing write; it was **unscheduled in redesign-r2**, so compose-r2 applied it: `BindingDisposition.Compose=100000006` (Binding.cs) + `ToLedgerValue`→"compose" + `OutputRouter` pass-through case (like Informational). **Unblocks 042/033/034.** Handoff for the redesign-r2 team: [`notes/HANDOFF-to-redesign-r2-compose-routing-promotion.md`](notes/HANDOFF-to-redesign-r2-compose-routing-promotion.md) (asks: confirm pass-through modeling; add sprk_disposition option-set value 100000006; don't re-implement).
+
+### Session commits (branch-only, ahead of master)
+`e345867a0` 031 marks · `d08df09e8` merge master · `a5a920f2d` gating (020 unblock) · `911a1ee9d` catalog 040/041/043/044 · (master-merge Wave J) · `540760eac` routing promotion · handoff-ref fill.
+
+### Still core-gated (not startable)
+042/033/034 NOW unblocked (routing promotion). 071 unblocked (core 037 ✅). Still blocked: 063 (core 057 memory.write), 064 (core 038 D-F4 view). 045 (eval) needs 042 first; 047 (deploy) needs 045.
+
+### ⬇️ Prior-session history below (016/030/032 integration wave — 2026-07-08)
 
 ### ✅ Integration wave complete (016/030/032) — 2026-07-08
 Committed the frontend+BFF integration wave. Verification:
@@ -60,12 +71,20 @@ startable now; core-gated tracks (⛔) wait on core R2 Phase A0.
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 040/041/043/044 (Phase 4 catalog wave) |
+| **Task File** | tasks/04{0,1,3,4}-*.poml |
+| **Title** | FR-07/08/10/11 compose Action + Binding catalog rows |
+| **Phase** | 4 Catalog |
+| **Status** | ✅ completed (2026-07-09) — 042 DEFERRED (core 010) |
+| **Rigor** | FULL · sonnet@high (session on Opus) · directional |
+
+**Phase-4 catalog wave (040/041/043/044) done — mirror-first, ADR-039.** Each capability = action-only seed (`infra/dataverse/actions/{code}.action.json`, systemPrompt home) + input mirror (`inputschemas/`) + output mirror (`outputschemas/`) + Binding row (`sprk_playbookconsumer-rows.json`). 13 files valid JSON; no banned property-level `required:true`; OptionSet codes verified vs `Binding.cs` (disposition=Informational/risk=None/captureMode=LoopElicitation = 100000000). Deploy = task 047 (`Deploy-AnalysisAction.ps1` + `Seed-PlaybookConsumers.ps1`); eval cases = task 045.
+- **SystemPrompt-home decision** (was the open review question): lives on `sprk_analysisaction.sprk_systemprompt` in an **action-only** seed file (no playbook — engine frozen); grounded in the R5 rule "sprk_systemprompt IS the JPS prompt primitive."
+- **042 (draft-alternative) DEFERRED**: its Binding declares the `compose` disposition = core task **010** (`BindingDisposition.Compose` + OutputRouter case), not landed. TASK-INDEX 042 → 🔴/⛔ (was wrongly unblocked).
+- **In-file REVIEW FLAGS** (non-blocking, for deploy/seed validation): 044 `surfaces="context"` (renders in Context pane — confirm the surface value is recognized); 043 input `changesText` upstream wiring finalizes with tasks 051/054; `ucid` left null pending a compose use-case id; span fields authored as text snippets (LLM-reliable).
+- **031 (prior) done**: 3 custom marks; jest 19/19; on branch.
+
+**Next**: 045 (eval cases ≥5 golden + ≥5 dispatch per row — FULL, modifies tests/) then 047 (deploy). 046 (dispatch wiring) also startable. 042 waits on core 010.
 
 ---
 

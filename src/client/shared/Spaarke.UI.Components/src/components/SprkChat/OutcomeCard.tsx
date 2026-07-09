@@ -230,8 +230,7 @@ export const OutcomeCard: React.FC<IOutcomeCardProps> = ({ card, onOpenLink, onN
 
   const link = card.link ?? undefined;
   const nextSteps = card.nextSteps ?? [];
-  const steps =
-    card.completion && isJobAwareMode(card.completion.mode) ? card.completion.steps ?? [] : [];
+  const steps = card.completion && isJobAwareMode(card.completion.mode) ? (card.completion.steps ?? []) : [];
 
   return (
     <div className={styles.root} data-testid="outcome-card">

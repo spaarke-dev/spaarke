@@ -76,6 +76,7 @@ This directory contains comprehensive architecture documentation covering system
 | Document | Description | Last Updated | Last Reviewed | Status |
 |----------|-------------|--------------|---------------|--------|
 | [event-to-do-architecture.md](event-to-do-architecture.md) | Event-to-do feature architecture | 2026-04-05 | 2026-04-05 | Implementation Complete |
+| [SPAARKE-FIELD-MAPPING-FRAMEWORK.md](SPAARKE-FIELD-MAPPING-FRAMEWORK.md) | Field Mapping Framework: two Dataverse tables, additive BFF contract, context-agnostic client engine, four mapping types (Copy/Default/Concat/Template), `sprk_expression` extensibility, creation-time-vs-update-time boundary, same-entity support | 2026-07-09 | 2026-07-09 | New (r2) |
 | [external-access-spa-architecture.md](external-access-spa-architecture.md) | External access SPA architecture | 2026-04-05 | 2026-04-05 | Current |
 | [finance-intelligence-architecture.md](finance-intelligence-architecture.md) | Finance intelligence feature design | 2026-04-05 | 2026-04-05 | Current |
 

@@ -22,6 +22,7 @@ import type { ICreateMatterFormState } from './formTypes';
 import type { IUploadedFile } from './wizardTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
+import type { AssociationResult } from '../AssociateToStep/types';
 import { readSseStream, parseSseEvent } from '../../hooks/useSseStream';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type {
@@ -29,6 +30,7 @@ import type {
   AuthenticatedFetchFn,
   IUserBuCascadeDefaults,
 } from '../../services/EntityCreationService';
+import { applyFieldMappings } from '../../services/FieldMappingService';
 
 // ---------------------------------------------------------------------------
 // Contact type (used by AssignCounselStep search results)
@@ -156,6 +158,9 @@ export class MatterService {
   private readonly _dataService: IDataService;
   private readonly _entityService: EntityCreationService;
   private readonly _tenantId: string;
+  /** Retained (alongside `_bffBaseUrl`) to drive the Field Mapping Framework engine call in `createMatter`. */
+  private readonly _authenticatedFetch: AuthenticatedFetchFn;
+  private readonly _bffBaseUrl: string;
 
   constructor(
     dataService: IDataService,
@@ -172,6 +177,8 @@ export class MatterService {
   ) {
     this._tenantId = tenantId ?? '';
     this._dataService = dataService;
+    this._authenticatedFetch = authenticatedFetch;
+    this._bffBaseUrl = bffBaseUrl;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     // Wrap IDataService to adapt createRecord return type.
     const webApiAdapter = {
@@ -223,13 +230,22 @@ export class MatterService {
    *   When omitted/undefined the cascade step is a no-op (legacy behavior preserved
    *   for tests that omit it). Wizard call sites pass the resolved value.
    * @param onUploadProgress Optional callback fired during SPE file uploads.
+   * @param association Optional parent record selected via the wizard's
+   *   AssociateToStep (Project/Account today; same-entity Matter parents —
+   *   matter→matter — are not precluded: no source===target guard, per
+   *   ADR-024/design.md §10 decision 9). When supplied, drives the Field
+   *   Mapping Framework engine (spec FR-12): `sourceEntity`/`sourceId` =
+   *   `association.entityType`/`recordId`, passed through unchanged. When
+   *   omitted, the engine call is skipped — a graceful no-op identical to
+   *   today's behavior.
    */
   async createMatter(
     form: ICreateMatterFormState,
     uploadedFiles: IUploadedFile[],
     followOnActions: IFollowOnActions,
     cascadeDefaults?: IUserBuCascadeDefaults,
-    onUploadProgress?: (progress: IUploadProgress) => void
+    onUploadProgress?: (progress: IUploadProgress) => void,
+    association?: AssociationResult | null
   ): Promise<ICreateMatterResult> {
     const warnings: string[] = [];
 
@@ -316,6 +332,27 @@ export class MatterService {
     for (const lk of lookups) {
       const navProp = navPropMap[lk.col] ?? lk.col;
       entity[`${navProp}@odata.bind`] = `/${lk.entitySet}(${lk.guid})`;
+    }
+
+    // Field Mapping Framework (spec FR-12, task 020): apply the configured
+    // {parent -> sprk_matter} mapping profile (if any) onto the create
+    // payload. Runs AFTER the lookup-binding block above and BEFORE
+    // createRecord, on the SAME payload object. The engine never throws and
+    // is a graceful no-op when there's no association or no profile -- no
+    // behavior change in either case. No source===target guard -- a Matter
+    // parent (matter→matter) is passed through unchanged, same as any other
+    // parent entity type (ADR-024/design.md §10 decision 9).
+    if (association?.recordId && association.entityType) {
+      const mappingResult = await applyFieldMappings({
+        sourceEntity: association.entityType,
+        sourceId: association.recordId,
+        targetEntity: 'sprk_matter',
+        payload: entity,
+        dataService: this._dataService,
+        authenticatedFetch: this._authenticatedFetch,
+        bffBaseUrl: this._bffBaseUrl,
+      });
+      warnings.push(...mappingResult.warnings);
     }
 
     try {

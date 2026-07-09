@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="set-regarding-and-field-mapping-resolver-r2">
+  <metadata>
+    <title>Extend BFF field-mapping read layer + rule DTO (additive)</title>
+    <phase>0: BFF Contract + Schema Extension</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>003,010</blocks>
+    <tags>bff-api, dataverse, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .cs files in Sprk.Bff.Api + Spaarke.Dataverse (bff-api tag).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive projection change following the existing MapRuleEntityToDto / MapToFieldMappingRuleEntity patterns; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential foundation; blocks the engine (010) which needs the DTO shape.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Make the field-mapping BFF endpoint return everything the four engines need. The server already reads
+    defaultValue/isRequired/iscascadingsource/compatibilitymode into FieldMappingRuleEntity but NOT
+    sprk_mapping_type or sprk_expression, and the FieldMappingRuleDto drops most of them. Add sprk_mapping_type
+    + sprk_expression to the Dataverse read, and surface mappingType/defaultValue/expression/isRequired/
+    compatibilityMode on the DTO. Additive only — no new endpoint, service, DI registration, or package.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs + Dataverse Web API projection. Follow ADRs strictly.</role>
+
+  <goal>GET /api/v1/field-mappings/profiles/{source}/{target} returns each rule with mappingType, defaultValue, expression, isRequired, compatibilityMode populated from Dataverse. No new BFF surface beyond DTO fields + $select additions.</goal>
+
+  <context>
+    <background>The as-built FieldMappingRuleDto exposes only SourceField/TargetField/types/Priority — it cannot express Copy vs Default vs Concat vs Template. This additively closes the contract so all four engines can be built client-side without ever reopening the BFF (design decision 3).</background>
+    <relevant-files>
+      <file>src/server/shared/Spaarke.Dataverse/Models.cs</file>
+      <file>src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/FieldMapping/FieldMappingRuleDto.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Stay within the Minimal API pattern; no controllers.</constraint>
+    <constraint source="ADR-010">No new interface/DI registration — this is a projection change only.</constraint>
+    <constraint source="project">Additive ONLY: add MappingType + Expression to FieldMappingRuleEntity; add sprk_mapping_type + sprk_expression to BOTH rule $select sites in DataverseWebApiService (GetFieldMappingRulesAsync + the $expand path); add mappingType/defaultValue/expression/isRequired/compatibilityMode to FieldMappingRuleDto + MapRuleEntityToDto. Do NOT remove or rename existing fields.</constraint>
+    <constraint source="project">sprk_mapping_type is an int choice (Copy 0 / Default 1 / Concat 2 / Template 3) — map to a string ("Copy"/"Default"/"Concat"/"Template") on the DTO, mirroring the existing MapFieldTypeToString/MapSyncModeToString style.</constraint>
+    <constraint source="project">No new NuGet package; no new endpoint; no new service.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add MappingType (int) + Expression (string?) to FieldMappingRuleEntity (Models.cs), documenting the choice values.</step>
+    <step order="2">In DataverseWebApiService, add sprk_mapping_type + sprk_expression to the rule $select in BOTH GetFieldMappingRulesAsync and the $expand rule select; read them in MapToFieldMappingRuleEntity (mirror the existing TryGetValue pattern).</step>
+    <step order="3">Add MappingType (string), DefaultValue (string?), Expression (string?), IsRequired (bool), CompatibilityMode (string) to FieldMappingRuleDto.</step>
+    <step order="4">Extend MapRuleEntityToDto to populate the new fields; add a MapMappingTypeToString helper (0→Copy,1→Default,2→Concat,3→Template) and a compatibility-mode string mapper if not already present.</step>
+    <step order="5">dotnet build src/server/api/Sprk.Bff.Api/ — confirm 0 errors.</step>
+    <step order="6">Update TASK-INDEX.md: mark 002 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If surfacing the new fields would require a new service or DI registration (i.e. the read isn't purely additive), STOP and escalate per CLAUDE.md §10 / §6.5 (BFF hot-path) rather than adding BFF surface.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build the BFF project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Dataverse/Models.cs</output>
+    <output type="code">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/FieldMapping/FieldMappingRuleDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FieldMappingRuleDto has mappingType, defaultValue, expression, isRequired, compatibilityMode; all existing fields retained.</criterion>
+    <criterion testable="true">Both rule $select sites in DataverseWebApiService include sprk_mapping_type and sprk_expression, and MapToFieldMappingRuleEntity reads both.</criterion>
+    <criterion testable="true">mappingType projects the int choice to "Copy"/"Default"/"Concat"/"Template".</criterion>
+    <criterion testable="true">No new endpoint, service, DI registration, or NuGet package was added.</criterion>
+    <criterion testable="true">dotnet build of Sprk.Bff.Api succeeds with 0 errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>Ref: spec.md FR-10, design.md §4.2. The push path also uses MapRuleEntityToDto — the additive fields must not break it (regression covered in task 003).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files + run bff-extensions.md checklist before starting.</protocol>
+  </execution>
+</task>

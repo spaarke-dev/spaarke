@@ -9,12 +9,7 @@
  *  - narration text carries identifiers/counts only (NFR-07) — no content.
  */
 
-import {
-  narrateTrace,
-  narrateTraceEvent,
-  TRACE_EVENT_KIND,
-  type TraceEventDto,
-} from '../executionTraceNarration';
+import { narrateTrace, narrateTraceEvent, TRACE_EVENT_KIND, type TraceEventDto } from '../executionTraceNarration';
 
 describe('executionTraceNarration', () => {
   const context = (turn: number, slices: number): TraceEventDto => ({
@@ -69,10 +64,7 @@ describe('executionTraceNarration', () => {
     // The agent REALLY ran only a document search. The model prose may have
     // "claimed" it also sent an email — but no send_email event exists, so it
     // must be structurally absent from the narration.
-    const realEvents: TraceEventDto[] = [
-      toolChain(1, 1, 0),
-      toolCall(1, 'sprk_document_search', 1),
-    ];
+    const realEvents: TraceEventDto[] = [toolChain(1, 1, 0), toolCall(1, 'sprk_document_search', 1)];
     const lines = narrateTrace(realEvents);
     const joined = lines.map(l => l.text).join(' | ');
     expect(joined).toContain('sprk_document_search');

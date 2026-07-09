@@ -322,17 +322,14 @@ public class DailyBriefingCollector : ICodedWorkflow
             "DailyBriefingCollector.CollectHighPriorityAsync starting for systemUserId={SystemUserId}",
             systemUserId);
 
-        // 7 parallel queries — one per flagged entity. Each returns HighPriorityItemDto[].
-        // Every query is failure-soft: on Dataverse exception, the entity contributes
-        // an empty array (logged as warning) so the digest still renders.
+        // One parallel query per flagged entity, driven off HighPriorityEntitySpecs (R5 task
+        // 036 collapsed the former 7 named wrappers into that spec array). Each query returns
+        // HighPriorityItemDto[] and is failure-soft: on Dataverse exception the entity
+        // contributes an empty array (logged as warning) so the digest still renders. Order
+        // matches HighPriorityEntitySpecs, so the per-entity counts in the completion log
+        // below stay correctly positioned.
         var queries = await Task.WhenAll(
-            QueryHighPriorityMatterAsync(ct),
-            QueryHighPriorityProjectAsync(ct),
-            QueryHighPriorityInvoiceAsync(ct),
-            QueryHighPriorityDocumentAsync(ct),
-            QueryHighPriorityWorkassignmentAsync(ct),
-            QueryHighPriorityEventAsync(ct),
-            QueryHighPriorityTodoAsync(systemUserId, ct)
+            HighPriorityEntitySpecs.Select(spec => QueryHighPriorityAsync(spec, systemUserId, ct))
         ).ConfigureAwait(false);
 
         // R5 task 034 (FR-C5) — de-dup before ordering. The 7 queries are one per
@@ -359,104 +356,78 @@ public class DailyBriefingCollector : ICodedWorkflow
         return all;
     }
 
-    private async Task<HighPriorityItemDto[]> QueryHighPriorityMatterAsync(CancellationToken ct)
-    {
-        return await QueryHighPriorityGenericAsync(
-            entityType: EntityMatter,
-            idColumn: "sprk_matterid",
-            nameColumn: "sprk_mattername",
-            descriptionColumn: "sprk_matterdescription",
-            dueDateColumn: null,
-            kindLabel: "Matter",
-            includeStateFilter: true,
-            ct: ct).ConfigureAwait(false);
-    }
+    // R5 task 036 (FR-C7) — the 7 flagged entities as data. Collapses the former 7
+    // near-identical QueryHighPriority{Matter,Project,Invoice,Document,Workassignment,
+    // Event,Todo}Async wrappers into rows over which CollectHighPriorityAsync fans out,
+    // each delegating to QueryHighPriorityGenericAsync with the SAME entity/column/filter
+    // intent the named wrapper carried. A change that once had to be made 7 times (e.g. the
+    // R7 case-sensitivity fix) is now a single spec edit. Row order matches the per-entity
+    // counts logged in CollectHighPriorityAsync.
+    private sealed record HighPriorityEntitySpec(
+        string EntityType,
+        string IdColumn,
+        string NameColumn,
+        string? DescriptionColumn,
+        string? DueDateColumn,
+        string? FallbackDueDateColumn,
+        string KindLabel,
+        bool IncludeStateFilter,
+        bool ScopeToOwner);
 
-    private async Task<HighPriorityItemDto[]> QueryHighPriorityProjectAsync(CancellationToken ct)
+    private static readonly HighPriorityEntitySpec[] HighPriorityEntitySpecs =
     {
-        return await QueryHighPriorityGenericAsync(
-            entityType: EntityProject,
-            idColumn: "sprk_projectid",
-            nameColumn: "sprk_projectname",
-            descriptionColumn: "sprk_description",
-            dueDateColumn: null,
-            kindLabel: "Project",
-            includeStateFilter: true,
-            ct: ct).ConfigureAwait(false);
-    }
-
-    private async Task<HighPriorityItemDto[]> QueryHighPriorityInvoiceAsync(CancellationToken ct)
-    {
+        new(EntityMatter, "sprk_matterid", "sprk_mattername", "sprk_matterdescription",
+            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Matter",
+            IncludeStateFilter: true, ScopeToOwner: false),
+        new(EntityProject, "sprk_projectid", "sprk_projectname", "sprk_description",
+            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Project",
+            IncludeStateFilter: true, ScopeToOwner: false),
         // Invoice has sprk_invoicedate (invoice date, NOT payment due date) — don't map to
         // DueDate. Include all flagged invoices regardless of date. Operator can refine later.
-        return await QueryHighPriorityGenericAsync(
-            entityType: "sprk_invoice",
-            idColumn: "sprk_invoiceid",
-            nameColumn: "sprk_name",
-            descriptionColumn: "sprk_description",
-            dueDateColumn: null,
-            kindLabel: "Invoice",
-            includeStateFilter: true,
-            ct: ct).ConfigureAwait(false);
-    }
-
-    private async Task<HighPriorityItemDto[]> QueryHighPriorityDocumentAsync(CancellationToken ct)
-    {
-        return await QueryHighPriorityGenericAsync(
-            entityType: EntityDocument,
-            idColumn: "sprk_documentid",
-            nameColumn: "sprk_documentname",
-            descriptionColumn: "sprk_documentdescription",
-            dueDateColumn: null,
-            kindLabel: "Document",
-            includeStateFilter: true,
-            ct: ct).ConfigureAwait(false);
-    }
-
-    private async Task<HighPriorityItemDto[]> QueryHighPriorityWorkassignmentAsync(CancellationToken ct)
-    {
-        return await QueryHighPriorityGenericAsync(
-            entityType: "sprk_workassignment",
-            idColumn: "sprk_workassignmentid",
-            nameColumn: "sprk_name",
-            descriptionColumn: "sprk_description",
-            dueDateColumn: "sprk_responseduedate",
-            kindLabel: "Work Assignment",
-            includeStateFilter: true,
-            ct: ct).ConfigureAwait(false);
-    }
-
-    private async Task<HighPriorityItemDto[]> QueryHighPriorityEventAsync(CancellationToken ct)
-    {
+        new("sprk_invoice", "sprk_invoiceid", "sprk_name", "sprk_description",
+            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Invoice",
+            IncludeStateFilter: true, ScopeToOwner: false),
+        new(EntityDocument, "sprk_documentid", "sprk_documentname", "sprk_documentdescription",
+            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Document",
+            IncludeStateFilter: true, ScopeToOwner: false),
+        new("sprk_workassignment", "sprk_workassignmentid", "sprk_name", "sprk_description",
+            DueDateColumn: "sprk_responseduedate", FallbackDueDateColumn: null,
+            KindLabel: "Work Assignment", IncludeStateFilter: true, ScopeToOwner: false),
         // Event has both sprk_duedate and sprk_finalduedate; use sprk_finalduedate first,
         // fall back to sprk_duedate. This mirrors QueryUpcomingTasksAsync's precedence.
-        return await QueryHighPriorityGenericAsync(
-            entityType: EntityEvent,
-            idColumn: "sprk_eventid",
-            nameColumn: "sprk_eventname",
-            descriptionColumn: "sprk_eventdescription",
-            dueDateColumn: "sprk_finalduedate",
-            fallbackDueDateColumn: "sprk_duedate",
-            kindLabel: "Task",
-            includeStateFilter: false,
-            ct: ct).ConfigureAwait(false);
-    }
+        new(EntityEvent, "sprk_eventid", "sprk_eventname", "sprk_eventdescription",
+            DueDateColumn: "sprk_finalduedate", FallbackDueDateColumn: "sprk_duedate",
+            KindLabel: "Task", IncludeStateFilter: false, ScopeToOwner: false),
+        // R7 W12 fix (2026-07-01): todos scoped to `owninguser = systemUserId` to match the
+        // primary Todos channel — operators shouldn't see other users' flagged todos in their
+        // own briefing. ScopeToOwner threads systemUserId into the owner filter.
+        new(EntityTodo, "sprk_todoid", "sprk_name", "sprk_description",
+            DueDateColumn: "sprk_duedate", FallbackDueDateColumn: null, KindLabel: "To Do",
+            IncludeStateFilter: true, ScopeToOwner: true),
+    };
 
-    private async Task<HighPriorityItemDto[]> QueryHighPriorityTodoAsync(Guid systemUserId, CancellationToken ct)
+    /// <summary>
+    /// Dispatch one <see cref="HighPriorityEntitySpec"/> to the shared
+    /// <see cref="QueryHighPriorityGenericAsync"/>, threading the owner filter only for specs
+    /// that opt into per-user scoping (To Do). Behavior per entity is identical to the named
+    /// wrapper this replaced (R5 task 036 / FR-C7).
+    /// </summary>
+    private Task<HighPriorityItemDto[]> QueryHighPriorityAsync(
+        HighPriorityEntitySpec spec,
+        Guid systemUserId,
+        CancellationToken ct)
     {
-        // R7 W12 fix (2026-07-01): todos scoped to `owninguser = systemUserId` to match
-        // the primary Todos channel — operators shouldn't see other users' flagged todos
-        // in their own briefing.
-        return await QueryHighPriorityGenericAsync(
-            entityType: EntityTodo,
-            idColumn: "sprk_todoid",
-            nameColumn: "sprk_name",
-            descriptionColumn: "sprk_description",
-            dueDateColumn: "sprk_duedate",
-            kindLabel: "To Do",
-            includeStateFilter: true,
-            ownerUserId: systemUserId,
-            ct: ct).ConfigureAwait(false);
+        return QueryHighPriorityGenericAsync(
+            entityType: spec.EntityType,
+            idColumn: spec.IdColumn,
+            nameColumn: spec.NameColumn,
+            dueDateColumn: spec.DueDateColumn,
+            kindLabel: spec.KindLabel,
+            includeStateFilter: spec.IncludeStateFilter,
+            ct: ct,
+            descriptionColumn: spec.DescriptionColumn,
+            fallbackDueDateColumn: spec.FallbackDueDateColumn,
+            ownerUserId: spec.ScopeToOwner ? systemUserId : null);
     }
 
     /// <summary>

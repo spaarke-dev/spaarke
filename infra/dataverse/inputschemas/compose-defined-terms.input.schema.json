@@ -1,0 +1,18 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for compose-defined-terms (spaarkeai-compose-r2 task 044, FR-11). Normalized OpenAI-function-parameters subset. Consumes the compose-document JPS scope — documentText (the full contract) is the load-bearing LLM input. Property-level \"required\": true is FORBIDDEN. No actionId (assigned at deploy, task 047). actionCode carries NO version suffix.",
+  "actionCode": "compose-defined-terms",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["documentText"],
+    "properties": {
+      "documentText": {
+        "type": "string",
+        "description": "The full contract text to scan for defined terms and usage consistency (compose-document scope).",
+        "maxLength": 200000,
+        "elicitation_prompt": "I'll scan the open document for defined terms and check they're used consistently.",
+        "ledger_resolution": "compose.documentText — the full text of the document open in the Compose editor (compose-document scope)"
+      }
+    }
+  }
+}

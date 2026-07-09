@@ -47,7 +47,12 @@ export type {
 } from './EntityCreationService';
 export * from './CommandRegistry';
 export * from './CommandExecutor';
-export { FieldMappingService } from './FieldMappingService';
+// Field-mapping engine (context-agnostic, ADR-012). `applyFieldMappings` is the
+// single public entrypoint the Create*Wizard services call (tasks 012+). The
+// former `FieldMappingService` class (PCF-WebApi-bound dead code) was replaced
+// by this injected-dependency function in set-regarding-and-field-mapping-resolver-r2 task 010.
+export { applyFieldMappings } from './FieldMappingService';
+export type { IApplyFieldMappingsArgs } from './FieldMappingService';
 export {
   EventTypeService,
   eventTypeService,
@@ -83,6 +88,10 @@ export {
   resolveRecordType,
   buildRecordUrl,
   findNavProp,
+  // Shared nav-prop discovery — consolidated 2026-07-09 (task 011, Path A).
+  // Used by the array-form wizard services + the field-mapping engine (task 012).
+  discoverNavProps,
+  _resetNavPropCacheForTests,
   applyResolverFields,
   // FR-A4-01 / FR-C1-01 additions (set-regarding-and-field-mapping-resolver-r1):
   resolveRecordNumberFieldName,

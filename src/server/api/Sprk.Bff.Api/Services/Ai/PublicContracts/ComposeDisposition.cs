@@ -52,12 +52,15 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// </para>
 ///
 /// <para>
-/// <b>Production wiring (NOT in this walking skeleton — see task 010 report)</b>: promoting
-/// <c>compose</c> to a maker-selectable routing disposition additionally requires
-/// <c>BindingDisposition.Compose</c> (Binding.cs), its <c>ToLedgerValue</c> mapping, and an
-/// <c>OutputRouter</c> routing case. Those touch shared routing files and are described (not
-/// applied) by task 010 to preserve parallel-agent safety; the string member + frame published
-/// here are the stable seam Compose builds on.
+/// <b>Production routing promotion (APPLIED 2026-07-09 by spaarkeai-compose-r2)</b>: task 010
+/// published this contract (the ENVELOPE) as a walking skeleton and deliberately deferred the
+/// maker-selectable routing promotion to preserve parallel-agent safety. That promotion —
+/// <c>BindingDisposition.Compose</c> (Binding.cs), its <c>ToLedgerValue</c> → <see cref="DispositionValue"/>
+/// mapping, and the <c>OutputRouter</c> pass-through case (store-before-render, like
+/// informational) — was subsequently found unscheduled in redesign-r2 and applied by
+/// spaarkeai-compose-r2 (touches these two shared routing files only). A Binding may now declare
+/// <c>sprk_disposition = compose</c> and route to a ledger write; the client re-materializes from
+/// the ledger (compose-outputs read endpoint + this frame's <c>ledger_ref</c>).
 /// </para>
 /// </summary>
 public static class ComposeDisposition

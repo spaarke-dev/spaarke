@@ -3,7 +3,7 @@
   <metadata>
     <title>Briefing-accuracy eval family (mixed-item corpus) + deterministic-renderer unit tests + CI merge gate</title>
     <phase>A: Accuracy core</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>011,013,014</dependencies>
     <blocks>017</blocks>

@@ -208,7 +208,10 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
 
         // ── Create sprk_todo (ADR-024: applyResolverFields runs inside TodoService when
         //    a regarding triple is supplied; skipped wizard means context.association is null)
-        const todoService = new TodoService(dataService);
+        // authenticatedFetch/bffBaseUrl also wire the Field Mapping Framework engine
+        // (task 021 / FR-12) — TodoService calls it after applyResolverFields, before
+        // createRecord, when a regarding parent is present.
+        const todoService = new TodoService(dataService, authenticatedFetch, bffBaseUrl);
         const result = await todoService.createTodo(currentFormValues, context.association);
         if (!result.success) {
           throw new Error(result.errorMessage ?? 'Failed to create to do');

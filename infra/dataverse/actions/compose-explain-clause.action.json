@@ -1,0 +1,37 @@
+{
+  "$comment": "spaarkeai-compose-r2 task 040 (FR-07) — compose-explain-clause Action SEED (systemPrompt home). ACTION-ONLY, no playbook: per ADR-039 a capability is an Action row + Binding row, and the Compose R2 engine is frozen (NO new sprk_analysisplaybook records). This file is the mirror-first author surface for the sprk_analysisaction row (sprk_actioncode=compose-explain-clause) carrying the JPS systemPrompt + Azure-OpenAI-Structured-Outputs output schema. Deploy via scripts/Deploy-AnalysisAction.ps1 (action-only; upsert by sprk_actioncode). The Binding that routes to it is in sprk_playbookconsumer-rows.json; the input/output schema mirrors under infra/dataverse/inputschemas|outputschemas are the CI-validated projections of this row. Owner hygiene: actionCode carries NO version suffix (compose-explain-clause, not @v1) — version lives in the description/an explicit field, never the name.",
+  "$comment-systemprompt-home": "REVIEW FLAG (task 040 template decision): the SystemPrompt lives on sprk_analysisaction.sprk_systemprompt (R5 rule: 'sprk_systemprompt IS the JPS prompt primitive — NO new prompt-bearing entity'). Structure mirrors the summarize-document-for-chat.playbook.json actions[] entry, minus the playbook/nodes wrapper. Read action → disposition informational (streams into the Assistant); it is NOT the compose disposition (that is task 042, gated on core task 010).",
+  "actionCode": "compose-explain-clause",
+  "name": "Compose — Explain Clause",
+  "description": "Plain-language explanation of a selected contract clause for the Compose inline AI toolbar (FR-07). Read-only capability: streams a schema-valid explanation into the Assistant, with matter/firm playbook + precedent context surfaced in the Context pane. Consumes the compose-selection JPS scope; no document mutation, no compose disposition.",
+  "actionType": 0,
+  "$comment-actionType": "ExecutorType.AiAnalysis = 0 — handled by the existing AiAnalysisNodeExecutor / prompt-driven executor. No new executor (ADR-039 reuse).",
+  "temperature": 0.2,
+  "$comment-temperature": "Low temperature — an explanation must be faithful to the clause text, not creative. Mirrors the extraction/analysis convention.",
+  "systemPrompt": "ROLE: You are the Spaarke Compose clause-explanation assistant. A user has selected a clause (or clause fragment) in a contract they are drafting and asked you to explain it. You produce a clear, plain-language explanation a practicing attorney can trust and a sophisticated business reader can follow.\n\nINPUT: a selectionText field carrying the selected clause, plus optional surrounding-document and playbook/precedent context provided by the retrieval layer.\n\nINSTRUCTIONS:\n  1. Explain what the selected clause DOES — its legal effect, the obligations/rights it creates, and who it favors — in plain language. Avoid restating the clause verbatim; interpret it.\n  2. Ground the explanation in the supplied clause text only. If matter/firm playbook or precedent context is provided, you MAY reference how this clause compares (e.g. 'this is broader than the firm-standard indemnity'), but do NOT invent playbook positions that were not supplied.\n  3. Emit a JSON object matching the output schema EXACTLY. additionalProperties is false; do not add fields.\n  4. explanation: a plain-language explanation of the clause's effect and significance (≤1 short paragraph, ≤1500 chars). Concrete and specific to THIS clause — name the mechanism (e.g. 'caps liability at fees paid in the prior 12 months'), not a generic definition.\n  5. keyConcepts: 2-6 short concept labels a reader should understand to grasp the clause (e.g. 'limitation of liability', 'consequential damages carve-out', 'survival'). Terms, not sentences.\n  6. relatedPlaybookIds: identifiers of matter/firm playbook entries the retrieval layer supplied that are relevant to this clause. Ids ONLY — never quoted playbook content. Empty array when none were supplied (do NOT fabricate ids).\n\nCONSTRAINTS:\n  - Do NOT fabricate. If the selection is too short or garbled to explain faithfully, return a brief explanation stating that the selection is insufficient to interpret, an empty keyConcepts is acceptable, and an empty relatedPlaybookIds — never invent legal effect that the text does not support.\n  - This is a READ action: never propose edits or rewrites here (that is the Draft Alternative action). Explanation only.\n  - Do NOT echo secrets, tokens, or content outside the supplied clause + context.",
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["explanation", "keyConcepts", "relatedPlaybookIds"],
+    "$comment-required": "Object-level required array (ALL three fields required). Property-level boolean 'required' is FORBIDDEN (invalid JSON Schema; 400-fails the request) — OpenAiFunctionSchemaValidator enforces this.",
+    "properties": {
+      "explanation": {
+        "type": "string",
+        "description": "Plain-language explanation of the selected clause's legal effect and significance (≤1 short paragraph, ≤1500 chars). Interprets the clause; does not restate it verbatim.",
+        "maxLength": 1500
+      },
+      "keyConcepts": {
+        "type": "array",
+        "description": "2-6 short concept labels a reader should understand to grasp the clause (terms, not sentences). Empty allowed only when the selection is insufficient to interpret.",
+        "items": { "type": "string", "maxLength": 80 },
+        "maxItems": 6
+      },
+      "relatedPlaybookIds": {
+        "type": "array",
+        "description": "Identifiers of matter/firm playbook entries the retrieval layer supplied that relate to this clause. Ids ONLY (never quoted content). Empty array when none supplied — do NOT fabricate.",
+        "items": { "type": "string" }
+      }
+    }
+  }
+}
