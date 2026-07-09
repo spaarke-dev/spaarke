@@ -8,7 +8,7 @@
  * deterministicRenderer test) applied to the shared-item email.
  */
 
-import { buildItemEmailDraft, buildRecordDeepLink } from '../src/components/DailyBriefingApp';
+import { buildItemEmailDraft, buildRecordDeepLink, buildEmailActivityRecord } from '../src/components/DailyBriefingApp';
 import type { HighPriorityItemResult } from '../src/services/briefingService';
 
 const CLIENT_URL = 'https://contoso.crm.dynamics.com';
@@ -37,6 +37,33 @@ describe('buildRecordDeepLink', () => {
   it('returns empty string when identity parts are missing (link omitted, never guessed)', () => {
     expect(buildRecordDeepLink(CLIENT_URL, '', 'id')).toBe('');
     expect(buildRecordDeepLink(CLIENT_URL, 'sprk_matter', '')).toBe('');
+  });
+
+  it('returns empty string when clientUrl is unknown (never emit a dead relative link)', () => {
+    // getClientUrl() can throw / be absent → clientUrl is ''. A relative
+    // /main.aspx link is broken in a mail client, so the link must be omitted.
+    expect(buildRecordDeepLink('', 'sprk_matter', 'abc')).toBe('');
+  });
+});
+
+describe('buildEmailActivityRecord', () => {
+  const payload = { to: { id: 'to-user-999' }, subject: 'Matter: Acme', body: 'see link' };
+
+  it('maps subject/body and builds From (mask 1) + To (mask 2) systemuser parties', () => {
+    const record = buildEmailActivityRecord('from-user-111', payload);
+    expect(record.subject).toBe('Matter: Acme');
+    expect(record.description).toBe('see link');
+    expect(record.email_activity_parties).toEqual([
+      { 'partyid_systemuser@odata.bind': '/systemusers(from-user-111)', participationtypemask: 1 },
+      { 'partyid_systemuser@odata.bind': '/systemusers(to-user-999)', participationtypemask: 2 },
+    ]);
+  });
+
+  it('omits the From party when the caller systemuserid is unknown (Dataverse defaults it)', () => {
+    const record = buildEmailActivityRecord('', payload);
+    expect(record.email_activity_parties).toEqual([
+      { 'partyid_systemuser@odata.bind': '/systemusers(to-user-999)', participationtypemask: 2 },
+    ]);
   });
 });
 

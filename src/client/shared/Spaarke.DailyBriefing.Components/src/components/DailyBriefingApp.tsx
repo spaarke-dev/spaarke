@@ -130,12 +130,38 @@ type EmailDialogState =
 /**
  * Build a Dataverse record deep link from the record's STRUCTURED identity
  * (entityType + entityId) — never from narrative/display text. Returns '' when
- * either part is missing so callers can omit the link cleanly. Exported for tests.
+ * the client URL OR either identity part is missing, so callers omit the link
+ * cleanly rather than emit a dead relative URL (an emailed `/main.aspx?...` link
+ * would be broken in any mail client). Exported for tests.
  */
 export function buildRecordDeepLink(clientUrl: string, entityType: string, entityId: string): string {
-  if (!entityType || !entityId) return '';
+  if (!clientUrl || !entityType || !entityId) return '';
   const id = entityId.replace(/[{}]/g, '');
   return `${clientUrl}/main.aspx?pagetype=entityrecord&etn=${encodeURIComponent(entityType)}&id=${encodeURIComponent(id)}`;
+}
+
+/**
+ * r5 email-share #3 — build the Xrm.WebApi `email` (draft activity) record for a
+ * single-item share. Pure + exported so the party payload (the runtime-risky
+ * surface) is unit-testable without a live Dataverse. The From party is bound to
+ * the caller's systemuser (participationtypemask 1) and the To party to the
+ * picked internal user (mask 2). From is omitted when the caller's id is unknown
+ * (Dataverse defaults it to the current user).
+ */
+export function buildEmailActivityRecord(
+  senderSystemUserId: string,
+  payload: { to: { id: string }; subject: string; body: string }
+): Record<string, unknown> {
+  const parties: Record<string, unknown>[] = [];
+  if (senderSystemUserId) {
+    parties.push({ 'partyid_systemuser@odata.bind': `/systemusers(${senderSystemUserId})`, participationtypemask: 1 });
+  }
+  parties.push({ 'partyid_systemuser@odata.bind': `/systemusers(${payload.to.id})`, participationtypemask: 2 });
+  return {
+    subject: payload.subject,
+    description: payload.body,
+    email_activity_parties: parties,
+  };
 }
 
 /**
@@ -576,17 +602,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
       if (!webApi) {
         throw new Error('Dataverse is not available.');
       }
-      const parties: Record<string, unknown>[] = [];
-      if (userId) {
-        parties.push({ 'partyid_systemuser@odata.bind': `/systemusers(${userId})`, participationtypemask: 1 });
-      }
-      parties.push({ 'partyid_systemuser@odata.bind': `/systemusers(${payload.to.id})`, participationtypemask: 2 });
-      const record: Record<string, unknown> = {
-        subject: payload.subject,
-        description: payload.body,
-        email_activity_parties: parties,
-      };
-      await webApi.createRecord('email', record);
+      await webApi.createRecord('email', buildEmailActivityRecord(userId, payload));
       dispatchToast(
         <Toast>
           <ToastTitle>Draft email created</ToastTitle>

@@ -46,6 +46,13 @@
 - **MVP wart (documented)**: in briefing mode the `SendEmailDialog` "Message" field is **cosmetic** — the server owns the briefing HTML, so a typed message is not sent. Prepend/subject-override is the deferred note-passthrough fast-follow (needs an OutputRouter-adjacent change). The dialog's default body states the briefing is included.
 - **Pre-existing, unrelated test failures** on this branch (verified by stashing my changes): `test/legalWorkspaceSectionRegistry.test.ts` + one case in `test/ActivityNotesSection.callbacks.test.tsx` (onKeep ttl 604800→0). NOT caused by email-share; candidates for the 090 `/defer` list.
 
+## Step 9.5 gate — independent adversarial code-review (2026-07-09)
+Verdict: **no Critical issues.** Security clean (egress guard closes the external-exfiltration hole; systemuserid stays token-derived; FetchXML injection not exploitable — format-validation-first + `SecurityElement.Escape`; nullable body binding verified optional so the scheduled no-body POST still works). ADR-012/021/§10/§11 all clean.
+- **Fixed (Warning):** the `createRecord('email', …)` party payload was untested (the runtime-risky surface). Extracted `buildEmailActivityRecord(senderId, payload)` as an exported pure helper + 2 tests asserting exact `partyid_systemuser@odata.bind` + `participationtypemask` (From=1/To=2). Now 11/11.
+- **Fixed (Suggestion):** `buildRecordDeepLink` now returns '' when `clientUrl` is empty (was emitting a dead relative `/main.aspx` link into the email body). Added a test.
+- **Accepted (Suggestion) — empty-briefing "sent" toast:** not reachable in practice — the "Email Briefing" menu item renders ONLY on the success render path (a non-empty briefing), so `EmailAsync`'s empty short-circuit can't fire for a colleague share except via a benign render→send data race. Documented, not plumbed.
+- **Accepted (Suggestion) — "internal = any active systemuser":** the guard treats any active `systemuser` as internal; orgs that provision external guests as systemusers with external `internalemailaddress` domains could still receive. Accepted as documented defense-in-depth for MVP; a domain allow-list is a future hardening if strict employee-only is required.
+
 ## Open / deferred
 - Personal-note prepend + subject override for #2 (needs OutputRouter-adjacent HTML change) → **fast-follow**, not MVP.
 - #3 send-now (vs draft activity) → enhancement; draft is the safe MVP matching the SendEmailStep contract.
