@@ -14,7 +14,7 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import type { IWebApiLike } from '../../types/WebApiLike';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
-import { applyResolverFields, discoverNavProps } from '../../services/PolymorphicResolverService';
+import { applyResolverFields, discoverNavProps, cleanGuid } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
 
 // ---------------------------------------------------------------------------
@@ -298,7 +298,7 @@ export class EventService {
         if (buDefaults.searchIndexId) {
           const aiNavProp = _findNavProp(navProps, 'sprk_aisearchindex');
           if (aiNavProp) {
-            entity[`${aiNavProp}@odata.bind`] = `/sprk_aisearchindexes(${buDefaults.searchIndexId})`;
+            entity[`${aiNavProp}@odata.bind`] = `/sprk_aisearchindexes(${cleanGuid(buDefaults.searchIndexId)})`;
             console.info(
               '[EventService] Cascaded sprk_ai_search_index from user BU:',
               buDefaults.searchIndexId,
@@ -329,7 +329,7 @@ export class EventService {
     if (formValues.eventTypeId) {
       const navProp = _findNavProp(navProps, 'sprk_eventtype_ref');
       if (navProp) {
-        entity[`${navProp}@odata.bind`] = `/sprk_eventtype_refs(${formValues.eventTypeId})`;
+        entity[`${navProp}@odata.bind`] = `/sprk_eventtype_refs(${cleanGuid(formValues.eventTypeId)})`;
       }
     }
 

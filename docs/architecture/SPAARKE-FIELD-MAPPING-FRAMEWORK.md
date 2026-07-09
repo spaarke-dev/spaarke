@@ -11,20 +11,70 @@ The Field Mapping Framework lets an admin declare, as data (not code), that crea
 
 The framework shipped once already (February 2026, embedded in the now-retired `AssociationResolver` PCF) and was deleted as unrelated collateral damage during a later picker-consolidation effort. This project (`set-regarding-and-field-mapping-resolver-r2`) rebuilt the apply engine from scratch as a context-agnostic module (ADR-012) callable from any wizard service, extended the BFF's rule contract to carry every field the engine needs, and seeded the initial Matter→{Event, Invoice, Report Card} attorney-matrix configuration. The load-bearing design decision is the **creation-time / update-time split** (see Constraints): mappings apply automatically once, at the moment a new child record is created, because a brand-new record has no existing data to protect. Refreshing an **already-existing** child's fields remains a separate, manual, ribbon-triggered mechanism (`UpdateRelatedButton` → `POST /api/v1/field-mappings/push`) that this project did not change.
 
-## Component Structure
+## Component Inventory (Code)
+
+This is the complete build surface. Every row is a distinct, live component; paths are repo-relative. Layers run top-to-bottom from storage → server → client engine → wizard call-sites.
+
+### Dataverse configuration (storage)
+
+| Component | Path / location | Responsibility |
+|-----------|------|-----------------|
+| `sprk_fieldmappingprofile` (table) | Dataverse (`spaarkedev1`) · `infrastructure/dataverse/solutions/FieldMappingAdminSolution/Entities/sprk_FieldMappingProfile/` | One row per (source entity, target entity) pair: `sprk_sourcerecordtype`/`sprk_targetrecordtype` (**lookups to `sprk_recordtype_ref`**, not name strings), `sprk_compatibilitymode`, `sprk_description`, `sprk_name`, `statecode` (0=Active / 1=Inactive → `IsActive`) |
+| `sprk_fieldmappingrule` (table) | Dataverse (`spaarkedev1`) · `.../Entities/sprk_FieldMappingRule/` | Child rows of a profile (relationship `sprk_fieldmappingrule_FieldMappingProfile_n1`, referencing attribute `sprk_FieldMappingProfile`): `sprk_sourcefield`/`sprk_targetfield` + their `sprk_sourcefieldtype`/`sprk_targetfieldtype`, `sprk_mapping_type` (Copy0/Default1/Concat2/Template3), `sprk_defaultvalue` (`NVARCHAR(100)`), **`sprk_expression`** (`Memo`, max 2000 — added this project), `sprk_compatibilitymode` (Strict0/Resolve1), `sprk_isrequired`, `sprk_executionorder`, `sprk_isactive` |
+| `sprk_recordtype_ref` (table) | Dataverse (`spaarkedev1`) | The authoritative entity-catalog both profile lookups resolve through; `sprk_recordlogicalname` is the logical-name string the BFF maps ↔ GUID. A target entity **must** have a row here before a profile can reference it. Shared with the ADR-024 resolver ecosystem |
+
+> **Nav-property fact (load-bearing):** the profile→rule `$expand` name the BFF uses is `sprk_fieldmappingrule_FieldMappingProfile_sprk_fieldmappingprofile`. This exact string is in `DataverseWebApiService.cs`; a wrong value here is one of the four latent bugs fixed during UAT (see Operational Notes).
+
+### BFF API (server)
 
 | Component | Path | Responsibility |
 |-----------|------|-----------------|
-| `sprk_fieldmappingprofile` (table) | Dataverse (spaarkedev1) | One row per (source entity, target entity) pair: `sprk_sourcerecordtype`/`sprk_targetrecordtype` (lookups to `sprk_recordtype_ref`), `sprk_capabilitymode`, `sprk_description`, `sprk_name`, `statecode` (active/inactive) |
-| `sprk_fieldmappingrule` (table) | Dataverse (spaarkedev1) | Child rows of a profile: `sprk_sourcefield`/`sprk_targetfield` + their `sprk_sourcefieldtype`/`sprk_targetfieldtype`, `sprk_mapping_type` (Copy0/Default1/Concat2/Template3), `sprk_defaultvalue` (`NVARCHAR(100)`), **`sprk_expression`** (`Memo`, max 2000 — added this project), `sprk_compatibilitymode`, `sprk_isrequired`, `sprk_executionorder`, `sprk_isactive` |
-| `FieldMappingEndpoints.cs` | `src/server/api/Sprk.Bff.Api/Api/FieldMappings/` | Minimal API group `/api/v1/field-mappings`; this framework's read path is `GET profiles/{sourceEntity}/{targetEntity}` |
-| `FieldMappingRuleDto.cs` / `FieldMappingProfileWithRulesDto.cs` | `src/server/api/Sprk.Bff.Api/Models/FieldMapping/` | The additive rule/profile contract the client engine consumes |
-| `DataverseWebApiService.cs` | `src/server/shared/Spaarke.Dataverse/` | Reads `sprk_fieldmappingprofile`/`sprk_fieldmappingrule` via OData `$select`/`$expand`; `FieldMappingProfileEntity`/`FieldMappingRuleEntity` in `Models.cs` are the read-side entity shapes |
-| `FieldMappingService.ts` | `src/client/shared/Spaarke.UI.Components/src/services/` | The client apply engine — `applyFieldMappings(...)`, one BFF call, dispatch over the four mapping types |
-| `FieldMappingTypes.ts` | `src/client/shared/Spaarke.UI.Components/src/types/` | `IFieldMappingProfile`/`IFieldMappingRule`/`IMappingResult` — mirrors the BFF DTOs 1:1 |
+| `FieldMappingEndpoints.cs` | `src/server/api/Sprk.Bff.Api/Api/FieldMappings/` | Minimal API group `/api/v1/field-mappings` (auth + `dataverse-query` rate-limit). Routes: `GET /profiles`, `POST /validate`, **`GET /profiles/{sourceEntity}/{targetEntity}`** (the creation-time engine's only read; **404 when no profile**), `POST /push` (update-time, ≤500 children). Also holds the int→string projections `MapMappingTypeToString`, `MapCompatibilityModeToString`, `MapFieldTypeToString`, `MapSyncModeToString` |
+| `FieldMappingRuleDto.cs` / `FieldMappingProfileWithRulesDto.cs` / `FieldMappingProfileDto.cs` | `src/server/api/Sprk.Bff.Api/Models/FieldMapping/` | The additive rule/profile contract the client engine consumes (`MappingType`, `DefaultValue`, `Expression`, `IsRequired`, `CompatibilityMode` surfaced this project) |
+| `PushFieldMappingsRequest.cs` / `PushFieldMappingsResponse.cs` | `.../Models/FieldMapping/Dtos/` | Request/response for the update-time `POST /push` path (unchanged logic; consumes the same additive DTO) |
+| `IFieldMappingDataverseService.cs` | `src/server/shared/Spaarke.Dataverse/` | Service contract: `GetFieldMappingProfileWithRulesAsync`, `QueryFieldMappingProfilesAsync`, `GetFieldMappingRulesAsync`, `RetrieveRecordFieldsAsync`, `QueryChildRecordIdsAsync`, `UpdateRecordFieldsAsync` |
+| `DataverseWebApiService.cs` | `src/server/shared/Spaarke.Dataverse/` | Implements the read: `LookupRecordTypeIdsAsync` (logical name → `sprk_recordtype_ref` GUID) then one profile query with `$expand` of active rules ordered by `sprk_executionorder`; `MapToFieldMappingProfileEntity`/`MapToFieldMappingRuleEntity` project the OData rows. `FieldMappingProfileEntity`/`FieldMappingRuleEntity` in `Models.cs` are the read-side shapes |
+
+### Client engine + call-sites (browser)
+
+| Component | Path | Responsibility |
+|-----------|------|-----------------|
+| `FieldMappingService.ts` | `src/client/shared/Spaarke.UI.Components/src/services/` | The client apply engine — `applyFieldMappings(...)`, one BFF call, one source read, dispatch over the four mapping types, never-throws |
+| `FieldMappingTypes.ts` | `src/client/shared/Spaarke.UI.Components/src/types/` | `IFieldMappingProfile`/`IFieldMappingRule`/`IMappingResult` + the `FieldMappingType`/`FieldMappingFieldType`/`FieldMappingCompatibilityMode` unions — mirrors the BFF DTOs 1:1 |
 | `PolymorphicResolverService.ts` (`discoverNavProps`/`findNavProp`) | `src/client/shared/Spaarke.UI.Components/src/services/` | Shared nav-property discovery, hoisted this project so the engine's lookup-Copy path and every wizard service use one implementation |
-| 7 `Create*Wizard` services (`eventService.ts`, `matterService.ts`, `projectService.ts`, `todoService.ts`, `workAssignmentService.ts`, `invoiceService.ts`, `reportCardService.ts`) | `src/client/shared/Spaarke.UI.Components/src/components/Create*Wizard/` | Each calls `applyFieldMappings` on its create payload, after resolver-field application, before `createRecord` |
-| `UpdateRelatedButton` PCF (unchanged) | `src/client/pcf/` | The pre-existing manual push mechanism for already-existing child records — untouched by this project |
+| 7 `Create*Wizard` services (`eventService.ts`, `matterService.ts`, `projectService.ts`, `todoService.ts`, `workAssignmentService.ts`, `invoiceService.ts`, `reportCardService.ts`) | `src/client/shared/Spaarke.UI.Components/src/components/Create*Wizard/` | Each calls `applyFieldMappings` on its create payload, after resolver-field application, before `createRecord`. Target entities: `sprk_event`/`sprk_matter`/`sprk_project`/`sprk_todo`/`sprk_workassignment`/`sprk_invoice`/`sprk_reportcard` |
+| `FieldMappingService.test.ts` | `.../src/services/__tests__/` | 18 engine unit tests (all four types, never-throws, single-fetch, same-entity, lookup bind, silent empty-lookup skip) |
+
+### Supporting / update-time surface
+
+| Component | Path | Responsibility |
+|-----------|------|-----------------|
+| `UpdateRelatedButton` PCF (unchanged) | `src/client/pcf/` | Pre-existing **manual push** trigger for already-existing child records → `POST /push`; untouched by this project |
+| `sprk_fieldmapping_push.js` (web resource) | `src/client/webresources/js/` | MDA ribbon script that calls `POST /push` from a parent form |
+| `FieldMappingAdmin` PCF (`bundle.js`) | `.../FieldMappingAdminSolution/Controls/sprk_Spaarke.Controls.FieldMappingAdmin/` | Ships in the admin solution but is **not** the supported authoring path — profiles/rules are authored on the **native MDA forms** (see Design Decisions "Native Dataverse forms for admin authoring"). Present as legacy; the admin guide does not use it |
+
+## PCF Hosts & the Set-Regarding Resolver (related controls — NOT part of the engine)
+
+The field-mapping engine has **no PCF of its own** — it is a shared-library module (ADR-012). It rides inside two PCF controls that are deployed and versioned independently, and it is *fed* by a third. These are listed here so the "code and PCF" inventory is complete; the boundary is deliberate (per project `design.md` §8, the resolver is context this framework consumes, not a deliverable it owns).
+
+| PCF control | Version | Deployed on | Data access | Relationship to field mapping |
+|---|---|---|---|---|
+| **VisualHost** (`Spaarke.Visuals.VisualHost`) | v1.4.34 | **Parent** forms (dashboards/cards) | Xrm.WebApi for charts; **BFF** for the wizard path | The **sole wizard host**: its "+" button uses `WizardRegistry.resolveWizard(...)` to lazy-mount the correct `Create*Wizard` in a Fluent `Dialog`, seeded with the host record as a locked `initialAssociation`. It bundles the shared-lib source, so shipping the wizards transitively bundles the engine — **the mapping cascade fires inside the wizard's service when the child is created.** VisualHost never calls `applyFieldMappings` directly |
+| **RegardingResolver** (`Spaarke.Controls.RegardingResolver`) | v1.4.6 | **Child** forms (`sprk_todo`, `sprk_event`, `sprk_invoice`, `sprk_communication`, `sprk_kpiassessment`, …) | **Xrm.WebApi only** (no BFF) | The runtime "set-regarding" picker (ADR-024). A user picks a polymorphic parent — or the control auto-detects a subgrid-pre-populated `sprk_regarding{Entity}` lookup — and it writes the 5 denormalized regarding fields (`sprk_regardingrecordtype`/`id`/`name`/`url`/`number`) via `PolymorphicResolverService`. **This is what supplies the field-mapping engine's `sourceEntity`/`sourceId`** when a record is created with a regarding parent already set. It does *not* copy field values — that is the engine's job |
+| **AssociationResolver** — **RETIRED (SRFR-045, 2026-07-05)** | — | — | — | The Feb-2026 framework originally lived inside this PCF. It was retired: its picker duty was 100% redundant with RegardingResolver, and its subgrid auto-detect + CREATE-mode helpers were folded into `RegardingResolverApp.tsx`. Its retirement is *why* the apply engine had to be rebuilt from scratch this project. **There is now one resolver control, not two.** Any doc or table still listing AssociationResolver is stale |
+
+**How they interlock at runtime:** RegardingResolver (on the child form, or via the wizard's association block) establishes the *regarding parent* → the `Create*Wizard` service reads that parent as `sourceEntity`/`sourceId` → `applyFieldMappings` fetches the `{parent → child}` profile from the BFF and enriches the create payload → the child is born with inherited fields. VisualHost is just the shell that launches the wizard; RegardingResolver is the linkage; the engine is the copy.
+
+## Configuration Enum Reference
+
+These are the option-set integer values a maker sees as labels on the form, and that Claude Code / the Web API must send as integers when seeding programmatically (see the admin guide's seeding recipe).
+
+| Field | Value → label |
+|---|---|
+| `sprk_mapping_type` | `0`=Copy · `1`=Default · `2`=Concat · `3`=Template |
+| `sprk_sourcefieldtype` / `sprk_targetfieldtype` | `0`=Text · `1`=Lookup · `2`=OptionSet · `3`=Number · `4`=DateTime · `5`=Boolean · `6`=Memo |
+| `sprk_compatibilitymode` | `0`=Strict · `1`=Resolve |
+| `statecode` (profile active flag) | `0`=Active · `1`=Inactive |
 
 ## Data Flow
 
@@ -78,6 +128,19 @@ The **secondary path** — refreshing an already-existing child record — is un
 - **Per-wizard wiring is asymmetric, not uniform.** `WorkAssignmentService`/`InvoiceService` require `authenticatedFetch`/`bffBaseUrl` at construction; `EventService`/`ProjectService`/`TodoService`/`ReportCardService` accept them as optional (or, for `ReportCardService`, were made required as part of this project's wiring) — when either dependency is absent, the engine call is skipped as a graceful no-op, identical to the "no profile found" path. `Matter`/`Project` had no pre-create "regarding parent" parameter before this project; both gained an `association` parameter specifically so the engine has a source entity/id to call with.
 - **Known scope gap (documented, not a defect)**: To Do records created via the cross-wizard "Add a To Do" follow-on (`createTodoRegardingChild`, invoked from `CreateInvoiceWizard`/`CreateReportCardWizard`) do not yet receive `authenticatedFetch`/`bffBaseUrl`, so field mapping is skipped (no-op) for that specific creation path. The primary standalone "Create New To Do" wizard is fully wired. A follow-up task would thread the two dependencies through `createTodoRegardingChild`'s two call sites.
 - **MUST** verify target field names per entity pair before seeding configuration — target field names diverge across entities (e.g. Matter's `sprk_assignedattorney1` maps to Invoice's `sprk_assignedtoattorney1`; Invoice has no law-firm field at all). Seed data is authored per-pair against `describe`-verified schema, never assumed identical across targets.
+
+## Operational Notes (UAT hardening)
+
+The framework's first real consumer surfaced four **pre-existing latent bugs** in shared infrastructure during live UAT; all four are fixed on `master`. They are recorded here because three of them live in shared code (`DataverseWebApiService`) and affect every caller, not just field mapping:
+
+1. **`DataverseWebApiService` `BaseAddress` was missing a trailing slash** — `…/api/data/v9.2` + a relative request URI drops `v9.2` per RFC-3986, producing a versionless URL that Dataverse answers with a 500. Shared-infra fix; affects **all** `DataverseWebApiService` HTTP calls, not only field mapping.
+2. **Wrong `$expand` navigation property** — was `sprk_fieldmappingprofile_fieldmappingrule`; corrected to `sprk_fieldmappingrule_FieldMappingProfile_sprk_fieldmappingprofile` (the real relationship name).
+3. **Unguarded `GetInt32()`/`GetBoolean()` on null `$expand` fields** — a Dataverse `$expand` includes null columns; the rule mapper now null-guards every scalar read in `MapToFieldMappingRuleEntity`.
+4. **Noisy empty-lookup warnings (cosmetic)** — an unset source lookup now skips **silently**; a warning is emitted only for the genuine anomaly (a *populated* lookup whose `@odata.bind` annotation is missing).
+
+**Debugging lesson recorded for maintainers:** hand-built repro queries with hardcoded GUIDs diverged from the BFF's actual code path (they skipped `LookupRecordTypeIdsAsync`). The container-log stack trace (Kudu VFS `…/api/vfs/LogFiles/<date>_containerStream.log`) was the turning point — pull server logs early rather than trusting a hand-built reproduction.
+
+**Deploy note:** because bug 1 is in shared `Spaarke.Dataverse`, the BFF must be deployed for the fix to take effect (`spaarke-bff-dev`, verified 200 on `GET /api/v1/field-mappings/profiles/sprk_matter/sprk_event`). The engine changes ship inside **VisualHost** (currently v1.4.34) — the wizard host — since that PCF bundles the shared-lib source.
 
 ## Related
 

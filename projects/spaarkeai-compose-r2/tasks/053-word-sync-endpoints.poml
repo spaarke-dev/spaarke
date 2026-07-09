@@ -3,7 +3,7 @@
     <title>FR-26 webhooks/spe-doc-changed + check-changes endpoints</title>
     <phase>5 Word</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
@@ -12,9 +12,9 @@
     <deps>052</deps>
     <tags>bff-api,api,spe,azure</tags>
     <estimated-effort>1.5 days</estimated-effort>
-    <assigned>unassigned</assigned>
-    <started></started>
-    <completed></completed>
+    <assigned>claude</assigned>
+    <started>2026-07-09</started>
+    <completed>2026-07-09</completed>
   </metadata>
 
   <prompt>
@@ -123,4 +123,45 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-09. Two routes added to `Api/ComposeEndpoints.cs` (all 10 existing routes
+    preserved): `POST /api/compose/webhooks/spe-doc-changed` (AllowAnonymous + HMAC via
+    `WebhookSignatureFilter` + constant-time clientState verify, mirroring
+    `CommunicationEndpoints.HandleIncomingWebhookAsync` exactly) and
+    `POST /api/compose/document/{documentSpeId}/check-changes` (under the group's existing
+    `RequireAuthorization()`). Both drive `SpeSyncOrchestrator` (task 052) exclusively — no
+    Microsoft.Graph type crosses either endpoint (ADR-007); etag/delta state is Redis via the
+    orchestrator (ADR-009).
+
+    New files: `Services/Compose/SpeWebhookNotificationVerifier.cs` (pure static verification
+    helper — validation-token detection, constant-time clientState batch check, driveId-from-
+    resource parsing — extracted for direct unit-testability rather than inlined, since the
+    logic is security-sensitive). Extended `SpeSyncOrchestrator` with
+    `ResolveContainerIdForDriveIdAsync` (a Graph notification only carries the driveId via its
+    `resource` field, never the SPE containerId Redis keys state by — this reverse-resolves it
+    by iterating the tracked-container index).
+
+    Tests: `SpeWebhookNotificationVerifierTests.cs` (12 pure unit tests, no mocks) +
+    `SpeSyncOrchestratorTests.cs` (+4: 2 for the reverse-lookup, 2 pinning the exact FR-26 poll
+    unchanged/changed scenario). Compose suite 248/248 (was 232); full BFF suite 7972/7972
+    (101 pre-existing skips); integration test project builds clean (no ctor drift).
+
+    Publish: 45.18 MB compressed (incl. PDBs) — zero measurable delta vs the 45.19 MB wave-013
+    baseline (no new packages). CVE: 1 pre-existing HIGH (`Microsoft.Kiota.Abstractions`
+    transitive via Graph SDK), not newly introduced. NetArchTest: Compose-scoped tests 4/4 green;
+    4 repo-wide pre-existing failures (ADR-007 Communication/Office, ADR-009
+    EndpointResponseCaching, ADR-010 RegistrationDataverseService/Options-pattern) confirmed
+    present with this task's changes stashed — unrelated to Compose, not introduced here.
+
+    Deviation: `check-changes` request body carries only `containerId` (not `driveId`/`tenantId`)
+    — `SpeSyncOrchestrator` resolves driveId internally from containerId, and all Graph calls in
+    this path run app-only (no OBO context needed), so neither was required. Design §12.2 didn't
+    specify the exact request contract; this is the minimal shape consistent with task 052's
+    substrate.
+
+    No escalations fired — the webhook auth model was unambiguous once
+    `CommunicationEndpoints`/`WebhookSignatureFilter` were read (mirrors it exactly per the
+    task's explicit instruction), so the CLAUDE.md §6 stop condition did not apply.
+  </notes>
 </task>

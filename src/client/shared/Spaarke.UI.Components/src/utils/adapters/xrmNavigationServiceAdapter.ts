@@ -39,6 +39,7 @@ import type {
   LookupResult,
 } from '../../types/serviceInterfaces';
 import { getXrm } from '../xrmContext';
+import { cleanGuid } from '../../services/PolymorphicResolverService';
 
 /**
  * Normalises a dimension value to the Xrm.Navigation format.
@@ -230,8 +231,13 @@ export function createXrmNavigationService(): INavigationService {
           return [];
         }
 
+        // Boundary normalization (follow-up #7): Xrm.Utility.lookupObjects returns
+        // registry-format GUIDs ("{ABC-...}", uppercase). Strip to a bare lowercase
+        // GUID HERE — the single point where picker ids enter our code — so no
+        // downstream @odata.bind ever receives a braced GUID (Dataverse 400
+        // "Error in query syntax"). cleanGuid is a no-op on already-bare ids.
         return results.map(r => ({
-          id: r.id,
+          id: cleanGuid(r.id),
           name: r.name,
           entityType: r.entityType,
         }));

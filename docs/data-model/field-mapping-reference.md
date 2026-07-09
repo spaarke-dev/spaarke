@@ -1,5 +1,7 @@
 # Field Mapping Reference
 
+> ⚠️ **Name clash — read this first.** Despite the title, this is a **field-name dictionary** (logical names / types across Spaarke entities), **NOT** the schema of the Field Mapping *Framework* (`sprk_fieldmappingprofile` / `sprk_fieldmappingrule`). For the mapping-config tables, the four mapping types, and how to author profiles/rules, see [`docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md`](../architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md) and [`docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md`](../guides/FIELD-MAPPING-ADMIN-GUIDE.md). This doc is still useful *alongside* those — it's where you look up the exact source/target field logical names when authoring a Copy rule.
+
 > **Last Updated**: April 5, 2026
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2

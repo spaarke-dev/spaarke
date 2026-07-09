@@ -170,7 +170,7 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Send Workspace Artifact",
         // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-send-workspace-artifact-row.json — keep byte-equal; edit the JSON, not this literal.
-        Description: @"Open a tab in the user's workspace pane. PREFERRED USE — open a named workspace LAYOUT as a live tab: widgetType 'Workspace' with widgetData {""kind"":""Workspace"",""layoutName"":""<layout name>""}. Use layoutName 'Compose' when the user asks to open the Compose editor or to start composing/drafting a document in the workspace; other layouts (e.g. 'Daily Briefing', 'Documents') open the same way. When opening the Compose layout ABOUT A SPECIFIC DOCUMENT, add widgetData.documentId (the sprk_document GUID, e.g. from a search result path tables/sprk_document/records/{guid}) — Compose then opens WITH that document loaded. Session-UPLOADED chat files cannot pre-seed Compose (they exist only as extracted text, not stored documents) — omit documentId for them; the tab opens empty and the tool result says so — relay it honestly. If the requested layout does not exist, the tool result lists the available layout names — relay them honestly. The tab opens immediately in the workspace pane and the tool result confirms it; only claim a tab was opened when this tool result says so. Legacy artifact variants (Summary, DocumentViewer, Dashboard, Table) record an artifact to workspace state but are NOT visible in the current workspace UI — avoid them unless explicitly instructed. Agent-created tabs default to visible-to-assistant.",
+        Description: @"Open a tab in the user's workspace pane. PREFERRED USE — open a named workspace LAYOUT as a live tab: widgetType 'Workspace' with widgetData {""kind"":""Workspace"",""layoutName"":""<layout name>""}. Use layoutName 'Compose' when the user asks to open the Compose editor or to start composing/drafting a document in the workspace; other layouts (e.g. 'Daily Briefing', 'Documents') open the same way. When opening the Compose layout ABOUT A SPECIFIC DOCUMENT, add widgetData.documentId (the sprk_document GUID, e.g. from a search result path tables/sprk_document/records/{guid}) — Compose then opens WITH that document loaded. To open a file the user UPLOADED into this chat, add widgetData.sessionFileId (the uploaded file's id from the session's attachments) instead of documentId — Compose opens with that file mounted as a transient working draft (no document record is created until the user saves). Use documentId for stored sprk_document records and sessionFileId for session uploads; set at most one. If the requested layout does not exist, the tool result lists the available layout names — relay them honestly. The tab opens immediately in the workspace pane and the tool result confirms it; only claim a tab was opened when this tool result says so. Legacy artifact variants (Summary, DocumentViewer, Dashboard, Table) record an artifact to workspace state but are NOT visible in the current workspace UI — avoid them unless explicitly instructed. Agent-created tabs default to visible-to-assistant.",
         Version: "1.1.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]
@@ -190,8 +190,9 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 "widgetData",
                 "JSON object carrying the per-variant payload. MUST include a 'kind' field equal to widgetType. " +
                 "Workspace: layoutName (the workspace layout's display name, e.g. 'Compose') or layoutId (GUID); " +
-                "optional documentId (sprk_document GUID) to pre-seed the Compose layout with that document " +
-                "(session-uploaded chat files are NOT pre-seedable — omit documentId for them). " +
+                "optional documentId (sprk_document GUID) to pre-seed the Compose layout with a STORED document, " +
+                "OR sessionFileId (a chat-session uploaded file id) to mount an UPLOADED file as a transient " +
+                "working draft (create-on-save) — set at most one. " +
                 "Legacy variants: Summary: body; DocumentViewer: documentId/filename/mimeType/sizeBytes; " +
                 "Dashboard: layoutId/dashboardName; Table: rowCount/filteredColumns/selectedRows.",
                 ToolParameterType.Object,
@@ -303,9 +304,8 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                         "display name, e.g. 'Compose') or 'layoutId' (a GUID).");
                 }
 
-                // R4-2 (2026-07-07): optional Compose pre-seed pointer — when present it
-                // must be a real sprk_document GUID (session file ids are rejected here
-                // with an instructive message; they carry no SPE pointer to load from).
+                // R4-2 (2026-07-07): optional STORED-document pre-seed pointer — a real
+                // sprk_document GUID resolved server-side to its SPE drive-item.
                 if (dataProp.TryGetProperty("documentId", out var docIdProp) &&
                     docIdProp.ValueKind == JsonValueKind.String &&
                     !string.IsNullOrWhiteSpace(docIdProp.GetString()) &&
@@ -313,8 +313,24 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 {
                     return ToolValidationResult.Failure(
                         "'widgetData.documentId' must be a sprk_document GUID when provided. " +
-                        "Session-uploaded chat file ids cannot pre-seed Compose — omit documentId " +
-                        "and tell the user the Compose tab opens empty for session files.");
+                        "To open a file the user uploaded into this chat, use 'widgetData.sessionFileId' instead.");
+                }
+
+                // FR-03 (task 012): optional UPLOADED-file transient mount pointer. A
+                // session-uploaded file id whose retained bytes Compose mounts as a transient
+                // working draft (create-on-save). Must be a non-empty string; documentId and
+                // sessionFileId are mutually exclusive (documentId = stored, sessionFileId = upload).
+                var hasSessionFileId = dataProp.TryGetProperty("sessionFileId", out var sfIdProp) &&
+                                       sfIdProp.ValueKind == JsonValueKind.String &&
+                                       !string.IsNullOrWhiteSpace(sfIdProp.GetString());
+                var hasDocumentId = dataProp.TryGetProperty("documentId", out var docId2) &&
+                                    docId2.ValueKind == JsonValueKind.String &&
+                                    !string.IsNullOrWhiteSpace(docId2.GetString());
+                if (hasSessionFileId && hasDocumentId)
+                {
+                    return ToolValidationResult.Failure(
+                        "'widgetData' cannot set both 'documentId' (a stored sprk_document) and " +
+                        "'sessionFileId' (an uploaded chat file) — set at most one.");
                 }
             }
 
@@ -589,6 +605,7 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
         string? layoutName = null;
         Guid layoutId = Guid.Empty;
         Guid documentId = Guid.Empty;
+        string? sessionFileId = null;
         try
         {
             using var doc = JsonDocument.Parse(args.WidgetDataRawJson);
@@ -603,6 +620,12 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
             if (doc.RootElement.TryGetProperty("documentId", out var diProp) && diProp.ValueKind == JsonValueKind.String)
             {
                 Guid.TryParse(diProp.GetString(), out documentId);
+            }
+            // FR-03 (task 012): an uploaded session-file id — mounts transiently (create-on-save).
+            if (doc.RootElement.TryGetProperty("sessionFileId", out var sfProp) && sfProp.ValueKind == JsonValueKind.String)
+            {
+                var raw = sfProp.GetString();
+                sessionFileId = string.IsNullOrWhiteSpace(raw) ? null : raw;
             }
         }
         catch (JsonException ex)
@@ -668,13 +691,17 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                     .ConfigureAwait(false);
             }
 
-            var widgetDataJson = composeSeed is null
-                ? JsonSerializer.Serialize(new
-                {
-                    layoutId = layout.Id.ToString("D"),
-                    layoutName = layout.Name
-                })
-                : JsonSerializer.Serialize(new
+            // FR-03 (task 012): a session-uploaded file mounts transiently. No SPE pointer
+            // resolution is needed — the bytes are served from the retained-upload cache by
+            // POST /api/compose/upload keyed by (chat session id, sessionFileId). The client
+            // fetches them into the editor's docxBytes seam; no sprk_document until first Save.
+            var hasUploadMount = composeSeed is null && sessionFileId is not null;
+            var chatSessionIdForSeed = context.ChatSessionId.ToString("D");
+
+            string widgetDataJson;
+            if (composeSeed is not null)
+            {
+                widgetDataJson = JsonSerializer.Serialize(new
                 {
                     layoutId = layout.Id.ToString("D"),
                     layoutName = layout.Name,
@@ -686,6 +713,31 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                         fileName = composeSeed.FileName
                     }
                 });
+            }
+            else if (hasUploadMount)
+            {
+                widgetDataJson = JsonSerializer.Serialize(new
+                {
+                    layoutId = layout.Id.ToString("D"),
+                    layoutName = layout.Name,
+                    compose = new
+                    {
+                        upload = new
+                        {
+                            sessionId = chatSessionIdForSeed,
+                            sessionFileId
+                        }
+                    }
+                });
+            }
+            else
+            {
+                widgetDataJson = JsonSerializer.Serialize(new
+                {
+                    layoutId = layout.Id.ToString("D"),
+                    layoutName = layout.Name
+                });
+            }
 
             // Presentation frame — rides the existing context_event channel (ADR-030
             // additive; old clients ignore the unknown discriminant). Identifiers +
@@ -750,6 +802,11 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
             {
                 summaryText += " The tab is pre-seeded with the requested document — it opens loaded, not empty.";
             }
+            else if (hasUploadMount)
+            {
+                summaryText += " The tab is mounting the uploaded file as a transient working draft — it opens " +
+                               "with the file loaded; no document record is created until the user saves.";
+            }
             else if (preSeedNote is not null)
             {
                 // Honest partial success: the tab opened, the pre-seed did not.
@@ -764,7 +821,8 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                     widgetType = "Workspace",
                     layoutId = layout.Id.ToString("D"),
                     layoutName = layout.Name,
-                    preSeededDocumentId = composeSeed?.SprkDocumentId
+                    preSeededDocumentId = composeSeed?.SprkDocumentId,
+                    mountedSessionFileId = hasUploadMount ? sessionFileId : null
                 },
                 summary: summaryText,
                 confidence: 1.0,

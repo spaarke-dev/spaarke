@@ -26,6 +26,7 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import {
   applyResolverFields,
   discoverNavProps,
+  cleanGuid,
   _resetNavPropCacheForTests,
 } from '../../services/PolymorphicResolverService';
 import type { IPolymorphicWebApi } from '../../services/PolymorphicResolverService';
@@ -131,22 +132,25 @@ export class TodoService {
     //    now feeds a CONTACT GUID via `searchContactsAsLookup`. Bind set
     //    name is `contacts` (plural of the OOB contact table).
     if (formValues.assignedToId) {
+      // cleanGuid: normalize brace-wrapped GUIDs (Xrm pickers / pre-fill) so the
+      // @odata.bind key predicate is valid (Dataverse 400 "query syntax" otherwise).
+      const assignedToGuid = cleanGuid(formValues.assignedToId);
       try {
         const navProps = await discoverNavProps('sprk_todo');
         const assignedNav = navProps.find(
           n => n.referencedEntity === 'contact' && n.columnName.toLowerCase().includes('assignedto')
         );
         if (assignedNav) {
-          entity[`${assignedNav.navPropName}@odata.bind`] = `/contacts(${formValues.assignedToId})`;
+          entity[`${assignedNav.navPropName}@odata.bind`] = `/contacts(${assignedToGuid})`;
         } else {
           // Fallback: use the lookup attribute name directly
           // UAT 2026-06-22 round 13: PascalCase nav-prop name required
-          entity['sprk_AssignedTo@odata.bind'] = `/contacts(${formValues.assignedToId})`;
+          entity['sprk_AssignedTo@odata.bind'] = `/contacts(${assignedToGuid})`;
         }
       } catch (err) {
         console.warn('[TodoService] Failed to resolve sprk_assignedto nav-prop, using fallback:', err);
         // UAT 2026-06-22 round 13: PascalCase nav-prop name required
-        entity['sprk_AssignedTo@odata.bind'] = `/contacts(${formValues.assignedToId})`;
+        entity['sprk_AssignedTo@odata.bind'] = `/contacts(${assignedToGuid})`;
       }
     }
 

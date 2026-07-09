@@ -314,11 +314,20 @@ public class UploadSessionManager
     /// SPE version. Used by document editors (Compose R1) that saved content back
     /// to an item they had already opened.
     /// </summary>
+    public Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        Stream content,
+        CancellationToken ct = default)
+        => ReplaceFileContentAsUserAsync(ctx, driveId, itemId, content, ifMatch: null, ct);
+
     public async Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
         HttpContext ctx,
         string driveId,
         string itemId,
         Stream content,
+        string? ifMatch,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(driveId)) throw new ArgumentException("driveId is required", nameof(driveId));
@@ -328,8 +337,16 @@ public class UploadSessionManager
         {
             var graphClient = await _factory.ForUserAsync(ctx, ct);
 
+            // FR-24 / Spike 7 G-1: send If-Match for optimistic concurrency when the caller
+            // supplied the load-time ETag. Absent an ETag this remains the R1 blind PUT.
             var saved = await graphClient.Drives[driveId].Items[itemId].Content
-                .PutAsync(content, cancellationToken: ct);
+                .PutAsync(content, requestConfiguration =>
+                {
+                    if (!string.IsNullOrEmpty(ifMatch))
+                    {
+                        requestConfiguration.Headers.Add("If-Match", ifMatch);
+                    }
+                }, cancellationToken: ct);
 
             if (saved == null)
             {
@@ -362,6 +379,20 @@ public class UploadSessionManager
         {
             _logger.LogError(ex, "SPE replace-content: access denied drive={DriveId} item={ItemId}", driveId, itemId);
             throw new UnauthorizedAccessException($"Access denied to drive-item {itemId} on drive {driveId}", ex);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 412)
+        {
+            // FR-24 / Spike 7 C′ (G-1): the ETag moved under us — reject instead of clobbering.
+            _logger.LogWarning(ex, "SPE replace-content: If-Match precondition failed drive={DriveId} item={ItemId} ifMatch={IfMatch}",
+                driveId, itemId, ifMatch);
+            throw new EtagPreconditionFailedException(itemId, ifMatch, ex);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 423)
+        {
+            // FR-24 / Spike 7 C (G-2): the drive-item is open in Word for Web (locked co-authoring
+            // session) — surface a typed 423 rather than an opaque 500.
+            _logger.LogWarning(ex, "SPE replace-content: drive-item locked by Word drive={DriveId} item={ItemId}", driveId, itemId);
+            throw new DocumentLockedByWordException(itemId, ex);
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == 429)
         {

@@ -18,13 +18,13 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 003 | Spike 3 — atomic edit batch + rollback | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 004 | Spike 4 — semantic appendix hallucination delta | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 005 | Spike 5 — Open XML write w:ins+w:comment → Word for Web | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
-| 006 | Spike 6 — reverse round-trip (Word edit → webhook → read); tune re-anchor bands | 0 Spikes | 🟢 | 005 | 🔲 | STANDARD | sonnet | high |
+| 006 | Spike 6 — reverse round-trip (Word edit → webhook → read); tune re-anchor bands | 0 Spikes | 🟢 | 005 | ✅ | STANDARD | sonnet | high |
 | 007 | Spike 7 — SPE checkout vs Word-for-Web open collision UX | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 008 | Spike 8 — docx-benchmark harness baseline | 0 Spikes | 🟢 | 005 | 🔲 | STANDARD | sonnet | high |
-| 010 | FR-01 wire 1a "Browse / open file" → transient mount | 1 Entry | 🟢 | 000 | 🔲 | FULL | sonnet | high |
-| 011 | FR-02 wire 1a "Search for Document" → reuse 1c load path | 1 Entry | 🟢 | none | 🔲 | FULL | sonnet | high |
-| 012 | FR-03 1b upload → transient mount (flip send_workspace_artifact + feed bytes) | 1 Entry | 🟢 | none | 🔲 | FULL | opus | high |
-| 013 | FR-05 create-on-save pipeline — extend PromoteIfEphemeralAsync (container/profile/indexing) | 1 Entry | 🟢 | none | 🔲 | FULL | opus | xhigh |
+| 010 | FR-01 wire 1a "Browse / open file" → transient mount | 1 Entry | 🟢 | 000 | ✅ | FULL | sonnet | high |
+| 011 | FR-02 wire 1a "Search for Document" → reuse 1c load path | 1 Entry | 🟢 | none | ✅ | FULL | sonnet | high |
+| 012 | FR-03 1b upload → transient mount (flip send_workspace_artifact + feed bytes) | 1 Entry | 🟢 | none | ✅ | FULL | opus | high |
+| 013 | FR-05 create-on-save pipeline — extend PromoteIfEphemeralAsync (container/record/index; profile→core) | 1 Entry | 🟢 | none | ✅ | FULL | opus | xhigh |
 | 014 | FR-05 optional parent-association prompt (Tier 2c dialog integration) | 1 Entry | 🟡 | 013 | 🔲 | FULL | sonnet | high |
 | 015 | FR-06a upload fidelity branch (original-if-unedited) | 1 Entry | 🟢 | 013 | 🔲 | FULL | sonnet | high |
 | 016 | FR-04 draft-into-editor via compose disposition | 1 Entry | 🟢 | 000 | 🔲 | FULL | opus | high |
@@ -35,9 +35,9 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 023 | FR-22 SemanticAppendixGenerator + CriticMarkup read direction | 2 LLM | 🟢 | 004 | ✅ | FULL | sonnet | high |
 | 024 | FR-23 enriched compose-selection/compose-document scope descriptions | 2 LLM | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 025 | Unit tests for Services/Compose LLM services (NFR-05/08 + NetArchTest) | 2 LLM | 🟢 | 020,021,022,023 | ✅ | STANDARD | sonnet | high |
-| 030 | FR-14 TipTap BubbleMenu inline AI toolbar (Explain/Compare/Draft/More) | 3 Inline | 🟢 | none | 🔲 | FULL | sonnet | high |
+| 030 | FR-14 TipTap BubbleMenu inline AI toolbar (Explain/Compare/Draft/More) | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
 | 031 | FR-15 custom ProseMirror marks (insertion/deletion/commentAnchor) | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
-| 032 | FR-18 serial action queueing in ConversationPane | 3 Inline | 🟢 | none | 🔲 | FULL | sonnet | high |
+| 032 | FR-18 serial action queueing in ConversationPane | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
 | 033 | FR-16 pending track-change materialization from ledger (compose disposition) | 3 Inline | 🟢 | 031,016 | ✅ | FULL | opus | high |
 | 034 | FR-17 undo/replace via ledger supersession | 3 Inline | 🟢 | 033 | 🔲 | FULL | opus | high |
 | 040 | FR-07 compose-explain-clause Action + Binding | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
@@ -48,11 +48,11 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 045 | FR-12 eval cases per row (golden + dispatch ≥5) + schema validation | 4 Catalog | 🟢 | 040,041,042,043,044 | ✅ | FULL | sonnet | high |
 | 046 | FR-13 dispatch wiring (compose_selection_offer choreography + direct dispatchConsumer) | 4 Catalog | 🟢 | 016,030 | 🔲 | FULL | opus | high |
 | 047 | Deploy catalog rows to Dataverse (mirror-first) | 4 Catalog | 🟢 | 045 | 🔲 | STANDARD | sonnet | high |
-| 050 | FR-24 DocxAnnotationWriter (comments + track changes, edge cases) + push endpoint | 5 Word | 🟢 | 005 | 🔲 | FULL | opus | xhigh |
-| 051 | FR-25 DocxAnnotationReader (parse w:comment/w:ins/w:del) + pull endpoint | 5 Word | 🟢 | 006 | 🔲 | FULL | sonnet | high |
+| 050 | FR-24 DocxAnnotationWriter (comments + track changes, edge cases) + push endpoint | 5 Word | 🟢 | 005 | ✅ | FULL | opus | xhigh |
+| 051 | FR-25 DocxAnnotationReader (parse w:comment/w:ins/w:del) + pull endpoint | 5 Word | 🟢 | 006 | ✅ | FULL | sonnet | high |
 | 052 | FR-26 SPE webhook subscription + BackgroundService renewal + delta query | 5 Word | 🟢 | none | ✅ | FULL | opus | high |
-| 053 | FR-26 webhooks/spe-doc-changed + check-changes endpoints | 5 Word | 🟢 | 052 | 🔲 | FULL | sonnet | high |
-| 054 | FR-27 return-from-Word re-anchoring (bands ≥0.85/0.6–0.85/<0.6) + conflict banner | 5 Word | 🟢 | 051,006 | 🔲 | FULL | opus | high |
+| 053 | FR-26 webhooks/spe-doc-changed + check-changes endpoints | 5 Word | 🟢 | 052 | ✅ | FULL | sonnet | high |
+| 054 | FR-27 return-from-Word re-anchoring (bands ≥0.85/0.6–0.85/<0.6) + conflict banner | 5 Word | 🟢 | 051,006 | ✅ | FULL | opus | high |
 | 055 | FR-28 push/save deterministic path (gate dialog + OutcomeCard = splittable) | 5 Word | 🟡 | 050 | 🔲 | FULL | sonnet | high |
 | 056 | Deploy + Word for Web round-trip verification (Spikes 5/6 as gate) | 5 Word | 🟢 | 050,051,053,054 | 🔲 | STANDARD | sonnet | high |
 | 060 | FR-29 anchored annotations in Compose session payload (doc-adjacent) | 6 Memory | 🟢 | none | 🔲 | FULL | sonnet | high |
@@ -63,7 +63,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 070 | FR-34 activate six coordinated flows (PaneEventBus choreography) | 7 Coord | 🟡 | 030,031 | 🔲 | FULL | opus | high |
 | 071 | FR-34 D-F3 UI ack-on-frame-id | 7 Coord | 🔴 | 070 | ⛔ | FULL | sonnet | high |
 | 072 | FR-35 Document Q&A over session-mounted document (stretch) | 7 Coord | 🟢 | none | 🔲 | STANDARD | sonnet | high |
-| 080 | R1 spec.md amendment (two Word-native non-goals → "shipped in R2") | 8 Wrap | 🟢 | none | 🔲 | MINIMAL | sonnet | high |
+| 080 | R1 spec.md amendment (two Word-native non-goals → "shipped in R2") | 8 Wrap | 🟢 | none | ✅ | MINIMAL | sonnet | high |
 | 081 | Publish-size ≤60 MB + CVE scan + NetArchTest facade verification (NFR-01/02/05) | 8 Wrap | 🟢 | 025,050,052 | 🔲 | STANDARD | sonnet | high |
 | 082 | Flagship gate G-R2-C — browser-verified full chain on spaarkedev1 | 8 Wrap | 🔴 | 016,033,042,046,047,014,055 | ⛔ | FULL | opus | high |
 | 083 | AnchoredAnnotation Path-A deviation code-review sign-off | 8 Wrap | 🟢 | 060 | 🔲 | MINIMAL | sonnet | high |

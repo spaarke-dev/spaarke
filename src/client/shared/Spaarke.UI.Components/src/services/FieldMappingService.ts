@@ -40,7 +40,7 @@ import {
   type IFieldMappingRule,
   type IMappingResult,
 } from '../types/FieldMappingTypes';
-import { discoverNavProps, findNavProp } from './PolymorphicResolverService';
+import { discoverNavProps, findNavProp, cleanGuid } from './PolymorphicResolverService';
 
 /**
  * Inputs to {@link applyFieldMappings}. Deliberately matches the
@@ -438,15 +438,19 @@ async function applyCopyLookup(rule: IFieldMappingRule, ctx: IRuleApplyContext):
   const guid = record[valueKey];
   const referentEntity = record[annotationKey];
 
-  if (
-    typeof guid !== 'string' ||
-    guid.length === 0 ||
-    typeof referentEntity !== 'string' ||
-    referentEntity.length === 0
-  ) {
+  // Empty source lookup — the parent simply has no value for this field. This is
+  // the normal case (e.g. a Matter with only one attorney assigned), NOT an error:
+  // there is nothing to copy, so skip SILENTLY without a warning.
+  if (typeof guid !== 'string' || guid.length === 0) {
+    return;
+  }
+
+  // Value present but the lookuplogicalname annotation is missing/empty — a genuine
+  // anomaly (a populated lookup whose referent entity cannot be determined). Warn + skip.
+  if (typeof referentEntity !== 'string' || referentEntity.length === 0) {
     ctx.warnings.push(
-      `Copy rule "${rule.sourceField}"→"${rule.targetField}" skipped: could not resolve the referent ` +
-        `entity for the source lookup (missing or empty "${annotationKey}" annotation).`
+      `Copy rule "${rule.sourceField}"→"${rule.targetField}" skipped: source lookup has a value but its ` +
+        `"${annotationKey}" annotation is missing, so the referent entity cannot be resolved.`
     );
     return;
   }
@@ -469,17 +473,8 @@ async function applyCopyLookup(rule: IFieldMappingRule, ctx: IRuleApplyContext):
   }
 
   const entitySet = _resolveEntitySetForReferent(referentEntity);
-  ctx.payload[`${navProp}@odata.bind`] = `/${entitySet}(${_cleanGuidForBind(guid)})`;
+  ctx.payload[`${navProp}@odata.bind`] = `/${entitySet}(${cleanGuid(guid)})`;
   ctx.fieldsMapped.push(rule.targetField);
-}
-
-/**
- * Strip braces + lowercase a GUID for `@odata.bind` URLs. Mirrors the private
- * `_cleanGuid` helper in `CreateInvoiceWizard/invoiceService.ts` (not exported
- * there, so duplicated here minimally per task 012's constraint).
- */
-function _cleanGuidForBind(id: string): string {
-  return id.replace(/[{}]/g, '').toLowerCase();
 }
 
 /**

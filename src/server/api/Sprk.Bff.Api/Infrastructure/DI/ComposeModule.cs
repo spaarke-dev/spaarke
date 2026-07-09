@@ -30,6 +30,7 @@ public static class ComposeModule
         services.AddSingleton<ComposeEditTransaction>();                       // FR-21 (task 022) — snapshot/rollback wrapper; holds no per-operation instance state (see class remarks), safe as a singleton
         services.AddSingleton<SemanticAppendixGenerator>();                     // FR-22 (task 023)
         services.AddSingleton<CriticMarkupRenderer>();                          // FR-22 (task 023)
+        services.AddSingleton<DocxAnnotationWriter>();                          // FR-24 (task 050) — pure OOXML annotation writer; thread-safe stateless singleton (ADR-010). Consumed by ComposeService.PushAnnotationsAsync (registered unconditionally, same as its consumer — no asymmetric-registration risk per bff-extensions.md §F.1)
 
         // R2 W1 SPE change-detection (FR-26, task 052) — subscription state machine +
         // BackgroundService renewal (ADR-001 hosted service; ADR-007 Graph stays behind

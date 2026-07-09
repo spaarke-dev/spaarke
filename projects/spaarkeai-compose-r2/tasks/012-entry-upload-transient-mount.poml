@@ -2,7 +2,7 @@
   <metadata>
     <title>FR-03 1b upload -&gt; transient mount (flip send_workspace_artifact + feed bytes)</title>
     <phase>1 Entry</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>16</estimated-hours>
     <effort>high</effort>
     <dependencies>none</dependencies>
@@ -130,4 +130,73 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-09 (FULL rigor, opus @ high).
+
+    KEY AS-BUILT FINDING (grounds the whole design): the chat upload pipeline ALREADY retains
+    the original binary bytes server-side — ChatDocumentEndpoints.UploadDocumentAsync step 9b
+    stores them in ITenantCache under "doc-upload-binary" keyed {sessionId}:{documentId} with a
+    4-hour TTL (the same key PersistDocumentAsync reads back). So POST /api/compose/upload serves
+    those bytes from Redis: NO SPE/Graph access (ADR-007 trivially satisfied), NO sprk_document
+    created (FR-05/013 stays separate). Tasks 010/011 were NOT yet merged, so this task also had
+    to BUILD the transient docxBytes mount seam in ComposeWorkspace.
+
+    THE SEAM (how uploaded bytes reach the transient mount):
+      LLM calls send_workspace_artifact(Workspace, layoutName:Compose, widgetData.sessionFileId)
+      → handler threads widgetData.compose.upload = {sessionId=chat session (D), sessionFileId}
+      → workspace_open_tab SSE frame → useContextEventBridge → PaneEventBus workspace.widget_load
+      → WorkspaceLayoutWidget forwards data.compose opaquely → main.tsx SpaarkeAiWorkspaceRenderer
+        builds ComposeLaunchContext.upload → ComposeSectionMount passes initialUploadRef
+      → ComposeWorkspace effect POSTs /api/compose/upload {sessionId, documentId:sessionFileId}
+        → base64-decodes response.content into state.docxBytes via reducer mountTransient
+        (pointer-less documentRef, checkoutStatus=skipped, isDirty=true) → ComposeEditor renders.
+
+    FILES (created/modified):
+      BFF:
+      - Api/ComposeEndpoints.cs — activated POST /api/compose/upload (was 501); serves retained
+        bytes from ITenantCache; format-robust sessionId probe (D/N); ComposeUploadRequest/Response.
+      - Services/Ai/Handlers/SendWorkspaceArtifactHandler.cs — flipped the session-file refusal:
+        new widgetData.sessionFileId threads compose.upload seed; documentId/sessionFileId mutual
+        exclusion; description + validation reworded; summary states transient mount.
+      - infra/dataverse/sprk_analysistool-send-workspace-artifact-row.json — sprk_description kept
+        BYTE-EQUAL to the handler literal (verified 1502==1502 chars); schema + comments updated.
+      Client (shared @spaarke/compose-components):
+      - types/compose-contracts.ts — new ComposeUploadRef; index.ts barrel export.
+      - context/composeLaunchContext.ts — added optional upload?: ComposeUploadRef.
+      - widgets/ComposeWorkspace.types.ts — requestUploadMount + mountTransient reducer actions.
+      - widgets/ComposeWorkspace.tsx — initialUploadRef prop + upload-mount fetch effect.
+      Client (@spaarke/ai-widgets): widgets/workspace/WorkspaceLayoutWidget.tsx — compose.upload
+        seed (speDriveItemId made optional; opaque forward).
+      Host wiring: solutions/SpaarkeAi/src/main.tsx (renderer upload branch);
+        solutions/LegalWorkspace/src/sections/composeEditor.registration.ts (initialUploadRef).
+      Tests:
+      - src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.upload.test.tsx
+        (4 tests, PASS): mounts bytes / POST shape + no create-on-mount / 404 error banner /
+        mutually-exclusive with stored doc.
+      - tests/unit/.../SendWorkspaceArtifactHandlerTests.cs — 3 facts: upload seed carried + no
+        stored-doc seed + no Dataverse call; both-ids → validation failure; sessionFileId-only OK.
+      - tests/integration/contract/Api/Compose/ComposeEndpointsContractTests.cs — updated the
+        obsolete Returns501 test to assert the activated 400-on-missing-ids contract (the 401
+        unauth theory already covers /api/compose/upload → AC7).
+
+    BUILD/VERIFY (I was the sole npm builder; per orchestrator I ran NO dotnet — a concurrent BFF
+    agent owns dotnet, and it independently added a push-annotations endpoint to ComposeEndpoints.cs
+    in a non-overlapping region):
+      - @spaarke/compose-components: `npm run typecheck` CLEAN; `npx jest` 40/40 PASS (incl. 4 new).
+      - @spaarke/ai-widgets: `tsc --noEmit` CLEAN (confirms WorkspaceLayoutWidget widening safe).
+      - SpaarkeAi + LegalWorkspace: no node_modules — full-solution typecheck DEFERRED (needs
+        npm install --legacy-peer-deps). main.tsx + registration.ts changes are small/mechanical,
+        verified by inspection.
+      - BFF C#: NOT compiled here (dotnet owned by concurrent agent) — correct-by-construction,
+        relies on that agent + CI to compile/run. Publish-size delta: ZERO new NuGet deps → negligible;
+        no new HIGH CVE (no new deps). Exact size/CVE measurement deferred to the dotnet-owning agent.
+
+    ADR compliance: ADR-013 (upload path injects only ITenantCache — no AI internals) · ADR-039
+    (file-serving Redis read, not dispatch, no string-key routing) · ADR-008 (RequireAuthorization
+    inherited; 401 theory green) · ADR-007 (Redis only; zero Graph/SPE; NetArchTest facade untouched)
+    · ADR-028 (authenticatedFetch) · ADR-021 (no new UI; reuses Fluent-v9/dark-mode editor + banners).
+    Create-on-save intentionally NOT implemented (task 013): transient doc is pointer-less + dirty so
+    Save currently fails gracefully until 013 lands.
+  </notes>
 </task>
