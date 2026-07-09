@@ -17,7 +17,7 @@ R2 restores **automatic field inheritance at child-record creation time**: when 
 - Hoist nav-prop discovery (currently private to `eventService.ts`) to the shared lib for lookup binding.
 - **Additive BFF contract extension** so `GET /api/v1/field-mappings/profiles/{source}/{target}` returns `mappingType`, `defaultValue`, `expression`, `isRequired`, `compatibilityMode`.
 - **Additive Dataverse schema**: one new column `sprk_expression` (`NVARCHAR(2000)`) on `sprk_fieldmappingrule`.
-- Wire the engine into **7 wizard services** (5 present now + invoice/reportCard gated on an unmerged branch).
+- Wire the engine into **all 7 wizard services** (all present on master as of 2026-07-09), each in the entity service's create method, adjacent to `applyResolverFields`, before `createRecord`.
 - Seed the attorney/assigned-resource field-mapping matrix (config data), per-pair against verified target schema.
 - Support **same-entity (matter→matter) creation-time mapping** with an explicit negative test against a `source === target` guard.
 - Documentation: Field Mapping Framework architecture doc + admin authoring guide.
@@ -33,9 +33,11 @@ R2 restores **automatic field inheritance at child-record creation time**: when 
 ### Affected Areas
 - `src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts` — rewrite (the engine).
 - `src/client/shared/Spaarke.UI.Components/src/types/FieldMappingTypes.ts` — align types to the four engines + BFF DTO shape.
-- `src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts` (+ `matter`/`project`/`todo`/`workAssignment` services) — wire the engine; hoist `_discoverNavProps`/`_findNavProp` out to a shared util.
-- `src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/` — the reusable wizard whose entity `onFinish` is the integration point.
-- `invoiceService` / `reportCardService` (arriving via unmerged branch) — wire after merge.
+- **All 7 entity service create methods** — the integration point is each service's create method, **adjacent to the existing `applyResolverFields` call, before `createRecord`**. Every service already has `dataService` + `authenticatedFetch` + `bffBaseUrl` injected (via the `WizardHostProps` contract) — exactly the engine's inputs:
+  - `CreateEventWizard/eventService.ts` (`createEvent`), `CreateInvoiceWizard/invoiceService.ts` (`createInvoice`), `CreateReportCardWizard/reportCardService.ts` (`createReportCard`)
+  - `CreateMatterWizard/matterService.ts`, `CreateProjectWizard/projectService.ts`, `CreateTodoWizard/todoService.ts`, `CreateWorkAssignmentWizard/workAssignmentService.ts`
+- `PolymorphicResolverService.ts` — already exposes shared `findNavProp`/`INavPropEntry`; the engine reuses these for lookup `@odata.bind` (the per-service private `_discoverNavProps` should consolidate here rather than the engine re-implementing discovery).
+- `WizardRegistry/wizardRegistry.ts` + `WizardHostProps` — the dispatch/injection contract (no change needed; the engine consumes the already-injected services).
 - `src/server/api/Sprk.Bff.Api/Models/FieldMapping/FieldMappingRuleDto.cs` + `Api/FieldMappings/FieldMappingEndpoints.cs` (`MapRuleEntityToDto`) — additive DTO fields.
 - `src/server/shared/Spaarke.Dataverse/Models.cs` (`FieldMappingRuleEntity`) + `DataverseWebApiService.cs` (rule `$select` + `MapToFieldMappingRuleEntity`) — read `sprk_mapping_type` + `sprk_expression`.
 - `sprk_fieldmappingrule` (Dataverse) — new `sprk_expression` column; profile/rule data seed.
@@ -52,13 +54,13 @@ R2 restores **automatic field inheritance at child-record creation time**: when 
 5. **FR-05 (Default/Constant)**: A Default (`sprk_mapping_type = 1`) rule writes the `sprk_defaultvalue` literal to the target field, ignoring the source. — Acceptance: literal appears on the created record.
 6. **FR-06 (Concat)**: A Concat (`= 2`) rule resolves the `sprk_expression` format string, substituting `{sprk_field}` placeholders from the parent record, into a text/memo target. — Acceptance: `{sprk_matternumber} - {sprk_mattername}` yields the joined string; missing placeholder → warning + omit, not a throw.
 7. **FR-07 (Template)**: A Template (`= 3`) rule uses the same placeholder resolver as Concat against `sprk_expression`. — Acceptance: template string with fixed scaffold + placeholders resolves correctly.
-8. **FR-08 (Nav-prop discovery hoisted + shared)**: `_discoverNavProps`/`_findNavProp` move from `eventService.ts` to a shared `@spaarke/ui-components` utility consumed by the engine and all wired services. — Acceptance: one implementation; `eventService` regarding-link behavior unchanged.
+8. **FR-08 (Nav-prop discovery consolidated + shared)**: `findNavProp`/`INavPropEntry` already live in `PolymorphicResolverService.ts`; the per-service private `_discoverNavProps` (duplicated across event/invoice/reportCard/etc.) is consolidated into one shared implementation the engine reuses for lookup binding. — Acceptance: single `_discoverNavProps` implementation; each service's regarding-link + resolver behavior unchanged.
 9. **FR-09 (Result contract, never throws)**: The engine returns `{ profileFound, fieldsMapped, warnings }`. Type-incompatibility, missing source field, or unresolved placeholder produce a non-fatal warning + skip that rule and never abort record creation. — Acceptance: injected failure → record still created; warning surfaced via the wizard's existing warnings array.
 10. **FR-10 (BFF DTO extension — additive)**: `FieldMappingRuleDto` gains `mappingType`, `defaultValue`, `expression`, `isRequired`, `compatibilityMode`; `MapRuleEntityToDto` populates them; `DataverseWebApiService` rule `$select` + `FieldMappingRuleEntity` + `MapToFieldMappingRuleEntity` read `sprk_mapping_type` + `sprk_expression`. — Acceptance: endpoint returns the new fields; no new endpoint/service/DI/package; `git diff --stat` shows only additive changes.
 11. **FR-11 (Schema add — additive)**: Add nullable `sprk_expression` (`NVARCHAR(2000)`) to `sprk_fieldmappingrule` via `dataverse-create-schema`. — Acceptance: column exists in spaarkedev1; no existing rule modified; `sprk_defaultvalue` unchanged.
-12. **FR-12 (Wire present wizards)**: Call the engine from `onFinish`/service create paths for `event`, `matter`, `project`, `todo`, `workAssignment`. — Acceptance: each populates mapped fields at creation when a profile exists; graceful no-op otherwise.
-13. **FR-13 (Wire invoice/reportCard — gated)**: After the invoice/reportCard wizard branch merges to master + this worktree, wire `invoiceService`/`reportCardService`. — Acceptance: services confirmed to exist before wiring; both populate mapped fields at creation; task is blocked (not skipped) if the merge hasn't landed.
-14. **FR-14 (Seed the matrix — config data, per-pair)**: Seed profile + Copy rules for the assigned-resource lookups for each Matter→(target) pair, mapping **verified** source→target logical names (e.g. Matter `sprk_assignedattorney1` → Invoice `sprk_assignedtoattorney1`; omit fields absent on a target, e.g. Invoice has no law-firm). Deactivate/repurpose the two stale "SRFR-084 UAT" profiles; delete the orphaned empty rule. — Acceptance: a wizard-created Event/Invoice inherits the seeded attorney fields; seed authored against `describe`-verified target schema.
+12. **FR-12 (Wire all 7 wizard services)**: Call the engine from each entity service's create method — `createEvent`, `createInvoice`, `createReportCard`, and `matter`/`project`/`todo`/`workAssignment` — adjacent to `applyResolverFields`, before `createRecord`, passing the resolved parent from `association`/`initialAssociation`. — Acceptance: each populates mapped fields at creation when a profile exists; graceful no-op otherwise. All 7 services present on master (dependency satisfied 2026-07-09).
+13. **FR-13 (Report Card entity coverage)**: Confirm `createReportCard` payload/lookup shape matches the canonical pattern and wire identically; report-card target is `sprk_reportcard` (both `sprk_reportcard` and `sprk_kpiassessment` registry-fall-back to `report-card`). — Acceptance: wizard-created Report Card inherits mapped fields at creation.
+14. **FR-14 (Seed the matrix — config data, per-pair, verified names)**: Seed profile + Copy rules for the assigned-resource lookups for each Matter→(target) pair against **`describe`-verified** source→target logical names. Confirmed divergences (must be honored, not assumed): Event = identical 8 names; **Invoice** = `sprk_assignedtoattorney1/2`, `sprk_assignedtoparalegal1/2`, **no law-firm fields**; **Report Card** = attorney/paralegal/external/internal same as Matter, but `sprk_assignedlawfirm1` → `sprk_assignedtolawfirm1` (renamed), `sprk_assignedlawfirm2` same. Deactivate/repurpose the two stale "SRFR-084 UAT" profiles; delete the orphaned empty rule. — Acceptance: a wizard-created Event/Invoice/Report Card inherits the seeded fields; seed rules map only fields that exist on each target.
 15. **FR-15 (Same-entity support + negative test)**: Matter→matter creation-time mapping works; no `source === target` guard exists in engine/BFF/seed; a Copy rule mapping a field to the same-named field on a different record applies (not a no-op). — Acceptance: positive matter→matter test passes; negative test asserts no same-entity guard.
 16. **FR-16 (Push regression)**: `UpdateRelatedButton` → `/push` still works after the DTO extension (additive fields don't break its deserialization). — Acceptance: smoke test of the existing push path passes.
 17. **FR-17 (Documentation)**: Publish a Field Mapping Framework architecture doc (two tables, BFF contract, client engine, four mapping types, `sprk_expression` extensibility model, creation-vs-update boundary, same-entity note) and an admin authoring guide (native MDA form, mapping types, `sprk_expression` templates, attorney-seed worked example). — Acceptance: both docs exist; root `CLAUDE.md` §17 pointer table updated.
@@ -117,8 +119,7 @@ R2 restores **automatic field inheritance at child-record creation time**: when 
 
 ## Dependencies
 
-### Prerequisites
-- **Invoice/Report Card wizard branch merged** to master + this worktree before FR-13 executes. The 5 present services (event, matter, project, todo, workAssignment) are unblocked immediately.
+- **Invoice/Report Card wizard branch — MERGED to master (2026-07-09), dependency satisfied.** All 7 services present and wireable immediately; FR-13 ungated. Worktree synced (0 behind origin/master).
 - `dataverse-create-schema` access to spaarkedev1 for the `sprk_expression` column + data seed.
 
 ### External
@@ -142,8 +143,9 @@ R2 restores **automatic field inheritance at child-record creation time**: when 
 - **Seed target coverage**: assumed only fields present on a given target are seeded (verified via `describe`); absent fields (e.g. Invoice law-firm) are simply not mapped.
 
 ## Unresolved Questions
-- [ ] **Report Card field schema** — exact assigned-resource field logical names on the report-card target are unknown until its branch merges. Blocks: FR-13/FR-14 report-card seed rows (verify via `describe` post-merge).
-- [ ] **Invoice/Report Card wizard `onFinish` shape** — confirm the incoming services expose a create path the engine can hook the same way as `eventService` before wiring. Blocks: FR-13 (verify post-merge, do not assume).
+- [x] **Report Card field schema** — RESOLVED (2026-07-09). `sprk_reportcard` verified via `describe`: attorney/paralegal/external/internal match Matter; `sprk_assignedlawfirm1` → `sprk_assignedtolawfirm1` (renamed), `sprk_assignedlawfirm2` same. Captured in FR-14.
+- [x] **Invoice/Report Card wizard create shape** — RESOLVED. `invoiceService.createInvoice` / `reportCardService.createReportCard` mirror the canonical `workAssignmentService` flow (nav-prop → payload → BU cascade → `applyResolverFields` → `createRecord`); the engine hooks adjacent to `applyResolverFields` in each. No blockers remain.
+- [ ] **`sprk_assignedto1/2` on Invoice / `sprk_kpiassessment` scope** — confirm during seed authoring whether Invoice's generic `sprk_assignedto1/2` should receive any Matter mapping (likely not — no clean source counterpart). Non-blocking; resolve at FR-14 seed time.
 
 ---
 *AI-optimized specification. Original design: design.md*
