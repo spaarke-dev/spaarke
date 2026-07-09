@@ -535,8 +535,20 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   //     total and made "Critical > Open items" read as a contradiction. "Updates" is
   //     the honest label; summing the two sources is deliberately avoided (records can
   //     appear in both → double-count would violate the by-construction accuracy rule).
-  const overdueCount = filteredNarratives.find(cn => /overdue/i.test(cn.category))?.bullets.length ?? 0;
-  const newMattersCount = filteredNarratives.find(cn => /matter/i.test(cn.category))?.bullets.length ?? 0;
+  // Match the EXACT channel-category keys emitted by DailyBriefingCollector (server constants
+  // ChannelOverdueTasks="overdue-tasks", ChannelMatters="matters") — not a loose /overdue/ /matter/
+  // regex, which could false-match a future channel (e.g. "overdue-documents", "matter-invoices")
+  // and silently inflate a count. Sum across ALL channels with the key (defensive against >1),
+  // case-insensitive. If the server renames a key the tile shows 0 (visible in UAT) rather than a
+  // wrong non-zero — the accuracy-safe failure mode. Keep these keys in sync with the collector.
+  const OVERDUE_CATEGORY_KEY = 'overdue-tasks';
+  const MATTERS_CATEGORY_KEY = 'matters';
+  const sumBulletsForCategory = (key: string): number =>
+    filteredNarratives
+      .filter(cn => cn.category?.toLowerCase() === key)
+      .reduce((total, cn) => total + cn.bullets.length, 0);
+  const overdueCount = sumBulletsForCategory(OVERDUE_CATEGORY_KEY);
+  const newMattersCount = sumBulletsForCategory(MATTERS_CATEGORY_KEY);
   const statTiles: StatTile[] = [
     { label: 'Updates', value: totalVisibleBullets, tone: 'neutral' },
     { label: 'Overdue', value: overdueCount, tone: overdueCount > 0 ? 'danger' : 'neutral' },
