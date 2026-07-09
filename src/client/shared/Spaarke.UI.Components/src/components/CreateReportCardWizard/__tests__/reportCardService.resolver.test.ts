@@ -94,7 +94,9 @@ function makeDataService(): IDataService & { _captured: Record<string, Record<st
         const entry = logical ? CATALOG[logical] : undefined;
         if (!entry) return { entities: [] };
         if (query.includes('sprk_recordtype_refid')) {
-          return { entities: [{ sprk_recordtype_refid: entry.recordTypeId, sprk_recorddisplayname: entry.recordTypeName }] };
+          return {
+            entities: [{ sprk_recordtype_refid: entry.recordTypeId, sprk_recorddisplayname: entry.recordTypeName }],
+          };
         }
         if (query.includes('sprk_regardingrecordnumberfield')) {
           return { entities: [{ sprk_regardingrecordnumberfield: entry.numberField }] };
@@ -125,17 +127,61 @@ function stubFetchNavProps() {
         status: 200,
         json: async () => ({
           value: [
-            { ReferencingAttribute: 'sprk_regardingmatter', ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter', ReferencedEntity: 'sprk_matter' },
-            { ReferencingAttribute: 'sprk_regardingproject', ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject', ReferencedEntity: 'sprk_project' },
-            { ReferencingAttribute: 'sprk_regardingrecordtype', ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType', ReferencedEntity: 'sprk_recordtype_ref' },
-            { ReferencingAttribute: 'sprk_assignedattorney1', ReferencingEntityNavigationPropertyName: 'sprk_AssignedAttorney1', ReferencedEntity: 'contact' },
-            { ReferencingAttribute: 'sprk_assignedattorney2', ReferencingEntityNavigationPropertyName: 'sprk_AssignedAttorney2', ReferencedEntity: 'contact' },
-            { ReferencingAttribute: 'sprk_assignedparalegal1', ReferencingEntityNavigationPropertyName: 'sprk_AssignedParalegal1', ReferencedEntity: 'contact' },
-            { ReferencingAttribute: 'sprk_assignedparalegal2', ReferencingEntityNavigationPropertyName: 'sprk_AssignedParalegal2', ReferencedEntity: 'contact' },
-            { ReferencingAttribute: 'sprk_assignedtolawfirm1', ReferencingEntityNavigationPropertyName: 'sprk_AssignedToLawFirm1', ReferencedEntity: 'sprk_organization' },
-            { ReferencingAttribute: 'sprk_assignedlawfirm2', ReferencingEntityNavigationPropertyName: 'sprk_AssignedLawFirm2', ReferencedEntity: 'sprk_organization' },
-            { ReferencingAttribute: 'sprk_assignedtoexternal', ReferencingEntityNavigationPropertyName: 'sprk_AssignedToExternal', ReferencedEntity: 'contact' },
-            { ReferencingAttribute: 'sprk_assignedtointernal', ReferencingEntityNavigationPropertyName: 'sprk_AssignedToInternal', ReferencedEntity: 'contact' },
+            {
+              ReferencingAttribute: 'sprk_regardingmatter',
+              ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter',
+              ReferencedEntity: 'sprk_matter',
+            },
+            {
+              ReferencingAttribute: 'sprk_regardingproject',
+              ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject',
+              ReferencedEntity: 'sprk_project',
+            },
+            {
+              ReferencingAttribute: 'sprk_regardingrecordtype',
+              ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType',
+              ReferencedEntity: 'sprk_recordtype_ref',
+            },
+            {
+              ReferencingAttribute: 'sprk_assignedattorney1',
+              ReferencingEntityNavigationPropertyName: 'sprk_AssignedAttorney1',
+              ReferencedEntity: 'contact',
+            },
+            {
+              ReferencingAttribute: 'sprk_assignedattorney2',
+              ReferencingEntityNavigationPropertyName: 'sprk_AssignedAttorney2',
+              ReferencedEntity: 'contact',
+            },
+            {
+              ReferencingAttribute: 'sprk_assignedparalegal1',
+              ReferencingEntityNavigationPropertyName: 'sprk_AssignedParalegal1',
+              ReferencedEntity: 'contact',
+            },
+            {
+              ReferencingAttribute: 'sprk_assignedparalegal2',
+              ReferencingEntityNavigationPropertyName: 'sprk_AssignedParalegal2',
+              ReferencedEntity: 'contact',
+            },
+            {
+              ReferencingAttribute: 'sprk_assignedtolawfirm1',
+              ReferencingEntityNavigationPropertyName: 'sprk_AssignedToLawFirm1',
+              ReferencedEntity: 'sprk_organization',
+            },
+            {
+              ReferencingAttribute: 'sprk_assignedlawfirm2',
+              ReferencingEntityNavigationPropertyName: 'sprk_AssignedLawFirm2',
+              ReferencedEntity: 'sprk_organization',
+            },
+            {
+              ReferencingAttribute: 'sprk_assignedtoexternal',
+              ReferencingEntityNavigationPropertyName: 'sprk_AssignedToExternal',
+              ReferencedEntity: 'contact',
+            },
+            {
+              ReferencingAttribute: 'sprk_assignedtointernal',
+              ReferencingEntityNavigationPropertyName: 'sprk_AssignedToInternal',
+              ReferencedEntity: 'contact',
+            },
           ],
         }),
       } as Response;
@@ -180,7 +226,11 @@ describe('ReportCardService.createReportCard', () => {
       const ds = makeDataService();
       const service = new ReportCardService(ds);
 
-      const form = makeForm({ name: '  Q3 Compliance Review  ', narrative: 'Quarterly review notes', dueDate: '2026-09-30' });
+      const form = makeForm({
+        name: '  Q3 Compliance Review  ',
+        narrative: 'Quarterly review notes',
+        dueDate: '2026-09-30',
+      });
 
       const result = await service.createReportCard(form, null);
 

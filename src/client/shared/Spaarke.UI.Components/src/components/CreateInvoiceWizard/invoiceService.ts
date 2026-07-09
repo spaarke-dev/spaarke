@@ -263,7 +263,9 @@ export class InvoiceService {
     // `sprk_ai_search_index` lookup from the current user's owning Business Unit.
     // INV-5 guards each scalar field independently.
     try {
-      const currentUserId = this._getCurrentUserIdOverride ? (this._getCurrentUserIdOverride() ?? '') : _getCurrentUserId();
+      const currentUserId = this._getCurrentUserIdOverride
+        ? (this._getCurrentUserIdOverride() ?? '')
+        : _getCurrentUserId();
       if (currentUserId) {
         const defaults = await EntityCreationService.resolveUserBuDefaults(this._dataService, currentUserId);
         EntityCreationService.applyUserBuDefaults(entity, defaults);
@@ -321,7 +323,11 @@ export class InvoiceService {
 
     // -- Step 2: Upload files to SPE + dual-bind sprk_document ---------------
     if (uploadedFiles.length > 0 && this._containerId) {
-      const uploadResult = await this._entityService.uploadFilesToSpe(this._containerId, uploadedFiles, onUploadProgress);
+      const uploadResult = await this._entityService.uploadFilesToSpe(
+        this._containerId,
+        uploadedFiles,
+        onUploadProgress
+      );
 
       if (!uploadResult.success) {
         warnings.push(
@@ -335,7 +341,9 @@ export class InvoiceService {
           // Primary bind: the newly-created Invoice.
           const invoiceNavProp = findNavProp(docNavProps, 'sprk_invoice', 'invoice');
           if (!invoiceNavProp) {
-            console.warn('[InvoiceService] No nav-prop found on sprk_document for sprk_invoice — dual-bind incomplete.');
+            console.warn(
+              '[InvoiceService] No nav-prop found on sprk_document for sprk_invoice — dual-bind incomplete.'
+            );
           }
 
           // Additional bind: the host record (Matter/Project), if an association
@@ -395,7 +403,8 @@ export class InvoiceService {
 
       if (uploadResult.failureCount > 0 && uploadResult.successCount > 0) {
         warnings.push(
-          `${uploadResult.failureCount} file(s) failed to upload: ` + uploadResult.errors.map(e => e.fileName).join(', ')
+          `${uploadResult.failureCount} file(s) failed to upload: ` +
+            uploadResult.errors.map(e => e.fileName).join(', ')
         );
       }
     } else if (uploadedFiles.length > 0 && !this._containerId) {

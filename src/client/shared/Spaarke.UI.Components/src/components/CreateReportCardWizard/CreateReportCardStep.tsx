@@ -26,7 +26,10 @@ import * as React from 'react';
 import { Text, Input, Textarea, Field, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from '../LookupField/LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
-import { searchContactsAsLookup, searchOrganizationsAsLookup } from '../CreateWorkAssignmentWizard/workAssignmentService';
+import {
+  searchContactsAsLookup,
+  searchOrganizationsAsLookup,
+} from '../CreateWorkAssignmentWizard/workAssignmentService';
 import { buildEmptyReportCardForm } from './formTypes';
 import type { ICreateReportCardFormState } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
