@@ -101,10 +101,8 @@ public sealed class VerifyCitationsHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Verify Citations",
-        Description: "Verifies legal citations found in the provided text against authoritative sources. " +
-                     "Returns verification status, confidence, and source URLs for each citation. " +
-                     "Use when the user asks to verify references, check case validity, or confirm " +
-                     "regulatory citations.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-citation-verify-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Verifies legal citations found in the provided text against authoritative sources. Returns verification status, confidence, and source URLs for each citation. Use when the user asks to verify references, check case validity, or confirm regulatory citations.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

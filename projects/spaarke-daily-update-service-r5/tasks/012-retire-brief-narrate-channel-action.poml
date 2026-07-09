@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Retire BRIEF-NARRATE-CHANNEL Action + remove its code constant and call path</title>
+    <phase>A: Accuracy core</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, ai, catalog</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; modifies .cs (narrator const) and retires a catalog Action with grep-zero verification (Step 3.5.5 FULL triggers).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical retirement (delete const + call path already dead after 010, retire catalog row) with explicit grep verification; no judgment-heavy design (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits DailyBriefingNarrator.cs which overlaps task 010; must run after 010 removes the call path so the const is safely deletable.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Retire the BRIEF-NARRATE-CHANNEL catalog Action (via BA editor / Dataverse MCP) and remove its remaining code footprint — the ChannelActionCode constant and any now-dead reference in DailyBriefingNarrator. Achieve grep-zero code consumers of "BRIEF-NARRATE-CHANNEL". Leave BRIEF-NARRATE-TLDR untouched. Per FR-A2 / NFR-05.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Familiar with the ADR-039/040 catalog-Action model, Dataverse Action catalog editing via BA editor/MCP, and the DailyBriefing narrator.
+  </role>
+
+  <goal>
+    The BRIEF-NARRATE-CHANNEL Action row is retired in the catalog and the ChannelActionCode constant plus any residual code reference is deleted from DailyBriefingNarrator.cs. A repo-wide grep for BRIEF-NARRATE-CHANNEL returns zero hits under src/. BRIEF-NARRATE-TLDR remains present and functional. Eval cases that referenced the channel Action are updated. BFF builds 0 errors; publish size reported.
+  </goal>
+
+  <context>
+    <background>
+      Task 010 removed the per-channel LLM call path, leaving ChannelActionCode unreferenced in the execution path. This task completes the retirement: delete the const, retire the catalog Action data, and prove no code consumer remains. NFR-05 requires grep-zero before merge; the retirement must be coordinated with eval-case updates so the suite stays green.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs</file>
+      <file>tests/integration/contract/Eval/golden-utterances.json</file>
+      <file>tests/integration/contract/Eval/GoldenUtteranceEvalSuiteTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-040">Retire the Action as catalog data (BA editor / Dataverse MCP), mirror-first. Do NOT delete the Action by editing code that assumes catalog contents; the catalog is the source of truth for Action rows.</constraint>
+    <constraint source="project">Remove ONLY the ChannelActionCode const (DailyBriefingNarrator.cs:62) and any residual reference to it. Do NOT touch TldrActionCode (line 61) or the BRIEF-NARRATE-TLDR resolution/call — that leg stays.</constraint>
+    <constraint source="project">A repo-wide grep -r "BRIEF-NARRATE-CHANNEL" src/ MUST return zero hits at task completion. Catalog exports, migration notes, or docs may retain the string for provenance (note this), but no code path may reference it.</constraint>
+    <constraint source="project">Update eval cases in golden-utterances.json / GoldenUtteranceEvalSuiteTests.cs that reference the channel Action so the eval suite stays green after retirement (NFR-05 / NFR-02).</constraint>
+    <constraint source="root-CLAUDE.md-§10">BFF-touching task: state placement decision, run dotnet publish, report compressed size + diff vs 49.63 MB baseline, confirm no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-040-catalog-action.md</file>
+      <file>.claude/adr/ADR-039-coded-composite.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+    </files>
+    <patterns>
+      <pattern name="Mirror-first catalog Action edit" location="docs/guides/ai-guide-consumer-wiring.md">
+        Catalog Action rows are authored/retired via BA editor/MCP with the eval-case obligation; follow the same discipline in reverse for retirement.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm task 010 has landed and the per-channel call path is gone (grep the narrator for CallLlmStructuredAsync(ChannelActionCode ...) returns nothing).</step>
+    <step order="2">Delete the ChannelActionCode const (DailyBriefingNarrator.cs:62) and any XML-doc/comment referencing the channel Action.</step>
+    <step order="3">Retire the BRIEF-NARRATE-CHANNEL row in the Dataverse Action catalog via BA editor / Dataverse MCP (mirror-first). Record the retirement in notes.</step>
+    <step order="4">Update golden-utterances.json + GoldenUtteranceEvalSuiteTests.cs to drop/adjust any case asserting BRIEF-NARRATE-CHANNEL dispatch.</step>
+    <step order="5">Run grep -r "BRIEF-NARRATE-CHANNEL" src/ and confirm zero code hits; document any non-code (doc/catalog-export) survivors.</step>
+    <step order="6">dotnet build src/server/api/Sprk.Bff.Api/ (0 errors); run the eval suite; run dotnet publish and report size.</step>
+    <step order="7">Update TASK-INDEX.md: task 012 status to completed. Record deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If retiring the catalog row would break a non-briefing consumer (an unexpected Action reference outside DailyBriefing*), STOP and escalate per root CLAUDE.md §6 — do not force the retirement or leave a dangling reference.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish BFF</tool>
+    <tool name="terminal">grep for consumers</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs</output>
+    <output type="test">tests/integration/contract/Eval/golden-utterances.json</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/012-channel-action-retirement.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep -r "BRIEF-NARRATE-CHANNEL" src/ returns zero code hits (documented catalog-export/doc survivors, if any, are called out in notes).</criterion>
+    <criterion testable="true">The ChannelActionCode const is deleted from DailyBriefingNarrator.cs; TldrActionCode and the BRIEF-NARRATE-TLDR resolution/call are unchanged.</criterion>
+    <criterion testable="true">The BRIEF-NARRATE-CHANNEL row is retired in the Dataverse Action catalog (retirement recorded in notes).</criterion>
+    <criterion testable="true">Eval cases referencing the channel Action are updated; the eval suite (golden-utterance) runs green.</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ exits 0 errors; publish size reported (absolute + diff vs 49.63 MB baseline); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-A2 / NFR-05 and plan.md Phase A.3. Depends on task 010 having removed the call path. BRIEF-NARRATE-TLDR is explicitly KEPT (spec Scope). Catalog edit is via BA editor/MCP per ADR-040 mirror-first + eval-case obligation.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist, FULL-rigor Step 9.5 gates, and BFF publish-size verification.
+    </protocol>
+  </execution>
+</task>

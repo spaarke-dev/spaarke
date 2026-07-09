@@ -62,12 +62,8 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Dataverse Update Record",
-        Description: "Updates columns on one existing Dataverse record under the calling user's permissions. " +
-                     "Call dataverse.describe first if the table's schema is unknown — do NOT guess column " +
-                     "logical names from display names. Choice columns require numeric option values, not labels. " +
-                     "Only the columns present in 'item' are changed. Update-only: a record that does not exist " +
-                     "or is not visible to the user fails with not-found — it is never created. " +
-                     "SIDE-EFFECT tool (write): executed with the user's own privileges.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-dataverse-update-record-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Updates columns on one existing Dataverse record under the calling user's permissions. Call dataverse.describe first if the table's schema is unknown — do NOT guess column logical names from display names. Only the columns present in 'item' are changed. Values: strings/numbers/booleans for simple fields; numeric option values for choice columns; comma-separated numeric values for multi-select choice; lookup fields as {""relatedTable"": ""..."", ""recordId"": ""guid""}. Update-only: a record that does not exist or is not visible to the user fails with not-found — it is never created. WRITE tool: executes with the user's own privileges. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname); people = contact, companies = account.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

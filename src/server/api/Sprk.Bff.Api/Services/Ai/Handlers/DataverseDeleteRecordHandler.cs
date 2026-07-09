@@ -60,11 +60,8 @@ public sealed partial class DataverseDeleteRecordHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Dataverse Delete Record",
-        Description: "Deletes one row from a Dataverse table under the calling user's permissions. Proceed solely " +
-                     "on explicit user consent: set hasUserApproved to true only after the user has affirmatively " +
-                     "confirmed the deletion. The delete is permanent and executed with the user's own privileges; " +
-                     "if the user cannot delete the record, the call fails with their access error. " +
-                     "SIDE-EFFECT tool (write).",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-dataverse-delete-record-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Deletes one row from a Dataverse table under the calling user's permissions. Proceed solely on explicit user consent: set hasUserApproved to true only after the user has affirmatively confirmed the deletion. The delete is permanent and executes with the user's own privileges; if the user cannot delete the record, the call fails with their access error. WRITE tool. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname); people = contact, companies = account.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Deploy redesigned Daily Briefing code page for G-R5-D browser UAT (light + dark)</title>
+    <phase>D: Visual redesign</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>023</dependencies>
+    <blocks>090</blocks>
+    <tags>deploy, frontend, code-page</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task (no new product code); STANDARD per Step 3.5.5 — builds and deploys an existing code page and prepares an operator UAT script.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical build + deploy following the code-page-deploy skill and azure-deployment constraints; no design or architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment to shared spaarkedev1 environment; irreversible/ordered — must not run alongside other deploys.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build and deploy the redesigned Daily Briefing code page (consuming the task-023 updated
+    Spaarke.DailyBriefing.Components) to spaarkedev1, then prepare the G-R5-D browser UAT script for the operator to
+    execute in both light and dark. Archive the UAT screenshots. Gates are operator-executed browser UAT — this task
+    deploys and stages the gate, it does not self-certify it.
+  </prompt>
+
+  <role>
+    SPAARKE platform deployment engineer. Expert in building and deploying React Code Page web resources to Dataverse
+    (code-page-deploy) and the spaarkedev1 environment conventions.
+  </role>
+
+  <goal>
+    The redesigned Daily Briefing code page is deployed to spaarkedev1 and loads the task-023 redesign; a G-R5-D
+    browser UAT script (operator-executed, covering light + dark) exists in the project notes; and UAT screenshots
+    are archived. Deployment evidence (what was built/deployed) is recorded in the project notes.
+  </goal>
+
+  <context>
+    <background>
+      Per spec NFR-07, G-R5-D's production verification is operator-executed browser UAT on spaarkedev1 (after the
+      harness sign-off gate 022) — curl/tests/logs never satisfy a gate. This task deploys the ported redesign (task
+      023) so the operator can validate the redesigned briefing in the real environment in both themes. The code page
+      consumes the shared lib; deploying the updated shared lib into the code page bundle is the mechanism.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/ (redesigned components from task 023)</file>
+      <file>the Daily Briefing code page that hosts DailyBriefingApp (build + web-resource deploy target)</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/uat/G-R5-D-uat-script.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/uat/ (archived UAT screenshots)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="skill:code-page-deploy">Build and deploy the Daily Briefing code page via the code-page-deploy skill (production build, web-resource upload + publish). Do NOT hand-roll a deploy path.</constraint>
+    <constraint source="constraint:azure-deployment">Deploy ONLY to spaarkedev1. Follow the azure-deployment constraints (master-sync-first per FR-E1: warn if the branch is behind origin/master before deploying). Do NOT deploy to any production environment.</constraint>
+    <constraint source="project">This task deploys and STAGES the gate. It MUST NOT mark G-R5-D as passed — G-R5-D is operator-executed browser UAT. The task's job is: deployed page loads the redesign + a UAT script exists + screenshots archived.</constraint>
+    <constraint source="project">The UAT script MUST cover BOTH light and dark, and MUST include the FR-D2 checks: glanceable "what matters", TL;DR + "Critical Today" prominent, every item navigable to its detail record, not a table paradigm.</constraint>
+    <constraint source="project">Node installs for the code page use npm install --legacy-peer-deps --no-audit --no-fund (root CLAUDE.md §12), and the production build (not a dev build).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/design/APPROVED.md</file>
+      <file>projects/spaarke-daily-update-service-r5/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm task 023 is complete and merged, and warn if the branch is behind origin/master (FR-E1 master-sync-first) before deploying.</step>
+    <step order="2">Follow code-page-deploy to produce a production build of the Daily Briefing code page that bundles the task-023 redesigned Spaarke.DailyBriefing.Components.</step>
+    <step order="3">Deploy/publish the code page web resource to spaarkedev1 per code-page-deploy.</step>
+    <step order="4">Open the deployed page in the browser and confirm it loads the redesigned briefing (not the old flat UI) without console errors, in light and dark.</step>
+    <step order="5">Write projects/spaarke-daily-update-service-r5/notes/uat/G-R5-D-uat-script.md — an operator-executed browser UAT checklist covering light + dark and the FR-D2 checks (glanceable, TL;DR + Critical Today prominent, every item navigable to detail, not a table).</step>
+    <step order="6">Capture and archive light + dark screenshots of the deployed redesign into projects/spaarke-daily-update-service-r5/notes/uat/.</step>
+    <step order="7">Record deployment evidence (build artifact, environment = spaarkedev1, publish confirmation) in projects/spaarke-daily-update-service-r5/notes/uat/G-R5-D-uat-script.md.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to completed. Note that the G-R5-D pass/fail decision is the operator's, made by executing the UAT script.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the deployed page does not load the redesign, throws console errors, or fails to render in dark mode on spaarkedev1, STOP and escalate per root CLAUDE.md §6 — do NOT hand a broken deployment to the operator UAT gate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Production-build the code page</tool>
+    <tool name="terminal">Run the code-page-deploy steps / capture screenshots</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/uat/G-R5-D-uat-script.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/uat/ (light + dark deployed-redesign screenshots)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Daily Briefing code page is deployed to spaarkedev1 and loads the task-023 redesigned briefing (not the prior flat UI) without console errors.</criterion>
+    <criterion testable="true">The deployed page renders correctly in both light and dark on spaarkedev1.</criterion>
+    <criterion testable="true">A G-R5-D operator-executed browser UAT script exists at notes/uat/G-R5-D-uat-script.md covering light + dark and the FR-D2 checks.</criterion>
+    <criterion testable="true">Light + dark screenshots of the deployed redesign are archived under notes/uat/.</criterion>
+    <criterion testable="true">The task did NOT self-certify G-R5-D; the pass/fail decision is left to the operator executing the UAT script.</criterion>
+    <criterion testable="true">Deployment targeted spaarkedev1 only, and a branch-behind-origin/master warning was checked before deploying (FR-E1).</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Deployed redesign loads">
+      <steps>
+        <step>Open the deployed Daily Briefing code page on spaarkedev1</step>
+        <step>Verify the redesigned layout (TL;DR band, Critical Today, item rows) matches the approved design</step>
+        <step>Check the browser console for JavaScript errors</step>
+      </steps>
+      <expected>The redesigned briefing loads on spaarkedev1 with no console errors.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in the app/host</step>
+        <step>Verify background colors adapt (no white in dark mode)</step>
+        <step>Verify text colors adapt (no black in dark mode)</step>
+        <step>Verify icons/badges use Fluent v9 semantic tokens, no hard-coded hex</step>
+      </steps>
+      <expected>The deployed redesign uses Fluent UI v9 semantic tokens per ADR-021 in both themes.</expected>
+    </test>
+    <test name="Item navigation on deployed page">
+      <steps>
+        <step>Click item navigation affordances on the deployed page</step>
+        <step>Verify each navigates to the correct detail record</step>
+      </steps>
+      <expected>Every item is navigable to its detail record on the deployed page.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    G-R5-D production verification is operator browser UAT on spaarkedev1 (spec NFR-07); this task deploys and stages
+    that gate. Master-sync-first (FR-E1): warn on branch-behind before deploying. Blocks task 090 (wrap-up).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -27,6 +27,7 @@ import type {
   IDialogOpenPayload,
   INavigatePayload,
 } from '../types';
+import type { IOutcomeCard } from '../OutcomeCard';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -346,6 +347,14 @@ export interface IGateResolveOutcome {
   recordEntityLogicalName?: string;
   /** Created/updated record's GUID (additive, R4-3). */
   recordId?: string;
+  /**
+   * The server's structured OutcomeCard v1 for a confirmed side-effect
+   * (spaarke-ai-architecture-redesign-r2 task 035 / FR-A1-06; additive). When present, the
+   * caller renders it via the OutcomeCard component (server-composed link chip + next-step
+   * chips) instead of the markdown "[Open record]" link. Undefined on reject, on the
+   * Binding-dispatch leg, and when the server did not emit a card.
+   */
+  outcome?: IOutcomeCard;
 }
 
 /** Shared POST to the gate-resolve endpoint. */
@@ -407,7 +416,17 @@ async function resolveGate(
       recordUrl?: string | null;
       recordEntityLogicalName?: string | null;
       recordId?: string | null;
+      // task 035 / FR-A1-06: the structured OutcomeCard v1. Tolerant reader — a card is used
+      // only when it carries a summary.userFacing (the minimum renderable shape).
+      outcome?: IOutcomeCard | null;
     };
+    const card =
+      result.outcome &&
+      typeof result.outcome === 'object' &&
+      result.outcome.summary &&
+      typeof result.outcome.summary.userFacing === 'string'
+        ? result.outcome
+        : undefined;
     return approved
       ? {
           success: true,
@@ -421,6 +440,8 @@ async function resolveGate(
               ? result.recordEntityLogicalName
               : undefined,
           recordId: typeof result.recordId === 'string' && result.recordId.length > 0 ? result.recordId : undefined,
+          // task 035 / FR-A1-06: the structured completion card (additive).
+          outcome: card,
         }
       : { success: true, message: `${pendingAction.actionName} was cancelled.` };
   } catch (err: unknown) {

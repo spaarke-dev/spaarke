@@ -204,6 +204,25 @@ public static class ChatEndpoints
             .ProducesProblem(401)
             .ProducesProblem(404);
 
+        // GET /api/ai/chat/sessions/{sessionId}/trace — decision-traceability read surface
+        // (AIR2-038 / FR-A1-09, D-F4). NET-NEW read surface: projects the session's stored
+        // ADR-040 ledger markers (ToolChain + Gate + ContextEnvelope-fingerprint) into the
+        // TraceEvent v1 stream so a decision-traceability view survives a hard refresh (closing
+        // the client executionTraceBuffer mount-gap). Read-only (D-F0(b) reads are free); no new
+        // store (ADR-040 — the ledger stays source of truth); consumable by satellite CRUD code
+        // only via the ISessionTraceReader PublicContracts facade (ADR-013). Same auth + rate
+        // limit as the sibling session-read routes (ADR-008): AddAiAuthorizationFilter + ai-stream.
+        group.MapGet("/sessions/{sessionId}/trace", GetSessionTraceAsync)
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-stream")
+            .WithName("GetSessionTrace")
+            .WithSummary("Read the decision-traceability trace for a session (FR-A1-09)")
+            .WithDescription("Projects the session ledger's stored ToolChain + Gate + ContextEnvelope-fingerprint markers (ADR-040) into the TraceEvent v1 read stream (request -> context slices -> tools -> gate/approval -> outcome). Read-only projection — no parallel store; the ledger remains the single source of truth. Rehydrates a decision-traceability view after a hard refresh, closing the client trace-buffer mount-gap. Identifiers/counts only (NFR-07). Returns an empty list for an unknown/expired session.")
+            .Produces<IReadOnlyList<TraceEvent>>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(429);
+
         // GET /api/ai/chat/playbooks — discover available playbooks (no session required)
         group.MapGet("/playbooks", ListPlaybooksAsync)
             .AddAiAuthorizationFilter()
@@ -1658,6 +1677,53 @@ public static class ChatEndpoints
     }
 
     // =========================================================================
+    // Decision-traceability read surface (AIR2-038 / FR-A1-09 — D-F4)
+    // =========================================================================
+    //
+    // PLACEMENT JUSTIFICATION (CLAUDE.md §10 BFF Hygiene + ADR-013 decision criteria):
+    //   Q1 latency/TTFB budget against BFF state?         YES — projects the live session
+    //      ledger the chat surface just wrote (<500ms restore budget, same as /restore).
+    //   Q2 writes BFF session/audit state same lifecycle? read-only, but reads the SAME
+    //      ledger/session state the request pipeline owns.
+    //   Q3 retroactive annotation of a streaming response? YES — it is the read-half of the
+    //      store-before-render trace the /messages SSE stream writes.
+    //   Q4 event-driven with no synchronous user wait?     NO — it serves an interactive
+    //      "how did you decide?" affordance.
+    //   → All BFF answers → stays in the BFF, on the existing /api/ai/chat group.
+    //   Facade (ADR-013): satellite/CRUD consumers reach the trace ONLY via
+    //      ISessionTraceReader (PublicContracts) — the endpoint injects that facade and never
+    //      exposes ledger internals (SessionToolChain/SessionGate/ChatSession) on the wire.
+    //   No new store (ADR-040): pure projection over markers already on the session; reads are
+    //      free (D-F0(b)); store-before-render is untouched (this is the render-side read).
+    //   No new DI module (ADR-010): ISessionTraceReader registered next to ChatSessionManager in
+    //      AnalysisServicesModule (both unconditional → symmetric registration, §F.1).
+    //   No new package; publish-size delta is code-only (~a few KB IL).
+
+    /// <summary>
+    /// GET /api/ai/chat/sessions/{sessionId}/trace
+    /// Reads the decision-traceability TraceEvent v1 stream for a session (AIR2-038 / FR-A1-09).
+    /// Read-only projection over the ADR-040 ledger; returns an empty list for an unknown session.
+    /// </summary>
+    private static async Task<IResult> GetSessionTraceAsync(
+        string sessionId,
+        HttpContext httpContext,
+        ISessionTraceReader traceReader,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        var trace = await traceReader.ReadTraceAsync(tenantId, sessionId, cancellationToken);
+        return Results.Ok(trace);
+    }
+
+    // =========================================================================
     // Workspace tab persistence (NFR-09 — task 065)
     // =========================================================================
     //
@@ -2039,7 +2105,13 @@ public static class ChatEndpoints
                 "confirmed", userFacingSummary,
                 RecordUrl: outcome.RecordUrl,
                 RecordEntityLogicalName: outcome.RecordEntityLogicalName,
-                RecordId: outcome.RecordId?.ToString("D")));
+                RecordId: outcome.RecordId?.ToString("D"),
+                // task 035 / FR-A1-06: carry the Completion Engine's OutcomeCard so the client
+                // renders the structured card (server-composed link chip + next-step chips)
+                // instead of parsing the markdown "[Open record]" link. Composed from the stored
+                // ledger output (store-before-render — ADR-040); null only if the ledger write
+                // degraded, in which case the client falls back to the summary/record fields.
+                Outcome: outcome.Outcome));
         }
 
         // Binding-backed: get-then-delete (double-confirm → 409) + confirmed ledger marker.
@@ -3157,9 +3229,17 @@ public record GateResolveRequest(bool Approved);
 /// </param>
 /// <param name="RecordEntityLogicalName">Created/updated record's table logical name (additive, R4-3).</param>
 /// <param name="RecordId">Created/updated record's GUID as <c>D</c>-format string (additive, R4-3).</param>
+/// <param name="Outcome">
+/// The Completion Engine's structured <see cref="OutcomeCard"/> for a confirmed side-effect
+/// (spaarke-ai-architecture-redesign-r2 task 035 / FR-A1-06; additive — null on reject, on the
+/// Binding-dispatch leg, and when the ledger write degraded). The client renders this card
+/// (server-composed link chip + next-step chips) in place of the markdown "[Open record]" link;
+/// the <see cref="RecordUrl"/>/<see cref="Summary"/> fields remain as the fallback.
+/// </param>
 public record GateResolveResult(
     string Status,
     string? Summary,
     string? RecordUrl = null,
     string? RecordEntityLogicalName = null,
-    string? RecordId = null);
+    string? RecordId = null,
+    OutcomeCard? Outcome = null);

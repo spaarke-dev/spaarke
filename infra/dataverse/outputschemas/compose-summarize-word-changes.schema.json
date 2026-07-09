@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/compose-summarize-word-changes.schema.json",
+  "title": "Compose — Summarize Word Changes — Output Schema (compose-summarize-word-changes)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='compose-summarize-word-changes' (spaarkeai-compose-r2 task 043, FR-10). MIRRORS VERBATIM the outputSchema in infra/dataverse/actions/compose-summarize-word-changes.action.json. Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required arrays, no anyOf/oneOf/discriminator; 'kind' is a constrained string via the enum keyword. summary declared first (streams before the change list).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "changes"],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Plain-language overview of the reviewer's changes (≤1 short paragraph, ≤1500 chars). Emitted FIRST.",
+      "maxLength": 1500
+    },
+    "changes": {
+      "type": "array",
+      "description": "One entry per distinct tracked change.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "location", "description"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "The kind of change.",
+            "enum": ["insertion", "deletion", "comment", "structural"]
+          },
+          "location": {
+            "type": "string",
+            "description": "Short human-readable pointer to where the change is.",
+            "maxLength": 500
+          },
+          "description": {
+            "type": "string",
+            "description": "One-sentence description of the change.",
+            "maxLength": 500
+          }
+        }
+      }
+    }
+  }
+}

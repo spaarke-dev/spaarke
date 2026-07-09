@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -164,6 +165,14 @@ public sealed class TypedHandlerResumeExecutor
     /// appid through session-create HostContext (client reads Xrm.Utility.getCurrentAppProperties)
     /// — recorded as a follow-up candidate, not built here.
     /// </param>
+    /// <param name="Outcome">
+    /// The Completion Engine's <see cref="OutcomeCard"/> for this gated outcome (task 035 /
+    /// FR-A1-06). Present on the success path (composed FROM the stored <c>loop@t{n}</c> ledger
+    /// output — store-before-render, ADR-040), carrying the audience-split summary + the
+    /// server-composed record link; null on failure/validation legs (nothing durably completed,
+    /// so there is no stored outcome to render — that "nothing happened" surface stays on the
+    /// honest markdown refusal channel).
+    /// </param>
     public sealed record ResumeOutcome(
         bool Success,
         string? Summary,
@@ -172,7 +181,8 @@ public sealed class TypedHandlerResumeExecutor
         string? UserSummary = null,
         string? RecordEntityLogicalName = null,
         Guid? RecordId = null,
-        string? RecordUrl = null);
+        string? RecordUrl = null,
+        OutcomeCard? Outcome = null);
 
     /// <summary>
     /// Resolves the suspended tool id back to its catalog row + registered handler.
@@ -288,6 +298,18 @@ public sealed class TypedHandlerResumeExecutor
         ToolResult result;
         try
         {
+            // FR-A1-05 (task 034) de-dupe note: task 034 added a PRE-SUSPEND ValidateChat at the
+            // gate (SideEffectGateAIFunction), so a provably-doomed call is rejected with an honest
+            // ❌ BEFORE it ever suspends and reaches this resume leg. This resume-side ValidateChat
+            // is NOT redundant and is deliberately RETAINED: it is a behavior-PRESERVING re-check
+            // for any call that passed pre-suspend (deterministic validation over the frozen Tier-3
+            // args yields the same PASS), AND it is the ONLY validation that runs under the
+            // CONFIRMING USER's OBO scope at execution time (this class resolves the handler +
+            // IDataverseUserClient from the gate-resolve request scope — see the class remarks) —
+            // it guards the suspend→confirm window against state drift (TOCTOU) that the
+            // loop-context pre-suspend pass cannot see. Removing it would be a security regression,
+            // not a de-dupe. It changes behavior only for a call that BECAME invalid after suspend,
+            // which is exactly the case it must still catch.
             var validation = resolution.Handler.ValidateChat(context, resolution.Tool);
             if (!validation.IsValid)
             {
@@ -340,12 +362,28 @@ public sealed class TypedHandlerResumeExecutor
         var record = ExtractCreatedRecord(result);
         var recordUrl = record is not null ? BuildRecordUrl(record.EntityLogicalName, record.RecordId) : null;
 
+        // ── Completion Engine (task 035 / FR-A1-06): compose the OutcomeCard FROM the stored
+        // ledger output (store-before-render — ADR-040). Only when the ledger write succeeded
+        // (non-null key): the card renders a STORED outcome by contract. The server-composed
+        // record link (recordUrl) becomes the card's clickable link; the audience split rides
+        // the user-facing sentence (UserSummary) over the model-facing Summary.
+        var card = string.IsNullOrWhiteSpace(ledgerKey)
+            ? null
+            : CompletionEngine.ComposeForGateResume(
+                ledgerOutputKey: ledgerKey!,
+                userFacing: userSummary ?? result.Summary ?? "Completed.",
+                internalDetail: result.Summary,
+                link: recordUrl is null
+                    ? null
+                    : OutcomeCardLink.ServerComposed(recordUrl, "Open record", "record"));
+
         return new ResumeOutcome(
             true, result.Summary, null, ledgerKey,
             UserSummary: userSummary,
             RecordEntityLogicalName: record?.EntityLogicalName,
             RecordId: record?.RecordId,
-            RecordUrl: recordUrl);
+            RecordUrl: recordUrl,
+            Outcome: card);
     }
 
     /// <summary>

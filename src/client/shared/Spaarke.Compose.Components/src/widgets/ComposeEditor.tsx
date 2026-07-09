@@ -86,6 +86,9 @@ import {
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
+import { InsertionMark } from './marks/InsertionMark';
+import { DeletionMark } from './marks/DeletionMark';
+import { CommentAnchorMark } from './marks/CommentAnchorMark';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the side-effect widget
 // registration (`register-workspace-widgets.ts` transitively pulls in
@@ -133,6 +136,15 @@ const LOCKED_EXTENSIONS = [
   TextAlign.configure({ types: ['heading', 'paragraph'] }),
 ];
 
+/**
+ * R2 custom marks (task 031, FR-15) — insertion/deletion/commentAnchor rendering primitives for
+ * pending AI track-changes. ADDITIVE to LOCKED_EXTENSIONS per design §5: registered alongside the
+ * locked Spike #1 list WITHOUT modifying it. These marks carry provenance and render only — they
+ * do NOT dispatch or materialize from the ledger (that is FR-16 / task 033, core-gated). Styling
+ * lives in `useStyles().editorSurface` via the `compose-mark-*` classes (semantic tokens; ADR-021).
+ */
+const COMPOSE_R2_MARKS = [InsertionMark, DeletionMark, CommentAnchorMark];
+
 // ---------------------------------------------------------------------------
 // Constants — selection debounce
 // ---------------------------------------------------------------------------
@@ -149,10 +161,7 @@ const SELECTION_DEBOUNCE_MS = 250;
  * in a draft must be escaped to render as literal text rather than markup.
  */
 function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /** Minimum selection length to fire Flow 2 (`compose_selection_offer`). */
@@ -379,6 +388,22 @@ const useStyles = makeStyles({
       borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
       margin: `${tokens.spacingVerticalM} 0`,
     },
+    // R2 custom marks (task 031, FR-15) — pending track-change redline + comment anchor.
+    // ADR-021: semantic tokens only (no hardcoded hex); the palette foreground/background tokens
+    // are theme-aware, so added/removed/anchor colors stay legible in both light and dark.
+    '& .compose-mark-insertion': {
+      color: tokens.colorPaletteGreenForeground1,
+      textDecorationLine: 'underline',
+    },
+    '& .compose-mark-deletion': {
+      color: tokens.colorPaletteRedForeground1,
+      textDecorationLine: 'line-through',
+    },
+    '& .compose-mark-comment-anchor': {
+      backgroundColor: tokens.colorPaletteYellowBackground2,
+      color: tokens.colorNeutralForeground1,
+      borderRadius: tokens.borderRadiusSmall,
+    },
   },
   loadingState: {
     display: 'flex',
@@ -537,7 +562,15 @@ function useSelectionEventDispatch(
  */
 export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditorProps>(
   function ComposeEditor(props, ref) {
-    const { docxBytes, documentRef, bffBaseUrl, sessionId = '', onDirtyChange, onImportWarnings, enqueueComposeAction } = props;
+    const {
+      docxBytes,
+      documentRef,
+      bffBaseUrl,
+      sessionId = '',
+      onDirtyChange,
+      onImportWarnings,
+      enqueueComposeAction,
+    } = props;
 
     const styles = useStyles();
     const dispatch = useDispatchPaneEvent();
@@ -547,7 +580,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     // ----- TipTap editor instance -----------------------------------------
     const editor = useEditor({
-      extensions: LOCKED_EXTENSIONS,
+      // LOCKED Spike #1 set + the ADDITIVE R2 custom marks (task 031) — the locked list itself
+      // is unchanged (spread, not mutated), honoring the "do not touch the locked list" constraint.
+      extensions: [...LOCKED_EXTENSIONS, ...COMPOSE_R2_MARKS],
       content: '<p></p>',
       // editorProps to apply Fluent v9 inherited foreground; semantic-token
       // styling on `.ProseMirror` lives in useStyles above.
@@ -650,7 +685,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // markup; `new_text` is Tier 3 and is NEVER logged.
           const html = newText
             .split(/\r?\n/)
-            .map((line) => `<p>${escapeHtml(line)}</p>`)
+            .map(line => `<p>${escapeHtml(line)}</p>`)
             .join('');
           editor.chain().focus().insertContent(html).run();
           dirtyRef.current = true;

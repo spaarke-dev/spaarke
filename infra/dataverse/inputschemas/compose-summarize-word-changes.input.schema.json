@@ -1,0 +1,18 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for compose-summarize-word-changes (spaarkeai-compose-r2 task 043, FR-10). Normalized OpenAI-function-parameters subset. Consumes the compose-document JPS scope; changesText (a textual representation of the tracked changes parsed by DocxAnnotationReader, task 051) is the load-bearing LLM input. REVIEW FLAG: exact upstream shape confirmed when 051/054 land. Property-level \"required\": true is FORBIDDEN. No actionId (assigned at deploy, task 047). actionCode carries NO version suffix.",
+  "actionCode": "compose-summarize-word-changes",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["changesText"],
+    "properties": {
+      "changesText": {
+        "type": "string",
+        "description": "Textual representation of the tracked changes (insertions/deletions/comments/structural) parsed from the document returned from Word. Supplied by the return-from-Word flow.",
+        "maxLength": 200000,
+        "elicitation_prompt": "I'll summarize the changes made in Word.",
+        "ledger_resolution": "compose.wordChanges — the tracked-change set parsed by DocxAnnotationReader (task 051) on return from Word (compose-document scope)"
+      }
+    }
+  }
+}

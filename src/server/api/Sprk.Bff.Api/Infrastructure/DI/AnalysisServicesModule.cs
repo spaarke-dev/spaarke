@@ -337,6 +337,15 @@ public static class AnalysisServicesModule
         // B5 — ChatHistoryManager (deps: ChatSessionManager + IChatDataverseRepository + ILogger — all unconditional).
         services.AddScoped<ChatHistoryManager>();
 
+        // AIR2-038 / FR-A1-09 — ISessionTraceReader (decision-traceability read facade, PublicContracts).
+        // Registered UNCONDITIONALLY alongside ChatSessionManager: the GET /trace endpoint is mapped
+        // unconditionally (EndpointMappingExtensions.MapChatEndpoints, line ~169) and injects
+        // ISessionTraceReader, and its only dependency (ChatSessionManager) is unconditional here — so
+        // symmetric registration holds (§F.1 asymmetric-registration rule; no ADR-032 kill-switch needed).
+        // Read-only projection over the ADR-040 ledger — no new store (ADR-040), facade boundary (ADR-013).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.ISessionTraceReader,
+            Sprk.Bff.Api.Services.Ai.PublicContracts.SessionTraceReader>();
+
         // Tier 1.5 residual — ChatContextMappingService (deps: IDistributedCache + IGenericEntityService +
         // ILogger + optional IConnectionMultiplexer — all unconditional). Originally classified as
         // compound-gated in D-09; Phase 1c triage 2026-06-01 surfaced ChatEndpoints.GetContextMappingsAsync

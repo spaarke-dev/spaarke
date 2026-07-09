@@ -133,6 +133,14 @@ public record ChatSession(
     /// resolutions are new entries correlated by <see cref="SessionGate.GateId"/>.
     /// </summary>
     public IReadOnlyList<SessionGate>? Gates { get; init; }
+
+    /// <summary>
+    /// Per-turn ContextEnvelope fingerprints — the context-selection leg of the
+    /// decision-traceability trace (AIR2-038 / FR-A1-09). Identifiers/counts only
+    /// (fingerprint id + slice count) — never slice content (NFR-07). Append-only.
+    /// Null (like the sibling ledger collections) means "no fingerprints yet".
+    /// </summary>
+    public IReadOnlyList<SessionContextFingerprint>? ContextFingerprints { get; init; }
 }
 
 /// <summary>

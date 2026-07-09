@@ -1,0 +1,32 @@
+{
+  "title": "CREATE-MATTER@v1 output schema — cataloged create-matter capability (FR-A1-13 / R19, spaarke-ai-architecture-redesign-r2 task 042). Repo mirror of the sprk_analysisaction.sprk_outputschemajson this Action will carry once seeded (PENDING live sprk_analysisaction row — see infra/dataverse/inputschemas/create-matter-v1.input.schema.json header). Declaration order = streaming order: matter_name -> matter_description -> practice_area_suggestion -> matter_type_suggestion -> cited_refs. cited_refs minItems 1: an uncited matter proposal is invalid (ADR-039 grounded outputs). practice_area_suggestion / matter_type_suggestion are LABELS (never GUIDs) — the assistant resolves them to sprk_practicearea_ref / sprk_mattertype_ref via dataverse.read_query before the gated dataverse.create_record write (mirrors the create-task pattern of proposal-now, write-later under the ONE confirmation gate).",
+  "type": "object",
+  "properties": {
+    "matter_name": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "Concise, professional matter name."
+    },
+    "matter_description": {
+      "type": "string",
+      "maxLength": 4000,
+      "description": "Complete matter description grounded in the source documents: nature of the matter, parties, and the concrete details a matter owner needs."
+    },
+    "practice_area_suggestion": {
+      "type": "string",
+      "description": "Best-guess practice-area LABEL judged from the source material; empty string when not evident. Resolved to sprk_practicearea_ref at write time — never a GUID."
+    },
+    "matter_type_suggestion": {
+      "type": "string",
+      "description": "Best-guess matter-type LABEL judged from the source material; empty string when not evident. Resolved to sprk_mattertype_ref at write time — never a GUID."
+    },
+    "cited_refs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "The source references the proposal drew from (file names; session output ledger keys when the request names them)."
+    }
+  },
+  "required": ["matter_name", "matter_description", "practice_area_suggestion", "matter_type_suggestion", "cited_refs"],
+  "additionalProperties": false
+}

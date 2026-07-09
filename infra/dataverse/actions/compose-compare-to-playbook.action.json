@@ -1,0 +1,59 @@
+{
+  "$comment": "spaarkeai-compose-r2 task 041 (FR-08) — compose-compare-to-playbook Action SEED (systemPrompt home). ACTION-ONLY, no playbook (ADR-039 Action+Binding; engine frozen). Mirror-first author surface for sprk_analysisaction (sprk_actioncode=compose-compare-to-playbook); deploy via scripts/Deploy-AnalysisAction.ps1 (upsert by sprk_actioncode). Read action → disposition informational (streams into the Assistant; deviations/matches surface in Context). Owner hygiene: actionCode carries NO version suffix. Pattern mirrors task 040 (see compose-explain-clause.action.json for the systemPrompt-home rationale).",
+  "actionCode": "compose-compare-to-playbook",
+  "name": "Compose — Compare to Playbook",
+  "description": "Compare a selected contract clause against the matter/firm playbook (FR-08). Read-only: surfaces the matching playbook entries, the deviations from firm-standard language, and a per-match risk score, with an overall risk assessment. Consumes the compose-selection JPS scope + retrieved matter/playbook context; no document mutation.",
+  "actionType": 0,
+  "temperature": 0.2,
+  "systemPrompt": "ROLE: You are the Spaarke Compose playbook-comparison assistant. A user has selected a clause in a contract they are drafting and asked how it compares to their matter/firm playbook. You produce a structured comparison an attorney can act on.\n\nINPUT: a selectionText field carrying the selected clause, plus matter/firm playbook entries supplied by the retrieval layer.\n\nINSTRUCTIONS:\n  1. Compare the selected clause against the supplied playbook entries. Identify which playbook entry (or entries) the clause corresponds to, how the drafted clause deviates from the firm-standard language, and how risky each deviation is.\n  2. Ground the comparison ONLY in the supplied playbook entries + clause text. Do NOT invent playbook positions or entry ids that were not supplied — if no relevant playbook entry was supplied, return an empty matches array and set overallRisk accordingly.\n  3. Emit a JSON object matching the output schema EXACTLY. additionalProperties is false; do not add fields.\n  4. matches: one entry per relevant playbook comparison. playbookEntryId is the supplied entry's id (id ONLY, never quoted content). clauseText is the drafted clause text this match concerns. deviations is a list of concrete, specific differences from the firm-standard language (each a short phrase). riskScore is a number in [0,1] where 0 = fully compliant / no risk and 1 = severe deviation / high risk. rationale is a one-sentence explanation of the risk.\n  5. overallRisk: an overall risk label for the clause — one of 'low', 'medium', 'high'.\n\nCONSTRAINTS:\n  - Do NOT fabricate playbook entries, ids, or deviations. Empty matches + overallRisk 'low' is the correct output when no relevant firm-standard was supplied to compare against.\n  - This is a READ action: report the comparison; do NOT propose rewritten clause language here (that is the Draft Alternative action).\n  - Never echo secrets or content outside the supplied clause + playbook context.",
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["matches", "overallRisk"],
+    "$comment-required": "Object-level required arrays only — property-level boolean 'required' is FORBIDDEN (OpenAiFunctionSchemaValidator).",
+    "properties": {
+      "matches": {
+        "type": "array",
+        "description": "One entry per relevant playbook comparison. Empty when no relevant firm-standard was supplied.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["playbookEntryId", "clauseText", "deviations", "riskScore", "rationale"],
+          "properties": {
+            "playbookEntryId": {
+              "type": "string",
+              "description": "Id of the supplied matter/firm playbook entry this match concerns (id ONLY — never quoted playbook content)."
+            },
+            "clauseText": {
+              "type": "string",
+              "description": "The drafted clause text this comparison concerns.",
+              "maxLength": 4000
+            },
+            "deviations": {
+              "type": "array",
+              "description": "Concrete, specific differences from the firm-standard language (each a short phrase). Empty when the clause matches the standard.",
+              "items": { "type": "string", "maxLength": 200 }
+            },
+            "riskScore": {
+              "type": "number",
+              "description": "Deviation risk in [0,1]: 0 = fully compliant / no risk, 1 = severe deviation / high risk.",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "rationale": {
+              "type": "string",
+              "description": "One-sentence explanation of the risk driving riskScore.",
+              "maxLength": 500
+            }
+          }
+        }
+      },
+      "overallRisk": {
+        "type": "string",
+        "description": "Overall risk label for the selected clause versus the playbook.",
+        "enum": ["low", "medium", "high"]
+      }
+    }
+  }
+}

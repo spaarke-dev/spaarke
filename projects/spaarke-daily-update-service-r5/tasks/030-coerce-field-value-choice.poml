@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>Metadata-driven Choice/Boolean/Number coercion for String-typed fieldMappings in CoerceFieldValue</title>
+    <phase>B: Hardening</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>032</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + modifies .cs on the BFF hot path; brownfield defect-hardening on the frozen node-execution engine (Step 3.5.5 FULL triggers: bff-api tag, .cs edit, code implementation).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-method brownfield defect fix with a line-referenced target and an in-file reference branch (Choice @430) to mirror; no cross-cutting migration or new pattern authoring (Step 3.5.5b sonnet default).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the frozen UpdateRecordNodeExecutor.cs; frozen-engine defect-hardening requires isolated, reviewed change — not parallel-safe.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Fix CoerceFieldValue (UpdateRecordNodeExecutor.cs:417) so that when a fieldMapping declares type:"string" but the TARGET Dataverse column is Choice/Boolean/Number, the value is resolved via cached column metadata (case-insensitive label→option value for Choice; parsed for Boolean/Number) instead of being passed verbatim — which currently 500s on Choice columns. When a Choice label cannot be matched, FAIL LOUD with an error naming the unmatched label and listing the valid option labels (do NOT return a 500 or a silent pass-through). Per FR-C1.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core Minimal API, Dataverse OData Web API type coercion, the ADR-039/040 coded-composite + catalog-Action node-execution engine, and column-metadata caching.
+  </role>
+
+  <goal>
+    CoerceFieldValue resolves a String-typed mapping against the target column's actual metadata type: a valid Choice label (any case) writes as its numeric option value; a Boolean string ("true"/"yes"/"1"/...) writes as a bool; a numeric string writes as int/decimal; an UNMATCHABLE Choice label produces a descriptive failure (label + valid options in the message), not a 500 and not a verbatim pass-through. Column metadata is looked up from a cache (no per-call metadata round-trip when cached). The BFF builds 0 errors, UpdateRecordNodeExecutorTests is updated and passes, and publish size is reported per NFR-01.
+  </goal>
+
+  <context>
+    <background>
+      During R7 W12 Document Upload UAT, the Profile Document playbook mapped {"field":"sprk_documenttype","type":"string",...} to a Choice column; CoerceFieldValue fell into the String branch (line 427-428, verbatim pass-through) and Dataverse returned 500 on the PATCH. The Choice branch (line 430) already does correct case-insensitive label→optionValue resolution when the mapping declares type:"choice", but nothing forces authors to declare it. This task makes the runtime resolve the real column type from metadata so a String-typed mapping targeting a Choice/Boolean/Number column coerces correctly, and fails loud when a label is invalid. See notes/inbound-from-r7/06-choice-field-coercion-in-updaterecord.md (Track B).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/UpdateRecordNodeExecutorTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/06-choice-field-coercion-in-updaterecord.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FROZEN-ENGINE PATH A EXCEPTION (spec.md ADR Tensions; root CLAUDE.md §10): this change modifies the frozen UpdateRecordNodeExecutor. It is defect-hardening (Choice writes currently 500), NOT new capability. STATE THIS EXPLICITLY in the PR description and in projects/spaarke-daily-update-service-r5/notes/ per the §10 frozen-engine rule; code-review must approve the exception explicitly.</constraint>
+    <constraint source="project">The metadata-driven path fires ONLY when mapping.Type == FieldMappingType.String AND the target column's metadata type is Choice, Boolean, or Number. When mapping.Type is already Choice/Boolean/Number/Lookup, preserve the EXISTING branches (lines 430-475) unchanged. When the target column is a text/string column, keep the verbatim pass-through (existing String behavior). Do not alter Lookup handling (line 472).</constraint>
+    <constraint source="project">Choice resolution MUST reuse the existing case-insensitive label→optionValue logic (the pattern at lines 439-450): trim, OrdinalIgnoreCase compare against option labels, then int-fallback if the rendered value is already a numeric option value present in the option set.</constraint>
+    <constraint source="project">On an unmatchable Choice label, the executor MUST fail loud: throw or return a node-execution failure whose message contains BOTH the unmatched rendered label AND the comma-joined list of valid option labels. It MUST NOT return the raw string verbatim (which produces the 500) and MUST NOT silently drop the field.</constraint>
+    <constraint source="project">Column metadata MUST be resolved through a cache so repeated writes to the same entity/column within a run do not each issue a metadata round-trip. If a suitable metadata cache/service already exists in the executor or its dependencies, reuse it (verify by Grep before adding any new cache). Do not add a new DI registration if an existing metadata accessor is already injected.</constraint>
+    <constraint source="ADR-013">Do NOT inject AI-internal types (IOpenAiClient, IPlaybookService) into this executor. Metadata access stays within the executor's existing Dataverse/metadata dependency surface; do not widen the AI boundary.</constraint>
+    <constraint source="root-CLAUDE.md-§10">BFF-touching task: state the placement decision (change stays inside the existing executor; note whether any new metadata-cache surface was added and justify per §11 if so), run dotnet publish -c Release, report compressed size + diff vs ~49.63 MB baseline (incl PDBs), and confirm no new HIGH-severity CVE from dotnet list package --vulnerable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-039-coded-composite.md</file>
+      <file>.claude/adr/ADR-013-ai-service-boundaries.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/06-choice-field-coercion-in-updaterecord.md</file>
+    </files>
+    <patterns>
+      <pattern name="Case-insensitive Choice label resolution" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs">
+        Lines 430-456 (the FieldMappingType.Choice branch) are the reference for label→optionValue resolution: trim, OrdinalIgnoreCase compare, int-fallback against ContainsValue. Reuse this logic from the metadata-driven String path; the difference is the options come from cached column metadata instead of mapping.Options.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check for Services/Ai/Nodes/UpdateRecordNodeExecutor.cs against the r2-core worktree (root §7); register the touch in projects/INDEX.md.</step>
+    <step order="2">Grep the executor + its constructor for an existing column/entity metadata accessor or cache (e.g. an injected metadata service, EntityMetadata cache, or attribute-metadata helper). Determine whether Choice option-set metadata is already reachable; only add a new cache/accessor if none exists (justify per §11 in notes if you must).</step>
+    <step order="3">In CoerceFieldValue, add a metadata-driven branch for FieldMappingType.String: look up the target column metadata (cached); if the column is Choice, resolve the rendered value via the case-insensitive label→optionValue logic mirrored from lines 439-450; if Boolean, parse ("true"/"yes"/"1"/"on" → true, etc., mirroring lines 458-464); if Number, parse int then decimal (mirroring lines 466-470). If the column is text/string, keep the verbatim pass-through.</step>
+    <step order="4">Implement fail-loud for an unmatchable Choice label: surface a node-execution failure whose message includes the unmatched label and the valid option labels. Ensure the 500-producing verbatim pass-through no longer occurs for Choice columns.</step>
+    <step order="5">Update UpdateRecordNodeExecutorTests.cs: add tests for (a) a String-typed mapping of a valid Choice label → writes the numeric option value; (b) an INVALID Choice label → descriptive failure listing valid options, NOT a 500/verbatim; (c) String→Boolean coercion; (d) String→Number coercion; (e) a String→text column still passes verbatim (regression). Mock/stub the metadata accessor with a fixed option set.</step>
+    <step order="6">Build: dotnet build src/server/api/Sprk.Bff.Api/ (0 errors). Run: dotnet test for the UpdateRecordNodeExecutorTests project.</step>
+    <step order="7">Run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/, measure compressed size, record absolute size + diff vs 49.63 MB baseline (incl PDBs); run dotnet list package --vulnerable and confirm no new HIGH CVE.</step>
+    <step order="8">Write the frozen-engine Path-A exception statement into notes/ for the PR description; update TASK-INDEX.md task 030 → completed; record any deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the executor has NO reachable column-metadata source and wiring one would require a new DI registration or crossing the ADR-013 AI boundary, STOP and escalate per root CLAUDE.md §6/§6.5 (ADR conflict) rather than injecting an AI-internal type or standing up a new metadata service silently.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, and publish the BFF</tool>
+    <tool name="terminal">Run grep / conflict-check</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/UpdateRecordNodeExecutorTests.cs</output>
+    <output type="docs">projects/spaarke-daily-update-service-r5/notes/030-choice-coercion-and-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a fieldMapping with type:"string" whose rendered value is a valid Choice label ("Contract") targeting a Choice column, when CoerceFieldValue runs, then it returns the numeric option value (100000000) — a test asserts this.</criterion>
+    <criterion testable="true">Given a fieldMapping with type:"string" whose rendered value is a label NOT in the Choice option set ("Bogus"), when CoerceFieldValue runs, then it produces a descriptive failure whose message contains "Bogus" AND the valid option labels — a test asserts the message content; it does NOT return the raw string and does NOT surface a 500.</criterion>
+    <criterion testable="true">Given a type:"string" mapping targeting a Boolean column with rendered value "yes"/"true"/"1", then CoerceFieldValue returns a bool true — a test asserts this; and "no"/"false"/"0" returns false.</criterion>
+    <criterion testable="true">Given a type:"string" mapping targeting a Number column with rendered value "42", then CoerceFieldValue returns an int/decimal 42 — a test asserts this.</criterion>
+    <criterion testable="true">Given a type:"string" mapping targeting a text/string column, then CoerceFieldValue still returns the value verbatim (existing behavior preserved) — a regression test asserts this.</criterion>
+    <criterion testable="true">Column metadata is resolved through a cache: a test asserts that two coercions of the same column within a run do not each trigger a metadata lookup (single lookup, or reuse of an existing cached accessor).</criterion>
+    <criterion testable="true">The existing FieldMappingType.Choice/Boolean/Number/Lookup branches (mapping already typed) are unchanged in behavior — existing UpdateRecordNodeExecutorTests still pass.</criterion>
+    <criterion testable="true">dotnet build src/server/api/Sprk.Bff.Api/ exits 0 errors; the coercion tests pass; publish size reported (absolute + diff vs 49.63 MB incl-PDBs); no new HIGH CVE; the frozen-engine Path-A exception is stated in notes/ for the PR description.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md FR-C1, plan.md Phase B.1, and notes/inbound-from-r7/06 (Track B is this task). This unblocks task 032, which restores the sprk_documenttype mapping to the Profile Document node once this coercion ships. The Choice branch at lines 430-456 is the copy source for label resolution; the Boolean branch (458-464) and Number branch (466-470) are the copy sources for those coercions. Frozen-engine Path A exception is pre-approved by spec.md ADR Tensions — still must be stated in the PR.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the mandatory pre-execution checklist, FULL-rigor Step 9.5 gates (code-review + adr-check), and BFF publish-size verification. Cite the frozen-engine Path-A exception in the PR description.
+    </protocol>
+  </execution>
+</task>

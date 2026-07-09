@@ -172,13 +172,8 @@ public sealed class GetWorkspaceTabContentHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Get Workspace Tab Content",
-        Description: "Read the composed widget state of an existing workspace tab. Use this " +
-                     "when the user refers to content they can see in a workspace tab (e.g., " +
-                     "'make the summary shorter', 'change the tldr') and you need the CURRENT " +
-                     "state to reason about what to modify. Returns the composed sections + " +
-                     "values from the tab's widget data — NOT raw streaming chunks. Read-only — " +
-                     "this tool NEVER mutates tab state; for edits use update_workspace_tab. " +
-                     "Architecture §6.5 / §11.1.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-get-workspace-tab-content-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Read the composed widget state of an existing workspace tab. Use this when the user refers to content they can see in a workspace tab (e.g., 'make the summary shorter', 'change the tldr') and you need the CURRENT state to reason about what to modify. Returns the composed sections + values from the tab's widget data — NOT raw streaming chunks. Inputs: tabId (required); sectionName (optional, scope read to one section). Outputs: status discriminator (ok | not_found | section_missing), widgetType, sections map (section name → value), sectionCount, message. Read-only — this tool NEVER mutates tab state; for edits use update_workspace_tab. When the tab is not in the current workspace state OR the sectionName is missing, the response is a structured re-readable status — never an error. Architecture §6.5 / §11.1.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

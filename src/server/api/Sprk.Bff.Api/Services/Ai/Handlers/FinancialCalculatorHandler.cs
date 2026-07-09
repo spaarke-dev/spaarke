@@ -104,9 +104,8 @@ public sealed class FinancialCalculatorHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Financial Calculator Handler",
-        Description: "Pure deterministic financial math: sum, tax, discount, FX conversion (configured rate table), " +
-                     "weighted average, and aggregation by category. All money math uses decimal; mixed-currency " +
-                     "operations are rejected. NO LLM call.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-financial-calculator-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Pure deterministic financial math: sum, tax, discount, FX conversion (configured rate table), weighted average, and aggregation by category. All money math uses decimal; mixed-currency operations are rejected. NO LLM call.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "application/json" },
         Parameters: new[]

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Sprk.Bff.Api.Api.Agent;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
@@ -71,18 +72,42 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         "sprk_document is blocked on this tool unconditionally and no argument change makes it " +
         "valid; offer an alternative instead (Document Upload wizard, create a task, or draft an email).";
 
+    /// <summary>
+    /// Refusal-affordance composer (spaarke-ai-architecture-redesign-r2 task 040, FR-A1-11,
+    /// design D-F0(d), NFR-10): appends a SERVER-composed, actionable Document Upload wizard
+    /// deep-link to <see cref="SprkDocumentCreateBlockedMessage"/> so the R5-E hard-block
+    /// refusal is never a dead end. The link travels on the SAME refusal-message channel the
+    /// R5-E block already relies on (<see cref="ToolValidationResult.Errors"/> in
+    /// <see cref="ValidateChat"/> — the gate-resume leg's first stop — and
+    /// <see cref="ToolResult.ErrorMessage"/> in <see cref="ExecuteChatAsync"/> defense-in-depth);
+    /// composing it via <see cref="HandoffUrlBuilder"/> keeps the URL server-trusted (D-F0(b): the
+    /// model never invents the link a user clicks), and it never grants or softens the block
+    /// itself — the create is REJECTED unconditionally regardless of this link's composition.
+    /// Host-scopes to the chat session's bound matter (<paramref name="matterId"/>) when known;
+    /// degrades to a valid unscoped wizard link otherwise (see
+    /// <see cref="HandoffUrlBuilder.BuildDocumentUploadWizardUrl(Guid?)"/>).
+    /// </summary>
+    internal string BuildBlockedMessageWithAffordance(Guid? matterId)
+    {
+        var url = _handoffUrlBuilder.BuildDocumentUploadWizardUrl(matterId);
+        return $"{SprkDocumentCreateBlockedMessage} Open the correct path now: [Document Upload wizard]({url})";
+    }
+
     [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
     private static partial Regex LogicalNameRegex();
 
     private readonly IDataverseUserClient _dataverse;
     private readonly ILogger<DataverseCreateRecordHandler> _logger;
+    private readonly HandoffUrlBuilder _handoffUrlBuilder;
 
     public DataverseCreateRecordHandler(
         IDataverseUserClient dataverse,
-        ILogger<DataverseCreateRecordHandler> logger)
+        ILogger<DataverseCreateRecordHandler> logger,
+        HandoffUrlBuilder handoffUrlBuilder)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _handoffUrlBuilder = handoffUrlBuilder ?? throw new ArgumentNullException(nameof(handoffUrlBuilder));
     }
 
     /// <inheritdoc />
@@ -91,46 +116,8 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Dataverse Create Record",
-        Description: "Inserts one row into a Dataverse table under the calling user's permissions and returns " +
-                     "the created record's id as a citable path (tables/{table}/records/{guid}). Call " +
-                     "dataverse.describe first if the table's schema is unknown — do NOT guess column logical " +
-                     "names from display names. Choice columns require numeric option values, not labels. " +
-                     "LOOKUP columns REQUIRE a recordId GUID: resolve the target record's GUID FIRST via " +
-                     "dataverse.search_data or dataverse.read_query — in the same turn you draft the proposal, " +
-                     "BEFORE asking the user to confirm; a lookup object without recordId is " +
-                     "rejected. If you cannot resolve a GUID for an optional lookup/choice, OMIT the column " +
-                     "(mention the value in a text column instead). Records you create belong to the calling " +
-                     "user automatically — never set owner/assignee columns for the requesting user themselves. " +
-                     // G-P3 UAT round-4 R4-1 (2026-07-07): the model invented an
-                     // `sprk_practicearea@odata.bind` annotation on a create-matter proposal. The
-                     // write mapper rejects @-annotation keys by design (injection hardening) —
-                     // ban them explicitly and give the sprk_matter contract from REAL metadata.
-                     "NEVER use OData annotations as item keys — no '@odata.bind', no '@' or '.' in any key: " +
-                     "the ONLY way to set a lookup on this transport is the {relatedTable, recordId} object " +
-                     "form, and choice columns take plain numeric values. " +
-                     "sprk_matter write contract (from live metadata — verify anything else with " +
-                     "dataverse.describe): sprk_mattername (text, REQUIRED); sprk_matternumber (text); " +
-                     "sprk_matterdescription (multiline text); sprk_mattertype is a LOOKUP to " +
-                     "sprk_mattertype_ref and sprk_practicearea is a LOOKUP to sprk_practicearea_ref — " +
-                     "resolve the reference row's GUID via dataverse.read_query first and send " +
-                     "{\"relatedTable\":\"sprk_mattertype_ref\",\"recordId\":\"guid\"} (same pattern for " +
-                     "practice area), or OMIT the column and put the value in sprk_matterdescription. " +
-                     // G-P3 UAT round-3 R3-4 (2026-07-07): description-level ban on bare
-                     // sprk_document rows. Round-5 R5-E (2026-07-07): the model IGNORED that
-                     // guidance and created an orphan fileless document — the ban is now a HARD
-                     // rule enforced by this handler (ValidateChat + ExecuteChatAsync reject
-                     // sprk_document with VALIDATION_FAILED before any Dataverse call).
-                     "HARD RULE — sprk_document creates are BLOCKED: this tool REJECTS any create on the " +
-                     "sprk_document table before anything is written (VALIDATION_FAILED). Spaarke document " +
-                     "records require the full ingestion pipeline (file upload → SharePoint Embedded storage → " +
-                     "document profile → indexing) that only the Document Upload wizard drives; no chat tool " +
-                     "can upload file content. Never attempt or retry a sprk_document create — no argument " +
-                     "change makes it valid. If asked to create a document or save chat output 'to documents', " +
-                     "say honestly that documents can't be created from chat and point the user to the Document " +
-                     "Upload wizard (or offer an alternative: work with a file uploaded into this chat, create " +
-                     "a task, draft an email, or open a workspace tab). " +
-                     "SIDE-EFFECT tool (write): the create is executed with the user's own privileges; " +
-                     "if the user cannot create rows in the table, the call fails with their access error.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-dataverse-create-record-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Inserts one row into a Dataverse table under the calling user's permissions and returns the created record id as a citable path (tables/{table}/records/{guid}). Call dataverse.describe first if the table's schema is unknown — do NOT guess column logical names from display names. Values: strings/numbers/booleans for simple fields; numeric option values for choice columns (NEVER labels — use dataverse.describe to find the numeric values); comma-separated numeric values for multi-select choice; lookup fields as {""relatedTable"": ""..."", ""recordId"": ""guid""} — recordId is REQUIRED: resolve the target record's GUID FIRST via dataverse.search_data or dataverse.read_query IN THE SAME TURN you draft the proposal, BEFORE asking the user to confirm; a lookup without recordId is rejected. NEVER use OData annotations as item keys — no '@odata.bind', no '@' or '.' in any key: the ONLY way to set a lookup on this transport is the {relatedTable, recordId} object form, and choice columns take plain numeric values. If you cannot resolve a GUID for an optional lookup or the numeric value for an optional choice, OMIT that column and mention the value in a text column instead — never guess. sprk_matter write contract (from live metadata — verify anything else with dataverse.describe): sprk_mattername (text, REQUIRED); sprk_matternumber (text); sprk_matterdescription (multiline text); sprk_mattertype is a LOOKUP to sprk_mattertype_ref and sprk_practicearea is a LOOKUP to sprk_practicearea_ref — resolve the reference row's GUID via dataverse.read_query first and send {""relatedTable"":""sprk_mattertype_ref"",""recordId"":""guid""} (same pattern for practice area with sprk_practicearea_ref), or OMIT the column and put the value in sprk_matterdescription. Records you create belong to the calling user automatically — never set owner/assignee columns for the requesting user themselves. HARD RULE — sprk_document creates are BLOCKED: this tool REJECTS any create on the sprk_document table before anything is written (VALIDATION_FAILED). Spaarke document records require the full ingestion pipeline (file upload → SharePoint Embedded storage → document profile → indexing) that only the Document Upload wizard drives; no chat tool can upload file content. Never attempt or retry a sprk_document create — no argument change makes it valid. If asked to create a document or save chat output 'to documents', say honestly that documents can't be created from chat and point the user to the Document Upload wizard (or offer an alternative: work with a file uploaded into this chat, create a task, draft an email, or open a workspace tab). WRITE tool: executes with the user's own privileges; if the user cannot create rows in the table, the call fails with their access error. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname — creation BLOCKED on this tool, Document Upload wizard only); people = contact, companies = account.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]
@@ -182,11 +169,17 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out var error))
             return ToolValidationResult.Failure(error!);
 
-        // R5-E HARD RULE: sprk_document creates never execute — the gate-resume leg
-        // (TypedHandlerResumeExecutor) runs ValidateChat BEFORE ExecuteChatAsync, so this
-        // rejection fires before any Dataverse wire call on every path.
+        // R5-E HARD RULE: sprk_document creates never execute. This ValidateChat now runs at
+        // TWO points on the gated path, so the rejection fires before any Dataverse wire call on
+        // every path: (1) AIR2-034 (FR-A1-05) PRE-SUSPEND — SideEffectGateAIFunction runs it via
+        // ToolHandlerToAIFunctionAdapter.ValidateForGate BEFORE suspending, so a doomed
+        // sprk_document create renders this honest ❌ + affordance and is NEVER shown a confirm
+        // dialog (no Confirm→❌ dead-end); and (2) the gate-resume leg (TypedHandlerResumeExecutor)
+        // re-runs it under the confirming user's OBO scope BEFORE ExecuteChatAsync (defense in
+        // depth / TOCTOU). AIR2-040 (FR-A1-11): the refusal carries a server-composed, host-scoped
+        // Document Upload deep-link — the block itself is unconditional and unaffected by the affordance.
         if (string.Equals(tablename, BlockedTableLogicalName, StringComparison.Ordinal))
-            return ToolValidationResult.Failure(SprkDocumentCreateBlockedMessage);
+            return ToolValidationResult.Failure(BuildBlockedMessageWithAffordance(context.MatterId));
 
         return ToolValidationResult.Success();
     }
@@ -207,11 +200,12 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
 
         // R5-E HARD RULE (defense in depth — ValidateChat already rejects): sprk_document
         // creates are blocked BEFORE any Dataverse call. TryParseArgs lower-cases the
-        // table name, so casing variants cannot slip past.
+        // table name, so casing variants cannot slip past. AIR2-040 (FR-A1-11): same
+        // affordance-carrying refusal as ValidateChat, for parity on this defense-in-depth path.
         if (string.Equals(tablename, BlockedTableLogicalName, StringComparison.Ordinal))
         {
             return LogOutcome(context, tablename,
-                Error(tool, SprkDocumentCreateBlockedMessage, ToolErrorCodes.ValidationFailed, startedAt),
+                Error(tool, BuildBlockedMessageWithAffordance(context.MatterId), ToolErrorCodes.ValidationFailed, startedAt),
                 stopwatch);
         }
 

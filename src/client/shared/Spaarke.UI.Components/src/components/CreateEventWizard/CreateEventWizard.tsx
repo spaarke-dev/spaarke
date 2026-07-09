@@ -45,7 +45,13 @@ import type { ICreateEventFormState } from './formTypes';
 
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
-import type { ILookupItem } from '../../types/LookupTypes';
+import {
+  searchContactsAsLookup,
+  searchOrganizationsAsLookup,
+  searchUsersAsLookup,
+  searchMatterTypes,
+  searchPracticeAreas,
+} from '../CreateWorkAssignmentWizard/workAssignmentService';
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for unit testing — see __tests__/CreateEventWizard.associateToStep.test.ts)
@@ -104,52 +110,6 @@ export function mergeEventRegardingFromAssociation(
     regardingRecordId: association.recordId,
     regardingRecordName: association.recordName,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Search helper functions (use IDataService instead of IWebApi)
-// ---------------------------------------------------------------------------
-
-async function searchContactsAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=contactid,fullname,emailaddress1` +
-    `&$filter=contains(fullname,'${safeFilter}')` +
-    `&$orderby=fullname asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('contact', options);
-  return result.entities.map(e => ({
-    id: e['contactid'] as string,
-    name: (e['fullname'] as string) + (e['emailaddress1'] ? ` (${e['emailaddress1']})` : ''),
-  }));
-}
-
-async function searchOrganizationsAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=sprk_organizationid,sprk_name` +
-    `&$filter=contains(sprk_name,'${safeFilter}')` +
-    `&$orderby=sprk_name asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('sprk_organization', options);
-  return result.entities.map(e => ({
-    id: e['sprk_organizationid'] as string,
-    name: e['sprk_name'] as string,
-  }));
-}
-
-async function searchUsersAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=systemuserid,fullname,internalemailaddress` +
-    `&$filter=contains(fullname,'${safeFilter}') and isdisabled eq false` +
-    `&$orderby=fullname asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('systemuser', options);
-  return result.entities.map(e => ({
-    id: e['systemuserid'] as string,
-    name: (e['fullname'] as string) + (e['internalemailaddress'] ? ` (${e['internalemailaddress']})` : ''),
-  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +230,14 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
     (query: string) => searchUsersAsLookup(dataService, query),
     [dataService]
   );
+  const handleSearchMatterTypes = React.useCallback(
+    (query: string) => searchMatterTypes(dataService, query),
+    [dataService]
+  );
+  const handleSearchPracticeAreas = React.useCallback(
+    (query: string) => searchPracticeAreas(dataService, query),
+    [dataService]
+  );
 
   // -- WebApi adapter for CreateRecordWizard ---------------------------------
   const webApiAdapter = React.useMemo(() => buildWebApiAdapter(dataService), [dataService]);
@@ -304,6 +272,8 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       searchContacts: handleSearchContacts,
       searchOrganizations: handleSearchOrganizations,
       searchUsers: handleSearchUsers,
+      searchMatterTypes: handleSearchMatterTypes,
+      searchPracticeAreas: handleSearchPracticeAreas,
 
       resolveSpeContainerId,
 
@@ -452,6 +422,8 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       handleSearchContacts,
       handleSearchOrganizations,
       handleSearchUsers,
+      handleSearchMatterTypes,
+      handleSearchPracticeAreas,
       onClose,
       authFetch,
       bffBaseUrl,

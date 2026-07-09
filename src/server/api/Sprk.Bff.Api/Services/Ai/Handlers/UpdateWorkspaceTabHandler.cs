@@ -158,11 +158,8 @@ public sealed class UpdateWorkspaceTabHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Update Workspace Tab",
-        Description: "Update an existing workspace tab's widget data. Use this when you have refined a previously " +
-                     "dispatched artifact and the user should see the updated state on the same tab (instead of a new one). " +
-                     "Conflict resolution: pass the 'expectedLastUserEditAt' timestamp you observed when you last read the " +
-                     "tab. If the user has edited the tab since then, this tool will REFUSE with a 'stale_read' status — " +
-                     "you must re-read the tab in your next turn before re-attempting. User edits always win.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-update-workspace-tab-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Update an existing workspace tab's widget data. Use this when you have refined a previously dispatched artifact and the user should see the updated state on the same tab (instead of a new one). Conflict resolution: pass the 'expectedLastUserEditAt' timestamp you observed when you last read the tab from your system-prompt snapshot. If the user has edited the tab since then, this tool will REFUSE with a 'stale_read' status — you must re-read the workspace state in your next turn and re-attempt with the refreshed timestamp. User edits always win. Omit expectedLastUserEditAt only when the tab has never been user-edited (e.g., you just created it via send_workspace_artifact).",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

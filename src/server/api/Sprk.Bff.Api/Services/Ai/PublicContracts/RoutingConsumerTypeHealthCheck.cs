@@ -266,6 +266,7 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
         var handlersWithoutToolRows = new List<string>();
         var duplicateToolRowsPerHandler = new List<string>();
         var toolRowsWithInvalidSchema = new List<string>();
+        var toolRowsWithDescriptionDrift = new List<string>();
         var toolRowCount = 0;
         var handlerCount = 0;
 
@@ -286,7 +287,7 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
             {
                 var toolQuery = new QueryExpression(ToolEntityLogicalName)
                 {
-                    ColumnSet = new ColumnSet("sprk_name", "sprk_handlerclass", "sprk_toolid", "sprk_jsonschema"),
+                    ColumnSet = new ColumnSet("sprk_name", "sprk_handlerclass", "sprk_toolid", "sprk_jsonschema", "sprk_description"),
                     NoLock = true,
                     Criteria = new FilterExpression(LogicalOperator.And),
                 };
@@ -305,6 +306,14 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
 
                 var rowCountByHandler = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 var rowCountByToolId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                // FR-A-01 triple-twin hoist (AIR2-020): capture each handler-class's live
+                // sprk_description + label so single-row handler classes can be parity-checked
+                // against the compiled handler Metadata.Description (the managed mirror of the
+                // authored seed-row JSON) below. Overwrites are harmless — only handler classes
+                // with EXACTLY ONE active row are compared (a multi-row handler's single
+                // Metadata.Description cannot mirror N method-specific rows).
+                var liveDescriptionByHandler = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+                var labelByHandler = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var row in toolRows)
                 {
                     var name = row.GetAttributeValue<string>("sprk_name");
@@ -338,6 +347,8 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
 
                     rowCountByHandler[handlerClass] =
                         rowCountByHandler.TryGetValue(handlerClass, out var n) ? n + 1 : 1;
+                    liveDescriptionByHandler[handlerClass] = row.GetAttributeValue<string>("sprk_description");
+                    labelByHandler[handlerClass] = label;
 
                     // Tool identity is sprk_toolid (the 8-field contract). A handler
                     // MAY legitimately serve several named tool rows (row = tool,
@@ -367,6 +378,40 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
                 handlersWithoutToolRows.AddRange(registeredSet
                     .Where(id => !rowCountByHandler.ContainsKey(id))
                     .OrderBy(id => id, StringComparer.OrdinalIgnoreCase));
+
+                // (d) Description-parity dimension (FR-A-01 triple-twin hoist, AIR2-020):
+                // the LLM-facing tool description is authored in ONE place — the seed-row
+                // JSON (infra/dataverse/sprk_analysistool-*-row.json → sprk_description).
+                // The live sprk_description is a MANAGED MIRROR (Seed-TypedHandlers.ps1
+                // PATCHes it) and the compiled handler Metadata.Description is a second
+                // mirror kept byte-equal in code (guarded in CI by
+                // CatalogToolDescriptionParityContractTests). Here we assert the LIVE value
+                // still matches the compiled mirror: a hand-edit to the live row that the
+                // seed would silently revert surfaces as Unhealthy instead of drifting
+                // unnoticed. Scope: handler classes with EXACTLY ONE active row (a multi-row
+                // handler's single Metadata.Description cannot mirror N method-specific rows;
+                // those descriptions are authored per-row in JSON and are out of this check).
+                var metadataDescriptionByHandler = (registry.GetAllHandlerInfo() ?? Array.Empty<ToolHandlerInfo>())
+                    .GroupBy(h => h.HandlerId, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First().Metadata.Description, StringComparer.OrdinalIgnoreCase);
+
+                foreach (var handlerClass in rowCountByHandler
+                             .Where(kvp => kvp.Value == 1 && registeredSet.Contains(kvp.Key))
+                             .Select(kvp => kvp.Key)
+                             .OrderBy(id => id, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (!metadataDescriptionByHandler.TryGetValue(handlerClass, out var compiledDescription))
+                    {
+                        continue; // Registered id without resolvable metadata — bijection dims already report it.
+                    }
+
+                    var liveDescription = liveDescriptionByHandler.TryGetValue(handlerClass, out var d) ? d : null;
+                    if (OpenAiFunctionSchemaValidator.FindDescriptionParityError(compiledDescription, liveDescription) is { } parityError)
+                    {
+                        var label = labelByHandler.TryGetValue(handlerClass, out var l) ? l : handlerClass;
+                        toolRowsWithDescriptionDrift.Add($"{label} (sprk_handlerclass={handlerClass}): {parityError}");
+                    }
+                }
             }
         }
 
@@ -417,6 +462,7 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
             duplicateToolRowsPerHandler,
             actionRowsWithInvalidInputSchema,
             toolRowsWithInvalidSchema,
+            toolRowsWithDescriptionDrift,
             dvSet.Count,
             toolRowCount,
             handlerCount,
@@ -436,6 +482,7 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
         IReadOnlyList<string> DuplicateToolRowsPerHandler,
         IReadOnlyList<string> ActionRowsWithInvalidInputSchema,
         IReadOnlyList<string> ToolRowsWithInvalidSchema,
+        IReadOnlyList<string> ToolRowsWithDescriptionDrift,
         int ConsumerTypeCount,
         int ToolRowCount,
         int HandlerCount,
@@ -455,7 +502,8 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
             ToolRowsWithoutHandlers.Count > 0 ||
             ToolRowsMissingHandlerClass.Count > 0 ||
             DuplicateToolRowsPerHandler.Count > 0 ||
-            HandlersWithoutToolRows.Count > 0;
+            HandlersWithoutToolRows.Count > 0 ||
+            ToolRowsWithDescriptionDrift.Count > 0;
 
         /// <summary>
         /// Invalid-schema findings are DEGRADED, never Unhealthy (G-P3 UAT
@@ -527,6 +575,13 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
             {
                 parts.Add(
                     $"registered handlers without a sprk_analysistool row (Unhealthy since the FR-P2-01 catalog-projection cutover, task 030 — seed the row via scripts/Seed-TypedHandlers.ps1 or delete the handler): {string.Join(", ", HandlersWithoutToolRows)}");
+            }
+
+            if (ToolRowsWithDescriptionDrift.Count > 0)
+            {
+                parts.Add(
+                    "single-row tool rows whose LIVE sprk_description diverges from the compiled handler Metadata.Description mirror (FR-A-01 triple-twin hoist — the description is authored ONLY in infra/dataverse/sprk_analysistool-*-row.json and PATCHed live by Seed-TypedHandlers.ps1; a live hand-edit is drift that the seed would revert — re-seed to restore parity, do NOT edit the live row): "
+                    + string.Join(", ", ToolRowsWithDescriptionDrift));
             }
 
             return

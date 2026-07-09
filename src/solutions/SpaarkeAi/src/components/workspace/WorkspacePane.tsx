@@ -60,6 +60,7 @@ import {
   logTelemetryError,
   TELEMETRY_TAB_RESTORE_LOAD_FAILURE,
   TELEMETRY_TAB_RESTORE_SAVE_FAILURE,
+  TELEMETRY_UI_ACTION_ACK_FAILURE,
 } from "../../telemetry/errorTelemetry";
 import {
   getPinnedWorkspaces,
@@ -231,6 +232,44 @@ export function WorkspacePane(): React.JSX.Element {
   React.useEffect(() => {
     persistTabsRef.current = persistTabs;
   }, [persistTabs]);
+
+  // ---------------------------------------------------------------------------
+  // D-F3 UI-action truthfulness — client-ack (FR-A1-08 / task AIR2-037)
+  //
+  // A server-initiated `widget_load` (no tabId) carrying a `frameId` means the
+  // emitting tool call (e.g. SendWorkspaceArtifactHandler's workspace_open_tab
+  // frame) is WAITING for this exact ack before its tool result can complete
+  // truthfully. Fired ONLY after the tab is actually materialized
+  // (manager.addTab below) — never before — so the ack is a genuine confirmation,
+  // not a hopeful echo of the frame. Fire-and-forget: on failure the server-side
+  // wait simply times out and the tool call reports an honest failure to the
+  // model (never a fabricated success) — there is no user-facing retry needed.
+  // ---------------------------------------------------------------------------
+
+  const sendUiActionAck = React.useCallback(
+    (frameId: string): void => {
+      if (!chatSessionId || !bffBaseUrl || !isAuthenticated) return;
+
+      const ackUrl = buildBffApiUrl(
+        bffBaseUrl,
+        `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/ack`,
+      );
+      void authenticatedFetch(ackUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ frameId }),
+      }).catch((err) => {
+        logTelemetryError(TELEMETRY_UI_ACTION_ACK_FAILURE, {
+          sessionId: chatSessionId,
+          message: err instanceof Error ? err.message : String(err),
+        });
+      });
+    },
+    [chatSessionId, bffBaseUrl, isAuthenticated, authenticatedFetch],
+  );
 
   // ---------------------------------------------------------------------------
   // Active-tab signal — Round 4 Fix 4 (2026-05-21)
@@ -738,6 +777,15 @@ export function WorkspacePane(): React.JSX.Element {
       // Add the tab — this enforces MAX_WORKSPACE_TABS eviction internally.
       const tabId = manager.addTab(widgetType, widgetData, displayName);
       syncState();
+
+      // D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): the tab is NOW
+      // actually materialized in this client's tab state — if the server frame
+      // carried a frameId (an ack-gated tool call is waiting), ack it referencing
+      // that EXACT frame id. Client-originated widget_load events (menu-opened
+      // tabs) never carry a frameId, so this is a no-op for them.
+      if (event.frameId) {
+        sendUiActionAck(event.frameId);
+      }
 
       // Lazy-resolve the widget component; update the tab once resolved.
       resolveWorkspaceWidget(widgetType).then((Component) => {

@@ -123,18 +123,8 @@ public sealed class EmailDraftToolHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "SYS-Email Draft",
-        Description: "Creates a DRAFT email record in Spaarke's Communication service for the user to review " +
-                     "and send. Never sends email — sending is always user-initiated from the Communication " +
-                     "service. Compose the subject and body from grounded session outputs (summaries, records " +
-                     "created this session) and cite their ledger keys in source_refs. " +
-                     // G-P3 UAT round-4 R4-4 (2026-07-07): "send this as an email" after a combined
-                     // summary produced a generic draft REFERENCING AN ATTACHMENT that cannot exist.
-                     "The draft CANNOT carry attachments — never write body text that references an attached " +
-                     "or enclosed document ('please find attached', 'enclosed is'). When the user asks to " +
-                     "email content already produced in this conversation (a summary, findings, a comparison), " +
-                     "include that content INLINE in the body; if their request implies attaching a file, say " +
-                     "the email is sent without attachments and inline the material instead. " +
-                     "SIDE-EFFECT tool (communicate): invocation is confirmation-gated.",
+        // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-email-draft-row.json — keep byte-equal; edit the JSON, not this literal.
+        Description: @"Creates a DRAFT email record in Spaarke's Communication service for the user to review and send. NEVER sends email — sending is always user-initiated from the Communication service. Compose the subject and body from grounded session outputs (summaries, records created this session) and cite their ledger keys in source_refs. The draft CANNOT carry attachments — never write body text that references an attached or enclosed document ('please find attached', 'enclosed is'). When the user asks to email content already produced in this conversation (a summary, findings, a comparison), include that content INLINE in the body; if their request implies attaching a file, say the email is sent without attachments and inline the material instead. Optionally associate the draft to a record via 'regarding' (e.g. the matter it concerns). COMMUNICATE tool: invocation is confirmation-gated; the record is created with the user's own privileges.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

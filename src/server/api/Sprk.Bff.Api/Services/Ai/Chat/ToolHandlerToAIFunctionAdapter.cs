@@ -353,10 +353,46 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     /// </summary>
     public AnalysisTool Tool => _tool;
 
+    /// <summary>
+    /// FR-A1-05 pre-suspend validation hook (spaarke-ai-architecture-redesign-r2 task 034):
+    /// runs the wrapped handler's <see cref="IToolHandler.ValidateChat"/> against the
+    /// LLM-supplied <paramref name="arguments"/> using the SAME per-invocation
+    /// <see cref="ChatInvocationContext"/> the live <see cref="InvokeCoreAsync"/> path builds
+    /// (same context factory, same tenant / session / matter scope, same argument serialization).
+    /// <para>
+    /// This lets <see cref="SideEffectGateAIFunction"/> reject a PROVABLY-doomed side-effecting
+    /// call with an honest ❌ (+ the handler's D-F0(d) affordance) BEFORE suspending it into a
+    /// confirmation dialog — instead of asking the user to confirm a call that cannot succeed
+    /// (the R5-E Confirm→❌ dead-end). It is a PURE validation peek: it does NOT execute the
+    /// handler and has NO side effect. The gate short-circuits only on a definite
+    /// <see cref="ToolValidationResult.IsValid"/> == false; a validation PASS falls through to the
+    /// normal suspend, so a call whose failure is not certain at validation time keeps its
+    /// legitimate confirmation dialog (the gate is never weakened toward execution).
+    /// </para>
+    /// </summary>
+    public ToolValidationResult ValidateForGate(AIFunctionArguments arguments)
+    {
+        var context = _contextFactory() with
+        {
+            RequestedToolName = _tool.Name,
+            ToolArgumentsJson = SerializeArgumentsToJson(arguments),
+        };
+
+        return _handler.ValidateChat(context, _tool);
+    }
+
     /// <inheritdoc />
     /// <remarks>
     /// FR-10: this is the natural-language description the LLM consults when deciding
     /// whether to invoke this tool. Sourced from <c>sprk_analysistool.sprk_description</c>.
+    /// <para>
+    /// FR-A-01 triple-twin hoist (AIR2-020): that live value is a SEED-MANAGED MIRROR of the
+    /// single authored source — the row JSON at <c>infra/dataverse/sprk_analysistool-*-row.json</c>
+    /// (<c>scripts/Seed-TypedHandlers.ps1</c> PATCHes it). Do NOT hand-edit the live row; edit the
+    /// JSON. The compiled handler <c>ToolHandlerMetadata.Description</c> is a second mirror kept
+    /// byte-equal in CI (CatalogToolDescriptionParityContractTests); live-vs-code drift is caught
+    /// at runtime by <c>RoutingConsumerTypeHealthCheck</c>'s description-parity dimension.
+    /// </para>
     /// </remarks>
     public override string Description => _tool.Description ?? string.Empty;
 

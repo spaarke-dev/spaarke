@@ -4,10 +4,14 @@
 // behavior an executor (FR-P3-04's coded-composite dispatch) would observe: a workflow
 // named by an Action row's sprk_workflowclass value is resolved by class reference through
 // the assembly-scan convention and EXECUTED — real narrator pipeline (mocked at the
-// IOpenAiClient / AnalysisActionService module boundary, same recipe as the existing
-// DailyBriefingNarrator behavior tests), real collector pipeline (failure-soft empty
+// IOpenAiClient / AnalysisActionService module boundary, same recipe as
+// DailyBriefingNarratorEntityLinkTests), real collector pipeline (failure-soft empty
 // channels), and the ADR-032 Null-Object kill-switch peer flowing through class-ref
 // resolution unchanged.
+//
+// R5 task 010 (FR-A3, 2026-07-08): the narrator's per-channel LLM leg was removed —
+// channel content is now built deterministically from req.Channels, so the module-boundary
+// mock below only stubs the TL;DR action (the sole remaining LLM call).
 
 using System.Text.Json;
 using FluentAssertions;
@@ -31,7 +35,6 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Workflows;
 public sealed class CodedWorkflowConventionTests
 {
     private const string TldrActionCode = "BRIEF-NARRATE-TLDR";
-    private const string ChannelActionCode = "BRIEF-NARRATE-CHANNEL";
     private const string TldrSummary = "One matter needs attention today.";
 
     // ─── Test 1: narrator resolved by class ref through the convention and executed ───
@@ -147,11 +150,11 @@ public sealed class CodedWorkflowConventionTests
         actions.Setup(s => s.GetActionByCodeAsync(TldrActionCode, It.IsAny<CancellationToken>()))
                .ReturnsAsync(MakeAction(TldrActionCode,
                    """{ "type":"object", "properties": { "summary":{"type":"string"}, "keyTakeaways":{"type":"array","items":{"type":"string"}}, "topAction":{"type":"string"} }, "required":["summary","keyTakeaways","topAction"], "additionalProperties":false }"""));
-        actions.Setup(s => s.GetActionByCodeAsync(ChannelActionCode, It.IsAny<CancellationToken>()))
-               .ReturnsAsync(MakeAction(ChannelActionCode,
-                   """{ "type":"object", "properties": { "channel":{"type":"string"}, "narrative":{"type":"array","items":{"type":"string"}} }, "required":["channel","narrative"], "additionalProperties":false }"""));
 
-        var llm = new Mock<IOpenAiClient>(MockBehavior.Loose);
+        // Strict — the TL;DR action is the ONLY LLM call the narrator makes post-R5 task
+        // 010; any other invocation (e.g. a resurrected per-channel call) throws and fails
+        // the test.
+        var llm = new Mock<IOpenAiClient>(MockBehavior.Strict);
         llm.Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), TldrActionCode.Replace('-', '_'),
                 It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
@@ -160,14 +163,6 @@ public sealed class CodedWorkflowConventionTests
                 summary = TldrSummary,
                 keyTakeaways = new[] { "Acme contract overdue" },
                 topAction = "Review the Acme engagement letter."
-            }));
-        llm.Setup(c => c.GetStructuredCompletionRawAsync(
-                It.IsAny<string>(), It.IsAny<BinaryData>(), ChannelActionCode.Replace('-', '_'),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(JsonSerializer.Serialize(new
-            {
-                channel = "Tasks",
-                narrative = new[] { "Acme contract renewal is overdue." }
             }));
 
         var scrubber = new Mock<IEntityNameScrubber>(MockBehavior.Loose);

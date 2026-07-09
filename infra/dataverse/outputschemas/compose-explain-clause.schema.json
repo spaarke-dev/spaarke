@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/compose-explain-clause.schema.json",
+  "title": "Compose — Explain Clause — Output Schema (compose-explain-clause)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='compose-explain-clause' (spaarkeai-compose-r2 task 040, FR-07). MIRRORS VERBATIM the outputSchema baked into infra/dataverse/actions/compose-explain-clause.action.json (the systemPrompt/schema author surface). Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required array, no anyOf/oneOf/discriminator. Property declaration order (explanation → keyConcepts → relatedPlaybookIds) mirrors the author surface; explanation streams first so the Assistant renders the plain-language answer before the concept/id lists.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["explanation", "keyConcepts", "relatedPlaybookIds"],
+  "$comment-required": "Object-level required array only — property-level boolean 'required' is FORBIDDEN (OpenAiFunctionSchemaValidator).",
+  "properties": {
+    "explanation": {
+      "type": "string",
+      "description": "Plain-language explanation of the selected clause's legal effect and significance (≤1 short paragraph, ≤1500 chars). Emitted FIRST. Interprets the clause; does not restate it verbatim.",
+      "maxLength": 1500
+    },
+    "keyConcepts": {
+      "type": "array",
+      "description": "2-6 short concept labels a reader should understand to grasp the clause (terms, not sentences). Emitted SECOND. Empty allowed only when the selection is insufficient to interpret.",
+      "items": { "type": "string", "maxLength": 80 },
+      "maxItems": 6
+    },
+    "relatedPlaybookIds": {
+      "type": "array",
+      "description": "Identifiers of matter/firm playbook entries the retrieval layer supplied that relate to this clause. Ids ONLY (never quoted content). Emitted LAST. Empty array when none supplied — never fabricated.",
+      "items": { "type": "string" }
+    }
+  }
+}

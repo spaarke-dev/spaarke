@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/compose-defined-terms.schema.json",
+  "title": "Compose — Defined Terms — Output Schema (compose-defined-terms)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='compose-defined-terms' (spaarkeai-compose-r2 task 044, FR-11). MIRRORS VERBATIM the outputSchema in infra/dataverse/actions/compose-defined-terms.action.json. Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required arrays, no anyOf/oneOf/discriminator. The 'consistent' boolean is a value-typed field (legal); the ban is on the property-level required keyword only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["terms", "inconsistencies"],
+  "properties": {
+    "terms": {
+      "type": "array",
+      "description": "One entry per defined term found in the document.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["term", "definitionSpan", "usages"],
+        "properties": {
+          "term": { "type": "string", "description": "The defined term itself.", "maxLength": 200 },
+          "definitionSpan": { "type": "string", "description": "Verbatim text snippet where the term is defined.", "maxLength": 2000 },
+          "usages": {
+            "type": "array",
+            "description": "Each place the term is used, with a consistency judgment.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["span", "consistent", "note"],
+              "properties": {
+                "span": { "type": "string", "description": "Verbatim text snippet of the usage.", "maxLength": 2000 },
+                "consistent": { "type": "boolean", "description": "True if this usage is consistent with the term's definition." },
+                "note": { "type": "string", "description": "Short explanation of any inconsistency; empty string when consistent.", "maxLength": 500 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "inconsistencies": {
+      "type": "array",
+      "description": "Defined-term problems (inconsistent usage / used-but-undefined / defined-but-unused). Empty when all defined terms are consistent.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["term", "detail"],
+        "properties": {
+          "term": { "type": "string", "description": "The term the inconsistency concerns.", "maxLength": 200 },
+          "detail": { "type": "string", "description": "One-sentence description of the inconsistency.", "maxLength": 500 }
+        }
+      }
+    }
+  }
+}

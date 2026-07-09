@@ -1,10 +1,12 @@
 # Spaarke Daily Update Service R5
 
-> **Status**: Not started — feedback capture phase
+> **Status**: Initialized — spec + plan + tasks generated (pipeline 2026-07-08); awaiting execution go-ahead
 >
-> **Created**: 2026-07-01
+> **Created**: 2026-07-01 · **Spec'd**: 2026-07-08
 >
 > **Predecessor**: [`spaarke-daily-update-service-r4`](../spaarke-daily-update-service-r4/) (complete 2026-06-26)
+>
+> **Scope**: (1) accuracy by construction — deterministic item rows + deterministic-fact TL;DR, no groundedness threshold; (2) visual redesign via `/prototype`; (3) hardening sweep (Choice-coercion, collaborator-scope, de-dup, tests, OData doc). **Deferred**: Monitored-For schema, EventDetailSidePane fix. See [`design.md`](design.md) v0.2 · [`spec.md`](spec.md) · [`plan.md`](plan.md).
 
 ## Purpose
 

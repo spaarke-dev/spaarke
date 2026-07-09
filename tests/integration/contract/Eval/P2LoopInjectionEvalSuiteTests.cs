@@ -591,7 +591,8 @@ public class P2LoopInjectionEvalSuiteTests
                 201, JsonDocument.Parse($$"""{"sprk_eventid":"{{createdId:D}}"}""").RootElement.Clone()));
         var handler = new Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler(
             dataverse.Object,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler>.Instance);
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler>.Instance,
+            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"));
 
         var adapter = new ToolHandlerToAIFunctionAdapter(
             toolRow, handler,

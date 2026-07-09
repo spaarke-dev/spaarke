@@ -111,6 +111,13 @@ export function useContextEventBridge(deps: ContextEventBridgeDeps): {
           widgetType,
           widgetData,
           displayName: data.contextDisplayName,
+          // D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): forward the
+          // server-issued frame id so WorkspacePane can ack it back once the tab is
+          // actually materialized. This is the SAME identifier the server's ack-gated
+          // tool call (SendWorkspaceArtifactHandler) is waiting on — dropping it here
+          // (as this bridge did before task AIR2-037) meant no client event could ever
+          // reference the frame, silently defeating the ack contract.
+          frameId: data.contextTabId,
         } as WorkspacePaneEvent);
         return;
       }

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-daily-update-service-r5">
+  <metadata>
+    <title>OData naming convention doc in docs/standards/ (FR-C9 part 1)</title>
+    <phase>0: Quick fixes</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002</blocks>
+    <tags>docs, standards</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task — no code implementation, no tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Routine documentation authoring with an explicit convention statement and examples to reproduce; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create a new standards document at docs/standards/ODATA-NAMING-CONVENTION.md that states the Spaarke OData
+    naming convention: binding a lookup via @odata.bind uses the PascalCase attribute SchemaName; filtering or
+    selecting a scalar uses the lowercase attribute LogicalName. Include one correct and one incorrect @odata.bind
+    example. This is FR-C9 part 1 and unblocks the grep audit in task 002.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer authoring a cross-cutting standards document. Familiar with Dataverse Web API OData
+    conventions (LogicalName vs SchemaName) and the existing docs/standards/ style.
+  </role>
+
+  <goal>
+    A new file docs/standards/ODATA-NAMING-CONVENTION.md exists that states BOTH naming rules (PascalCase SchemaName
+    for @odata.bind lookup binding; lowercase LogicalName for filtering/selecting), shows one correct and one
+    incorrect @odata.bind example, and is linked from docs/standards/INDEX.md.
+  </goal>
+
+  <context>
+    <background>
+      R7 W12 discovered a class of bug where lookups were bound via @odata.bind using the lowercase attribute
+      LogicalName (e.g. "sprk_assignedto@odata.bind"), which Dataverse rejects with an OData 400 — the navigation
+      property name must be the PascalCase SchemaName ("sprk_AssignedTo"). One instance was fixed in R7
+      (useInlineTodoCreate.ts); another remains in EventDetailSidePane (deferred). This doc codifies the convention
+      so the pattern is documented once and enforceable, and it is the reference cited by the task-002 grep audit.
+    </background>
+    <relevant-files>
+      <file>docs/standards/ODATA-NAMING-CONVENTION.md</file>
+      <file>docs/standards/INDEX.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">The doc MUST state both rules verbatim in substance: (1) "binding a lookup via @odata.bind -> PascalCase SchemaName"; (2) "filtering or selecting a scalar -> lowercase LogicalName". Do not add rules beyond these two plus the worked examples.</constraint>
+    <constraint source="project">Match the existing docs/standards/ file style (title header, Purpose/Audience header block, markdown tables/code fences) as used by CODING-STANDARDS.md and DATA-ACCESS-DECISION-CRITERIA.md.</constraint>
+    <constraint source="project">Add exactly one row for the new doc to the docs/standards/INDEX.md "Standards Index" table. Do not restructure INDEX.md otherwise.</constraint>
+    <constraint source="project">This is a docs-only task. Do NOT modify any source code, deploy scripts, or the EventDetailSidePane files.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/04-latent-bugs.md</file>
+      <file>projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/03-code-review-followups.md</file>
+      <file>docs/standards/INDEX.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="Standards doc style" location="docs/standards/CODING-STANDARDS.md">
+        Header block (Purpose/Audience/Last Reviewed), section headings, fenced code blocks for correct/incorrect examples.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read note 04-latent-bugs.md "Grep audit / Convention documentation" section and note 03 for the source of the convention text and the correct-usage reference sites (SmartTodoWidget.tsx:759, SmartToDo.tsx:680, TodoDetail.tsx:636, useInlineTodoCreate.ts:263).</step>
+    <step order="2">Read docs/standards/CODING-STANDARDS.md and DATA-ACCESS-DECISION-CRITERIA.md to match the header block and section style.</step>
+    <step order="3">Write docs/standards/ODATA-NAMING-CONVENTION.md: header block; a "The rule" section stating both rules; a "Where each is used" section (LogicalName in FetchXml / QueryExpression Filter / ColumnSet / $select; SchemaName in @odata.bind navigation-property names and $expand); a "Examples" section with one correct fenced @odata.bind example (PascalCase, e.g. "sprk_AssignedTo@odata.bind") and one incorrect fenced example (lowercase, e.g. "sprk_assignedto@odata.bind") annotated as wrong with the 400-error symptom.</step>
+    <step order="4">Add one row to the docs/standards/INDEX.md Standards Index table linking ODATA-NAMING-CONVENTION.md with a one-line description and today's date.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status to completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/standards/ODATA-NAMING-CONVENTION.md</output>
+    <output type="docs">docs/standards/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">docs/standards/ODATA-NAMING-CONVENTION.md exists.</criterion>
+    <criterion testable="true">The doc states the @odata.bind -> PascalCase SchemaName rule AND the filter/select -> lowercase LogicalName rule.</criterion>
+    <criterion testable="true">The doc contains exactly one correct @odata.bind example (PascalCase SchemaName navigation property) and one incorrect @odata.bind example (lowercase LogicalName) clearly labelled correct vs incorrect.</criterion>
+    <criterion testable="true">docs/standards/INDEX.md contains a link to ODATA-NAMING-CONVENTION.md in its Standards Index table.</criterion>
+    <criterion testable="true">No file outside docs/standards/ is modified by this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Source convention text is in note 04-latent-bugs.md ("Convention documentation" bullet). The correct SchemaName
+    for the recurring example is sprk_AssignedTo. Keep the doc short and focused — two rules plus examples; do not
+    expand into a broader Dataverse OData tutorial.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

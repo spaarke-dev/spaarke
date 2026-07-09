@@ -39,12 +39,12 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// </para>
 ///
 /// <para>
-/// <b>Production routing dependency (core task 010, NOT this task)</b>: for a maker-selectable
-/// Binding to route to <c>compose</c>, the core must add <c>BindingDisposition.Compose</c>
-/// (Binding.cs), its <c>ToLedgerValue</c> mapping, and an <see cref="Ai.OutputRouter"/> case —
-/// those touch shared routing files and are owned by core task 010. Until then a Binding cannot
-/// declare the compose disposition through <c>sprk_disposition</c>; this consumer + its test
-/// prove the Compose half of the seam is correct and ready.
+/// <b>Production routing promotion (APPLIED 2026-07-09 by spaarkeai-compose-r2)</b>: for a
+/// maker-selectable Binding to route to <c>compose</c>, <c>BindingDisposition.Compose</c>
+/// (Binding.cs), its <c>ToLedgerValue</c> mapping, and an <see cref="Ai.OutputRouter"/>
+/// pass-through case are required. Core task 010 published the CONTRACT only and deferred this
+/// promotion (it was then unscheduled in redesign-r2); spaarkeai-compose-r2 applied it. A Binding
+/// may now declare the compose disposition through <c>sprk_disposition</c>.
 /// </para>
 /// </summary>
 public static class ComposeDraftDisposition

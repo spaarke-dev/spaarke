@@ -1,7 +1,7 @@
 <task id="AIR2-020" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Triple-twin validator hoist — single authored catalog source → generated/validated mirrors [FR-A-01]</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>A-infra — before ANY catalog-row task</phase>
     <gate>G-R2-A (enabling infra)</gate>
     <estimated-effort>2-3 days</estimated-effort>
@@ -54,7 +54,7 @@
     <patterns>
       <pattern name="Function-schema validator" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/OpenAiFunctionSchemaValidator.cs">Line 70 — the validation entry point to EXTEND with three-surface parity enforcement.</pattern>
       <pattern name="Routing-consumer health check" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs">Line 66 — startup/health parity assertion surface; add the authored-source-vs-mirror drift check here.</pattern>
-      <pattern name="Seed mirror home" location="infra/dataverse/inputschemas/">The `*.input.schema.json` twins (create-task-v1, draft-corr-v1, etc.) that become GENERATED artifacts, not hand-edited.</pattern>
+      <pattern name="Seed mirror home" location="infra/dataverse/sprk_analysistool-*-row.json">CORRECTED surface (was mis-cited as `infra/dataverse/inputschemas/`, which mirrors a DIFFERENT column `sprk_analysisaction.sprk_inputschema`, not the tool-description prose). The genuine third description twin is the `sprk_analysistool-*-row.json` seed rows carrying `sprk_description` — confirmed by r1 UAT note g-p3-uat-round4-findings.md:274-280. These row files are the SINGLE AUTHORED SOURCE (Model 1 / GitOps); live `sprk_description` is a seed-managed mirror; handler `Metadata.Description` is a code mirror validated in CI.</pattern>
     </patterns>
   </knowledge>
 
@@ -111,4 +111,21 @@
     <trigger>If any capability's three surfaces cannot be reconciled to a single authored source without changing runtime behavior (i.e., the twins already disagree semantically, not just cosmetically), STOP and surface the divergence per CLAUDE.md §6.5 — the migration must not silently pick a winner that alters a shipped capability's contract.</trigger>
     <trigger>If single-sourcing would require a second authoring/dispatch mechanism to satisfy a row (ADR-039 one-intent tension), surface it rather than forking authoring.</trigger>
   </escalation>
+
+  <notes>
+    COMPLETED 2026-07-08 (Model 1 / GitOps + Option C validate-only, operator-ratified after task-020 escalation).
+
+    SURFACE CORRECTION (project-scoped, per operator instruction 4): the prescribed third twin `infra/dataverse/inputschemas/` was mis-cited — discovery proved it mirrors a DIFFERENT column (`sprk_analysisaction.sprk_inputschema`, input schema of a different entity), not the tool-description prose. The genuine third description twin is `infra/dataverse/sprk_analysistool-*-row.json` (`sprk_description`), confirmed by r1 UAT note g-p3-uat-round4-findings.md:274-280. `inputschemas/` and the Binding-intent surface (`sprk_playbookconsumer.sprk_tooldescription`) are OUT of this hoist. Full discovery + drift census (36 pairs, 0 semantic) in notes/task-020-triple-twin-hoist-design-and-escalation.md.
+
+    IMPLEMENTED:
+    - Authored source = `infra/dataverse/sprk_analysistool-*-row.json` `sprk_description` (Model 1). Live `sprk_analysistool.sprk_description` = seed-managed mirror (Seed-TypedHandlers.ps1 PATCHes it; documented seed-managed + do-not-edit-live). Handler `Metadata.Description` = code mirror, reconciled byte-equal for all 23 single-row handlers (Option C, no codegen).
+    - Parity mechanism: pure `OpenAiFunctionSchemaValidator.FindDescriptionParityError(authored, mirror)` (NFR-07-safe — lengths + first-diff index only), reused by BOTH enforcement points.
+    - CI enforcement: tests/integration/contract/Catalog/CatalogToolDescriptionParityContractTests.cs (KEEP-path; data-driven over the authored rows; positive all-single-row parity + NEGATIVE corrupt-mirror + single-source-edit-propagation + memory.* authored-through-source proof; multi-row + no-row handlers exempt).
+    - Runtime enforcement: RoutingConsumerTypeHealthCheck description-parity dimension → Unhealthy when a live single-row sprk_description diverges from the compiled mirror (surfaces a hand-edit the seed would revert). +2 health-check tests.
+    - Docs: seed-managed note in Seed-TypedHandlers.ps1 header + ToolHandlerToAIFunctionAdapter projection site. Form-level read-only for sprk_description noted as a follow-up (health-check + seed-revert are the interim enforcement).
+
+    memory.* (task 057) authors THROUGH this source; live seeding deferred to 057 (seeding a row without its handler now would trip the existing bijection health check). Compose's 5 rows author the same way.
+
+    VERIFICATION: BFF build 0 errors; BFF unit suite 7581/7682 (101 skipped; 1 pre-existing flake AuditLogServiceTests.LogInteractionAsync_PartitionsByTenantId — passes in isolation, orthogonal); golden-utterance eval 35/35 green.
+  </notes>
 </task>

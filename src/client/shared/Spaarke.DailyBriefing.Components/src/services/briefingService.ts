@@ -146,6 +146,25 @@ export interface TldrResult {
   categoryCount: number;
   /** Count of priority items that fed the summary. */
   priorityItemCount: number;
+  /**
+   * R5 task 014 (FR-A5) — anchor-to-item grounding for click-through links. Computed
+   * server-side, deterministically (`DailyBriefingNarrator.BuildTldrItemRefs`) — never
+   * LLM-authored. Binary resolution, no groundedness score: the widget looks up each entry's
+   * `itemId` against the items it has available and DROPS the anchor (renders unlinked plain
+   * text, no residue, no warning) when the lookup misses (FR-A6 — no warn/withhold band).
+   * Optional on the wire for backward compatibility with any cached/older response shape.
+   */
+  itemRefs?: TldrItemRefResult[];
+}
+
+/**
+ * A single TL;DR anchor-to-item grounding entry (R5 task 014, FR-A5). See {@link TldrResult.itemRefs}.
+ */
+export interface TldrItemRefResult {
+  /** The exact text span the TL;DR named (verbatim, case-insensitive match against the TL;DR text). */
+  anchorText: string;
+  /** The source item id this anchor claims to reference — resolved against the widget's available items or dropped. */
+  itemId: string;
 }
 
 export interface ChannelNarrationResult {
@@ -154,24 +173,29 @@ export interface ChannelNarrationResult {
 }
 
 export interface NarrativeBulletResult {
+  /**
+   * R5 task 010 (FR-A3): built server-side directly from the source item's
+   * `Title` field (`DailyBriefingNarrator.BuildDeterministicBullet`) —
+   * deterministic, never LLM-authored.
+   */
   narrative: string;
   itemIds: string[];
   primaryEntityType: string;
   primaryEntityId: string;
   primaryEntityName: string;
-  /**
-   * R7 W12 feedback items 2/3/4 (2026-07-01) — per-bullet entity references.
-   * Ordered by first-appearance in narrative text (mentioned refs), then by
-   * channel order (implicit refs). Widget renders:
-   * - `mentioned=true` refs: wrap `entityName` in narrative text as clickable Link.
-   * - `mentioned=false` refs: append trailing `[N]` citations.
-   * Empty array (or field absent) => plain-text bullet, no citations.
-   */
-  references?: NarrativeBulletReferenceResult[];
 }
 
+/**
+ * Reference shape used internally by `NarrativeCitedText`'s deterministic
+ * segment builder (R5 task 011). The R7 W12 per-bullet `references[]` wire
+ * field this type originally mirrored (LLM-narrative multi-mention
+ * citations) is no longer emitted by `BuildDeterministicBullet` and is not
+ * consumed anywhere client-side — this type now exists purely to describe
+ * the single, item-derived candidate `NarrativeCitedText` builds from its
+ * own `regardingName`/`regardingEntityType`/`regardingId` props.
+ */
 export interface NarrativeBulletReferenceResult {
-  /** 1-based citation index for trailing `[N]` markers. */
+  /** 1-based index (retained for `buildSegments` compatibility; always 1 today). */
   index: number;
   /** Dataverse logical name of the target entity (e.g., "sprk_matter"). */
   entityType: string;
@@ -405,6 +429,10 @@ export async function fetchBriefingNarration(channels: ChannelFetchResult[]): Pr
       data.tldr.keyTakeaways = Array.isArray(data.tldr.keyTakeaways) ? data.tldr.keyTakeaways : [];
       data.tldr.summary = data.tldr.summary ?? '';
       data.tldr.topAction = data.tldr.topAction ?? '';
+      // R5 task 014 (FR-A5): same defensive normalization for itemRefs — an omitted/malformed
+      // field must never crash the resolution pass; empty array = "no anchors named", the
+      // common case, never itself a warning signal (FR-A6 — no groundedness gate).
+      data.tldr.itemRefs = Array.isArray(data.tldr.itemRefs) ? data.tldr.itemRefs : [];
     }
     return { status: 'success', data };
   } catch (err: unknown) {
@@ -468,6 +496,10 @@ export async function fetchBriefingLive(): Promise<NarrationResult> {
       data.tldr.keyTakeaways = Array.isArray(data.tldr.keyTakeaways) ? data.tldr.keyTakeaways : [];
       data.tldr.summary = data.tldr.summary ?? '';
       data.tldr.topAction = data.tldr.topAction ?? '';
+      // R5 task 014 (FR-A5): same defensive normalization for itemRefs — an omitted/malformed
+      // field must never crash the resolution pass; empty array = "no anchors named", the
+      // common case, never itself a warning signal (FR-A6 — no groundedness gate).
+      data.tldr.itemRefs = Array.isArray(data.tldr.itemRefs) ? data.tldr.itemRefs : [];
     }
     return { status: 'success', data };
   } catch (err: unknown) {
