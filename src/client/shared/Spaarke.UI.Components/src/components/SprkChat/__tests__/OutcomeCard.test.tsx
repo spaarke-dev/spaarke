@@ -31,7 +31,11 @@ describe('OutcomeCard', () => {
     const onOpenLink = jest.fn();
     const card: IOutcomeCard = {
       ...baseCard,
-      link: { url: 'https://org.crm.dynamics.com/main.aspx?pagetype=entityrecord', label: 'Open record', kind: 'record' },
+      link: {
+        url: 'https://org.crm.dynamics.com/main.aspx?pagetype=entityrecord',
+        label: 'Open record',
+        kind: 'record',
+      },
     };
 
     renderWithProvider(<OutcomeCard card={card} onOpenLink={onOpenLink} />);

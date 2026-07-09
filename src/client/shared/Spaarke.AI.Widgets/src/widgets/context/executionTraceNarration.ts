@@ -142,15 +142,18 @@ export function narrateTraceEvent(event: TraceEventDto): NarrationLine | null {
         parts.push(`${event.resultCount} result${event.resultCount === 1 ? '' : 's'}`);
       }
       if (typeof event.durationMs === 'number' && Number.isFinite(event.durationMs)) {
-        parts.push(event.durationMs < 1000 ? `${Math.round(event.durationMs)} ms` : `${(event.durationMs / 1000).toFixed(2)} s`);
+        parts.push(
+          event.durationMs < 1000 ? `${Math.round(event.durationMs)} ms` : `${(event.durationMs / 1000).toFixed(2)} s`
+        );
       }
       const suffix = parts.length > 0 ? ` (${parts.join(', ')})` : '';
       return { ...base, text: `Ran ${tool}${suffix}` };
     }
     case TRACE_EVENT_KIND.gate: {
-      const effect = typeof event.sideEffectClass === 'string' && event.sideEffectClass.length > 0
-        ? event.sideEffectClass
-        : 'action';
+      const effect =
+        typeof event.sideEffectClass === 'string' && event.sideEffectClass.length > 0
+          ? event.sideEffectClass
+          : 'action';
       switch (event.status) {
         case 'pending':
           return { ...base, text: `Awaiting your approval to ${effect}` };

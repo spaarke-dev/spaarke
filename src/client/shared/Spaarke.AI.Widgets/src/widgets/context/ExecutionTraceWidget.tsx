@@ -452,14 +452,16 @@ function traceEventsToEntries(events: readonly TraceEventDto[], idFrom: () => nu
 function narrateLiveToolChain(turn: number, calls: readonly TraceToolCallSummary[]): NarrationLine[] {
   const dtos: TraceEventDto[] = [
     { sequence: 0, turn, kind: TRACE_EVENT_KIND.toolChain, toolCallCount: calls.length },
-    ...calls.map((c, i): TraceEventDto => ({
-      sequence: i + 1,
-      turn,
-      kind: TRACE_EVENT_KIND.toolCall,
-      toolId: c.toolId,
-      resultCount: c.resultCount,
-      durationMs: c.durationMs,
-    })),
+    ...calls.map(
+      (c, i): TraceEventDto => ({
+        sequence: i + 1,
+        turn,
+        kind: TRACE_EVENT_KIND.toolCall,
+        toolId: c.toolId,
+        resultCount: c.resultCount,
+        durationMs: c.durationMs,
+      })
+    ),
   ];
   return dtos.map(narrateTraceEvent).filter((l): l is NarrationLine => l !== null);
 }
@@ -745,7 +747,12 @@ const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({ data, isLoa
           event; nothing here originates from model prose. */}
       {narration.length > 0 && (
         <>
-          <div className={styles.narration} role="log" aria-label="Plan narration" data-testid="execution-trace-narration">
+          <div
+            className={styles.narration}
+            role="log"
+            aria-label="Plan narration"
+            data-testid="execution-trace-narration"
+          >
             {narration.map((line, idx) => (
               <div
                 className={styles.narrationLine}

@@ -369,8 +369,25 @@ function serverLineage(): ServerTraceEvent[] {
   return [
     { version: 'trace-event/v1', sequence: 0, turn: 1, kind: 'context', fingerprintId: 'fp-1', contextSliceCount: 4 },
     { version: 'trace-event/v1', sequence: 1, turn: 1, kind: 'tool_chain', toolCallCount: 1 },
-    { version: 'trace-event/v1', sequence: 2, turn: 1, kind: 'tool_call', toolId: 'sprk_document_search', resultCount: 3, durationMs: 120 },
-    { version: 'trace-event/v1', sequence: 3, turn: 1, kind: 'gate', gateId: 'g-1', gateKind: 'confirmation', status: 'pending', sideEffectClass: 'write' },
+    {
+      version: 'trace-event/v1',
+      sequence: 2,
+      turn: 1,
+      kind: 'tool_call',
+      toolId: 'sprk_document_search',
+      resultCount: 3,
+      durationMs: 120,
+    },
+    {
+      version: 'trace-event/v1',
+      sequence: 3,
+      turn: 1,
+      kind: 'gate',
+      gateId: 'g-1',
+      gateKind: 'confirmation',
+      status: 'pending',
+      sideEffectClass: 'write',
+    },
   ];
 }
 
@@ -452,7 +469,10 @@ describe('ExecutionTraceWidget — server trace read surface (AIR2-038)', () => 
     await screen.findAllByTestId('execution-trace-row');
 
     act(() => {
-      bus.dispatch('context', makeToolChainEvent([{ toolId: 'live.after.restore', resultCount: 1 }], { turn: 2 } as Partial<ContextPaneEvent>));
+      bus.dispatch(
+        'context',
+        makeToolChainEvent([{ toolId: 'live.after.restore', resultCount: 1 }], { turn: 2 } as Partial<ContextPaneEvent>)
+      );
     });
 
     const rows = screen.getAllByTestId('execution-trace-row');
