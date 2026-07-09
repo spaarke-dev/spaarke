@@ -1,0 +1,97 @@
+<task id="AIR2-003" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Business-slice determinism check — schema-card render must be prompt-cache stable</title>
+    <status>not-started</status>
+    <phase>0 — Reconciliation &amp; Discovery</phase>
+    <gate>none (foundation; settles NFR-04 cache-stability scope for the Business slice)</gate>
+    <estimated-effort>0.5 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Focused determinism verification of one render path with a pinning test; bounded scope, but a wrong "it's deterministic" call silently breaks prompt-cache stability — effort high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, discovery, phase-0, determinism, context-envelope, prompt-cache</tags>
+    <dependencies>none (Phase 0 front wave)</dependencies>
+  </metadata>
+
+  <prompt>
+    Verify the Dataverse schema-card render (the Business slice of the ContextEnvelope) is DETERMINISTIC — stable property ordering, no embedded timestamps, no per-request GUIDs — so it can safely sit in the cache-stable prefix (spec FR-P0-03, design D-M2 F-2/T-3, NFR-04). Outcome is binary: EITHER determinism is confirmed (Business stays in the stable prefix) OR the caching NFR is re-scoped honestly and the Business slice is documented as belonging OUTSIDE the stable prefix. Prove it with a repeat-render pinning test, not by eyeballing.
+  </prompt>
+
+  <role>Senior .NET developer who can isolate a schema-card render, render it twice for the same record/table, and assert byte-stable output — plus judge whether any variance is intrinsic or fixable.</role>
+
+  <goal>
+    A determinism verdict for the Business-slice schema-card render, backed by a pinning test in `tests/integration/contract/` (or the nearest KEEP-path home) that renders the same schema card twice and asserts identical bytes (stable ordering, no timestamps, no GUIDs). If deterministic → documented that Business stays in the stable prefix. If not → the specific non-determinism source is named and either fixed or the caching NFR (NFR-04) is re-scoped with Business moved out of the stable prefix — recorded in notes.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="baseline">projects/spaarke-ai-architecture-redesign-r2/notes/prompt-assembly-baseline.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-04">Prompt-cache stability requires the stable prefix to be byte-identical across turns for the same subject — any timestamp/GUID/unordered-dictionary in the Business slice breaks it.</constraint>
+    <constraint source="ADR-040">Determinism is verified on the existing assembly path; no second render path is introduced to obtain a "clean" result.</constraint>
+    <constraint source="ADR-038">The pinning test is a KEEP-path integration test; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration assertions.</constraint>
+    <constraint source="project">The verdict MUST be one of the two honest outcomes — "confirmed deterministic (stays in prefix)" or "non-deterministic (re-scope + move out of prefix)". No hand-wave.</constraint>
+    <constraint source="bff-hygiene">If code changes to fix ordering, run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>schema-card-render, determinism, prompt-cache-stability, stable-ordering</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Host-identity / Business slice source" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs:582">Host-identity line + host-record context feeding the Business slice — inspect for ordering/timestamp variance.</pattern>
+      <pattern name="Schema-card render" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseCreateRecordHandler.cs:111">Per-table schema card / write-contract render — the concrete card whose ordering + timestamp/GUID freedom must be pinned.</pattern>
+      <pattern name="Contract/determinism test home" location="tests/integration/contract/">KEEP-path integration tests; add the repeat-render pinning test here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>D-M2 wants the ContextEnvelope's stable-prefix slices (identity, schema cards, environment facts, preferences) to precede the volatile ledger tail so prompt-cache hits survive across turns. Schema cards only earn a place in that prefix if they render byte-identically. FR-P0-03 forces an honest determinism check now, before task 053/054 lock the envelope layout. Consumes the same render path task 002 measured.</background>
+    <dependencies>
+      <dependency task="002" status="pending">Prompt-assembly baseline identifies the Business-slice render location + size (helpful, not blocking).</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-B-04 / task 053 Context Binder places Business in the stable prefix based on THIS verdict.</item>
+      <item>NFR-04 prompt-cache stability depends on this outcome for the Business slice.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Locate the render">From the anchors, isolate the schema-card render that produces the Business slice.</step>
+    <step order="1" name="Repeat-render test">Add a pinning test that renders the same schema card twice for the same record/table and diffs the output byte-for-byte.</step>
+    <step order="2" name="Diagnose variance">If bytes differ, identify the source (dictionary-ordering, embedded timestamp, per-request GUID) and classify as fixable vs intrinsic.</step>
+    <step order="3" name="Decide + record">If deterministic (or cheaply fixed) → document Business stays in the stable prefix. If not → re-scope NFR-04 honestly, move Business out of the prefix, record in notes.</step>
+    <step order="4" name="Verify + governance">Build; run the pinning test; if code changed, measure publish-size delta + state Placement Justification.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run the determinism pinning test</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/contract/ (schema-card repeat-render determinism pinning test)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/business-slice-determinism.md (verdict + evidence + prefix decision)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (only if an ordering/timestamp fix is applied)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A pinning test renders the same schema card twice for the same record/table and asserts byte-identical output; it lives in tests/integration/contract/ and passes.</criterion>
+    <criterion testable="true">The test asserts stable property ordering AND the absence of timestamps / per-request GUIDs in the rendered Business slice.</criterion>
+    <criterion testable="true">The note records exactly ONE verdict: confirmed-deterministic (Business stays in stable prefix) OR non-deterministic (NFR-04 re-scoped, Business moved out of prefix) — with the specific variance source named if non-deterministic.</criterion>
+    <criterion testable="true">The test uses no `Mock&lt;HttpMessageHandler&gt;` and no DI-registration assertions (ADR-038).</criterion>
+    <criterion testable="true">NEGATIVE: injecting a timestamp/GUID into the render (or reordering the source dict) makes the pinning test FAIL — proving the test actually detects non-determinism.</criterion>
+    <criterion testable="true">If any code changed, publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the Business-slice render is non-deterministic AND the non-determinism is intrinsic (cannot be cheaply fixed without a broad refactor), STOP and surface the NFR-04 re-scope decision — moving Business out of the stable prefix has a prompt-cache-cost the operator should ratify, and it changes the ContextEnvelope layout task 053 will build.</trigger>
+  </escalation>
+</task>

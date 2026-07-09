@@ -1,0 +1,105 @@
+<task id="AIR2-042" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Cataloged create-matter capability — Binding + prompted Action (FR-A1-13 / R19)</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction</phase>
+    <gate>G-R2-A (judgment)</gate>
+    <estimated-effort>2 days</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mirrors the shipped create-task capability pattern (Binding + prompted Action) rather than inventing architecture; the catalog-authoring risk is contained by the triple-twin hoist it depends on.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>true</goal-eligible>
+    <tags>bff-api, catalog-row, binding, action, create-matter, side-effect</tags>
+    <dependencies>020 (triple-twin validator hoist) — HARD prerequisite: no catalog-row task before 020</dependencies>
+  </metadata>
+
+  <prompt>
+    Add a cataloged create-matter capability — a Binding + prompted Action modeled on the shipped create-task capability — so a user can create a matter through the assistant, with the OutcomeCard links targeting the created matter (spec FR-A1-13, R19). This is a catalog-row task, so it MUST be sequenced AFTER task 020 (triple-twin validator hoist); author the row through the single hoisted source, never the three hand-maintained twins.
+  </prompt>
+
+  <role>.NET + JPS developer fluent in the Spaarke closed-catalog Binding/Action model, `jps-action-create`/`jps-validate`, the create-record handler, and Policy v2 side-effect gating.</role>
+
+  <goal>
+    A create-matter capability exists as a catalog Binding + prompted Action (input schema authored through the triple-twin single source, mirrors validated), executable through the assistant like create-task. It carries a declared `side_effect_class` (catalog DATA, gated by Policy v2 — matter creation is a write). On success, the OutcomeCard link targets the newly created matter record. No second dispatch path; it rides the existing DataverseCreateRecord handler and disposition/OutcomeCard surface.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="hoist-task">projects/spaarke-ai-architecture-redesign-r2/tasks/020-triple-twin-validator-hoist.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Risk/side-effect for create-matter is catalog-declared DATA (`side_effect_class`), never runtime LLM judgment; the capability is a closed-catalog row.</constraint>
+    <constraint source="project">HARD SEQUENCE: task 020 (triple-twin hoist) MUST land first — author the input/description through the single hoisted source; validator-enforced parity across live catalog ↔ handler Metadata ↔ `infra/dataverse/` mirror.</constraint>
+    <constraint source="ADR-013">Any CRUD consumer reaches the capability via `PublicContracts/`; do not inject AI internals into CRUD.</constraint>
+    <constraint source="ADR-038">Test is a KEEP-path integration test; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="component-justification">Per CLAUDE.md §11: EXTEND the create-task Binding/Action + DataverseCreateRecord handler pattern; do NOT introduce a new handler or dispatch path for matters.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; measure publish-size delta vs the ~49.63 MB baseline; no new HIGH CVE; Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/catalog, jps/action, ai/side-effect-gate, ai/outcome-card</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="create-task consumer row (mirror)" location="infra/dataverse/sprk_playbookconsumer-rows.json:102">consumerType create-task (:102), name create-task (default) (:105) — model the create-matter Binding on this shape (authored via the 020 hoisted source).</pattern>
+      <pattern name="create-task input schema (mirror)" location="infra/dataverse/inputschemas/create-task-v1.input.schema.json">The prompted-Action input schema shape to mirror for create-matter.</pattern>
+      <pattern name="Create-record handler (extend)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseCreateRecordHandler.cs">The existing handler create-matter dispatches through — no new handler.</pattern>
+      <pattern name="OutcomeCard link surface" location="src/server/api/Sprk.Bff.Api/Api/Agent/HandoffUrlBuilder.cs">Server link composition the OutcomeCard uses to target the created matter.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>create-task already ships as a Binding + prompted Action; FR-A1-13 (R19) wants the same for matters, with the OutcomeCard deep-linking the created matter. Because it adds a catalog row, the triple-twin hoist (task 020) must land first so the guidance/contract text has a single authored source with validator-enforced parity (plan §5 hard sequence: 020 BEFORE 032, 042, 057).</background>
+    <dependencies>
+      <dependency task="020" status="pending">Triple-twin validator hoist — BLOCKS this task; the create-matter row is authored through the hoisted single source.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-A1-06 (task 035) OutcomeCard is the surface the created-matter link renders on.</item>
+      <item>FR-A1-12 (task 041) capability discovery lists create-matter once cataloged.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance + gate">Confirm task 020 has landed. Load spec FR-A1-13, ADR-039/013, bff-extensions.md. Confirm the create-task Binding/Action + create-record handler + OutcomeCard link via anchors.</step>
+    <step order="1" name="Author the row via the hoist">Author the create-matter Binding + prompted Action input schema through the single hoisted source (020); regenerate/validate the three mirrors for parity.</step>
+    <step order="2" name="Declare side_effect_class">Set the catalog-declared side_effect_class so Policy v2 gates matter creation as a write (no runtime LLM risk judgment).</step>
+    <step order="3" name="Wire outcome link">Ensure the OutcomeCard link targets the created matter record via HandoffUrlBuilder.</step>
+    <step order="4" name="Test">KEEP-path integration test: create-matter dispatches through the existing handler, the gate fires per the declared class, and the OutcomeCard link resolves to the created matter.</step>
+    <step order="5" name="Verify + governance">Build; run `jps-validate` + tests; measure publish-size delta; bff-extensions checklist; no new HIGH CVE; Placement Justification.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run BFF tests</tool>
+    <tool name="jps-validate">Validate the create-matter Action JSON + mirror parity</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infra/dataverse/ (create-matter Binding + Action mirrors — generated from the hoisted source)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ (create-matter routes through DataverseCreateRecordHandler — no new handler)</output>
+    <output type="test">tests/integration/contract/ or tests/unit/ (create-matter dispatch + gate + outcome link)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A create-matter capability exists as a catalog Binding + prompted Action, authored through the task-020 single hoisted source with validator-enforced parity across all three mirrors.</criterion>
+    <criterion testable="true">create-matter declares its `side_effect_class` as catalog DATA and is gated by Policy v2 as a write — no runtime LLM risk judgment (ADR-039).</criterion>
+    <criterion testable="true">On success, the OutcomeCard link targets the newly created matter record.</criterion>
+    <criterion testable="true">create-matter dispatches through the EXISTING DataverseCreateRecord handler — no new handler or dispatch path (CLAUDE.md §11).</criterion>
+    <criterion testable="true">Publish-size delta measured; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">NEGATIVE: authoring the row by editing a twin directly (not the hoisted source) fails validator parity; and create-matter cannot execute ungated (write gate fires) — both covered by tests.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If task 020 has NOT landed, STOP — this is a catalog-row task and the hard-sequence rule (plan §5) forbids authoring a row before the triple-twin hoist. Do not author the row against the three hand-maintained twins.</trigger>
+    <trigger>If create-matter needs a field/behavior the create-task pattern cannot express without a new handler, surface the extension-vs-new decision per CLAUDE.md §11 before building a new handler.</trigger>
+  </escalation>
+</task>

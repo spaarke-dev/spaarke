@@ -1,0 +1,93 @@
+<task id="AIR2-004" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Discovery obligations confirm — pin the five citeable seams with file:line evidence</title>
+    <status>not-started</status>
+    <phase>0 — Reconciliation &amp; Discovery</phase>
+    <gate>none (foundation; de-risks the citations later waves rely on)</gate>
+    <estimated-effort>0.5 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mostly pre-satisfied by pipeline discovery — this task CONFIRMS + records exact file:line; low ambiguity, effort medium.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>discovery, phase-0, evidence, seams</tags>
+    <dependencies>none (Phase 0 front wave)</dependencies>
+  </metadata>
+
+  <prompt>
+    Verify in-repo, and record with file:line evidence, the five discovery obligations from design §14 before any later wave cites them with authority (spec FR-P0-04): (1) golden-utterance suite file location + format; (2) `OpenAiFunctionSchemaValidator` extension points for the triple-twin hoist (row 15 / FR-A-01); (3) Gate-ledger property surface (confirmation-state persistence); (4) the `dispatchUncertain` seam shape — confirmed to live in `ElicitationTurnRouter` (no literal symbol); (5) `ServiceBusJobProcessor` / Job Contract status surface. This is largely pre-satisfied by pipeline discovery — the task's job is to CONFIRM each and record the exact anchor.
+  </prompt>
+
+  <role>Engineer doing evidence hygiene — grepping/reading to confirm each claimed seam exists exactly where the plan says, and recording the precise file:line so downstream tasks cite fact not memory.</role>
+
+  <goal>
+    A discovery note in `projects/spaarke-ai-architecture-redesign-r2/notes/` recording, for each of the five obligations, a confirmed file path + line + a one-line shape description (e.g. golden-utterance JSON schema shape; the validator's extension seam; the Gate-ledger confirmation-state property; the `ElicitationTurnRouter` behavior that IS `dispatchUncertain`; the Job Contract status enum). Any that DON'T match the plan's assumption are flagged as a correction.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Every obligation is recorded with a CONFIRMED file:line + shape note — a citation without a line number does not satisfy FR-P0-04.</constraint>
+    <constraint source="project">If a claimed seam is absent or shaped differently than the plan assumed (e.g. no `dispatchUncertain` symbol — it's behavioral in `ElicitationTurnRouter`), record the CORRECTION explicitly; do not paper over it.</constraint>
+    <constraint source="ADR-039">The `OpenAiFunctionSchemaValidator` extension-point confirmation must not imply a second intent/validation mechanism — it is the single-source parity enforcement seam (FR-A-01).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>golden-utterances, schema-validator, gate-ledger, dispatch-uncertain, job-status-surface</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+    </files>
+    <patterns>
+      <pattern name="Golden-utterance suite" location="tests/integration/contract/Eval/golden-utterances.json">Confirm file exists + record its JSON case format (the eval families in 031/033 extend it).</pattern>
+      <pattern name="Validator extension seam" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/OpenAiFunctionSchemaValidator.cs:70">Confirm the extension point the triple-twin hoist (task 020) enforces parity through.</pattern>
+      <pattern name="Gate-ledger surface" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs">Confirm the SessionGate / confirmation-state property surface (a second ask must be structurally impossible).</pattern>
+      <pattern name="dispatchUncertain behavior" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ElicitationTurnRouter.cs:34">Confirm the origin/uncertain-dispatch behavior lives here (no literal `dispatchUncertain` symbol).</pattern>
+      <pattern name="Job status surface" location="src/server/api/Sprk.Bff.Api/Services/Jobs/JobContract.cs:9">Confirm the Job Contract status surface + ServiceBusJobProcessor consumed by FR-A0-07 (task 014).</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Design §14 lists five things the design assumed but flagged "verify in-repo before citing with authority." project-pipeline discovery already located most (see plan §3 anchors). FR-P0-04 makes the confirmation explicit so the hoist (020), eval families (031/033), gate engine (032), origin classifier, and JobAwareCompletionState (014) build on confirmed anchors. Cheap, front-wave.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Phase 0 front wave — no upstream.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-A-01 / task 020 triple-twin hoist consumes the confirmed validator extension point.</item>
+      <item>FR-A1-02/04 eval families (031/033) consume the confirmed golden-utterance format.</item>
+      <item>FR-A0-07 / task 014 consumes the confirmed Job Contract status surface.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Enumerate obligations">List the five design §14 obligations + the plan's assumed anchor for each.</step>
+    <step order="1" name="Confirm each">Grep/read to confirm each seam exists at the assumed location; capture the exact file:line + a one-line shape note.</step>
+    <step order="2" name="Flag corrections">Where reality differs from the assumption, record the correction (especially the `dispatchUncertain`=behavioral finding).</step>
+    <step order="3" name="Write the note">Record all five confirmations + any corrections in notes/; cross-reference the consuming downstream tasks.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Confirm seam locations</tool>
+    <tool name="git">Commit the note on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/discovery-obligations.md (five confirmed file:line anchors + shape notes + corrections)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The note records a CONFIRMED file:line for ALL five obligations: golden-utterance suite, validator extension point, Gate-ledger surface, `dispatchUncertain` seam, Job status surface.</criterion>
+    <criterion testable="true">Each anchor carries a one-line shape description sufficient for a downstream task to cite without re-discovering.</criterion>
+    <criterion testable="true">The `dispatchUncertain` entry explicitly records that it is BEHAVIORAL in `ElicitationTurnRouter` (no literal symbol) — matching the plan's §3 finding.</criterion>
+    <criterion testable="true">NEGATIVE: any obligation whose real location/shape differs from the plan's assumption is recorded as a CORRECTION, not silently aligned to the assumption.</criterion>
+    <criterion testable="true">The note cross-references which downstream task consumes each confirmed anchor (020 / 031 / 033 / 014 / gate engine).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If any of the five seams is MISSING or materially different from the plan's §3 assumption (e.g. the validator has no extension point the hoist can use), STOP and surface it — task 020 (triple-twin hoist, which BLOCKS all catalog-row tasks) or the eval-family tasks may need re-planning before they start.</trigger>
+  </escalation>
+</task>

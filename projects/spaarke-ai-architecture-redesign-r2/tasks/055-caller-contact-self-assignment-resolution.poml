@@ -1,0 +1,92 @@
+<task id="AIR2-055" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Caller-contact self-assignment resolution — claims→contact, server-side</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded, deterministic server-side resolution over a well-understood claims→Dataverse-contact mapping; no architectural blast radius. Feeds the User slice of an existing Binder contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, context-binder, user-slice, deterministic, identity</tags>
+    <dependencies>053 (Context Binder — User slice consumer)</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement deterministic SERVER-SIDE caller-contact resolution (FR-B-06): map the authenticated caller's claims to their Dataverse contact so "assign it to me" stops being model guesswork. The resolved contact populates the ContextEnvelope User slice. Resolution is deterministic (claims → contact lookup), never an LLM inference.
+  </prompt>
+
+  <role>Senior .NET developer fluent in Spaarke OBO auth/claims, Dataverse contact lookup, and the Context Binder User slice.</role>
+
+  <goal>
+    A server-side resolver deterministically maps the caller's identity claims to their Dataverse contact and exposes it on the ContextEnvelope User slice, so self-assignment ("assign to me", "my tasks") resolves to a concrete contact id without model guesswork. Resolution is deterministic and fails honestly (no silent wrong-contact) when the caller has no resolvable contact.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Self-assignment resolution is deterministic DATA (claims→contact), never runtime LLM judgment.</constraint>
+    <constraint source="project">Resolution is server-side; the client/model never supplies the contact id for "me".</constraint>
+    <constraint source="project">Fail honestly — an unresolvable caller yields an explicit no-contact result, not a guessed/nearest contact.</constraint>
+    <constraint source="ADR-013">Surfaces to the Binder User slice; no AI-internal type leaks to CRUD.</constraint>
+    <constraint source="ADR-038">Resolver tests are KEEP-path; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run bff-extensions.md checklist; measure publish-size; no new HIGH CVE; state Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>auth/claims, dataverse-contact-lookup, context-binder-user-slice, deterministic-resolution</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Context Binder User slice" location="src/server/api/Sprk.Bff.Api/Services/Ai/">Task 053 Binder — the resolved contact populates the User slice here.</pattern>
+      <pattern name="Host-identity assembly" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs:582">Existing host-identity/caller assembly the resolver extends for contact resolution.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R18/R17 backlog: "assign to me" currently relies on the model guessing the contact, which is unreliable. FR-B-06 makes it a deterministic server-side resolution feeding the User slice, consistent with ADR-039's "no runtime judgment for what should be data."</background>
+    <dependencies>
+      <dependency task="053" status="required">Binder User slice to populate.</dependency>
+    </dependencies>
+    <related-work>
+      <item>G-R2-A UAT scenario "assign it to me" (create-task) depends on this resolution; G-R2-B UAT checks User identity is known without re-prompting.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load spec FR-B-06, the claims surface, the Binder User slice. Confirm the claims→contact key.</step>
+    <step order="1" name="Resolver">Implement deterministic claims→Dataverse-contact resolution server-side.</step>
+    <step order="2" name="User slice">Populate the resolved contact into the ContextEnvelope User slice.</step>
+    <step order="3" name="Honest failure">Return an explicit no-contact result for unresolvable callers.</step>
+    <step order="4" name="Tests">Resolve a known caller; unresolvable caller → explicit no-contact; assert no model-supplied "me" id path. Include NEGATIVE below.</step>
+    <step order="5" name="Verify + governance">Build; run tests; measure publish-size; state Placement Justification.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run resolver tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (caller-contact resolver + User slice wiring)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (resolution + honest-failure tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A known caller's claims resolve deterministically to their Dataverse contact, surfaced on the User slice (asserted by a test).</criterion>
+    <criterion testable="true">Resolution is server-side; no code path accepts a model/client-supplied contact id for "me".</criterion>
+    <criterion testable="true">An unresolvable caller yields an explicit no-contact result (honest failure), not a guessed contact.</criterion>
+    <criterion testable="true">NEGATIVE: a caller with no matching contact does NOT resolve to a nearest/first contact — a test asserts the no-contact path.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+</task>

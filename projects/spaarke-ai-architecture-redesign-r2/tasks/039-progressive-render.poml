@@ -1,0 +1,103 @@
+<task id="AIR2-039" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Progressive render of dispatched outputs — store-before-render preserved (FR-A1-10 / D-F5)</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction</phase>
+    <gate>G-R2-A (judgment)</gate>
+    <estimated-effort>2 days</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded rendering-path change over the existing disposition/SSE surface; the hard architectural call (ADR-037 section-keyed streaming vs client-reveal fallback) is a spec-time engineering decision, not a new architecture. Promotion-gated to opus only if the section-keyed path forces an ADR-037 change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>true</goal-eligible>
+    <tags>bff-api, spaarkeai, render, adr-037, adr-040, streaming</tags>
+    <dependencies>A0 (010 ComposeDisposition v1 / disposition surface) established the rendering seam</dependencies>
+  </metadata>
+
+  <prompt>
+    Make dispatched capability outputs render progressively while KEEPING the ADR-040 ledger-write-before-render invariant (spec FR-A1-10, design D-F5, R14). Preferred mechanism: section-keyed streaming per amended ADR-037. Fallback: client-side progressive reveal of the stored terminal chunk. The mechanism is a spec-time engineering call — choose one at implementation, and DO NOT let progressive reveal render anything that was not first stored.
+  </prompt>
+
+  <role>Full-stack developer fluent in the Spaarke SSE render pipeline, ADR-037 multi-node output composition, and the ADR-040 disposition/store-before-render contract.</role>
+
+  <goal>
+    Long capability outputs stream to the user progressively rather than appearing as one terminal blob, with the store-before-render invariant intact: every rendered section corresponds to already-stored ledger content. If section-keyed streaming (ADR-037) is chosen, sections are keyed and emitted as stored; if the client-reveal fallback is chosen, the reveal animates over the already-stored terminal chunk. Either way, a render never precedes its ledger write.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-040">Storage precedes rendering — every progressively rendered section MUST correspond to already-stored ledger content; no render-ahead-of-store.</constraint>
+    <constraint source="ADR-037">Section-keyed streaming is the preferred mechanism; if chosen it follows the amended multi-node output-composition contract, not a new streaming protocol.</constraint>
+    <constraint source="ADR-039">No second dispatch protocol; progressive render rides the existing SSE/disposition surface.</constraint>
+    <constraint source="ADR-038">Tests are KEEP-path integration tests; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="project">Mechanism choice (section-keyed vs client-reveal) is a spec-time engineering decision; document which was chosen and why in task notes.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; measure publish-size delta vs the ~49.63 MB baseline; no new HIGH CVE; Placement Justification if BFF surface changes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/disposition, sse-streaming, ai/output-composition</topic>
+    <files>
+      <file>docs/adr/ADR-037-multinode-output-composition.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Disposition + store-before-render" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs:125">SessionOutput (:125), Disposition is the only rendering contract (:122), Disposition member (:143) — progressive render sections attach to stored SessionOutput.</pattern>
+      <pattern name="Section-keyed composition (ADR-037)" location="docs/adr/ADR-037-multinode-output-composition.md:47">Decision section (:47) — the amended composite-node composition the preferred section-keyed path follows.</pattern>
+      <pattern name="SSE emission" location="src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs">Existing SSE event emission the progressive frames extend (server path) or the client consumes (fallback reveal).</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Dispatched outputs currently land as a terminal chunk. D-F5 wants progressive rendering for long outputs (R7) without violating store-before-render. Two mechanisms are viable; the spec explicitly defers the choice to implementation time (spec Assumptions: "section-keyed streaming preferred; client-reveal fallback — chosen at implementation time").</background>
+    <dependencies>
+      <dependency task="010" status="pending">ComposeDisposition v1 / disposition surface is the seam progressive render rides.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-A1-09 (task 038) shares the store-before-render invariant and the SSE surface.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load spec FR-A1-10, ADR-037/040, bff-extensions.md. Confirm the disposition + SSE surface via anchors.</step>
+    <step order="1" name="Choose mechanism">Evaluate section-keyed streaming (ADR-037) vs client-reveal fallback against the current output shapes; record the decision + rationale in task notes.</step>
+    <step order="2" name="Implement">Wire the chosen path so sections render as they are stored (section-keyed) OR the client reveals the already-stored terminal chunk progressively (fallback).</step>
+    <step order="3" name="Preserve invariant">Guarantee no section renders before its ledger write; add the assertion at the render boundary.</step>
+    <step order="4" name="Tests">KEEP-path test: long output renders in ≥2 progressive steps; store-before-render holds; a render-ahead attempt fails.</step>
+    <step order="5" name="Verify + governance">Build; run tests; measure publish-size delta; bff-extensions checklist; no new HIGH CVE.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run BFF tests</tool>
+    <tool name="npm">Build + jest the client render path</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (section-keyed emission — if chosen) OR client render path</output>
+    <output type="code">src/solutions/SpaarkeAi/** or src/client/shared/Spaarke.AI.Widgets/** (progressive reveal — if fallback chosen)</output>
+    <output type="test">tests/integration/contract/ or tests/unit/ (progressive-render + store-before-render)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (mechanism-choice decision record)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A long dispatched output renders progressively (≥2 visible steps), not as a single terminal blob.</criterion>
+    <criterion testable="true">The chosen mechanism (section-keyed per ADR-037 OR client-reveal fallback) is documented with rationale in task notes.</criterion>
+    <criterion testable="true">Every rendered section corresponds to already-stored ledger content — store-before-render preserved, asserted by a test.</criterion>
+    <criterion testable="true">No second dispatch/streaming protocol is introduced (ADR-039); the change rides the existing SSE/disposition surface.</criterion>
+    <criterion testable="true">Publish-size delta measured; no new HIGH CVE.</criterion>
+    <criterion testable="true">NEGATIVE: an attempt to render a section before its ledger write fails/throws — covered by a test.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If section-keyed streaming requires changing ADR-037 beyond its existing amendment (a Path B amendment), STOP and surface per CLAUDE.md §6.5 before proceeding; do not silently extend the streaming contract.</trigger>
+  </escalation>
+</task>

@@ -1,0 +1,102 @@
+<task id="AIR2-052" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Memory governance — retention/expiration, user review/delete surface, record-auth-aligned read, audit, sensitivity (litigation-hold DEFERRED)</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>2.5 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Governance semantics over user-owned Tier 3 data — retention, deletion-propagation, and record-authorization-aligned read are correctness-and-compliance-sensitive; a read that leaks memory the user can't see the record for is an ethical-wall breach. ADR-015 + GDPR erasure surface directly to the user.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, memory, governance, adr-015, gdpr, security</tags>
+    <dependencies>050 (generalized service), 051 (governance envelope)</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement memory governance (FR-B-03) over the generalized service: retention defaults + expiration driven by `retentionClass`; a user-visible review/delete surface for USER memory; record-memory review that honors the record's authorization (read access to the record ⇒ read its memory); deletion-propagation semantics; audit events on write/delete; and `sensitivity` classification. Memory items are ADR-015 Tier 3 (user-owned, GDPR-erasable). Litigation-hold interaction is DEFERRED (owner ruling 2026-07-08) to the separate governance project — do NOT implement it here.
+  </prompt>
+
+  <role>Senior .NET developer fluent in ADR-015 Tier 3 governance, GDPR erasure, record-authorization checks, and audit-event emission in the Spaarke BFF.</role>
+
+  <goal>
+    Governance is enforced on the memory service: facts expire/retain per `retentionClass`; a user can review + delete their USER memory through a surface; record-memory reads are gated by the record's own authorization (no read of a record's memory without read access to the record); deletions propagate coherently; every write/delete emits an audit event (identifiers/counts only, NFR-07); sensitivity is classified + honored. Litigation-hold is explicitly out (deferred), documented as such.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="existing-service">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs</file>
+    <file purpose="envelope">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryFact.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-015">Tier 3 — user-owned, GDPR-erasable; the review/delete surface + erasure path are mandatory.</constraint>
+    <constraint source="project">Record-memory read is authorization-aligned: read access to the record is necessary + sufficient to read its record memory. No separate memory ACL that could diverge from record auth.</constraint>
+    <constraint source="NFR-07">Audit events carry identifiers/counts only — never memory content.</constraint>
+    <constraint source="project">Litigation-hold interaction is DEFERRED — do not implement; document the deferral boundary.</constraint>
+    <constraint source="ADR-013">User-facing review/delete reaches memory via PublicContracts / a BFF endpoint, not a leaked concrete service.</constraint>
+    <constraint source="ADR-038">Governance tests are KEEP-path integration/service tests; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run bff-extensions.md checklist; new/changed endpoints get unconditional service registration + tests; measure publish-size; no new HIGH CVE; Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/memory, governance, adr-015-tier3, gdpr-erasure, record-authorization, audit</topic>
+    <files>
+      <file>docs/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing erasure path" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs">GDPR erasure logic to preserve + extend for deletion-propagation.</pattern>
+      <pattern name="Envelope governance fields" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryFact.cs">retentionClass/expiration/sensitivity/deletionPolicy drive this task's enforcement.</pattern>
+      <pattern name="Pinned memory endpoints (review/delete home)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/">PinnedContextRepository + existing memory endpoints — extend for the user review/delete surface.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>The two-scope model splits governance: USER memory gets an explicit user-visible review/delete surface (it's the user's standing facts/preferences); RECORD memory review rides the record's own authorization so it can't drift from ethical walls. Litigation-hold + full untrusted-origin governance are the DEFERRED governance-project scope; this task ships the interim, in-scope governance only.</background>
+    <dependencies>
+      <dependency task="050" status="required">Generalized service + scopes.</dependency>
+      <dependency task="051" status="required">Governance envelope fields (retentionClass/expiration/sensitivity/deletionPolicy).</dependency>
+    </dependencies>
+    <related-work>
+      <item>057 gates memory WRITES; this task governs retention/read/delete of stored memory. 069 UAT verifies "user can see + delete what's remembered."</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load spec FR-B-03, ADR-015, the envelope fields. Confirm the existing erasure path + record-authorization check surface.</step>
+    <step order="1" name="Retention/expiration">Enforce retention defaults + expiration per `retentionClass`; expired facts are excluded from reads / reaped.</step>
+    <step order="2" name="User review/delete surface">Ship a user-visible review + delete surface for USER memory via a BFF endpoint (unconditional registration + test).</step>
+    <step order="3" name="Record-auth-aligned read">Gate record-memory reads by the record's authorization — read access to the record is necessary + sufficient; no divergent memory ACL.</step>
+    <step order="4" name="Deletion-propagation + audit + sensitivity">Define deletion-propagation semantics; emit audit events (ids/counts only) on write/delete; honor `sensitivity` in read/return.</step>
+    <step order="5" name="Tests">Retention expiry; user delete; record-auth read allow/deny; audit-event emission (no content); sensitivity honored. Include NEGATIVE below.</step>
+    <step order="6" name="Verify + governance">Build; run tests; measure publish-size; state Placement Justification + the litigation-hold deferral.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run governance/integration tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/ (retention/expiration, deletion-propagation, sensitivity enforcement)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (user review/delete endpoint — unconditional registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (governance tests incl. record-auth allow/deny)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Facts expire/retain per `retentionClass`; an expired fact is excluded from reads (asserted by a test).</criterion>
+    <criterion testable="true">A user can review + delete their USER memory through the shipped surface; delete removes the fact (GDPR erasure preserved).</criterion>
+    <criterion testable="true">Record-memory read is allowed iff the caller has read access to the record; a caller WITHOUT record read access cannot read that record's memory.</criterion>
+    <criterion testable="true">Write + delete emit audit events carrying identifiers/counts only — no memory content (NFR-07), asserted by a test.</criterion>
+    <criterion testable="true">The user review/delete endpoint has unconditional service registration + a test (bff-extensions §F).</criterion>
+    <criterion testable="true">NEGATIVE: a caller lacking record read access is denied record-memory read (no leak), and litigation-hold is NOT implemented (deferral documented; no hold code path exists).</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+</task>

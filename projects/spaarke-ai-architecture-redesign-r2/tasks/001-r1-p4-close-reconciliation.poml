@@ -1,0 +1,94 @@
+<task id="AIR2-001" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>r1 P4-close reconciliation of design §10 contingent rows (4/5/6/8/12)</title>
+    <status>not-started</status>
+    <phase>0 — Reconciliation &amp; Discovery</phase>
+    <gate>none (foundation; gates FR-D-06 / FR-D-07 / FR-B-15 disposition)</gate>
+    <estimated-effort>0.5 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded evidence-gathering + disposition-recording task; no architectural blast radius, but judgment on each row's r1-close state warrants effort high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>reconciliation, discovery, phase-0, contingent, r1-close</tags>
+    <dependencies>none (Phase 0 front wave)</dependencies>
+  </metadata>
+
+  <prompt>
+    Re-check the design §10 contingent backlog rows (4, 5, 6, 8, 12) against the ACTUAL r1 P4-close state, and record a disposition for each in project notes (spec FR-P0-01). Each row must resolve to exactly one of: in-scope-FR (this project), accept-as-ruled, or verified-closed — with file/PR/grep evidence. This unblocks the final disposition of FR-D-06 (legacy workspace tools), FR-D-07 (orphan verification), and FR-B-15 (ADR-040 inline size-cap home).
+  </prompt>
+
+  <role>Senior engineer reconciling a predecessor project's backlog against merged reality — comfortable reading r1 PRs, grepping the codebase, and writing evidence-anchored dispositions.</role>
+
+  <goal>
+    A reconciliation note in `projects/spaarke-ai-architecture-redesign-r2/notes/` dispositions each of the five contingent rows (4 legacy workspace tools, 5 ADR-040 inline size-cap, 6, 8, 12 orphan verification) to in-scope-FR / accept-as-ruled / verified-closed, each backed by concrete evidence (file:line, PR number, or grep-zero). The three dependent FRs (FR-D-06, FR-D-07, FR-B-15) can proceed from a settled starting state rather than an assumption.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design-backlog">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="predecessor">projects/spaarke-ai-architecture-redesign-r1/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Every disposition MUST cite concrete evidence — a file:line, a merged PR number, or a grep-zero result. "Assumed closed" is not a disposition.</constraint>
+    <constraint source="ADR-040">Row 5 (inline size-cap enforcement home) is an ADR-040 concern — if it lands in r2 it is memory/ledger hardening (FR-B-15); do not invent a second enforcement path.</constraint>
+    <constraint source="NFR-13">Any "retired/closed" claim MUST be backed by grep-zero verification (no live references remain).</constraint>
+    <constraint source="project">This task records dispositions only — it does NOT implement FR-D-06/07 or FR-B-15; it hands them a settled starting state.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>backlog-reconciliation, r1-p4-close, contingent-rows, grep-zero-verification</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Legacy workspace tools (row 4)" location="src/server/api/Sprk.Bff.Api/Services/Ai/">Get/Update/Close Workspace Tab + 4 artifact variants on the orphaned IWorkspaceStateService — grep for live registrations/handlers to decide re-point vs retire.</pattern>
+      <pattern name="ADR-040 inline size-cap (row 5)" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs">Inline cap around :50 — confirm whether r1 landed an enforcement home or left it open (→ FR-B-15).</pattern>
+      <pattern name="Orphan verification (row 12)" location="infra/dataverse/">DAILY-BRIEFING-NARRATE + spaarke-playbook-embeddings orphans on spaarkedev1 — confirm r1 P4 closure (→ FR-D-07).</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Spec FR-P0-01 + Unresolved Questions flag that §10 rows 4/5/6/8/12 were left contingent on r1 P4-close state. r1 was a full executed+closed project; whether P4 finished these rows changes their r2 disposition. This is the first Phase 0 task; its output settles three downstream FRs.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Phase 0 front wave — no upstream.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-D-06 (task 075) legacy workspace tools verdict is CONTINGENT on this row-4 disposition.</item>
+      <item>FR-D-07 (task 076) orphan verification is CONTINGENT on this row-12 disposition.</item>
+      <item>FR-B-15 (task 064) ADR-040 inline size-cap home is CONTINGENT on this row-5 disposition.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Load backlog + spec">Read design §10 rows 4/5/6/8/12 and spec FR-P0-01; list what each row claimed r1 would close.</step>
+    <step order="1" name="Gather r1-close evidence">For each row, inspect the r1 project close artifacts (TASK-INDEX, notes, merged PRs) + the live codebase via grep to establish actual P4-close state.</step>
+    <step order="2" name="Disposition each row">Assign each row to in-scope-FR / accept-as-ruled / verified-closed with cited evidence (file:line, PR#, or grep-zero).</step>
+    <step order="3" name="Write the note">Record all five dispositions + evidence in `notes/`; explicitly flag which of FR-D-06/07 + FR-B-15 are now unblocked and with what starting assumption.</step>
+    <step order="4" name="Escalate any unfinished r1 work">If a row reveals r1 P4 did NOT finish (e.g. legacy tools still live on the orphaned service), surface it per the escalation trigger rather than silently absorbing scope.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Inspect r1 merge history / PR evidence</tool>
+    <tool name="grep">grep-zero verification for retirement claims</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/r1-p4-reconciliation.md (five row dispositions + evidence + downstream-FR unblock statement)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The note dispositions ALL five rows (4, 5, 6, 8, 12) to exactly one of in-scope-FR / accept-as-ruled / verified-closed.</criterion>
+    <criterion testable="true">Every disposition cites concrete evidence: a file:line, a merged PR number, or a grep-zero result — no bare "assumed closed".</criterion>
+    <criterion testable="true">The note states, per row, which downstream FR (FR-D-06 / FR-D-07 / FR-B-15) it unblocks and the starting assumption it hands over.</criterion>
+    <criterion testable="true">Any "retired/closed" disposition is backed by a grep-zero result showing no live references remain (NFR-13).</criterion>
+    <criterion testable="true">NEGATIVE: if a row reveals unfinished r1 P4 work, the note records it as an ESCALATION (not a silent in-scope absorption) and the escalation trigger fires.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If any contingent row reveals that r1 P4 did NOT actually close the work (e.g. legacy workspace tools still wired to the orphaned IWorkspaceStateService, or the size-cap enforcement home never landed), STOP and surface it as scope-expansion input — do not silently pull unbounded r1 remediation into r2. The operator decides whether it becomes an r2 FR or returns to r1.</trigger>
+  </escalation>
+</task>

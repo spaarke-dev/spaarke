@@ -1,0 +1,107 @@
+<task id="AIR2-014" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Publish JobAwareCompletionState v1 contract (walking skeleton) — project the EXISTING Job Contract, no new job model</title>
+    <status>not-started</status>
+    <phase>A0 — Contract-first</phase>
+    <gate>G-R2-A (seam publication)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Load-bearing for the NFR-12 ingestion-parity invariant across Compose r2 + async pipelines; the state machine must integrate the existing Job Contract without forking it. Architectural blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, contract, seam, jobs, completion-state, ingestion-parity, compose-r2</tags>
+    <dependencies>none (A0 front wave; publish early)</dependencies>
+  </metadata>
+
+  <prompt>
+    Publish the `JobAwareCompletionState v1` contract as a Phase-A0 walking skeleton (spec FR-A0-07, design D-F2/R20). It defines the per-step async completion states — queued / running / partial / completed / failed / poisoned / cancelled / retry-pending / user-action-required — as a PROJECTION over the EXISTING `JobContract` + `ServiceBusJobProcessor`. NO new job model. This is how OutcomeCards show durable multi-step progress and how the core enforces the ingestion-parity invariant (NFR-12: a bare `sprk_document` row is never a successful document operation) WITHOUT owning the Compose pipeline. Ship the contract WITH a thin producer, thin consumer, and a contract test.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the Spaarke Service Bus job pipeline (`JobContract`, `ServiceBusJobProcessor`, `JobStatusService`) and versioned tolerant-reader contracts.</role>
+
+  <goal>
+    A versioned `JobAwareCompletionState v1` contract under `Services/Ai/PublicContracts/` projecting existing job status into the nine per-step states, with a version field, tolerant-reader rules, example payloads, and the terminal/non-terminal state map. A thin producer maps a real `JobContract` status into a JobAwareCompletionState; a thin consumer renders it (progress/recovery); a contract test in `tests/integration/contract/` locks the shape AND asserts the ingestion-parity distinction (record-exists ≠ downstream-analysis-finished). The ordered step SET is CONSUMER-DECLARED: a consumer declares its own ordered steps (Compose's are `container → record → profile-analysis → indexing`); the contract is generic over the step set and MUST NOT hardcode any one consumer's steps.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="consumer-design">projects/spaarkeai-compose-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">NO new job model — JobAwareCompletionState is a PROJECTION over the existing `JobContract`/`ServiceBusJobProcessor` (CLAUDE.md §11 reuse; plan §3 "no new job model").</constraint>
+    <constraint source="NFR-12">The contract MUST make "record exists" distinguishable from "downstream analysis/indexing finished" — the ingestion-parity invariant depends on it.</constraint>
+    <constraint source="ADR-013">Compose r2 consumes JobAwareCompletionState only via `Services/Ai/PublicContracts/`.</constraint>
+    <constraint source="ADR-040">States render STORED job status — store-before-render; no model-claimed progress.</constraint>
+    <constraint source="ADR-038">Contract test is a KEEP-path integration test; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jobs/service-bus, job-contract, completion-state, ingestion-parity, versioned-contracts</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Job Contract" location="src/server/api/Sprk.Bff.Api/Services/Jobs/JobContract.cs:9">The existing job status surface JobAwareCompletionState projects — reuse, do not fork.</pattern>
+      <pattern name="Job processor" location="src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs">The processor producing status transitions the states map onto.</pattern>
+      <pattern name="Job status service" location="src/server/api/Sprk.Bff.Api/Services/Jobs/JobStatusService.cs">Status read surface the producer projects from.</pattern>
+      <pattern name="Contract test home" location="tests/integration/contract/">Add the JobAwareCompletionState contract test here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Async pipelines (document creation, analysis, indexing, Compose save-back) finish AFTER the tool returns. FR-A1-07 makes OutcomeCards job-aware so users distinguish "record created" from "indexing done" — the R-2 ingestion-parity invariant. This A0 task freezes the state contract first, integrating the existing Job Contract (no new model), so task 036 and Compose r2 bind to a stable projection.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Front A0 wave — no upstream.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-A1-07 (task 036) integrates JobAwareCompletionState into OutcomeCards + enforces ingestion-parity.</item>
+      <item>FR-A0-02 (task 011) OutcomeCard carries the job-aware state for async paths.</item>
+      <item>Compose r2 consumes it for save-back durable progress.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load FR-A0-07, the Job Contract anchors, NFR-12, bff-extensions.md; map existing job statuses to the nine target states.</step>
+    <step order="1" name="Define the contract">Define `JobAwareCompletionState v1` DTO under `Services/Ai/PublicContracts/`: the nine per-step states, terminal/non-terminal map, version field, tolerant-reader rules, failure/partial states.</step>
+    <step order="1b" name="Consumer-declared step set">Make the ordered step SET consumer-declared — the contract is generic over steps (no hardcoded consumer). Support Compose's `container → record → profile-analysis → indexing`; prove a DIFFERENT step set renders correctly too.</step>
+    <step order="2" name="Reference producer">Wire a thin producer projecting a REAL JobContract status into a JobAwareCompletionState (no new job model).</step>
+    <step order="3" name="Reference consumer">A thin consumer rendering the state (progress + failure recovery + record-exists vs downstream-finished).</step>
+    <step order="4" name="Contract test">Add a contract test asserting the state map, version, tolerant-reader, and the ingestion-parity distinction (record-exists ≠ analysis-finished).</step>
+    <step order="5" name="Verify + governance">Build; run the contract test; measure publish-size delta; state Placement Justification + bff-extensions checklist.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run the contract/integration test</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (JobAwareCompletionState v1 contract DTO + JobContract projection)</output>
+    <output type="test">tests/integration/contract/ (JobAwareCompletionState contract test)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (contract doc: job-status→state mapping + terminal map + versioning + example payloads)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`JobAwareCompletionState v1` exists under `Services/Ai/PublicContracts/` (ADR-013) with the nine states, a version field + tolerant-reader rules; an unknown extra field is ignored (asserted by the test).</criterion>
+    <criterion testable="true">The contract is a PROJECTION over the existing `JobContract`/`ServiceBusJobProcessor` — the diff introduces NO new job model (reuse verified).</criterion>
+    <criterion testable="true">A thin producer maps a REAL JobContract status into a JobAwareCompletionState and a thin consumer renders it — round-trip proven by the contract test.</criterion>
+    <criterion testable="true">The contract test asserts the ingestion-parity distinction: a "record created" state is NOT reported as "completed" while downstream analysis/indexing is still running (NFR-12).</criterion>
+    <criterion testable="true">The test uses no `Mock&lt;HttpMessageHandler&gt;` and no DI-registration assertions (ADR-038); Compose r2 can consume with zero local variant.</criterion>
+    <criterion testable="true">NEGATIVE: a state derived from model-claimed progress (not stored job status) fails a test assertion (store-before-render).</criterion>
+    <criterion testable="true">The ordered step SET is CONSUMER-DECLARED (generic over steps, no hardcoded consumer); Compose's `container → record → profile-analysis → indexing` renders correctly — proven by a test.</criterion>
+    <criterion testable="true">NEGATIVE: a consumer with a DIFFERENT ordered step set still renders correctly (the contract does not assume or hardcode Compose's steps) — asserted by a test.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-05 / FR-28). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the existing Job Contract cannot express one of the nine states (e.g. no poisoned/retry-pending distinction) without EXTENDING the job model, STOP and surface it — the plan mandates "no new job model"; adding job-model fields is a scope decision the operator must ratify (and it touches the shared jobs pipeline other consumers depend on).</trigger>
+  </escalation>
+</task>

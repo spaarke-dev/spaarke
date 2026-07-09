@@ -1,0 +1,105 @@
+<task id="AIR2-057" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>memory.write as an AI-initiated, silent, provenance-tagged side effect — automatic capture (NO gate)</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>2 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Introduces a side-effecting typed tool that persists memory automatically as a normal turn side effect; correctness of the provenance envelope written at capture time (source/bindingId/ledgerRef/trustLevel) and the reuse of the generalized memory service (task 050) are load-bearing for the Insights-Engine durable store and the FR-B-03 review/delete control. Authored through the triple-twin catalog (task 020).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, memory, memory-write, provenance, adr-039, catalog-row</tags>
+    <dependencies>020 (triple-twin hoist — catalog-row source), 050 (memory service — write target), 051 (envelope)</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement `memory.write` as an AI-INITIATED, SILENT, provenance-tagged side effect (spec FR-B-08, refined 2026-07-08): a typed tool the assistant invokes automatically to capture salient facts as a normal turn side effect. There is NO write-gate, NO explicit-only rule, NO confirmation dialog — automatic memory is the value proposition (the operator ruled explicit-only/gated writes over-engineering for this stage, 2026-07-08). Every written item carries a PROVENANCE envelope recorded at capture time as METADATA (not a gate): `source` (user | ai-derived | insights-engine), `bindingId`/`ledgerRef`, `trustLevel`. The FR-B-03 user review/delete surface (task 052) is the control. DEFERRED to a separate governance project: the untrusted-origin ban, poisoning evals, and `trustLevel` enforcement. Author the `memory.*` catalog row THROUGH the task-020 triple-twin hoisted source (it is the first consumer).
+  </prompt>
+
+  <role>Senior .NET developer fluent in ADR-039 closed catalogs, the ADR-040 session ledger, the generalized memory service, and side-effecting typed tools in the Spaarke BFF.</role>
+
+  <goal>
+    A `memory.write` typed tool exists with a catalog-declared `side_effect_class`, authored through the triple-twin hoisted source. The assistant captures salient facts AUTOMATICALLY (AI-initiated, silent — no gate, no confirmation dialog). Each write records a provenance envelope as metadata at capture time: `source` (user | ai-derived | insights-engine), `bindingId`/`ledgerRef`, `trustLevel`. Provenance is surfaced on read so the FR-B-03 review/delete surface can act on it. The deferred hard-governance rules (untrusted-origin ban, poisoning evals, `trustLevel` enforcement) are documented as out of scope for this stage.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">`memory.write` risk is catalog-declared `side_effect_class` DATA, never runtime LLM judgment; no second intent mechanism. Catalog row authored through the task-020 triple-twin source.</constraint>
+    <constraint source="project">AI-INITIATED + SILENT: `memory.write` executes automatically as a normal turn side effect — NO write-gate, NO explicit-only rule, NO confirmation dialog. Automatic memory is the value proposition (operator ruling 2026-07-08).</constraint>
+    <constraint source="project">PROVENANCE AS METADATA (not a gate): every write records `source` (user | ai-derived | insights-engine), `bindingId`/`ledgerRef`, `trustLevel` at capture time. These describe the item; they do NOT block the write. The FR-B-03 review/delete surface is the control.</constraint>
+    <constraint source="ADR-040">Store-before-render preserved; the write persists via the generalized memory service, not a parallel cache.</constraint>
+    <constraint source="project">DEFERRED (do NOT implement): untrusted-origin ban, poisoning evals, `trustLevel` enforcement — these belong to a separate governance project. Document the boundary.</constraint>
+    <constraint source="ADR-013">Consumed via PublicContracts; no AI-internal type leaks to CRUD.</constraint>
+    <constraint source="ADR-038">Tool/memory tests are KEEP-path integration tests; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run bff-extensions.md checklist; unconditional service registration for any mapped endpoint; measure publish-size; no new HIGH CVE; state Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/side-effecting-tools, closed-catalogs, memory-write, provenance-envelope, ai-initiated-memory</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Triple-twin catalog source" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/OpenAiFunctionSchemaValidator.cs:70">Task 020 hoisted single-source — author the `memory.*` catalog row through it (first consumer).</pattern>
+      <pattern name="Memory service (write target)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs">Generalized service (task 050) is the write target; envelope provenance (task 051) recorded on write.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Automatic memory is the value proposition: the assistant captures salient facts on its own so the workspace accrues durable knowledge without the user curating it. The operator ruled (2026-07-08) that gating or restricting these writes to explicit user instruction is over-engineering for this stage — so `memory.write` is AI-initiated and silent, guarded only by a provenance envelope written as metadata and the FR-B-03 user review/delete surface. The full poisoning threat model (untrusted-origin ban, semantic-retrieval trust boundary, poisoning evals, `trustLevel` enforcement) is DEFERRED to a separate governance project; residual document-injection-poisoning risk is an accepted operator decision. The triple-twin hoist (task 020) is the mandatory catalog-authoring path; Record scope memory (task 050) is the write target and positions this as the future Insights-Engine durable store.</background>
+    <dependencies>
+      <dependency task="020" status="required">Triple-twin hoist — the `memory.*` catalog row must be authored through it.</dependency>
+      <dependency task="050" status="required">Generalized memory service write target.</dependency>
+      <dependency task="051" status="required">Envelope provenance recorded on write.</dependency>
+    </dependencies>
+    <related-work>
+      <item>052 governs stored memory (retention/read/delete) — the FR-B-03 review/delete control surface for what this task WRITES. 016 defines the MemoryItem provenance envelope this write populates.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load spec FR-B-08 (refined 2026-07-08) + NFR-03, ADR-039/040. Confirm the triple-twin source + the generalized memory service write target.</step>
+    <step order="1" name="Catalog row via triple-twin">Author the `memory.write` catalog row (declared `side_effect_class`) THROUGH the task-020 hoisted source; validator-enforced parity across the three surfaces.</step>
+    <step order="2" name="AI-initiated silent write">Wire `memory.write` as an automatic turn side effect — the assistant captures salient facts with NO gate, NO explicit-only check, NO confirmation dialog.</step>
+    <step order="3" name="Provenance envelope on write">Record the provenance envelope as metadata at capture time: `source` (user | ai-derived | insights-engine), `bindingId`/`ledgerRef`, `trustLevel`. Persist via the generalized memory service (store-before-render).</step>
+    <step order="4" name="Surface provenance on read">Surface the provenance on read so the FR-B-03 review/delete surface (task 052) can act on it.</step>
+    <step order="5" name="Tests">AI-initiated write executes silently and persists; provenance envelope recorded + surfaced on read; the write is NOT gated (no confirmation dialog is emitted). Document the deferred-governance boundary.</step>
+    <step order="6" name="Verify + governance">Build; run tests; measure publish-size; state Placement Justification + the deferred hard-governance boundary.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run memory/tool integration tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (memory.write typed tool — AI-initiated + provenance wiring)</output>
+    <output type="code">infra/dataverse/inputschemas/ + hoisted source (memory.* catalog row via task-020 single source)</output>
+    <output type="test">tests/integration/contract/ + tests/unit/Sprk.Bff.Api.Tests/ (silent-write + provenance-envelope tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`memory.write` is a typed tool with a catalog-declared `side_effect_class` authored through the task-020 triple-twin source (validator-enforced parity across all three surfaces).</criterion>
+    <criterion testable="true">`memory.write` is AI-INITIATED + SILENT: the assistant captures a salient fact automatically with NO write-gate, NO explicit-only check, and NO confirmation dialog — a test asserts a write completes without any confirmation/gate step.</criterion>
+    <criterion testable="true">Each write records a provenance envelope as METADATA at capture time: `source` (user | ai-derived | insights-engine), `bindingId`/`ledgerRef`, `trustLevel` — asserted by a test; provenance does NOT block the write.</criterion>
+    <criterion testable="true">Provenance is surfaced on read so the FR-B-03 review/delete surface can act on it.</criterion>
+    <criterion testable="true">The deferred hard-governance rules (untrusted-origin ban, poisoning evals, `trustLevel` enforcement) are NOT implemented and are documented as out of scope for this stage.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-30). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>This task ships AI-initiated, un-gated memory writes per the operator's 2026-07-08 ruling. If a stakeholder requests write-GATING (explicit-only, confirmation, or untrusted-origin blocking), STOP and escalate — that request REOPENS the deferred governance scope (untrusted-origin ban, poisoning evals, `trustLevel` enforcement) and is a scope/threat-model decision for the separate governance project, not a silent change here. Surface options + recommendation per CLAUDE.md §6/§6.5 rather than adding a gate ad hoc.</trigger>
+  </escalation>
+</task>

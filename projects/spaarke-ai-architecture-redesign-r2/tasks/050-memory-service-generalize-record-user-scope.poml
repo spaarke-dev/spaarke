@@ -1,0 +1,115 @@
+<task id="AIR2-050" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Memory Service — generalize MatterMemoryService→RecordMemory + User scope + NEW subject-partitioned container</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>3 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Deepest new build of the memory wave; generalizes a shipped Cosmos subsystem (ETag/versioning, GDPR erasure, budget-serialization) onto a generic keying + a NEW subject-partitioned container. Wrong partition key or a botched live-doc migration is irreversible (Cosmos partition keys can't change in place) and blocks 051–057. Brownfield refactor of load-bearing session-context code.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, memory, cosmos, adr-015, adr-040, brownfield, migration</tags>
+    <dependencies>016 (MemoryItem v1 contract), 015 (ContextEnvelope v1)</dependencies>
+  </metadata>
+
+  <prompt>
+    Generalize the EXISTING `Services/Ai/Memory/MatterMemoryService.cs:27` from matter-only (`MatterMemory`) to a generic **RecordMemory** keyed by `(entityType, entityId)`, and add a second active scope — **User** memory keyed by `userId` — over a **NEW Cosmos container partitioned by SUBJECT** (`entityId`/`userId`, NOT `/tenantId`). Reuse the CODE (`MemoryFact` model, ETag/versioning, GDPR erasure, budget-serialization), not the container. Decide and record the live-doc migration disposition (migrate vs fresh-container-and-leave-legacy) for the existing matter-keyed `memory` container on dev. This is FR-B-01 — the memory wave's foundation; 051–057 build on it.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the Spaarke AI memory subsystem (ADR-015 Tier 3), Cosmos DB partition-key design, and brownfield refactoring of session-context services.</role>
+
+  <goal>
+    A generalized memory service exists: **RecordMemory** keyed generically by `(entityType, entityId)` (matters, projects, invoices, work-assignments, events, documents — NOT matter-only) and **User** memory keyed by `userId` (one general per-user store, NOT per-matter). Both persist to a NEW Cosmos container partitioned by SUBJECT (`entityId` for record, `userId` for user), reusing the existing `MemoryFact` model + ETag/versioning + GDPR erasure + budget-serialization logic. The old container/keying is retired or left-legacy per an explicit, recorded migration decision. Record memory holds only DERIVED/synthesized knowledge (not Dataverse field duplicates). The service is shaped so a future `source: insights-engine` fact writes cleanly (wiring is a follow-on, not this task).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="publish-size-rule">.claude/constraints/azure-deployment.md</file>
+    <file purpose="existing-service">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs</file>
+    <file purpose="existing-model">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryFact.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-015">Memory items are Tier 3 (user-owned, GDPR-erasable); preserve the existing erasure path when generalizing.</constraint>
+    <constraint source="ADR-040">Not a parallel session cache — Record/User are cross-session governed objects, a DIFFERENT concern from the Conversation ledger facade. State this by construction in code + comments.</constraint>
+    <constraint source="ADR-013">CRUD/satellite consumers reach memory only via `Services/Ai/PublicContracts/`; do not export the concrete service.</constraint>
+    <constraint source="project">Partition by SUBJECT (`entityId`/`userId`), NEVER `/tenantId` — dedicated-per-customer envs make `/tenantId` a single hot logical partition against the 20 GB cap. Cosmos partition keys can't change in place → NEW container reusing existing service code.</constraint>
+    <constraint source="project">Record memory keys generically by `(entityType, entityId)` — matter-only keying is the regression to remove. Record memory holds DERIVED knowledge only; never duplicate live Dataverse fields (the Binder reads those directly per FR-B-04).</constraint>
+    <constraint source="project">Insights-Engine-as-consumer direction: the envelope + service must not preclude a `source: insights-engine` fact. Wiring is a follow-on, out of scope here.</constraint>
+    <constraint source="ADR-038">Service tests are KEEP-path integration/service tests in `tests/unit/Sprk.Bff.Api.Tests/`; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta vs the ~49.63 MB (incl. PDBs) baseline; no new HIGH CVE. One new Cosmos container is the only new Azure dependency.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/memory, cosmos-partitioning, adr-015-tier3, gdpr-erasure, brownfield-generalization</topic>
+    <files>
+      <file>docs/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing memory service (generalize this)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs:27">MatterMemoryService — ContainerName const, ETag/versioning, GDPR erasure, budget-serialization. Generalize MatterMemory→RecordMemory + add User scope; do NOT rewrite the reused logic.</pattern>
+      <pattern name="MemoryFact model (reuse)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryFact.cs">Existing Type/Key/Value/Source/ConfirmedByUser/Confidence/RecordedAt fields — reused verbatim; envelope fields land in task 051.</pattern>
+      <pattern name="Fact typing" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryFactType.cs">Matter-specific fact types to generalize off `sprk_matter`.</pattern>
+      <pattern name="Composition + repositories" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryCompositionService.cs">MemoryCompositionService, PinnedContextRepository, RecentlyDiscussedTracker consume the service — keep their contracts working through the generalization.</pattern>
+      <pattern name="MemoryItem v1 seam" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/">Task 016 MemoryItem v1 contract — the consumable shape the generalized service produces.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Discovery (plan §3) found a full Cosmos memory subsystem already shipped — the design's §11 "greenfield memory" estimate was wrong. The operator's 2026-07-08 refinement collapsed five scopes → two active (Record + User), generalized Record off `sprk_matter`, and re-partitioned by subject. This task is the reuse-first execution of that refinement: reuse the logic, replace the container + keying.</background>
+    <dependencies>
+      <dependency task="016" status="required">MemoryItem v1 contract (consumable shape).</dependency>
+      <dependency task="015" status="required">ContextEnvelope v1 (Memory slice consumer of this service).</dependency>
+    </dependencies>
+    <related-work>
+      <item>051 adds the governance envelope onto the generalized MemoryFact; 052 adds governance/retention/review-delete; 053 Binder reads this service into the Memory slice; 057 gates writes.</item>
+      <item>FR-D-05 (task 074) re-keys the audit container off `/tenantId` — adopt the same subject/scalable-key discipline from day one.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load spec FR-B-01, ADR-015/040/013, bff-extensions.md. Read MatterMemoryService end-to-end; inventory every consumer (MemoryCompositionService, repositories, endpoints, client `memory/*`).</step>
+    <step order="1" name="Generalize keying">Introduce a generic `(entityType, entityId)` record key and a `userId` user key; add a scope discriminator. Preserve reused logic (ETag/versioning, erasure, budget-serialization) — generalize the matter-specific fact types + keying only.</step>
+    <step order="2" name="New subject-partitioned container">Provision a NEW Cosmos container in the existing account partitioned by SUBJECT; wire the service to it. Point-read on subject; scope discriminator distinguishes record vs user docs.</step>
+    <step order="3" name="Migration decision">Decide + RECORD (project notes) the live-doc disposition for the legacy matter-keyed `memory` container on dev: migrate existing docs into the new container vs fresh-container-and-leave-legacy. Cosmos keys can't change in place — justify the choice.</step>
+    <step order="4" name="Preserve consumers + facade">Keep MemoryComposition/repositories/endpoints working; expose only the MemoryItem v1 shape via PublicContracts.</step>
+    <step order="5" name="Tests">Add service tests: generic record keying round-trip, user-scope round-trip, ETag concurrency preserved, GDPR erasure preserved, subject-partition read path. Include the NEGATIVE case (below).</step>
+    <step order="6" name="Verify + governance">Build; run tests; measure publish-size delta; state Placement Justification + bff-extensions checklist + the migration decision in PR notes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run the service/integration tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/ (RecordMemory generalization + User scope + new-container wiring)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (MemoryItem v1 exposure)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (generalized memory service tests)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (migration decision record + partition-key rationale)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RecordMemory persists + point-reads by generic `(entityType, entityId)` for at least two non-matter entity types (e.g., project + invoice), proven by tests.</criterion>
+    <criterion testable="true">User memory persists + reads by `userId` as ONE general per-user store (not per-matter), proven by a test.</criterion>
+    <criterion testable="true">The new container is partitioned by SUBJECT (`entityId`/`userId`); no code path partitions memory by `/tenantId`.</criterion>
+    <criterion testable="true">Reused logic is preserved — ETag/version concurrency and GDPR erasure pass their tests unchanged in behavior after generalization.</criterion>
+    <criterion testable="true">Consumable shape is the task-016 MemoryItem v1 via PublicContracts (ADR-013); no concrete service leaks to satellites.</criterion>
+    <criterion testable="true">The live-doc migration disposition is decided + recorded in project notes with rationale (partition key can't change in place).</criterion>
+    <criterion testable="true">NEGATIVE: an attempt to write a record fact that merely duplicates a live Dataverse field (no derived/synthesized content) is rejected or documented-as-disallowed, and a test asserts record memory is not used as a Dataverse-field mirror.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported vs ~49.63 MB baseline; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The live-doc migration decision (Step 3) is a judgment boundary with an irreversible consequence — Cosmos partition keys cannot change in place, and choosing "migrate" vs "fresh-container-and-leave-legacy" affects dev data and any downstream reads. Surface the decision with options + recommendation (CLAUDE.md §6 Human Escalation) BEFORE executing a destructive migration; do not silently drop or rewrite existing matter-keyed docs.</trigger>
+  </escalation>
+</task>

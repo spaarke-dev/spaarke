@@ -1,0 +1,84 @@
+<task id="AIR2-076" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Orphan verification — DAILY-BRIEFING-NARRATE + spaarke-playbook-embeddings closed by r1 P4 (contingent on 001)</title>
+    <status>not-started</status>
+    <phase>H — G-R2-D Hardening</phase>
+    <gate>G-R2-D (hardening)</gate>
+    <estimated-effort>0.25 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Read-only verification of two named orphans against recorded state; no code change, no design surface, minimal blast radius.</model-tier-reason>
+    <effort>low</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>hardening, verification, orphans, contingent, nfr-13</tags>
+    <dependencies>001 (r1 P4-close reconciliation) — CONTINGENT</dependencies>
+  </metadata>
+
+  <prompt>
+    CONTINGENT on task 001: verify that the DAILY-BRIEFING-NARRATE + `spaarke-playbook-embeddings` orphans on spaarkedev1 were closed by r1 P4 (spec FR-D-07, design row R12). This is a verification task — confirm closure with evidence, or if still orphaned, record the residual for disposition. Read task 001's recorded state first; do not re-investigate from scratch.
+  </prompt>
+
+  <role>Verification engineer fluent in the Spaarke playbook/catalog surface on spaarkedev1 and the R1 P4 cleanup history.</role>
+
+  <goal>
+    Both named orphans (DAILY-BRIEFING-NARRATE playbook + `spaarke-playbook-embeddings`) are confirmed closed on spaarkedev1 with grep-zero / catalog-absence evidence (NFR-13), OR — if still present — the residual is recorded with a disposition recommendation. The verdict is grounded in task 001's recorded r1 P4-close state.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="reconciliation-task">projects/spaarke-ai-architecture-redesign-r2/tasks/001-r1-p4-close-reconciliation.poml</file>
+    <file purpose="reconciliation-notes">projects/spaarke-ai-architecture-redesign-r2/notes/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">CONTINGENT on task 001 — read its recorded disposition of design §10 row R12 before verifying; if verified-closed there, this task confirms with fresh evidence only.</constraint>
+    <constraint source="NFR-13">Closure evidence is grep-zero / catalog-absence (no dangling references on spaarkedev1).</constraint>
+    <constraint source="project">Read-only verification — if an orphan is still present, RECORD it; do not perform the cleanup here (that would be a new disposition needing its own task).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>verification/orphans, playbook-catalog, grep-zero</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Named orphans" location="infra/dataverse/">DAILY-BRIEFING-NARRATE + `spaarke-playbook-embeddings` are the two orphans; verify absence in the live catalog + seed mirrors on spaarkedev1.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Design §10 row R12 flagged two orphaned artifacts pending r1 P4 cleanup. Whether they were actually removed is unknown until task 001 records the P4-close state — hence contingent. This is the cheapest hardening row: confirm-or-record.</background>
+    <dependencies>
+      <dependency task="001" status="required-contingent">Task 001 records the r1 P4-close disposition of row R12; this task verifies against it.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 075 (legacy workspace tools) is the sibling contingent-on-001 row.</item>
+      <item>Task 079 (G-R2-D verification) records the orphan-verification outcome.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Read 001">Read task 001's recorded disposition of design §10 row R12.</step>
+    <step order="1" name="Verify DAILY-BRIEFING-NARRATE">Confirm absence (or presence) of the DAILY-BRIEFING-NARRATE playbook in the live catalog + seed mirrors on spaarkedev1.</step>
+    <step order="2" name="Verify embeddings">Confirm absence (or presence) of `spaarke-playbook-embeddings`.</step>
+    <step order="3" name="Record">Record closure with evidence, or record the residual + a disposition recommendation (no cleanup here).</step>
+  </steps>
+
+  <tools>
+    <tool name="rg">Grep-zero / catalog-absence verification</tool>
+    <tool name="git">Commit the verification note on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (orphan-verification record: closed-with-evidence or residual + recommendation)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The verification cites task 001's recorded r1 P4-close disposition of row R12 as its basis.</criterion>
+    <criterion testable="true">DAILY-BRIEFING-NARRATE closure (or residual) is confirmed with grep-zero / catalog-absence evidence on spaarkedev1.</criterion>
+    <criterion testable="true">`spaarke-playbook-embeddings` closure (or residual) is confirmed with the same evidence standard.</criterion>
+    <criterion testable="true">NEGATIVE: if either orphan is still present, the task RECORDS the residual + recommendation and makes NO cleanup change (verification stays read-only).</criterion>
+  </acceptance-criteria>
+</task>
