@@ -23,59 +23,21 @@
 
 import { actionToBadge, reasonToLabel } from '../src/components/HighPrioritySection';
 
-function expectedShortDate(iso: string): string {
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(iso));
-}
-
 describe('actionToBadge', () => {
-  it("'Overdue' with a dueDate: danger/filled badge labelled 'Overdue · {shortDate}'", () => {
-    const badge = actionToBadge('Overdue', '2026-06-01T00:00:00Z');
-    expect(badge).toEqual({
-      label: `Overdue · ${expectedShortDate('2026-06-01T00:00:00Z')}`,
-      color: 'danger',
-      appearance: 'filled',
-    });
+  it("'Overdue' → danger/tint badge labelled 'Overdue' (word only, no date)", () => {
+    expect(actionToBadge('Overdue')).toEqual({ label: 'Overdue', color: 'danger', appearance: 'tint' });
   });
 
-  it("'Overdue' without a dueDate: falls back to the bare 'Overdue' label", () => {
-    const badge = actionToBadge('Overdue');
-    expect(badge).toEqual({ label: 'Overdue', color: 'danger', appearance: 'filled' });
+  it("'DueToday' → warning/tint badge labelled 'Due today'", () => {
+    expect(actionToBadge('DueToday')).toEqual({ label: 'Due today', color: 'warning', appearance: 'tint' });
   });
 
-  it("'DueToday': warning/filled badge labelled 'Due today'", () => {
-    const badge = actionToBadge('DueToday');
-    expect(badge).toEqual({ label: 'Due today', color: 'warning', appearance: 'filled' });
+  it("'DueSoon' → informative/tint badge labelled 'Due soon' (word only, no date)", () => {
+    expect(actionToBadge('DueSoon')).toEqual({ label: 'Due soon', color: 'informative', appearance: 'tint' });
   });
 
-  it("'DueSoon' with a dueDate: informative/outline badge labelled 'Due {shortDate}'", () => {
-    const badge = actionToBadge('DueSoon', '2026-07-15T00:00:00Z');
-    expect(badge).toEqual({
-      label: `Due ${expectedShortDate('2026-07-15T00:00:00Z')}`,
-      color: 'informative',
-      appearance: 'outline',
-    });
-  });
-
-  it("'DueSoon' without a dueDate: falls back to 'Due soon'", () => {
-    const badge = actionToBadge('DueSoon');
-    expect(badge).toEqual({ label: 'Due soon', color: 'informative', appearance: 'outline' });
-  });
-
-  it("'Recent' with a modifiedOn older than 7 days: subtle/outline badge labelled 'Updated {shortDate}'", () => {
-    // A fixed date far in the past guarantees the >=7-day branch of the
-    // internal (non-exported) formatRelative helper, independent of "now".
-    const oldModifiedOn = '2020-01-01T00:00:00Z';
-    const badge = actionToBadge('Recent', undefined, oldModifiedOn);
-    expect(badge).toEqual({
-      label: `Updated ${expectedShortDate(oldModifiedOn)}`,
-      color: 'subtle',
-      appearance: 'outline',
-    });
-  });
-
-  it("'Recent' without a modifiedOn: falls back to 'Recently updated'", () => {
-    const badge = actionToBadge('Recent');
-    expect(badge).toEqual({ label: 'Recently updated', color: 'subtle', appearance: 'outline' });
+  it("'Recent' → subtle/tint badge labelled 'Recently updated'", () => {
+    expect(actionToBadge('Recent')).toEqual({ label: 'Recently updated', color: 'subtle', appearance: 'tint' });
   });
 
   it('unknown action value falls back safely to null (no badge rendered)', () => {

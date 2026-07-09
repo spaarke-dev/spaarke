@@ -14,7 +14,7 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Badge } from '@fluentui/react-components';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -37,9 +37,9 @@ const useStyles = makeStyles({
   },
   label: {
     flex: 1,
+    color: tokens.colorNeutralForeground1,
   },
   count: {
-    color: tokens.colorNeutralForeground3,
     flexShrink: 0,
   },
 });
@@ -70,9 +70,9 @@ export const ChannelHeading: React.FC<ChannelHeadingProps> = ({ icon, label, ite
       <Text size={400} weight="semibold" className={styles.label}>
         {label}
       </Text>
-      <Text size={200} className={styles.count}>
+      <Badge appearance="tint" color="subtle" size="small" className={styles.count}>
         {itemCount} {itemCount === 1 ? 'item' : 'items'}
-      </Text>
+      </Badge>
     </div>
   );
 };

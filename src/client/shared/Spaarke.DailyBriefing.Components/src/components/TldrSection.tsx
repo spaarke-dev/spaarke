@@ -35,7 +35,7 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, Text, Badge, Skeleton, SkeletonItem, Link } from '@fluentui/react-components';
-import { InfoRegular } from '@fluentui/react-icons';
+import { InfoRegular, SparkleRegular, ArrowRightRegular } from '@fluentui/react-icons';
 import { buildSegments } from './NarrativeCitedText';
 import type { NarrativeBulletReferenceResult, TldrItemRefResult } from '../services/briefingService';
 
@@ -47,11 +47,25 @@ const useStyles = makeStyles({
   card: {
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusLarge,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    boxShadow: tokens.shadow4,
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalXL,
     paddingTop: tokens.spacingVerticalL,
     paddingBottom: tokens.spacingVerticalL,
+    marginBottom: tokens.spacingVerticalXL,
     position: 'relative',
+  },
+  headingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    marginBottom: tokens.spacingVerticalM,
+  },
+  headingIcon: {
+    fontSize: '22px',
+    color: tokens.colorBrandForeground1,
+    flexShrink: 0,
   },
   heading: {
     marginTop: '0',
@@ -80,7 +94,43 @@ const useStyles = makeStyles({
   },
   topAction: {
     display: 'block',
+  },
+  topActionBox: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: tokens.spacingHorizontalS,
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderTopLeftRadius: tokens.borderRadiusMedium,
+    borderTopRightRadius: tokens.borderRadiusMedium,
+    borderBottomLeftRadius: tokens.borderRadiusMedium,
+    borderBottomRightRadius: tokens.borderRadiusMedium,
+    borderLeftWidth: '3px',
+    borderLeftStyle: 'solid',
+    borderLeftColor: tokens.colorBrandStroke1,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    marginTop: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalS,
+  },
+  topActionContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  },
+  topActionLabel: {
+    color: tokens.colorBrandForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase100,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
+  topActionIcon: {
+    color: tokens.colorBrandForeground1,
+    fontSize: '18px',
+    flexShrink: 0,
+    marginTop: '2px',
   },
   footer: {
     color: tokens.colorNeutralForeground3,
@@ -356,9 +406,12 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
   // Success state
   return (
     <div className={styles.card}>
-      <Text as="h2" size={500} weight="semibold" className={styles.heading}>
-        TL;DR
-      </Text>
+      <div className={styles.headingRow}>
+        <SparkleRegular className={styles.headingIcon} aria-hidden="true" />
+        <Text as="h2" size={500} weight="semibold" style={{ margin: 0 }}>
+          TL;DR
+        </Text>
+      </div>
       <Badge className={styles.aiBadge} appearance="tint" color="brand" size="small">
         AI Insight
       </Badge>
@@ -389,14 +442,20 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
         </ul>
       )}
       {tldr.topAction && (
-        <Text size={300} weight="semibold" className={styles.topAction}>
-          <TldrAnchoredText
-            text={tldr.topAction}
-            refs={resolvedRefs}
-            onOpenRecord={onOpenRecord}
-            linkClassName={styles.inlineLink}
-          />
-        </Text>
+        <div className={styles.topActionBox}>
+          <ArrowRightRegular className={styles.topActionIcon} aria-hidden="true" />
+          <div className={styles.topActionContent}>
+            <Text className={styles.topActionLabel}>Top action</Text>
+            <Text size={300} weight="semibold" className={styles.topAction}>
+              <TldrAnchoredText
+                text={tldr.topAction}
+                refs={resolvedRefs}
+                onOpenRecord={onOpenRecord}
+                linkClassName={styles.inlineLink}
+              />
+            </Text>
+          </div>
+        </div>
       )}
       <div className={styles.footer}>
         {generatedAt && <Text size={200}>Generated {formatRelativeTime(generatedAt)}</Text>}
