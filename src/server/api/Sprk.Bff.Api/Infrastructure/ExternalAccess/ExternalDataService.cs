@@ -267,7 +267,7 @@ public class ExternalDataService
             body["sprk_todopinned"] = request.SprkTodopinned.Value;
 
         // ADR-024: regarding-project lookup + 4 resolver fields applied atomically.
-        body["sprk_regardingproject@odata.bind"] = $"/sprk_projects({projectId})";
+        body["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({projectId})"; // R5 002: PascalCase nav prop (metadata-verified)
         await ApplyResolverFieldsAsync(body, "sprk_project", projectId, projectDisplayName, ct);
 
         var url = $"{GetApiUrl()}/sprk_todos";
@@ -429,7 +429,7 @@ public class ExternalDataService
         var recordTypeRef = await ResolveRecordTypeRefAsync(regardingEntityName, ct);
         if (recordTypeRef.HasValue)
         {
-            body["sprk_regardingrecordtype@odata.bind"] =
+            body["sprk_RegardingRecordType@odata.bind"] = // R5 002: PascalCase nav prop (metadata-verified)
                 $"/sprk_recordtype_refs({recordTypeRef.Value.Id})";
         }
         else

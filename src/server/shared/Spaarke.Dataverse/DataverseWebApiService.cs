@@ -343,7 +343,9 @@ public class DataverseWebApiService : IDataverseService
         // Set playbook lookup if provided
         if (playbookId.HasValue)
         {
-            payload["sprk_playbookid@odata.bind"] = $"/sprk_analysisplaybooks({playbookId.Value})";
+            // R5 task 002 (FR-C9): nav prop is sprk_Playbook (metadata-verified) — sprk_analysis
+            // has no "sprk_playbookid" lookup; the earlier key was a non-existent nav property.
+            payload["sprk_Playbook@odata.bind"] = $"/sprk_analysisplaybooks({playbookId.Value})";
         }
 
         var response = await SendPostAsJsonAsync("sprk_analysises", payload, ct);
@@ -374,12 +376,12 @@ public class DataverseWebApiService : IDataverseService
         {
             ["sprk_name"] = output.Name ?? "Output",
             ["sprk_value"] = output.Value ?? string.Empty,
-            ["sprk_analysisid@odata.bind"] = $"/sprk_analysises({output.AnalysisId})"
+            ["sprk_AnalysisId@odata.bind"] = $"/sprk_analysises({output.AnalysisId})" // R5 002: PascalCase nav prop (metadata-verified)
         };
 
         if (output.OutputTypeId.HasValue)
         {
-            payload["sprk_outputtypeid@odata.bind"] = $"/sprk_aioutputtypes({output.OutputTypeId.Value})";
+            payload["sprk_OutputTypeId@odata.bind"] = $"/sprk_aioutputtypes({output.OutputTypeId.Value})"; // R5 002: PascalCase nav prop (metadata-verified)
         }
 
         if (output.SortOrder.HasValue)
@@ -1288,7 +1290,7 @@ public class DataverseWebApiService : IDataverseService
         };
 
         if (request.EventTypeId.HasValue)
-            payload["sprk_eventtype_ref@odata.bind"] = $"/sprk_eventtypes({request.EventTypeId.Value})";
+            payload["sprk_EventType_Ref@odata.bind"] = $"/sprk_eventtype_refs({request.EventTypeId.Value})"; // R5 002: nav prop sprk_EventType_Ref + correct collection sprk_eventtype_refs (metadata-verified; sprk_eventtypes does not exist)
 
         if (request.BaseDate.HasValue)
             payload["sprk_basedate"] = request.BaseDate.Value.ToString("yyyy-MM-dd");
@@ -1346,7 +1348,7 @@ public class DataverseWebApiService : IDataverseService
             payload["sprk_description"] = request.Description;
 
         if (request.EventTypeId.HasValue)
-            payload["sprk_eventtype_ref@odata.bind"] = $"/sprk_eventtypes({request.EventTypeId.Value})";
+            payload["sprk_EventType_Ref@odata.bind"] = $"/sprk_eventtype_refs({request.EventTypeId.Value})"; // R5 002: nav prop sprk_EventType_Ref + correct collection sprk_eventtype_refs (metadata-verified; sprk_eventtypes does not exist)
 
         if (request.BaseDate.HasValue)
             payload["sprk_basedate"] = request.BaseDate.Value.ToString("yyyy-MM-dd");
@@ -1444,7 +1446,7 @@ public class DataverseWebApiService : IDataverseService
         var payload = new Dictionary<string, object?>
         {
             ["sprk_eventlogname"] = logName,
-            ["sprk_event@odata.bind"] = $"/sprk_events({eventId})",
+            ["sprk_Event@odata.bind"] = $"/sprk_events({eventId})", // R5 002: PascalCase nav prop (metadata-verified)
             ["sprk_action"] = action,
             ["sprk_description"] = description
         };

@@ -116,7 +116,36 @@ Actual shipped bind keys using correct PascalCase. The R7 reference sites plus t
 
 ---
 
-## Escalation (per task `<escalation>` trigger + CLAUDE.md §6)
+## ✅ Verification + fixes (2026-07-09 — the 10 needs-verification resolved)
+
+The Dataverse MCP connector turned out to be authorized, and an `az` Dataverse-scoped token can
+query the Web API `EntityDefinitions/ManyToOneRelationships` metadata (the authoritative source
+for each lookup's `ReferencingEntityNavigationPropertyName` — i.e. the exact `@odata.bind` key).
+All 10 `needs-verification` sites were checked against **live spaarkedev1 relationship metadata**.
+Result: **8 were real violations (now FIXED), 2 confirmed correct.** `@odata.bind` nav-prop names
+are case-sensitive (the R7 bug class), so each lowercase key below would 400 if its path were
+exercised — these are latent bugs in likely-legacy write paths (which is why they went unnoticed).
+
+| Site | Was | Real nav prop (metadata) | Verdict |
+|---|---|---|---|
+| `DataverseWebApiService.cs:346` (sprk_analysis) | `sprk_playbookid` → `/sprk_analysisplaybooks` | **`sprk_Playbook`** | **FIXED** (attr `sprk_playbookid` doesn't exist; lookup is `sprk_playbook`) |
+| `DataverseWebApiService.cs:377` (sprk_analysisoutput) | `sprk_analysisid` | **`sprk_AnalysisId`** | **FIXED** (casing) |
+| `DataverseWebApiService.cs:382` (sprk_analysisoutput) | `sprk_outputtypeid` | **`sprk_OutputTypeId`** | **FIXED** (casing) |
+| `DataverseWebApiService.cs:1291,1349` (sprk_event) | `sprk_eventtype_ref` → `/sprk_eventtypes` | **`sprk_EventType_Ref`** → `/sprk_eventtype_refs` | **FIXED** (casing **+ collection**: `sprk_eventtype` does not exist / 404s) |
+| `DataverseWebApiService.cs:1447` (sprk_eventlog) | `sprk_event` | **`sprk_Event`** | **FIXED** (casing) |
+| `ExternalDataService.cs:270` (sprk_todo) | `sprk_regardingproject` | **`sprk_RegardingProject`** | **FIXED** (casing) |
+| `ExternalDataService.cs:432` (sprk_todo) | `sprk_regardingrecordtype` | **`sprk_RegardingRecordType`** | **FIXED** (casing) |
+| `external-spa web-api-client.ts:555,587` + `EventsCalendar.tsx:379` (sprk_event) | `sprk_projectid` → `` `sprk_projects(id)` `` | **`sprk_RegardingProject`** → `/sprk_projects(id)` | **FIXED** (attr `sprk_projectid` doesn't exist; lookup is `sprk_regardingproject`; also added missing leading `/`) |
+| `DataverseWebApiService.cs:339` (sprk_analysis) | `sprk_documentid` | `sprk_documentid` | ✅ CORRECT (genuinely lowercase nav prop) |
+| `NodeService.cs` (sprk_playbooknode) | `sprk_playbookid` / `sprk_actionid` / `sprk_modeldeploymentid` | same (all lowercase) | ✅ CORRECT |
+
+Note: `sprk_analysis` itself carries **mixed** nav-prop casing (`sprk_documentid` lowercase but
+`sprk_Playbook` PascalCase) — the lookups were authored at different times, which is exactly why
+per-attribute metadata verification (not a blanket rule) was required. Verified via
+`EntityDefinitions(LogicalName=…)/ManyToOneRelationships` on spaarkedev1. BFF builds 0 errors after
+the fixes. These deploy with the next BFF deploy; the external-spa fix deploys with that SPA.
+
+## Escalation (per task `<escalation>` trigger + CLAUDE.md §6) — RESOLVED above
 
 🔔 **10 `needs-verification` bind sites (§2) cannot be confirmed against a known SchemaName without live Dataverse metadata**, which is unavailable to this audit (the Dataverse MCP connector is not authorized in this session). Two are direct casing *inconsistencies* for the same target entity (`sprk_outputtypeid` vs `sprk_OutputTypeId` → `/sprk_aioutputtypes`; `sprk_regardingproject`/`sprk_regardingrecordtype` vs the resolver's PascalCase `sprk_RegardingProject`/`sprk_RegardingRecordType`).
 
