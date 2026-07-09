@@ -116,6 +116,63 @@ export function isJobAwareMode(mode: string | number | undefined): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// action_outcome SSE frame adapter (spaarke-ai-architecture-redesign-r2 task 044c)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Loosely-typed shape this adapter accepts — structurally matches the
+ * `action_outcome` fields on `IChatSseEventData` (SprkChat/types.ts) without
+ * importing that type here (keeps OutcomeCard.tsx free of a dependency on the
+ * SSE event-envelope types, consistent with its existing presentational scope).
+ */
+export interface IActionOutcomeFrameData {
+  status?: string | number;
+  userSummary?: string;
+  linkUrl?: string | null;
+  linkLabel?: string | null;
+  nextSteps?: string[];
+  ledgerOutputKey?: string;
+}
+
+/**
+ * Adapts the `action_outcome` SSE frame payload (mirrors server
+ * `ChatSseActionOutcomeData` — `Api/Ai/ChatEndpoints.cs`) into the {@link IOutcomeCard}
+ * shape this component renders.
+ *
+ * task 044c: the AUTO-EXECUTE (no-dialog) gate leg (`SideEffectGateAIFunction.cs`
+ * ~line 490) emits `OutcomeCard.Render()`'s FLATTENED view-projection
+ * (`OutcomeCardView` — labels only, no link `kind`, no chip `actionKind`) rather
+ * than the full `OutcomeCard` v1 shape the gate-RESUME leg carries
+ * (`dispatchConfirmedAction` / `GateResolveResult.Outcome`, consumed at
+ * SprkChat.tsx ~761). This adapter restores the presentational defaults the
+ * view-projection dropped, so BOTH legs render through the ONE `OutcomeCard`
+ * component:
+ *   - `link.kind`: `'record'` — the only link kind this leg composes (the Undo
+ *     target for a reversible create, or the review-and-send record for an
+ *     email draft; see `SideEffectGateAIFunction.BuildRecordUrl`).
+ *   - `nextSteps[].actionKind`: `'invoke_capability'` — the only chip kind this
+ *     leg declares today (the "Undo" chip; see `SideEffectGateAIFunction`'s
+ *     `chips.Add(new NextStepChip("Undo", "invoke_capability"))`).
+ *
+ * Tolerant reader (035's convention): `status` accepts the server's lowercased
+ * string ("succeeded" | "partial" | "failed") or, defensively, a differently-cased
+ * string or numeric ordinal — {@link normalizeOutcomeStatus} does the actual
+ * normalization at render time, so this adapter passes the raw value through.
+ */
+export function actionOutcomeDataToCard(data: IActionOutcomeFrameData): IOutcomeCard {
+  return {
+    ledgerOutputKey: data.ledgerOutputKey,
+    status: data.status ?? 'succeeded',
+    summary: { userFacing: data.userSummary ?? '' },
+    link:
+      typeof data.linkUrl === 'string' && data.linkUrl.length > 0
+        ? { url: data.linkUrl, label: data.linkLabel || 'Open record', kind: 'record' }
+        : undefined,
+    nextSteps: (data.nextSteps ?? []).map(label => ({ label, actionKind: 'invoke_capability' })),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Styles
 // ─────────────────────────────────────────────────────────────────────────────
 

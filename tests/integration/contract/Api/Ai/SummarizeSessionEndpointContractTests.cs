@@ -20,6 +20,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
@@ -473,6 +474,9 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
         builder.Services.AddSingleton<IOpenAiClient>(OpenAi);
         builder.Services.AddSingleton<PromptSchemaRenderer>();
         builder.Services.AddSingleton<IActionRunner, ActionRunner>();
+        // ADR-043 E-10: the dispatch seam resolves inputs via the REAL ContextBinder over the fixture's
+        // session manager (writes the ContextEnvelope fingerprint; resolves the file operand for summarize).
+        builder.Services.AddSingleton<IContextBinder, ContextBinder>();
 
         // FR-P1-02 (task 021) — REAL OutputRouter over the fixture's session manager: the
         // contract tests now exercise the live ledger write-before-render seam (the stored

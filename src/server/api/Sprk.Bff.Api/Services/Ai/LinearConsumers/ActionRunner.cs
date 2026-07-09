@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
@@ -53,12 +55,39 @@ public sealed class ActionRunner : IActionRunner
         _logger = logger;
     }
 
-    public async Task<JsonElement> RunAsync(
+    /// <summary>
+    /// Pre-ADR-043 overload: wraps <paramref name="documentText"/> as a
+    /// <see cref="OperandChannel.Document"/> operand (empty context envelope) and delegates to the
+    /// canonical <see cref="BoundInputs"/> path — byte-identical to the pre-E-10 behavior for the
+    /// linear-consumer callers (Doc Upload / File Summarize / Prefills / Event rules / etc.).
+    /// </summary>
+    public Task<JsonElement> RunAsync(
         AnalysisAction action,
         DocumentText documentText,
         LinearRunContext context,
         CancellationToken cancellationToken)
     {
+        var inputs = new BoundInputs
+        {
+            Context = ContextEnvelopeReferenceProducer.Assemble(),
+            Operand = new ResolvedOperand
+            {
+                Channel = OperandChannel.Document,
+                Kind = OperandKind.FileDocument,
+                Document = documentText,
+            },
+        };
+        return RunAsync(action, inputs, context, cancellationToken);
+    }
+
+    public async Task<JsonElement> RunAsync(
+        AnalysisAction action,
+        BoundInputs inputs,
+        LinearRunContext context,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(inputs);
+
         if (string.IsNullOrWhiteSpace(action.SystemPrompt))
         {
             throw new InvalidOperationException(
@@ -72,20 +101,19 @@ public sealed class ActionRunner : IActionRunner
                 $"linear consumers require a constrained-decoding schema.");
         }
 
-        if (string.IsNullOrWhiteSpace(documentText.ExtractedText))
-        {
-            throw new InvalidOperationException(
-                $"DocumentText for {documentText.FileName} is empty; nothing to send to the LLM.");
-        }
-
-        var prompt = BuildPrompt(action.SystemPrompt, documentText);
+        var prompt = BuildPrompt(action.SystemPrompt, inputs.Operand);
         var jsonSchema = BinaryData.FromString(action.OutputSchemaJson);
         var schemaName = SanitizeSchemaName(action.Name);
         var temperature = (float?)action.Temperature;
 
+        // NFR-07: identifiers + counts only — never slice content. Records that the resolved context
+        // envelope flows to the executor (ADR-043: the completion consumes context-via-envelope).
         _logger.LogInformation(
-            "Linear run: consumer={ConsumerType} action={ActionName} promptLen={PromptLen} temp={Temperature}",
-            context.ConsumerType, action.Name, prompt.Length, temperature);
+            "Linear run: consumer={ConsumerType} action={ActionName} operandChannel={OperandChannel} " +
+            "operandKind={OperandKind} promptLen={PromptLen} temp={Temperature} context=[{ContextSummary}]",
+            context.ConsumerType, action.Name, inputs.Operand.Channel, inputs.Operand.Kind,
+            prompt.Length, temperature,
+            ContextEnvelopeReferenceConsumer.RenderPresenceSummary(inputs.Context));
 
         // FR-P3-01 (task 040): the per-consumer ModelDeployments/MaxOutputTokens config
         // maps were retired with the LinearConsumers appsettings block. Model intent lives
@@ -108,17 +136,39 @@ public sealed class ActionRunner : IActionRunner
     }
 
     /// <summary>
-    /// Build the prompt. Two paths:
-    /// 1. JPS (JSON Prompt Schema) — Action's SystemPrompt starts with a <c>{</c>
-    ///    and contains <c>$schema</c>: render via <see cref="PromptSchemaRenderer"/>
-    ///    (natural-language sections, embedded document text in the "## Input"
-    ///    section). Matches the Playbook Engine's AiCompletion executor behavior.
-    /// 2. Flat text — plain prompt: fall back to the simple single-placeholder
-    ///    <c>{{document.extractedText}}</c> substitution (or append the text after
-    ///    a "## Input" separator when no placeholder is present).
+    /// Build the prompt from the resolved operand (ADR-043 Move 1 / E-10). Routes by
+    /// <see cref="ResolvedOperand.Channel"/>:
+    /// <list type="bullet">
+    /// <item><see cref="OperandChannel.Document"/> — a file-grounding document renders under
+    ///   <c>## Document</c> (JPS) / the flat-text "Document:" append. This is the <b>verbatim pre-E-10
+    ///   path</b> (byte-for-behavior — the shipped summarize path is unregressed).</item>
+    /// <item><see cref="OperandChannel.Input"/> — a structured operand renders through the single-source
+    ///   <c>## Input</c> producer (<see cref="PromptSchemaRenderer"/> Layer 2 for JPS actions;
+    ///   <see cref="PromptInputSection"/> appended for flat-text actions).</item>
+    /// <item><see cref="OperandChannel.None"/> — a prompt-only run (the relaxed no-file path): the JPS
+    ///   instruction sections / the flat prompt, with no operand section.</item>
+    /// </list>
     /// </summary>
-    private string BuildPrompt(string systemPrompt, DocumentText documentText)
+    private string BuildPrompt(string systemPrompt, ResolvedOperand operand) => operand.Channel switch
     {
+        OperandChannel.Document => BuildDocumentPrompt(systemPrompt, RequireDocument(operand)),
+        OperandChannel.Input => BuildInputPrompt(systemPrompt, RequireInput(operand)),
+        _ => BuildNoOperandPrompt(systemPrompt),
+    };
+
+    /// <summary>
+    /// The pre-E-10 document-operand prompt build, preserved verbatim (non-regression). JPS renders the
+    /// document under <c>## Document</c>; flat text appends the "Document:" block or substitutes the
+    /// <c>{{document.extractedText}}</c> placeholder. Empty extracted text is a hard error (unchanged).
+    /// </summary>
+    private string BuildDocumentPrompt(string systemPrompt, DocumentText documentText)
+    {
+        if (string.IsNullOrWhiteSpace(documentText.ExtractedText))
+        {
+            throw new InvalidOperationException(
+                $"DocumentText for {documentText.FileName} is empty; nothing to send to the LLM.");
+        }
+
         var rendered = _promptRenderer.Render(
             rawPrompt: systemPrompt,
             skillContext: null,
@@ -143,6 +193,59 @@ public sealed class ActionRunner : IActionRunner
 
         return systemPrompt.Replace(PlaceholderExtractedText, documentText.ExtractedText, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// The structured-operand prompt build (ADR-043). A JPS action passes the operand as the renderer's
+    /// <c>runtimeInput</c> (rendered as <c>## Input</c> by <see cref="PromptSchemaRenderer"/>); a flat-text
+    /// action (e.g. compose actions) appends the single-source <see cref="PromptInputSection"/> directly —
+    /// so both formats emit byte-identical <c>## Input</c> (the frozen, golden-pinned producer).
+    /// </summary>
+    private string BuildInputPrompt(string systemPrompt, JsonElement input)
+    {
+        var rendered = _promptRenderer.Render(
+            rawPrompt: systemPrompt,
+            skillContext: null,
+            knowledgeContext: null,
+            documentText: null,
+            templateParameters: null,
+            downstreamNodes: null,
+            runtimeInput: input);
+
+        if (rendered.Format == PromptFormat.JsonPromptSchema && !string.IsNullOrWhiteSpace(rendered.PromptText))
+        {
+            return rendered.PromptText;
+        }
+
+        // Flat-text action — append the single-source `## Input` section after the instruction prompt.
+        return systemPrompt + "\n\n" + PromptInputSection.Render(input);
+    }
+
+    /// <summary>
+    /// The prompt-only build (no operand — the relaxed no-file / args-less run). JPS renders the
+    /// instruction sections; flat text returns the prompt unchanged.
+    /// </summary>
+    private string BuildNoOperandPrompt(string systemPrompt)
+    {
+        var rendered = _promptRenderer.Render(
+            rawPrompt: systemPrompt,
+            skillContext: null,
+            knowledgeContext: null,
+            documentText: null,
+            templateParameters: null,
+            downstreamNodes: null);
+
+        return rendered.Format == PromptFormat.JsonPromptSchema && !string.IsNullOrWhiteSpace(rendered.PromptText)
+            ? rendered.PromptText
+            : systemPrompt;
+    }
+
+    private static DocumentText RequireDocument(ResolvedOperand operand) =>
+        operand.Document ?? throw new InvalidOperationException(
+            "ActionRunner: Document-channel operand carries no DocumentText (ContextBinder contract violation).");
+
+    private static JsonElement RequireInput(ResolvedOperand operand) =>
+        operand.Input ?? throw new InvalidOperationException(
+            "ActionRunner: Input-channel operand carries no element (ContextBinder contract violation).");
 
     /// <summary>
     /// Azure OpenAI structured-output schema names must be alphanumeric +

@@ -705,6 +705,19 @@ public static class AnalysisServicesModule
         // §F.1 asymmetric-registration audit: registration is unconditional within the
         // already-gated outer block; both endpoints map unconditionally with
         // the NullSessionDispatchOrchestrator mirror in AddNullObjectsForCompoundOff.
+        // IContextBinder — THE platform input-resolution seam (ADR-043 Move 1 / E-10; re-scopes
+        // task 053). Resolves an Action's declared inputs into grounding context (ContextEnvelope) +
+        // the typed operand (## Input / ## Document), and writes the ContextEnvelope fingerprint via
+        // ChatSessionManager.AppendContextFingerprintAsync (task-038's dark seam, now live).
+        // Scoped: wraps ChatSessionManager (Scoped) — matches the SessionDispatchOrchestrator that
+        // consumes it. §F.1 asymmetric-registration audit: consumed ONLY by the concrete
+        // SessionDispatchOrchestrator ctor (registered in THIS compound-ON block); the compound-OFF
+        // path resolves NullSessionDispatchOrchestrator (logger-only ctor) which never touches this
+        // seam → transitively conditional; no ADR-032 Null peer needed.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.IContextBinder,
+                           Sprk.Bff.Api.Services.Ai.Context.ContextBinder>();
+        Console.WriteLine("✓ ContextBinder registered (ADR-043 E-10 input-resolution seam; ContextEnvelope + operand; task-038 fingerprint writer)");
+
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionDispatchOrchestrator>();
         Console.WriteLine("✓ SessionDispatchOrchestrator registered (FR-P1-04 Click path; binding-id catalog dispatch; ADR-040 ledger-before-render)");
 

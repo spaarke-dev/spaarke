@@ -438,15 +438,19 @@ async function applyCopyLookup(rule: IFieldMappingRule, ctx: IRuleApplyContext):
   const guid = record[valueKey];
   const referentEntity = record[annotationKey];
 
-  if (
-    typeof guid !== 'string' ||
-    guid.length === 0 ||
-    typeof referentEntity !== 'string' ||
-    referentEntity.length === 0
-  ) {
+  // Empty source lookup — the parent simply has no value for this field. This is
+  // the normal case (e.g. a Matter with only one attorney assigned), NOT an error:
+  // there is nothing to copy, so skip SILENTLY without a warning.
+  if (typeof guid !== 'string' || guid.length === 0) {
+    return;
+  }
+
+  // Value present but the lookuplogicalname annotation is missing/empty — a genuine
+  // anomaly (a populated lookup whose referent entity cannot be determined). Warn + skip.
+  if (typeof referentEntity !== 'string' || referentEntity.length === 0) {
     ctx.warnings.push(
-      `Copy rule "${rule.sourceField}"→"${rule.targetField}" skipped: could not resolve the referent ` +
-        `entity for the source lookup (missing or empty "${annotationKey}" annotation).`
+      `Copy rule "${rule.sourceField}"→"${rule.targetField}" skipped: source lookup has a value but its ` +
+        `"${annotationKey}" annotation is missing, so the referent entity cannot be resolved.`
     );
     return;
   }
