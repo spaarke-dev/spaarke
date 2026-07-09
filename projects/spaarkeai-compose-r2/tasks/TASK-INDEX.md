@@ -45,7 +45,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 042 | FR-09 compose-draft-alternative Action + Binding (compose disposition) | 4 Catalog | 🟢 | 001,016 | ✅ | FULL | opus | high |
 | 043 | FR-10 compose-summarize-word-changes Action + Binding | 4 Catalog | 🟢 | 001,006 | ✅ | FULL | sonnet | high |
 | 044 | FR-11 compose-defined-terms Action + Binding (overflow trigger → Context) | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
-| 045 | FR-12 eval cases per row (golden + dispatch ≥5) + schema validation | 4 Catalog | 🟢 | 040,041,042,043,044 | 🔲 | FULL | sonnet | high |
+| 045 | FR-12 eval cases per row (golden + dispatch ≥5) + schema validation | 4 Catalog | 🟢 | 040,041,042,043,044 | ✅ | FULL | sonnet | high |
 | 046 | FR-13 dispatch wiring (compose_selection_offer choreography + direct dispatchConsumer) | 4 Catalog | 🟢 | 016,030 | 🔲 | FULL | opus | high |
 | 047 | Deploy catalog rows to Dataverse (mirror-first) | 4 Catalog | 🟢 | 045 | 🔲 | STANDARD | sonnet | high |
 | 050 | FR-24 DocxAnnotationWriter (comments + track changes, edge cases) + push endpoint | 5 Word | 🟢 | 005 | 🔲 | FULL | opus | xhigh |
