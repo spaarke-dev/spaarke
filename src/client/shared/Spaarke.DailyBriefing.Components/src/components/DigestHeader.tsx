@@ -37,7 +37,13 @@ import {
   MenuList,
   MenuItem,
 } from '@fluentui/react-components';
-import { NewsRegular, ArrowClockwiseRegular, MoreVerticalRegular, BookRegular } from '@fluentui/react-icons';
+import {
+  NewsRegular,
+  ArrowClockwiseRegular,
+  MoreVerticalRegular,
+  BookRegular,
+  MailRegular,
+} from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only — ADR-021)
@@ -114,6 +120,16 @@ export interface DigestHeaderProps {
    * not rendered.
    */
   onBrowsePlaybooks?: () => void;
+  /**
+   * r5 email-share #2 (2026-07-09) — called when the user clicks the "Email
+   * Briefing" overflow menu item ("how do I share this with a colleague"). The
+   * host opens the shared email dialog and POSTs the picked recipient to
+   * `/api/ai/daily-briefing/email`, which server-renders + sends the caller's
+   * briefing. Pure callback (shared lib stays Xrm-free per ADR-012). When
+   * omitted, the item is not rendered. Shares the overflow menu with
+   * {@link onBrowsePlaybooks} — the menu renders when EITHER is provided.
+   */
+  onEmailBriefing?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +179,7 @@ export const DigestHeader: React.FC<DigestHeaderProps> = ({
   onRefresh,
   preferencesSlot,
   onBrowsePlaybooks,
+  onEmailBriefing,
 }) => {
   const styles = useStyles();
 
@@ -197,7 +214,7 @@ export const DigestHeader: React.FC<DigestHeaderProps> = ({
           chat surface affordance: opens Library in browse mode → Path A.5
           launch preserved via existing Code Page wrapper.
         */}
-        {onBrowsePlaybooks && (
+        {(onBrowsePlaybooks || onEmailBriefing) && (
           <Menu>
             <MenuTrigger disableButtonEnhancement>
               <Tooltip content="More actions" relationship="label">
@@ -206,9 +223,16 @@ export const DigestHeader: React.FC<DigestHeaderProps> = ({
             </MenuTrigger>
             <MenuPopover>
               <MenuList>
-                <MenuItem icon={<BookRegular />} onClick={onBrowsePlaybooks}>
-                  Browse Playbooks
-                </MenuItem>
+                {onEmailBriefing && (
+                  <MenuItem icon={<MailRegular />} onClick={onEmailBriefing}>
+                    Email Briefing
+                  </MenuItem>
+                )}
+                {onBrowsePlaybooks && (
+                  <MenuItem icon={<BookRegular />} onClick={onBrowsePlaybooks}>
+                    Browse Playbooks
+                  </MenuItem>
+                )}
               </MenuList>
             </MenuPopover>
           </Menu>

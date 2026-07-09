@@ -55,10 +55,17 @@ import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
 import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
+import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components';
+import { extractEmailKey } from '@spaarke/ui-components/services';
 import { useBriefingRender, useInlineTodoCreate, useBriefingPreferences } from '../hooks';
 import { TOASTER_ID } from '../utils/toastUtils';
 import type { IWebApi, NotificationCategory, NotificationItem } from '../types/notifications';
-import type { ChannelNarrationResult, NarrativeBulletResult } from '../services/briefingService';
+import {
+  emailBriefingToColleague,
+  type ChannelNarrationResult,
+  type NarrativeBulletResult,
+  type HighPriorityItemResult,
+} from '../services/briefingService';
 
 const useStyles = makeStyles({
   container: {
@@ -109,6 +116,47 @@ export interface DailyBriefingAppProps {
    * for non-Dataverse hosts).
    */
   onBrowsePlaybooks?: () => void;
+}
+
+/**
+ * r5 email-share (2026-07-09) — open-dialog state for the shared SendEmailDialog.
+ * `briefing` shares the whole briefing (server renders + sends via /email);
+ * `item` shares one high-priority record (client-composed draft email activity).
+ */
+type EmailDialogState =
+  | { mode: 'briefing' }
+  | { mode: 'item'; item: HighPriorityItemResult; defaultSubject: string; defaultBody: string };
+
+/**
+ * Build a Dataverse record deep link from the record's STRUCTURED identity
+ * (entityType + entityId) — never from narrative/display text. Returns '' when
+ * either part is missing so callers can omit the link cleanly. Exported for tests.
+ */
+export function buildRecordDeepLink(clientUrl: string, entityType: string, entityId: string): string {
+  if (!entityType || !entityId) return '';
+  const id = entityId.replace(/[{}]/g, '');
+  return `${clientUrl}/main.aspx?pagetype=entityrecord&etn=${encodeURIComponent(entityType)}&id=${encodeURIComponent(id)}`;
+}
+
+/**
+ * r5 email-share #3 — compose the draft email subject + body for a single
+ * high-priority item, DETERMINISTICALLY from the item's structured fields
+ * (name, kindLabel, description) plus a deep link built from entityType/entityId.
+ * No narrative text is consulted (mirrors the deterministic-link rule the TL;DR
+ * renderer follows). Exported so the composition is unit-testable without a mount.
+ */
+export function buildItemEmailDraft(
+  item: HighPriorityItemResult,
+  clientUrl: string
+): { subject: string; body: string } {
+  const kind = item.kindLabel ? `${item.kindLabel}: ` : '';
+  const subject = `${kind}${item.name || 'Record'}`.slice(0, 200);
+  const link = buildRecordDeepLink(clientUrl, item.entityType, item.entityId);
+  const lines: string[] = [item.name || 'Record'];
+  if (item.description) lines.push('', item.description);
+  if (link) lines.push('', `Open the record: ${link}`);
+  lines.push('', '— Shared from the Daily Briefing');
+  return { subject, body: lines.join('\n') };
 }
 
 // ---------------------------------------------------------------------------
@@ -447,6 +495,112 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   );
 
   // ---------------------------------------------------------------------------
+  // r5 email-share (2026-07-09) — #2 Email Briefing (server-send) + #3 Email Item
+  // (client-composed draft email activity). Reuses the shared SendEmailDialog.
+  // ---------------------------------------------------------------------------
+
+  const [emailDialog, setEmailDialog] = React.useState<EmailDialogState | null>(null);
+
+  // Dataverse client URL for deep links (e.g. https://org.crm.dynamics.com).
+  const clientUrl = React.useMemo<string>(() => {
+    try {
+      return xrm?.Utility?.getGlobalContext()?.getClientUrl?.() ?? '';
+    } catch {
+      return '';
+    }
+  }, [xrm]);
+
+  // Recipient picker — active internal systemusers with an email (matches the
+  // server-side egress guard, which requires an active systemuser). Formats each
+  // result as "Full Name (email)" so SendEmailDialog's extractEmailKey resolves it.
+  const handleSearchUsers = React.useCallback(
+    async (query: string): Promise<ISendEmailPayload['to'][]> => {
+      if (!webApi || !query || query.trim().length < 2) return [];
+      const safe = query.trim().replace(/'/g, "''");
+      const options =
+        `?$select=systemuserid,fullname,internalemailaddress` +
+        `&$filter=contains(fullname,'${safe}') and isdisabled eq false` +
+        `&$orderby=fullname asc&$top=10`;
+      try {
+        const result = await webApi.retrieveMultipleRecords('systemuser', options);
+        return (result.entities ?? [])
+          .filter((e: Record<string, unknown>) => !!e['internalemailaddress'])
+          .map((e: Record<string, unknown>) => ({
+            id: String(e['systemuserid'] ?? ''),
+            name: `${String(e['fullname'] ?? '')} (${String(e['internalemailaddress'])})`,
+          }));
+      } catch (err) {
+        console.warn('[DailyBriefing] user search failed:', err);
+        return [];
+      }
+    },
+    [webApi]
+  );
+
+  const handleEmailBriefing = React.useCallback(() => setEmailDialog({ mode: 'briefing' }), []);
+
+  const handleEmailItem = React.useCallback(
+    (item: HighPriorityItemResult) => {
+      const { subject, body } = buildItemEmailDraft(item, clientUrl);
+      setEmailDialog({ mode: 'item', item, defaultSubject: subject, defaultBody: body });
+    },
+    [clientUrl]
+  );
+
+  // Single onSend for both modes. Throwing keeps SendEmailDialog open + shows the
+  // error; resolving closes it. Success dispatches a confirmation toast.
+  const handleEmailSend = React.useCallback(
+    async (payload: ISendEmailPayload): Promise<void> => {
+      if (!emailDialog) return;
+
+      if (emailDialog.mode === 'briefing') {
+        const recipientEmail = extractEmailKey(payload.to.name);
+        if (!recipientEmail) {
+          throw new Error("Could not resolve the selected user's email address.");
+        }
+        const result = await emailBriefingToColleague(recipientEmail);
+        if (result.status !== 'success') {
+          throw new Error(result.message);
+        }
+        dispatchToast(
+          <Toast>
+            <ToastTitle>Briefing sent</ToastTitle>
+            <ToastBody>Your Daily Briefing was emailed to {payload.to.name}.</ToastBody>
+          </Toast>,
+          { intent: 'success', timeout: 6000 }
+        );
+        return;
+      }
+
+      // mode === 'item' — create a DRAFT email activity (never auto-sent).
+      if (!webApi) {
+        throw new Error('Dataverse is not available.');
+      }
+      const parties: Record<string, unknown>[] = [];
+      if (userId) {
+        parties.push({ 'partyid_systemuser@odata.bind': `/systemusers(${userId})`, participationtypemask: 1 });
+      }
+      parties.push({ 'partyid_systemuser@odata.bind': `/systemusers(${payload.to.id})`, participationtypemask: 2 });
+      const record: Record<string, unknown> = {
+        subject: payload.subject,
+        description: payload.body,
+        email_activity_parties: parties,
+      };
+      await webApi.createRecord('email', record);
+      dispatchToast(
+        <Toast>
+          <ToastTitle>Draft email created</ToastTitle>
+          <ToastBody>
+            A draft email to {payload.to.name} was saved. Open it from your activities to review and send.
+          </ToastBody>
+        </Toast>,
+        { intent: 'success', timeout: 8000 }
+      );
+    },
+    [emailDialog, webApi, userId, dispatchToast]
+  );
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
@@ -564,6 +718,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         onRefresh={refreshBriefing}
         preferencesSlot={<PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />}
         onBrowsePlaybooks={onBrowsePlaybooks}
+        onEmailBriefing={handleEmailBriefing}
       />
       <div className={styles.scrollContent}>
         {/* Task 021 redesign: deterministic KPI tiles at the top. */}
@@ -579,7 +734,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           resolvableItems={tldrResolvableItems}
           onOpenRecord={handleOpenRecord}
         />
-        <HighPrioritySection items={highPriorityItems} onOpenRecord={handleOpenRecord} />
+        <HighPrioritySection items={highPriorityItems} onOpenRecord={handleOpenRecord} onEmailItem={handleEmailItem} />
         <div className={styles.activitySection}>
           <ActivityNotesSection
             channelNarratives={filteredNarratives}
@@ -596,6 +751,25 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         </div>
         <CaughtUpFooter channelLabels={[]} />
       </div>
+      {emailDialog && (
+        <SendEmailDialog
+          open={true}
+          onClose={() => setEmailDialog(null)}
+          title={emailDialog.mode === 'briefing' ? 'Email Briefing' : 'Email Item'}
+          defaultSubject={
+            emailDialog.mode === 'briefing'
+              ? `Daily Briefing — ${new Date().toLocaleDateString()}`
+              : emailDialog.defaultSubject
+          }
+          defaultBody={
+            emailDialog.mode === 'briefing'
+              ? 'Sharing my Daily Briefing with you — the full briefing is included in this email.'
+              : emailDialog.defaultBody
+          }
+          onSearchUsers={handleSearchUsers}
+          onSend={handleEmailSend}
+        />
+      )}
     </div>
   );
 };

@@ -38,6 +38,14 @@
 3. **Shared lib #2**: `onEmailBriefing` on `DigestHeader` (menu item); `DailyBriefingApp` dialog wiring the `/email` POST with picked recipient. Jest test for recipient-passthrough.
 4. **Gates**: code-review + adr-check (Step 9.5). Then batch into the pending r5 deploy (BFF re-deploy + SpaarkeAi widget deploy) + UAT.
 
+## As-built notes (2026-07-09)
+- **Reused `SendEmailDialog`** (`@spaarke/ui-components`), not a hand-rolled dialog — even better than the planned `SendEmailStep` reuse: it already bundles the Dialog chrome, recipient LookupField, subject/body, send spinner, and error surface. **Zero new components** authored (§11 win). Recipient email parsed via the shared `extractEmailKey`.
+- **All wiring lives in `DailyBriefingApp`** (the Xrm-bridge); leaf components (`DigestHeader`, `HighPrioritySection`) only receive callbacks → stay Xrm-free (ADR-021/012). No SpaarkeAi host changes.
+- **#3 composition extracted to exported pure helpers** `buildItemEmailDraft` / `buildRecordDeepLink` in `DailyBriefingApp.tsx` → unit-tested in `test/emailShareDraft.test.ts` (8/8 green): subject/body/link are built only from structured fields (name, kindLabel, description, entityType, entityId), never narrative.
+- **#2 server change**: `/email` now takes optional `{ recipientEmail }` + internal-only egress guard (commit `5c3c1a9ee`, 8/8 contract tests).
+- **MVP wart (documented)**: in briefing mode the `SendEmailDialog` "Message" field is **cosmetic** — the server owns the briefing HTML, so a typed message is not sent. Prepend/subject-override is the deferred note-passthrough fast-follow (needs an OutputRouter-adjacent change). The dialog's default body states the briefing is included.
+- **Pre-existing, unrelated test failures** on this branch (verified by stashing my changes): `test/legalWorkspaceSectionRegistry.test.ts` + one case in `test/ActivityNotesSection.callbacks.test.tsx` (onKeep ttl 604800→0). NOT caused by email-share; candidates for the 090 `/defer` list.
+
 ## Open / deferred
 - Personal-note prepend + subject override for #2 (needs OutputRouter-adjacent HTML change) → **fast-follow**, not MVP.
 - #3 send-now (vs draft activity) → enhancement; draft is the safe MVP matching the SendEmailStep contract.
