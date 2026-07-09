@@ -88,6 +88,18 @@
     <Compile Include="..\..\integration\regression\**\*.cs" LinkBase="RegressionTests" />
   </ItemGroup>
 
+  <!--
+    E-10 (2026-07-09) — ADR-043 seam KEEP-path inclusion. tests/integration/seam/** is the new
+    vertical-slice KEEP category ADR-043 adds to ADR-038 (consumer input → dispatch → stored
+    SessionOutput → render/frame; the definition-of-done for any dispatch/execution change — a
+    contract-shape test is NOT sufficient). Compiled INTO this assembly for the same fixture-coupling
+    reason as the contract/regression globs above (reuses TestableChatSessionManager, StubOpenAiClient,
+    InMemoryTenantCache — no duplication). New seam tests add files under tests/integration/seam/{Module}/.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\integration\seam\**\*.cs" LinkBase="SeamTests" />
+  </ItemGroup>
+
   <!-- Insights Engine test fixtures (task 030+: Layer 1 / Layer 2 / D-P7 ingest tests).
        Linked from tests/Insights/fixtures/ so the same fixtures can be consumed by
        unit tests here, D-P16 smoke tests, and D-P14 synthesis playbook integration

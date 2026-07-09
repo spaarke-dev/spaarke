@@ -42,17 +42,20 @@ public class ComposeService : IComposeService
     private readonly ISpeFileOperations _spe;
     private readonly ChatSessionManager _sessions;
     private readonly IGenericEntityService _dataverse;
+    private readonly DocxAnnotationWriter _annotationWriter;
     private readonly ILogger<ComposeService> _logger;
 
     public ComposeService(
         ISpeFileOperations spe,
         ChatSessionManager sessions,
         IGenericEntityService dataverse,
+        DocxAnnotationWriter annotationWriter,
         ILogger<ComposeService> logger)
     {
         _spe = spe;
         _sessions = sessions;
         _dataverse = dataverse;
+        _annotationWriter = annotationWriter;
         _logger = logger;
     }
 
@@ -293,6 +296,77 @@ public class ComposeService : IComposeService
             SessionId = request.SessionId,
             DocumentRecordId = newId,
             WasCreated = true,
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<PushAnnotationsResult> PushAnnotationsAsync(
+        PushAnnotationsRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.DriveId))
+            throw new ArgumentException("DriveId is required for SPE drive-item access.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.DocumentSpeId))
+            throw new ArgumentException("DocumentSpeId (drive-item id) is required.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.TenantId))
+            throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.IfMatch))
+            throw new ArgumentException("IfMatch (load-time ETag) is required — a blind overwrite is not offered on the push-annotations path.", nameof(request));
+        if (request.Annotations is null || request.Annotations.Count == 0)
+            throw new ArgumentException("At least one annotation is required.", nameof(request));
+
+        _logger.LogInformation(
+            "Compose push-annotations: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} annotations={AnnotationCount}",
+            request.TenantId, request.DriveId, request.DocumentSpeId, request.Annotations.Count);
+
+        // 1) Download the CURRENT bytes via the facade (ADR-007 — no Graph type here).
+        var stream = await _spe.DownloadFileAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
+            .ConfigureAwait(false);
+        if (stream is null)
+        {
+            throw new InvalidOperationException(
+                $"SPE drive-item not found or unreadable: drive={request.DriveId} item={request.DocumentSpeId}");
+        }
+
+        byte[] sourceBytes;
+        await using (stream.ConfigureAwait(false))
+        {
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+            sourceBytes = buffer.ToArray();
+        }
+
+        // 2) Render annotations into native OOXML markup. Pure — no I/O, no AI (ADR-013).
+        //    DocxAnnotationException (malformed / target-not-found) propagates to the endpoint,
+        //    which maps it to 400 / 422 ProblemDetails. This runs BEFORE the write, so a bad
+        //    annotation batch never leaves a partial SPE version.
+        var annotatedBytes = _annotationWriter.Annotate(sourceBytes, request.Annotations);
+
+        // 3) Persist with optimistic concurrency (If-Match). A drive-item that moved under the
+        //    caller (Word autosave) surfaces as EtagPreconditionFailedException (412); an open
+        //    Word co-authoring session surfaces as DocumentLockedByWordException (423). Both
+        //    propagate to the endpoint. Nothing partially writes.
+        using var annotatedStream = new MemoryStream(annotatedBytes, writable: false);
+        var saved = await _spe.ReplaceFileContentAsUserAsync(
+                httpContext, request.DriveId, request.DocumentSpeId, annotatedStream, request.IfMatch, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (saved is null || string.IsNullOrEmpty(saved.Id))
+        {
+            throw new InvalidOperationException(
+                $"SPE annotated-write failed: drive-item not found or version not returned. drive={request.DriveId} item={request.DocumentSpeId}");
+        }
+
+        return new PushAnnotationsResult
+        {
+            DocumentSpeId = request.DocumentSpeId,
+            DriveId = request.DriveId,
+            VersionId = saved.Id,
+            ETag = saved.ETag,
+            Size = saved.Size,
+            AnnotationCount = request.Annotations.Count,
         };
     }
 

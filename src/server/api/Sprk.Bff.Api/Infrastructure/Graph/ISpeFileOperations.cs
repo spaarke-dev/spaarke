@@ -59,6 +59,26 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
+    /// Replace the content of an existing drive-item by itemId (OBO flow) with optimistic
+    /// concurrency. Same as the etag-less overload, but sends an <c>If-Match</c> header when
+    /// <paramref name="ifMatch"/> is non-empty so a drive-item that moved under the caller is
+    /// rejected instead of blindly overwritten (FR-24 / Spike 7 gap G-1).
+    /// </summary>
+    /// <remarks>
+    /// Throws <see cref="EtagPreconditionFailedException"/> on HTTP 412 (ETag moved) and
+    /// <see cref="DocumentLockedByWordException"/> on HTTP 423 (open in Word for Web). ADR-007:
+    /// no <c>Microsoft.Graph</c> type crosses this boundary. When <paramref name="ifMatch"/> is
+    /// null/empty this behaves exactly like the etag-less overload (a blind PUT).
+    /// </remarks>
+    Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        Stream content,
+        string? ifMatch,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Resolve a container ID to its drive ID.
     /// Container IDs start with "b!" (base64-encoded SharePoint site ID).
     /// If the input is already a drive ID, returns it unchanged.

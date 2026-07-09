@@ -37,7 +37,13 @@ import {
   MenuList,
   MenuItem,
 } from '@fluentui/react-components';
-import { NewsRegular, ArrowClockwiseRegular, MoreHorizontalRegular, BookRegular } from '@fluentui/react-icons';
+import {
+  NewsRegular,
+  ArrowClockwiseRegular,
+  MoreVerticalRegular,
+  BookRegular,
+  MailRegular,
+} from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only — ADR-021)
@@ -82,8 +88,21 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export interface DigestHeaderProps {
-  /** Total number of unread notifications across all channels. */
-  totalUnreadCount: number;
+  /**
+   * @deprecated No longer rendered (R5, 2026-07-09). The subtitle previously
+   * showed "· {N} items" from this count, but that reflected only the visible
+   * activity bullets — not the whole briefing (high-priority "Critical" items
+   * are separate) — which read as a confusing total. The subtitle now shows a
+   * "Last updated" timestamp instead. Retained as an OPTIONAL prop so existing
+   * callers do not break.
+   */
+  totalUnreadCount?: number;
+  /**
+   * When the briefing data was generated (ISO string or Date). Rendered as
+   * "Last updated {weekday, month day} at {time}". When omitted/null (loading /
+   * empty / error states), the subtitle falls back to just today's date.
+   */
+  lastUpdated?: string | Date | null;
   /** Called when the user clicks the refresh button. */
   onRefresh?: () => void;
   /** Slot for the preferences dropdown (rendered in the actions area). */
@@ -101,6 +120,16 @@ export interface DigestHeaderProps {
    * not rendered.
    */
   onBrowsePlaybooks?: () => void;
+  /**
+   * r5 email-share #2 (2026-07-09) — called when the user clicks the "Email
+   * Briefing" overflow menu item ("how do I share this with a colleague"). The
+   * host opens the shared email dialog and POSTs the picked recipient to
+   * `/api/ai/daily-briefing/email`, which server-renders + sends the caller's
+   * briefing. Pure callback (shared lib stays Xrm-free per ADR-012). When
+   * omitted, the item is not rendered. Shares the overflow menu with
+   * {@link onBrowsePlaybooks} — the menu renders when EITHER is provided.
+   */
+  onEmailBriefing?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,11 +149,37 @@ function formatToday(): string {
   }
 }
 
+/**
+ * "Last updated {weekday, month day} at {time}", e.g.
+ * "Last updated Thursday, July 9 at 9:56 AM". Formats the briefing's
+ * generation timestamp in the viewer's locale + timezone. Falls back to just
+ * today's date if the value is missing or unparseable.
+ */
+function formatLastUpdated(value: string | Date): string {
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) return formatToday();
+  try {
+    const date = new Intl.DateTimeFormat(undefined, {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+    }).format(d);
+    const time = new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(d);
+    return `Last updated ${date} at ${time}`;
+  } catch {
+    return formatToday();
+  }
+}
+
 export const DigestHeader: React.FC<DigestHeaderProps> = ({
-  totalUnreadCount,
+  lastUpdated,
   onRefresh,
   preferencesSlot,
   onBrowsePlaybooks,
+  onEmailBriefing,
 }) => {
   const styles = useStyles();
 
@@ -136,8 +191,7 @@ export const DigestHeader: React.FC<DigestHeaderProps> = ({
           Daily Briefing
         </Text>
         <Text size={200} className={styles.subtitle}>
-          {formatToday()}
-          {totalUnreadCount > 0 ? ` · ${totalUnreadCount} ${totalUnreadCount === 1 ? 'item' : 'items'}` : ''}
+          {lastUpdated ? formatLastUpdated(lastUpdated) : formatToday()}
         </Text>
       </div>
       <div className={styles.actions}>
@@ -160,18 +214,25 @@ export const DigestHeader: React.FC<DigestHeaderProps> = ({
           chat surface affordance: opens Library in browse mode → Path A.5
           launch preserved via existing Code Page wrapper.
         */}
-        {onBrowsePlaybooks && (
+        {(onBrowsePlaybooks || onEmailBriefing) && (
           <Menu>
             <MenuTrigger disableButtonEnhancement>
               <Tooltip content="More actions" relationship="label">
-                <Button appearance="subtle" size="small" icon={<MoreHorizontalRegular />} aria-label="More actions" />
+                <Button appearance="subtle" size="small" icon={<MoreVerticalRegular />} aria-label="More actions" />
               </Tooltip>
             </MenuTrigger>
             <MenuPopover>
               <MenuList>
-                <MenuItem icon={<BookRegular />} onClick={onBrowsePlaybooks}>
-                  Browse Playbooks
-                </MenuItem>
+                {onEmailBriefing && (
+                  <MenuItem icon={<MailRegular />} onClick={onEmailBriefing}>
+                    Email Briefing
+                  </MenuItem>
+                )}
+                {onBrowsePlaybooks && (
+                  <MenuItem icon={<BookRegular />} onClick={onBrowsePlaybooks}>
+                    Browse Playbooks
+                  </MenuItem>
+                )}
               </MenuList>
             </MenuPopover>
           </Menu>

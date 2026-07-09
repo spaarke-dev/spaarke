@@ -46,8 +46,8 @@ Spaarke Compose is the AI-native legal drafting workspace — the center pane of
 - Office Add-in entry path (Word → Compose) — R3
 - PDF / email / transcript artifact types — R4+
 - Real-time multi-user co-editing (CRDT) — R5+
-- Tracked changes round-trip with Word — never (out of architecture)
-- Comments stored as Word `<w:comment>` elements — never; Compose stores comments as ChatSession annotations (R2+)
+- **[AMENDED 2026-07-09 — Path B, CLAUDE.md §6.5]** ~~Tracked changes round-trip with Word — never (out of architecture)~~ → **Shipped in R2** via FR-24 (push annotations) / FR-25 (pull annotations) — see `projects/spaarkeai-compose-r2/spec.md` FR-24/FR-25 and `projects/spaarkeai-compose-r2/design.md` §10 ADR Tensions. This R1 non-goal was over-pruned; competitive necessity surfaced post-R1.
+- **[AMENDED 2026-07-09 — Path B, CLAUDE.md §6.5]** ~~Comments stored as Word `<w:comment>` elements — never; Compose stores comments as ChatSession annotations (R2+)~~ → **Shipped in R2** via FR-24 (push annotations) / FR-25 (pull annotations) — see `projects/spaarkeai-compose-r2/spec.md` FR-24/FR-25 and `projects/spaarkeai-compose-r2/design.md` §10 ADR Tensions. Same rationale as above — needed for Word parity.
 
 ### Affected Areas
 
@@ -182,8 +182,8 @@ All R1 Compose endpoints belong in `Sprk.Bff.Api`. No new microservice; no Datav
 - ❌ MUST NOT extend `sprk_analysis` for Compose chat/session storage (use `ChatSession` model)
 - ❌ MUST NOT inject `IOpenAiClient`, `IPlaybookService`, or other AI internals into Compose CRUD code
 - ❌ MUST NOT build custom integrations for advanced DOCX features outside TipTap OOB
-- ❌ MUST NOT store comments as Word `<w:comment>` elements in R1 (use ChatSession annotations in R2+)
-- ❌ MUST NOT support tracked-changes round-trip (out of architecture)
+- ❌ MUST NOT store comments as Word `<w:comment>` elements in R1 (use ChatSession annotations in R2+) — **R1-scoped; superseded by R2 FR-24/FR-25 (Path B amendment per CLAUDE.md §6.5, filed 2026-07-09)**
+- ❌ MUST NOT support tracked-changes round-trip (out of architecture) — **R1-scoped; superseded by R2 FR-24/FR-25 (Path B amendment per CLAUDE.md §6.5, filed 2026-07-09)**
 - ❌ MUST NOT extend `HostContext` in R1 (use existing fields; transient state goes in JPS scope inputs)
 
 ### Supersession Map (BINDING — prevent code-level commingling)

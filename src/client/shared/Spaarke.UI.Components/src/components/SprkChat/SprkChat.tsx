@@ -60,6 +60,7 @@ import { useChatFileAttachment } from './hooks/useChatFileAttachment';
 import type { ISprkChatInputHandle } from './types';
 import { Toaster, useToastController, useId, Toast, ToastTitle, ToastBody } from '@fluentui/react-components';
 import { ActionConfirmationDialog } from './ActionConfirmationDialog';
+import { actionOutcomeDataToCard } from './OutcomeCard';
 import {
   openCodePageDialog,
   navigateToTarget,
@@ -695,6 +696,34 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   );
 
   /**
+   * Handle action_outcome SSE event (spaarke-ai-architecture-redesign-r2 task 044c).
+   *
+   * Emitted on the AUTO-EXECUTE (no-dialog) gate leg — a clear low-risk side effect
+   * (e.g. "create a follow-up task…") that the Confirmation Policy v2 engine resolved
+   * to Execute/ExecuteWithUndo WITHOUT a confirmation dialog. THE GAP this closes: the
+   * server has always emitted this frame (task 044, SideEffectGateAIFunction.cs:490),
+   * but no client consumed it, so the auto-executed action rendered ONLY grounded text
+   * — never the ✅ OutcomeCard + record chip + Undo chip.
+   *
+   * Routes to the SAME `outcome_card` render path the gate-RESUME leg uses
+   * (handleActionConfirm above, ~line 761) — no new card component, no second render
+   * path. `actionOutcomeDataToCard` (OutcomeCard.tsx) adapts the frame's flattened
+   * view-projection fields into the full IOutcomeCard shape that renderer expects.
+   */
+  const handleActionOutcomeEvent = React.useCallback(
+    (data: IChatSseEventData) => {
+      const card = actionOutcomeDataToCard(data);
+      addMessage({
+        role: 'Assistant',
+        content: `✅ ${card.summary.userFacing}`,
+        timestamp: new Date().toISOString(),
+        metadata: { responseType: 'outcome_card', data: card },
+      });
+    },
+    [addMessage]
+  );
+
+  /**
    * Handle dialog_open SSE event.
    * Opens a Code Page dialog via Xrm.Navigation.navigateTo with pre-populated fields.
    *
@@ -938,13 +967,14 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     });
   }, [pendingPlanId, pendingPlanData, updateLastMessageMetadata]);
 
-  // Task R2-039/R2-052: Handle action/dialog/navigate SSE events from the stream.
+  // Task R2-039/R2-052/044c: Handle action/dialog/navigate/outcome SSE events from the stream.
   // Dispatches to the appropriate handler based on event type:
   // - action_confirmation → show ActionConfirmationDialog
   // - action_success → show success toast
   // - action_error → show error toast
   // - dialog_open → open Code Page via Xrm.Navigation.navigateTo
   // - navigate → navigate to record/URL via Xrm.Navigation (R2-052)
+  // - action_outcome → render the auto-execute OutcomeCard (task 044c)
   React.useEffect(() => {
     if (!pendingActionEvent) return;
 
@@ -966,6 +996,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       case 'navigate':
         handleNavigateEvent(data);
         break;
+      case 'action_outcome':
+        // task 044c: auto-execute (no-dialog) gate leg — render via outcome_card.
+        handleActionOutcomeEvent(data);
+        break;
     }
 
     // Clear the event so it's not processed again
@@ -977,6 +1011,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     handleActionErrorEvent,
     handleDialogOpenEvent,
     handleNavigateEvent,
+    handleActionOutcomeEvent,
     clearPendingActionEvent,
   ]);
 

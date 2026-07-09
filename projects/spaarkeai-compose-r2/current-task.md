@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-09 (by context-handoff — pre-compact, parallel-wave plan captured)
+> **Last Updated**: 2026-07-09 (by context-handoff — pre-compact; parallel wave 050/006/080 ✅ uncommitted, 012 in-flight, ComposeEndpoints.cs reconciliation pending)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,18 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Phase 3+4. **DONE + MERGED TO MASTER** (`7f5e592c4`, 2026-07-09): 031 marks, catalog 040/041/043/044, compose-disposition routing promotion + task-035 OutcomeCard reconciliation. Branch clean, 0 ahead of master, main repo synced. |
-| **Step** | — (between tasks) |
-| **Status** | **WAVE COMPLETE (2026-07-09), not yet committed.** ✅ **042** (draft-alternative catalog — Binding disposition=100000006 verified vs Binding.cs:144, schema OpenAI-subset compliant, no version suffix) · ✅ **061** (action-history-ledger — BFF build 0/0, 6 new + 86/86 Compose + 2/2 ADR-013 archtests, anti-component grep clean) · ✅ **033** (pending-redline — jest 36/36 incl. dark-theme ComposeEditor UI, tsc/build 0, BFF build 0/0). All disjoint files. Prior work on master (`7f5e592c4`). |
-| **Next Action** | **Commit the wave** (033+042+061 + POML/TASK-INDEX status). Then continue: **034** (undo/replace via ledger supersession — builds on usePendingRedline; opus, npm) now unblocked; **045** (eval cases — all catalog rows 040–044 ✅) now unblocked. |
+| **Task** | **PARALLEL INDEPENDENT WAVE** (Word interop + entry paths) while **core (redesign-r2) builds the AI-execution foundation** (Phase E, `Services/Ai/`). On master through `05c102338` (033/042/061 wave + platform assessment + 045 eval + handoffs — all MERGED). |
+| **Step** | Wave 050/006/080/012 **DONE + RECONCILED + committing**. |
+| **Status** | ✅ **050** DocxAnnotationWriter + push endpoint + If-Match/ETag facade overload · ✅ **012** FR-03 upload→transient mount (activated `POST /api/compose/upload` serving retained bytes from `ITenantCache`; send_workspace_artifact `sessionFileId` seed; built the transient `docxBytes` mount seam) · ✅ **006** spike-6 round-trip (bands HOLD; **054 finding**: ambiguity-guard AUTO→REVIEW when 2nd candidate within ~0.05; **051 gotchas**: DeletedText/w:date-UTC/comment-anchor-crosswalk) · ✅ **080** R1 spec amendment. **RECONCILED**: `ComposeEndpoints.cs` (050+012 concurrent editors) has BOTH `/upload` + `/push-annotations`, no conflict markers; **BFF build 0 errors**; **BFF Compose+handler tests 234/234** (fixed 1 stale assertion 012 left — `SendWorkspaceArtifactHandlerTests` expected "Session-uploaded"; handler reworded → assert `sessionFileId`); **compose-components jest 40/40**; ai-widgets tsc clean. |
+| **Next Action** | Committing the wave now. Then **next waves (all independent of the core fix)**: **051→054** (Word reader/re-anchor — 006 done, apply the ambiguity-guard finding to 054), **013** create-on-save (dotnet; 012 left the mount seam pointer-less+dirty so Save fails gracefully until 013), **010/011** entry mounts (npm; 012 already built 010's `docxBytes` seam), **053** webhook endpoints (052 done), **060/062** memory. **HELD** (dispatch/operand-gated): 016/034/046/047, 030/032, 063/064/071. **Core**: awaiting ContextEnvelope operand-home decision + ADR-043 draft (ack in `notes/HANDOFF-compose-r2-ack-execution-foundation.md`). |
+
+### 🚨 Uncommitted-on-disk at checkpoint (survives compaction; commit after 012 reconciles)
+- **050**: NEW `Services/Compose/DocxAnnotationWriter.cs`, `Infrastructure/Graph/SpeConcurrencyExceptions.cs`, `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/DocxAnnotationWriterTests.cs` · MOD `Infrastructure/Graph/{ISpeFileOperations,SpeFileStore,UploadSessionManager}.cs` (If-Match overload), `Services/Compose/{IComposeService,ComposeService}.cs`, `Infrastructure/DI/ComposeModule.cs`, `Api/Ai/ComposeEndpoints.cs` (push-annotations route — **shared w/012**).
+- **006**: `notes/spikes/spike-6-word-roundtrip.md` + `word-roundtrip-prototype.cs` + `spike6-*.docx`, 006 POML.
+- **080**: `projects/spaarkeai-compose-r1/{spec.md,CLAUDE.md}` (amendments), 080 POML.
+- **012** (in-flight): SpaarkeAi upload-mount + Compose lib + `Api/Ai/ComposeEndpoints.cs` upload endpoint (**shared w/050 — the reconciliation risk**).
+- **Also uncommitted**: `notes/HANDOFF-compose-r2-ack-execution-foundation.md` (ack to core: confirmed B1-B6 + caught ContextEnvelope operand-home gap — no slice for selectionText/changesText/documentText; operand volatile vs StablePrefix; awaiting core's operand-home decision + ADR-043 draft), this `current-task.md`.
+- **Lesson**: 012 was mis-partitioned as npm-only — FR-03 also activates the BFF `POST /api/compose/upload`, so it shares `ComposeEndpoints.cs` + the dotnet build with 050. Don't co-schedule two BFF-endpoint tasks.
 
 ### Wave results (2026-07-09) — uncommitted
 - **033 files**: NEW `src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts` (+ `.test.tsx`, 16 tests) · MODIFIED `ComposeEditor.tsx` (materializeComposeDraft repointed → redline; +materializePendingRedline handle; accept/reject + unresolved-target banner) · `hooks/index.ts` barrel.
@@ -21,7 +29,17 @@
 - **061 files**: MODIFIED `src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs` (+`GetActionHistory` read-only ledger query + `ComposeActionHistoryEntry`) · NEW `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ActionHistoryLedgerQueryTests.cs`.
 - **Deviations (033, directional)**: contracts path is shared-lib `src/types/compose-contracts.ts`; `compose_edit_apply_request` event doesn't exist (used shipped Flow 5 `compose_assistant_insert`+`ledgerRef`); no client FR-19 validator → strict/first/all + ambiguity implemented in hook. Escalation NOT fired (contract matched HANDOFF §1). FR-17 ledger-write supersession = task 034.
 
-### 🏛️ ESCALATED TO PLATFORM-LEVEL ARCHITECTURE ASSESSMENT (2026-07-09)
+### ▶️ PARALLEL INDEPENDENT WAVE while core builds the foundation (2026-07-09)
+Owner: "work any items that can be done in parallel so we don't lose time to the fix." Dispatched 4 sub-agents on tracks INDEPENDENT of the compose dispatch foundation (core Phase E, `Services/Ai/`) AND the unsettled operand contract. Toolchain-partitioned (≤1 dotnet + ≤1 npm + no-build):
+- **050** (a10e2b200bf2898b8, dotnet/opus/xhigh) — FR-24 DocxAnnotationWriter (w:comment/w:ins/w:del) + push endpoint + If-Match/ETag conflict. THE dotnet builder. `Services/Compose` + `Api`.
+- **012** (abc44c89fe3b652a9, npm/opus) — FR-03 1b upload→transient mount (send_workspace_artifact flip + docxBytes seam). THE npm builder. SpaarkeAi + Compose lib.
+- **080** (a86abb8a6b957311f, docs/sonnet) — R1 spec amendment (2 Word non-goals → shipped in R2). No build.
+- **006** (af53ec52552dfc786, spike/sonnet) — reverse round-trip + tune re-anchor bands (gates 051/054/008). Standalone scratch prototype (no BFF/npm build). notes/spikes.
+Each via task-execute FULL rigor (080 MINIMAL); write-boundary = own POML only, main session reconciles TASK-INDEX/current-task + consolidated build after.
+**On deck (next waves, independent)**: 013 create-on-save (dotnet), 010/011 entry mounts (npm), 051→054 Word reader/reanchor (after 006), 053 webhook endpoints, 060 anchored annotations, 062 compaction, 083. **Held** (dispatch-gated / operand-gated): 016/034/046/047, 030/032, 063/064/071.
+**Ack to core on disk (uncommitted)**: `notes/HANDOFF-compose-r2-ack-execution-foundation.md` — confirmed B1-B6 + caught the ContextEnvelope operand-home gap (no slice for selectionText/changesText/documentText; operand is volatile vs StablePrefix). Awaiting core's operand-home decision + ADR-043 draft.
+
+### 🏛️ PLATFORM-LEVEL ARCHITECTURE ASSESSMENT (2026-07-09) — DONE, on master
 **Owner reframed the question**: don't just patch the compose-dispatch seam (tactical option "a" = kicks the can + orphans the cross-cutting debt between projects/teams). Strict project boundaries are THE root cause. Wants a proper **requirement / problem / solution analysis for the WHOLE legal-AI solution** (not compose-projected), covering BOTH the technical architecture AND the ownership/governance model that lets cross-cutting execution-layer debt fall between platform-core and satellites.
 **Deliverable**: a platform-level assessment in `docs/assessments/` (same home as `bff-ai-extraction-assessment-2026-05-20.md` that CLAUDE.md §10 governance was built from) → then an ADR as decision-of-record. Placed at platform level ON PURPOSE (anti-orphaning). Ties the org fix to the EXISTING proven precedent: CLAUDE.md §10 (BFF Hygiene governance) + §11 (Component Justification) — extend that pattern to the AI execution layer.
 **Thesis so far** (from the 3 validation agents): the AI capability EXECUTION engine realizes only a narrow slice of the declarative ADR-039 catalog contract — input hardcoded to session files, disposition a hardcoded allow-list (drifts from OutputRouter), action-kind prompted-only; AND there are TWO asymmetric execution engines (playbook `AiCompletionNodeExecutor` HAS input-binding/`runtimeInput`; canonical dispatch `ActionRunner` LACKS it) — the canonical one is the weaker; AND an ownership gap (shared seam = core's; need = satellites'; nobody owns generalization) + per-component definition-of-done (no vertical-slice test) hid it.

@@ -54,21 +54,71 @@ public class DailyBriefingEmailEndpointContractTests : IClassFixture<DailyBriefi
     }
 
     [Fact]
-    public async Task PostEmail_HappyPath_Returns200_AndDeliversToCallerFromClaims()
+    public async Task PostEmail_NoBody_Returns200_AndDeliversToCallerFromClaims()
     {
         _fx.Reset();
         var client = _fx.CreateAuthenticatedClient();
 
+        // No body (the scheduled trigger's shape) → recipient defaults to the caller's claim.
         var response = await client.PostAsync("/api/ai/daily-briefing/email", content: null);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         _fx.Composite.EmailCalls.Should().ContainSingle();
         var call = _fx.Composite.EmailCalls[0];
         call.RecipientEmail.Should().Be(DailyBriefingEndpointTestFixture.UserEmail,
-            "the recipient is the ACTING USER resolved from token claims — never body-supplied (no spoofing surface)");
+            "with no body-supplied recipient, delivery defaults to the ACTING USER resolved from token claims");
         call.SystemUserId.Should().Be(DailyBriefingEndpointTestFixture.SystemUserId,
             "the acting Dataverse identity resolves from the oid claim via the systemuser lookup");
     }
+
+    [Fact]
+    public async Task PostEmail_WithInternalColleagueRecipient_Returns200_AndDeliversCallersBriefingToColleague()
+    {
+        _fx.Reset();
+        var client = _fx.CreateAuthenticatedClient();
+
+        var response = await client.PostAsync(
+            "/api/ai/daily-briefing/email", JsonBody($$"""{"recipientEmail":"{{DailyBriefingEndpointTestFixture.ColleagueEmail}}"}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fx.Composite.EmailCalls.Should().ContainSingle();
+        var call = _fx.Composite.EmailCalls[0];
+        call.RecipientEmail.Should().Be(DailyBriefingEndpointTestFixture.ColleagueEmail,
+            "the colleague-share path delivers to the body-supplied internal recipient");
+        call.SystemUserId.Should().Be(DailyBriefingEndpointTestFixture.SystemUserId,
+            "the briefing content is the CALLER's own — systemuserid stays token-derived, never body-supplied (no data-source spoofing)");
+    }
+
+    [Fact]
+    public async Task PostEmail_WithExternalRecipient_Returns400_WithoutDispatch()
+    {
+        _fx.Reset();
+        var client = _fx.CreateAuthenticatedClient();
+
+        // A well-formed address that is NOT an active internal systemuser — the egress guard blocks it.
+        var response = await client.PostAsync(
+            "/api/ai/daily-briefing/email", JsonBody("""{"recipientEmail":"stranger@external-domain.com"}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "the briefing may carry confidential data — it may only be forwarded to an internal user (egress guard)");
+        _fx.Composite.EmailCalls.Should().BeEmpty("an external recipient must never trigger a send");
+    }
+
+    [Fact]
+    public async Task PostEmail_WithMalformedRecipient_Returns400_WithoutDispatch()
+    {
+        _fx.Reset();
+        var client = _fx.CreateAuthenticatedClient();
+
+        var response = await client.PostAsync(
+            "/api/ai/daily-briefing/email", JsonBody("""{"recipientEmail":"not-an-email"}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _fx.Composite.EmailCalls.Should().BeEmpty("a malformed recipient is rejected before dispatch");
+    }
+
+    private static StringContent JsonBody(string json) =>
+        new(json, System.Text.Encoding.UTF8, "application/json");
 
     [Fact]
     public async Task PostEmail_Unauthenticated_Returns401()
@@ -132,8 +182,17 @@ public class DailyBriefingEmailEndpointContractTests : IClassFixture<DailyBriefi
 public sealed class DailyBriefingEndpointTestFixture : IAsyncLifetime, IDisposable
 {
     public const string UserEmail = "briefing.user@contoso.com";
+    public const string ColleagueEmail = "colleague@contoso.com";
     public static readonly Guid SystemUserId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
     public static readonly Guid AadOid = Guid.Parse("12345678-1234-1234-1234-123456789012");
+
+    /// <summary>
+    /// Emails the egress guard treats as active internal users (mirrors the systemuser table).
+    /// Seeded with the caller + one colleague; a recipient NOT in this set resolves to empty and
+    /// the endpoint rejects it as external. Reset re-seeds between tests.
+    /// </summary>
+    public HashSet<string> KnownInternalEmails { get; } =
+        new(StringComparer.OrdinalIgnoreCase) { UserEmail, ColleagueEmail };
 
     public StubComposite Composite { get; } = new();
 
@@ -170,12 +229,28 @@ public sealed class DailyBriefingEndpointTestFixture : IAsyncLifetime, IDisposab
         // inference requires a registration (prod always registers a real or Null impl).
         builder.Services.AddSingleton(Mock.Of<Sprk.Bff.Api.Services.Ai.PublicContracts.IBriefingAi>());
 
-        // Dataverse systemuser lookup: oid claim → systemuserid.
+        // Dataverse systemuser lookups: (a) oid claim → systemuserid (caller identity), and
+        // (b) internalemailaddress → active-user existence (r5 colleague-share egress guard).
+        // The mock branches on the FetchXML so the egress guard can MISS for an unknown/external
+        // recipient while the oid lookup still resolves the caller.
         var entityService = new Mock<IGenericEntityService>();
         entityService
             .Setup(s => s.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
+            .ReturnsAsync((FetchExpression fe, CancellationToken _) =>
             {
+                var q = fe.Query ?? string.Empty;
+                if (q.Contains("internalemailaddress", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Egress-guard lookup: match only KNOWN internal emails (mirrors the UI's
+                    // systemuser picker). Unknown/external → empty → endpoint returns 400.
+                    var isKnownInternal = KnownInternalEmails.Any(e =>
+                        q.Contains(e, StringComparison.OrdinalIgnoreCase));
+                    return isKnownInternal
+                        ? new EntityCollection(new List<Entity> { new("systemuser") { Id = Guid.NewGuid() } })
+                        : new EntityCollection(new List<Entity>());
+                }
+
+                // oid → systemuserid (caller identity) lookup.
                 var user = new Entity("systemuser") { Id = SystemUserId };
                 user["systemuserid"] = SystemUserId;
                 return new EntityCollection(new List<Entity> { user });
@@ -203,6 +278,9 @@ public sealed class DailyBriefingEndpointTestFixture : IAsyncLifetime, IDisposab
         Composite.RenderCalls.Clear();
         Composite.EmailCalls.Clear();
         Composite.ThrowOnEmail = null;
+        KnownInternalEmails.Clear();
+        KnownInternalEmails.Add(UserEmail);
+        KnownInternalEmails.Add(ColleagueEmail);
     }
 
     public HttpClient CreateAuthenticatedClient(bool includeEmailClaims = true)

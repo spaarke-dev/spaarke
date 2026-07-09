@@ -25,8 +25,8 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, Text, Link, Badge } from '@fluentui/react-components';
-import { AlertUrgentRegular } from '@fluentui/react-icons';
+import { makeStyles, tokens, Text, Link, Badge, Button, Tooltip } from '@fluentui/react-components';
+import { AlertUrgentRegular, MailRegular } from '@fluentui/react-icons';
 
 import type { HighPriorityItemResult } from '../services/briefingService';
 
@@ -159,6 +159,14 @@ export interface HighPrioritySectionProps {
   items: HighPriorityItemResult[];
   /** Called on item click. Wire to the parent's Xrm.Navigation modal open. */
   onOpenRecord?: (entityType: string, entityId: string) => void;
+  /**
+   * r5 email-share #3 (2026-07-09) — called when the user clicks the per-item
+   * "Email" affordance ("share this item with a colleague"). The parent opens the
+   * shared email dialog, composes a body from the item's structured fields + a deep
+   * link, and creates a draft email activity. Xrm-free per ADR-021 — this is a pure
+   * callback. When omitted, the Email affordance is not rendered (back-compat).
+   */
+  onEmailItem?: (item: HighPriorityItemResult) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +220,7 @@ export function reasonToLabel(reason?: string): string {
 // Component
 // ---------------------------------------------------------------------------
 
-export const HighPrioritySection: React.FC<HighPrioritySectionProps> = ({ items, onOpenRecord }) => {
+export const HighPrioritySection: React.FC<HighPrioritySectionProps> = ({ items, onOpenRecord, onEmailItem }) => {
   const styles = useStyles();
 
   if (!Array.isArray(items) || items.length === 0) {
@@ -274,6 +282,17 @@ export const HighPrioritySection: React.FC<HighPrioritySectionProps> = ({ items,
                   <Badge appearance={badge.appearance} color={badge.color} size="small">
                     {badge.label}
                   </Badge>
+                  {onEmailItem && (
+                    <Tooltip content="Email this item to a colleague" relationship="label">
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<MailRegular />}
+                        aria-label={`Email ${item.name || 'item'} to a colleague`}
+                        onClick={() => onEmailItem(item)}
+                      />
+                    </Tooltip>
+                  )}
                 </div>
               </div>
               {item.description && (
