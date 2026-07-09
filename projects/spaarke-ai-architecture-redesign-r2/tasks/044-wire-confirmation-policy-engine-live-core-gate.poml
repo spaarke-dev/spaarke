@@ -1,62 +1,74 @@
 <task id="AIR2-044" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
-    <title>Wire ConfirmationPolicyEngine into the live core gate — end-to-end, no shims (FR-A1-03 acceptance closer)</title>
+    <title>Wire the confirmation gate on RISK + AMBIGUITY (not origin-provenance) — make Policy v2 live end-to-end, no shims</title>
     <status>not-started</status>
-    <phase>Wave J — G-R2-A Judgment + Friction (gap-closer added 2026-07-09)</phase>
+    <phase>Wave J — G-R2-A Judgment + Friction (gap-closer, re-scoped 2026-07-09 after operator reframing)</phase>
     <gate>G-R2-A</gate>
     <estimated-effort>1.5 days</estimated-effort>
     <model-tier>opus</model-tier>
-    <model-tier-reason>Highest-blast-radius task of the wave: it makes the deterministic confirmation engine LIVE on the core chat gate execution path. Touches the gate call-site, the origin-signal flow from dispatch, and the execute/confirm/elicit branch. A subtle shim (origin defaulting to Inferred) would silently pass "code written" but fail "feature works." Requires the strongest reasoning + rigorous end-to-end verification.</model-tier-reason>
+    <model-tier-reason>Highest-blast-radius task of the wave: makes the deterministic confirmation gate LIVE on the core chat execution path with the real (tier × completeness × ambiguity) signals. A subtle shim (defaulting the ambiguity signal) would pass "code written" but fail "feature works end to end." Strongest reasoning + rigorous end-to-end verification required.</model-tier-reason>
     <effort>xhigh</effort>
-    <effort-reason>Brownfield root-cause wiring across dispatch → gate → engine → behavior; the real origin/tier/completeness signal flow must be traced and threaded, not stubbed.</effort-reason>
+    <effort-reason>Brownfield root-cause wiring across dispatch → gate → engine → behavior; the real ambiguity/confidence signal must be traced and threaded, not stubbed.</effort-reason>
     <parallel-safe>false</parallel-safe>
     <goal-eligible>false</goal-eligible>
-    <tags>bff-api, ai, gate, confirmation-policy, judgment, end-to-end, no-shim</tags>
-    <dependencies>032 (ConfirmationPolicyEngine PRODUCER — MERGED), 034 (gate pre-suspend validation — MERGED), 012 (GateDecisionV2 contract — MERGED). This task closes the FR-A1-03 acceptance gap: 032 built the engine but it has 0 production call-sites; nothing invokes ConfirmationPolicyEngine.Evaluate on the live path.</dependencies>
+    <tags>bff-api, ai, gate, confirmation-policy, judgment, ambiguity, end-to-end, no-shim</tags>
+    <dependencies>032 (ConfirmationPolicyEngine PRODUCER + tier table + overlay precedence — MERGED, REUSED), 034 (gate pre-suspend validation — MERGED), 012 (GateDecisionV2 contract — MERGED), 040 (HandoffUrlBuilder deep-links — MERGED, reused for email handoff), 035 (Completion Engine / OutcomeCard — MERGED, carries the deep link + Undo).</dependencies>
   </metadata>
 
   <prompt>
-    Make the deterministic Confirmation Policy v2 engine (ConfirmationPolicyEngine, task 032) LIVE on the core chat gate. Today the engine has ZERO production call-sites — SideEffectGateAIFunction.InvokeCoreAsync still decides suspend/execute via the OLD declared-class path (PendingPlanManager.RequiresConfirmation). This task invokes ConfirmationPolicyEngine.Evaluate at the live gate call-site, feeding it REAL (risk-tier × origin × completeness × overlays) signals, and drives real behavior from the returned GateDecisionV2: execute-without-dialog (explicit+complete 2a/2b), confirm-one-dialog (inferred/otherwise 2b), always-dialog (tier 3/4), elicit (incomplete args).
+    Make the confirmation gate LIVE on the core chat path, driven by RISK + AMBIGUITY — NOT the E-1..E-6 "explicit vs inferred" origin-provenance machinery. Prior task-044 attempt correctly escalated (CLAUDE.md §6.5): the origin classifier's "Explicit" verdict has NO production producer (Click doesn't reach the LLM-loop gate; deriving Explicit from the utterance = ADR-039-banned re-parse), so it resolves Inferred 100%. The operator reframed the real problem (2026-07-09): confirmation is intrusive when the user CLEARLY asked ("yes, I just told you to create a task"); the genuine risk is an AMBIGUOUS instruction ("create a to do task" — a to-do or a task?) executing the wrong choice.
 
-    ABSOLUTE QUALITY MANDATE (operator, 2026-07-09): NO dead-ends, NO shims, NO pseudocode, NO incomplete/stubbed paths, NO origin hardcoded/defaulted-to-Inferred to "make it compile." The bar is "the feature works END TO END and is observable," not "did we write the code." If a required real signal (e.g. Click-vs-text origin) is genuinely not available at the call-site, THREAD IT from its real source — do not fabricate or default it. If threading it truly requires work beyond this task's reach (e.g. a frontend dispatch-envelope change), STOP and ESCALATE per §6.5 rather than shipping a signal that is always Inferred.
+    THE MODEL (operator-ratified). Two layers:
+    (1) The AGENT TURN handles ambiguity (ADR-039's sanctioned intent decider): when genuinely torn between capabilities, it ASKS a clarifying question instead of dispatching. Wrong-choice risk is caught here, before the gate.
+    (2) The GATE handles risk, using ONLY real signals:
+        - TIER (catalog DATA, real): 0/1 → execute (reads/drafts free, D-F0(b)); 2a/2b + complete → EXECUTE + Undo, NO dialog; 2c → preview/confirm (r2 default); 3/4 irreversible in-system (delete/supersede, set-deadline, assign-to-another-user) → ALWAYS confirm.
+        - COMPLETENESS (real): incomplete args → the agent ELICITS (a natural question, not a scary confirm), then re-evaluate.
+        - AMBIGUITY / dispatchUncertain overlay (real): a tool call flagged low-confidence → confirm (backstop on top of layer 1).
+    Reuse ConfirmationPolicyEngine's tier table + overlay precedence AS-IS; feed its origin/confidence slot from the REAL ambiguity signal (confident → proceed for low-risk; uncertain → confirm). Do NOT build E-1..E-6 origin producers or any utterance-parser.
+
+    EMAIL IS DRAFT + HANDOFF, NEVER AUTO-SEND (r2, operator-ratified): an email action DRAFTS the email (Tier 1, executes) and returns an OutcomeCard with a HandoffUrlBuilder deep link to open the email record for human review/edit/send. The human's review-and-send at that record IS the gate — NO confirm dialog, and the system NEVER sends. Auto-send (a true Tier-4 send side effect needing a confirm) is explicitly DEFERRED past r2.
+
+    ABSOLUTE QUALITY MANDATE (operator, 2026-07-09): NO dead-ends, shims, pseudocode, or incomplete paths. The bar is "the feature works END TO END and is observable," not "did we write the code." The ambiguity/confidence signal MUST come from a real source — do NOT default/hardcode it. If no honest source exists, STOP and ESCALATE per §6.5 (as the prior attempt correctly did) rather than shim.
   </prompt>
 
-  <role>Senior BFF engineer fluent in the ADR-039 dispatch model, the SprkChatAgentFactory gate wrap-site, the ADR-040 session ledger / Gate status, the Policy v2 engine (risk tier × origin × completeness + overlay precedence + E-1..E-6), and the SideEffectGateAIFunction suspend/resume lifecycle.</role>
+  <role>Senior BFF engineer fluent in the ADR-039 dispatch model + closed catalog, the SprkChatAgentFactory gate wrap-site, the ADR-040 ledger / Gate status, the Policy v2 engine (tier table + overlay precedence), the Completion Engine/OutcomeCard + HandoffUrlBuilder deep-link pattern, and the SideEffectGateAIFunction suspend/resume lifecycle.</role>
 
   <goal>
-    ConfirmationPolicyEngine.Evaluate is invoked on the live core gate path for every side-effect tool invocation, fed real signals, and its GateDecisionV2 outcome deterministically drives execute / confirm-once / always-dialog / elicit — REPLACING (not shadowing) the old declared-class-only suspend decision. The behavior is observable end-to-end: an explicit + complete Tier-2b request executes with NO dialog; an inferred Tier-2b confirms exactly once; a Tier-3/4 request always dialogs; an incomplete request elicits once then re-evaluates. The fail-closed floor (undecidable origin ⇒ Inferred ⇒ confirm), the R5-E hard block, the 034 pre-suspend validation, and D-F0(b) free-reads are all preserved.
+    The confirmation gate is LIVE on the core chat path and driven by real (tier × completeness × ambiguity) signals via the reused ConfirmationPolicyEngine, REPLACING the old declared-class-only decision. Observable end-to-end: a clear+complete low-risk request (create-task, 2b) EXECUTES with no dialog + an Undo affordance; an email action drafts + returns a review/send deep link (no dialog, no auto-send); an ambiguous instruction makes the AGENT ask a clarifying question (no wrong-choice execution); an incomplete request elicits then re-evaluates; an irreversible in-system action (delete/supersede/deadline/assign) always confirms. The 034 pre-suspend validation, the R5-E hard block, Tier-0 free reads, and the fail-closed default (unknown/uncertain → confirm) are all preserved.
   </goal>
 
   <inputs>
-    <file purpose="policy-source">projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md</file>
+    <file purpose="reframing-decision">projects/spaarke-ai-architecture-redesign-r2/notes/044-signal-flow-trace.md (prior attempt's signal trace + escalation evidence)</file>
+    <file purpose="policy-source">projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md (tier table + overlay precedence — REUSE the tier/overlay parts; the E-1..E-6 origin parsing is OUT of scope now)</file>
     <file purpose="engine">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Gate/ConfirmationPolicyEngine.cs</file>
-    <file purpose="origin-classifier">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Gate/RequestOriginClassifier.cs</file>
     <file purpose="risk-resolver">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Gate/RiskTierResolver.cs</file>
     <file purpose="gate-callsite">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SideEffectGateAIFunction.cs</file>
     <file purpose="wrap-site">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
-    <file purpose="pending-manager">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs</file>
-    <file purpose="contract">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/GateDecisionV2.cs</file>
+    <file purpose="routing">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts (IConsumerRoutingService + routing — candidate-match ambiguity source to investigate)</file>
+    <file purpose="handoff-links">src/server/api/Sprk.Bff.Api/Api/Agent/HandoffUrlBuilder.cs</file>
+    <file purpose="completion">src/server/api/Sprk.Bff.Api/Services/Ai/CompletionEngine.cs</file>
     <file purpose="adr">docs/adr/ADR-041-judgment-confirmation-completion-policy.md</file>
   </inputs>
 
   <constraints>
-    <constraint source="no-shim">Origin MUST be derived from real turn provenance (Click path vs user-utterance vs document-content/tool-result), threaded from the actual dispatch/turn context to the gate. It MUST NOT be hardcoded, defaulted, or stubbed to a constant. The integration tests below are the forcing function — they cannot pass if origin is faked.</constraint>
-    <constraint source="ADR-039">Risk tier is catalog-declared DATA (the tool's declared side_effect_class / sprk_configuration.riskProfile resolved by RiskTierResolver) — never a runtime LLM judgment. No second intent mechanism.</constraint>
-    <constraint source="ADR-040">Confirmation state is a Gate-ledger property; the engine reads it so a second ask is structurally impossible. Store-before-render preserved (suspend marker lands before any dialog render).</constraint>
-    <constraint source="D-F0(b)">Reads/searches (Tier 0) are never gated; the engine can only ever WEAKEN a gate for a structurally-Explicit origin, never strengthen a read into a gate, and never weaken a hard block.</constraint>
-    <constraint source="034-preserve">The task-034 pre-suspend ValidateChat MUST be preserved and compose correctly with the engine decision — a doomed call still renders an honest ❌ with affordance (not Confirm→❌). A validation-passing call then follows the engine's execute/confirm/elicit decision.</constraint>
-    <constraint source="replace-not-shadow">The old PendingPlanManager.RequiresConfirmation declared-class-only decision MUST be replaced/subsumed by the engine decision on the live path — do NOT leave two parallel decision mechanisms that can disagree. If RequiresConfirmation is retained as an internal helper the engine consumes, that is fine; two independent top-level deciders is not.</constraint>
-    <constraint source="bff-hygiene">Load .claude/constraints/bff-extensions.md. No new package unless justified. Report publish-size delta (baseline ~46.48 MB compressed incl PDB; ceiling 60 MB) + no new HIGH CVE (pre-existing Microsoft.Kiota.Abstractions HIGH is not yours). PublicContracts facade discipline (ADR-013).</constraint>
-    <constraint source="eval-gate">The golden-utterance + resourcefulness + origin-classification eval families MUST stay green; add cases if the live wiring creates newly-observable behavior not yet covered.</constraint>
+    <constraint source="no-shim">The ambiguity/confidence signal MUST come from a real source. It MUST NOT be hardcoded/defaulted to fabricate a positive "explicit/confident" verdict. IMPORTANT — this is NOT an escalation trap: the operator's PRIMARY goal (a clear + complete low-risk request executes with NO dialog) is driven entirely by TIER + COMPLETENESS, which are BOTH already real (RiskTierResolver over catalog DATA + schema required[] vs args). Deliver that happy path first. Ambiguity ("create a to do task") is handled by LAYER 1 — the agent turn asking a clarifying question (real behavior, ADR-039's decider) — BEFORE the gate. The gate-side dispatchUncertain overlay is an OPTIONAL BACKSTOP: wire it to honor a real low-confidence signal IF one exists (e.g. a routing candidate-match count), but it may honestly remain unfired when there is no such signal — that is correct, not a shim, because layer 1 already covers ambiguity. Escalate per §6.5 ONLY if TIER or COMPLETENESS themselves cannot be sourced (they can) — do NOT escalate merely because dispatchUncertain lacks a strong producer.</constraint>
+    <constraint source="no-origin-machinery">Do NOT build E-1..E-6 origin producers, a SessionGate.Origin field, a proposal-recording provenance system, or any utterance→action re-parse. The origin/confidence slot is fed by the real ambiguity signal, not parsed authorization provenance.</constraint>
+    <constraint source="ADR-039">Ambiguity is resolved by the AGENT TURN (asking a clarifying question) — the sanctioned intent decider. The gate adds no second intent mechanism. Risk tier stays catalog-declared DATA.</constraint>
+    <constraint source="ADR-040">Confirmation state is a Gate-ledger property; store-before-render preserved (suspend marker lands before any dialog render).</constraint>
+    <constraint source="email-draft-handoff">Email = draft (executes) + OutcomeCard HandoffUrlBuilder deep link to open the email record for human review/edit/send. NO confirm dialog for the draft; NO auto-send in r2. Auto-send is deferred.</constraint>
+    <constraint source="D-F0(b)">Tier-0 reads/searches never gated; the gate only ever adds friction for risk/ambiguity, never weakens a hard block; a doomed call (034) still renders honest ❌ with affordance.</constraint>
+    <constraint source="replace-not-shadow">The engine becomes the single top-level decider on the live path — do not leave the old declared-class-only decision as a parallel decider that can disagree.</constraint>
+    <constraint source="bff-hygiene">Load .claude/constraints/bff-extensions.md. Report publish-size delta (baseline ~46.48 MB compressed incl PDB; ceiling 60 MB) + no new HIGH CVE (pre-existing Microsoft.Kiota.Abstractions HIGH is not yours). ADR-013 facade discipline.</constraint>
+    <constraint source="eval-gate">Golden-utterance + resourcefulness + origin eval families stay green. NOTE: the origin eval family (033) tests the engine's tier/overlay logic on constructed inputs — it stays valid; do not delete it. Add behavior cases for the newly-observable execute/confirm/elicit/ambiguity outcomes.</constraint>
   </constraints>
 
   <steps mode="directional">
-    <step order="0" name="Trace the real signal flow">Map, from actual code, where the gate is invoked (SprkChatAgentFactory wrap-site → SideEffectGateAIFunction.InvokeCoreAsync) and what context is available there. Identify the REAL source of each engine input: (a) origin — how the dispatch layer knows Click vs text vs doc-content (the ADR-039 dispatch envelope / invocation context); (b) risk tier — the tool's declared class via RiskTierResolver; (c) completeness — from ValidateForGate/the arg schema; (d) overlays — dispatchUncertain, shield-degradation, injection-suspect signals. Write the trace to notes/044-signal-flow-trace.md. IF any signal has no real source reachable from the call-site, that is the escalation point — do NOT invent a default.</step>
-    <step order="1" name="Thread origin to the gate">Make the real origin provenance available at InvokeCoreAsync (thread it through the wrap-site / invocation context). Feed RequestOriginClassifier the real turn structure + the Gate ledger (for E-1 affirmation-binding, E-2 reset, E-5 inheritance).</step>
-    <step order="2" name="Build PolicyEvaluationContext + call Evaluate">At the live gate call-site, assemble a real PolicyEvaluationContext (origin + risk tier + completeness + overlays) and call ConfirmationPolicyEngine.Evaluate → GateDecisionV2. Replace the old declared-class-only suspend decision with the engine's outcome.</step>
-    <step order="3" name="Drive real behavior from GateDecisionV2">Act on the decision: execute-without-suspend (no SessionGate marker) for explicit+complete 2a/2b (2a/2b carry the ✅ Undo affordance on the OutcomeCard); suspend-one-dialog for confirm; always-dialog for tier 3/4; elicit-once for incomplete then re-evaluate. Preserve 034 pre-suspend validation + the R5-E hard block ahead of the engine decision.</step>
-    <step order="4" name="Integration proof (the anti-shim gate)">Add integration tests that exercise the REAL gate path (not a mocked engine) and assert OBSERVABLE behavior: (i) explicit+complete Tier-2b create → tool executes, NO suspend marker written, NO dialog; (ii) inferred Tier-2b → exactly one suspend marker (one dialog), no re-ask; (iii) Tier-4 → always suspends even when explicit+complete; (iv) incomplete args → elicits once then re-evaluates; (v) undecidable origin → Inferred → confirm (fail-closed); (vi) R5-E hard block → honest ❌ with affordance, never a confirm dialog, zero Dataverse writes. Each test must fail if origin is hardcoded to a constant.</step>
-    <step order="5" name="Eval + gates">Keep all eval families green; add origin/behavior cases if newly observable. Run code-review + adr-check (Step 9.5). Report publish size + CVE.</step>
+    <step order="0" name="Confirm real inputs + trace the ambiguity signal">Confirm from actual code that TIER (RiskTierResolver over catalog DATA) and COMPLETENESS (schema required[] vs args) are sourceable at the gate call-site — they are; the happy path (clear+complete low-risk → execute no-dialog) rides these alone. Then investigate the OPTIONAL ambiguity backstop: does the routing (IConsumerRoutingService) expose a candidate-match count or a low-confidence flag the gate can honor? Update notes/044-signal-flow-trace.md. Do NOT escalate merely because the dispatchUncertain backstop lacks a strong producer (layer 1 — the agent asking — covers ambiguity). Escalate ONLY if tier or completeness themselves cannot be sourced.</step>
+    <step order="1" name="Wire real inputs to the engine">At the live gate call-site (SideEffectGateAIFunction.InvokeCoreAsync), assemble the PolicyEvaluationContext from REAL signals: tier (RiskTierResolver over catalog DATA), completeness (schema required[] vs args / ValidateForGate), ambiguity (Step 0 signal → the origin/confidence slot: confident→proceed, uncertain→confirm), overlays. Call ConfirmationPolicyEngine.Evaluate. Replace the old declared-class-only decision.</step>
+    <step order="2" name="Agent asks on ambiguity">Ensure the agent turn asks a clarifying question when genuinely torn between capabilities (directive/prompt + closed-catalog behavior) rather than dispatching a guess — this is layer 1. The dispatchUncertain overlay is the gate-side backstop.</step>
+    <step order="3" name="Drive behavior from the decision">Tier 0/1 → execute; 2a/2b + confident + complete → execute + Undo (OutcomeCard Undo chip); 2c → preview/confirm; 3/4 irreversible in-system → confirm dialog; incomplete → elicit once then re-evaluate. EMAIL → draft executes + OutcomeCard HandoffUrlBuilder review/send deep link, no dialog, no send. Preserve 034 pre-suspend + R5-E hard block ahead of the decision.</step>
+    <step order="4" name="Integration proof (anti-shim gate)">Integration tests on the REAL gate path (not a mocked engine) asserting OBSERVABLE behavior: (i) clear+complete Tier-2b create → executes, NO suspend marker, NO dialog, Undo present; (ii) email action → draft executes + OutcomeCard carries a review/send deep link, NO suspend marker, NO auto-send; (iii) ambiguous instruction → agent asks a clarifying question, NO side-effect executed; (iv) incomplete args → elicits once then re-evaluates; (v) irreversible in-system (delete/supersede or set-deadline) → exactly one suspend marker (one dialog); (vi) uncertain/unknown → confirm (fail-closed); (vii) R5-E hard block → honest ❌ with affordance, zero Dataverse writes. Each must fail if the ambiguity signal is hardcoded.</step>
+    <step order="5" name="Eval + gates">Keep eval families green; add behavior cases. code-review + adr-check (Step 9.5). Report publish size + CVE.</step>
   </steps>
 
   <tools>
@@ -65,23 +77,24 @@
   </tools>
 
   <outputs>
-    <output type="code">The live gate call-site invoking ConfirmationPolicyEngine.Evaluate with real signals + GateDecisionV2-driven behavior (SideEffectGateAIFunction / dispatch context / origin threading)</output>
-    <output type="code">notes/044-signal-flow-trace.md (the real signal-source map)</output>
-    <output type="test">Integration tests proving the 6 observable behaviors on the real gate path</output>
+    <output type="code">The live gate call-site invoking ConfirmationPolicyEngine.Evaluate with real (tier × completeness × ambiguity) signals + decision-driven behavior</output>
+    <output type="code">Email draft + OutcomeCard review/send deep link (HandoffUrlBuilder) — no auto-send</output>
+    <output type="doc">notes/044-signal-flow-trace.md updated with the real ambiguity-signal source</output>
+    <output type="test">Integration tests proving the 7 observable behaviors on the real gate path</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">ConfirmationPolicyEngine.Evaluate is invoked on the live core gate path (verifiable: a non-test, non-comment call-site exists that reaches it for every side-effect tool invocation).</criterion>
-    <criterion testable="true">Origin reaches the engine from REAL turn provenance threaded from the dispatch/invocation context — NOT a hardcoded/defaulted constant. The signal-flow trace documents each input's real source.</criterion>
-    <criterion testable="true">Behavior is driven by GateDecisionV2: explicit+complete Tier-2b executes with NO dialog; inferred Tier-2b confirms exactly once; Tier-3/4 always dialogs; incomplete elicits once then re-evaluates — all proven by integration tests on the real gate path (mocking the engine is NOT acceptable proof).</criterion>
-    <criterion testable="true">The old declared-class-only suspend decision is replaced/subsumed — there are not two independent top-level deciders that can disagree.</criterion>
-    <criterion testable="true">Fail-closed preserved: undecidable origin ⇒ Inferred ⇒ confirm; the R5-E hard block still renders honest ❌ with affordance (zero Dataverse writes); Tier-0 reads never gated; 034 pre-suspend validation preserved and composed.</criterion>
+    <criterion testable="true">ConfirmationPolicyEngine.Evaluate is invoked on the live core gate path for every side-effect tool invocation (real call-site, not a comment), fed real tier + completeness + ambiguity signals.</criterion>
+    <criterion testable="true">The ambiguity/confidence signal comes from a REAL source (documented in the trace) — NOT hardcoded/defaulted. No E-1..E-6 origin producer or utterance re-parse is built.</criterion>
+    <criterion testable="true">Observable behaviors proven by integration tests on the real gate path (mocking the engine is NOT acceptable proof): clear+complete 2b executes no-dialog + Undo; email drafts + review/send deep link with no dialog/no send; ambiguous → agent asks; incomplete → elicit; irreversible in-system → confirm once; uncertain → confirm.</criterion>
+    <criterion testable="true">The engine is the single top-level decider on the live path — the old declared-class-only decision is replaced/subsumed.</criterion>
+    <criterion testable="true">Preserved: 034 pre-suspend validation (doomed → honest ❌ + affordance), R5-E hard block (zero Dataverse writes), Tier-0 free reads, fail-closed default (unknown/uncertain → confirm).</criterion>
     <criterion testable="true">Build 0 errors; golden-utterance + resourcefulness + origin eval families green; publish &lt; 60 MB; no new HIGH CVE; code-review + adr-check clean.</criterion>
-    <criterion testable="true">NEGATIVE / anti-shim: there is NO path where origin is hardcoded/defaulted to a constant to bypass real classification; NO TODO/NotImplemented/pseudocode in the live gate path; the integration tests would FAIL if origin were faked (demonstrate by construction).</criterion>
+    <criterion testable="true">NEGATIVE / anti-shim: no path defaults/hardcodes the ambiguity signal; no TODO/NotImplemented/pseudocode in the live gate path; email is NEVER auto-sent in r2; the integration tests would FAIL if the ambiguity signal were faked.</criterion>
   </acceptance-criteria>
 
   <escalation>
-    <trigger>If making origin real requires a signal that genuinely does not exist anywhere reachable from the gate call-site (e.g. the frontend dispatch envelope does not carry a Click-vs-text marker and adding it is out of this task's scope), STOP and escalate per CLAUDE.md §6.5 — describe the missing signal, the real source that would need to emit it, and the scope. Do NOT ship an always-Inferred default and call it done.</trigger>
-    <trigger>If wiring the engine surfaces a genuine conflict with ADR-039 (second intent mechanism) or ADR-040 (confirmation-state store) that comply (Path C) cannot resolve, STOP and run the §6.5 protocol.</trigger>
+    <trigger>If the capability-selection ambiguity/confidence signal genuinely has no honest source reachable from the routing/agent-turn and cannot be produced within scope, STOP and escalate per §6.5 (describe the missing signal + the real source that would need to emit it + scope). Do NOT default it and call it done.</trigger>
+    <trigger>If wiring surfaces a genuine ADR-039 (second intent mechanism) or ADR-040 (confirmation-state store) conflict that comply (Path C) cannot resolve, STOP and run the §6.5 protocol.</trigger>
   </escalation>
 </task>
