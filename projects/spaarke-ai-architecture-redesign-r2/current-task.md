@@ -8,9 +8,9 @@
 
 ## Active Task
 
-- **Task**: none (P0 + A0 contracts 010–016 + 021 + **020 triple-twin hoist** COMPLETE)
-- **Status**: none
-- **Phase**: A0 + A-infra hoist done → **030 D-F0 doctrine** (+ 031 eval family) next; catalog-row tasks now unblocked (author through the JSON source)
+- **Task**: 030 — D-F0 Resourcefulness Doctrine (directive-layer strategy block) [FR-A1-01]
+- **Status**: in-progress
+- **Phase**: Wave J — G-R2-A Judgment. Rigor FULL, opus @ high, directional.
 
 ## Next Action
 
