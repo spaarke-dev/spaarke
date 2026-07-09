@@ -2,25 +2,21 @@
 
 > Tracks the ACTIVE task only. History lives in `tasks/TASK-INDEX.md`.
 
-**Status**: none (project initialized; tasks generated; awaiting operator go-ahead for execution)
+**Status**: none (validation wave complete; awaiting operator go-ahead for next wave)
 **Active task**: none
-**Next action**: operator confirms start → `task-execute` on first task per TASK-INDEX parallel groups
+**Next action**: operator confirms → dispatch next wave
 
-## Pipeline state (2026-07-08)
+## Progress (2026-07-08)
 
-- [x] Pre-flight passed (synced to origin/master; BFF build green)
-- [x] Resource discovery complete (code surfaces mapped — see plan.md)
-- [x] Artifacts generated (README, plan.md, CLAUDE.md, current-task.md)
-- [x] Task POMLs + TASK-INDEX generated (26 tasks, all well-formed XML)
-- [x] Registered in projects/INDEX.md
-- [ ] Operator go-ahead for Phase 0/A execution ← **YOU ARE HERE**
+- Project initialized: 26 tasks, TASK-INDEX, registered in projects/INDEX.md.
+- **Validation wave COMPLETE (4/4 ✅)**: 001 (OData doc), 030 (CoerceFieldValue String→Choice fix), 035 (client jest tests), 040 (deploy convention).
+  - Independently verified: BFF build 0 errors; 44/44 affected BFF tests; 36/36 new jest tests (3 failures confirmed pre-existing); publish size −0.17 MB; frozen-engine Path-A honored; DI scope bridge correct.
 
-## First executable tasks (Wave 1, when cleared)
+## Next wave candidates (root-ready, per TASK-INDEX)
 
-Root-ready (no deps), distinct files: **001** (OData doc), **030** (CoerceFieldValue), **033** (collaborator-scope), **035** (client tests), **040** (deploy convention), **020** (harness, cross-repo). Plus **015** (guardrail) and **031** (jps-validate — main-session). Run `/conflict-check` first (r2-core `Services/Ai/` overlap).
+- **010** (remove per-channel LLM narrate leg — starts the Phase-A accuracy chain)
+- **020** (scaffold /prototype harness — cross-repo; escalates if standalone build fails)
+- **033** (collaborator-scope fix — starts the collector chain 033→034→036→037)
+- **015** (groundedness guardrail), **031** (jps-validate — main-session)
 
-## Notes for the next session
-
-- Baseline is current with master (r2-core #580/#582 merged in).
-- D-8 harness is cross-repo (`spaarke-prototype`); depends on unmerged `fix/daily-briefing-components-standalone-build`.
-- Run `/conflict-check` before each wave (r2-core `Services/Ai/` overlap).
+Run `/conflict-check` before dispatching (r2-core `Services/Ai/` overlap). Collector-chain tasks and 013 must not run concurrently.

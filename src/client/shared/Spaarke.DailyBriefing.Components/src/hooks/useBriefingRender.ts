@@ -57,7 +57,7 @@ export interface UseBriefingRenderResult {
 // Empty detection helper
 // ---------------------------------------------------------------------------
 
-function isEmptyResponse(response: NarrateResponse): boolean {
+export function isEmptyResponse(response: NarrateResponse): boolean {
   const hasChannels = response.channelNarratives.length > 0;
   if (hasChannels) return false;
   const tldr = response.tldr;

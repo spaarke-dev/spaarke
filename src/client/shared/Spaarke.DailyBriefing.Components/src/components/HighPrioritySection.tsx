@@ -155,7 +155,7 @@ interface ActionBadgeStyle {
  * Adds the due date when known so the badge is self-explanatory. Falls back
  * to modifiedon relative time for the "Recent" action.
  */
-function actionToBadge(action: string, dueDate?: string, modifiedOn?: string): ActionBadgeStyle | null {
+export function actionToBadge(action: string, dueDate?: string, modifiedOn?: string): ActionBadgeStyle | null {
   switch (action) {
     case 'Overdue':
       return {
@@ -210,7 +210,7 @@ function formatRelative(iso: string): string {
  * Translate the reason enum into a short chip label. Empty string when reason
  * is missing (widget just omits the chip).
  */
-function reasonToLabel(reason?: string): string {
+export function reasonToLabel(reason?: string): string {
   switch (reason) {
     case 'Both':
       return 'HighPriority + Monitor';

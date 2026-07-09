@@ -17,7 +17,7 @@
 
 | ID | Title | Phase | Status | Deps | Blocks | Rigor | Tier/Effort | Parallel-safe |
 |----|-------|-------|--------|------|--------|-------|-------------|---------------|
-| 001 | OData naming convention doc | 0 | 🔲 | none | 002 | MINIMAL | sonnet/high | ✅ |
+| 001 | OData naming convention doc | 0 | ✅ | none | 002 | MINIMAL | sonnet/high | ✅ |
 | 002 | @odata.bind grep audit + fix in-use | 0 | 🔲 | 001 | — | STANDARD | sonnet/high | ✅ |
 | 010 | Remove per-channel LLM narrate leg | A | 🔲 | none | 011,012,013 | FULL | sonnet/xhigh | ❌ narrator/composite |
 | 011 | Deterministic item-row rendering | A | 🔲 | 010 | 016 | FULL | sonnet/high | ❌ client lib |
@@ -32,16 +32,16 @@
 | 022 | Operator harness sign-off (GATE G-R5-D) | D | 🔲 | 021 | 023 | MINIMAL | sonnet/high | ❌ operator gate |
 | 023 | Production port to shared lib | D | 🔲 | 022,011 | 024 | FULL | sonnet/high | ❌ client lib |
 | 024 | Phase D deploy + G-R5-D UAT | D | 🔲 | 023 | 090 | STANDARD | sonnet/high | ❌ deploy |
-| 030 | CoerceFieldValue String→Choice fix | B | 🔲 | none | 032 | FULL | sonnet/xhigh | ❌ frozen-engine |
+| 030 | CoerceFieldValue String→Choice fix | B | ✅ | none | 032 | FULL | sonnet/xhigh | ❌ frozen-engine |
 | 031 | jps-validate Step 7.7 Choice check | B | 🔲 | none | — | STANDARD | sonnet/high | ❌ `.claude/` main-session |
 | 032 | fieldMapping sweep + restore documenttype | B | 🔲 | 030 | — | STANDARD | sonnet/high | ❌ |
 | 033 | Collaborator-scope fix + re-flip test | B | 🔲 | none | 034 | FULL(TEST-MOD) | sonnet/xhigh | ❌ collector |
 | 034 | Collector de-duplication | B | 🔲 | 033 | 036 | FULL | sonnet/high | ❌ collector |
-| 035 | Client-helper jest tests | B | 🔲 | none | — | STANDARD(TEST-MOD) | sonnet/high | ✅ Group H |
+| 035 | Client-helper jest tests | B | ✅ | none | — | STANDARD(TEST-MOD) | sonnet/high | ✅ Group H |
 | 036 | Collapse 7 QueryHighPriority* helpers | B | 🔲 | 034 | 037 | STANDARD | sonnet/high | ❌ collector |
 | 037 | Promise-cache primary-contact + comment | B | 🔲 | 036 | 038 | STANDARD | sonnet/high | ❌ collector |
 | 038 | Phase B deploy + G-R5-C UAT | B | 🔲 | 037,032,035 | 090 | STANDARD | sonnet/high | ❌ deploy |
-| 040 | Deploy convention (master-sync-first) | E | 🔲 | none | — | STANDARD | sonnet/high | ✅ Group F |
+| 040 | Deploy convention (master-sync-first) | E | ✅ | none | — | STANDARD | sonnet/high | ✅ Group F |
 | 090 | Project wrap-up | Wrap | 🔲 | 017,024,038,040 | — | FULL | sonnet/high | ❌ main-session |
 
 ## Shared-file serialization (why so much is parallel-safe=false)

@@ -3,7 +3,7 @@
   <metadata>
     <title>Metadata-driven Choice/Boolean/Number coercion for String-typed fieldMappings in CoerceFieldValue</title>
     <phase>B: Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>032</blocks>

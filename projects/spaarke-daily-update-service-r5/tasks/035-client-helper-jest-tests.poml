@@ -3,7 +3,7 @@
   <metadata>
     <title>Jest tests for buildSegments, isEmptyResponse, useInlineTodoCreate, actionToBadge/reasonToLabel</title>
     <phase>B: Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>none</blocks>
@@ -102,6 +102,8 @@
 
   <notes>
     See spec.md FR-C6, plan.md Phase B.6, notes/inbound-from-r7/03 item 2. The R7 note's classifyDueDate is a naming error — corrected here to actionToBadge/reasonToLabel per the verified code map. Test folder is test/ (not __tests__/). Existing companion test useInlineTodoCreate.computeDueDate.test.ts shows the hook's test style.
+
+    COMPLETED 2026-07-08. 4 new test files at test/ (36 tests total, all passing): NarrativeCitedText.buildSegments.test.ts (7), useBriefingRender.isEmptyResponse.test.ts (8), useInlineTodoCreate.test.ts (6), HighPrioritySection.badges.test.ts (15). Export-only production change (minimal, per constraint): added `export` keyword to buildSegments, isEmptyResponse, actionToBadge, reasonToLabel (previously module-private) — zero behavior change, verified via git-stash A/B comparison against the package's pre-existing (unrelated) 3 test failures in legalWorkspaceSectionRegistry.test.ts + ActivityNotesSection.callbacks.test.tsx. Full deviation record: notes/task-035-client-helper-jest-tests.md. Quality gates (code-review + adr-check, TEST-MODIFYING override): both clean, no findings.
   </notes>
 
   <execution>

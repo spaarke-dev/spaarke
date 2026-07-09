@@ -104,7 +104,7 @@ type Segment =
       entityId: string;
     };
 
-function buildSegments(narrative: string, mentioned: readonly NarrativeBulletReferenceResult[]): Segment[] {
+export function buildSegments(narrative: string, mentioned: readonly NarrativeBulletReferenceResult[]): Segment[] {
   if (!narrative) return [];
   if (mentioned.length === 0) return [{ kind: 'text', text: narrative }];
 

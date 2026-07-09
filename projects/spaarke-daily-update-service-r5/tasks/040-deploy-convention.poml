@@ -3,7 +3,7 @@
   <metadata>
     <title>Adopt master-sync-first deploy convention + branch-behind warning (FR-E1, D-6)</title>
     <phase>E: Deploy convention</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>none</blocks>
@@ -105,6 +105,16 @@
     emit Write-Warning "Branch is $behind commit(s) behind origin/master — sync master before deploying to avoid
     overwriting in-flight work." Keep it minimal and non-blocking. The reserved-window flag-file idea from note 05
     section "Additional guardrails" was REJECTED — do not implement it.
+
+    COMPLETION (2026-07-08): Wrote projects/spaarke-daily-update-service-r5/notes/deploy-convention.md — states the
+    master-sync-first rule, the standard deploy sequence, the reusable branch-behind warning snippet, the PR
+    obligation, and explicitly-out-of-scope items. No deploy script was edited: as of this task, none of this
+    project's deploy tasks (017, 024, 038) has executed, so this project does not yet touch a deploy script. Per
+    orchestrator direction, the snippet is documented for tasks 017/038 (Deploy-BffApi.ps1, via bff-deploy skill)
+    and 024 (Deploy-DailyBriefing.ps1, via code-page-deploy skill) to adopt when they run. Deploy-SpaarkeAi.ps1 is
+    out of scope (no R5 task deploys it). Orchestrator explicitly instructed NOT to modify TASK-INDEX.md as part of
+    this task — that update is deferred to the caller/next step, deviating from the generic step-5 instruction in
+    this POML.
   </notes>
 
   <execution>
