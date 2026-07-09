@@ -67,9 +67,12 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 081 | Publish-size ≤60 MB + CVE scan + NetArchTest facade verification (NFR-01/02/05) | 8 Wrap | 🟢 | 025,050,052 | 🔲 | STANDARD | sonnet | high |
 | 082 | Flagship gate G-R2-C — browser-verified full chain on spaarkedev1 | 8 Wrap | 🔴 | 016,033,042,046,047,014,055 | ⛔ | FULL | opus | high |
 | 083 | AnchoredAnnotation Path-A deviation code-review sign-off | 8 Wrap | 🟢 | 060 | 🔲 | MINIMAL | sonnet | high |
+| 084 | Consumer-side vertical-slice seam test — compose dispatch E2E (ADR-043 B6 / O3) | 8 Wrap | 🔴 | 016,046 (+core E-20/E-40) | ⛔ | FULL | sonnet | high |
 | 090 | Project wrap-up (code-review, adr-check, repo-cleanup, /test-diet, lessons) | 8 Wrap | 🔴 | all | ⛔ | FULL | opus | high |
 
-**Totals**: 56 tasks — **33 🟢 startable** · **16 🔴 core-A0-blocked** · **7 🟡 splittable** (splittable are counted among startable; their gated half joins the blocked set). Task 045 rigor bumped STANDARD→FULL per CLAUDE.md §8 TEST-MODIFYING override (it modifies `tests/**`).
+**Totals**: 57 tasks (084 added 2026-07-09) — Task 045 rigor bumped STANDARD→FULL per CLAUDE.md §8 TEST-MODIFYING override.
+
+> **⚠️ E-20 GATING CORRECTION (2026-07-09, from [ADR-043-impact-review.md](../notes/ADR-043-impact-review.md))**: the compose-disposition dispatch is **422-broken end-to-end on master** — the admit-gate (`SessionDispatchOrchestrator.cs:229`) still admits only `Informational|WorkProduct`; our routing promotion fixed the router/ledger leg (2 of 3 lists) but NOT the admit-gate. The fix is **core E-20 (`DispositionRoutability`), 🔲 not started.** So **042/033/034 are shipped-but-GATED (false-green for E2E)** — they pass the router/unit layer but 422 through `/dispatch`; **re-verify after E-20**. The **4 informational actions dispatch E2E now** (E-10 fixed the input path). **046/047 (compose row)/082/084 wait on E-20**; **034 additionally waits on E-30** (+ open mechanism decision). **FREEZE compose edits to `OutputRouter.cs` + `Binding.cs` until E-20** (merge-collision).
 
 ## Parallel Execution Plan (startable 🟢 tracks)
 
