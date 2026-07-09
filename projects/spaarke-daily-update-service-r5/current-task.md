@@ -7,6 +7,10 @@
 
 ## Quick Recovery (READ THIS FIRST)
 
+> **2026-07-09 update — Email-share feature COMPLETE (not deployed).** Operator chose A + system-sender + build-now. Built + reviewed + tested; **DEPLOY IS ON HOLD** pending cross-project coordination approval (operator instruction). 3 new commits on top of the prior 7: `5c3c1a9ee` (BFF /email colleague recipient + internal-only egress guard, 8/8 contract tests), `21e5ad3dd` (client #2 Email Briefing via shared SendEmailDialog + #3 Email Item draft activity; deterministic body/link helpers; 11/11), `2807b4237` (Step-9.5 review fixes). Design/decisions/review: `notes/email-share-feature-plan.md`. Reply to redesign-r2 E-12: `notes/REPLY-to-redesign-r2-E12-consumer-response.md` (ready to send). Pre-existing unrelated test failures on branch: `legalWorkspaceSectionRegistry` + `ActivityNotesSection.callbacks` (onKeep ttl) — 090 /defer candidates. **When deploy is approved:** merge branch→master, re-deploy BFF (picks up 002 @odata.bind fixes + /email change), deploy SpaarkeAi widget, UAT (incl. Email Briefing + Email Item), close 017/024/038/022, then 090 wrap (+ prompt-shape-parity test defer, + note-passthrough fast-follow for #2).
+
+
+
 | Field | Value |
 |---|---|
 | **Project** | spaarke-daily-update-service-r5 — **21/26 tasks done; CODE-COMPLETE**. Remaining are deploy/operator/wrap only. |
