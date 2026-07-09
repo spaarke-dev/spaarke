@@ -34,7 +34,7 @@
 | 024 | Phase D deploy + G-R5-D UAT | D | 🔲 | 023 | 090 | STANDARD | sonnet/high | ❌ deploy |
 | 030 | CoerceFieldValue String→Choice fix | B | ✅ | none | 032 | FULL | sonnet/xhigh | ❌ frozen-engine |
 | 031 | jps-validate Step 7.7 Choice check | B | ✅ | none | — | STANDARD | sonnet/high | ❌ `.claude/` main-session |
-| 032 | fieldMapping sweep + restore documenttype | B | 🔲 | 030 | — | STANDARD | sonnet/high | ❌ |
+| 032 | fieldMapping sweep + restore documenttype | B | ✅ | 030 | — | STANDARD | sonnet/high | ❌ | (audit + restore via MCP done + data-verified; round-trip EXECUTION verify = UAT @ 038) |
 | 033 | Collaborator-scope fix + re-flip test | B | ✅ | none | 034 | FULL(TEST-MOD) | sonnet/xhigh | ❌ collector |
 | 034 | Collector de-duplication | B | ✅ | 033 | 036 | FULL | sonnet/high | ❌ collector |
 | 035 | Client-helper jest tests | B | ✅ | none | — | STANDARD(TEST-MOD) | sonnet/high | ✅ Group H |
