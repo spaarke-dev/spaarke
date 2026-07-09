@@ -78,6 +78,16 @@ export const TELEMETRY_TAB_RESTORE_LOAD_FAILURE =
 export const TELEMETRY_TAB_RESTORE_SAVE_FAILURE =
   "spaarke-ai-error.tab-restore.save-failure";
 
+/**
+ * Emitted when POST /api/ai/chat/sessions/{sessionId}/ack fails (e.g. network error or
+ * 5xx) after WorkspacePane materializes a server-initiated tab. The ack itself is
+ * best-effort from the CLIENT's perspective: on failure the server's ack-gated tool call
+ * (D-F3 / FR-A1-08 / task AIR2-037) will time out and report an honest failure to the
+ * model — this event is diagnostic signal for that degraded path, not a user-facing error.
+ */
+export const TELEMETRY_UI_ACTION_ACK_FAILURE =
+  "spaarke-ai-error.ui-action-ack.failure";
+
 // ---------------------------------------------------------------------------
 // Internal state — App Insights singleton resolved via setter
 // ---------------------------------------------------------------------------

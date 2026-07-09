@@ -61,6 +61,30 @@ public sealed class HandoffUrlBuilder
     }
 
     /// <summary>
+    /// Refusal-affordance overload (spaarke-ai-architecture-redesign-r2 task 040, FR-A1-11,
+    /// design D-F0(d)): composes the Document Upload wizard deep-link for the R5-E
+    /// <c>sprk_document</c> hard-block refusal. Host-scopes to a known matter record when
+    /// <paramref name="matterId"/> is supplied (assumes <c>sprk_matter</c> — the only host
+    /// entity type carried by <c>ChatInvocationContext.MatterId</c>); degrades to a valid
+    /// UNSCOPED standalone-mode link (still fully actionable — <c>DocumentUploadWizardDialog</c>
+    /// treats a missing parent entity as standalone mode and its <c>AssociateToStep</c> resolves
+    /// the target, or the user can Skip to an unassociated upload) when no host record is known.
+    /// Never returns null/empty — the caller always has an actionable link to relay.
+    /// </summary>
+    public string BuildDocumentUploadWizardUrl(Guid? matterId)
+    {
+        if (matterId is not { } id || id == Guid.Empty)
+        {
+            return BuildWebResourceUrl("sprk_documentuploadwizard", new Dictionary<string, string>());
+        }
+
+        return BuildDocumentUploadWizardUrl(
+            parentEntityType: "sprk_matter",
+            parentEntityId: id,
+            parentEntityName: string.Empty);
+    }
+
+    /// <summary>
     /// Generates a deep-link to the Summarize Files Wizard.
     /// </summary>
     public string BuildSummarizeFilesWizardUrl(Guid documentId, string bffBaseUrl)

@@ -1,0 +1,26 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for CREATE-MATTER@v1 (spaarke-ai-architecture-redesign-r2 task 042, FR-A1-13 / R19) — authored via the repo-first discipline CatalogInputSchemaContractTests exists for (author here FIRST, let CI validate it, THEN write to Dataverse; see that test class's remarks). PENDING LIVE DEPLOY: actionId below is a placeholder — no live sprk_analysisaction row exists yet for CREATE-MATTER@v1. Deploying this capability requires, in order: (1) create the live sprk_analysisaction row (sprk_actioncode=CREATE-MATTER@v1, sprk_kind=Prompted, sprk_promptschema = the JPS at projects/spaarke-ai-architecture-redesign-r2/notes/jps/CREATE-MATTER-v1.jps.json, sprk_inputschema = this file's inputSchema member, sprk_outputschemajson = infra/dataverse/outputschemas/create-matter-v1.schema.json), (2) set this file's actionId to the resulting GUID, (3) run scripts/dataverse/Seed-PlaybookConsumers.ps1 to seed the create-matter Binding row (infra/dataverse/sprk_playbookconsumer-rows.json) now that its actionCode lookup resolves, (4) add ConsumerTypes.CreateMatter to src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs (both the constant AND the ConsumerTypes.All array) and flip the golden-utterance GU-create-matter cases from catalogStatus=planned to existing. Deferred deliberately to avoid tripping RoutingConsumerTypeHealthCheck's ConstantsWithoutRows dimension on the currently-deployed spaarkedev1 BFF before the row exists (same defer-until-seedable discipline task 020 used for the memory.* rows). Owner: gate G-R2-A deploy step (task 049) or a dedicated follow-up.",
+  "actionCode": "CREATE-MATTER@v1",
+  "actionId": "00000000-0000-0000-0000-000000000000",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "fileIds": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Optional subset of session file ids the matter proposal should be grounded in. Omit to use all session files."
+      },
+      "practice_area": {
+        "type": "string",
+        "description": "The matter's practice area as the user stated it in conversation (e.g. 'Employment Law', 'Litigation'), when they name one. Resolved to sprk_practicearea_ref via dataverse.read_query at write time; omitted (never guessed) if unresolvable.",
+        "elicitation_prompt": "What practice area is this matter in? (optional — I can leave this unset)"
+      },
+      "matter_type": {
+        "type": "string",
+        "description": "The matter's type as the user stated it in conversation (e.g. 'Litigation', 'Transactional'), when they name one. Resolved to sprk_mattertype_ref via dataverse.read_query at write time; omitted (never guessed) if unresolvable.",
+        "elicitation_prompt": "What type of matter is this? (optional — I can leave this unset)"
+      }
+    }
+  }
+}

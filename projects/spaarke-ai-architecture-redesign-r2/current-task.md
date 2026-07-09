@@ -9,17 +9,20 @@
 
 | Field | Value |
 |---|---|
-| **Progress** | **15 of 53 tasks complete** — the entire FOUNDATION is done |
-| **Done** | Phase 0 (001–004), all A0 contracts (010–016), test-repair (021), triple-twin hoist (020), D-F0 doctrine (030), D-F0 eval family (031) |
-| **Status** | between tasks; working tree CLEAN (all committed through `fd20e0abe`) |
-| **Branch** | `work/spaarke-ai-architecture-redesign-r2` — **0/0 with master** (all merged via PR #586, 2026-07-09). Master @ `4148bb8ec`. |
-| **Next Action** | **Task 032 — Policy v2 gate engine** (opus, serial, dep 020✅). Dispatch a subagent running `task-execute` for `tasks/032-confirmation-policy-v2-gate-engine.poml`; implement per `notes/policy-v2-origin-classification-decision-tree.md` (tier table + fail-closed origin classifier + E-1..E-6 + GateDecision v2 producer + association picker). Then 033/034 + the parallel-safe J batch. |
+| **Progress** | **21 of 53 tasks complete** — foundation + Wave J (gate engine + 5 parallel surfaces) done |
+| **Done** | Phase 0 (001–004), all A0 contracts (010–016), test-repair (021), triple-twin hoist (020), D-F0 doctrine (030), D-F0 eval family (031), **Wave J parallel batch: 032 gate engine, 037 UI-ack, 039 progressive render, 040 refusal-affordance, 041 capability-discovery, 042 create-matter (2026-07-09)** |
+| **Status** | between waves; Wave J being committed. Combined tree VERIFIED GREEN: build 0 errors (3 projects), no conflict markers, eval-gate + gate engine + all new suites **521 passed / 0 failed / 1 pre-existing skip**, publish **48.30 MB** compressed (under 60 ceiling, ~baseline). |
+| **Branch** | `work/spaarke-ai-architecture-redesign-r2` — ahead of master by prior checkpoint commits + Wave J commit (this commit). NOT yet merged. |
+| **Next Action** | **Serial J-wave (shared gate/factory/completion stack — run ONE AT A TIME in the main session or one subagent at a time):** 033 (origin-classification eval family, sonnet, dep 032✅) → 034 (gate pre-suspend validation, opus, dep 032✅) → 035 (Completion Engine + OutcomeCard, opus, dep 011✅) → 036 (job-aware completion, opus, dep 014✅) → 038 (trace view + server read, opus, dep 013✅) → 043 (ADR-041 authoring, fable, dep 030✅/032✅/035). Then the memory wave M. |
 
-### Immediate next tasks (per TASK-INDEX Parallel Groups)
-- **032** Confirmation Policy v2 gate engine (opus, parallel-safe=false, dep 020✅) — implements the GateDecision v2 PRODUCER + tier table + origin classifier + E-1..E-6 (per `notes/policy-v2-origin-classification-decision-tree.md`). Unblocks Compose FR-05 (association-picker live behavior) + 033/034.
-- Then serial J-wave: 034 (gate pre-suspend), 035 (Completion Engine, dep 011✅), 036 (job-aware, dep 014✅), 038 (trace view+server read, dep 013✅), 043 (ADR-041).
-- Parallel-safe J tasks (can batch): 037 UI-ack, 039 progressive render, 040 refusal-affordance, 041 capability-discovery, 042 create-matter (dep 020✅). 033 origin-eval (dep 032).
-- Memory wave M: 050 (dep 016✅) → 051/052; 053 Binder (dep 015✅) → 054 (dep 002✅+053); 055/056/057/060–065.
+### Immediate next tasks (per TASK-INDEX Parallel Groups — J-serial share the gate/factory/completion files, NOT parallel-safe)
+- **033** Origin-classification eval family (sonnet, dep 032✅) — eval cases over the RequestOriginClassifier; pairs with 032's E-1..E-6.
+- **034** Gate pre-suspend validation (opus, dep 032✅) — wires the live gate call-site origin/proposal signals (the 032 engine currently defaults origin to `Inferred`/always-suspend until 034 feeds it).
+- **035** Completion Engine + OutcomeCard all paths (opus, dep 011✅) — also unblocks DEF-001 (OutcomeCard-structured refusal follow-up).
+- **036** Job-aware completion / ingestion-parity (opus, dep 014✅). Note: `JobStatusService.cs` is at `Services/Office/`, not `Services/Jobs/`.
+- **038** Traceability view + narration + server read surface (opus, dep 013✅) — publishes the last-but-one seam (TraceEvent view half).
+- **043** ADR-041 authoring (fable, dep 030✅/032✅/035) — §6.5 + `.claude/` write-boundary (main-session-only).
+- **Memory wave M** (after J-serial): 050 (dep 016✅) → 051/052; 053 Binder (dep 015✅) → 054 (dep 002✅+053); 055/056/**057 memory.write**/060–065. 057 publishes the final seam; **017** milestone posts "Compose UNBLOCKED" after 038+057.
 
 ### Critical Context (essential for continuation)
 - **Execution model**: dispatch each task as a subagent running `task-execute` at its POML `<model-tier>` (sonnet default; opus/fable for the flagged tasks). Parallel-safe tasks → concurrent subagents (each creates NEW files, does NOT edit TASK-INDEX/current-task/SEAM-STATUS — main session consolidates + flips rows + commits). parallel-safe=false → run one at a time. Build-verify between waves.

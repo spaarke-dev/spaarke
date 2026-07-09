@@ -80,6 +80,7 @@
 
 import { readSseStream, parseSseEvent } from '../hooks/useSseStream';
 import type { AccessTokenGetter } from '../components/SprkChat/types';
+import { extractRevealableSections, revealSectionsProgressively } from './progressiveSectionReveal';
 
 // ---------------------------------------------------------------------------
 // Chip contract (Click path, canonical §7.2 / Binding `sprk_chiptransitions`)
@@ -259,6 +260,14 @@ export interface ConsumerDispatchDeps {
   readonly getAccessToken: AccessTokenGetter;
   /** `workspace`-channel PaneEventBus publisher. */
   readonly publishPaneEvent: DispatchPaneEventPublisher;
+  /**
+   * Progressive-reveal pacing (task 039 / D-F5): delay in ms awaited between
+   * revealing successive sections of the terminal result — see
+   * {@link revealSectionsProgressively}. Defaults to that function's own
+   * default (120ms) when omitted. Pass 0 for tests that don't care about
+   * pacing.
+   */
+  readonly sectionRevealDelayMs?: number;
 }
 
 /** Per-dispatch arguments (all optional — a bare chip click passes none). */
@@ -372,7 +381,7 @@ async function mapDispatchHttpError(response: Response): Promise<Error> {
  * session id is re-read per dispatch through `deps.getSessionId`.
  */
 export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchConsumer {
-  const { bffBaseUrl, getSessionId, getAccessToken, publishPaneEvent } = deps;
+  const { bffBaseUrl, getSessionId, getAccessToken, publishPaneEvent, sectionRevealDelayMs } = deps;
 
   return async function dispatchConsumer(
     bindingId: string,
@@ -422,6 +431,11 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
     // Event path — every chip click permanently emptied the strip).
     let terminalResult: unknown;
     let capturedChips: ConsumerChip[] | undefined;
+    // task 039 / D-F5: the terminal chunk's section reveal is staggered (see
+    // progressiveSectionReveal.ts), so it outlives the synchronous consumeChunk call.
+    // Tracked here so the dispatch doesn't resolve until pacing + streaming_complete
+    // have both actually happened.
+    let pendingReveal: Promise<void> | null = null;
 
     const publishStartedOnce = (): void => {
       if (started) return;
@@ -437,7 +451,10 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
      *                 `section_completed` pairs from the terminal `result`
      *                 payload (executors emit ONE terminal chunk carrying the
      *                 whole STORED ledger payload — ADR-040 render-follows-
-     *                 store), followed by streaming_complete/complete. String
+     *                 store), PACED via `revealSectionsProgressively` (task 039
+     *                 / D-F5 — a small delay between sections so the output
+     *                 renders in ≥2 visible steps instead of one batched
+     *                 paint), followed by streaming_complete/complete. String
      *                 values ride `finalContent`; arrays/objects ride
      *                 `finalStructuredData` so the section renderer's typed
      *                 paths (lists, labeled blocks) apply.
@@ -465,41 +482,57 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
 
         case 'complete': {
           terminalResult = chunk.result ?? chunk.summary ?? undefined;
+          sawComplete = true;
+
           if (chunk.result && typeof chunk.result === 'object' && !Array.isArray(chunk.result)) {
-            publishStartedOnce();
-            const result = chunk.result as Record<string, unknown>;
-            let index = 0;
-            for (const [key, value] of Object.entries(result)) {
-              if (value === null || value === undefined) continue;
-              // Widget-internal metadata fields are not renderable content.
-              if (key === 'parsedSuccessfully' || key === 'rawResponse') continue;
-              if (typeof value === 'string' && value === '') continue;
-              // Section-keyed bridge (task 046 / amended ADR-037): one
-              // section per top-level result key, in declaration order.
+            // Section-keyed bridge (task 046 / amended ADR-037), now PACED (task 039 /
+            // D-F5): one section per top-level result key, in declaration order,
+            // revealed with a stagger so the output arrives in ≥2 visible steps rather
+            // than one synchronous-batch paint. `chunk.result` is the STORED terminal
+            // payload (ADR-040 — the BFF only emits this chunk after the ledger write);
+            // this bridge never sees pre-store state, so pacing cannot introduce a
+            // render-ahead-of-store violation.
+            const sections = extractRevealableSections(chunk.result as Record<string, unknown>);
+            pendingReveal = (async () => {
+              publishStartedOnce();
+              await revealSectionsProgressively(
+                sections,
+                (section, index) => {
+                  publishPaneEvent('workspace', {
+                    type: 'section_started',
+                    streamId,
+                    sectionName: section.name,
+                    sectionIndex: index,
+                  });
+                  publishPaneEvent('workspace', {
+                    type: 'section_completed',
+                    streamId,
+                    sectionName: section.name,
+                    // Strings render as section text; arrays/objects ride the
+                    // structured payload so the section renderer's typed paths
+                    // (bulleted lists, labeled blocks) apply.
+                    ...(typeof section.value === 'string'
+                      ? { finalContent: section.value }
+                      : { finalStructuredData: section.value }),
+                  });
+                },
+                { delayMs: sectionRevealDelayMs }
+              );
               publishPaneEvent('workspace', {
-                type: 'section_started',
+                type: 'streaming_complete',
                 streamId,
-                sectionName: key,
-                sectionIndex: index++,
+                completionStatus: 'complete',
               });
-              publishPaneEvent('workspace', {
-                type: 'section_completed',
-                streamId,
-                sectionName: key,
-                // Strings render as section text; arrays/objects ride the
-                // structured payload so the section renderer's typed paths
-                // (bulleted lists, labeled blocks) apply.
-                ...(typeof value === 'string' ? { finalContent: value } : { finalStructuredData: value }),
-              });
-            }
+            })();
+            return;
           }
+
           publishStartedOnce();
           publishPaneEvent('workspace', {
             type: 'streaming_complete',
             streamId,
             completionStatus: 'complete',
           });
-          sawComplete = true;
           return;
         }
 
@@ -551,6 +584,13 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
         completionStatus: 'declined',
       });
       throw err;
+    }
+
+    // task 039 / D-F5: wait for the paced section reveal (+ its trailing
+    // streaming_complete) to actually finish before resolving — a caller awaiting
+    // dispatchConsumer() should observe the FULL reveal, not just its kickoff.
+    if (pendingReveal) {
+      await pendingReveal;
     }
 
     if (sawError) {

@@ -61,6 +61,15 @@
     "additionalProperties": false
   },
   "sprk_configuration": {
-    "_comment": "No method-discriminator dispatch — this row exposes a single LLM-facing function. Empty object reserved for future per-row defaults (e.g., default widget-type override, per-tenant 'always-pin' policy)."
+    "_comment": "No method-discriminator dispatch — this row exposes a single LLM-facing function. Empty object reserved for future per-row defaults (e.g., default widget-type override, per-tenant 'always-pin' policy).",
+    "_comment_riskprofile": "Confirmation Policy v2 (FR-A1-03, task 032) catalog-declared risk factors — DATA extending sprk_sideeffectclass per policy-v2-origin-classification-decision-tree.md §1. Opening a workspace tab is a private, fully-reversible UI affordance (the user can close it) with no system-of-record mutation ⇒ Tier 2a (private/internal reversible; ✅ card + Undo when explicit+complete). Consumed by GateRiskProfile.FromConfiguration + RiskTierResolver; NEVER a runtime model judgment.",
+    "riskProfile": {
+      "tier": "2a",
+      "reversible": true,
+      "externallyVisible": false,
+      "deadlineImpact": false,
+      "confidentialityImpact": false,
+      "recordOfTruthImpact": false
+    }
   }
 }

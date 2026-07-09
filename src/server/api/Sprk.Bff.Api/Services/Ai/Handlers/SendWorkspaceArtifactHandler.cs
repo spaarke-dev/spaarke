@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Models.Workspace;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
@@ -117,6 +118,15 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     /// <summary>SSE discriminant for the live tab-open frame (rides the existing context_event channel — ADR-030 additive).</summary>
     internal const string WorkspaceOpenTabEventType = "workspace_open_tab";
 
+    /// <summary>
+    /// D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): how long the tool result waits
+    /// for the client's <c>POST /api/ai/chat/sessions/{sessionId}/ack</c> before failing
+    /// honestly. Generous enough to absorb SSE delivery + PaneEventBus dispatch + the client's
+    /// ack round-trip under normal network conditions, short enough that a genuinely
+    /// unreachable client doesn't stall the tool call.
+    /// </summary>
+    internal static readonly TimeSpan WorkspaceTabAckTimeout = TimeSpan.FromSeconds(8);
+
     private static readonly JsonSerializerOptions WidgetDataJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -127,6 +137,7 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     private readonly TimeProvider _timeProvider;
     private readonly WorkspaceLayoutService _layoutService;
     private readonly IDataverseUserClient _dataverse;
+    private readonly IUiActionAckCoordinator _ackCoordinator;
     private readonly ILogger<SendWorkspaceArtifactHandler> _logger;
 
     public SendWorkspaceArtifactHandler(
@@ -135,6 +146,7 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
         TimeProvider timeProvider,
         WorkspaceLayoutService layoutService,
         IDataverseUserClient dataverse,
+        IUiActionAckCoordinator ackCoordinator,
         ILogger<SendWorkspaceArtifactHandler> logger)
     {
         _workspaceStateService = workspaceStateService ?? throw new ArgumentNullException(nameof(workspaceStateService));
@@ -145,6 +157,9 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
         // drive-item pointer for the Compose pre-seed — user-OBO, same posture as the
         // dataverse.* handlers (a document invisible to the user fails as unresolvable).
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
+        // D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): gates this tool's success
+        // on a client ack referencing the emitted frame id (see ExecuteOpenWorkspaceTabAsync).
+        _ackCoordinator = ackCoordinator ?? throw new ArgumentNullException(nameof(ackCoordinator));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -690,9 +705,41 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                     }),
                 cancellationToken).ConfigureAwait(false);
 
+            // ── D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037) ───────────────
+            // The SSE frame carries `tabId` as the frame id the client MUST echo back via
+            // POST /api/ai/chat/sessions/{sessionId}/ack once it has actually materialized
+            // the tab (WorkspacePane's widget_load handler → manager.addTab). The tool
+            // result completes ONLY on that ack — an SSE write succeeding proves the frame
+            // left the server, NOT that the client rendered it (the R2-D fabrication gap:
+            // "I opened the tab" with no backing client event). On timeout we fail HONESTLY
+            // — never fall through to the success summary below.
+            var ackOutcome = await _ackCoordinator
+                .WaitForAckAsync(
+                    context.ChatSessionId.ToString("N"),
+                    tabId,
+                    WorkspaceTabAckTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (ackOutcome == UiActionAckOutcome.TimedOut)
+            {
+                stopwatch.Stop();
+                _logger.LogWarning(
+                    "SendWorkspaceArtifactHandler ({Correlation}) workspace tab ack TIMEOUT layoutId={LayoutId} tabId={TabId} after {Duration}ms — no client acknowledgment referencing the frame id (FR-A1-08 honest-failure path).",
+                    correlationLogId, layout.Id, tabId, stopwatch.ElapsedMilliseconds);
+                return ToolResult.Error(
+                    HandlerId, tool.Id, tool.Name,
+                    $"Could not confirm the '{layout.Name}' workspace tab actually opened in the client " +
+                    "(no acknowledgment received within the timeout) — it may NOT be visible. Tell the " +
+                    "user honestly instead of claiming the tab opened; suggest they try again or check " +
+                    "the workspace pane manually.",
+                    ToolErrorCodes.Timeout,
+                    Timed());
+            }
+
             stopwatch.Stop();
             _logger.LogInformation(
-                "SendWorkspaceArtifactHandler ({Correlation}) workspace tab opened layoutId={LayoutId} tabId={TabId} in {Duration}ms",
+                "SendWorkspaceArtifactHandler ({Correlation}) workspace tab opened + ACKED layoutId={LayoutId} tabId={TabId} in {Duration}ms",
                 correlationLogId, layout.Id, tabId, stopwatch.ElapsedMilliseconds);
 
             var summaryText = $"Opened the '{layout.Name}' workspace as a tab in the workspace pane" +

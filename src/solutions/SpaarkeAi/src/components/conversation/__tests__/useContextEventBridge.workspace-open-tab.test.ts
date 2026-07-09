@@ -52,6 +52,9 @@ describe("useContextEventBridge — workspace_open_tab (R2-D)", () => {
         layoutName: "Compose",
       },
       displayName: "Compose",
+      // D-F3 UI-action truthfulness (task AIR2-037): the server-issued frame id must
+      // flow through so WorkspacePane can ack it once the tab actually materializes.
+      frameId: "11111111111111111111111111111111",
     });
 
     // The frame must NOT leak onto the context channel (ExecutionTraceWidget).

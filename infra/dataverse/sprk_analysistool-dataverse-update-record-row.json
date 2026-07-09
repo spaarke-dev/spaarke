@@ -57,6 +57,15 @@
     }
   },
   "sprk_configuration": {
-    "_comment": "No method-discriminator dispatch — single LLM-facing function. Reserved for per-environment defaults."
+    "_comment": "No method-discriminator dispatch — single LLM-facing function. Reserved for per-environment defaults.",
+    "_comment_riskprofile": "Confirmation Policy v2 (FR-A1-03, task 032) catalog-declared risk factors — DATA extending sprk_sideeffectclass per policy-v2-origin-classification-decision-tree.md §1. Consumed by GateRiskProfile.FromConfiguration + RiskTierResolver; NEVER a runtime model judgment. Baseline for a generic system-of-record update: reversible (re-editable) mutation of a record-of-truth row ⇒ Tier 2b. Per-args escalation (e.g. moving a deadline field, changing an assignee) is future per-invocation tiering.",
+    "riskProfile": {
+      "tier": "2b",
+      "reversible": true,
+      "externallyVisible": false,
+      "deadlineImpact": false,
+      "confidentialityImpact": false,
+      "recordOfTruthImpact": true
+    }
   }
 }
