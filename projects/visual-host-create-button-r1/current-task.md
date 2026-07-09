@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 090 — Project wrap-up — COMPLETE. Project status: Complete. |
-| **Step** | All 090 deliverables done: ISS-01 filed (`notes/defer-issues.md` + GitHub #587); maker-facing valid-keys note added to `docs/guides/VISUALHOST-SETUP-GUIDE.md`; README → Complete (KPI→Report Card language corrected throughout); `notes/lessons-learned.md` written (6 lessons + process notes); TASK-INDEX.md + POML marked ✅/completed. |
-| **Status** | not-started (project complete — no active task) |
-| **Next Action** | Commit all wrap-up artifacts, `/push-to-github`, then `/merge-to-master`. Worktree stays open (owner explicitly does NOT want it archived). |
+| **Task** | Project COMPLETE. All work merged to master. |
+| **Step** | Task 090 wrap-up done (README→Complete, lessons-learned, valid-keys doc, ISS-01/#587 filed). PR #588 (v1.4.32 fix + wrap-up docs) merged to master (`983d1f5ec`, 2026-07-09). Main repo's local master synced. **Owner explicitly wants this worktree kept open** (not archived) — not registered with the portfolio system either, so `/devops-project-archive` isn't applicable as-is. |
+| **Status** | not-started (project complete — no active task; branch fully in sync with master, nothing stranded) |
+| **Next Action** | None required. If resuming work here: either (a) pick up Issue #587 (Invoice Vendor Org lookup) with live browser access, or (b) start a fresh task/project in this worktree. |
 
 ### Root cause found + fixed (2026-07-09) — v1.4.32
 `CreateEventWizard.tsx` had two real bugs, both in its own local, duplicated search-helper code (not shared with the already-correct `matterService.ts`/`workAssignmentService.ts`):
