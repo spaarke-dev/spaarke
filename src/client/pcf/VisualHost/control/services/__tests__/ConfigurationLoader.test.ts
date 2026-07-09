@@ -97,7 +97,58 @@ describe('ConfigurationLoader', () => {
         sprk_aggregationtype: AggregationType.Sum,
         sprk_groupbyfield: 'statuscode',
         sprk_optionsjson: '{"showLegend": true}',
+        // Mirrored from sprk_optionsjson by mapToChartDefinition (pre-existing;
+        // this assertion was stale before task 010 — added here while touching it).
+        sprk_configurationjson: '{"showLegend": true}',
+        // "+" Create Wizard button configuration (visual-host-create-button-r1 / FR-01).
+        // Absent in the mock record -> defaults per NFR-05 backward compat.
+        createWizardEnabled: false,
+        createWizardKey: null,
       });
+    });
+
+    it('should default createWizardEnabled=false and createWizardKey=null when columns are null (NFR-05 backward compat)', async () => {
+      const mockRecord = createMockRecord({
+        sprk_createwizardenabled: null,
+        sprk_createwizardkey: null,
+      });
+      const mockContext = createMockContext({
+        retrieveRecord: jest.fn().mockResolvedValue(mockRecord),
+      });
+
+      const result = await loadChartDefinition(mockContext, '12345678-1234-1234-1234-123456789012');
+
+      expect(result.createWizardEnabled).toBe(false);
+      expect(result.createWizardKey).toBeNull();
+    });
+
+    it('should populate createWizardEnabled=true and createWizardKey when set', async () => {
+      const mockRecord = createMockRecord({
+        sprk_createwizardenabled: true,
+        sprk_createwizardkey: 'event',
+      });
+      const mockContext = createMockContext({
+        retrieveRecord: jest.fn().mockResolvedValue(mockRecord),
+      });
+
+      const result = await loadChartDefinition(mockContext, '12345678-1234-1234-1234-123456789012');
+
+      expect(result.createWizardEnabled).toBe(true);
+      expect(result.createWizardKey).toBe('event');
+    });
+
+    it('should trim createWizardKey and treat whitespace-only as null', async () => {
+      const mockRecord = createMockRecord({
+        sprk_createwizardenabled: true,
+        sprk_createwizardkey: '  invoice  ',
+      });
+      const mockContext = createMockContext({
+        retrieveRecord: jest.fn().mockResolvedValue(mockRecord),
+      });
+
+      const result = await loadChartDefinition(mockContext, '12345678-1234-1234-1234-123456789012');
+
+      expect(result.createWizardKey).toBe('invoice');
     });
 
     it('should normalize GUID format (remove braces)', async () => {

@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="PCF control combining Monitor, High Priority, and Access Permission fields in a compact 33%-column layout" languagecode="1033" />
     </Descriptions>
-    <Version>1.0.4</Version>
+    <Version>1.0.5</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>

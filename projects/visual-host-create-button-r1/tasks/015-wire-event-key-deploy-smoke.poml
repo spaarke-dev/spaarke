@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="visual-host-create-button-r1">
+  <metadata>
+    <title>Wire event key + PCF version bump + deploy + Event-from-Matter smoke</title>
+    <phase>A: Visual Host + Registry + Event</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002,012,013,014</dependencies>
+    <blocks>020</blocks>
+    <tags>pcf, deploy, visualhost, e2e-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Deploy + end-to-end verification of Phase A</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical wire-up + pcf-deploy recipe + smoke</model-tier-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Wire CreateEventWizard.tsx to actually consume the initialAssociation/lockAssociation seed VisualHostRoot now passes (task 012), bump the VisualHost PCF version, build:prod + pack + deploy per pcf-deploy, and smoke-test creating an Event from a Matter visual.</prompt>
+  <role>SPAARKE PCF + shared-UI developer. Follow pcf-deploy exactly (build:prod, shared-lib installed first) AND the ADR-024 associateToStep pattern from CreateTodoWizard/TodoWizardDialog.tsx.</role>
+  <goal>VisualHost deployed with a working "+" → CreateEventWizard flow; a created Event is regarding the host Matter with all resolver fields populated; a document dual-binds to Matter + Event.</goal>
+
+  <context>
+    <background>
+      VisualHost imports shared-lib SOURCE — the shared lib node_modules must be installed before build:prod. Bump all 5 version locations.
+
+      **Task 002 (completed)**: the new sprk_document→sprk_event lookup was created with SchemaName "sprk_Event" (verified against live Dataverse metadata to match the existing sprk_Invoice/sprk_WorkAssignment PascalCase convention) — this is the EXACT literal string CreateEventWizard.tsx:254-257 already hardcodes in its `createDocumentRecords('sprk_events', eventId, 'sprk_Event', ...)` call. No code change needed for the document dual-bind itself; verify it during the smoke test rather than assuming.
+
+      **🔴 Scope expansion discovered 2026-07-08 (post-012 review) — CreateEventWizard.tsx has NO Associate-To step at all today.** Traced concretely:
+      - `ICreateEventWizardProps` has no `initialAssociation`/`lockAssociation` fields.
+      - `CreateEventWizard`'s `config: ICreateRecordWizardConfig` object has no `associateToStep` entry at all (not even present-but-unlocked) — the wizard goes straight Add Files → Event Details → Next Steps with zero association capability.
+      - `eventService.ts:249` — `createEvent(formValues, regardingEntityName?, options?)` was already migrated (task 014) to accept an optional `regardingEntityName` + read `formValues.regardingRecordId`/`regardingRecordName`, and internally calls `applyResolverFields` when supplied. But `CreateEventWizard.tsx`'s current `onFinish` calls `eventService.createEvent(currentFormValues)` with ONLY one argument — the resolver path is never actually exercised today.
+      - Task 012 (VisualHostRoot) already passes `initialAssociation`/`lockAssociation=true` as props into whatever wizard the registry resolves — but since `CreateEventWizard` doesn't read those props at all yet, they are silently dropped. Without this task's wiring, the Visual Host "+" → Event flow will create an Event but it will NOT be regarding the host record — this task's own smoke test would fail.
+
+      **The exact reference pattern to copy** is `src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/TodoWizardDialog.tsx` (the only existing wizard using `associateToStep` today):
+      ```ts
+      associateToStep: navigationService
+        ? { entityTypes: EVENT_REGARDING_TARGETS.slice(), navigationService, initialAssociation, lockAssociation }
+        : undefined,
+      // ...
+      onFinish: async (context) => {
+        const result = await eventService.createEvent(currentFormValues, context.association?.entityType, ...);
+        // also copy context.association.recordId/.recordName onto formValues.regardingRecordId/.regardingRecordName
+        // before calling createEvent, per eventService.createEvent's JSDoc contract (reads them off formValues).
+      }
+      ```
+      Note `TodoWizardDialog`'s `associateToStep` config shown above does NOT yet pass `lockAssociation` (it predates task 014) — you ARE adding `lockAssociation` to `CreateEventWizard`'s config (task 014 already added `lockAssociation` support to `CreateRecordWizard`/`AssociateToStep` — read `CreateRecordWizard.tsx` around `config.associateToStep` handling to confirm the exact field name and behavior: when `lockAssociation` is true, the step is hidden entirely but the seeded `initialAssociation` still reaches `onFinish` via `context.association`).
+
+      **entityTypes list**: `AssociateToStep/types.ts` has `TODO_REGARDING_TARGETS` (11 entries) but it's sprk_todo-specific and doesn't match Event's actual schema. Build a new `EVENT_REGARDING_TARGETS` (or confirm/reuse an existing one if you find it already added) from Event's REAL live-schema lookups — confirmed via Phase 0 discovery (`describe('tables/sprk_event')`): `sprk_regardingmatter`, `sprk_regardingproject`, `sprk_regardinginvoice`, `sprk_regardingaccount`, `sprk_regardingcontact`, `sprk_regardingworkassignment`, `sprk_regardinganalysis`, `sprk_regardingbudget`, `sprk_regardingorganziation` (NOTE: this field name has a typo in live schema — "organziation" not "organization" — use the EXACT live field name, do not "fix" the typo, that would break the lookup). This list matters mainly for future non-locked launch contexts (nothing currently opens CreateEventWizard unlocked with a picker) — get it right, but don't over-invest; the CRITICAL path for THIS task's acceptance criteria is the locked (`lockAssociation=true`) Visual Host launch, which bypasses the picker UI entirely and just needs `context.association` to carry the seeded `initialAssociation` through to `onFinish`.
+    </background>
+    <relevant-files>
+      src/client/pcf/VisualHost/ (control + Solution)
+      src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/CreateEventWizard.tsx (add associateToStep + wire onFinish)
+      src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts (createEvent signature — already migrated, do not re-modify without reason)
+      src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/TodoWizardDialog.tsx (canonical associateToStep reference)
+      src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/types.ts (RegardingTarget shape; add EVENT_REGARDING_TARGETS here)
+      src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateRecordWizard.tsx (lockAssociation handling, context.association)
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      docs/guides/PCF-DEPLOYMENT-GUIDE.md
+      .claude/skills/pcf-deploy/SKILL.md
+      src/client/pcf/CLAUDE.md
+      projects/visual-host-create-button-r1/spec.md
+      projects/visual-host-create-button-r1/notes/field-manifests/event.md
+      .claude/adr/ADR-024-polymorphic-resolver-pattern.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify wizardRegistry 'event' → migrated CreateEventWizard (already true per task 011).</step>
+    <step>Add `initialAssociation?: AssociationResult` + `lockAssociation?: boolean` to `ICreateEventWizardProps`; add `EVENT_REGARDING_TARGETS` to `AssociateToStep/types.ts` from Event's real schema (see background — exact live field names, including the "organziation" typo); add `associateToStep` to CreateEventWizard's `config` object (gated on `navigationService` presence, mirroring TodoWizardDialog); wire `onFinish` to read `context.association` and pass it into `eventService.createEvent(formValues, context.association?.entityType)` after copying `context.association.recordId`/`.recordName` onto `formValues.regardingRecordId`/`.regardingRecordName`.</step>
+    <step>Verify (no code change expected beyond the above) that CreateEventWizard.tsx's hardcoded 'sprk_Event' nav-prop string in its document dual-bind call now resolves against the sprk_document→sprk_event lookup task 002 created — confirm during the smoke test below rather than assuming.</step>
+    <step>Install shared-lib node_modules; bump VisualHost version (all 5 locations); npm run build:prod. NOTE (per task 012 findings): baseline bundle was 741 KiB before task 012's `@spaarke/auth` wiring, which grew it to ~1.19 MiB (structural cost of `@azure/msal-browser` entering the graph for the first time — expected, not a regression). This task's own delta on top of that should be small (a few KB, from the new associateToStep wiring); report the actual before/after.</step>
+    <step>Copy artifacts; pack.ps1. Provide the solution ZIP path for import (or import per pcf-deploy).</step>
+    <step>Smoke: on a Matter's Events visual, click "+", verify the Associate-To step is HIDDEN (locked to the Matter), complete CreateEventWizard, submit; inspect the Event's regarding lookup + all 5 resolver fields in Dataverse; upload a file and confirm it appears in both the Matter and Event Documents subgrids.</step>
+    <step>Regression: open CreateEventWizard from its existing Code Page entry point (src/solutions/CreateEventWizard/src/main.tsx) if reasonably reachable, or at minimum confirm via code review that omitting initialAssociation/lockAssociation (the Code Page's main.tsx doesn't pass either today) still renders a sane wizard (either the step doesn't render because navigationService is absent there too, or renders unlocked+empty) — no crash, no regression to that existing surface.</step>
+  </steps>
+
+  <tools>Read, Grep, Edit, Bash, PowerShell, Skill(pcf-deploy), Skill(ui-test)</tools>
+  <outputs>Deployed VisualHost solution ZIP; CreateEventWizard associateToStep wiring; smoke-test results.</outputs>
+
+  <acceptance-criteria>
+    <criterion>"+" on an Event visual opens CreateEventWizard with the Associate-To step hidden; created Event regarding the host Matter with all 5 resolver fields.</criterion>
+    <criterion>Uploaded file dual-binds (Matter + Event subgrids).</criterion>
+    <criterion>No regression to the existing CreateEventWizard Code Page entry point.</criterion>
+    <criterion>Bundle delta reported (informational this task — the &lt;5 KB gzipped NFR-01 budget is evaluated at the final Phase-E state across all tasks per task 012's finding that `@spaarke/auth` is a necessary ~490 KB structural cost, not a regression to chase down here). No BFF files in diff.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Event create from Matter visual">
+      <steps><step>Open Matter form → Events visual</step><step>Click "+"; complete wizard; submit</step><step>Open the new Event; verify regarding + resolver fields</step></steps>
+      <expected>Valid sprk_event regarding the Matter; no console errors</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    <summary>
+      Completed as a single-session, main-agent (not delegated) FULL-rigor execution. Wired
+      CreateEventWizard.tsx to consume the initialAssociation/lockAssociation seed VisualHostRoot
+      already passes (task 012), gated more precisely than TodoWizardDialog to avoid a Code Page
+      regression, bumped VisualHost 1.4.27 → 1.4.28 in all 5 locations, built:prod, packed, and
+      IMPORTED the solution into spaarkedev1 (pac CLI was authenticated in this session).
+    </summary>
+
+    <files-changed>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/types.ts — added EVENT_REGARDING_TARGETS (9 entries), cross-verified against a LIVE describe('tables/sprk_event') query run during this task (not just trusted from the task background) — confirms all 9 lookupAttribute names exactly, including the "sprk_regardingorganziation" typo (live column name; do not "fix") and the OOB account/contact target logical names.</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/CreateEventWizard.tsx — added initialAssociation?/lockAssociation? to ICreateEventWizardProps; extracted 2 exported pure helpers (resolveEventAssociateToStepConfig, mergeEventRegardingFromAssociation) for testability; wired config.associateToStep + onFinish regarding-passthrough into eventService.createEvent(formValuesWithRegarding, context.association?.entityType).</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/__tests__/CreateEventWizard.associateToStep.test.ts — NEW. 13 tests covering EVENT_REGARDING_TARGETS live-schema fidelity, the gating rule (incl. the Code Page non-regression case), and the regarding-passthrough merge (incl. no-mutation + overwrite-stale-value cases).</file>
+      <file>src/client/pcf/VisualHost/control/ControlManifest.Input.xml — version 1.4.27 → 1.4.28 (location 1/5).</file>
+      <file>src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx — version footer 1.4.27 → 1.4.28 (location 2/5).</file>
+      <file>src/client/pcf/VisualHost/Solution/solution.xml — &lt;Version&gt; 1.4.27 → 1.4.28 (location 3/5).</file>
+      <file>src/client/pcf/VisualHost/Solution/Controls/sprk_Spaarke.Visuals.VisualHost/ControlManifest.xml — version 1.4.27 → 1.4.28 (location 4/5).</file>
+      <file>src/client/pcf/VisualHost/Solution/pack.ps1 — $version 1.4.27 → 1.4.28 (location 5/5).</file>
+      <file>src/client/pcf/VisualHost/Solution/Controls/sprk_Spaarke.Visuals.VisualHost/{bundle.js,ControlManifest.xml,styles.css} — build:prod output copied in for packing (generated artifacts).</file>
+    </files-changed>
+
+    <step7-code-page-regression-resolution>
+      RESOLVED via Path C (precise gating), not escalated to a human decision — the POML explicitly
+      offered this as one of two acceptable resolutions ("gate more precisely... or flag for human
+      judgment"). Confirmed by reading src/solutions/CreateEventWizard/src/main.tsx:81-92: it DOES
+      pass navigationService={navigationService} to CreateEventWizard, but passes NEITHER
+      initialAssociation NOR lockAssociation. A gate mirroring TodoWizardDialog verbatim
+      (navigationService-only) would have surfaced a brand-new, unlocked, un-seeded Associate-To
+      step on that already-shipped surface — a real UX regression (an extra required
+      click/Skip on every standalone Event creation).
+      Fix: resolveEventAssociateToStepConfig() in CreateEventWizard.tsx requires navigationService
+      AND (initialAssociation !== undefined OR lockAssociation === true). This exactly preserves
+      the Code Page's current behavior (associateToStep resolves to undefined — zero change) while
+      enabling the Visual Host locked-launch path (initialAssociation set + lockAssociation=true).
+      Unit-tested explicitly: "returns undefined when navigationService is present but neither
+      initialAssociation nor lockAssociation is set (Code Page regression guard)".
+    </step7-code-page-regression-resolution>
+
+    <verified-statically-or-via-test>
+      <item>TypeScript compiles clean (shared-lib tsc build succeeded; PCF webpack build succeeded).</item>
+      <item>eslint: 0 errors on all changed files (1 PRE-EXISTING warning on an unrelated tenantId useMemo dep, not introduced by this task).</item>
+      <item>26/26 CreateEventWizard test suite tests pass (13 new + 13 pre-existing eventService tests, all green — no regression to task 014's resolver migration).</item>
+      <item>54/54 AssociateToStep + CreateRecordWizard + CreateTodoWizard tests pass (no regression to the shared associateToStep/lockAssociation machinery task 014 added).</item>
+      <item>code-review + adr-check quality gates: 0 critical, 0 warnings, 0 violations.</item>
+      <item>Live Dataverse schema verification (mcp__dataverse__describe): confirmed sprk_event has all 9 entity-specific regarding lookups used in EVENT_REGARDING_TARGETS, including the sprk_regardingorganziation typo and OOB account/contact targets — matches the POML's claims exactly. Also confirmed sprk_document.sprk_event lookup column exists (task 002's schema addition).</item>
+      <item>Deployment: VisualHostSolution imported successfully to spaarkedev1 at v1.4.28 (pac solution import + publish-changes both succeeded; pac solution list confirms 1.4.28 live).</item>
+    </verified-statically-or-via-test>
+
+    <not-verified-follow-up-for-human>
+      <item>Full click-through UI smoke test (open a Matter's Events visual, click "+", confirm the
+      Associate-To step is HIDDEN, complete + submit the wizard, open the created Event and verify
+      the regarding lookup + all 5 resolver fields, upload a file and confirm it appears in BOTH the
+      Matter and Event Documents subgrids) was NOT performed — no Chrome/browser tool was available
+      in this session. This is the acceptance-criteria-defining verification and should be run by a
+      human (or a future ui-test-skill session with --chrome) against the now-live v1.4.28 deploy.</item>
+      <item>The exact OData nav-prop SchemaName casing ("sprk_Event") hardcoded at
+      CreateEventWizard.tsx:254-257 for the document dual-bind was NOT independently re-verified via
+      EntityDefinitions/ManyToOneRelationships metadata in this session (no such metadata-query tool
+      was available) — it relies on task 002's prior claim. The file-upload part of the smoke test
+      above will empirically confirm or refute this in the same pass.</item>
+    </not-verified-follow-up-for-human>
+
+    <bundle-size>
+      Fresh npm run build:prod output: bundle.js = 1,251,804 bytes (1.194 MiB), matching the task's
+      own stated expected baseline (~1.19 MiB, post task-012 @spaarke/auth addition). Packed ZIP
+      (VisualHostSolution_v1.4.28.zip) = 354,857 bytes. A precise isolated before/after delta
+      attributable ONLY to this task's associateToStep wiring was not captured (a git-stash-based
+      clean rebuild was attempted but `git status` timed out repeatedly in this environment/session;
+      aborted rather than risk uncommitted work) — the added code is 2 small pure functions + a
+      9-entry data array, expected to be a few KB uncompressed, well within informational tolerance
+      per the acceptance criterion (NFR-01 budget is evaluated at final Phase-E state, not per-task).
+    </bundle-size>
+
+    <deployment>
+      ZIP: src/client/pcf/VisualHost/Solution/bin/VisualHostSolution_v1.4.28.zip
+      Imported to spaarkedev1 via `pac solution import --path ... --publish-changes` (succeeded);
+      `pac solution list` confirms VisualHostSolution at 1.4.28 live in the environment.
+    </deployment>
+  </notes>
+</task>

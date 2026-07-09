@@ -113,6 +113,107 @@ export const TODO_REGARDING_TARGETS: ReadonlyArray<RegardingTarget> = [
 ] as const;
 
 // ---------------------------------------------------------------------------
+// EVENT_REGARDING_TARGETS — canonical list of the 9 sprk_event regarding targets
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical list of the nine entity targets supported for `sprk_event`
+ * regarding associations (visual-host-create-button-r1 task 015).
+ *
+ * Confirmed against the LIVE Dataverse schema via `describe('tables/sprk_event')`
+ * (spaarkedev1, 2026-07-08) — every `lookupAttribute` below is a real column on
+ * `sprk_event` today.
+ *
+ * **Note the typo in `sprk_regardingorganziation`** (transposed "z"/"i" — NOT
+ * "organization"): this is the REAL live lookup-attribute name on `sprk_event`.
+ * Do not "fix" it — pointing at the corrected spelling would target a
+ * nonexistent column and silently fail to bind. The `label` is spelled
+ * correctly ("Organization"); only the `lookupAttribute` value carries the
+ * typo, matching the live column name exactly.
+ *
+ * `Account` and `Contact` use the OOB `account`/`contact` logical names (not
+ * `sprk_account`/`sprk_contact`), confirmed via the same schema query.
+ *
+ * @see .claude/adr/ADR-024-polymorphic-resolver-pattern.md
+ * @see projects/visual-host-create-button-r1/tasks/015-wire-event-key-deploy-smoke.poml
+ */
+export const EVENT_REGARDING_TARGETS: ReadonlyArray<RegardingTarget> = [
+  { label: 'Matter', entityType: 'sprk_matter', lookupAttribute: 'sprk_regardingmatter' },
+  { label: 'Project', entityType: 'sprk_project', lookupAttribute: 'sprk_regardingproject' },
+  { label: 'Invoice', entityType: 'sprk_invoice', lookupAttribute: 'sprk_regardinginvoice' },
+  { label: 'Account', entityType: 'account', lookupAttribute: 'sprk_regardingaccount' },
+  { label: 'Contact', entityType: 'contact', lookupAttribute: 'sprk_regardingcontact' },
+  { label: 'Work Assignment', entityType: 'sprk_workassignment', lookupAttribute: 'sprk_regardingworkassignment' },
+  { label: 'Analysis', entityType: 'sprk_analysis', lookupAttribute: 'sprk_regardinganalysis' },
+  { label: 'Budget', entityType: 'sprk_budget', lookupAttribute: 'sprk_regardingbudget' },
+  // NOTE: intentional typo — see doc comment above.
+  { label: 'Organization', entityType: 'sprk_organization', lookupAttribute: 'sprk_regardingorganziation' },
+] as const;
+
+// ---------------------------------------------------------------------------
+// INVOICE_REGARDING_TARGETS — canonical list of the 2 sprk_invoice regarding targets
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical list of the two entity targets supported for `sprk_invoice`
+ * regarding associations (visual-host-create-button-r1 task 030).
+ *
+ * Confirmed against the LIVE Dataverse schema per
+ * `notes/field-manifests/invoice.md` (Phase 0, spaarkedev1, 2026-07-08):
+ * Invoice's entity-specific lookups are **Matter + Project only** — narrower
+ * than `EVENT_REGARDING_TARGETS` / `TODO_REGARDING_TARGETS` — per spec FR-09
+ * / design §5.6 ("`applyResolverFields` succeeds for Matter and Project
+ * parents on Event/Invoice/KPI").
+ *
+ * Unlike `EVENT_REGARDING_TARGETS` (whose lookup columns carry the
+ * `sprk_regarding{entity}` prefix), the manifest confirms Invoice's
+ * entity-specific lookup columns are named directly `sprk_matter` /
+ * `sprk_project` (no "regarding" prefix) — this is informational metadata
+ * only (`RegardingTarget.lookupAttribute` doc comment); `applyResolverFields`
+ * discovers the real nav-prop from live metadata at runtime regardless.
+ *
+ * @see .claude/adr/ADR-024-polymorphic-resolver-pattern.md
+ * @see projects/visual-host-create-button-r1/notes/field-manifests/invoice.md
+ * @see projects/visual-host-create-button-r1/tasks/030-create-invoice-wizard.poml
+ */
+export const INVOICE_REGARDING_TARGETS: ReadonlyArray<RegardingTarget> = [
+  { label: 'Matter', entityType: 'sprk_matter', lookupAttribute: 'sprk_matter' },
+  { label: 'Project', entityType: 'sprk_project', lookupAttribute: 'sprk_project' },
+] as const;
+
+// ---------------------------------------------------------------------------
+// REPORTCARD_REGARDING_TARGETS — canonical list of the 2 sprk_reportcard regarding targets
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical list of the two entity targets supported for `sprk_reportcard`
+ * regarding associations (visual-host-create-button-r1 task 040).
+ *
+ * Confirmed against the LIVE Dataverse schema via `describe('tables/sprk_reportcard')`
+ * (spaarkedev1, 2026-07-08) per
+ * `projects/visual-host-create-button-r1/notes/field-manifests/reportcard.md`:
+ * `sprk_reportcard`'s entity-specific lookups are **Matter + Project only** —
+ * `sprk_regardingmatter` / `sprk_regardingproject` — no other
+ * `sprk_regarding{entity}` lookups exist on this table.
+ *
+ * Unlike `INVOICE_REGARDING_TARGETS` (whose lookup columns are named directly
+ * `sprk_matter` / `sprk_project`, no "regarding" prefix), Report Card's
+ * entity-specific lookups DO carry the `sprk_regarding{entity}` prefix — same
+ * convention as `TODO_REGARDING_TARGETS` / `EVENT_REGARDING_TARGETS`. This is
+ * informational metadata only (`RegardingTarget.lookupAttribute` doc comment);
+ * `applyResolverFields` discovers the real nav-prop from live metadata at
+ * runtime regardless.
+ *
+ * @see .claude/adr/ADR-024-polymorphic-resolver-pattern.md
+ * @see projects/visual-host-create-button-r1/notes/field-manifests/reportcard.md
+ * @see projects/visual-host-create-button-r1/tasks/040-create-reportcard-wizard.poml
+ */
+export const REPORTCARD_REGARDING_TARGETS: ReadonlyArray<RegardingTarget> = [
+  { label: 'Matter', entityType: 'sprk_matter', lookupAttribute: 'sprk_regardingmatter' },
+  { label: 'Project', entityType: 'sprk_project', lookupAttribute: 'sprk_regardingproject' },
+] as const;
+
+// ---------------------------------------------------------------------------
 // AssociationResult
 // ---------------------------------------------------------------------------
 
@@ -194,4 +295,19 @@ export interface AssociateToStepProps {
    * Useful while the wizard is in a loading or submitting state.
    */
   disabled?: boolean;
+
+  /**
+   * When `true`, the step renders the pre-supplied `value` as a fixed,
+   * read-only association: the record-type dropdown, "Select Record" button,
+   * and Clear affordance are all suppressed. Used when the parent record is
+   * unambiguous and must not be changed by the user — e.g. a wizard launched
+   * from a Visual Host visual, where the host record is always the parent
+   * (design §5.5, `lockAssociation`).
+   *
+   * Distinct from {@link disabled} (a transient greying-out during submit):
+   * `locked` is a permanent contract that the association cannot be edited.
+   * When `locked` is `true` but no `value` is supplied, the step renders only
+   * its header (there is nothing to lock).
+   */
+  locked?: boolean;
 }

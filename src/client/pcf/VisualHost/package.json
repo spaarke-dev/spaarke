@@ -23,9 +23,11 @@
     "build-storybook": "storybook build"
   },
   "dependencies": {
+    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
     "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components/spaarke-ui-components-2.0.0.tgz"
   },
   "devDependencies": {
+    "@azure/msal-browser": "^3.30.0",
     "@babel/core": "^7.28.5",
     "@babel/preset-env": "^7.28.5",
     "@babel/preset-react": "^7.28.5",

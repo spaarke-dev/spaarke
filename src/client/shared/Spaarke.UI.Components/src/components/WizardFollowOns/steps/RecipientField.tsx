@@ -1,17 +1,22 @@
 /**
  * RecipientField.tsx
- * Hybrid contact-lookup + freeform email entry field with chip list.
+ * Hybrid contact-lookup + freeform email entry field with a chip list.
  *
- * Moved from LegalWorkspace's CreateMatter to the shared library since
- * this component is entity-agnostic — it uses search callbacks.
+ * Internal to the WizardFollowOns module (consumed by DraftSummaryFollowOnStep).
+ * Ported from CreateRecordWizard/steps/RecipientField so this module is
+ * self-contained and survives the removal of the CreateRecordWizard follow-on
+ * copies in the per-wizard migrations (tasks 021–024).
  *
- * @see DraftSummaryStep — primary consumer
+ * Entity-agnostic — all record access is via injected search callbacks.
+ *
+ * Constraints: Fluent v9 only, semantic tokens (ADR-021), no domain imports
+ * (ADR-012).
  */
 import * as React from 'react';
 import { Input, Text, Button, Spinner, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
 import { DismissRegular, SearchRegular, PersonRegular, MailRegular } from '@fluentui/react-icons';
 import type { ILookupItem } from '../../../types/LookupTypes';
-import type { IRecipientItem } from '../types';
+import type { IRecipientItem } from '../followOnTypes';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -387,3 +392,5 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
     </div>
   );
 };
+
+RecipientField.displayName = 'RecipientField';

@@ -1,24 +1,28 @@
 /**
- * DraftSummaryStep.tsx
- * Follow-on step for AI-generated summary with recipient distribution.
+ * DraftSummaryFollowOnStep.tsx
+ * Follow-on step for an AI-generated summary with recipient distribution,
+ * shared across Spaarke create wizards.
  *
- * Moved from LegalWorkspace's CreateMatter to the shared library.
- * The AI fetch function is provided via props (no entity-specific imports).
+ * Generalized into the WizardFollowOns module from
+ * CreateRecordWizard/steps/DraftSummaryStep. The AI fetch function is injected
+ * via props (no entity-specific imports); when omitted, the step shows a
+ * manual-entry textarea immediately. Uses the module-local `RecipientField`.
  *
- * @see CreateRecordWizard — wires the fetchAiSummary callback from config
+ * Constraints: Fluent v9 only, semantic tokens (ADR-021), no domain imports
+ * (ADR-012).
  */
 import * as React from 'react';
 import { Card, CardHeader, Textarea, Spinner, Text, Badge, makeStyles, tokens } from '@fluentui/react-components';
 import { SparkleRegular, WarningRegular } from '@fluentui/react-icons';
 import { RecipientField } from './RecipientField';
-import type { IRecipientItem } from '../types';
+import type { IRecipientItem } from '../followOnTypes';
 import type { ILookupItem } from '../../../types/LookupTypes';
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
-export interface IDraftSummaryStepProps {
+export interface IDraftSummaryFollowOnStepProps {
   /** Current AI-generated or user-edited summary text (controlled). */
   summaryText: string;
   /** Called when summary text changes. */
@@ -34,7 +38,7 @@ export interface IDraftSummaryStepProps {
   /** Search function for contact lookup. */
   onSearchContacts: (query: string) => Promise<ILookupItem[]>;
   /**
-   * Optional async function to fetch AI draft summary.
+   * Optional async function to fetch an AI draft summary.
    * If not provided, the step shows a manual-entry textarea immediately.
    */
   fetchAiSummary?: () => Promise<{ summary: string }>;
@@ -115,7 +119,7 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
+export const DraftSummaryFollowOnStep: React.FC<IDraftSummaryFollowOnStepProps> = ({
   summaryText,
   onSummaryChange,
   recipients,
@@ -239,3 +243,5 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
     </div>
   );
 };
+
+DraftSummaryFollowOnStep.displayName = 'DraftSummaryFollowOnStep';

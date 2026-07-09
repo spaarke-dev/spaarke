@@ -2,7 +2,15 @@
   "extends": "./node_modules/pcf-scripts/tsconfig_base.json",
   "compilerOptions": {
     "typeRoots": ["node_modules/@types"],
-    "module": "es2015",
+    // "module" intentionally NOT overridden here (task 012,
+    // visual-host-create-button-r1) — inherits "es2020" from
+    // pcf-scripts/tsconfig_base.json. The prior "es2015" override predates
+    // any dynamic `import()` usage in this control's dependency graph;
+    // `wizardRegistry.ts` (task 011) uses `React.lazy(() => import(...))`
+    // for wizard code-splitting, which TS only permits under "es2020"+
+    // module targets (TS1323). Every other PCF in this repo (e.g.
+    // SemanticSearchControl) has no "module" override and already inherits
+    // "es2020" from the base config.
     "moduleResolution": "node",
     "jsx": "react",
     "esModuleInterop": true,

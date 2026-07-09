@@ -125,6 +125,17 @@ export interface IChartDefinition {
 
   // Card shape (v1.2.44)
   sprk_metriccardshape?: CardShape;
+
+  // "+" Create Wizard button configuration (visual-host-create-button-r1 / FR-01)
+  /** Gates the "+" toolbar button. Optional so existing object literals (e.g.
+   *  `matterMainCards.ts`) compile unchanged; `ConfigurationLoader` always
+   *  populates a definitive `boolean`, defaulting to `false` when
+   *  `sprk_createwizardenabled` is null/absent (NFR-05 backward compat). */
+  createWizardEnabled?: boolean;
+  /** Registry key selecting which wizard to open (see `wizardRegistry.ts`).
+   *  `null`/absent when unset — the "+" handler falls back to
+   *  `sprk_entitylogicalname`. */
+  createWizardKey?: string | null;
 }
 
 /**
