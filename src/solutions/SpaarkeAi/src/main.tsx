@@ -253,9 +253,41 @@ async function bootstrap(): Promise<void> {
           speDriveItemId?: string;
           speDriveId?: string | null;
           fileName?: string | null;
+          upload?: {
+            sessionId?: string;
+            sessionFileId?: string;
+            fileName?: string | null;
+          };
         }
       | undefined;
-    if (!seed || typeof seed.speDriveItemId !== "string" || seed.speDriveItemId.length === 0) {
+    if (!seed) {
+      return app;
+    }
+
+    // FR-03 (task 012): an Assistant-UPLOADED file has no SPE pointer — it rides as
+    // `compose.upload` and mounts transiently (create-on-save). Checked first because it is
+    // mutually exclusive with the stored-document (speDriveItemId) path.
+    if (
+      seed.upload &&
+      typeof seed.upload.sessionId === "string" &&
+      seed.upload.sessionId.length > 0 &&
+      typeof seed.upload.sessionFileId === "string" &&
+      seed.upload.sessionFileId.length > 0
+    ) {
+      const composeUploadLaunch: ComposeLaunchContextValue = {
+        composeMode: "editor",
+        document: null,
+        driveId: "",
+        upload: {
+          sessionId: seed.upload.sessionId,
+          sessionFileId: seed.upload.sessionFileId,
+          fileName: seed.upload.fileName ?? undefined,
+        },
+      };
+      return <ComposeLaunchContext.Provider value={composeUploadLaunch}>{app}</ComposeLaunchContext.Provider>;
+    }
+
+    if (typeof seed.speDriveItemId !== "string" || seed.speDriveItemId.length === 0) {
       return app;
     }
 

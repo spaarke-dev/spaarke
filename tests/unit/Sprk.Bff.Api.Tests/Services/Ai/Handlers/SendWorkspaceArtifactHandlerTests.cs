@@ -467,6 +467,95 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
         compose.GetProperty("fileName").GetString().Should().Be("NDA - Acme.docx");
     }
 
+    // ═════════════════════════════════════════════════════════════════════════════
+    // FR-03 (spaarkeai-compose-r2 task 012) — session-uploaded file transient mount
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private static string BuildWorkspaceArgsJsonWithSessionFile(string sessionFileId) =>
+        $$"""
+          {
+            "widgetType": "Workspace",
+            "title": "Compose",
+            "widgetData": {
+              "kind": "Workspace",
+              "layoutName": "Compose",
+              "sessionFileId": "{{sessionFileId}}"
+            }
+          }
+          """;
+
+    [Fact]
+    public async Task ExecuteChatAsync_WorkspaceLayout_WithSessionFileId_CarriesUploadSeed_AndNoStoredDocumentSeed()
+    {
+        SeedComposeSystemLayout();
+        const string sessionFileId = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+
+        var emitted = new List<Sprk.Bff.Api.Api.Ai.ChatSseEvent>();
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: BuildWorkspaceArgsJsonWithSessionFile(sessionFileId)) with
+        {
+            SseWriter = (evt, _) => { emitted.Add(evt); return Task.CompletedTask; }
+        };
+
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildArtifactTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.Summary.Should().Contain("transient working draft",
+            because: "FR-03: an uploaded file mounts transiently (create-on-save); the tool result grounds that claim");
+
+        var dto = emitted.Should().ContainSingle().Subject.Data
+            .Should().BeOfType<Sprk.Bff.Api.Services.Ai.Telemetry.ContextSseEventDto>().Subject;
+        using var widgetData = JsonDocument.Parse(dto.ContextWidgetDataJson!);
+        var compose = widgetData.RootElement.GetProperty("compose");
+        var upload = compose.GetProperty("upload");
+        upload.GetProperty("sessionFileId").GetString().Should().Be(sessionFileId);
+        upload.GetProperty("sessionId").GetString().Should().Be(ctx.ChatSessionId.ToString("D"),
+            because: "the client fetches the retained bytes from POST /api/compose/upload keyed by the chat session id");
+
+        // The upload path carries NO stored-document (sprk_document / SPE) seed — those are
+        // mutually exclusive with the transient upload mount.
+        compose.TryGetProperty("sprkDocumentId", out _).Should().BeFalse();
+        compose.TryGetProperty("speDriveItemId", out _).Should().BeFalse();
+
+        // Deterministic file handling — no Dataverse resolution on the upload path (ADR-013).
+        _dataverse.Verify(
+            d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public void ValidateChat_Workspace_WithBothDocumentIdAndSessionFileId_ReturnsFailure()
+    {
+        var argsJson = $$"""
+          {
+            "widgetType": "Workspace",
+            "title": "Compose",
+            "widgetData": {
+              "kind": "Workspace",
+              "layoutName": "Compose",
+              "documentId": "d0c00000-1111-2222-3333-444444444444",
+              "sessionFileId": "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+            }
+          }
+          """;
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: argsJson);
+
+        var result = CreateHandler().ValidateChat(ctx, BuildArtifactTool());
+
+        result.IsValid.Should().BeFalse(
+            because: "documentId (a stored sprk_document) and sessionFileId (an uploaded chat file) are mutually exclusive");
+    }
+
+    [Fact]
+    public void ValidateChat_Workspace_WithSessionFileIdOnly_Succeeds()
+    {
+        var ctx = BuildChatInvocationContext(
+            toolArgumentsJson: BuildWorkspaceArgsJsonWithSessionFile("a1b2c3d4e5f60718293a4b5c6d7e8f90"));
+
+        var result = CreateHandler().ValidateChat(ctx, BuildArtifactTool());
+
+        result.IsValid.Should().BeTrue(
+            because: "FR-03 removes the session-upload refusal for the Compose-mount path");
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_WorkspaceLayout_DocumentWithoutStoredFile_OpensTabEmpty_AndSaysSoHonestly()
     {
@@ -538,8 +627,8 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
         var result = handler.ValidateChat(ctx, BuildArtifactTool());
 
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.Contains("Session-uploaded", StringComparison.Ordinal),
-            because: "the rejection teaches the model the honest alternative (open empty + say so)");
+        result.Errors.Should().Contain(e => e.Contains("sessionFileId", StringComparison.Ordinal),
+            because: "the rejection teaches the model the honest alternative — mount the upload via widgetData.sessionFileId");
     }
 
     [Fact]

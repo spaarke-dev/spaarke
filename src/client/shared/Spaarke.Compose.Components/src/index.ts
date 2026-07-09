@@ -86,6 +86,8 @@ export type { ComposeLaunchContextValue } from './context/composeLaunchContext';
 export type {
   // Document pointer
   ComposeDocumentRef,
+  // Transient upload-mount pointer (FR-03 / task 012)
+  ComposeUploadRef,
   // Flow 1 — workspace → context (selection change)
   ComposeWorkspaceToContextFlow,
   ComposeSelection,

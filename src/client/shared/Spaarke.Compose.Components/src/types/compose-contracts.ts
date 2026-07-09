@@ -108,6 +108,29 @@ export interface ComposeDocumentRef {
 }
 
 /**
+ * Pointer to a chat-session UPLOADED file whose original bytes the BFF retained
+ * (ITenantCache `doc-upload-binary`, from the chat upload pipeline). Distinct from
+ * {@link ComposeDocumentRef} because an uploaded file has NO SPE drive-item pointer and
+ * NO `sprk_document` record yet — it mounts into the editor as a TRANSIENT working draft
+ * (spaarkeai-compose-r2 FR-03 / task 012). The document record is created only on first
+ * Save (create-on-save, FR-05 / task 013).
+ *
+ * The workspace fetches the bytes via `POST /api/compose/upload` with `{ sessionId,
+ * documentId: sessionFileId }` and routes the base64-decoded content into the editor's
+ * `docxBytes` mount seam.
+ *
+ * Privacy: identifiers only (Tier 1 safe).
+ */
+export interface ComposeUploadRef {
+  /** The chat session id the file was uploaded into (keys the retained-bytes cache). */
+  sessionId: string;
+  /** The uploaded file's session-scoped id (the `documentId` from the upload 202). */
+  sessionFileId: string;
+  /** Optional human-readable file name for UI labelling (else resolved from the upload response). */
+  fileName?: string;
+}
+
+/**
  * Editor selection span — anchors a region of the open document.
  *
  * Per design.md §14 row 2: this is TRANSIENT payload-only state. Subscribers

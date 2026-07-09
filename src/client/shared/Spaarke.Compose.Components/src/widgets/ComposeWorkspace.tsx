@@ -88,6 +88,7 @@ import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types
 import { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHeartbeatGate } from './hooks';
 import type {
   ComposeDocumentRef,
+  ComposeUploadRef,
   ComposeAssistantToWorkspaceFlow,
   ComposeWorkspaceToContextFlow,
   ComposeWorkspaceToAssistantFlow,
@@ -143,6 +144,15 @@ export interface ComposeWorkspaceProps {
    * When `undefined` or `null`, renders `ComposeEmptyState` (Path A/B picker).
    */
   initialDocumentRef?: ComposeDocumentRef | null;
+
+  /**
+   * FR-03 (task 012): optional transient upload-mount pointer. When supplied (and no
+   * `initialDocumentRef`), the workspace fetches the Assistant-uploaded file's retained
+   * bytes via `POST /api/compose/upload` and mounts them into the editor as a TRANSIENT
+   * working draft (no `sprk_document`; create-on-save on first Save). Mutually exclusive
+   * with `initialDocumentRef` — an upload has no SPE pointer.
+   */
+  initialUploadRef?: ComposeUploadRef | null;
 
   /** Optional initial ChatSession id (correlation). */
   initialSessionId?: string;
@@ -235,6 +245,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const styles = useStyles();
   const {
     initialDocumentRef,
+    initialUploadRef,
     initialSessionId,
     bffBaseUrl,
     driveId,
@@ -713,6 +724,84 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const handleImportWarnings = React.useCallback((warnings: Array<{ type: string; message: string }>): void => {
     dispatch({ kind: 'importWarnings', warnings });
   }, []);
+
+  // -------------------------------------------------------------------------
+  // FR-03 (task 012) — transient upload-mount
+  // -------------------------------------------------------------------------
+  // When launched from a chat "open in Compose" on an Assistant-UPLOADED file,
+  // fetch the retained bytes from POST /api/compose/upload and route them into
+  // the editor's `docxBytes` seam as a transient working draft (create-on-save;
+  // NO sprk_document until first Save). Mutually exclusive with the
+  // initialDocumentRef (stored-document) path. `@spaarke/auth` per ADR-028.
+  React.useEffect(() => {
+    if (!initialUploadRef) return;
+    if (initialDocumentRef) return; // stored-document path wins; upload is mutually exclusive
+    if (state.status !== 'empty' && state.status !== 'error') return;
+    if (!initialUploadRef.sessionId || !initialUploadRef.sessionFileId) return;
+    if (!bffBaseUrl) {
+      dispatch({
+        kind: 'loadFailed',
+        errorMessage: 'BFF base URL is not configured. Cannot open the uploaded file.',
+      });
+      return;
+    }
+
+    const ac = new AbortController();
+    const uploadRef = initialUploadRef;
+    dispatch({ kind: 'requestUploadMount', sessionId: uploadRef.sessionId });
+
+    (async () => {
+      try {
+        const url = `${bffBaseUrl}/api/compose/upload`;
+        const response = await authenticatedFetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: uploadRef.sessionId, documentId: uploadRef.sessionFileId }),
+          signal: ac.signal,
+        });
+
+        if (!response.ok) {
+          const msg =
+            response.status === 404
+              ? 'The uploaded file is no longer available (the session may have expired). Re-upload it in the Assistant and try again.'
+              : `Failed to open the uploaded file (HTTP ${response.status}).`;
+          dispatch({ kind: 'loadFailed', errorMessage: msg });
+          return;
+        }
+
+        const payload = (await response.json()) as {
+          content: string;
+          fileName?: string;
+          size?: number;
+        };
+
+        // ASP.NET Core serializes byte[] as a base64 string (NOT a JSON number
+        // array) — decode with atob(), mirroring the Load effect above.
+        const binary = atob(payload.content ?? '');
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        if (ac.signal.aborted) return;
+
+        dispatch({
+          kind: 'mountTransient',
+          docxBytes: bytes.buffer,
+          fileName: payload.fileName ?? uploadRef.fileName,
+        });
+        // A freshly-mounted upload is unsaved by definition — mark dirty so Save
+        // (create-on-save, task 013) is enabled immediately.
+        setIsDirty(true);
+      } catch (err) {
+        if (ac.signal.aborted) return;
+        const message = err instanceof Error ? err.message : String(err);
+        dispatch({ kind: 'loadFailed', errorMessage: `Failed to open the uploaded file: ${message}` });
+      }
+    })();
+
+    return () => ac.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialUploadRef?.sessionFileId, initialUploadRef?.sessionId, bffBaseUrl]);
 
   // -------------------------------------------------------------------------
   // Editor doc-ref shape (shared lib has its own narrower interface)

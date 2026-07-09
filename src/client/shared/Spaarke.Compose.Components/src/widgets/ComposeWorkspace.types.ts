@@ -107,6 +107,9 @@ export type ComposeWorkspaceAction =
       fileName?: string;
     }
   | { kind: 'loadFailed'; errorMessage: string }
+  // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
+  | { kind: 'requestUploadMount'; sessionId: string }
+  | { kind: 'mountTransient'; docxBytes: ArrayBuffer; fileName?: string }
   | { kind: 'requestSave' }
   | { kind: 'saveSucceeded'; sprkDocumentId?: string; etag: string | null }
   | { kind: 'saveFailed'; errorMessage: string }
@@ -174,6 +177,30 @@ export function composeWorkspaceReducer(
         ...state,
         status: 'error',
         errorMessage: action.errorMessage,
+      };
+    // ── FR-03 (task 012): transient upload-mount ────────────────────────────
+    case 'requestUploadMount':
+      // Enter the loading spinner WITHOUT a documentRef so the BFF Load effect
+      // (which gates on `state.documentRef`) stays inert — the upload-mount effect
+      // owns this transition and fetches from POST /api/compose/upload instead.
+      return {
+        ...INITIAL_STATE,
+        status: 'loading',
+        sessionId: action.sessionId,
+        documentRef: null,
+      };
+    case 'mountTransient':
+      // Pointer-less transient working draft: docxBytes populated, documentRef carries
+      // ONLY a display fileName (empty speDriveItemId = "no SPE pointer yet"). No
+      // sprk_document, no checkout (skipped) — first Save runs create-on-save (task 013).
+      return {
+        ...state,
+        status: 'loaded',
+        docxBytes: action.docxBytes,
+        etag: null,
+        documentRef: { speDriveItemId: '', fileName: action.fileName },
+        checkoutStatus: 'skipped',
+        errorMessage: null,
       };
     case 'requestSave':
       if (state.status !== 'loaded') return state;

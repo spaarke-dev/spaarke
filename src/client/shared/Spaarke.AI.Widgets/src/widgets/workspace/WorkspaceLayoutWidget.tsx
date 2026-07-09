@@ -71,12 +71,31 @@ export interface WorkspaceLayoutWidgetData {
   compose?: {
     /** Dataverse `sprk_document` GUID. */
     sprkDocumentId?: string;
-    /** SPE drive-item id — the document Compose loads. */
-    speDriveItemId: string;
+    /**
+     * SPE drive-item id — the STORED document Compose loads. Optional: absent for the
+     * FR-03 transient upload-mount path (see `upload` below), which has no SPE pointer.
+     */
+    speDriveItemId?: string;
     /** SPE drive id (per-BU container drive). */
     speDriveId?: string | null;
     /** Display file name for UI labelling. */
     fileName?: string | null;
+    /**
+     * FR-03 transient upload-mount pointer (spaarkeai-compose-r2 / task 012). Present when
+     * the chat opened Compose ON AN ASSISTANT-UPLOADED file — `SendWorkspaceArtifactHandler`
+     * puts `compose.upload` on the `workspace_open_tab` frame. The host renderer translates
+     * it into `ComposeLaunchContext.upload`; Compose fetches the retained bytes via
+     * `POST /api/compose/upload` and mounts them transiently (create-on-save). Forwarded
+     * opaquely (this package must NOT depend on `@spaarke/compose-components`).
+     */
+    upload?: {
+      /** Chat session id the file was uploaded into. */
+      sessionId: string;
+      /** The uploaded file's session-scoped id. */
+      sessionFileId: string;
+      /** Display file name for UI labelling. */
+      fileName?: string | null;
+    };
   };
 }
 

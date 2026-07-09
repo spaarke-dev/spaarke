@@ -143,6 +143,31 @@ public interface IComposeService
         PromoteComposeDocumentRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FR-24 push-annotations: download the current SPE bytes, render the accepted Compose
+    /// annotations into them as native Open XML track-changes + comments (via
+    /// <see cref="DocxAnnotationWriter"/>), and persist the result to SPE with optimistic
+    /// concurrency (<c>If-Match</c> ETag). Mirrors <see cref="SaveAsync"/>'s SPE-orchestration
+    /// role — the pure OOXML authoring is delegated to the writer, the SPE hop to the
+    /// <c>SpeFileStore</c> facade (ADR-007). No AI reach (ADR-013).
+    /// </summary>
+    /// <remarks>
+    /// The write uses the caller-supplied load-time ETag so a document changed under the caller
+    /// (e.g. a Word-for-Web autosave) is rejected, not overwritten. On rejection the facade throws
+    /// <see cref="Infrastructure.Graph.EtagPreconditionFailedException"/> (412, ETag moved) or
+    /// <see cref="Infrastructure.Graph.DocumentLockedByWordException"/> (423, open in Word); the
+    /// endpoint maps both to ProblemDetails. Nothing partially writes.
+    /// </remarks>
+    /// <param name="request">Push payload: SPE drive-item id + drive id + tenant id + load-time
+    /// ETag + the accepted annotations.</param>
+    /// <param name="httpContext">HTTP context for OBO auth into Graph. Required.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A <see cref="PushAnnotationsResult"/> with the new SPE version id + ETag + size.</returns>
+    Task<PushAnnotationsResult> PushAnnotationsAsync(
+        PushAnnotationsRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default);
 }
 
 // ---------------------------------------------------------------------------
@@ -299,4 +324,49 @@ public sealed record PromoteComposeDocumentResult : ComposeDocumentResult
     /// <summary>True when the <c>sprk_document</c> row was created in this call. False
     /// when an existing row was returned (idempotent behavior on repeated Save).</summary>
     public required bool WasCreated { get; init; }
+}
+
+/// <summary>FR-24 push-annotations request payload.</summary>
+public sealed record PushAnnotationsRequest
+{
+    /// <summary>SPE drive (container) id. Required.</summary>
+    public required string DriveId { get; init; }
+
+    /// <summary>SPE drive-item id. Required.</summary>
+    public required string DocumentSpeId { get; init; }
+
+    /// <summary>Tenant id (multi-tenant isolation per ADR-015 Tier 3). Required.</summary>
+    public required string TenantId { get; init; }
+
+    /// <summary>Load-time ETag sent as <c>If-Match</c> for optimistic concurrency. Required — a
+    /// blind overwrite is not offered on this path (FR-24 / Spike 7 G-1).</summary>
+    public required string IfMatch { get; init; }
+
+    /// <summary>The accepted annotations (track-change insertions/deletions + comments) to
+    /// materialize as native Open XML markup. Required, non-empty.</summary>
+    public required IReadOnlyList<DocxAnnotation> Annotations { get; init; }
+}
+
+/// <summary>FR-24 push-annotations outcome — new SPE version id + ETag + size. Standalone (not a
+/// <see cref="ComposeDocumentResult"/>): the push path is document-scoped and carries no
+/// ChatSession binding.</summary>
+public sealed record PushAnnotationsResult
+{
+    /// <summary>SPE drive-item id the annotations were written to.</summary>
+    public required string DocumentSpeId { get; init; }
+
+    /// <summary>SPE drive (container) id.</summary>
+    public string? DriveId { get; init; }
+
+    /// <summary>New SPE version id committed by the annotated write.</summary>
+    public required string VersionId { get; init; }
+
+    /// <summary>Updated ETag after the write (matches Graph's response ETag).</summary>
+    public string? ETag { get; init; }
+
+    /// <summary>New file size after the write.</summary>
+    public long? Size { get; init; }
+
+    /// <summary>Count of annotations materialized into the document.</summary>
+    public required int AnnotationCount { get; init; }
 }

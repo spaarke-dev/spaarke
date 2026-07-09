@@ -3,7 +3,7 @@
     <title>FR-24 DocxAnnotationWriter (comments + track changes, edge cases) + push endpoint</title>
     <phase>5 Word</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>opus</model-tier>
     <effort>xhigh</effort>
@@ -138,6 +138,43 @@
     <criterion testable="true">Publish size reported absolute + delta vs 49.63 MB baseline, ≤60 MB; no new HIGH CVE; only MIT deps added.</criterion>
     <criterion testable="true">Matching unit tests exist and pass; BFF build is green.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-07-09 (FULL rigor, opus @ xhigh). BFF build green (0 errors); 13 new DocxAnnotationWriter
+    tests pass (incl. OpenXmlValidator Office2019 = 0 errors, closing Spike 5 static-validity criterion);
+    99 Services.Compose unit tests green (no regression); Tier-1 ADR013_ComposeFacadeTests + ADR-007
+    Endpoints-vs-Graph arch tests PASS.
+
+    FILES:
+    - NEW src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs — pure byte[]→byte[] OOXML
+      annotation writer (w:ins/w:del/w:comment). Reuses TrackChangeKind; DocxAnnotation contract mirrors
+      target_text/new_text. EDGE-1 comments-before-track-changes; EDGE-2 paragraph-mark deletion via
+      w:pPr/w:rPr/w:del; EDGE-3 monotonic id seeded past existing; EDGE-4 DeletedText not Text. Thread-safe
+      singleton (per-call AnnotationSession). DocxAnnotationException{MalformedDocument→400, TargetNotFound→422}.
+    - NEW src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeConcurrencyExceptions.cs — EtagPreconditionFailedException(412),
+      DocumentLockedByWordException(423). Facade translation of Graph errors (ADR-007; no Graph type leaks).
+    - MOD Infrastructure/Graph/{ISpeFileOperations,SpeFileStore,UploadSessionManager}.cs — added If-Match OVERLOAD
+      of ReplaceFileContentAsUserAsync (Spike 7 G-1/G-2: closes the C-2 gap — as-built method had NO If-Match).
+      Additive overload; existing 5-arg callers/mocks untouched. 423/412 caught → typed exceptions.
+    - MOD Services/Compose/{IComposeService,ComposeService}.cs — PushAnnotationsAsync orchestration (download→
+      annotate→If-Match write), mirrors SaveAsync. ComposeService gains DocxAnnotationWriter dep.
+    - MOD Infrastructure/DI/ComposeModule.cs — AddSingleton<DocxAnnotationWriter> (unconditional; consumer +
+      endpoint also unconditional → no §F.1 asymmetric-registration risk).
+    - MOD Api/ComposeEndpoints.cs — POST /api/compose/document/{documentSpeId}/push-annotations (route #9),
+      handler maps DocxAnnotationException→400/422, 412, 423, 404/403/500. (Exception types fully-qualified
+      inline to avoid churning the using-block during a concurrent FR-03 edit of the same file.)
+    - NEW tests/unit/Sprk.Bff.Api.Tests/Services/Compose/DocxAnnotationWriterTests.cs — 13 domain-logic tests
+      (ADR-038 KEEP; no transport mocks; real docx round-trip + validator).
+
+    DEVIATION (directional mode, Spike 5-grounded): POML Step 1 said add DocumentFormat.OpenXml + Codeuctivity.
+    OpenXmlPowerTools. Spike 5 VALIDATED OpenXml 3.4.1 is ALREADY referenced and OpenXmlPowerTools is NOT needed
+    for the writer path → ZERO packages added, ~0 publish-size delta. Publish (Release) = 45.18 MB compressed
+    incl PDBs (≤60 ceiling; baseline 49.63). No new HIGH CVE (Kiota.Abstractions HIGH is pre-existing transitive,
+    not introduced here). PLACEMENT: writer is a new deterministic OOXML unit in Services/Compose (cannot fold
+    into ComposeService per SRP); endpoint reuses ComposeEndpoints + SpeFileStore — no new SPE plumbing. NO AI
+    reach (ADR-013 arch test green). Runtime Word-for-Web native render remains the Spike 5 §5 / Spike 7 §7
+    integration recipe (real SPE container) — out of headless unit scope.
+  </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
