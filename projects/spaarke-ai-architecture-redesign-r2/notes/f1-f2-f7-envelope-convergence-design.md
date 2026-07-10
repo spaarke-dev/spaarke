@@ -40,9 +40,15 @@ At bind/render time the fragments and the conversation system message are now in
 5. F-7: budget evaluation test proving real non-zero conversation/memory token counts flow on a live-shaped bind (and that the ~8k conversation worst case now logs a live warn — assert via logger capture, not a 500).
 6. Full suite + local eval gate green; publish-size measured per §10 (report line in task notes).
 
+### D6 — PE-D8(b) IS IN SCOPE (operator ruling 2026-07-10): render the envelope into DISPATCH prompts
+The operator pulled #619(b) into this task. `ActionRunner` (and the dispatch executor path via `SessionDispatchOrchestrator`) composes the envelope's rendered context into the dispatch prompt — per 053's own remark this is "a one-line composition change" now that 054 budgets are binding:
+- Render `RenderStablePrefixAdditions` (User + Business fragments — now incl. user memory per D3) + the record-memory fragment into the dispatched capability's prompt, in a deterministic position consistent with the interactive layout (stable additions before the operand `## Input` section; date suffix per the interactive suffix convention if dispatch prompts carry a date at all — match what exists, don't invent).
+- The envelope is ALREADY bound on the dispatch path (`SessionDispatchOrchestrator.cs:389-409`) — consume the existing `BoundInputs`, do NOT add a second bind.
+- **Eval handling**: golden-utterance/dispatch evals assert ROUTING/OUTCOME behavior, not prompt bytes — they must stay green as-is. The interactive byte-pins (D2) are scoped to interactive and unaffected. Add a dispatch seam test (tests/integration/seam/**) pinning: (a) a dispatch with host-record memory renders the memory fragment into the executor prompt; (b) a dispatch with NO memory/host renders a prompt byte-identical to pre-change (regression pin). If any existing eval case DOES change outcome due to the added context, STOP and report — that is a behavioral change requiring operator eyes, not a silent re-baseline.
+- Update the #619 GitHub issue at consolidation: (b) delivered by this task; (a) remains open (see below).
+
 ### Explicitly OUT (unchanged deferrals)
-- Dispatch-prompt envelope rendering — remains PE-D8/#619(b) unless the operator pulls it in.
-- Schema-card prose consolidation into the Business slice — PE-D8/#619(a).
+- Schema-card prose consolidation into the Business slice — PE-D8/#619(a) (catalog JSON migration + eval re-baseline; stays deferred).
 - Semantic slice conditional-trigger wiring — PE-D6/#617.
 
 ## Conflict window
