@@ -15,7 +15,7 @@
   </metadata>
 
   <prompt>
-    Implement memory governance (FR-B-03) over the generalized service: retention defaults + expiration driven by `retentionClass`; a user-visible review/delete surface for USER memory; record-memory review that honors the record's authorization (read access to the record ⇒ read its memory); deletion-propagation semantics; audit events on write/delete; and `sensitivity` classification. Memory items are ADR-015 Tier 3 (user-owned, GDPR-erasable). Litigation-hold interaction is DEFERRED (owner ruling 2026-07-08) to the separate governance project — do NOT implement it here.
+    Implement MINIMAL memory governance (FR-B-03 — RESCOPED by operator ruling 2026-07-09: "we are way over-emphasizing and over-complicating; at this stage we only need minimal"). In scope, and ONLY this: (1) a user-visible review/delete surface for USER memory (BFF endpoint, unconditional registration); (2) record-memory read aligned to the record's own authorization (read access to the record ⇒ read its memory) — implement STRUCTURALLY by deriving from the caller's own user-context record read/OBO check, never a parallel memory ACL; (3) preserve the existing GDPR erasure path; (4) retention = map `retentionClass` → per-item Cosmos `ttl` at write time with one documented default (Cosmos TTL does the expiry — NO reaper, NO custom expiry machinery, NO read-filter beyond trusting TTL); (5) audit write/delete via the EXISTING AuditLogService (identifiers/counts only, NFR-07). `sensitivity` and `deletionPolicy` PERSIST AS INERT FIELDS — build NO enforcement machinery for them. Deletion = simple point-delete; no cascade/propagation subsystem. Litigation-hold DEFERRED (2026-07-08). Memory items are ADR-015 Tier 3 (user-owned, GDPR-erasable).
   </prompt>
 
   <role>Senior .NET developer fluent in ADR-015 Tier 3 governance, GDPR erasure, record-authorization checks, and audit-event emission in the Spaarke BFF.</role>
@@ -71,10 +71,10 @@
 
   <steps mode="directional">
     <step order="0" name="Context">Load spec FR-B-03, ADR-015, the envelope fields. Confirm the existing erasure path + record-authorization check surface.</step>
-    <step order="1" name="Retention/expiration">Enforce retention defaults + expiration per `retentionClass`; expired facts are excluded from reads / reaped.</step>
+    <step order="1" name="Retention via Cosmos TTL (minimal)">Map `retentionClass` → per-item Cosmos `ttl` at write time with one documented default; Cosmos does the expiry. No reaper, no custom machinery.</step>
     <step order="2" name="User review/delete surface">Ship a user-visible review + delete surface for USER memory via a BFF endpoint (unconditional registration + test).</step>
     <step order="3" name="Record-auth-aligned read">Gate record-memory reads by the record's authorization — read access to the record is necessary + sufficient; no divergent memory ACL.</step>
-    <step order="4" name="Deletion-propagation + audit + sensitivity">Define deletion-propagation semantics; emit audit events (ids/counts only) on write/delete; honor `sensitivity` in read/return.</step>
+    <step order="4" name="Minimal audit + inert fields">Emit write/delete audit events via the existing AuditLogService (ids/counts only). `sensitivity`/`deletionPolicy` stay inert fields — no enforcement. Deletion = point-delete only.</step>
     <step order="5" name="Tests">Retention expiry; user delete; record-auth read allow/deny; audit-event emission (no content); sensitivity honored. Include NEGATIVE below.</step>
     <step order="6" name="Verify + governance">Build; run tests; measure publish-size; state Placement Justification + the litigation-hold deferral.</step>
   </steps>
@@ -91,10 +91,11 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Facts expire/retain per `retentionClass`; an expired fact is excluded from reads (asserted by a test).</criterion>
+    <criterion testable="true">`retentionClass` maps to a per-item Cosmos `ttl` at write time with a documented default; expiry rides Cosmos TTL (asserted by testing the ttl value written per retentionClass — no reaper or custom expiry machinery exists).</criterion>
     <criterion testable="true">A user can review + delete their USER memory through the shipped surface; delete removes the fact (GDPR erasure preserved).</criterion>
     <criterion testable="true">Record-memory read is allowed iff the caller has read access to the record; a caller WITHOUT record read access cannot read that record's memory.</criterion>
-    <criterion testable="true">Write + delete emit audit events carrying identifiers/counts only — no memory content (NFR-07), asserted by a test.</criterion>
+    <criterion testable="true">Write + delete emit audit events via the EXISTING AuditLogService carrying identifiers/counts only — no memory content (NFR-07), asserted by a test.</criterion>
+    <criterion testable="true">MINIMALITY (operator 2026-07-09): `sensitivity` and `deletionPolicy` persist as INERT fields — grep/inspection confirms NO enforcement machinery, state machine, or deny path reads them; deletion is simple point-delete with no cascade subsystem.</criterion>
     <criterion testable="true">The user review/delete endpoint has unconditional service registration + a test (bff-extensions §F).</criterion>
     <criterion testable="true">NEGATIVE: a caller lacking record read access is denied record-memory read (no leak), and litigation-hold is NOT implemented (deferral documented; no hold code path exists).</criterion>
     <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
