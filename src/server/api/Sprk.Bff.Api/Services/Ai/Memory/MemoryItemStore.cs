@@ -455,6 +455,14 @@ public static partial class DataverseFieldMirrorGuard
     public static bool IsDataverseFieldReference(string key)
         => DataverseLogicalNameRegex().IsMatch(key) || key.Contains("@odata", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Non-throwing peer of <see cref="EnsureNotDataverseFieldMirror"/> (SAME regex — no duplicate pattern):
+    /// true when a record-scope fact merely mirrors a live Dataverse field. Used by the Context Binder
+    /// (task 053, FR-B-04) as DEFENSE-IN-DEPTH to EXCLUDE such an item from the ContextEnvelope's Memory
+    /// references (the Binder reads live record fields directly) rather than to REJECT a write.
+    /// </summary>
+    public static bool IsDataverseFieldMirror(MemoryFact fact) => IsDataverseFieldReference(fact.Key);
+
     /// <summary>Throws when a record-scope fact merely mirrors a live Dataverse field (FR-B-01).</summary>
     public static void EnsureNotDataverseFieldMirror(MemoryFact fact)
     {

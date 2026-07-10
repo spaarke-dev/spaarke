@@ -1,7 +1,7 @@
 <task id="AIR2-053" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Context Binder + ContextEnvelope assembly — generalize the 6 R1 primitives; cache-stable</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>M — G-R2-B Memory</phase>
     <gate>G-R2-B (memory)</gate>
     <estimated-effort>3 days</estimated-effort>

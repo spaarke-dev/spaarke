@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Memory;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -653,17 +654,14 @@ public class PlaybookChatContextProvider : IChatContextProvider
         // matter" / "what's the link?" resolve to the HOST record, never to a lookalike
         // name found in uploaded-document text. Static per session (prompt-cache-friendly:
         // lives in the stable context-provider prefix, not the volatile tail).
-        var recordPhrase = string.IsNullOrWhiteSpace(entityName)
-            ? $"the {hostContext.EntityType} record with id {hostContext.EntityId}"
-            : $"the {hostContext.EntityType} record '{entityName}' (id: {hostContext.EntityId})";
-        var pageSentence = humanReadablePageType is null
-            ? string.Empty
-            : $" The user is viewing the {humanReadablePageType}.";
-        var enrichmentBlock =
-            $"Context: This chat is hosted on {recordPhrase}.{pageSentence} " +
-            $"When the user says \"this {hostContext.EntityType}\", \"this record\", or asks to save, link, or " +
-            $"attach something to \"the {hostContext.EntityType}\", they mean THIS host record — use its id above. " +
-            "Do not search for a different record by name unless the user explicitly names one.";
+        //
+        // Task 053 (FR-B-04): the block string is now produced by the SHARED
+        // HostIdentityProducer (ContextSliceProducers) — the ONE source the Context Binder's
+        // Business slice also uses. The provider keeps its guards, name lazy-fetch, page-type
+        // mapping, and budget gating above/below; only the string build folds in. Byte-identical
+        // to the R1 inline build — BusinessSliceDeterminismContractTests pins it unchanged.
+        var enrichmentBlock = HostIdentityProducer.BuildEnrichmentBlock(
+            hostContext.EntityType, hostContext.EntityId, entityName, humanReadablePageType);
 
         // Guard: enrichment block itself must be ≤ MaxEnrichmentTokens
         var enrichmentTokenEstimate = EstimateTokenCount(enrichmentBlock);

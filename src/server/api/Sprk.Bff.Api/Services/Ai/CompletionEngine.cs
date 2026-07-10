@@ -19,8 +19,8 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// <para>
 /// <b>Component Justification (CLAUDE.md §11)</b>:
 /// (1) <i>Existing</i> — overlaps nothing that already yields a per-outcome disposition card;
-/// R1 emitted the primitives ONLY inline on the gated resume path (ChatEndpoints
-/// <c>BuildGateOutcomeMessage</c> markdown) and never on the auto-executed or event paths.
+/// R1 emitted the primitives ONLY inline on the gated resume path
+/// (<c>GateOutcomeProducer.BuildGateOutcomeMessage</c> markdown) and never on the auto-executed or event paths.
 /// (2) <i>Extension</i> — it does NOT fork <see cref="OutcomeCard"/>: it is a thin composer OVER
 /// the task-011 guard factory (<see cref="OutcomeCard.ForStoredOutcome"/>) and the task-036
 /// <see cref="JobAwareOutcomeProjection"/>; it invents no card shape and changes nothing about how

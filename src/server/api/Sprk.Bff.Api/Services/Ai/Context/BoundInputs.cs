@@ -143,6 +143,23 @@ public sealed record ContextBindingRequest
     /// <summary>Assembled Business-slice fragment (host-record identity + schema card).</summary>
     public string? BusinessFragment { get; init; }
 
+    // ── Host-record identity sources (task 053, FR-B-04) — when supplied and no explicit
+    //    BusinessFragment is given, the Binder self-produces the Business slice's host-identity block
+    //    (and, when the memory store is available, the Record memory-item references) from these. The
+    //    id-only-or-provided-name shape is deterministic; no lazy name fetch happens at bind time. ──
+
+    /// <summary>Host entity type (already normalized, e.g. <c>matter</c>) the chat/dispatch is hosted on. Null → no host-identity self-production.</summary>
+    public string? HostEntityType { get; init; }
+
+    /// <summary>Host record's Dataverse id. Null → no host-identity self-production.</summary>
+    public string? HostEntityId { get; init; }
+
+    /// <summary>Host record display name when the caller already holds it (no lazy fetch at bind time). Null → the id-only host-identity shape.</summary>
+    public string? HostEntityName { get; init; }
+
+    /// <summary>Already-humanized host page-type label, or null → no page sentence in the host-identity block.</summary>
+    public string? HostPageTypeLabel { get; init; }
+
     /// <summary>
     /// Pre-resolved server-side caller contact id (claims→contact) — reference, not free text. When
     /// null, <see cref="ContextBinder"/> resolves it deterministically from <see cref="Caller"/> (or

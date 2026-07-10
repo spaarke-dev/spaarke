@@ -204,19 +204,9 @@ public class SprkChatAgentFactory
         "rules: relay the links the platform hands you; never compose, guess, or reconstruct one " +
         "yourself.";
 
-    /// <summary>
-    /// Builds the current-date context line (G-P3 UAT round-5 R5-A, 2026-07-07): the model
-    /// receives no clock and hallucinated "tomorrow" as a 2024 date. Appended at the END of
-    /// the system prompt (stable position; rotates once per UTC day — the accepted daily
-    /// prompt-cache rotation). Exposed internal for the directive-presence tests.
-    /// </summary>
-    internal static string BuildCurrentDateDirective(DateTimeOffset utcNow) =>
-        "\n\n## Current Date\n" +
-        $"Today's date is {utcNow:yyyy-MM-dd} ({utcNow:dddd}, UTC). Resolve EVERY relative date the user " +
-        "gives ('today', 'tomorrow', 'next Friday', 'in two weeks') against THIS date before composing any " +
-        "field value — never guess the year. The user's local date may differ by one day near midnight UTC; " +
-        "when you propose an action containing a resolved date, state the absolute date in your proposal " +
-        "text so the user can correct it before confirming.";
+    // Task 053 (FR-B-04): BuildCurrentDateDirective moved to the shared
+    // ContextSliceProducers.EnvironmentFactsProducer (the ONE source for this primitive — the interactive
+    // append site above + the Context Binder's Workspace slice both call it). Byte-identical output.
 
     public SprkChatAgentFactory(
         IChatClient chatClient,
@@ -878,7 +868,11 @@ public class SprkChatAgentFactory
         var timeProvider = scope.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
         context = context with
         {
-            SystemPrompt = context.SystemPrompt + BuildCurrentDateDirective(timeProvider.GetUtcNow()),
+            // Task 053 (FR-B-04): the current-date directive is now produced by the SHARED
+            // EnvironmentFactsProducer (ContextSliceProducers) — the ONE source the Context Binder's
+            // Workspace slice also uses. Byte-identical to the R1 factory-local build.
+            SystemPrompt = context.SystemPrompt +
+                Context.EnvironmentFactsProducer.BuildCurrentDateDirective(timeProvider.GetUtcNow()),
         };
         // === End R5-A date context =======================================================
 
