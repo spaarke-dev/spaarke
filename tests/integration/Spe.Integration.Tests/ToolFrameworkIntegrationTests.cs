@@ -331,9 +331,8 @@ public class ToolFrameworkIntegrationTests : IClassFixture<IntegrationTestFixtur
             // enum) — empty-document is VALID by design (these handlers don't
             // operate on document content). Same B-G11 / B-G11c rationale as
             // the chat-only handlers above. Added by PR #395 hotfix 2026-06-18.
-            "SendWorkspaceArtifactHandler",   // task 054 — creates a workspace tab
-            "UpdateWorkspaceTabHandler",      // task 055 — updates an existing tab
-            "CloseWorkspaceTabHandler",       // task 056 — closes a tab
+            // (The update/close workspace-tab handlers were retired by AIR2-075.)
+            "SendWorkspaceArtifactHandler",   // task 054 — opens a workspace layout tab
             "ManagePinnedContextHandler",     // task 069 — pinned-memory CRUD via voice
         };
 

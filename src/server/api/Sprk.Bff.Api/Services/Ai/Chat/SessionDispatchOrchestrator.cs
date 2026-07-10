@@ -87,6 +87,7 @@ public class SessionDispatchOrchestrator
     private readonly EventRulesOptions _manifestProbeOptions;
     private readonly Sprk.Bff.Api.Telemetry.AiTelemetry _aiTelemetry;
     private readonly ILogger<SessionDispatchOrchestrator> _logger;
+    private readonly TimeProvider _timeProvider;
 
     public SessionDispatchOrchestrator(
         ChatSessionManager sessionManager,
@@ -100,7 +101,8 @@ public class SessionDispatchOrchestrator
         PendingPlanManager pendingPlanManager,
         IOptions<EventRulesOptions> manifestProbeOptions,
         Sprk.Bff.Api.Telemetry.AiTelemetry aiTelemetry,
-        ILogger<SessionDispatchOrchestrator> logger)
+        ILogger<SessionDispatchOrchestrator> logger,
+        TimeProvider? timeProvider = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
@@ -118,6 +120,11 @@ public class SessionDispatchOrchestrator
         _manifestProbeOptions = manifestProbeOptions?.Value ?? throw new ArgumentNullException(nameof(manifestProbeOptions));
         _aiTelemetry = aiTelemetry ?? throw new ArgumentNullException(nameof(aiTelemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        // Track-B hygiene sweep (R9, task 073): clock for the manifest readiness probe's
+        // Task.Delay — optional, defaults to TimeProvider.System (production/DI); tests
+        // inject a FakeTimeProvider for deterministic probe-delay assertions instead of
+        // relying on a real (or zeroed) wall-clock wait.
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -142,6 +149,7 @@ public class SessionDispatchOrchestrator
         _manifestProbeOptions = null!;
         _aiTelemetry = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = null!;
     }
 
     /// <summary>
@@ -579,13 +587,19 @@ public class SessionDispatchOrchestrator
         // Wait-briefly-or-degrade, IDENTICAL policy + bounds to the Event path's G-P1
         // Defect 3 probe (EventRulesOptions.ReadinessProbe*, ~5s default): re-read the
         // session until requested ids all resolve (explicit subset) or the manifest is
-        // non-empty (default-all), then degrade to whatever resolved. Task.Delay matches
-        // the Event-path precedent; the TimeProvider refactor is on the /defer list.
+        // non-empty (default-all), then degrade to whatever resolved. Track-B hygiene
+        // sweep (R9, task 073): the probe now delays via TimeProvider (per ADR-038 §5 /
+        // docs/standards/TEST-ARCHITECTURE.md §4) instead of raw Task.Delay, so tests can
+        // deterministically drive the probe with a FakeTimeProvider instead of relying on
+        // a zeroed real-world delay.
         if (IsResolutionIncomplete(requestedFileIds, targetFiles))
         {
             for (var attempt = 1; attempt <= _manifestProbeOptions.ReadinessProbeAttempts; attempt++)
             {
-                await Task.Delay(Math.Max(0, _manifestProbeOptions.ReadinessProbeDelayMs), cancellationToken)
+                await Task.Delay(
+                        TimeSpan.FromMilliseconds(Math.Max(0, _manifestProbeOptions.ReadinessProbeDelayMs)),
+                        _timeProvider,
+                        cancellationToken)
                     .ConfigureAwait(false);
                 var refreshed = await _sessionManager
                     .GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)

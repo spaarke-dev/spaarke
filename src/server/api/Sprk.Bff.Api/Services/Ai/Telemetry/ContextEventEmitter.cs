@@ -39,8 +39,8 @@ namespace Sprk.Bff.Api.Services.Ai.Telemetry;
 ///
 /// <para>
 /// <b>Meter name</b>: <c>Sprk.Bff.Api.Ai.ContextEvents</c>. Follows the existing
-/// <c>Sprk.Bff.Api.*</c> Meter-naming convention used by <c>AiTelemetry</c> and
-/// <c>UpdateWorkspaceTabHandler</c> (task 058 pattern).
+/// <c>Sprk.Bff.Api.*</c> Meter-naming convention used by <c>AiTelemetry</c>
+/// (task 058 pattern).
 /// </para>
 /// </summary>
 public sealed class ContextEventEmitter : IContextEventEmitter, IDisposable

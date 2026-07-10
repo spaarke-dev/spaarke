@@ -171,6 +171,51 @@ resource auditContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/cont
 }
 
 // ============================================================================
+// CONTAINER: audit-partitioned  (task AIR2-074, FR-D-05 — design row R21)
+// Re-keyed successor to the `audit` container above. Immutable append-only Tier-2
+// compliance log (ADR-015). No TTL (permanent 7-year retention).
+// Partition key: /partitionKey — a SYNTHETIC value `{tenantId}|{yyyy-MM}` (tenant +
+// monthly time bucket), deliberately NOT bare /tenantId: deployments are
+// customer-dedicated, so /tenantId collapses every audit write into ONE logical
+// partition — a slow-motion failure against the Cosmos 20 GB logical-partition cap.
+// Time-bucketing rolls each month into a fresh partition so none grows unboundedly.
+// Cosmos partition keys cannot change in place → NEW container + code cutover
+// (AuditLogService). The legacy `audit` container is NOT retired and NOT re-keyed:
+// its historical records are append-only compliance data and are left intact
+// (non-destructive migration; copy-forward is an operator step — see the AIR2-074
+// migration note in projects/spaarke-ai-architecture-redesign-r2/notes/).
+// Adopts the same single-synthetic-partition-key discipline as `memory-items`
+// (task AIR2-050 / ADR-042); memory keys by subject identity, audit by tenant+time.
+// Immutability policy (immutabilityPeriodSinceCreationInDays: 2555, Locked) is applied
+// at provisioning per infrastructure/cosmos/audit-container-policy.json when GA.
+// ============================================================================
+
+resource auditPartitionedContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'audit-partitioned'
+  properties: {
+    resource: {
+      id: 'audit-partitioned'
+      partitionKey: {
+        paths: ['/partitionKey']
+        kind: 'Hash'
+        version: 2
+      }
+      defaultTtl: -1 // No automatic expiry — audit records are permanent (7-year compliance retention)
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        includedPaths: [
+          { path: '/*' }
+        ]
+        excludedPaths: [
+          { path: '/"_etag"/?' }
+        ]
+      }
+    }
+  }
+}
+
+// ============================================================================
 // CONTAINER: memory
 // SHARED container: pinned-context rows + workspace-tab durable rows (+ legacy
 // matter-memory docs, retired by task AIR2-050 — left in place per the 2026-07-09

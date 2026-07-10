@@ -1,11 +1,22 @@
 {
   "_comment": [
     "Cosmos DB audit container immutability policy.",
-    "This file documents the required immutable container configuration for the 'audit' container.",
+    "This file documents the required immutable container configuration for the 'audit-partitioned' container.",
     "",
-    "The 'audit' container stores ADR-015 Tier 2 compliance records for AI interactions.",
+    "The 'audit-partitioned' container stores ADR-015 Tier 2 compliance records for AI interactions.",
     "Retention: 7 years (legal compliance requirement).",
     "Immutability: container-level policy prevents updates and deletes at the data plane.",
+    "",
+    "AIR2-074 RE-KEY (FR-D-05): the active audit container was re-keyed off bare '/tenantId' onto a",
+    "synthetic '/partitionKey' value '{tenantId}|{yyyy-MM}' (tenant + monthly time bucket) to stay",
+    "under the Cosmos 20 GB logical-partition cap in customer-dedicated deployments. Cosmos partition",
+    "keys cannot change in place, so this is a NEW container ('audit-partitioned') with the write path",
+    "cut over in AuditLogService.cs. The predecessor 'audit' container (partition '/tenantId') is NOT",
+    "retired and NOT re-keyed — its historical append-only compliance records are left intact and",
+    "retain their own immutability policy (documented under 'legacyContainer' below). Migration of",
+    "existing records is a NON-DESTRUCTIVE copy-forward operator step (see the AIR2-074 migration note",
+    "in projects/spaarke-ai-architecture-redesign-r2/notes/). Existing audit data is never deleted or",
+    "rewritten.",
     "",
     "IMPORTANT: The application code in AuditLogService.cs enforces append-only semantics",
     "by using CreateItemAsync exclusively. This infrastructure policy provides a second,",
@@ -18,9 +29,10 @@
   ],
 
   "container": {
-    "name": "audit",
+    "name": "audit-partitioned",
     "database": "spaarke-ai",
-    "partitionKey": "/tenantId",
+    "partitionKey": "/partitionKey",
+    "partitionKeyValueFormat": "{tenantId}|{yyyy-MM}  (synthetic tenant + monthly time bucket — AIR2-074/FR-D-05; never bare /tenantId)",
     "defaultTtl": -1,
     "analyticalStorageTtl": -1,
 
@@ -42,6 +54,25 @@
     }
   },
 
+  "legacyContainer": {
+    "_comment": [
+      "Predecessor container, RETAINED read-only after the AIR2-074 re-key. Not retired, not re-keyed,",
+      "never migrated destructively — append-only Tier-2 compliance data. New writes go to",
+      "'audit-partitioned'; historical records remain queryable here (and, once the operator runs the",
+      "non-destructive copy-forward, also in 'audit-partitioned')."
+    ],
+    "name": "audit",
+    "database": "spaarke-ai",
+    "partitionKey": "/tenantId",
+    "defaultTtl": -1,
+    "analyticalStorageTtl": -1,
+    "immutabilityPolicy": {
+      "immutabilityPeriodSinceCreationInDays": 2555,
+      "allowProtectedAppendWrites": false,
+      "state": "Locked"
+    }
+  },
+
   "rbac": {
     "_comment": "Only Cosmos DB Built-in Data Reader role should be assigned for audit reads.",
     "writeRole": "Cosmos DB Built-in Data Contributor (restricted to CreateItemAsync by application code)",
@@ -50,8 +81,17 @@
   },
 
   "deploymentCommands": {
-    "_comment": "CLI commands to verify immutability policy after deployment.",
-    "verifyPolicy": "az cosmosdb sql container show --account-name spaarke-cosmos-dev --database-name spaarke-ai --name audit --resource-group spe-infrastructure-westus2 --query 'resource.defaultTtl'",
-    "applyImmutabilityViaBicep": "See infrastructure/bicep/modules/cosmos-db.bicep — add immutabilityPolicy to auditContainer resource block when GA."
+    "_comment": [
+      "Operator steps for the AIR2-074 re-key. NON-DESTRUCTIVE: create the new container and copy",
+      "existing records forward while the legacy 'audit' container remains intact. Nothing is deleted",
+      "or rewritten in 'audit'. Run these against live infra (this project declares infra in bicep and",
+      "reports the commands rather than mutating live Cosmos)."
+    ],
+    "createNewContainer": "az cosmosdb sql container create --account-name spe-cosmos-dev-ai --database-name spaarke-ai --resource-group spe-infrastructure-westus2 --name audit-partitioned --partition-key-path /partitionKey --ttl -1   # OR re-run infrastructure/bicep/modules/cosmos-db.bicep (auditPartitionedContainer resource)",
+    "verifyNewContainer": "az cosmosdb sql container show --account-name spe-cosmos-dev-ai --database-name spaarke-ai --name audit-partitioned --resource-group spe-infrastructure-westus2 --query 'resource.partitionKey.paths'",
+    "migrateExistingDataNonDestructive": "COPY-FORWARD ONLY (never move/delete). While the container is small, copy each legacy 'audit' doc into 'audit-partitioned' recomputing partitionKey = `${tenantId}|${yyyy-MM(timestamp)}` and writing via CreateItem. Suggested tool: `az cosmosdb copy` (intra-account container copy job) or a scripted read-from-audit → create-into-audit-partitioned pass. Leave 'audit' untouched.",
+    "escalationIfLarge": "If 'audit' has grown large enough that copy-forward is not cheap/safe (data-movement + RU cost), STOP and choose 'leave-legacy': new writes already target 'audit-partitioned'; historical reads continue against the legacy 'audit' container for the remainder of its 7-year retention. Surface the measured size to the operator (AIR2-074 escalation trigger).",
+    "verifyLegacyImmutability": "az cosmosdb sql container show --account-name spe-cosmos-dev-ai --database-name spaarke-ai --name audit --resource-group spe-infrastructure-westus2 --query 'resource.defaultTtl'",
+    "applyImmutabilityViaBicep": "See infrastructure/bicep/modules/cosmos-db.bicep — add immutabilityPolicy to the auditPartitionedContainer resource block when GA."
   }
 }

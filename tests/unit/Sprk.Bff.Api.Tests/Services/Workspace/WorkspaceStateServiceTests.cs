@@ -1,9 +1,7 @@
-using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Infrastructure.Cache;
@@ -16,16 +14,16 @@ namespace Sprk.Bff.Api.Tests.Services.Workspace;
 /// <summary>
 /// Unit tests for <see cref="WorkspaceStateService"/> — R6 Pillar 6a / task 051.
 ///
-/// Acceptance-criteria coverage:
+/// AIR2-075 (2026-07-10): the tab WRITE path (upsert / pin / close) was retired with the
+/// orphaned Get/Update/Close Workspace Tab tools + the SendWorkspaceArtifact legacy variants.
+/// The service is now READ-ONLY; only the read-path acceptance criteria remain:
 ///   (a) Per-tenant cache-key isolation — two tenants, same sessionId → different keys.
-///   (b) Redis TTL = 24h on UpsertTab.
-///   (c) PinTab writes through to Cosmos with matterId tag + IsPinned=true.
-///   (d) CloseTab removes from Redis; does NOT touch Cosmos durable.
 ///   (e) GetTabs merges hot (Redis) + durable (Cosmos) rows; hot wins on tab-id collision.
-///   (f) JSON polymorphism round-trips each of the 4 widget-data variants.
+///   (f) JSON polymorphism round-trips each of the 4 widget-data variants through the hot tier.
 ///
-/// Cosmos interactions are verified via the Moq <see cref="Container"/> + injected
-/// <see cref="CosmosClient"/>. Redis is mocked via <see cref="IDistributedCache"/>.
+/// The hot tier is seeded DIRECTLY through the in-memory <see cref="ITenantCache"/> (the write
+/// path that used to seed it via UpsertTabAsync is retired). Cosmos interactions are verified
+/// via the Moq <see cref="Container"/> + injected <see cref="CosmosClient"/>.
 /// </summary>
 public class WorkspaceStateServiceTests
 {
@@ -91,6 +89,20 @@ public class WorkspaceStateServiceTests
         private static string BuildKey(string tenantId, string resource, string id, int version)
             => $"tenant:{tenantId}:{resource}:{id}:v{version}";
     }
+
+    /// <summary>
+    /// Seed the Redis hot tier directly (the retired write path used to do this via
+    /// UpsertTabAsync). Writes a <c>tabId → WorkspaceTab</c> dictionary under the canonical
+    /// workspace-state cache key so <see cref="WorkspaceStateService.GetTabsAsync"/> reads it.
+    /// </summary>
+    private static Task SeedHotAsync(FakeTenantCache cache, string tenantId, string sessionId, params WorkspaceTab[] tabs)
+        => cache.SetAsync(
+            tenantId,
+            WorkspaceStateService.CacheResource,
+            sessionId,
+            WorkspaceStateService.CacheVersion,
+            tabs.ToDictionary(t => t.Id, t => t, StringComparer.Ordinal),
+            TimeSpan.FromHours(24));
 
     private static (WorkspaceStateService Service, FakeTenantCache Cache, Mock<Container> ContainerMock)
         CreateSut(Action<Mock<Container>>? configureContainer = null)
@@ -173,38 +185,20 @@ public class WorkspaceStateServiceTests
     }
 
     [Fact]
-    public async Task UpsertTabAsync_WritesToTenantSpecificRedisKey()
-    {
-        // Arrange
-        var (sut, cache, _) = CreateSut();
-        var tabA = MakeTab("tab-1", TenantA, SessionId, SummaryData());
-        var tabB = MakeTab("tab-1", TenantB, SessionId, SummaryData());
-
-        // Act
-        await sut.UpsertTabAsync(TenantA, SessionId, tabA);
-        await sut.UpsertTabAsync(TenantB, SessionId, tabB);
-
-        // Assert — both keys exist in cache; they do NOT collide
-        cache.Store.Should().ContainKey($"tenant:{TenantA}:workspace-state:{SessionId}:v1");
-        cache.Store.Should().ContainKey($"tenant:{TenantB}:workspace-state:{SessionId}:v1");
-        cache.Store.Should().HaveCount(2);
-    }
-
-    [Fact]
     public async Task GetTabsAsync_ReturnsOnlyOwnTenantData()
     {
         // Arrange
-        var (sut, _, containerMock) = CreateSut();
+        var (sut, cache, containerMock) = CreateSut();
         SetupEmptyCosmosQuery(containerMock);
 
-        await sut.UpsertTabAsync(TenantA, SessionId, MakeTab("tab-1", TenantA, SessionId, SummaryData("for-A")));
-        await sut.UpsertTabAsync(TenantB, SessionId, MakeTab("tab-1", TenantB, SessionId, SummaryData("for-B")));
+        await SeedHotAsync(cache, TenantA, SessionId, MakeTab("tab-1", TenantA, SessionId, SummaryData("for-A")));
+        await SeedHotAsync(cache, TenantB, SessionId, MakeTab("tab-1", TenantB, SessionId, SummaryData("for-B")));
 
         // Act
         var tabsA = await sut.GetTabsAsync(TenantA, SessionId);
         var tabsB = await sut.GetTabsAsync(TenantB, SessionId);
 
-        // Assert
+        // Assert — each tenant's hot key is isolated; no cross-tenant bleed.
         tabsA.Should().HaveCount(1);
         ((SummaryTabWidgetData)tabsA[0].WidgetData).Body.Should().Be("for-A");
         tabsA[0].TenantId.Should().Be(TenantA);
@@ -212,169 +206,10 @@ public class WorkspaceStateServiceTests
         tabsB.Should().HaveCount(1);
         ((SummaryTabWidgetData)tabsB[0].WidgetData).Body.Should().Be("for-B");
         tabsB[0].TenantId.Should().Be(TenantB);
-    }
 
-    [Fact]
-    public async Task UpsertTabAsync_ThrowsOnTenantMismatch()
-    {
-        // Arrange
-        var (sut, _, _) = CreateSut();
-        var tabA = MakeTab("tab-1", TenantA, SessionId, SummaryData());
-
-        // Act / Assert — calling with the wrong tenantId arg surfaces the mismatch
-        var act = () => sut.UpsertTabAsync(TenantB, SessionId, tabA);
-        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Tenant mismatch*");
-    }
-
-    // =========================================================================
-    // (b) Redis TTL = 24h on UpsertTab (FR-32)
-    // =========================================================================
-
-    [Fact]
-    public async Task UpsertTabAsync_SetsRedisTtlTo24Hours()
-    {
-        // Arrange
-        var (sut, cache, _) = CreateSut();
-        var tab = MakeTab("tab-1", TenantA, SessionId, SummaryData());
-
-        // Act
-        await sut.UpsertTabAsync(TenantA, SessionId, tab);
-
-        // Assert — post-migration: AbsoluteExpirationRelativeToNow (the wrapper does not expose
-        // SlidingExpiration); 24h horizon preserved.
-        var (_, ttl) = cache.Store[$"tenant:{TenantA}:workspace-state:{SessionId}:v1"];
-        ttl.Should().Be(TimeSpan.FromHours(24));
-    }
-
-    // =========================================================================
-    // (c) PinTab writes through to Cosmos with matterId + IsPinned=true
-    // =========================================================================
-
-    [Fact]
-    public async Task PinTabAsync_WritesThroughToCosmos_WithMatterIdTagAndIsPinnedTrue()
-    {
-        // Arrange
-        WorkspaceStateService.WorkspaceTabDurableDocument? capturedDoc = null;
-        PartitionKey? capturedPk = null;
-
-        var (sut, _, containerMock) = CreateSut(c =>
-        {
-            c.Setup(x => x.UpsertItemAsync(
-                    It.IsAny<WorkspaceStateService.WorkspaceTabDurableDocument>(),
-                    It.IsAny<PartitionKey?>(),
-                    It.IsAny<ItemRequestOptions>(),
-                    It.IsAny<CancellationToken>()))
-                .Callback<WorkspaceStateService.WorkspaceTabDurableDocument, PartitionKey?, ItemRequestOptions, CancellationToken>(
-                    (doc, pk, _, _) => { capturedDoc = doc; capturedPk = pk; })
-                .ReturnsAsync(new Mock<ItemResponse<WorkspaceStateService.WorkspaceTabDurableDocument>>().Object);
-        });
-
-        var tab = MakeTab("tab-pin-1", TenantA, SessionId, SummaryData("body"), pinned: false, matterId: "matter-orig", matterName: "Original");
-        await sut.UpsertTabAsync(TenantA, SessionId, tab);
-
-        // Act — pin and attach a different matter
-        await sut.PinTabAsync(TenantA, SessionId, "tab-pin-1", "matter-new");
-
-        // Assert — Cosmos upsert was called with correct shape
-        capturedDoc.Should().NotBeNull();
-        capturedDoc!.Id.Should().Be($"workspace-tab_{TenantA}_tab-pin-1");
-        capturedDoc.DocumentType.Should().Be("workspace-tab");
-        capturedDoc.TenantId.Should().Be(TenantA);
-        capturedDoc.SessionId.Should().Be(SessionId);
-        capturedDoc.MatterId.Should().Be("matter-new");
-        capturedDoc.Tab.Should().NotBeNull();
-        capturedDoc.Tab!.IsPinned.Should().BeTrue();
-        capturedDoc.Tab.MatterContext.MatterId.Should().Be("matter-new");
-        capturedPk.Should().Be(new PartitionKey(TenantA));
-    }
-
-    [Fact]
-    public async Task PinTabAsync_PreservesHotTierAfterPromotion()
-    {
-        // Arrange
-        var (sut, cache, containerMock) = CreateSut(SetupCosmosUpsertAccepts);
-        var tab = MakeTab("tab-pin-2", TenantA, SessionId, SummaryData());
-        await sut.UpsertTabAsync(TenantA, SessionId, tab);
-
-        // Act
-        await sut.PinTabAsync(TenantA, SessionId, "tab-pin-2", "matter-X");
-
-        // Assert — Redis row still present
+        // Two distinct tenant-scoped keys exist.
         cache.Store.Should().ContainKey($"tenant:{TenantA}:workspace-state:{SessionId}:v1");
-    }
-
-    [Fact]
-    public async Task PinTabAsync_ThrowsKeyNotFound_WhenTabNotPresent()
-    {
-        // Arrange
-        var (sut, _, _) = CreateSut();
-
-        // Act / Assert
-        var act = () => sut.PinTabAsync(TenantA, SessionId, "missing-tab", "matter-X");
-        await act.Should().ThrowAsync<KeyNotFoundException>();
-    }
-
-    // =========================================================================
-    // (d) CloseTab removes from Redis only; does NOT touch Cosmos
-    // =========================================================================
-
-    [Fact]
-    public async Task CloseTabAsync_RemovesFromRedis_DoesNotTouchCosmos()
-    {
-        // Arrange
-        var (sut, cache, containerMock) = CreateSut();
-        var tab = MakeTab("tab-close-1", TenantA, SessionId, SummaryData());
-        await sut.UpsertTabAsync(TenantA, SessionId, tab);
-
-        // Act
-        await sut.CloseTabAsync(TenantA, SessionId, "tab-close-1");
-
-        // Assert — Redis key was removed entirely (only tab in session)
-        cache.Store.Should().NotContainKey($"tenant:{TenantA}:workspace-state:{SessionId}:v1");
-
-        // No Cosmos delete / upsert calls
-        containerMock.Verify(c => c.DeleteItemAsync<It.IsAnyType>(
-            It.IsAny<string>(), It.IsAny<PartitionKey>(),
-            It.IsAny<ItemRequestOptions>(), It.IsAny<CancellationToken>()),
-            Times.Never);
-        containerMock.Verify(c => c.UpsertItemAsync(
-            It.IsAny<WorkspaceStateService.WorkspaceTabDurableDocument>(),
-            It.IsAny<PartitionKey?>(),
-            It.IsAny<ItemRequestOptions>(),
-            It.IsAny<CancellationToken>()),
-            Times.Never);
-    }
-
-    [Fact]
-    public async Task CloseTabAsync_PreservesOtherTabs_InSameSession()
-    {
-        // Arrange
-        var (sut, cache, _) = CreateSut();
-        await sut.UpsertTabAsync(TenantA, SessionId, MakeTab("tab-1", TenantA, SessionId, SummaryData("A")));
-        await sut.UpsertTabAsync(TenantA, SessionId, MakeTab("tab-2", TenantA, SessionId, SummaryData("B")));
-
-        // Act
-        await sut.CloseTabAsync(TenantA, SessionId, "tab-1");
-
-        // Assert — Redis key still present; tab-2 alive
-        var key = $"tenant:{TenantA}:workspace-state:{SessionId}:v1";
-        cache.Store.Should().ContainKey(key);
-        var bytes = cache.Store[key].Value;
-        var dict = JsonSerializer.Deserialize<Dictionary<string, WorkspaceTab>>(
-            bytes, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        dict.Should().NotBeNull();
-        dict!.Should().HaveCount(1).And.ContainKey("tab-2");
-    }
-
-    [Fact]
-    public async Task CloseTabAsync_IsIdempotent_WhenTabMissing()
-    {
-        // Arrange
-        var (sut, _, _) = CreateSut();
-
-        // Act / Assert — no throw, no side effect
-        var act = () => sut.CloseTabAsync(TenantA, SessionId, "never-existed");
-        await act.Should().NotThrowAsync();
+        cache.Store.Should().ContainKey($"tenant:{TenantB}:workspace-state:{SessionId}:v1");
     }
 
     // =========================================================================
@@ -406,11 +241,11 @@ public class WorkspaceStateServiceTests
             Tab = pinnedOnlyTab,
         };
 
-        var (sut, _, containerMock) = CreateSut(c =>
+        var (sut, cache, _) = CreateSut(c =>
             SetupCosmosQuery(c, new[] { durableDoc, pinnedOnlyDoc }));
 
         // Hot tier has fresh tab-1
-        await sut.UpsertTabAsync(TenantA, SessionId, MakeTab("tab-1", TenantA, SessionId, SummaryData("FRESH"), pinned: true));
+        await SeedHotAsync(cache, TenantA, SessionId, MakeTab("tab-1", TenantA, SessionId, SummaryData("FRESH"), pinned: true));
 
         // Act
         var tabs = await sut.GetTabsAsync(TenantA, SessionId);
@@ -436,13 +271,13 @@ public class WorkspaceStateServiceTests
     }
 
     // =========================================================================
-    // (f) JSON polymorphism round-trips all 4 widget-data variants
+    // (f) JSON polymorphism round-trips all 4 widget-data variants through the hot tier
     // =========================================================================
 
     [Fact]
     public async Task JsonPolymorphism_RoundTripsAllFourWidgetDataVariants()
     {
-        var (sut, _, _) = CreateSut();
+        var (sut, cache, containerMock) = CreateSut(SetupEmptyCosmosQuery);
 
         // Summary
         var summary = MakeTab("t-sum", TenantA, SessionId, new SummaryTabWidgetData
@@ -482,13 +317,7 @@ public class WorkspaceStateServiceTests
             DataSourceId = "ds-1",
         });
 
-        await sut.UpsertTabAsync(TenantA, SessionId, summary);
-        await sut.UpsertTabAsync(TenantA, SessionId, doc);
-        await sut.UpsertTabAsync(TenantA, SessionId, dashboard);
-        await sut.UpsertTabAsync(TenantA, SessionId, table);
-
-        var (_, _, containerMock) = CreateSut();
-        SetupEmptyCosmosQuery(containerMock);
+        await SeedHotAsync(cache, TenantA, SessionId, summary, doc, dashboard, table);
 
         // Reload — round-trip through Redis JSON
         var roundTripped = await sut.GetTabsAsync(TenantA, SessionId);
@@ -516,17 +345,6 @@ public class WorkspaceStateServiceTests
     // =========================================================================
     // Cosmos mock helpers
     // =========================================================================
-
-    private static void SetupCosmosUpsertAccepts(Mock<Container> containerMock)
-    {
-        containerMock
-            .Setup(c => c.UpsertItemAsync(
-                It.IsAny<WorkspaceStateService.WorkspaceTabDurableDocument>(),
-                It.IsAny<PartitionKey?>(),
-                It.IsAny<ItemRequestOptions>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Mock<ItemResponse<WorkspaceStateService.WorkspaceTabDurableDocument>>().Object);
-    }
 
     private static void SetupEmptyCosmosQuery(Mock<Container> containerMock)
         => SetupCosmosQuery(containerMock, Array.Empty<WorkspaceStateService.WorkspaceTabDurableDocument>());

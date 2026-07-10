@@ -1,7 +1,7 @@
 <task id="AIR2-070" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Publish-size verification harness + per-task report (≤60 MB compressed)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>H — G-R2-D Hardening</phase>
     <gate>G-R2-D (hardening)</gate>
     <estimated-effort>0.5 day</estimated-effort>

@@ -229,6 +229,24 @@ jobs:
   #     ResourcefulnessEvalSuiteTests: no_fabrication is asserted MECHANICALLY
   #     against the ADR-040 ledger ToolChain (ResourcefulnessFabricationOracle);
   #     the four family dimensions are LLM-judge-scored on the live eval-gate run.
+  #   • Origin-classification family (r2 task 033 / FR-A1-04, Policy v2 E-1..E-6)
+  #     — OriginClassificationEvalSuiteTests: hard-equality assertions against the
+  #     real RequestOriginClassifier + ConfirmationPolicyEngine (deterministic
+  #     production code, never an LLM judge).
+  #   • ContextEnvelope budget-breach-fails-eval (r2 task 054 / FR-B-05) —
+  #     ContextBudgetBreachEvalTests: a per-slice or envelope-ceiling breach is
+  #     mechanically DETECTED (never silently truncated) against the real
+  #     EnvelopeBudget checker.
+  #   • Memory-write capture→recall family (r2 task 057 / FR-B-08 / FR-30) —
+  #     MemoryWriteCaptureRecallEvalTests.
+  #
+  # spec FR-D-02 / NFR-02 (r2 spaarke-ai-architecture-redesign-r2 task 071):
+  # ALL of the above families gate the merge — any single family red fails this
+  # job. Memory-poisoning eval families are explicitly OUT OF SCOPE here —
+  # DEFERRED to the separate memory-governance project per spec FR-B-10
+  # (spaarke-ai-architecture-redesign-r2/spec.md item 38). Do NOT add a
+  # memory-poisoning family to this trait/gate until that governance project
+  # ships it.
   # ──────────────────────────────────────────────────────────────────────────
   eval-gate:
     name: Eval Gate (Golden Utterances)
