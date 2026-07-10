@@ -183,6 +183,16 @@ export interface NarrativeBulletResult {
   primaryEntityType: string;
   primaryEntityId: string;
   primaryEntityName: string;
+  /**
+   * R5 richer-rows (2026-07-09): the record's own description/subject (deterministic source
+   * `Body`). Rendered truncated beneath the title. Optional for backward compatibility.
+   */
+  description?: string;
+  /**
+   * R5 richer-rows (2026-07-09): ISO 8601 date that qualified this record for the briefing
+   * (source ModifiedOn). Rendered as an "Updated {date}" caption. Optional.
+   */
+  date?: string;
 }
 
 /**
@@ -482,12 +492,25 @@ export async function fetchBriefingNarration(channels: ChannelFetchResult[]): Pr
  * `/render` unconditionally on mount, without the appnotification load gate
  * that `useBriefingNarration` had.
  */
-export async function fetchBriefingLive(): Promise<NarrationResult> {
+/**
+ * Optional per-user briefing windows (r5 settings-wiring, 2026-07-09), sourced from the
+ * user's Display Parameters. Omitted → the server applies its fixed 5-day defaults.
+ */
+export interface BriefingWindowParams {
+  /** Due-soon look-ahead in days (upcoming tasks/events). */
+  dueWithinDays: number;
+  /** Recency look-back in hours (documents/matters/projects modified-on). */
+  recencyHours: number;
+}
+
+export async function fetchBriefingLive(windows?: BriefingWindowParams): Promise<NarrationResult> {
   try {
     const response = await authenticatedFetch('/api/ai/daily-briefing/render', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: '{}',
+      body: windows
+        ? JSON.stringify({ dueWithinDays: windows.dueWithinDays, recencyHours: windows.recencyHours })
+        : '{}',
     });
 
     const data = (await response.json()) as NarrateResponse;
@@ -567,5 +590,29 @@ export async function emailBriefingToColleague(recipientEmail: string): Promise<
     }
     console.error('[DailyBriefing] briefing email-share failed:', err);
     return { status: 'error', message: error.message ?? 'Failed to email the briefing.' };
+  }
+}
+
+/**
+ * Fetch the SharePoint-Embedded preview embed URL for a document, for the shared
+ * `RichFilePreviewDialog` file-preview modal (operator UAT 2026-07-09, item D).
+ *
+ * Calls `GET /api/documents/{documentId}/preview-url` — the SAME BFF endpoint the
+ * Semantic Search PCF uses (see SemanticSearchApiService.getPreviewUrl). `documentId`
+ * is the `sprk_document` record GUID, which each Documents-channel briefing bullet
+ * carries as `itemIds[0]`. Returns null on any failure so the dialog shows its own
+ * inline error state rather than throwing.
+ */
+export async function getDocumentPreviewUrl(documentId: string): Promise<string | null> {
+  if (!documentId) return null;
+  try {
+    const response = await authenticatedFetch(`/api/documents/${encodeURIComponent(documentId)}/preview-url`, {
+      method: 'GET',
+    });
+    const data = (await response.json()) as { previewUrl?: string };
+    return data.previewUrl ?? null;
+  } catch (err: unknown) {
+    console.warn('[DailyBriefing] getDocumentPreviewUrl failed:', err);
+    return null;
   }
 }

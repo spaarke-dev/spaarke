@@ -243,6 +243,7 @@ public class SessionDispatchManifestProbeTests
             scopeResolver.Object,
             actionRunner.Object,
             contextBinder,
+            Mock.Of<Sprk.Bff.Api.Services.Ai.ICodedWorkflowRegistry>(),
             textSource.Object,
             router.Object,
             pendingPlanManager,

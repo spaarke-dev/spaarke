@@ -25,7 +25,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 011 | FR-02 wire 1a "Search for Document" → reuse 1c load path | 1 Entry | 🟢 | none | ✅ | FULL | sonnet | high |
 | 012 | FR-03 1b upload → transient mount (flip send_workspace_artifact + feed bytes) | 1 Entry | 🟢 | none | ✅ | FULL | opus | high |
 | 013 | FR-05 create-on-save pipeline — extend PromoteIfEphemeralAsync (container/record/index; profile→core) | 1 Entry | 🟢 | none | ✅ | FULL | opus | xhigh |
-| 014 | FR-05 optional parent-association prompt (Tier 2c dialog integration) | 1 Entry | 🟡 | 013 | 🔲 | FULL | sonnet | high |
+| 014 | FR-05 optional parent-association prompt (Tier 2c dialog integration) | 1 Entry | 🟡 | 013 | ✅ | FULL | sonnet | high |
 | 015 | FR-06a upload fidelity branch (original-if-unedited) | 1 Entry | 🟢 | 013 | 🔲 | FULL | sonnet | high |
 | 016 | FR-04 draft-into-editor via compose disposition | 1 Entry | 🟢 | 000 | 🔲 | FULL | opus | high |
 | 017 | Deploy — BFF + SpaarkeAi (entry paths) + verify 1a/1b/1c mount | 1 Entry | 🟢 | 010,011,012,013,015 | 🔲 | STANDARD | sonnet | high |
@@ -55,7 +55,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 054 | FR-27 return-from-Word re-anchoring (bands ≥0.85/0.6–0.85/<0.6) + conflict banner | 5 Word | 🟢 | 051,006 | ✅ | FULL | opus | high |
 | 055 | FR-28 push/save deterministic path (gate dialog + OutcomeCard = splittable) | 5 Word | 🟡 | 050 | 🔲 | FULL | sonnet | high |
 | 056 | Deploy + Word for Web round-trip verification (Spikes 5/6 as gate) | 5 Word | 🟢 | 050,051,053,054 | 🔲 | STANDARD | sonnet | high |
-| 060 | FR-29 anchored annotations in Compose session payload (doc-adjacent) | 6 Memory | 🟢 | none | 🔲 | FULL | sonnet | high |
+| 060 | FR-29 anchored annotations in Compose session payload (doc-adjacent) | 6 Memory | 🟢 | none | ✅◐ | FULL | sonnet | high |
 | 061 | FR-31 action history via ledger queries (no duplicate structure) | 6 Memory | 🟢 | none | ✅ | FULL | sonnet | high |
 | 062 | FR-33 compaction over ledger + cross-version persistence (DocumentId+MatterId) | 6 Memory | 🟢 | 061 | 🔲 | STANDARD | sonnet | high |
 | 063 | FR-30 workspace-scope MemoryItems via gated memory.write | 6 Memory | 🔴 | none | ⛔ | FULL | sonnet | high |
@@ -67,9 +67,12 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 081 | Publish-size ≤60 MB + CVE scan + NetArchTest facade verification (NFR-01/02/05) | 8 Wrap | 🟢 | 025,050,052 | 🔲 | STANDARD | sonnet | high |
 | 082 | Flagship gate G-R2-C — browser-verified full chain on spaarkedev1 | 8 Wrap | 🔴 | 016,033,042,046,047,014,055 | ⛔ | FULL | opus | high |
 | 083 | AnchoredAnnotation Path-A deviation code-review sign-off | 8 Wrap | 🟢 | 060 | 🔲 | MINIMAL | sonnet | high |
+| 084 | Consumer-side vertical-slice seam test — compose dispatch E2E (ADR-043 B6 / O3) | 8 Wrap | 🔴 | 016,046 (+core E-20/E-40) | ⛔ | FULL | sonnet | high |
 | 090 | Project wrap-up (code-review, adr-check, repo-cleanup, /test-diet, lessons) | 8 Wrap | 🔴 | all | ⛔ | FULL | opus | high |
 
-**Totals**: 56 tasks — **33 🟢 startable** · **16 🔴 core-A0-blocked** · **7 🟡 splittable** (splittable are counted among startable; their gated half joins the blocked set). Task 045 rigor bumped STANDARD→FULL per CLAUDE.md §8 TEST-MODIFYING override (it modifies `tests/**`).
+**Totals**: 57 tasks (084 added 2026-07-09) — Task 045 rigor bumped STANDARD→FULL per CLAUDE.md §8 TEST-MODIFYING override.
+
+> **⚠️ E-20 GATING CORRECTION (2026-07-09, from [ADR-043-impact-review.md](../notes/ADR-043-impact-review.md))**: the compose-disposition dispatch is **422-broken end-to-end on master** — the admit-gate (`SessionDispatchOrchestrator.cs:229`) still admits only `Informational|WorkProduct`; our routing promotion fixed the router/ledger leg (2 of 3 lists) but NOT the admit-gate. The fix is **core E-20 (`DispositionRoutability`), 🔲 not started.** So **042/033/034 are shipped-but-GATED (false-green for E2E)** — they pass the router/unit layer but 422 through `/dispatch`; **re-verify after E-20**. The **4 informational actions dispatch E2E now** (E-10 fixed the input path). **042/033/034/046/047 (compose row)/082/084 all wait on E-20 ONLY.** ~~034 additionally waits on E-30~~ — **CORRECTED 2026-07-09 by core** ([REPLY-to-compose-r2-e20-e30-forkc.md](../notes/REPLY-to-compose-r2-e20-e30-forkc.md) §2): 034's supersession-write mechanism is **already shipped in Phase A0** (`ComposeDisposition.BuildFrame`/`ResolveCurrent`, locked by `ComposeDispositionContractTests`); E-30 (deterministic `ActionKind`) is for coded chat-loop actions, **orthogonal to compose supersession**. Build 034's write mechanism against the A0 contract now; it dispatches once E-20 admits `Compose`. **E-20 is DONE in core's worktree (admits `Compose`), pending merge** — core offered a fast-merge. **FREEZE compose edits to `OutputRouter.cs` + `Binding.cs` until E-20** (core owns the collapse).
 
 ## Parallel Execution Plan (startable 🟢 tracks)
 

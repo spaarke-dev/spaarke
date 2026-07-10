@@ -310,6 +310,15 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
             //      it to the prompt-body text. See:
             //        docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md (T111a)
             //      Defensive: missing inputBinding → null → renderer skips the Input section.
+            //
+            //      ADR-043 / E-12 (completion-engine convergence): the node engine renders a FULL
+            //      multi-section JPS prompt, so its convergence onto the SINGLE-SOURCE `## Input`
+            //      producer is necessarily THROUGH PromptSchemaRenderer — whose Layer-2 `## Input`
+            //      block was refactored in E-10 to delegate to PromptInputSection.Render. Passing the
+            //      inputBinding element to the renderer below is therefore the call-site swap onto the
+            //      one producer (NOT a reshape): dispatch (ActionRunner), this node engine, and the
+            //      retired DailyBriefingNarrator replica now all emit byte-identical `## Input`.
+            //      The vertical-slice guard for this path lives in tests/integration/seam/**.
             var runtimeInput = ExtractInputBindingAsJsonElement(context.Node.ConfigJson);
 
             // 4. Render the (possibly merged) JPS prompt to the final string the LLM receives.

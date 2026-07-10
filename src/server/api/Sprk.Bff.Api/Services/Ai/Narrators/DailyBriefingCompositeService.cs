@@ -110,10 +110,11 @@ public class DailyBriefingCompositeService
     public virtual async Task<DailyBriefingNarrateResponse> RenderAsync(
         Guid systemUserId,
         string tenantId,
+        DailyBriefingCollector.BriefingWindowOptions windows,
         CancellationToken cancellationToken)
     {
         var (payload, highPriorityItems, collectMs) =
-            await CollectAsync(systemUserId, cancellationToken).ConfigureAwait(false);
+            await CollectAsync(systemUserId, windows, cancellationToken).ConfigureAwait(false);
 
         if (payload.Channels.Length == 0 && payload.PriorityItems.Length == 0 && payload.Categories.Length == 0)
         {
@@ -176,7 +177,8 @@ public class DailyBriefingCompositeService
         ArgumentException.ThrowIfNullOrWhiteSpace(recipientEmail);
 
         var (payload, highPriorityItems, collectMs) =
-            await CollectAsync(systemUserId, cancellationToken).ConfigureAwait(false);
+            await CollectAsync(systemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, cancellationToken)
+                .ConfigureAwait(false);
 
         if (payload.Channels.Length == 0 && payload.PriorityItems.Length == 0 && payload.Categories.Length == 0)
         {
@@ -318,12 +320,13 @@ public class DailyBriefingCompositeService
 
     private async Task<(DailyBriefingNarrateRequest Payload, HighPriorityItemDto[] HighPriority, long CollectMs)> CollectAsync(
         Guid systemUserId,
+        DailyBriefingCollector.BriefingWindowOptions windows,
         CancellationToken cancellationToken)
     {
         // R7 W12 feedback item 9: fan out the collect + high-priority scan in parallel —
         // disjoint Dataverse queries; combined latency ≈ the slower of the two.
         var collectStart = DateTimeOffset.UtcNow;
-        var payloadTask = _collector.CollectAsync(systemUserId, cancellationToken);
+        var payloadTask = _collector.CollectAsync(systemUserId, windows, cancellationToken);
         var highPriorityTask = _collector.CollectHighPriorityAsync(systemUserId, cancellationToken);
         await Task.WhenAll(payloadTask, highPriorityTask).ConfigureAwait(false);
         var collectMs = (long)(DateTimeOffset.UtcNow - collectStart).TotalMilliseconds;

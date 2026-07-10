@@ -187,6 +187,70 @@ public static class ConsumerTypes
     public const string CreateTask = "create-task";
 
     /// <summary>
+    /// <c>ComposeEditor</c> BubbleMenu toolbar (Compose R2 FR-07, task 040) —
+    /// read-only clause explanation grounded in matter/firm playbook and
+    /// precedent context. Consumes the <c>compose-selection</c> scope;
+    /// Informational disposition (no edit). Constant registered by core task
+    /// AIR2-E42 per the compose-r2 handoff (B5,
+    /// <c>notes/HANDOFF-to-redesign-r2-ai-execution-foundation.md</c>); the
+    /// live Binding row (<c>sprk_playbookconsumer</c>) is staged mirror-first
+    /// at <c>infra/dataverse/sprk_playbookconsumer-rows.json</c> and deployed
+    /// by compose-r2 task 047 (deploy gate). Registering the constant here
+    /// ahead of that deploy is deliberate: it lets the deployed row land
+    /// without a code change, at the cost of an interim
+    /// <see cref="RoutingConsumerTypeHealthCheck"/> <c>ConstantsWithoutRows</c>
+    /// finding on any environment where the row is not yet live.
+    /// </summary>
+    public const string ComposeExplainClause = "compose-explain-clause";
+
+    /// <summary>
+    /// <c>ComposeEditor</c> BubbleMenu toolbar (Compose R2 FR-08, task 041) —
+    /// read-only comparison of the selected clause against the matter/firm
+    /// playbook (matches, deviations, risk score). Consumes
+    /// <c>compose-selection</c>; Informational disposition. See
+    /// <see cref="ComposeExplainClause"/> remarks for the registration
+    /// provenance shared by all five compose-r2 constants.
+    /// </summary>
+    public const string ComposeCompareToPlaybook = "compose-compare-to-playbook";
+
+    /// <summary>
+    /// The return-from-Word summarization flow (Compose R2 FR-10, task 043) —
+    /// plain-language summary of a reviewer's Word tracked changes
+    /// (insertions/deletions/comments). Consumes <c>compose-document</c>;
+    /// Informational disposition; invoked by the return-from-Word flow
+    /// (compose-r2 task 054). See <see cref="ComposeExplainClause"/> remarks.
+    /// </summary>
+    public const string ComposeSummarizeWordChanges = "compose-summarize-word-changes";
+
+    /// <summary>
+    /// The Compose defined-terms scan (Compose R2 FR-11, task 044) —
+    /// read-only consistency check of a document's defined terms, rendered
+    /// in the Context pane. Consumes <c>compose-document</c>; Informational
+    /// disposition. See <see cref="ComposeExplainClause"/> remarks.
+    /// </summary>
+    public const string ComposeDefinedTerms = "compose-defined-terms";
+
+    /// <summary>
+    /// The ONE edit-producing Compose R2 capability (FR-09, task 042) —
+    /// proposes an alternative rewrite of the selected clause as a pending
+    /// track-change (structured edit + rationale + sources) the attorney
+    /// accepts, replaces, or undoes. Declares the <c>compose</c> Binding
+    /// disposition (<c>BindingDisposition.Compose</c>, 100000006) — the
+    /// dispatched output is ledger-written before render (ADR-040) and
+    /// undo/replace is ledger supersession, never client DOM undo. Consumes
+    /// <c>compose-selection</c>. See <see cref="ComposeExplainClause"/>
+    /// remarks for the registration provenance.
+    /// </summary>
+    public const string ComposeDraftAlternative = "compose-draft-alternative";
+
+    // NOTE (AIR2-E42): create-matter (task 042, DEF-003 / #593) is intentionally
+    // NOT registered here yet — its ConsumerType constant lands together with its
+    // live Binding/Action row at the G-R2-A gate-deploy step (task 049). Registering
+    // the constant ahead of the row trips both the ConstantsWithoutRows health
+    // finding AND the golden-utterance planned-vs-existing coherence guard
+    // (GU-065/066/067 are catalogStatus:"planned"). Keep constant+row atomic at 049.
+
+    /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
     /// 028e exit gate).
@@ -208,5 +272,10 @@ public static class ConsumerTypes
         InsightsAsk,
         InsightsSearch,
         CreateTask,
+        ComposeExplainClause,
+        ComposeCompareToPlaybook,
+        ComposeSummarizeWordChanges,
+        ComposeDefinedTerms,
+        ComposeDraftAlternative,
     };
 }

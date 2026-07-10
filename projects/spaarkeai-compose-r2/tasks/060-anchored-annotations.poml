@@ -3,7 +3,7 @@
     <title>FR-29 anchored annotations in Compose session payload (doc-adjacent)</title>
     <phase>6 Memory</phase>
     <gate>startable-now</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
@@ -114,4 +114,31 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-09. `AnchoredAnnotation`/`AnchoredAnnotationAnchor`/`AnchoredAnnotationProvenance`/
+    `DefinedTerm` (verbatim design.md §8 shapes) added on `ChatSession` (Models/Ai/Chat/ChatSession.cs) as
+    two new nullable, MUTABLE sibling collections alongside the existing append-only ledger collections —
+    persisted via the SAME three-tier stack (Redis hot-tier confirmed generic; Cosmos warm-tier mapping
+    NOT extended, see deviation below). `IComposeService`/`ComposeService` gained
+    `GetComposeAnnotationsAsync`/`SaveComposeAnnotationsAsync` (partial-replace semantics, ADR-040
+    `{bindingId}@t{n}` provenance validated fail-fast) and `LoadAsync` now RESUMES a caller-supplied
+    `SessionId` when it's bound to the SAME document (rehydrate), falling back to R1 mint-new otherwise.
+    Client (`ComposeWorkspace.tsx`) forwards `initialSessionId` on Load and defensively parses optional
+    `anchoredAnnotations`/`definedTermsTracking` from the response.
+
+    DEVIATIONS (reported to orchestrator): (1) touched `ChatSession.cs` — outside the literal "Edit
+    ONLY" list — because it's the only reachable carrier for the payload from `Services/Compose/`;
+    additive-only, zero collision observed. (2) Cosmos warm-tier (`StoredSession.cs` +
+    `ChatSessionManager`'s Map methods) NOT extended — both out of boundary — so annotations round-trip
+    via Redis only today; a Redis-evicted session restored from Cosmos would lose them. (3) No HTTP wire
+    exists yet (`ComposeEndpoints.cs` out of boundary) — the service-layer contract is complete and
+    tested; the client rehydrate is defensive/forward-compatible pending a follow-up endpoint task.
+
+    7 new tests in `AnchoredAnnotationPersistenceTests.cs` (round-trip, tenant isolation, partial-replace,
+    malformed-provenance fail-fast, missing-session, session-resumption + cross-document non-leak).
+    BFF 270/270 Compose suite green; ADR-013 NetArchTest green; integration project builds clean;
+    frontend tsc clean + jest 64/64; publish 49.82 MB incl PDBs / 45.81 MB excl (~0 delta, no new
+    packages); 1 pre-existing HIGH CVE (Kiota, not introduced).
+  </notes>
 </task>

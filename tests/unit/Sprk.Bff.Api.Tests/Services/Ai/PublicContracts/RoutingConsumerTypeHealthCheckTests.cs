@@ -186,8 +186,11 @@ public sealed class RoutingConsumerTypeHealthCheckTests
     // ── Drift class (a): constants ↔ Binding rows ──────────────────────────
 
     [Fact]
-    public async Task CheckHealthAsync_ConstantWithoutBindingRow_ReturnsUnhealthyNamingConstant()
+    public async Task CheckHealthAsync_ConstantWithoutBindingRow_ReturnsDegradedNamingConstant()
     {
+        // E-40/E-42: a constant ahead of its row (mirror-first seam) is a benign
+        // forward-declaration → Degraded, not Unhealthy. (A row WITHOUT a constant is
+        // the real admin-typo break and stays Unhealthy — see the sibling test.)
         var rows = ConsumerTypes.All
             .Where(t => t != ConsumerTypes.MatterPreFill)
             .Select(BindingRow)
@@ -198,9 +201,9 @@ public sealed class RoutingConsumerTypeHealthCheckTests
 
         var result = await CheckAsync(sut);
 
-        result.Status.Should().Be(HealthStatus.Unhealthy);
+        result.Status.Should().Be(HealthStatus.Degraded);
         result.Description.Should().Contain(ConsumerTypes.MatterPreFill);
-        result.Description.Should().Contain("without Binding row");
+        result.Description.Should().Contain("ahead of their Binding row");
     }
 
     [Fact]
@@ -222,21 +225,121 @@ public sealed class RoutingConsumerTypeHealthCheckTests
     }
 
     [Fact]
-    public async Task CheckHealthAsync_EmptyBindingTable_ReturnsUnhealthyListingEveryConstant()
+    public async Task CheckHealthAsync_EmptyBindingTable_ReturnsDegradedListingEveryConstant()
     {
-        // FR-P0-04 upgrade: an unseeded environment was previously a WARN-and-
-        // continue; under the closed-catalog gate it is maximal drift.
+        // E-40/E-42: an unseeded environment = every constant forward-declared (no rows
+        // yet) → Degraded, and still lists every constant so an operator sees what to seed.
+        // (Contrast: a row WITHOUT a constant is Unhealthy — that's a typo, not an unseeded env.)
         SetupBindingRows();
         SetupToolRows(ToolRow("Alpha Tool", "AlphaHandler"));
         var sut = CreateSut(handlerIds: new[] { "AlphaHandler" });
 
         var result = await CheckAsync(sut);
 
-        result.Status.Should().Be(HealthStatus.Unhealthy);
+        result.Status.Should().Be(HealthStatus.Degraded);
         foreach (var constant in ConsumerTypes.All)
         {
             result.Description.Should().Contain(constant);
         }
+    }
+
+    // ── Compose-r2 parity (AIR2-E42, compose-r2 handoff B5): the 5 compose
+    //    constants registered by this task must genuinely participate in the
+    //    SAME constants-↔-rows parity dimension as every pre-existing consumer
+    //    type — no special-cased pass-through. (create-matter's constant is NOT
+    //    registered here — it lands with its live row at task 049 / DEF-003, so
+    //    registering it ahead of the row would trip both this parity check and
+    //    the golden-utterance planned-vs-existing coherence guard.) ──────
+
+    public static IEnumerable<object[]> NewlyRegisteredConsumerTypes()
+    {
+        yield return new object[] { ConsumerTypes.ComposeExplainClause };
+        yield return new object[] { ConsumerTypes.ComposeCompareToPlaybook };
+        yield return new object[] { ConsumerTypes.ComposeSummarizeWordChanges };
+        yield return new object[] { ConsumerTypes.ComposeDefinedTerms };
+        yield return new object[] { ConsumerTypes.ComposeDraftAlternative };
+    }
+
+    [Fact]
+    public void ConsumerTypesAll_IncludesComposeR2Constants()
+    {
+        // Acceptance criterion: ConsumerTypes carries the 5 compose-r2 consumer
+        // types (compose-explain-clause / compose-compare-to-playbook /
+        // compose-summarize-word-changes / compose-defined-terms /
+        // compose-draft-alternative — infra/dataverse/sprk_playbookconsumer-rows.json,
+        // compose-r2 tasks 040-044) so the health-check parity dimension has
+        // something to reconcile deployed rows against.
+        ConsumerTypes.All.Should().Contain(new[]
+        {
+            "compose-explain-clause",
+            "compose-compare-to-playbook",
+            "compose-summarize-word-changes",
+            "compose-defined-terms",
+            "compose-draft-alternative",
+        });
+    }
+
+    [Theory]
+    [MemberData(nameof(NewlyRegisteredConsumerTypes))]
+    public async Task CheckHealthAsync_NewConsumerTypeMissingBindingRow_ReturnsDegradedNamingIt(string consumerType)
+    {
+        // A deployed row for every OTHER constant, but this one's Binding row is
+        // absent — the exact pre-deploy state today (compose-r2 task 047 rows not yet
+        // live). E-40/E-42: this is a benign FORWARD-DECLARATION (mirror-first seam —
+        // the whole point of registering the constant ahead of the row) → Degraded, NOT
+        // Unhealthy. It is NOT special-cased as exempt: it still participates in the
+        // parity dimension and is named at /healthz so an operator knows to seed the row.
+        var rows = ConsumerTypes.All
+            .Where(t => t != consumerType)
+            .Select(BindingRow)
+            .ToArray();
+        SetupBindingRows(rows);
+        SetupToolRows(ToolRow("Alpha Tool", "AlphaHandler"));
+        var sut = CreateSut(handlerIds: new[] { "AlphaHandler" });
+
+        var result = await CheckAsync(sut);
+
+        result.Status.Should().Be(HealthStatus.Degraded);
+        result.Description.Should().Contain(consumerType);
+        result.Description.Should().Contain("ahead of their Binding row");
+    }
+
+    [Theory]
+    [MemberData(nameof(NewlyRegisteredConsumerTypes))]
+    public async Task CheckHealthAsync_NewConsumerTypeRowPresent_ParticipatesInHealthyBijection(string consumerType)
+    {
+        // Once the catalog row IS deployed (task 047 / the DEF-003 seed), the
+        // constant must resolve cleanly — a deployed row must NOT flip
+        // Unhealthy (the acceptance criterion this task exists to satisfy).
+        SetupBindingRows(BindingRowsForAllConstants());
+        SetupToolRows(ToolRow("Alpha Tool", "AlphaHandler"));
+        var sut = CreateSut(handlerIds: new[] { "AlphaHandler" });
+
+        var result = await CheckAsync(sut);
+
+        result.Status.Should().Be(HealthStatus.Healthy);
+        ConsumerTypes.All.Should().Contain(consumerType);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_DataverseSideTypoOnNewComposeConsumerType_ReturnsUnhealthyNamingRowValue()
+    {
+        // The 2026-06-24 UAT-2 incident shape (matter-pre-fil), reproduced against
+        // one of the NEW compose-r2 types: an admin/seed typo on the Dataverse side
+        // for a type this task registered must be caught exactly like a
+        // pre-existing constant's typo would be.
+        var rows = BindingRowsForAllConstants()
+            .Append(BindingRow("compose-draft-alternate")) // missing trailing "ive"
+            .ToArray();
+        SetupBindingRows(rows);
+        SetupToolRows(ToolRow("Alpha Tool", "AlphaHandler"));
+        var sut = CreateSut(handlerIds: new[] { "AlphaHandler" });
+
+        var result = await CheckAsync(sut);
+
+        result.Status.Should().Be(HealthStatus.Unhealthy);
+        result.Description.Should().Contain("compose-draft-alternate");
+        result.Description.Should().Contain("without ConsumerTypes constant");
     }
 
     // ── Drift class (b): tool row ↔ handler bijection ──────────────────────
@@ -370,9 +473,11 @@ public sealed class RoutingConsumerTypeHealthCheckTests
     [Fact]
     public async Task CheckHealthAsync_MultipleDriftClasses_ReportsEveryClassInOneDescription()
     {
-        var rows = ConsumerTypes.All
-            .Where(t => t != ConsumerTypes.ChatSummarize)
-            .Select(BindingRow)
+        // Multiple REAL (Unhealthy) drift classes in one description. NOTE (E-40/E-42):
+        // ConstantsWithoutRows is no longer a drift class — it is a Degraded forward-declaration
+        // and is asserted separately; this test covers the row-without-constant + tool-bijection
+        // drift classes that remain Unhealthy.
+        var rows = BindingRowsForAllConstants()
             .Append(BindingRow("typo-consumer"))
             .ToArray();
         SetupBindingRows(rows);
@@ -385,7 +490,6 @@ public sealed class RoutingConsumerTypeHealthCheckTests
         var result = await CheckAsync(sut);
 
         result.Status.Should().Be(HealthStatus.Unhealthy);
-        result.Description.Should().Contain(ConsumerTypes.ChatSummarize);
         result.Description.Should().Contain("typo-consumer");
         result.Description.Should().Contain("GhostHandler");
         result.Description.Should().Contain("dataverse.dup (2 rows)");

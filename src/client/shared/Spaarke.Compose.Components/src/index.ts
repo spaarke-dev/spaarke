@@ -125,6 +125,11 @@ export type {
   ComposeAssistantToWorkspaceFlow,
   // Flow 6 — assistant → context (citations / suggested clauses)
   ComposeAssistantToContextFlow,
+  // R2 FR-29 — Compose-domain session-payload annotations (design.md §8; task 060)
+  AnchoredAnnotationAnchor,
+  AnchoredAnnotationProvenance,
+  AnchoredAnnotation,
+  DefinedTerm,
 } from './types/compose-contracts';
 
 // DOCX bridge helpers — exported for advanced consumers + R2 tests. Most

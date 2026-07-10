@@ -81,6 +81,36 @@ public class IdentityNormalizationServiceTests
         result.OrganizationIds.Should().BeEquivalentTo(new[] { TestOrgIdA, TestOrgIdB });
     }
 
+    [Fact]
+    public async Task ResolveAsync_UserWithPrimaryContact_ResolvesContactIdFromUserRecord()
+    {
+        // r5 2026-07-09 (Daily Briefing completeness): the Spaarke model links user→contact via
+        // systemuser.sprk_primarycontact (lookup → contact), NOT contact.azureactivedirectoryobjectid
+        // (which isn't provisioned on contact in every env). The identity service must read the
+        // primary-contact lookup from the user row as the authoritative ContactId — this is what
+        // lets the Contact-typed membership descriptors (assignedAttorney / assignedParalegal)
+        // match the acting user. Note: NO cross-ref query is set up (Strict mock), proving the
+        // primary-contact path resolves without it.
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        SetupSystemUserRow(dataverse, TestSystemUserId,
+            email: EmailAddress, businessUnitId: TestBusinessUnitId, aadOid: TestAadObjectId,
+            primaryContactId: TestContactId);
+        SetupTeamMembershipRows(dataverse, TestSystemUserId, TestTeamIdA, TestTeamIdB);
+        SetupContactWithAccountParent(dataverse, TestContactId, TestAccountId);
+
+        var orgResolver = new Mock<IIdentityOrganizationResolver>();
+        orgResolver
+            .Setup(x => x.ResolveOrganizationsAsync(TestSystemUserId, TestContactId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { TestOrgIdA, TestOrgIdB });
+
+        var sut = CreateSut(dataverse.Object, organizationResolvers: new[] { orgResolver.Object });
+
+        var result = await sut.ResolveAsync(TestSystemUserId, CancellationToken.None);
+
+        result.ContactId.Should().Be(TestContactId,
+            "ContactId resolves from the user's sprk_primarycontact lookup (no contact AAD cross-ref needed)");
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Edge cases — user without contact, contact without account, etc.
     // ─────────────────────────────────────────────────────────────────────
@@ -344,7 +374,8 @@ public class IdentityNormalizationServiceTests
         Guid systemUserId,
         string? email,
         Guid? businessUnitId,
-        Guid? aadOid)
+        Guid? aadOid,
+        Guid? primaryContactId = null)
     {
         var entity = new Entity("systemuser") { Id = systemUserId };
         if (email is not null)
@@ -358,6 +389,10 @@ public class IdentityNormalizationServiceTests
         if (aadOid is { } oid)
         {
             entity["azureactivedirectoryobjectid"] = oid;
+        }
+        if (primaryContactId is { } pcId)
+        {
+            entity["sprk_primarycontact"] = new EntityReference("contact", pcId);
         }
 
         dataverse

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Compose;
@@ -169,6 +170,52 @@ public interface IComposeService
         PushAnnotationsRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FR-29 read: projects the CURRENT <see cref="AnchoredAnnotation"/> and
+    /// <see cref="DefinedTerm"/> collections stored on a Compose session (design.md §8).
+    /// Read-only — used internally by <see cref="LoadAsync"/> and available standalone
+    /// (e.g., for a Context-pane refresh). Returns empty collections (never null) for a
+    /// session with none stored, or for an unknown session id.
+    /// </summary>
+    /// <param name="tenantId">Tenant id (ADR-015 Tier 3 isolation). Required.</param>
+    /// <param name="sessionId">Bound <c>ChatSession</c> id. Required.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<ComposeAnnotationsState> GetComposeAnnotationsAsync(
+        string tenantId,
+        string sessionId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FR-29 write: persists <see cref="AnchoredAnnotation"/> and/or <see cref="DefinedTerm"/>
+    /// collections onto the EXISTING Compose session payload (the three-tier <c>ChatSession</c>
+    /// stack — no new entity; design.md §8).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Partial-replace semantics</b>: a <c>null</c> collection on the request leaves the
+    /// corresponding stored collection UNCHANGED; a non-null (possibly empty) collection
+    /// REPLACES it wholesale. Annotations are mutable positional UI state — accept / reject /
+    /// edit — not an append-only ledger (contrast with <c>ChatSession.Outputs</c>/<c>ToolChains</c>).
+    /// </para>
+    /// <para>
+    /// <b>Path-A boundary (charter §3.4)</b>: this method MUST NOT be confused with
+    /// <c>memory.write</c> — it never touches the Memory Service, never routes through the
+    /// Context Binder, and the stored collections are never surfaced in the memory
+    /// review/delete view. See the class-level remarks on <see cref="AnchoredAnnotation"/>.
+    /// </para>
+    /// <para>
+    /// <b>ADR-040 provenance</b>: any non-null <c>Provenance.LedgerRef</c> on a supplied entry
+    /// MUST be in <c>{bindingId}@t{n}</c> form; a malformed ref throws
+    /// <see cref="ArgumentException"/> before anything persists.
+    /// </para>
+    /// </remarks>
+    /// <param name="request">Save payload: tenant id + session id + the collection(s) to replace.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidOperationException">The session does not exist.</exception>
+    Task<ComposeAnnotationsState> SaveComposeAnnotationsAsync(
+        SaveComposeAnnotationsRequest request,
+        CancellationToken cancellationToken = default);
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +282,18 @@ public sealed record LoadComposeDocumentRequest
     /// <summary>Optional display name carried through for session-binding initialization.
     /// Used only when a new session is created.</summary>
     public string? DisplayName { get; init; }
+
+    /// <summary>
+    /// FR-29 (R2): optional known <c>ChatSession</c> id to RESUME so the load restores prior
+    /// <see cref="AnchoredAnnotation"/>/<see cref="DefinedTerm"/> state (design.md §8). When
+    /// supplied AND a session with this id exists AND is bound to the SAME document identity
+    /// being loaded (the <c>DocumentRecordId</c>-or-<c>DocumentSpeId</c> binding key —
+    /// see <see cref="ComposeService.LoadAsync"/> remarks), <see cref="LoadAsync"/> reuses it
+    /// instead of minting a new session. When absent, not found, or bound to a DIFFERENT
+    /// document, <see cref="LoadAsync"/> falls back to minting a fresh session (R1 behavior,
+    /// unchanged) — this parameter is purely additive.
+    /// </summary>
+    public string? SessionId { get; init; }
 }
 
 /// <summary>Load outcome — DOCX bytes + session id + (Path A) <c>sprk_documentid</c>.</summary>
@@ -251,6 +310,18 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
 
     /// <summary>File size in bytes.</summary>
     public long? Size { get; init; }
+
+    /// <summary>
+    /// FR-29 rehydrate (design.md §8): anchored annotations restored from the resumed/created
+    /// session. Empty (never null) when none exist yet or the session was freshly minted.
+    /// </summary>
+    public IReadOnlyList<AnchoredAnnotation> AnchoredAnnotations { get; init; } = Array.Empty<AnchoredAnnotation>();
+
+    /// <summary>
+    /// FR-29 rehydrate (design.md §8): defined-terms tracking restored from the
+    /// resumed/created session. Empty (never null) when none exist yet.
+    /// </summary>
+    public IReadOnlyList<DefinedTerm> DefinedTermsTracking { get; init; } = Array.Empty<DefinedTerm>();
 }
 
 /// <summary>Save request payload.</summary>
@@ -406,4 +477,34 @@ public sealed record PushAnnotationsResult
 
     /// <summary>Count of annotations materialized into the document.</summary>
     public required int AnnotationCount { get; init; }
+}
+
+/// <summary>
+/// FR-29 (design.md §8) — the CURRENT state of the two Compose-domain session collections.
+/// Returned by <see cref="IComposeService.GetComposeAnnotationsAsync"/> and
+/// <see cref="IComposeService.SaveComposeAnnotationsAsync"/>.
+/// </summary>
+public sealed record ComposeAnnotationsState
+{
+    /// <summary>Current anchored annotations (empty, never null).</summary>
+    public required IReadOnlyList<AnchoredAnnotation> AnchoredAnnotations { get; init; }
+
+    /// <summary>Current defined-terms tracking (empty, never null).</summary>
+    public required IReadOnlyList<DefinedTerm> DefinedTermsTracking { get; init; }
+}
+
+/// <summary>FR-29 save request — partial-replace payload for a session's Compose-domain collections. See <see cref="IComposeService.SaveComposeAnnotationsAsync"/> remarks for semantics.</summary>
+public sealed record SaveComposeAnnotationsRequest
+{
+    /// <summary>Tenant id (ADR-015 Tier 3 isolation). Required.</summary>
+    public required string TenantId { get; init; }
+
+    /// <summary>Bound <c>ChatSession</c> id. Required — the session must already exist.</summary>
+    public required string SessionId { get; init; }
+
+    /// <summary>New anchored-annotations collection. <c>null</c> leaves the stored collection unchanged; a non-null (possibly empty) value replaces it wholesale.</summary>
+    public IReadOnlyList<AnchoredAnnotation>? AnchoredAnnotations { get; init; }
+
+    /// <summary>New defined-terms-tracking collection. <c>null</c> leaves the stored collection unchanged; a non-null (possibly empty) value replaces it wholesale.</summary>
+    public IReadOnlyList<DefinedTerm>? DefinedTermsTracking { get; init; }
 }

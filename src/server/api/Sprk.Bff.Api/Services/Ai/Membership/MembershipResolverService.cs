@@ -73,8 +73,12 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// </remarks>
     internal const string CacheResource = "membership-resolved";
 
-    /// <summary>Cache schema version per ADR-009.</summary>
-    private const int CacheVersion = 1;
+    /// <summary>
+    /// Cache schema version per ADR-009. Bumped to 3 (r5 2026-07-09) alongside the
+    /// distinct='true' completeness fix (see <see cref="BuildFetchXml"/>) so that empty
+    /// membership results cached under the buggy query are orphaned rather than served.
+    /// </summary>
+    private const int CacheVersion = 3;
 
     /// <summary>Phase 1A per-user cache TTL (FR-1A.8).</summary>
     internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
@@ -417,7 +421,16 @@ public sealed class MembershipResolverService : IMembershipResolverService
         var projectAttributes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var sb = new StringBuilder(512);
-        sb.Append("<fetch distinct='true' top='").Append(limit + 1).Append('\'');
+        // NOTE (r5 2026-07-09 — briefing-completeness fix): NO distinct='true'. Dataverse
+        // FetchXml with distinct dedupes on the PROJECTED columns and does NOT return the
+        // record id unless the primary key is explicitly projected. This query projects only
+        // the descriptor lookup fields (owner/team/BU/…), so many records sharing the same
+        // lookup values collapsed into a few "distinct" rows WITH EMPTY IDS, which
+        // MaterializeResults then dropped (row.Id == Guid.Empty) → membership resolved to 0
+        // even for a user who owns 45 matters. This query has no <link-entity>, so each match
+        // is exactly one row (no multiplication), and MaterializeResults already dedupes by id
+        // (HashSet). distinct was therefore a no-op for dedup and actively broke id retrieval.
+        sb.Append("<fetch top='").Append(limit + 1).Append('\'');
         if (skip > 0)
         {
             // FetchXml paging via 'page' attribute — page is 1-based with fixed
@@ -815,8 +828,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
         var sb = new StringBuilder(512);
         // top is generous — transitive results are 1-hop only and naturally
         // bounded by the related-entity volume. We use the primary MaxLimit
-        // as a sane ceiling.
-        sb.Append("<fetch distinct='true' top='").Append(MembershipResolveOptions.MaxLimit).Append('\'');
+        // as a sane ceiling. NO distinct='true' (see BuildFetchXml note): distinct
+        // without projecting the primary key returns empty ids in Dataverse FetchXml;
+        // MaterializeTransitiveResults dedupes by id, so distinct is unneeded + harmful.
+        sb.Append("<fetch top='").Append(MembershipResolveOptions.MaxLimit).Append('\'');
         sb.Append("><entity name='").Append(EscapeXml(relatedEntity)).Append("'>");
 
         // Project each back-ref lookup field so MaterializeTransitiveResults

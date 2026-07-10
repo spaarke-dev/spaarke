@@ -45,6 +45,7 @@ public sealed class NullDailyBriefingCollector : DailyBriefingCollector
 
     public override Task<DailyBriefingNarrateRequest> CollectAsync(
         Guid systemUserId,
+        BriefingWindowOptions windows,
         CancellationToken ct)
     {
         _logger.LogDebug(

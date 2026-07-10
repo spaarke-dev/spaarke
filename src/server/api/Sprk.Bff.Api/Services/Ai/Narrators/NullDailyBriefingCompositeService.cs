@@ -31,7 +31,8 @@ public sealed class NullDailyBriefingCompositeService : DailyBriefingCompositeSe
     }
 
     public override Task<DailyBriefingNarrateResponse> RenderAsync(
-        Guid systemUserId, string tenantId, CancellationToken cancellationToken) => Throw();
+        Guid systemUserId, string tenantId, DailyBriefingCollector.BriefingWindowOptions windows,
+        CancellationToken cancellationToken) => Throw();
 
     public override Task<DailyBriefingNarrateResponse> NarrateAsync(
         DailyBriefingNarrateRequest request, string tenantId, CancellationToken cancellationToken) => Throw();

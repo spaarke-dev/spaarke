@@ -82,6 +82,101 @@
 import type { PaneChannel } from '@spaarke/ai-widgets';
 
 // ---------------------------------------------------------------------------
+// R2 FR-29 — Anchored annotations + defined-terms tracking (design.md §8)
+// ---------------------------------------------------------------------------
+//
+// Client mirror of `Sprk.Bff.Api.Models.Ai.Chat.AnchoredAnnotation` /
+// `DefinedTerm` (spaarkeai-compose-r2 task 060). Field names are VERBATIM per
+// design.md §8's `AnchoredAnnotation` TypeScript declaration.
+//
+// Path-A deviation note (charter §3.4, design.md §8): AnchoredAnnotation is
+// Compose-domain, document-adjacent POSITIONAL UI STATE (like a cursor or a
+// fold) — NOT a MemoryItem variant. It is never written via `memory.*`, never
+// retrieved by the Context Binder, and never surfaced in the user's memory
+// review/delete view. Persisted via the existing Compose session payload (the
+// three-tier ChatSession stack the ledger rides) — no new entity.
+//
+// Persistence: bound to `DocumentId` (document identity), not to a specific
+// DOCX version — intended to survive Word handoffs (design.md §8
+// "Cross-version persistence").
+
+/**
+ * Drift-resistant anchor (content-match + structural hint) locating an
+ * {@link AnchoredAnnotation} or a {@link DefinedTerm}'s first usage in the
+ * document. Survives document edits better than a raw editor position.
+ */
+export interface AnchoredAnnotationAnchor {
+  /** Content-match pattern (surrounding text) used to re-locate the anchor after edits. */
+  textPattern: string;
+  /** Structural hint — paragraph index at anchor-creation time (best-effort). */
+  paragraphHint: number;
+  /** Editor-native span id (TipTap/ProseMirror) — stable for the in-editor session lifetime. */
+  spanId: string;
+}
+
+/**
+ * AI-sourced provenance — the ADR-040 `{bindingId}@t{n}` ledger reference form.
+ * References the ledger entry; never duplicates the underlying `SessionOutput`
+ * payload as a second source of truth.
+ */
+export interface AnchoredAnnotationProvenance {
+  /** The `sprk_playbookconsumer` Binding id that produced the annotation. */
+  bindingId: string;
+  /** Addressable ledger key in `{bindingId}@t{n}` form (ADR-040). */
+  ledgerRef: string;
+}
+
+/**
+ * R2 anchored annotation (design.md §8 verbatim shape) — Compose-domain,
+ * document-adjacent positional UI state: a comment, insertion/deletion
+ * suggestion, or explanation anchored to a position in the open document.
+ *
+ * Privacy: `body` may carry user- or LLM-generated content (Tier 3 per
+ * ADR-015) — same sensitivity tier as `selectionText` / `contentHtml`
+ * elsewhere in this file.
+ */
+export interface AnchoredAnnotation {
+  /** Stable annotation id (client-generated). */
+  id: string;
+  /** Annotation kind (design.md §8 verbatim union). */
+  type: 'comment' | 'insertion-suggestion' | 'deletion-suggestion' | 'explanation';
+  /** Anchor locating the annotation in the document. */
+  anchor: AnchoredAnnotationAnchor;
+  /** Annotation body text (Tier 3 — see privacy note above). */
+  body: string;
+  /** Author display name or identifier (human user, or the producing AI capability). */
+  author: string;
+  /** ISO-8601 UTC timestamp the annotation was created. */
+  timestamp: string;
+  /** Who originated the annotation. */
+  source: 'human' | 'ai';
+  /** AI-sourced annotations carry the producing Binding + ADR-040 ledger ref. */
+  provenance?: AnchoredAnnotationProvenance;
+}
+
+/**
+ * R2 defined-term tracking entry (spec FR-11 `compose-defined-terms`
+ * extraction capability) — a term detected/tracked for the session, rendered
+ * READ-ONLY in the Context pane (the Context pane is audit-only, never an
+ * interactive input surface). Same Path-A deviation note and persistence
+ * contract as {@link AnchoredAnnotation}.
+ */
+export interface DefinedTerm {
+  /** The detected term text (e.g. "Confidential Information"). */
+  term: string;
+  /** The term's definition as stated in the document, when located. */
+  definition?: string;
+  /** Anchor to the term's first (defining) usage in the document. */
+  firstUsageAnchor?: AnchoredAnnotationAnchor;
+  /** Human-readable descriptions of usages flagged as inconsistent with the definition. */
+  inconsistentUsages?: string[];
+  /** Who originated the tracking entry (human-added term vs. AI-extracted). */
+  source: 'human' | 'ai';
+  /** AI-sourced entries carry the producing Binding + ADR-040 ledger ref. */
+  provenance?: AnchoredAnnotationProvenance;
+}
+
+// ---------------------------------------------------------------------------
 // Shared types — pointers, not entities
 // ---------------------------------------------------------------------------
 

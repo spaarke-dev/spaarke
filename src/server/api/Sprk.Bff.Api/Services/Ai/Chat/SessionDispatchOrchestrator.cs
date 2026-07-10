@@ -47,11 +47,12 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// clean stable error (ADR-039: no fallback, no consumer-type re-detection).
 /// </para>
 /// <para>
-/// <b>P1 execution envelope</b>: prompted Actions with Informational disposition only.
-/// Non-prompted kinds and non-informational dispositions reject PRE-RUN with stable
-/// error codes (cheaper and more honest than letting <see cref="OutputRouter"/>'s
-/// loud P3 stubs throw after the LLM spend). The P2/P3 phases widen this envelope
-/// where the coded-workflow executor and the remaining disposition legs land.
+/// <b>Execution envelope</b>: prompted Actions whose disposition <see cref="OutputRouter"/> can
+/// route. The disposition gate derives from the ADR-043 §3 <see cref="DispositionRoutability"/>
+/// registry (admission = routability — the ONE source; no parallel allow-list), so it admits exactly
+/// the routable set and rejects not-yet-routable dispositions PRE-RUN with a stable error code
+/// (cheaper and more honest than letting the router's loud post-store stub throw after the LLM spend).
+/// The ActionKind gate (non-prompted kinds) is a SEPARATE, orthogonal axis owned by E-30.
 /// </para>
 /// <para>
 /// <b>Args contract</b>: chip <c>args</c> forward verbatim from the client; THIS
@@ -79,6 +80,7 @@ public class SessionDispatchOrchestrator
     private readonly IScopeResolverService _scopeResolver;
     private readonly IActionRunner _actionRunner;
     private readonly IContextBinder _contextBinder;
+    private readonly ICodedWorkflowRegistry _codedWorkflows;
     private readonly ISessionFileTextSource _sessionFileTextSource;
     private readonly IOutputRouter _outputRouter;
     private readonly PendingPlanManager _pendingPlanManager;
@@ -92,6 +94,7 @@ public class SessionDispatchOrchestrator
         IScopeResolverService scopeResolver,
         IActionRunner actionRunner,
         IContextBinder contextBinder,
+        ICodedWorkflowRegistry codedWorkflows,
         ISessionFileTextSource sessionFileTextSource,
         IOutputRouter outputRouter,
         PendingPlanManager pendingPlanManager,
@@ -104,6 +107,7 @@ public class SessionDispatchOrchestrator
         _scopeResolver = scopeResolver ?? throw new ArgumentNullException(nameof(scopeResolver));
         _actionRunner = actionRunner ?? throw new ArgumentNullException(nameof(actionRunner));
         _contextBinder = contextBinder ?? throw new ArgumentNullException(nameof(contextBinder));
+        _codedWorkflows = codedWorkflows ?? throw new ArgumentNullException(nameof(codedWorkflows));
         _sessionFileTextSource = sessionFileTextSource ?? throw new ArgumentNullException(nameof(sessionFileTextSource));
         _outputRouter = outputRouter ?? throw new ArgumentNullException(nameof(outputRouter));
         _pendingPlanManager = pendingPlanManager ?? throw new ArgumentNullException(nameof(pendingPlanManager));
@@ -131,6 +135,7 @@ public class SessionDispatchOrchestrator
         _scopeResolver = null!;
         _actionRunner = null!;
         _contextBinder = null!;
+        _codedWorkflows = null!;
         _sessionFileTextSource = null!;
         _outputRouter = null!;
         _pendingPlanManager = null!;
@@ -211,28 +216,39 @@ public class SessionDispatchOrchestrator
                 "The requested binding has no Action target; the dispatch path executes catalog Actions only.");
         }
 
-        if (binding.ActionKind != ActionKind.Prompted)
+        // ── ADR-043 §4 (E-30): the ActionKind decision is a deterministic total function over the
+        // closed kind vocabulary — Prompted → the prompted executor (ActionRunner), Coded → the
+        // registered ICodedWorkflow via ICodedWorkflowRegistry (the reserved Action-Engine front door;
+        // engine internals stay behind ICodedWorkflow.ExecuteAsync), and ANY other/undefined kind →
+        // the same loud 422 as before (no silent fallback, no second dispatch protocol — ADR-039).
+        // The kind decision lives ONLY here; the two executor legs below join the SAME
+        // store-before-render tail (OutputRouter.RouteAsync), so there is one ledger write and one
+        // render boundary regardless of kind.
+        if (binding.ActionKind is not (ActionKind.Prompted or ActionKind.Coded))
         {
             throw new DispatchRejectedException(
                 DispatchRejectedException.ActionKindUnsupported,
                 StatusCodes.Status422UnprocessableEntity,
                 $"The requested binding targets an Action of kind '{binding.ActionKind}'; " +
-                "the P1 dispatch path executes prompted Actions only.");
+                "the dispatch path executes prompted or coded Actions only.");
         }
 
-        // Disposition envelope: the dispatch seam executes the dispositions whose
-        // OutputRouter legs are IMPLEMENTED — Informational (P1 task 021) and WorkProduct
-        // (FR-P3-08 task 047: host-record persistence). Rejecting the still-stubbed legs
-        // PRE-RUN is cheaper and more honest than letting OutputRouter's loud stubs throw
-        // after the LLM spend. (Email is deliberately NOT dispatchable here — its only
-        // consumer is the coded briefing composite, which routes directly; see task 043.)
-        if (binding.Disposition is not (BindingDisposition.Informational or BindingDisposition.WorkProduct))
+        // ── ADR-043 §3 single-source disposition admission: the dispatch seam admits EXACTLY the
+        // dispositions OutputRouter can route (DispositionRoutability — the ONE registry). There is
+        // NO separate hardcoded allow-list here: admission DERIVES from routability, so the admit-gate,
+        // the OutputRouter switch, and ToLedgerValue can never disagree. This is precisely the drift
+        // that half-landed compose's routing promotion (router case added, admit-gate un-widened) →
+        // a live 422. Rejecting a not-yet-routable disposition PRE-RUN is cheaper and more honest than
+        // letting the router's loud post-store stub throw after the LLM spend. Realizing a disposition
+        // is now ONE change in DispositionRoutability, and the admit-gate follows automatically.
+        if (!DispositionRoutability.IsAdmissible(binding.Disposition))
         {
             throw new DispatchRejectedException(
                 DispatchRejectedException.DispositionUnsupported,
                 StatusCodes.Status422UnprocessableEntity,
-                $"The requested binding declares disposition '{binding.Disposition}'; " +
-                "only informational and work_product outputs execute on the dispatch path.");
+                $"The requested binding declares disposition '{binding.Disposition}', whose OutputRouter " +
+                $"routing leg is not yet implemented ({DispositionRoutability.NotRoutableReason(binding.Disposition)}). " +
+                "Only dispositions the router can route are admitted on the dispatch path.");
         }
 
         var action = await _scopeResolver
@@ -250,51 +266,189 @@ public class SessionDispatchOrchestrator
             binding.BindingId, binding.Ucid, binding.ConsumerType, action.Id, action.Name,
             binding.Disposition, request.TenantId, request.SessionId, requestedFileIds?.Count ?? 0);
 
-        // ── ADR-043 (E-10) input resolution: ContextBinder resolves the Action's DECLARED inputs into
-        // grounding context (ContextEnvelope) + the typed operand, and writes the ContextEnvelope
-        // fingerprint (task-038's dark seam, now live; ADR-040 store-before-render; NFR-07 ids/counts).
-        // The operand branch is deterministic over the declared schema (ADR-039): an Action declaring a
-        // structured operand (selectionText/changesText/documentText arg, or a ledger_resolution
-        // reference — e.g. the compose actions) resolves from the dispatch args WITHOUT session files;
-        // otherwise the shipped file/`## Document` path runs unchanged (non-regression).
-        var runContext = new LinearRunContext
-        {
-            ConsumerType = binding.ConsumerType,
-            CorrelationId = request.CorrelationId,
-            TenantId = request.TenantId,
-        };
-
-        // The context fingerprint + the output entry share the turn ordinal (max prior output turn + 1),
-        // so the "context selected" leg is anchored to the turn it grounds (OutputRouter allocates the
-        // SAME ordinal for the SessionOutput below — no output is appended between).
-        var contextTurn = (session.Outputs is { Count: > 0 } ? session.Outputs.Max(o => o.Turn) : 0) + 1;
-        var conversationTail = BuildConversationTail(session);
-
-        BoundInputs boundInputs;
+        // Both executor legs (prompted / coded) produce the output JsonElement + its grounding source
+        // refs, then join the SAME store-before-render tail (OutputRouter.RouteAsync) below — one ledger
+        // write, one render boundary, regardless of ActionKind (ADR-039 / ADR-040).
+        JsonElement output;
         IReadOnlyList<string> sourceRefs = Array.Empty<string>();
 
-        if (_contextBinder.HasStructuredOperand(binding.InputSchemaJson, request.Args))
+        if (binding.ActionKind == ActionKind.Coded)
         {
-            // ── Structured-operand path (args-text / ledger_resolution — the compose-B2 shape). No
-            // session files are required; the no-file hard stop is relaxed. ContextBinder resolves the
-            // declared operand (and, for ledger_resolution, a prior SessionOutput by reference — ADR-040).
-            BoundInputs? bound = null;
-            string? bindError = null;
+            // ── Coded leg (E-30 / ADR-043 §4): a registered ICodedWorkflow fulfils the coded Action —
+            // the reserved front door the future Action Engine plugs into (engine internals stay behind
+            // ICodedWorkflow.ExecuteAsync). Resolution is closed-catalog: the Action's sprk_workflowclass
+            // MUST name a registered workflow — unknown/missing refs reject loud (ADR-039, no fallback).
+            // Self-contained workflows read their inputs from the operand args (CodedWorkflowContext.
+            // ArgumentsJson = the dispatch args verbatim); they do NOT use the prompted ContextBinder
+            // grounding. The workflow's result serializes to the output JsonElement the router stores.
+            var workflowClassRef = binding.WorkflowClass;
+            if (string.IsNullOrWhiteSpace(workflowClassRef))
+            {
+                throw new DispatchRejectedException(
+                    DispatchRejectedException.ActionKindUnsupported,
+                    StatusCodes.Status422UnprocessableEntity,
+                    $"Binding {binding.BindingId} targets a coded Action but declares no sprk_workflowclass; " +
+                    "a coded dispatch requires a registered workflow class ref (ADR-039 closed catalog).");
+            }
+
+            var workflow = _codedWorkflows.GetWorkflow(workflowClassRef)
+                ?? throw new DispatchRejectedException(
+                    DispatchRejectedException.ActionKindUnsupported,
+                    StatusCodes.Status422UnprocessableEntity,
+                    $"Binding {binding.BindingId} names coded workflow class '{workflowClassRef}', which is not " +
+                    $"in the coded-workflow registry (registered: {string.Join(", ", _codedWorkflows.GetRegisteredWorkflowClassRefs())}). " +
+                    "Fix the Action row or the registration — there is no fallback (ADR-039).");
+
+            string? codedError = null;
+            JsonElement codedOutput = default;
             try
             {
-                bound = await _contextBinder
-                    .BindAsync(
-                        new ContextBindingRequest
+                var result = await workflow
+                    .ExecuteAsync(
+                        new CodedWorkflowContext
                         {
-                            InputSchemaJson = binding.InputSchemaJson,
-                            Args = request.Args,
-                            LedgerOutputs = session.Outputs,
-                            ConversationTail = conversationTail,
-                            TenantId = request.TenantId,
-                            SessionId = request.SessionId,
-                            Turn = contextTurn,
+                            ArgumentsJson = request.Args is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } a
+                                ? a.GetRawText()
+                                : "{}",
+                            UserId = null,
+                            ActingUserEmail = request.ActingUserEmail,
                         },
                         cancellationToken)
+                    .ConfigureAwait(false);
+
+                codedOutput = SerializeWorkflowResult(result, workflowClassRef);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "SessionDispatchOrchestrator: coded workflow '{WorkflowClass}' failed for binding {BindingId} action {ActionId}. TenantId={TenantId} SessionId={SessionId}",
+                    workflowClassRef, binding.BindingId, action.Id, request.TenantId, request.SessionId);
+                codedError = "The action failed. Please try again.";
+            }
+
+            _aiTelemetry.RecordCapabilityInvocation(
+                request.TenantId,
+                userId: null,
+                entryPath: Sprk.Bff.Api.Telemetry.AiMeteringContext.EntryPathCoded,
+                capability: binding.Ucid ?? binding.ConsumerType,
+                outcome: codedError is null ? "success" : "failed");
+
+            if (codedError is not null)
+            {
+                yield return AnalysisChunk.FromError(codedError);
+                yield break;
+            }
+
+            output = codedOutput;
+        }
+        else
+        {
+            // ── ADR-043 (E-10) input resolution: ContextBinder resolves the Action's DECLARED inputs into
+            // grounding context (ContextEnvelope) + the typed operand, and writes the ContextEnvelope
+            // fingerprint (task-038's dark seam, now live; ADR-040 store-before-render; NFR-07 ids/counts).
+            // The operand branch is deterministic over the declared schema (ADR-039): an Action declaring a
+            // structured operand (selectionText/changesText/documentText arg, or a ledger_resolution
+            // reference — e.g. the compose actions) resolves from the dispatch args WITHOUT session files;
+            // otherwise the shipped file/`## Document` path runs unchanged (non-regression).
+            var runContext = new LinearRunContext
+            {
+                ConsumerType = binding.ConsumerType,
+                CorrelationId = request.CorrelationId,
+                TenantId = request.TenantId,
+            };
+
+            // The context fingerprint + the output entry share the turn ordinal (max prior output turn + 1),
+            // so the "context selected" leg is anchored to the turn it grounds (OutputRouter allocates the
+            // SAME ordinal for the SessionOutput below — no output is appended between).
+            var contextTurn = (session.Outputs is { Count: > 0 } ? session.Outputs.Max(o => o.Turn) : 0) + 1;
+            var conversationTail = BuildConversationTail(session);
+
+            BoundInputs boundInputs;
+
+            if (_contextBinder.HasStructuredOperand(binding.InputSchemaJson, request.Args))
+            {
+                // ── Structured-operand path (args-text / ledger_resolution — the compose-B2 shape). No
+                // session files are required; the no-file hard stop is relaxed. ContextBinder resolves the
+                // declared operand (and, for ledger_resolution, a prior SessionOutput by reference — ADR-040).
+                BoundInputs? bound = null;
+                string? bindError = null;
+                try
+                {
+                    bound = await _contextBinder
+                        .BindAsync(
+                            new ContextBindingRequest
+                            {
+                                InputSchemaJson = binding.InputSchemaJson,
+                                Args = request.Args,
+                                LedgerOutputs = session.Outputs,
+                                ConversationTail = conversationTail,
+                                TenantId = request.TenantId,
+                                SessionId = request.SessionId,
+                                Turn = contextTurn,
+                            },
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // A dangling / truncated ledger_resolution reference (ADR-040) or a malformed operand
+                    // surfaces here — loud, never a silent fallback. Identifiers only (NFR-07).
+                    _logger.LogError(ex,
+                        "SessionDispatchOrchestrator: input resolution failed for binding {BindingId} action {ActionId}. TenantId={TenantId} SessionId={SessionId}",
+                        binding.BindingId, action.Id, request.TenantId, request.SessionId);
+                    bindError = "The AI action could not resolve its inputs. Please check the request and try again.";
+                }
+
+                if (bindError is not null)
+                {
+                    yield return AnalysisChunk.FromError(bindError);
+                    yield break;
+                }
+
+                boundInputs = bound!;
+            }
+            else
+            {
+                // ── File-operand path: the shipped summarize behavior, unchanged. Resolve session files,
+                // probe for manifest readiness, fetch text, then bind the file as a `## Document` operand.
+                boundInputs = default!;
+                var fileBind = await ResolveFileOperandAsync(
+                    request, session, binding, requestedFileIds, conversationTail, contextTurn, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (fileBind.Error is not null)
+                {
+                    yield return AnalysisChunk.FromError(fileBind.Error);
+                    yield break;
+                }
+
+                boundInputs = fileBind.Inputs!;
+                // The manifest readiness probe may have refreshed the session — carry the refreshed instance
+                // to the ledger write (preserves the pre-E-10 behavior where the probe's session flowed to RouteAsync).
+                session = fileBind.Session;
+                sourceRefs = fileBind.SourceRefs;
+            }
+
+            // Route the output write on top of the fingerprint-inclusive session ContextBinder returned, so the
+            // output write (read-modify-write) does not clobber the context fingerprint just written (ADR-040
+            // append-only; both writes mutate the session). Falls back to the current session when no fingerprint
+            // was written (e.g. the session vanished from the store mid-turn).
+            session = boundInputs.UpdatedSession ?? session;
+
+            output = default;
+            string? llmError = null;
+            try
+            {
+                output = await _actionRunner
+                    .RunAsync(action, boundInputs, runContext, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -303,83 +457,26 @@ public class SessionDispatchOrchestrator
             }
             catch (Exception ex)
             {
-                // A dangling / truncated ledger_resolution reference (ADR-040) or a malformed operand
-                // surfaces here — loud, never a silent fallback. Identifiers only (NFR-07).
                 _logger.LogError(ex,
-                    "SessionDispatchOrchestrator: input resolution failed for binding {BindingId} action {ActionId}. TenantId={TenantId} SessionId={SessionId}",
+                    "SessionDispatchOrchestrator: prompted executor failed for binding {BindingId} action {ActionId}. TenantId={TenantId} SessionId={SessionId}",
                     binding.BindingId, action.Id, request.TenantId, request.SessionId);
-                bindError = "The AI action could not resolve its inputs. Please check the request and try again.";
+                llmError = "The AI action failed. Please try again.";
             }
 
-            if (bindError is not null)
+            // FR-P4-05 per-tenant metering (task 054): one capability-invocation increment at THE dispatch
+            // seam — covers chip clicks, the loop's BindingCapabilityTool, gate resolution, and /summarize.
+            _aiTelemetry.RecordCapabilityInvocation(
+                request.TenantId,
+                userId: null,     // ambient scope
+                entryPath: null,  // ambient scope (default "click")
+                capability: binding.Ucid ?? binding.ConsumerType,
+                outcome: llmError is null ? "success" : "failed");
+
+            if (llmError is not null)
             {
-                yield return AnalysisChunk.FromError(bindError);
+                yield return AnalysisChunk.FromError(llmError);
                 yield break;
             }
-
-            boundInputs = bound!;
-        }
-        else
-        {
-            // ── File-operand path: the shipped summarize behavior, unchanged. Resolve session files,
-            // probe for manifest readiness, fetch text, then bind the file as a `## Document` operand.
-            boundInputs = default!;
-            var fileBind = await ResolveFileOperandAsync(
-                request, session, binding, requestedFileIds, conversationTail, contextTurn, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (fileBind.Error is not null)
-            {
-                yield return AnalysisChunk.FromError(fileBind.Error);
-                yield break;
-            }
-
-            boundInputs = fileBind.Inputs!;
-            // The manifest readiness probe may have refreshed the session — carry the refreshed instance
-            // to the ledger write (preserves the pre-E-10 behavior where the probe's session flowed to RouteAsync).
-            session = fileBind.Session;
-            sourceRefs = fileBind.SourceRefs;
-        }
-
-        // Route the output write on top of the fingerprint-inclusive session ContextBinder returned, so the
-        // output write (read-modify-write) does not clobber the context fingerprint just written (ADR-040
-        // append-only; both writes mutate the session). Falls back to the current session when no fingerprint
-        // was written (e.g. the session vanished from the store mid-turn).
-        session = boundInputs.UpdatedSession ?? session;
-
-        JsonElement output = default;
-        string? llmError = null;
-        try
-        {
-            output = await _actionRunner
-                .RunAsync(action, boundInputs, runContext, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "SessionDispatchOrchestrator: prompted executor failed for binding {BindingId} action {ActionId}. TenantId={TenantId} SessionId={SessionId}",
-                binding.BindingId, action.Id, request.TenantId, request.SessionId);
-            llmError = "The AI action failed. Please try again.";
-        }
-
-        // FR-P4-05 per-tenant metering (task 054): one capability-invocation increment at THE dispatch
-        // seam — covers chip clicks, the loop's BindingCapabilityTool, gate resolution, and /summarize.
-        _aiTelemetry.RecordCapabilityInvocation(
-            request.TenantId,
-            userId: null,     // ambient scope
-            entryPath: null,  // ambient scope (default "click")
-            capability: binding.Ucid ?? binding.ConsumerType,
-            outcome: llmError is null ? "success" : "failed");
-
-        if (llmError is not null)
-        {
-            yield return AnalysisChunk.FromError(llmError);
-            yield break;
         }
 
         // ── ADR-040 SEAM (FR-P1-02): the universal ledger write BEFORE render. The OutputRouter writes
@@ -416,6 +513,34 @@ public class SessionDispatchOrchestrator
         {
             yield return AnalysisChunk.FromChips(transitionChips);
         }
+    }
+
+    private static readonly JsonSerializerOptions WorkflowResultSerializerOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Serialize a coded workflow's result into the <see cref="JsonElement"/> the
+    /// <see cref="OutputRouter"/> stores as the <c>SessionOutput</c> payload (ADR-040 store-before-render).
+    /// A result that is already a <see cref="JsonElement"/> is cloned (detached from any caller-owned
+    /// <c>JsonDocument</c> lifetime); anything else is serialized with the shared web options. A null
+    /// result is a coded-contract violation — fail loud, never store null.
+    /// </summary>
+    private static JsonElement SerializeWorkflowResult(object? result, string workflowClassRef)
+    {
+        if (result is null)
+        {
+            throw new InvalidOperationException(
+                $"Coded workflow '{workflowClassRef}' returned null; a coded dispatch must return a " +
+                "serializable result object (the SessionOutput payload — ADR-040 stores it before render).");
+        }
+
+        if (result is JsonElement element)
+        {
+            return element.Clone();
+        }
+
+        var json = JsonSerializer.Serialize(result, WorkflowResultSerializerOptions);
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
     }
 
     /// <summary>
@@ -724,12 +849,19 @@ public class SessionDispatchOrchestrator
 /// <c>sprk_inputschema</c> owns the future vocabulary). Null = no args.
 /// </param>
 /// <param name="CorrelationId">Optional correlation ID propagated to the run context (NFR-17).</param>
+/// <param name="ActingUserEmail">
+/// The acting user's email, resolved from the caller's auth claims at the dispatch endpoint
+/// (E-30). Flows to <c>CodedWorkflowContext.ActingUserEmail</c> so a coded workflow can address a
+/// NOTIFICATION email to the user server-side (never a client-supplied recipient). Null for the
+/// prompted path and for callers that do not resolve it (backward-compatible default).
+/// </param>
 public sealed record SessionDispatchRequest(
     string TenantId,
     string SessionId,
     Guid BindingId,
     JsonElement? Args,
-    string? CorrelationId = null);
+    string? CorrelationId = null,
+    string? ActingUserEmail = null);
 
 /// <summary>
 /// A Click dispatch that was refused at the catalog-resolution boundary (ADR-039:

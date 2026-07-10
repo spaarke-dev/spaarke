@@ -714,6 +714,35 @@ public static class AnalysisServicesModule
         // SessionDispatchOrchestrator ctor (registered in THIS compound-ON block); the compound-OFF
         // path resolves NullSessionDispatchOrchestrator (logger-only ctor) which never touches this
         // seam → transitively conditional; no ADR-032 Null peer needed.
+        // IOrganizationalContextProvider — read-only INBOUND Organizational-scope provider seam (task 060,
+        // FR-B-11). Spaarke receives organizational context through this interface; NO outbound/push
+        // path — not an MCP-server surface. r2 ships ONLY the ADR-032 P2 quiet no-op Null-Object (no real
+        // provider — the Work IQ runtime integration + researcher spike are deferred per owner ruling
+        // 2026-07-08). §F.1 asymmetric-registration audit: the sole consumer is ContextBinder (registered
+        // in THIS compound-ON block, immediately below); the compound-OFF path resolves
+        // NullSessionDispatchOrchestrator, which never touches ContextBinder, so this seam is never
+        // resolved in the OFF path either — transitively conditional, same rationale as IContextBinder.
+        // ContextBinder also self-defaults to NullOrganizationalContextProvider internally, so omitting
+        // this registration would still be safe — it is registered anyway so a future Work IQ provider is
+        // a one-line DI swap without reopening ContextBinder.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IOrganizationalContextProvider,
+                           Sprk.Bff.Api.Services.Ai.PublicContracts.NullOrganizationalContextProvider>();
+        Console.WriteLine("✓ IOrganizationalContextProvider registered (task 060 FR-B-11; Null-Object default — Work IQ provider deferred)");
+
+        // ICallerContactResolver — deterministic claims→Dataverse-contact resolver (task 055, FR-B-06).
+        // Maps the caller's AAD oid claim to a Dataverse contact via the
+        // contact.azureactivedirectoryobjectid cross-reference (ADR-028) so "assign it to me" resolves
+        // server-side, never a model guess. Scoped: wraps IDataverseService (Singleton) and is consumed
+        // by ContextBinder (Scoped, registered immediately below). §F.1 asymmetric-registration audit:
+        // sole consumer is ContextBinder in THIS compound-ON block; the compound-OFF path's
+        // NullSessionDispatchOrchestrator never touches ContextBinder, so this seam is never resolved
+        // OFF-path either — transitively conditional, same rationale as IContextBinder.
+        // ContextBinder also self-defaults to NullCallerContactResolver internally, so omitting this
+        // registration would still be safe (honest no-contact result rather than a null-reference failure).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerContactResolver,
+                           Sprk.Bff.Api.Services.Ai.Context.CallerContactResolver>();
+        Console.WriteLine("✓ ICallerContactResolver registered (task 055 FR-B-06; claims→contact, feeds ContextEnvelope User slice)");
+
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.IContextBinder,
                            Sprk.Bff.Api.Services.Ai.Context.ContextBinder>();
         Console.WriteLine("✓ ContextBinder registered (ADR-043 E-10 input-resolution seam; ContextEnvelope + operand; task-038 fingerprint writer)");
@@ -1339,6 +1368,22 @@ public static class AnalysisServicesModule
         }
 
         services.AddSingleton<ITextChunkingService, TextChunkingService>();
+
+        // FR-B-12 (task 061) — ISemanticScopeProvider WRAPS whichever IRagService was just
+        // registered above (real RagService when AI Search keys are configured, NullRagService
+        // otherwise) via constructor injection — no conditional branching needed here. The
+        // provider forwards every call through IRagService.SearchAsync, so it inherits both the
+        // real hybrid-search behavior AND the NullRagService P3 Fail-Fast behavior automatically
+        // (CLAUDE.md §11 default-to-reuse: wrap, don't duplicate the Null-Object pattern).
+        // ADR-032 §F.1 inspection: nothing unconditional resolves this service today — the live
+        // per-turn ContextBinder Semantic-slice call site is a deliberately deferred follow-on
+        // (task 060, the Organizational-scope provider, lands in the SAME M-parallel wave and is
+        // likely to touch the same shared ContextBinder.cs / ContextBindingRequest files; wiring
+        // both providers into that seam in one pass avoids two concurrent agents racing on it).
+        // Registering the provider now means it is DI-ready the moment that follow-on wiring
+        // lands. No separate Null-Object peer is needed even then, per the note above.
+        services.AddSingleton<ISemanticScopeProvider, SemanticScopeProvider>();
+        Console.WriteLine("✓ Semantic-scope provider registered (FR-B-12; wraps IRagService, preserves PrivilegeFilterBuilder ACL)");
     }
 
     private static void AddToolFramework(IServiceCollection services, IConfiguration configuration)

@@ -141,6 +141,154 @@ public record ChatSession(
     /// Null (like the sibling ledger collections) means "no fingerprints yet".
     /// </summary>
     public IReadOnlyList<SessionContextFingerprint>? ContextFingerprints { get; init; }
+
+    // =========================================================================
+    // R2 Compose-domain annotations (spaarkeai-compose-r2 FR-29, design.md §8).
+    //
+    // UNLIKE the append-only ledger collections above, these two are MUTABLE —
+    // accept/reject/edit REPLACE the stored collection wholesale (see
+    // ComposeService.SaveComposeAnnotationsAsync). They are NOT ledger entries and
+    // NOT MemoryItems: this is the ARGUED Path-A exception to the core memory
+    // charter §3.4 "no local MemoryItem variants" (design.md §8 "Explicit deviation
+    // note"). AnchoredAnnotation is document-adjacent positional UI state (like a
+    // cursor or a fold) — it MUST NOT be written via memory.*, MUST NOT be
+    // retrieved by the Context Binder, and MUST NOT be surfaced in the user's
+    // memory review/delete view. Persistence rides this SAME three-tier ChatSession
+    // stack (Redis hot / Cosmos warm / Dataverse cold) — no new entity. Bound to
+    // the session's DocumentId (document identity), not to a DOCX version, so it
+    // is intended to survive Word handoffs (design.md §8 "Cross-version
+    // persistence"). Governance: ADR-015 Tier 3 (user-owned, GDPR-erasable with
+    // the session); tenant-scoped via TenantId; document-scoped via DocumentId.
+    //
+    // Null (like the sibling collections above) means "none yet" — pre-R2 Redis/
+    // Cosmos payloads deserialize cleanly.
+    // =========================================================================
+
+    /// <summary>
+    /// R2 anchored annotations (design.md §8) — Compose-domain document-adjacent
+    /// positional UI state: comments, insertion/deletion suggestions, and
+    /// explanations anchored to a position in the open document. See the
+    /// class-level remarks above for the Path-A deviation note.
+    /// </summary>
+    public IReadOnlyList<AnchoredAnnotation>? AnchoredAnnotations { get; init; }
+
+    /// <summary>
+    /// R2 defined-terms tracking (design.md §8; spec FR-11 <c>compose-defined-terms</c>
+    /// extraction capability) — session-scoped tracking of detected defined terms +
+    /// inconsistent-usage flags, rendered read-only in the Context pane. Same
+    /// governance + mutability notes as <see cref="AnchoredAnnotations"/>.
+    /// </summary>
+    public IReadOnlyList<DefinedTerm>? DefinedTermsTracking { get; init; }
+}
+
+/// <summary>
+/// R2 anchored annotation (design.md §8) — Compose-domain, document-adjacent
+/// positional UI state (comment, insertion/deletion suggestion, or explanation)
+/// anchored to a position in the open document via <see cref="Anchor"/>.
+///
+/// <para>
+/// <b>Path-A deviation (charter §3.4, design.md §8)</b>: this is NOT a
+/// <c>MemoryItem</c> variant. It is argued as document-adjacent UI state — like a
+/// cursor or a fold — never retrieved as "memory" by the Context Binder, never
+/// written via <c>memory.*</c>, and never surfaced in the user's memory
+/// review/delete view. If that argument is ever rejected at review, the fallback
+/// is a <c>MemoryItem</c> sub-type negotiated WITH the core — never a silent
+/// local variant.
+/// </para>
+/// <para>
+/// <b>Mutability</b>: unlike the append-only ledger collections on
+/// <see cref="ChatSession"/>, annotations are mutable — accept/reject/edit REPLACE
+/// the stored collection (see <c>ComposeService.SaveComposeAnnotationsAsync</c>).
+/// </para>
+/// </summary>
+public sealed record AnchoredAnnotation
+{
+    /// <summary>Stable annotation id (client-generated).</summary>
+    public required string Id { get; init; }
+
+    /// <summary>
+    /// <c>"comment"</c> | <c>"insertion-suggestion"</c> | <c>"deletion-suggestion"</c> |
+    /// <c>"explanation"</c> (design.md §8 verbatim).
+    /// </summary>
+    public required string Type { get; init; }
+
+    /// <summary>Drift-resistant anchor (content-match + structural hint + editor span id) locating the annotation in the document.</summary>
+    public required AnchoredAnnotationAnchor Anchor { get; init; }
+
+    /// <summary>Annotation body text (comment text, suggested replacement text, or explanation).</summary>
+    public required string Body { get; init; }
+
+    /// <summary>Author display name or identifier (human user, or the producing AI capability).</summary>
+    public required string Author { get; init; }
+
+    /// <summary>UTC timestamp the annotation was created.</summary>
+    public required DateTimeOffset Timestamp { get; init; }
+
+    /// <summary><c>"human"</c> | <c>"ai"</c> — who originated the annotation (design.md §8 verbatim).</summary>
+    public required string Source { get; init; }
+
+    /// <summary>
+    /// AI-sourced annotations carry the producing Binding + the ADR-040 ledger ref.
+    /// References the ledger entry — NEVER duplicates the <c>SessionOutput</c> payload
+    /// as a second source of truth.
+    /// </summary>
+    public AnchoredAnnotationProvenance? Provenance { get; init; }
+}
+
+/// <summary>Drift-resistant anchor for an <see cref="AnchoredAnnotation"/> or a <see cref="DefinedTerm"/> first-usage location (design.md §8 verbatim shape).</summary>
+public sealed record AnchoredAnnotationAnchor
+{
+    /// <summary>Content-match pattern (surrounding text) used to re-locate the anchor after document edits.</summary>
+    public required string TextPattern { get; init; }
+
+    /// <summary>Structural hint — paragraph index at anchor-creation time (best-effort; re-anchoring tolerates drift).</summary>
+    public required int ParagraphHint { get; init; }
+
+    /// <summary>Editor-native span id (TipTap/ProseMirror) — stable for in-editor session lifetime; not guaranteed stable across a Word round-trip (content-match + paragraph hint carry re-anchoring there).</summary>
+    public required string SpanId { get; init; }
+}
+
+/// <summary>
+/// AI-sourced provenance for an <see cref="AnchoredAnnotation"/> or <see cref="DefinedTerm"/> —
+/// the ADR-040 <c>{bindingId}@t{n}</c> ledger reference form
+/// (<see cref="SessionLedger.BuildOutputKey"/>). References the ledger entry; never
+/// duplicates the underlying <c>SessionOutput</c> payload.
+/// </summary>
+public sealed record AnchoredAnnotationProvenance
+{
+    /// <summary>The <c>sprk_playbookconsumer</c> Binding id that produced the annotation.</summary>
+    public required string BindingId { get; init; }
+
+    /// <summary>Addressable ledger key in <c>{bindingId}@t{n}</c> form (ADR-040).</summary>
+    public required string LedgerRef { get; init; }
+}
+
+/// <summary>
+/// R2 defined-term tracking entry (design.md §8; spec FR-11 <c>compose-defined-terms</c>
+/// extraction capability) — a term detected by the extraction capability, tracked for
+/// the session and rendered read-only in the Context pane (Context pane is audit-only,
+/// never an interactive input surface). Same Path-A deviation note and mutability
+/// contract as <see cref="AnchoredAnnotation"/> (see its remarks).
+/// </summary>
+public sealed record DefinedTerm
+{
+    /// <summary>The detected term text (e.g., "Confidential Information").</summary>
+    public required string Term { get; init; }
+
+    /// <summary>The term's definition as stated in the document, when the extraction capability located one.</summary>
+    public string? Definition { get; init; }
+
+    /// <summary>Drift-resistant anchor to the term's first (defining) usage in the document.</summary>
+    public AnchoredAnnotationAnchor? FirstUsageAnchor { get; init; }
+
+    /// <summary>Human-readable descriptions of usages flagged as inconsistent with the definition (spec FR-11 <c>inconsistencies</c>). Empty/absent when no inconsistency was flagged.</summary>
+    public IReadOnlyList<string>? InconsistentUsages { get; init; }
+
+    /// <summary><c>"human"</c> | <c>"ai"</c> — who originated the tracking entry (human-added term vs. AI-extracted).</summary>
+    public required string Source { get; init; }
+
+    /// <summary>AI-sourced entries carry the producing Binding + the ADR-040 ledger ref. References the ledger entry — never duplicates the <c>SessionOutput</c> payload.</summary>
+    public AnchoredAnnotationProvenance? Provenance { get; init; }
 }
 
 /// <summary>
