@@ -9,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Progress** | **41 of 62 tasks** — Phase E closed; memory wave 055/060/061/063 + 050 + **051** done; worktree MERGED with master `bdf23f11e` |
-| **Task** | 051 ✅ COMPLETE (SHRANK scope: test-only — MemoryItemEnvelopeTests + store inert-trust negative + notes/051-envelope-field-mapping.md; 134/134 memory suites; publish delta 0) |
-| **Status** | Committing 051 now. Branch NOT yet pushed/merged to master since PR #608. |
-| **Next Action** | **TRANCHE M2 step 2**: dispatch the 5-agent parallel batch (052 opus, 057 opus [dep 051 ✅], 062 sonnet, 064 sonnet, 017 sonnet) in ONE message, each via task-execute; then consolidate; then 053 main-session. |
+| **Progress** | **46 of 62 tasks** — memory wave: 050/051 + M2 parallel batch (052/057/062/064/017) ALL DONE; SEAM-STATUS = ALL SEAMS PUBLISHED ON-BRANCH (Compose FR-30 unblocked); worktree MERGED with master `bdf23f11e` |
+| **Task** | M2 batch consolidated: memory suites 198/198; consolidation fix applied = subject-key normalization at MemoryItemStore chokepoint (LLM casing / braced-uppercase Dataverse GUIDs would have silently broken capture→recall) + 2 pinning tests; §6.5 record-read granularity flag filed under PE-D5 in defer-issues.md (operator to confirm) |
+| **Status** | Full-suite verification + batch commit in flight. Branch NOT yet pushed/merged to master since PR #608. |
+| **Next Action** | **TRANCHE M2 finale: task 053 Binder convergence — MAIN session** (phased per POML: Binder feature-complete incl. NET-NEW Business producer + deterministic renderer, NO cache machinery, proven at dispatch parity → interactive cutover with prompt-regression pinning; delete dead OrchestratorPromptBuilder; PE-D6 conditional wiring only if natural). Then TRANCHE M3 (054+056) → merge to master. |
 
 ### Critical Context (essential)
 - **Operator rulings 2026-07-09/10 (ALL EXECUTED into POMLs/spec — commits `a28206cfc`, `a70ab868b`)**: per-fact docs aligned MemoryItem v1; fresh container `memory-items` (/subjectId) NO migration (legacy `memory` container SHARED with pins+workspace-tabs — never retire); canonical userId = Dataverse systemuserid; upsert-by-(Type,Key) supersession; **053 converges the INTERACTIVE chat path onto the Binder — do not defer** (audit: 0/6 primitives folded; Binder dispatch-only; Business producer NET-NEW; OrchestratorPromptBuilder DEAD); **governance = MINIMAL** (052 rescoped: review/delete + record-auth read + erasure + retentionClass→Cosmos ttl only; sensitivity/deletionPolicy INERT); **cache stability = keep free determinism, NO cache-key machinery**; **NO mid-wave gate — continuous progression to 069 full-solution feedback**.

@@ -249,6 +249,11 @@ public static class EndpointMappingExtensions
         // enforced at handler level (UserId match between caller's oid and pin's UserId).
         Sprk.Bff.Api.Api.Memory.PinnedMemoryEndpoints.MapPinnedMemoryEndpoints(app);
 
+        // AIR2-052 — /api/memory/{user,records} minimal governance surface (FR-B-03): user review/delete,
+        // GDPR erase, and record-authorization-aligned record-memory read over IMemoryItemStore (task 050).
+        // Unconditional registration (bff-extensions §F); consumes memory plumbing + existing authorization.
+        Sprk.Bff.Api.Api.Memory.MemoryGovernanceEndpoints.MapMemoryGovernanceEndpoints(app);
+
         app.MapDailyBriefingEndpoints();
 
         app.MapFinanceEndpoints();

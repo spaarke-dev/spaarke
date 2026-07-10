@@ -61,6 +61,30 @@ describe('OutcomeCard', () => {
     expect(onNextStep).toHaveBeenCalledWith(card.nextSteps![0]);
   });
 
+  it('passes targetBindingId through onNextStep for an invoke_capability chip (task 062 — Click path dispatch)', () => {
+    const onNextStep = jest.fn();
+    const card: IOutcomeCard = {
+      ...baseCard,
+      nextSteps: [
+        { label: 'Analyze the document', actionKind: 'invoke_capability', targetBindingId: 'binding-guid-1' },
+        { label: 'Open the library', actionKind: 'navigate' },
+      ],
+    };
+
+    renderWithProvider(<OutcomeCard card={card} onNextStep={onNextStep} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /analyze the document/i }));
+    expect(onNextStep).toHaveBeenCalledWith(
+      expect.objectContaining({ targetBindingId: 'binding-guid-1', actionKind: 'invoke_capability' })
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /open the library/i }));
+    expect(onNextStep).toHaveBeenLastCalledWith(
+      expect.objectContaining({ actionKind: 'navigate' })
+    );
+    expect(onNextStep.mock.calls[1][0].targetBindingId).toBeUndefined();
+  });
+
   it('renders next-step chips inert (disabled) when no onNextStep handler is supplied', () => {
     const card: IOutcomeCard = { ...baseCard, nextSteps: [{ label: 'Assign it', actionKind: 'invoke_capability' }] };
 

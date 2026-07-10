@@ -24,6 +24,7 @@ import { ArrowExportRegular } from '@fluentui/react-icons';
 import { ISprkChatMessageProps, ICitation, IDocumentStatusChatMessage } from './types';
 import { CitationMarker } from './SprkChatCitationPopover';
 import { SprkChatMessageRenderer } from './SprkChatMessageRenderer';
+import type { INextStepChip } from './OutcomeCard';
 import { SprkChatDocumentStatus } from './SprkChatDocumentStatus';
 import { PlanPreviewCard } from './PlanPreviewCard';
 import type { PlanStep } from './PlanPreviewCard';
@@ -353,6 +354,14 @@ export interface ISprkChatMessageExtendedProps extends ISprkChatMessageProps {
    * The link renders disabled when this prop is absent.
    */
   onOpenLibraryModal?: (sessionAttachmentIds: string[]) => void;
+
+  /**
+   * spaarke-ai-architecture-redesign-r2 task 062 (FR-A1-06 / FR-B-13 workspace-intelligence
+   * precursor). Called when the user clicks a next-step chip on an `outcome_card` card. Threaded
+   * straight through to `SprkChatMessageRenderer` (only meaningful when
+   * `metadata.responseType === 'outcome_card'`); chips render disabled when omitted.
+   */
+  onNextStep?: (chip: INextStepChip) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -421,6 +430,8 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   // chat-routing-redesign-r1 task 117b
   onSelectPlaybook,
   onOpenLibraryModal,
+  // spaarke-ai-architecture-redesign-r2 task 062
+  onNextStep,
 }) => {
   const styles = useStyles();
   const isUser = message.role === 'User';
@@ -567,6 +578,10 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
           // when responseType === 'playbook_options'.
           onSelectPlaybook={onSelectPlaybook}
           onOpenLibraryModal={onOpenLibraryModal}
+          // spaarke-ai-architecture-redesign-r2 task 062 (FR-B-13): thread the
+          // next-step chip handler down to the outcome_card renderer. Only used
+          // when responseType === 'outcome_card'.
+          onNextStep={onNextStep}
         />
         {/*
          * chat-routing-redesign-r1 task 117b: suppress the Insert button on

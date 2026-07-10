@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Logging;
+using Sprk.Bff.Api.Services.Ai.Audit;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Memory;
@@ -51,6 +52,7 @@ public sealed class MemoryItemStore : IMemoryItemStore
 
     private readonly Container _container;
     private readonly ILogger<MemoryItemStore> _logger;
+    private readonly IAuditLogService? _auditLog;
 
     /// <summary>
     /// Initialises the <see cref="MemoryItemStore"/>.
@@ -58,10 +60,17 @@ public sealed class MemoryItemStore : IMemoryItemStore
     /// <param name="cosmosClient">Singleton Cosmos DB client (DefaultAzureCredential, no connection strings).</param>
     /// <param name="databaseName">Cosmos DB database name from <c>CosmosPersistence:DatabaseName</c> config.</param>
     /// <param name="logger">Logger for diagnostic messages (identifiers/counts only, ADR-015 Tier 1).</param>
+    /// <param name="auditLog">
+    /// Optional append-only Tier-2 audit log (task 052, NFR-07). When supplied, every memory WRITE
+    /// emits a compliance audit event carrying identifiers/counts ONLY — never memory content. Reuses
+    /// the EXISTING <see cref="IAuditLogService"/> (operator ruling 2026-07-09 — no new audit component).
+    /// Optional so the task-050 construction/tests that predate the audit hook stay green.
+    /// </param>
     public MemoryItemStore(
         CosmosClient cosmosClient,
         string databaseName,
-        ILogger<MemoryItemStore> logger)
+        ILogger<MemoryItemStore> logger,
+        IAuditLogService? auditLog = null)
     {
         ArgumentNullException.ThrowIfNull(cosmosClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(databaseName);
@@ -69,6 +78,7 @@ public sealed class MemoryItemStore : IMemoryItemStore
 
         _container = cosmosClient.GetContainer(databaseName, ContainerName);
         _logger = logger;
+        _auditLog = auditLog;
     }
 
     // =========================================================================
@@ -89,6 +99,15 @@ public sealed class MemoryItemStore : IMemoryItemStore
             DataverseFieldMirrorGuard.EnsureNotDataverseFieldMirror(item.Fact);
         }
 
+        // Subject-key normalization at the SINGLE chokepoint (consolidation fix, 2026-07-10): callers
+        // supply keys with mixed casing/braces (LLM-supplied subjectType via memory.write; Dataverse
+        // host contexts often send "{UPPERCASE}" GUIDs), while Cosmos partition keys + query params are
+        // case-sensitive. Without this, a fact written as ("Matter","{ABC…}") is never recalled by a
+        // read for ("matter","abc…"). Same discipline as BuildItemId's fact-key normalization.
+        item = string.Equals(item.Scope, MemoryScope.User, StringComparison.Ordinal)
+            ? item with { UserId = NormalizeSubjectId(item.UserId!) }
+            : item with { SubjectType = NormalizeSubjectType(item.SubjectType!), SubjectId = NormalizeSubjectId(item.SubjectId!) };
+
         var subjectKey = item.PartitionKey;
         var id = BuildItemId(item.Scope, item.Fact.Type, item.Fact.Key);
         var partitionKey = new PartitionKey(subjectKey);
@@ -108,6 +127,10 @@ public sealed class MemoryItemStore : IMemoryItemStore
             // First capture for this key — create path.
         }
 
+        // Retention (task 052): map retentionClass → per-item Cosmos ttl at WRITE time. Cosmos does the
+        // expiry — no reaper, no read-filter (operator ruling 2026-07-09: minimal governance).
+        var ttlSeconds = MemoryRetentionPolicy.ResolveTtlSeconds(item.RetentionClass);
+
         MemoryItemDocument document;
         ItemRequestOptions requestOptions;
 
@@ -117,20 +140,33 @@ public sealed class MemoryItemStore : IMemoryItemStore
             // creation stamps and marking the update instant.
             document = MemoryItemDocument.FromItem(
                 item with { CreatedAt = existing.CreatedAt, CreatedBy = existing.CreatedBy ?? item.CreatedBy, UpdatedAt = DateTimeOffset.UtcNow },
-                id, subjectKey, tenantId);
+                id, subjectKey, tenantId, ttlSeconds);
             requestOptions = new ItemRequestOptions { IfMatchEtag = existing.ETag };
         }
         else
         {
-            document = MemoryItemDocument.FromItem(item, id, subjectKey, tenantId);
+            document = MemoryItemDocument.FromItem(item, id, subjectKey, tenantId, ttlSeconds);
             requestOptions = new ItemRequestOptions();
         }
 
         await _container.UpsertItemAsync(document, partitionKey, requestOptions, ct);
 
         _logger.LogDebug(
-            "MemoryItemStore: Upserted fact (scope={Scope}, type={FactType}, superseded={Superseded}) for subject {SubjectKey}",
-            item.Scope, item.Fact.Type, existing is not null, subjectKey);
+            "MemoryItemStore: Upserted fact (scope={Scope}, type={FactType}, superseded={Superseded}, ttl={Ttl}) for subject {SubjectKey}",
+            item.Scope, item.Fact.Type, existing is not null, ttlSeconds, subjectKey);
+
+        // Audit the WRITE (NFR-07): identifiers/counts ONLY — the fact Key/Value are NEVER emitted.
+        // Fire-and-forget via the existing Tier-2 AuditLogService (no new audit component).
+        if (_auditLog is not null)
+        {
+            var entry = MemoryAuditEvents.Build(
+                action: existing is not null ? MemoryAuditEvents.ActionSupersede : MemoryAuditEvents.ActionWrite,
+                tenantId: tenantId,
+                userId: item.CreatedBy,
+                subjectKey: subjectKey,
+                itemIds: new[] { id });
+            await _auditLog.LogInteractionAsync(entry, ct);
+        }
 
         return document.ToItem();
     }
@@ -145,9 +181,9 @@ public sealed class MemoryItemStore : IMemoryItemStore
                 "SELECT * FROM c WHERE c.documentType = @docType AND c.scope = @scope AND c.subjectType = @subjectType")
             .WithParameter("@docType", DocumentTypeValue)
             .WithParameter("@scope", MemoryScope.Record)
-            .WithParameter("@subjectType", subjectType);
+            .WithParameter("@subjectType", NormalizeSubjectType(subjectType));
 
-        return await QueryPartitionAsync(query, subjectId, ct);
+        return await QueryPartitionAsync(query, NormalizeSubjectId(subjectId), ct);
     }
 
     /// <inheritdoc/>
@@ -160,7 +196,7 @@ public sealed class MemoryItemStore : IMemoryItemStore
             .WithParameter("@docType", DocumentTypeValue)
             .WithParameter("@scope", MemoryScope.User);
 
-        return await QueryPartitionAsync(query, userId, ct);
+        return await QueryPartitionAsync(query, NormalizeSubjectId(userId), ct);
     }
 
     /// <inheritdoc/>
@@ -168,6 +204,8 @@ public sealed class MemoryItemStore : IMemoryItemStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(subjectKey);
         ArgumentException.ThrowIfNullOrWhiteSpace(itemId);
+
+        subjectKey = NormalizeSubjectId(subjectKey);
 
         try
         {
@@ -193,6 +231,7 @@ public sealed class MemoryItemStore : IMemoryItemStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(subjectKey);
 
+        subjectKey = NormalizeSubjectId(subjectKey);
         var partitionKey = new PartitionKey(subjectKey);
         var query = new QueryDefinition("SELECT * FROM c WHERE c.documentType = @docType")
             .WithParameter("@docType", DocumentTypeValue);
@@ -238,6 +277,26 @@ public sealed class MemoryItemStore : IMemoryItemStore
     // =========================================================================
     // Internal helpers (internal for unit test access — legacy test pattern preserved)
     // =========================================================================
+
+    /// <summary>
+    /// Normalizes a record subjectType (entity logical name): trim + lowercase. Cosmos query params
+    /// are case-sensitive; writers (LLM-supplied via memory.write, host contexts) and readers
+    /// (governance endpoints, chat provider) must land on one canonical form.
+    /// </summary>
+    internal static string NormalizeSubjectType(string subjectType)
+        => subjectType.Trim().ToLowerInvariant();
+
+    /// <summary>
+    /// Normalizes a subject id (entityId or userId — the PARTITION value): trim, strip braces, and
+    /// canonicalize GUIDs to lowercase "D" format (Dataverse host contexts often send
+    /// <c>{UPPERCASE}</c> GUIDs). Non-GUID ids are trimmed only — casing is preserved because they
+    /// may be externally meaningful.
+    /// </summary>
+    internal static string NormalizeSubjectId(string subjectId)
+    {
+        var trimmed = subjectId.Trim().Trim('{', '}');
+        return Guid.TryParse(trimmed, out var guid) ? guid.ToString("D") : trimmed;
+    }
 
     /// <summary>
     /// Builds the DETERMINISTIC document id for a fact: <c>mem_{scope}_{factTypeInt}_{keyHash16}</c>.

@@ -1,7 +1,7 @@
 <task id="AIR2-052" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Memory governance — retention/expiration, user review/delete surface, record-auth-aligned read, audit, sensitivity (litigation-hold DEFERRED)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>M — G-R2-B Memory</phase>
     <gate>G-R2-B (memory)</gate>
     <estimated-effort>2.5 days</estimated-effort>

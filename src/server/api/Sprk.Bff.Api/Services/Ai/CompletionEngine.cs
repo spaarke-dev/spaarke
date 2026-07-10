@@ -188,9 +188,15 @@ public static class CompletionEngine
     /// data — never model invention, per FR-A1-06 constraint) onto the task-011
     /// <see cref="NextStepChip"/> vocabulary. Transitions with no label are dropped (a chip with
     /// no caption is not renderable). A transition that names a target Binding is an
-    /// <c>invoke_capability</c> chip; a bare label is a <c>navigate</c> placeholder. The concrete
-    /// server-composed navigation target is resolved by the Click path / task 062 — the chip here
-    /// is a declared placeholder (NFR-07: no target URL is invented at completion time).
+    /// <c>invoke_capability</c> chip carrying that Binding's GUID as
+    /// <see cref="NextStepChip.TargetBindingId"/> — the resolution datum the Click path's
+    /// <c>dispatchConsumer(bindingId, args)</c> helper needs (task 062 gap close: the OutcomeCard
+    /// chip previously carried no dispatchable target, unlike the parallel
+    /// <c>AnalysisChunkChip</c>/<c>EventChip</c> next-step wire shapes). A bare label with no
+    /// declared target Binding is a <c>navigate</c> placeholder with a null
+    /// <see cref="NextStepChip.TargetBindingId"/> (NFR-07: no target is invented at completion
+    /// time — the ONLY source is <see cref="Binding.ChipTransitions"/>, so a chip can never carry
+    /// a target the Binding did not declare).
     /// </summary>
     public static IReadOnlyList<NextStepChip> MapNextStepChips(Binding binding)
     {
@@ -210,11 +216,13 @@ public static class CompletionEngine
                 continue;
             }
 
-            var actionKind = string.IsNullOrWhiteSpace(transition.TargetBindingId)
-                ? "navigate"
-                : "invoke_capability";
+            var targetBindingId = string.IsNullOrWhiteSpace(transition.TargetBindingId)
+                ? null
+                : transition.TargetBindingId!.Trim();
 
-            chips.Add(new NextStepChip(label!.Trim(), actionKind));
+            var actionKind = targetBindingId is null ? "navigate" : "invoke_capability";
+
+            chips.Add(new NextStepChip(label!.Trim(), actionKind, TargetBindingId: targetBindingId));
         }
 
         return chips.Count > 0 ? chips : Array.Empty<NextStepChip>();

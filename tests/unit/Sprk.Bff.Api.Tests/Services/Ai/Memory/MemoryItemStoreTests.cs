@@ -605,6 +605,53 @@ public class MemoryItemStoreTests
     }
 
     // =========================================================================
+    // (k) Subject-key normalization at the store chokepoint (consolidation fix 2026-07-10):
+    // cross-caller casing/brace variance must land on ONE canonical partition + subjectType,
+    // or capture→recall silently misses (LLM-supplied subjectType; Dataverse "{UPPERCASE}" GUIDs).
+    // =========================================================================
+
+    [Fact]
+    public async Task UpsertAsync_MixedCaseSubjectTypeAndBracedUppercaseGuid_PersistsCanonicalKeys()
+    {
+        // Arrange — the shapes real callers send: LLM-cased subjectType + Dataverse-braced GUID
+        var (sut, containerMock) = CreateSut();
+        var (doc, _, partition) = ArrangeCreatePath(containerMock);
+        var item = BuildRecordItem("Matter", "{" + ProjectId.ToUpperInvariant() + "}");
+
+        // Act
+        var persisted = await sut.UpsertAsync(item, TenantId);
+
+        // Assert — one canonical form everywhere: document keys, partition, returned item
+        doc()!.SubjectType.Should().Be("matter");
+        doc()!.SubjectId.Should().Be(ProjectId);
+        partition().Should().Be(new PartitionKey(ProjectId));
+        persisted.SubjectType.Should().Be("matter");
+        persisted.SubjectId.Should().Be(ProjectId);
+    }
+
+    [Fact]
+    public async Task GetForRecordAsync_MixedCaseSubjectTypeAndBracedUppercaseGuid_QueriesCanonicalKeys()
+    {
+        // Arrange
+        var (sut, containerMock) = CreateSut();
+        QueryDefinition? capturedQuery = null;
+        QueryRequestOptions? capturedOptions = null;
+        containerMock
+            .Setup(c => c.GetItemQueryIterator<MemoryItemDocument>(
+                It.IsAny<QueryDefinition>(), It.IsAny<string>(), It.IsAny<QueryRequestOptions>()))
+            .Callback<QueryDefinition, string, QueryRequestOptions>((q, _, options) => { capturedQuery = q; capturedOptions = options; })
+            .Returns(MockFeedIterator(Array.Empty<MemoryItemDocument>()).Object);
+
+        // Act — a reader using host-context casing must hit the same partition + subjectType a writer used
+        await sut.GetForRecordAsync("MATTER", "{" + ProjectId.ToUpperInvariant() + "}");
+
+        // Assert
+        capturedOptions!.PartitionKey.Should().Be(new PartitionKey(ProjectId));
+        capturedQuery!.GetQueryParameters()
+            .Should().Contain(p => p.Name == "@subjectType" && (string)p.Value! == "matter");
+    }
+
+    // =========================================================================
     // (j) NEGATIVE (task 051, FR-B-08) — TrustLevel is INERT at the store write path
     // =========================================================================
 

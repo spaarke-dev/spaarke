@@ -125,8 +125,18 @@ public sealed class MemoryItemDocument
     [JsonPropertyName("_etag")]
     public string? ETag { get; set; }
 
-    /// <summary>Maps a validated contract item onto the document shape (storage-only members supplied by the store).</summary>
-    public static MemoryItemDocument FromItem(MemoryItem item, string id, string subjectKey, string? tenantId) => new()
+    /// <summary>
+    /// Maps a validated contract item onto the document shape (storage-only members supplied by the store).
+    /// </summary>
+    /// <param name="item">The validated contract item.</param>
+    /// <param name="id">The deterministic document id.</param>
+    /// <param name="subjectKey">The subject partition value.</param>
+    /// <param name="tenantId">Tenant metadata.</param>
+    /// <param name="ttl">
+    /// Optional per-item Cosmos TTL (seconds) mapped from <see cref="RetentionClass"/> by
+    /// <see cref="MemoryRetentionPolicy"/> at write time (task 052). Null = no expiry.
+    /// </param>
+    public static MemoryItemDocument FromItem(MemoryItem item, string id, string subjectKey, string? tenantId, int? ttl = null) => new()
     {
         Id = id,
         SubjectId = subjectKey,
@@ -149,6 +159,7 @@ public sealed class MemoryItemDocument
         CreatedAt = item.CreatedAt,
         UpdatedAt = item.UpdatedAt,
         CreatedBy = item.CreatedBy,
+        Ttl = ttl,
     };
 
     /// <summary>Maps the document back to the MemoryItem v1 contract shape (the ONLY shape consumers see, per ADR-013).</summary>

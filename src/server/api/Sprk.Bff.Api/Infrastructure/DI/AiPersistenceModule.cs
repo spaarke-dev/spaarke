@@ -94,10 +94,19 @@ public static class AiPersistenceModule
         // MatterMemoryService; legacy `memory`-container docs are left in place (fresh-container
         // ruling 2026-07-09 — that container is shared with pins + workspace tabs).
         // Scoped: CosmosClient is thread-safe singleton; the store reads ETags per request.
+        // AIR2-052: the store now also emits a Tier-2 memory-WRITE audit event via the EXISTING
+        // IAuditLogService (NFR-07, identifiers/counts only — no new audit component). Registered above.
         services.AddScoped<IMemoryItemStore>(sp => new MemoryItemStore(
             cosmosClient: sp.GetRequiredService<CosmosClient>(),
             databaseName: databaseName,
-            logger: sp.GetRequiredService<ILogger<MemoryItemStore>>()));
+            logger: sp.GetRequiredService<ILogger<MemoryItemStore>>(),
+            auditLog: sp.GetRequiredService<IAuditLogService>()));
+
+        // AIR2-052: memory-governance authorization port (FR-B-03). Thin seam over the existing
+        // IDataversePrivilegeChecker (record-read alignment — caller-derived, no parallel ACL) +
+        // NotificationService (AAD oid → systemuserid). Scoped: both dependencies are Singletons, so
+        // Scoped is safe; per-request usage from the governance endpoints.
+        services.AddScoped<IMemoryAccessAuthorizer, MemoryAccessAuthorizer>();
 
         // AIPU2-035: PromptLibraryService — Personal + Team template CRUD (Cosmos DB prompts container).
         // Scoped: one instance per HTTP request; shares the singleton CosmosClient.

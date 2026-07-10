@@ -1,7 +1,7 @@
 <task id="AIR2-064" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>ADR-040 inline size-cap enforcement home — CONTINGENT on task 001</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>M — G-R2-B Memory</phase>
     <gate>G-R2-B (memory)</gate>
     <estimated-effort>1 day</estimated-effort>
@@ -93,4 +93,8 @@
   <escalation>
     <trigger>The contingency ruling is a judgment boundary: if task 001's reconciliation is ambiguous about whether r1 closed R5 (CLAUDE.md §6 ambiguous requirements), STOP and surface the ambiguity with the r1 evidence rather than guessing ownership — a wrong call either duplicates r1 work or leaves the cap unenforced.</trigger>
   </escalation>
+
+  <notes>
+    Completed 2026-07-10 as a VERIFIED NO-OP per task 001's Row 5 disposition (`notes/r1-p4-reconciliation.md`, verified-closed). Independently re-verified (not just re-cited) directly against this worktree: single enforcement function `SessionLedger.CapInlinePayload` (`Models/Ai/Chat/SessionLedgerEntries.cs:84-107`, cap constant at :50), invoked at exactly two ledger write seams — `OutputRouter.RouteAsync` (`OutputRouter.cs:175`, immediately before the ledger append at :207-209, which is itself explicitly store-before-render per ADR-040 D2/D8) and the gate-resume writer in `TypedHandlerResumeExecutor` (`TypedHandlerResumeExecutor.cs:512`, before the append at :535). Ran `OutputRouterTests.cs` directly: 23/23 pass, including the at-cap-inlines-verbatim and over-cap-produces-truncation-marker boundary tests and the email-disposition fail-loud-never-partial test. No code changes made — a second enforcement point would violate this task's own single-enforcement-point constraint and task 001's already-adjudicated ownership ruling. One nuance restated (already adjudicated by task 001, not a fresh escalation): the shipped mechanism is a truncation marker with a 16 KB preview, not a full spill-to-reference of the complete over-cap payload — task 001 already ruled this is what row 5's *ownership* contingency required, with full blob/pointer offload as an explicit, separately-tracked future upgrade path. Full evidence + AC-by-AC disposition in `notes/064-adr-040-size-cap-verified-noop.md`. Quality Gates (Step 9.5) skipped per the documentation-only/no-code-change condition — no diff exists for code-review/adr-check to review.
+  </notes>
 </task>

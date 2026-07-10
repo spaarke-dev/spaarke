@@ -1,7 +1,7 @@
 <task id="AIR2-057" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>memory.write as an AI-initiated, silent, provenance-tagged side effect — automatic capture (NO gate)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>M — G-R2-B Memory</phase>
     <gate>G-R2-B (memory)</gate>
     <estimated-effort>2 days</estimated-effort>
