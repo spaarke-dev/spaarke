@@ -11,9 +11,9 @@
 **Mandate**: work the Phase-9 E2E remediation queue autonomously. Source of truth = [notes/e2e-gap-register.md](../notes/e2e-gap-register.md). Definition-of-done = the binding rule in project [CLAUDE.md](../CLAUDE.md) "E2E Definition-of-Done" (through-the-wire WebApplicationFactory slice test — NON-WAIVABLE).
 
 **The queue + sequence** (author each POML from its register cluster JUST BEFORE launching, using [tasks/100-getting-started-vertical-e2e.poml](tasks/100-getting-started-vertical-e2e.poml) as the exemplar template):
-1. **100 getting-started vertical (Cluster 1)** — RUNNING (agent). On completion → reconcile (below).
-2. **102 memory-resume (Cluster 4)** — BFF-heavy (ComposeEndpoints + ComposeService + ChatSessionManager + StoredSession). Gaps 4.1-4.5.
-3. **104 three-pane coordination (Cluster 5)** — frontend (ContextPaneController + ConversationPane receivers + Flows 3/4/6 + typed discriminants). Gaps 5.1-5.2. **102 + 104 are toolchain/file-disjoint → can run in PARALLEL.**
+1. **100 getting-started vertical (Cluster 1)** — ✅ **DONE + COMMITTED** (`98a6d71d1`, 2026-07-10). 3/3 WebApplicationFactory slice tests pass; DEF-06/07 removed. Reconciled + verified.
+2. **102 memory-resume (Cluster 4)** — 🔄 **RUNNING** (agent, opus). ComposeEndpoints Load query-binding + response DTO + annotations route + ChatSessionManager/StoredSession Cosmos + client. Gaps 4.1-4.5. POML authored.
+3. **104 three-pane coordination (Cluster 5)** — 📝 **AUTHORED + QUEUED** (POML written). Real receivers on ContextPaneController/ConversationPane + Flows 3/4/6 + typed discriminants. Gaps 5.1-5.2. **⚠️ CORRECTION to the original plan: 102 + 104 are NOT parallel-safe** — both edit `Spaarke.Compose.Components` (102: annotations client hook + Load caller; 104: ComposeEditor discriminants + ComposeWorkspace flow receivers) = SAME npm package → build-artifact contention (≤1 npm build rule). The register's "disjoint" note considered only source-file overlap, not shared build. **Launch 104 only AFTER 102 reconciles.**
 4. **101 AI-action activation code-side (Cluster 2)** — toolbar bindingId registration + 2 missing triggers + the 084 HTTP-boundary compose-dispatch test. (The 047 DEPLOY half is owner/live-env — queue it, do NOT run.)
 5. **103 Word-shuttle wiring (Cluster 3)** — client callers + EnsureSubscriptionAsync origin call + task 055 deterministic path. Touches ComposeEndpoints.cs → serialize after 100/102.
 
@@ -30,7 +30,7 @@
 
 **OWNER WAKE-UP QUEUE** (surface these when owner returns): live-env deploys (047 catalog → flips /healthz green, then 017/056/081); the 034 undo/replace scope decision (Full Path B vs replace-only — E-20 coded-workflow seam makes durable pure-undo feasible); the sandbox deploy of the getting-started vertical for the demo; any escalations logged during the night.
 
-**HEAD**: `3b0a39224` (branch, clean). All state durable: register + Phase-9 POMLs + TASK-INDEX + this plan.
+**HEAD**: `98a6d71d1` (branch — task 100 landed). 102 running (agent), 104 authored+queued (serial after 102). All state durable: register + Phase-9 POMLs (100✅/102🔄/104📝/101/103 pending) + TASK-INDEX + this plan.
 
 ---
 

@@ -1,0 +1,126 @@
+<task id="102" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>E2E-R3 — Memory / annotations / cross-version resume survives a reopen (Cluster 4)</title>
+    <phase>9 E2E Remediation</phase>
+    <status>in-progress</status>
+    <estimated-hours>14</estimated-hours>
+    <effort>high</effort>
+    <dependencies>060, 061, 062</dependencies>
+    <blocks>082</blocks>
+    <tags>bff-api, frontend, memory, cosmos, testing, e2e-remediation</tags>
+    <rigor-hint reason="Cross-toolchain persistence wiring on the resume path; the linchpin gap (4.1) makes every reopen mint an empty session; 5 gaps + the anti-recurrence reopen test; FULL, unconditional Step 9.5">FULL</rigor-hint>
+    <model-tier reason="Load-endpoint DTO + query binding + annotation save route + Cosmos StoredSession extension + client save-on-mutation; high blast radius on the persistence contract; ADR-030/013/028 surface">opus</model-tier>
+    <parallel-group>e2e-remediation-serial</parallel-group>
+    <parallel-safe reason="Touches ComposeEndpoints.cs (shared with 100/103) AND Spaarke.Compose.Components (shared with 104) — run SOLO; cannot co-build with 104">false</parallel-safe>
+    <source>notes/e2e-gap-register.md Cluster 4 (gaps 4.1–4.5) + the 5-slice E2E audit (Slice D)</source>
+  </metadata>
+
+  <prompt>
+    Make a user's Compose annotations, defined terms, and action history SURVIVE a reopen, end-to-end
+    through the HTTP wire, and prove it with a WebApplicationFactory test. Today a reopen is E2E-inert
+    despite tasks 060/061/062 being ✅: the Load endpoint DISCARDS the incoming sessionId+matterId, so
+    ComposeService's resume branch never runs and EVERY reopen mints a brand-new EMPTY session (gap 4.1,
+    the linchpin); the Load response omits the anchoredAnnotations/definedTerms/actionHistory the service
+    already returns (gap 4.2); there is no route to SAVE anchored annotations so the client never persists
+    them (gap 4.3); action history is computed but dropped before the wire (gap 4.4); and the Cosmos warm
+    tier drops annotation collections so anything that outlives the Redis TTL is lost (gap 4.5). Close
+    register Cluster 4 gaps 4.1–4.5 and land the anti-recurrence reopen-restores-state test. The
+    ComposeService methods that PRODUCE this state are already correct — do NOT rewrite them; make them
+    reachable and persisted.
+  </prompt>
+
+  <role>
+    Full-stack developer fluent in the Compose Load/resume path (ComposeEndpoints Load handler +
+    ComposeService resume branch), the ChatSessionManager two-tier store (Redis hot + Cosmos warm /
+    StoredSession), the compose client Load/mutation flow, and WebApplicationFactory integration tests.
+  </role>
+
+  <goal>
+    Reopen a previously-saved Compose document → the SAME session resumes (not a new empty one), and its
+    anchored annotations, defined terms, and action history are returned by Load and rendered. Mutating an
+    annotation persists it (save route) so it survives a Redis-TTL-crossing reopen (Cosmos warm tier).
+    Every hop connects over HTTP. A WebApplicationFactory test drives save-annotation → reopen(Load with
+    sessionId+matterId) → assert the session resumed and all three collections are restored. All 5
+    Cluster-4 gaps closed; DEF-04/DEF-05 removed from the defer list (fixed, not deferred).
+  </goal>
+
+  <context>
+    <background>
+      Source of truth: notes/e2e-gap-register.md Cluster 4 (gaps 4.1–4.5) with exact file:line evidence,
+      and design.md §2.9 (cross-version memory / anchored annotations). 063 (memory.write) and 064 (D-F4
+      trace) are genuinely core-blocked and remain correctly deferred — do NOT build them. The
+      ComposeService methods that produce annotations/definedTerms/actionHistory are correct; the failure
+      is entirely in the WIRE (query binding, response DTO, save route, StoredSession persistence, client).
+    </background>
+    <relevant-files>
+      <file purpose="server-load-handler" edit="true">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — Load handler (~908-951, 1271-1280): bind [FromQuery] sessionId + matterId and pass them into the service call so the resume branch runs (gap 4.1); add anchoredAnnotations/definedTerms/actionHistory to LoadComposeDocumentResponse and map them from the service result (gaps 4.2/4.4).</file>
+      <file purpose="server-annotations-route" edit="true">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — map GET + POST .../annotations that call the (existing) SaveComposeAnnotationsAsync / load path so the client can persist and rehydrate anchored annotations (gap 4.3).</file>
+      <file purpose="server-service-REUSE" edit="false">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — resume branch (~154-176) and the action-history method (~995-1050) are already correct; do NOT rewrite. Just pass sessionId/matterId in and surface the returned collections.</file>
+      <file purpose="warm-tier" edit="true">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (~505-547) + StoredSession.cs — extend StoredSession to carry anchoredAnnotations/definedTerms/actionHistory and include them in the Cosmos warm-tier map/unmap so state survives past the Redis TTL (gap 4.5 / DEF-05). Keep the existing map-method style.</file>
+      <file purpose="client-load" edit="true">compose client Load caller — send matterId (and the known sessionId) on the Load request so the resume branch is reachable from the client (gap 4.1 client half). Locate the actual caller (mount host / load hook) — do NOT assume ComposeWorkspace.tsx without confirming.</file>
+      <file purpose="client-annotations" edit="true">compose client annotations flow — persist anchored annotations on mutation via the new save route, and hydrate them from the Load response on mount (gap 4.3 client half). Reuse the existing pending-redline / annotation hook; do NOT introduce a parallel store.</file>
+      <file purpose="e2e-test" edit="true">tests/integration/contract/Api/Ai/ComposeMemoryResumeEndpointContractTests.cs (NEW) — the anti-recurrence WebApplicationFactory reopen-restores-state slice test.</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="linchpin-4.1">The Load endpoint MUST honor the incoming sessionId+matterId and route to the resume branch. A reopen of the same document MUST NOT mint a new empty session. This is the non-negotiable core of the task.</constraint>
+    <constraint source="no-parallel-store">Reuse the existing annotation/pending-redline client hook and the existing ComposeService methods. Do NOT create a parallel annotation store, a new service, or a duplicate DTO — extend the existing surface (Component Justification §11).</constraint>
+    <constraint source="cleanGuid">Any Xrm-sourced GUID (matterId, documentId, sessionId if Xrm-derived) that enters an @odata.bind or /entityset(guid) URL MUST be wrapped with `cleanGuid` from `@spaarke/ui-components`. GUIDs sent as JSON body/query values are not OData URLs and are not wrapped.</constraint>
+    <constraint source="ADR-030">If the client uses the PaneEventBus for any annotation signal, use a typed discriminant — no `as any`. (If no bus signal is needed, this does not apply.)</constraint>
+    <constraint source="ADR-013">Services/Compose injects no AI internals. ChatSessionManager/StoredSession changes stay within the existing session-store contract.</constraint>
+    <constraint source="ADR-028">Client Load/save fetches use @spaarke/auth (and Xrm.WebApi for host Dataverse).</constraint>
+    <constraint source="no-defer">Fix all 5 gaps in this pass; remove DEF-04/DEF-05 from notes/defer-issues.md (fixed, not deferred). Do NOT file new deferrals for in-scope gaps. 063/064 stay deferred (core-blocked) — do not touch.</constraint>
+    <constraint source="bff-hygiene">BFF-touching: report publish-size delta vs 49.63 MB baseline + CVE scan.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose/memory-resume, anchored-annotations, chatsessionmanager-two-tier, webapplicationfactory-e2e</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r2/notes/e2e-gap-register.md</file>
+      <file>.claude/adr/ADR-030-typed-event-bus.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-facade.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load the register Cluster 4 + this POML. Read the 5 broken hops at their cited file:line. Confirm the ComposeService resume branch and the action-history method are present and correct (they are — do not rewrite). Locate the ACTUAL client Load caller before editing (do not assume a file).</step>
+    <step order="1">Server linchpin (gap 4.1): bind [FromQuery] sessionId + matterId on the Load handler and pass them into the service call so the resume branch runs instead of minting a new session.</step>
+    <step order="2">Server response (gaps 4.2/4.4): add anchoredAnnotations, definedTerms, actionHistory to LoadComposeDocumentResponse and map them from the service result (they are already returned by the service — stop dropping them).</step>
+    <step order="3">Server annotations route (gap 4.3): map GET + POST .../annotations wired to the existing SaveComposeAnnotationsAsync / load path.</step>
+    <step order="4">Warm tier (gap 4.5 / DEF-05): extend StoredSession + the ChatSessionManager Cosmos map/unmap to carry the three annotation collections so they survive past the Redis TTL.</step>
+    <step order="5">Client: send matterId (+ known sessionId) on Load so the resume branch is reachable; persist anchored annotations on mutation via the new save route; hydrate annotations/definedTerms/actionHistory from the Load response on mount. Reuse the existing hook.</step>
+    <step order="6">ANTI-RECURRENCE TEST (definition-of-done, non-waivable): add ComposeMemoryResumeEndpointContractTests — a WebApplicationFactory test that POSTs a save (annotation) then a Load with sessionId+matterId through the real endpoints and asserts (a) the SAME session resumed (not a new empty one) and (b) anchoredAnnotations/definedTerms/actionHistory are restored. Cross the HTTP boundary a service-only test cannot.</step>
+    <step order="7">Verify: dotnet build + dotnet test (new + Compose regression); Compose.Components tsc + jest; publish-size + CVE. Run Step 9.5 (code-review + adr-check) UNCONDITIONALLY. Update this POML notes; remove DEF-04/DEF-05 from defer-issues.md. Do NOT edit TASK-INDEX/current-task (main session reconciles).</step>
+  </steps>
+
+  <outputs>
+    <output type="code">ComposeEndpoints.cs (Load query-binding for sessionId/matterId; LoadComposeDocumentResponse + 3 collections; annotations GET/POST routes)</output>
+    <output type="code">ChatSessionManager.cs + StoredSession.cs (Cosmos warm-tier carries the 3 annotation collections)</output>
+    <output type="code">compose client Load caller (sends matterId/sessionId) + annotations hook (save-on-mutation + hydrate-on-mount)</output>
+    <output type="test">tests/integration/contract/Api/Ai/ComposeMemoryResumeEndpointContractTests.cs (WebApplicationFactory reopen-restores-state slice)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Reopening a saved document with its sessionId+matterId resumes the SAME session — the Load handler binds both from the request and routes to the resume branch; a reopen never mints a new empty session (gap 4.1 closed).</criterion>
+    <criterion testable="true">LoadComposeDocumentResponse returns anchoredAnnotations, definedTerms, and actionHistory, mapped from the (unchanged) service result (gaps 4.2/4.4 closed).</criterion>
+    <criterion testable="true">A GET/POST .../annotations route exists; the client persists anchored annotations on mutation and hydrates them from Load on mount (gap 4.3 closed); no parallel store introduced.</criterion>
+    <criterion testable="true">StoredSession + the Cosmos warm tier carry the three annotation collections so state survives past the Redis TTL (gap 4.5 / DEF-05 closed).</criterion>
+    <criterion testable="true">A WebApplicationFactory test drives save-annotation → Load(sessionId,matterId) through the real endpoints and asserts the same session resumed AND all three collections restored (anti-recurrence definition-of-done).</criterion>
+    <criterion testable="true">DEF-04 and DEF-05 removed from notes/defer-issues.md (fixed). 063/064 untouched (stay core-deferred). BFF publish-size delta + CVE reported; Step 9.5 clean.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If honoring sessionId on Load conflicts with an existing session-ownership/auth contract (e.g. the session belongs to a different principal), or if StoredSession cannot carry the collections without a breaking schema change to the shared chat store, STOP and surface per CLAUDE.md §6/§6.5 — do not silently pick an alternative or a new store.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    (to be filled by the executing agent)
+  </notes>
+</task>

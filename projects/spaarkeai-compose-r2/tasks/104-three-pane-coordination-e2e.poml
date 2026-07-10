@@ -1,0 +1,123 @@
+<task id="104" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>E2E-R5 — Three-pane coordination: real receivers + Flows 3/4/6 + typed discriminants (Cluster 5; supersedes/absorbs 070)</title>
+    <phase>9 E2E Remediation</phase>
+    <status>in-progress</status>
+    <estimated-hours>12</estimated-hours>
+    <effort>high</effort>
+    <dependencies>030, 031, 046</dependencies>
+    <blocks>072, 082</blocks>
+    <tags>frontend, three-pane, pane-event-bus, testing, e2e-remediation</tags>
+    <rigor-hint reason="The R2 differentiator (three-pane coordination) is stub-only: 4 of 6 flows contract-only, receivers log-only on the wrong pane, 6 discriminants ride via `as any` (ADR-030 violation); real-bus cross-pane test as the forcing function; FULL, unconditional Step 9.5">FULL</rigor-hint>
+    <model-tier reason="Cross-pane event-bus coordination across ContextPaneController/ConversationPane/ComposeWorkspace with typed-discriminant contract changes (ADR-030); moderate blast radius but the differentiator surface">opus</model-tier>
+    <parallel-group>e2e-remediation-serial</parallel-group>
+    <parallel-safe reason="Touches Spaarke.Compose.Components (ComposeEditor/ComposeWorkspace) shared with 102 — cannot co-build with 102; run SOLO after 102">false</parallel-safe>
+    <source>notes/e2e-gap-register.md Cluster 5 (gaps 5.1–5.2) + the 5-slice E2E audit (Slice E). Supersedes/absorbs task 070.</source>
+  </metadata>
+
+  <prompt>
+    Make the three-pane workspace COORDINATE for real, and prove it with a real-PaneEventBus cross-pane
+    test. Today the R2 differentiator is stub-only despite task 070 being open and Flows 1&2 being "wired":
+    4 of 6 compose flows are stub/contract-only; the Flow 1&2 receivers are LOG-ONLY and sit on the WRONG
+    pane (ComposeWorkspace, not the Context/Assistant panes that should react); only Flow 5 is genuinely
+    wired; and none of the 6 `compose_*` discriminants exist in the typed bus union — they all ride via
+    `as any`, an ADR-030 violation. Close register Cluster 5 gaps 5.1–5.2: put REAL receivers on the
+    Context and Assistant panes, build Flows 3/4/6, and add the typed discriminants so no compose event
+    rides untyped. Land a real-bus cross-pane integration test as the anti-recurrence forcing function
+    (evidence the receivers are mounted + reachable, per the project E2E definition-of-done row 3).
+    This task supersedes and absorbs task 070.
+  </prompt>
+
+  <role>
+    Frontend developer fluent in the SpaarkeAi three-pane shell (ThreePaneShell, ContextPaneController,
+    ConversationPane), the PaneEventBus contract (@spaarke/events-components) and its compose-contracts.ts
+    discriminants, and the ComposeWorkspace/ComposeEditor emit sites. Comfortable writing a real-bus jest
+    integration test that drives a compose event across panes.
+  </role>
+
+  <goal>
+    Emitting each of the six compose flow signals on the PaneEventBus produces the correct cross-pane
+    effect: the Context pane and the Assistant/Conversation pane react on their OWN controllers (not a
+    log-only handler on ComposeWorkspace). Flows 3, 4, and 6 are built (not stubs). All six `compose_*`
+    signals are typed discriminants in the bus union — zero `as any`. A real-PaneEventBus jest test drives
+    each flow emit → asserts the receiving pane's observable effect. Cluster 5 gaps 5.1–5.2 closed; task
+    070 folded in and marked superseded.
+  </goal>
+
+  <context>
+    <background>
+      Source of truth: notes/e2e-gap-register.md Cluster 5 (gaps 5.1–5.2) with file:line evidence, and
+      design.md §7 (three-pane flow catalog) + §7.2 (the RETRACTED "invented" discriminants — do NOT
+      reintroduce compose_action_request / compose_edit_apply_request; the real discriminants are in
+      compose-contracts.ts). Spike 0 forbids inventing new discriminant names; extend the EXISTING typed
+      union. The real apply/selection flows already in code (compose_selection_offer,
+      compose_assistant_insert with ledgerRef) are the pattern — mirror them for the typed union; do NOT
+      change their runtime contract.
+    </background>
+    <relevant-files>
+      <file purpose="flow-receivers-context" edit="true">src/solutions/SpaarkeAi/src/components/shell/ContextPaneController.tsx (~433-489, the default:break) — add REAL receivers for the Context-pane flows (Flow 6 doc-context surfacing + the context legs of 3/4) instead of falling through default.</file>
+      <file purpose="flow-receivers-assistant" edit="true">SpaarkeAi ConversationPane / Assistant-pane controller — add REAL receivers for the Assistant-pane flows (the conversation legs of Flows 3/4) so the Assistant reacts on its own controller.</file>
+      <file purpose="wrong-pane-stub" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx (~706-732) — the log-only Flow 1&2 receivers on the WRONG pane: move the reaction to the correct pane controller (Context/Assistant); ComposeWorkspace should EMIT/relay, not be the terminal handler for cross-pane flows.</file>
+      <file purpose="typed-discriminants" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (~554-565) — remove the `as any` emits; use the typed discriminants.</file>
+      <file purpose="bus-union" edit="true">the compose-contracts.ts / PaneEventBus typed union (@spaarke/events-components or the compose widget contracts file) — add the 6 compose_* discriminants to the typed union so every compose event is typed. Do NOT add the retracted invented names.</file>
+      <file purpose="e2e-test" edit="true">a NEW real-PaneEventBus jest integration test (co-located with the three-pane shell tests) — the anti-recurrence forcing function: emit each flow → assert the receiving pane's effect.</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-030">Every compose event on the bus MUST use a typed discriminant in the union — zero `as any`. This is the core contract fix (gap 5.2).</constraint>
+    <constraint source="no-invented-discriminants">Do NOT reintroduce the retracted invented names compose_action_request / compose_edit_apply_request (design §7.2 / Spike 0 forbid them). Extend the EXISTING discriminants in compose-contracts.ts. Do NOT change the runtime contract of the already-shipped compose_selection_offer / compose_assistant_insert flows.</constraint>
+    <constraint source="correct-pane">Receivers live on the pane that OWNS the reaction (ContextPaneController for context surfacing, the Assistant/Conversation controller for conversation reactions) — NOT a log-only handler on ComposeWorkspace. ComposeWorkspace emits/relays; it is not the terminal cross-pane handler.</constraint>
+    <constraint source="reuse-070">This task supersedes 070 — fold 070's intent in; do NOT leave a parallel 070 implementation. One coherent coordination layer, not two (Component Justification §11).</constraint>
+    <constraint source="real-bus-test">The forcing function MUST use the REAL PaneEventBus (not a mocked bus) and assert a cross-pane effect (emit on pane A → observable reaction on pane B). An isolated unit test that only checks a handler in isolation does NOT satisfy the project E2E definition-of-done row 3 (mounted + reachable).</constraint>
+    <constraint source="no-defer">Build Flows 3/4/6 in this pass; do NOT stub them or file deferrals for in-scope flows. 072 (Doc Q&A) inherits this Context surfacing (Flow 6) — leave it consumable, but building 072 itself is out of scope.</constraint>
+    <constraint source="no-http">This is a client-only coordination task — no BFF/endpoint changes. If a flow genuinely needs a server round-trip, that is an escalation, not a silent BFF edit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>three-pane-coordination, pane-event-bus, compose-contracts-discriminants, real-bus-jest</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r2/notes/e2e-gap-register.md</file>
+      <file>.claude/adr/ADR-030-typed-event-bus.md</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/context/compose-contracts.ts</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load the register Cluster 5 + this POML + compose-contracts.ts. Read the 6 flows in design §7, the retracted names in §7.2 (do NOT use them), and the current emit/receive sites (ComposeWorkspace ~706-732, ContextPaneController ~433-489 default:break, ComposeEditor ~554-565 `as any`). Enumerate which of the 6 flows are already wired (Flow 5) vs stub (3/4/6) vs log-only-wrong-pane (1/2).</step>
+    <step order="1">Typed discriminants (gap 5.2): add the 6 compose_* discriminants to the typed bus union in compose-contracts.ts, mirroring the shape of the existing compose_selection_offer / compose_assistant_insert; remove every `as any` emit in ComposeEditor and elsewhere.</step>
+    <step order="2">Correct-pane receivers (gap 5.1, Flows 1&2): move the log-only ComposeWorkspace receivers to the Context/Assistant pane controllers so the owning pane reacts; ComposeWorkspace emits/relays only.</step>
+    <step order="3">Build Flows 3, 4, 6 (gap 5.1): implement the real receivers + effects on the correct pane controllers (Flow 6 = doc-context surfacing on Context pane; Flows 3/4 = their context + conversation legs). Fold in task 070's intent — one coordination layer.</step>
+    <step order="4">ANTI-RECURRENCE TEST (definition-of-done, non-waivable): add a real-PaneEventBus jest integration test that, for each of the 6 flows, emits on the source pane and asserts the receiving pane's observable effect — evidence the receivers are mounted + reachable (project E2E DoD row 3). No mocked bus.</step>
+    <step order="5">Verify: Compose.Components + SpaarkeAi + events-components tsc clean (your files); jest (new real-bus test + regression). Run Step 9.5 (code-review + adr-check) UNCONDITIONALLY — confirm zero `as any` on compose events and no invented discriminants. Update this POML notes; mark 070 superseded in your report. Do NOT edit TASK-INDEX/current-task (main session reconciles). No BFF publish-size needed (client-only) — state that explicitly.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">compose-contracts.ts (6 compose_* discriminants added to the typed union)</output>
+    <output type="code">ContextPaneController.tsx + ConversationPane/Assistant controller (real receivers for Flows 3/4/6 + relocated Flows 1/2)</output>
+    <output type="code">ComposeWorkspace.tsx (emit/relay, not terminal handler) + ComposeEditor.tsx (typed emits, no `as any`)</output>
+    <output type="test">real-PaneEventBus cross-pane jest integration test (6 flows: emit → receiving-pane effect)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">All six compose flow signals produce the correct cross-pane effect on the OWNING pane controller (Context / Assistant), not a log-only handler on ComposeWorkspace (gap 5.1 closed; Flows 1&2 relocated, 3/4/6 built).</criterion>
+    <criterion testable="true">All six compose_* signals are typed discriminants in the bus union; zero `as any` on compose events; the retracted invented names are NOT reintroduced (gap 5.2 / ADR-030 closed).</criterion>
+    <criterion testable="true">A real-PaneEventBus jest integration test drives each of the 6 flow emits and asserts the receiving pane's observable effect (anti-recurrence definition-of-done row 3; real bus, not mocked).</criterion>
+    <criterion testable="true">Task 070 is folded in / superseded — one coordination layer, no parallel 070 implementation left behind.</criterion>
+    <criterion testable="true">The already-shipped compose_selection_offer / compose_assistant_insert runtime contracts are unchanged; Flow 5 still works.</criterion>
+    <criterion testable="true">tsc + jest green for the touched packages; Step 9.5 clean; no BFF changes (client-only, stated explicitly).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a flow genuinely requires a server round-trip (BFF endpoint), or if correctly routing a receiver forces a change to an already-shipped discriminant's runtime contract, STOP and surface per CLAUDE.md §6/§6.5 — do not silently add a BFF edit or mutate a shipped contract.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    (to be filled by the executing agent)
+  </notes>
+</task>
