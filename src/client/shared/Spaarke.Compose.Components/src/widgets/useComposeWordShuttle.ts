@@ -112,9 +112,7 @@ export interface CheckChangesResult {
  * endpoint scores (task 054). `textPattern`/`paragraphHint` come from the annotation's anchor;
  * `preview` is a short, Tier-1-safe label the conflict UI shows.
  */
-export function anchoredAnnotationsToPriorAnchors(
-  annotations: readonly AnchoredAnnotation[]
-): PriorAnchorInput[] {
+export function anchoredAnnotationsToPriorAnchors(annotations: readonly AnchoredAnnotation[]): PriorAnchorInput[] {
   return annotations
     .filter(a => a.anchor?.textPattern)
     .map(a => ({
