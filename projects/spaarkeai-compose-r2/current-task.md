@@ -12,10 +12,10 @@
 
 **The queue + sequence** (author each POML from its register cluster JUST BEFORE launching, using [tasks/100-getting-started-vertical-e2e.poml](tasks/100-getting-started-vertical-e2e.poml) as the exemplar template):
 1. **100 getting-started vertical (Cluster 1)** — ✅ **DONE + COMMITTED** (`98a6d71d1`, 2026-07-10). 3/3 WebApplicationFactory slice tests pass; DEF-06/07 removed. Reconciled + verified.
-2. **102 memory-resume (Cluster 4)** — 🔄 **RUNNING** (agent, opus). ComposeEndpoints Load query-binding + response DTO + annotations route + ChatSessionManager/StoredSession Cosmos + client. Gaps 4.1-4.5. POML authored.
-3. **104 three-pane coordination (Cluster 5)** — 📝 **AUTHORED + QUEUED** (POML written). Real receivers on ContextPaneController/ConversationPane + Flows 3/4/6 + typed discriminants. Gaps 5.1-5.2. **⚠️ CORRECTION to the original plan: 102 + 104 are NOT parallel-safe** — both edit `Spaarke.Compose.Components` (102: annotations client hook + Load caller; 104: ComposeEditor discriminants + ComposeWorkspace flow receivers) = SAME npm package → build-artifact contention (≤1 npm build rule). The register's "disjoint" note considered only source-file overlap, not shared build. **Launch 104 only AFTER 102 reconciles.**
-4. **101 AI-action activation code-side (Cluster 2)** — toolbar bindingId registration + 2 missing triggers + the 084 HTTP-boundary compose-dispatch test. (The 047 DEPLOY half is owner/live-env — queue it, do NOT run.)
-5. **103 Word-shuttle wiring (Cluster 3)** — client callers + EnsureSubscriptionAsync origin call + task 055 deterministic path. Touches ComposeEndpoints.cs → serialize after 100/102.
+2. **102 memory-resume (Cluster 4)** — ✅ **DONE + COMMITTED** (`c167376bf`, 2026-07-10). Linchpin 4.1 fixed (Load binds sessionId+matterId → same-session resume); gaps 4.2-4.5 closed; 5/5 reopen-restores-state slice tests pass; DEF-04/05 marked FIXED. Reconciled + verified.
+3. **104 three-pane coordination (Cluster 5)** — 🔄 **RUNNING** (agent, opus). Real receivers on ContextPaneController/ConversationPane + Flows 3/4/6 + typed discriminants + real-bus jest forcing test. Gaps 5.1-5.2. Client-only. **NOTE: 102+104 were NOT parallel-safe** (both edit `Spaarke.Compose.Components` → build contention); serialized — a refinement of the register's source-only "disjoint" call. 104 launched after 102 landed.
+4. **101 AI-action activation code-side (Cluster 2)** — 📝 **AUTHORED + QUEUED**. Toolbar bindingId registration (2.2) + 2 missing triggers (2.3) + the 084 in-process WebApplicationFactory /dispatch slice test. **The 047 DEPLOY half + /healthz flip (2.1/2.4) are OWNER/live-env — scoped OUT, named as prereq.** Serial after 104 (shares Spaarke.Compose.Components). Escalation boundary in POML: if bindingId is only mint-at-deploy → ✅◐ E2E-pending on 047.
+5. **103 Word-shuttle wiring (Cluster 3)** — client callers + EnsureSubscriptionAsync origin call + task 055 deterministic path. Touches ComposeEndpoints.cs + Spaarke.Compose.Components → serialize after 101. (Author from register Cluster 3 just before launch.)
 
 **Per-task reconciliation procedure** (on each agent completion):
 - Verify: build + tests green AND the forcing-function slice test PRESENT + PASSING. If the slice test is absent/red → task is NOT done: SendMessage the agent back to add/fix it, do not mark ✅.
@@ -30,7 +30,7 @@
 
 **OWNER WAKE-UP QUEUE** (surface these when owner returns): live-env deploys (047 catalog → flips /healthz green, then 017/056/081); the 034 undo/replace scope decision (Full Path B vs replace-only — E-20 coded-workflow seam makes durable pure-undo feasible); the sandbox deploy of the getting-started vertical for the demo; any escalations logged during the night.
 
-**HEAD**: `98a6d71d1` (branch — task 100 landed). 102 running (agent), 104 authored+queued (serial after 102). All state durable: register + Phase-9 POMLs (100✅/102🔄/104📝/101/103 pending) + TASK-INDEX + this plan.
+**HEAD**: `c167376bf` (branch — tasks 100 + 102 landed). 104 running (agent), 101 authored+queued (serial after 104). All state durable: register + Phase-9 POMLs (100✅/102✅/104🔄/101📝/103 pending) + TASK-INDEX + this plan. Progress this cycle: 2 of 5 Phase-9 clusters closed + verified through the wire.
 
 ---
 

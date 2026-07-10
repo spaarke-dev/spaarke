@@ -1,0 +1,126 @@
+<task id="101" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>E2E-R2 — AI-action activation (code side): toolbar bindingId registration + 2 missing triggers + 084 HTTP-slice test (Cluster 2)</title>
+    <phase>9 E2E Remediation</phase>
+    <status>in-progress</status>
+    <estimated-hours>12</estimated-hours>
+    <effort>high</effort>
+    <dependencies>016, 046</dependencies>
+    <blocks>082</blocks>
+    <tags>frontend, bff-api, dispatch, testing, e2e-remediation</tags>
+    <rigor-hint reason="Activates the 5 compose AI catalog actions on the client + closes the anti-recurrence dispatch test (084); toolbar registration + 2 missing triggers + a real HTTP /dispatch slice test; FULL, unconditional Step 9.5">FULL</rigor-hint>
+    <model-tier reason="Client toolbar registration + trigger wiring + the flagship 084 WebApplicationFactory /dispatch slice test spanning client body → real route → orchestrator; the dispatch contract surface (ADR-030/039/040)">opus</model-tier>
+    <parallel-group>e2e-remediation-serial</parallel-group>
+    <parallel-safe reason="Touches Spaarke.Compose.Components (ComposeAiToolbar) shared with 102/103/104 — run SOLO; cannot co-build with 103/104">false</parallel-safe>
+    <source>notes/e2e-gap-register.md Cluster 2 (gaps 2.2/2.3, + 2.1/2.4 owner-deploy) + the 5-slice E2E audit (Slice B). The anti-recurrence closure (084) folds in here.</source>
+  </metadata>
+
+  <prompt>
+    Activate the 5 compose AI catalog actions on the CLIENT and prove a real compose action dispatches
+    through the HTTP wire with a WebApplicationFactory /dispatch test. The dispatch plumbing
+    (queue → apply-leg → orchestrator → ledger → materialize) and the admit-gate are already wired (E-20
+    landed; the 422 is gone). What is still missing on the CODE side: (2.2) the toolbar buttons ship
+    `bindingId:''` so they render DISABLED, and `registerComposeAiToolbarAction` is called only in tests;
+    (2.3) 2 of the 5 actions (summarize-word-changes, defined-terms) have NO client trigger at all
+    (absent from DEFAULT_ACTIONS; the overflow is empty); and (084) there is NO HTTP-boundary test that
+    dispatches a real compose action through the real `/dispatch` route. Close Cluster 2's CODE gaps
+    (2.2, 2.3) and land the 084 forcing-function test. The LIVE-ENV catalog deploy (task 047 — the 5
+    Action + 5 Binding rows to spaarkedev1) and the /healthz-green flip (2.4) are OWNER-ONLY / live-env
+    and are OUT OF SCOPE here — name them as the remaining prerequisite, do NOT attempt them.
+  </prompt>
+
+  <role>
+    Full-stack developer fluent in the compose AI toolbar (ComposeAiToolbar registration + DEFAULT_ACTIONS
+    + overflow), the dispatch client seam (dispatchConsumer / the 046 composeActionBridge), the binding-id
+    resolution path (how a compose action's bindingId is supplied to the toolbar), and WebApplicationFactory
+    /dispatch integration tests.
+  </role>
+
+  <goal>
+    All 5 compose AI actions are triggerable from the client: the toolbar buttons carry a real bindingId
+    (not '') and are enabled; the 2 missing triggers (summarize-word-changes, defined-terms) are wired
+    into their entry points (overflow / return-from-Word). A WebApplicationFactory test drives a real
+    compose action from the HTTP body the client sends → the real `/dispatch` route → the orchestrator →
+    asserts the dispatched/stored/rendered result (084 — the anti-recurrence closure that adds the real-HTTP
+    /dispatch dimension none of the 3 existing test surfaces have). Cluster 2 CODE gaps (2.2, 2.3) closed;
+    2.1/2.4 (deploy + /healthz) named as owner-queued.
+  </goal>
+
+  <context>
+    <background>
+      Source of truth: notes/e2e-gap-register.md Cluster 2 (gaps 2.1–2.4) + the anti-recurrence section on
+      task 084, and design.md §5 (AI action catalog). BINDING owner limit: the live-env deploy of the 5
+      Action + 5 Binding rows (task 047) and the /healthz flip are OWNER/live-env — this task is CODE ONLY.
+      The 084 test proves the slice IN-PROCESS by seeding a binding at the WebApplicationFactory module
+      boundary (the same boundary 100/102 mock Dataverse at) and driving the REAL /dispatch route — it does
+      NOT require a live deployment. If, and only if, the toolbar genuinely cannot carry a stable bindingId
+      known at build/seed time (i.e. the id is minted only at live-deploy), STOP and escalate — that is the
+      one place 047 becomes a hard code prerequisite.
+      Retracted-name guard: do NOT reintroduce compose_action_request / compose_edit_apply_request; the 046
+      dispatch seam (composeActionBridge → dispatchConsumer + existing compose_assistant_insert apply leg)
+      is the wired pattern — reuse it.
+    </background>
+    <relevant-files>
+      <file purpose="toolbar-registration" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx (~188-210, 341-345, 405) — supply a real bindingId to each toolbar action so buttons enable; `registerComposeAiToolbarAction` must run in the real mount path, not only tests (gap 2.2). First INSPECT how bindingId is meant to be resolved (deterministic mirror id vs runtime lookup by consumer+action code) before wiring.</file>
+      <file purpose="default-actions" edit="true">the compose DEFAULT_ACTIONS / overflow source — add the 2 missing triggers: defined-terms (overflow) and summarize-word-changes (return-from-Word entry) (gap 2.3).</file>
+      <file purpose="dispatch-seam-REUSE" edit="false">src/solutions/SpaarkeAi/src/components/conversation/composeApplyLeg.ts + the 046 composeActionBridge — the wired dispatch seam (dispatchConsumer + compose_assistant_insert with ledgerRef). Reuse; do NOT add a new route/discriminant.</file>
+      <file purpose="084-e2e-test" edit="true">tests/integration/contract/Api/Ai/ (NEW, e.g. ComposeDispatchEndpointContractTests.cs) — the 084 WebApplicationFactory test: seed a compose binding at the module boundary, POST the dispatch body the client sends through the real /dispatch route, assert admit → route → store "compose" → render terminal. This is the anti-recurrence closure (real HTTP /dispatch + seeded catalog row).</file>
+      <file purpose="deploy-prereq-REFERENCE" edit="false">notes/e2e-gap-register.md "DEPLOY / CONFIG PREREQUISITES" — task 047 (5 Action + 5 Binding rows → spaarkedev1) + the /healthz parity flip are owner/live-env; NAME them in your report, do NOT attempt.</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner-deploy-boundary">The live-env catalog deploy (047) and the /healthz flip (2.4) are OWNER-ONLY. Do NOT deploy, do NOT run pac/Dataverse writes against spaarkedev1. Name them as the remaining prerequisite for production E2E; this task closes the CODE side + the in-process 084 test.</constraint>
+    <constraint source="no-invented-discriminants">Reuse the 046 dispatch seam (composeActionBridge → dispatchConsumer + existing compose_assistant_insert). Do NOT reintroduce compose_action_request / compose_edit_apply_request; do NOT add a new dispatch route or string-key routing.</constraint>
+    <constraint source="no-version-suffix">Any binding/action code or config value referenced MUST NOT carry a version suffix (@v1/-v1/@vN) — it becomes cross-env cleanup cruft.</constraint>
+    <constraint source="cleanGuid">If a bindingId or any Xrm-sourced GUID enters an @odata.bind or /entityset(guid) URL, wrap with cleanGuid from @spaarke/ui-components. A bindingId sent in a JSON dispatch body is not an OData URL and is not wrapped.</constraint>
+    <constraint source="ADR-030">Compose bus events use typed discriminants — zero `as any`.</constraint>
+    <constraint source="no-defer">Close gaps 2.2 and 2.3 in this pass; do NOT file deferrals for the in-scope code gaps. (2.1/2.4 are owner-deploy, not a code deferral.)</constraint>
+    <constraint source="bff-hygiene">The 084 test compiles into the BFF test project — if any BFF source changes, report publish-size delta vs 49.63 MB baseline + CVE. If code-only client + test, state no BFF source change.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose/ai-action-catalog, dispatch-seam, bindingid-resolution, webapplicationfactory-dispatch</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r2/notes/e2e-gap-register.md</file>
+      <file>.claude/adr/ADR-030-typed-event-bus.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DispositionRoutability.cs</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load the register Cluster 2 + this POML. INSPECT how a compose action's bindingId is meant to reach the toolbar (deterministic mirror id vs runtime resolution by consumer+action code) and how the 046 dispatch seam is wired. Confirm the admit-gate + dispatch plumbing are already correct (they are — E-20 landed). Enumerate which of the 5 actions have a trigger today vs not.</step>
+    <step order="1">Toolbar (gap 2.2): supply a real bindingId to each of the 5 toolbar actions and run `registerComposeAiToolbarAction` in the real mount path so the buttons enable. If bindingId can only be minted at live-deploy (not knowable at build/seed time) → STOP + escalate (047 becomes a hard prereq).</step>
+    <step order="2">Missing triggers (gap 2.3): wire defined-terms into the overflow and summarize-word-changes into its return-from-Word entry point, reusing the 046 dispatch seam.</step>
+    <step order="3">084 FORCING-FUNCTION TEST (definition-of-done, non-waivable): add a WebApplicationFactory test that seeds a compose binding at the module boundary and POSTs the dispatch body the client sends through the REAL /dispatch route; assert admit → route → store "compose" → terminal render. This adds the real-HTTP /dispatch + seeded-row dimensions the 3 existing surfaces lack. Do NOT waive it as "already covered."</step>
+    <step order="4">Verify: dotnet build + dotnet test (084 + dispatch/compose regression); Compose.Components tsc + jest; if BFF source changed, publish-size + CVE (else state client+test only). Run Step 9.5 (code-review + adr-check) UNCONDITIONALLY. Update this POML notes. NAME task 047 (deploy) + the /healthz flip as owner-queued in your report. Do NOT edit TASK-INDEX/current-task (main session reconciles).</step>
+  </steps>
+
+  <outputs>
+    <output type="code">ComposeAiToolbar.tsx (real bindingId per action + real-mount registration)</output>
+    <output type="code">DEFAULT_ACTIONS / overflow (defined-terms + summarize-word-changes triggers)</output>
+    <output type="test">tests/integration/contract/Api/Ai/ComposeDispatchEndpointContractTests.cs (084 — real /dispatch slice with seeded binding)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">All 5 compose toolbar actions carry a real bindingId and render enabled; `registerComposeAiToolbarAction` runs in the real mount path (gap 2.2 closed) — OR, if bindingId is only mint-at-deploy, a clean escalation naming 047 as the hard prereq.</criterion>
+    <criterion testable="true">The 2 previously-untriggerable actions (defined-terms via overflow, summarize-word-changes via return-from-Word) are wired to the 046 dispatch seam (gap 2.3 closed); no new route/discriminant added.</criterion>
+    <criterion testable="true">A WebApplicationFactory test dispatches a real compose action through the real /dispatch route (seeded binding at the module boundary) and asserts admit → route → store "compose" → terminal render (084 anti-recurrence closure).</criterion>
+    <criterion testable="true">Zero `as any` on compose bus events; retracted invented discriminants not reintroduced; no version suffix on any binding/action code.</criterion>
+    <criterion testable="true">Task 047 (live-env catalog deploy) + the /healthz flip are NAMED as owner-queued prerequisites for production E2E — not attempted, not silently deferred. Step 9.5 clean.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a compose action's bindingId can only be minted at live deployment (not knowable at build/seed time), STOP and surface per CLAUDE.md §6/§6.5 — the toolbar activation then genuinely depends on task 047 (owner/live-env) and this task is ✅◐ E2E-pending on that deploy, not a clean ✅. Also stop if closing 2.3 would require a new dispatch route or a server round-trip beyond the existing seam.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    (to be filled by the executing agent)
+  </notes>
+</task>
