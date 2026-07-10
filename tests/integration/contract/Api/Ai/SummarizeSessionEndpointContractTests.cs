@@ -669,11 +669,19 @@ public sealed class StubOpenAiClient : IOpenAiClient
 {
     public string RawJsonToReturn { get; set; } = "{}";
 
+    /// <summary>The last assembled prompt the prompted executor sent to the LLM boundary. Lets a
+    /// caller assert the resolved operand reached the prompt (e.g. the compose `## Input` section)
+    /// without a live model — mirrors the seam-test stub's capture.</summary>
+    public string? LastPrompt { get; private set; }
+
     public Task<string> GetStructuredCompletionRawAsync(
         string prompt, BinaryData jsonSchema, string schemaName, string? model = null,
         int? maxOutputTokens = null, float? temperature = null,
         CancellationToken cancellationToken = default)
-        => Task.FromResult(RawJsonToReturn);
+    {
+        LastPrompt = prompt;
+        return Task.FromResult(RawJsonToReturn);
+    }
 
     public IAsyncEnumerable<string> StreamStructuredCompletionAsync(
         IEnumerable<global::OpenAI.Chat.ChatMessage> messages, BinaryData jsonSchema,

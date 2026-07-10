@@ -34,16 +34,22 @@
  *
  * ---------------------------------------------------------------------------
  * PHASE-4 STUB BOUNDARY (binding — read before wiring a real Binding here):
- * `DEFAULT_ACTIONS` below ships with `bindingId: ''` for all three primary
- * actions. The real `sprk_playbookconsumer` Binding GUIDs are authored by
- * Phase 4 catalog-row tasks (040-044), which are core-A0-gated (blocked on
- * core task 020, the triple-twin description hoist) — see
- * `projects/spaarkeai-compose-r2/CLAUDE.md` "Core Phase A0 dependency".
+ * `DEFAULT_ACTIONS` below ships with `bindingId: ''` for all FIVE actions
+ * (three primary clause-selection actions + two overflow whole-document
+ * actions). The real `sprk_playbookconsumer` Binding GUIDs are authored
+ * mirror-first (`infra/dataverse/sprk_playbookconsumer-rows.json`) and MINTED
+ * PER-ENVIRONMENT AT CATALOG SEED TIME (task 047 — owner/live-env). They are
+ * NOT knowable at build/seed time (portable actionCode lookups resolve to a
+ * fresh row GUID per environment), and the `/dispatch` route is GUID-only
+ * (no client-side consumer→GUID resolver), so button ENABLEMENT genuinely
+ * depends on that deploy (E2E-pending on 047 — see spaarkeai-compose-r2
+ * task 101 escalation).
  * An empty `bindingId` renders the button DISABLED (honest stub — clicking a
  * disabled button cannot silently no-op or 400) rather than wired-but-broken.
- * Phase 4 activates each action with ONE call to
- * `registerComposeAiToolbarAction({ ...same id..., bindingId: '<real GUID>' })`
- * — no edit to this file required (the registration-extensibility guarantee,
+ * Activation is ONE call per action to
+ * `registerComposeAiToolbarAction({ ...same id..., bindingId: '<seeded GUID>' })`
+ * from the real mount path once the host can resolve the deployed GUIDs — no
+ * edit to this file required (the registration-extensibility guarantee,
  * design.md §2.0).
  *
  * ---------------------------------------------------------------------------
@@ -180,10 +186,35 @@ const EXPLAIN_TOOLTIP =
 const COMPARE_TOOLTIP =
   'Compare this clause against the matter/firm playbook — surfaces matches, deviations, and a risk score.';
 const DRAFT_TOOLTIP = 'Draft an alternative version of this clause as a pending suggestion you can accept or reject.';
+// Tooltip copy for the two whole-document overflow actions (excerpts of the
+// authored `sprk_playbookconsumer` toolDescription for each — same "tool
+// descriptions ARE the prompt" sourcing rule as the primary three).
+const SUMMARIZE_WORD_CHANGES_TOOLTIP =
+  'Summarize the tracked changes a reviewer made in Word — insertions, deletions, comments, and structural edits — in plain language. Read-only.';
+const DEFINED_TERMS_TOOLTIP =
+  'Scan the document for defined terms and check they are used consistently. Read-only; results render in the Context pane.';
 
 /**
- * The three R2-committed primary actions (design.md §2.0/§2.1-§2.3). All
- * ship with `bindingId: ''` — see file header "PHASE-4 STUB BOUNDARY".
+ * The five R2-committed AI actions (design.md §2.0/§2.1-§2.5). The three
+ * clause-selection actions are `primary` (always-visible buttons); the two
+ * whole-document actions (summarize-word-changes, defined-terms) are
+ * `overflow` (in the "More actions…" menu) — closing gap 2.3 (they previously
+ * had NO client trigger at all: absent from DEFAULT_ACTIONS, the overflow was
+ * empty). All five dispatch through the SAME 046 seam (`handleActionClick` →
+ * `enqueueComposeAction` / `dispatchConsumer`) — no new route or discriminant.
+ *
+ * All ship with `bindingId: ''` — see file header "PHASE-4 STUB BOUNDARY".
+ * The empty bindingId renders every action DISABLED until the deployed
+ * `sprk_playbookconsumer` Binding GUID is registered via
+ * `registerComposeAiToolbarAction` (see file header). Those GUIDs are minted
+ * per-environment at catalog SEED time (task 047, owner/live-env), so button
+ * ENABLEMENT is E2E-pending on that deploy — but the trigger ENTRY POINTS
+ * (this registry) exist now, which is what gap 2.3 required.
+ *
+ * NOTE (summarize-word-changes): the overflow gives it a working trigger now.
+ * Its dedicated "return-from-Word" entry (fired when a reviewer's edits come
+ * back from Word) is hosted by the return-from-Word reanchor UI (Cluster 3 /
+ * task 054), which is not yet mounted — that additional entry lands with 054.
  */
 const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
   {
@@ -206,6 +237,25 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     tooltip: DRAFT_TOOLTIP,
     bindingId: '',
     placement: 'primary',
+  },
+  {
+    // gap 2.3 — the return-from-Word summarization trigger (FR-10). Overflow
+    // entry now; the dedicated return-from-Word entry lands with task 054.
+    id: 'compose-summarize-word-changes',
+    label: 'Summarize Word changes',
+    tooltip: SUMMARIZE_WORD_CHANGES_TOOLTIP,
+    bindingId: '',
+    placement: 'overflow',
+  },
+  {
+    // gap 2.3 — the defined-terms scan (FR-11). Overflow-menu trigger per the
+    // authored Binding row ("overflow-menu trigger"); results surface read-only
+    // in the Context pane.
+    id: 'compose-defined-terms',
+    label: 'Defined terms',
+    tooltip: DEFINED_TERMS_TOOLTIP,
+    bindingId: '',
+    placement: 'overflow',
   },
 ];
 

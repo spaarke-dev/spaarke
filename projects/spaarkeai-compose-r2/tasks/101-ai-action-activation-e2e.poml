@@ -121,6 +121,49 @@
   </execution>
 
   <notes>
-    (to be filled by the executing agent)
+    ── Execution outcome (2026-07-10) — ✅◐ E2E-pending on task 047 ──────────────────────────
+
+    GAP 2.3 (2 missing triggers) — CLOSED (code). Added `compose-summarize-word-changes` and
+    `compose-defined-terms` to ComposeAiToolbar `DEFAULT_ACTIONS` (placement: overflow). Both are now
+    triggerable client entry points dispatching through the SAME 046 seam
+    (handleActionClick → enqueueComposeAction / dispatchConsumer) — no new route, no new discriminant.
+    They render disabled (bindingId '') like the existing 3 primary stubs until 047 seeds the GUIDs.
+    NOTE: summarize-word-changes' dedicated return-from-Word entry is hosted by the return-from-Word
+    reanchor UI (Cluster 3 / task 054), not yet mounted — the overflow gives it a working trigger now;
+    the 054 entry lands with 054. Jest test added (11/11 green); tsc clean.
+
+    084 FORCING-FUNCTION TEST — LANDED + GREEN. tests/integration/contract/Api/Ai/
+    ComposeDispatchEndpointContractTests.cs (3 tests, all pass). Reuses the existing
+    DispatchSessionEndpointTestFixture (real SessionDispatchOrchestrator + ActionRunner + ContextBinder
+    + recording OutputRouter; module-boundary mocks only). Seeds a COMPOSE binding at the
+    IConsumerRoutingService boundary and POSTs the EXACT wire body the client dispatchConsumer sends
+    ({ bindingId, args:{ selectionText,… } }) through the REAL /dispatch route. Asserts: (1) compose
+    DISPOSITION admitted (200, not the half-landed 422) — the anti-recurrence proof; (2) SessionOutput
+    stored with disposition "compose", key {bindingId}@t1, BEFORE render (ADR-040); (3) the selectionText
+    operand reaches ## Input (structured-operand path, zero session files) — not the file path;
+    (4) negative contrast: without selectionText nothing is stored (operand is load-bearing). Adds the
+    real-HTTP /dispatch + compose-disposition dimensions none of the 3 existing surfaces had.
+    Regression band green: 465 dispatch/compose/router/binder tests pass.
+
+    GAP 2.2 (toolbar real bindingId + real-mount registration) — ESCALATED, ✅◐ E2E-pending on 047
+    (per POML <escalation> + owner HARD boundary). INSPECTION RESULT: the bindingId is the
+    sprk_playbookconsumer ROW GUID, minted PER-ENVIRONMENT at catalog SEED time (task 047) — the mirror
+    (sprk_playbookconsumer-rows.json) uses portable actionCode lookups resolved per environment, NOT a
+    build/seed-time-knowable GUID. The /dispatch route is GUID-only (rejects non-GUID 400); there is NO
+    client-side consumer→GUID resolver (chips receive GUIDs server-pushed from Event Rules; the toolbar
+    is a client-initiated surface with no such source). Therefore the toolbar genuinely cannot carry a
+    stable bindingId at build/seed time — activation depends on 047 minting the GUIDs and the host
+    registering them via the existing registerComposeAiToolbarAction seam. Hardcoding a per-env GUID
+    would be cross-env cruft (owner hygiene violation); a new BFF resolver endpoint is out-of-scope and
+    itself 047-gated. This is exactly the escalation boundary the POML anticipated → NOT a clean ✅.
+
+    2.1/2.4 — OWNER-QUEUED (live-env, not attempted): task 047 (deploy 5 sprk_analysisaction + 5
+    sprk_playbookconsumer rows → spaarkedev1; flips /healthz green) + the /healthz parity flip. These
+    are the remaining prerequisites for production E2E of the compose toolbar.
+
+    Verification: dotnet build + dotnet test green; Compose.Components tsc clean + jest 11/11.
+    No BFF SOURCE changed (client + tests only) → no publish-size/CVE run required. Step 9.5
+    (code-review + adr-check) clean. No new route/discriminant; zero as-any on compose events
+    (task 104 typed union untouched); no version suffix.
   </notes>
 </task>
