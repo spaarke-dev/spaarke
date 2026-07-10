@@ -1,6 +1,8 @@
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -34,6 +36,9 @@ namespace Sprk.Bff.Api.Services.Ai.Context;
 public sealed class ContextBinder : IContextBinder
 {
     private readonly ChatSessionManager _sessionManager;
+    private readonly IOrganizationalContextProvider _organizationalContextProvider;
+    private readonly ICallerContactResolver _callerContactResolver;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly ILogger<ContextBinder> _logger;
 
     /// <summary>
@@ -51,10 +56,38 @@ public sealed class ContextBinder : IContextBinder
     private const string LedgerResolutionMember = "ledger_resolution";
     private const string LedgerResolutionKeyMember = "key";
 
-    public ContextBinder(ChatSessionManager sessionManager, ILogger<ContextBinder> logger)
+    /// <param name="sessionManager">Session ledger + fingerprint writer (ADR-040 store-before-render).</param>
+    /// <param name="logger">Diagnostic logger.</param>
+    /// <param name="organizationalContextProvider">
+    /// Read-only inbound Organizational-scope provider seam (task 060, FR-B-11). Optional — when the DI
+    /// container has no registration (or a caller constructs <see cref="ContextBinder"/> directly, e.g.
+    /// existing tests), the Binder falls back to <see cref="NullOrganizationalContextProvider"/> so the
+    /// Organizational slice is always an ADR-032 empty Null-Object default rather than a null-reference
+    /// failure.
+    /// </param>
+    /// <param name="callerContactResolver">
+    /// Deterministic claims→Dataverse-contact resolver (task 055, FR-B-06). Optional — when the DI
+    /// container has no registration (or a caller constructs <see cref="ContextBinder"/> directly, e.g.
+    /// existing tests), the Binder falls back to <see cref="NullCallerContactResolver"/> (ADR-032 empty
+    /// default) so the User slice's <c>CallerContactId</c> stays honestly null rather than throwing.
+    /// </param>
+    /// <param name="httpContextAccessor">
+    /// Ambient caller-principal source for the live HTTP dispatch path (task 055, FR-B-06). Optional —
+    /// null in background/pre-session binds and in most tests. <see cref="ContextBindingRequest.Caller"/>,
+    /// when supplied, always takes precedence over the ambient <c>HttpContext.User</c>.
+    /// </param>
+    public ContextBinder(
+        ChatSessionManager sessionManager,
+        ILogger<ContextBinder> logger,
+        IOrganizationalContextProvider? organizationalContextProvider = null,
+        ICallerContactResolver? callerContactResolver = null,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _organizationalContextProvider = organizationalContextProvider ?? new NullOrganizationalContextProvider();
+        _callerContactResolver = callerContactResolver ?? NullCallerContactResolver.Instance;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     /// <inheritdoc />
@@ -80,7 +113,8 @@ public sealed class ContextBinder : IContextBinder
         ArgumentNullException.ThrowIfNull(request);
 
         var operand = ResolveOperand(request);
-        var envelope = AssembleEnvelope(request);
+        var callerContactId = await ResolveCallerContactIdAsync(request, ct).ConfigureAwait(false);
+        var envelope = await AssembleEnvelopeAsync(request, callerContactId, ct).ConfigureAwait(false);
         var (fingerprint, updatedSession) = await WriteFingerprintAsync(request, envelope, ct).ConfigureAwait(false);
 
         return new BoundInputs
@@ -90,6 +124,35 @@ public sealed class ContextBinder : IContextBinder
             Fingerprint = fingerprint,
             UpdatedSession = updatedSession,
         };
+    }
+
+    // ── Caller-contact resolution (task 055, FR-B-06): deterministic claims→Dataverse-contact,
+    //    server-side only. No branch here reads request.Args / an LLM completion for "me" — the ONLY
+    //    inputs are an explicit pre-resolved id or the caller's own ClaimsPrincipal. ──────────────────
+
+    private async Task<string?> ResolveCallerContactIdAsync(ContextBindingRequest request, CancellationToken ct)
+    {
+        // An explicit pre-resolved id (e.g. a caller that already ran its own claims resolution) wins.
+        // This is still server-side-only — no dispatch path populates ContextBindingRequest.CallerContactId
+        // from client Args or a model completion (grep-verified: the only writers are this Binder and the
+        // request's own construction site).
+        if (!string.IsNullOrWhiteSpace(request.CallerContactId))
+        {
+            return request.CallerContactId;
+        }
+
+        var principal = request.Caller ?? _httpContextAccessor?.HttpContext?.User;
+        var resolution = await _callerContactResolver.ResolveAsync(principal, ct).ConfigureAwait(false);
+        if (!resolution.IsResolved)
+        {
+            _logger.LogDebug(
+                "ContextBinder: caller-contact resolution unresolved (reason={Reason}) — User slice " +
+                "CallerContactId stays null (FR-B-06 fail-honestly; never a guessed/nearest contact).",
+                resolution.UnresolvedReason);
+            return null;
+        }
+
+        return resolution.ContactId;
     }
 
     // ── Operand resolution (deterministic over declared schema — ADR-039 / ADR-040) ──────────────
@@ -276,16 +339,46 @@ public sealed class ContextBinder : IContextBinder
         }
     }
 
-    // ── Context envelope assembly (frozen task-015 contract — redefined by NOTHING here) ─────────
+    // ── Context envelope assembly (frozen task-015 contract for User/Workspace/Business/Memory/Semantic;
+    //    the Organizational slice is read through IOrganizationalContextProvider — task 060, FR-B-11) ──
 
-    private static ContextEnvelope AssembleEnvelope(ContextBindingRequest request) =>
-        ContextEnvelopeReferenceProducer.Assemble(
+    private async Task<ContextEnvelope> AssembleEnvelopeAsync(
+        ContextBindingRequest request, string? callerContactId, CancellationToken ct)
+    {
+        var envelope = ContextEnvelopeReferenceProducer.Assemble(
             userFragment: request.UserFragment,
             workspaceFragment: request.WorkspaceFragment,
             businessFragment: request.BusinessFragment,
             conversation: request.ConversationTail,
             memoryItems: request.MemoryItems,
-            callerContactId: request.CallerContactId);
+            callerContactId: callerContactId);
+
+        // Organizational slice (task 060, FR-B-11): read through the inbound provider seam rather than
+        // the hardcoded present-but-empty shape the reference producer emits. With no real provider
+        // registered, IOrganizationalContextProvider resolves to the ADR-032 Null-Object default and this
+        // still yields an empty slice — never a failure.
+        var orgResult = await _organizationalContextProvider
+            .GetContextAsync(
+                new OrganizationalContextRequest { CallerContactId = callerContactId },
+                ct)
+            .ConfigureAwait(false);
+
+        return envelope with
+        {
+            Organizational = new OrganizationalSlice
+            {
+                Meta = new SliceMeta
+                {
+                    Stability = SliceStability.SemiStable,
+                    BudgetTokens = null,
+                    EstimatedTokens = 0,
+                    ReferenceCount = orgResult.ReferenceCount,
+                    Present = orgResult.ReferenceCount > 0,
+                },
+                ProviderImplemented = orgResult.ProviderImplemented,
+            },
+        };
+    }
 
     // ── Fingerprint writer (task-038 dark seam → live; ADR-040 store-before-render; NFR-07) ──────
 
