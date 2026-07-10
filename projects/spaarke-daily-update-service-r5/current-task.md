@@ -7,74 +7,56 @@
 
 ## Quick Recovery (READ THIS FIRST)
 
-> **2026-07-09 update — Email-share feature COMPLETE (not deployed).** Operator chose A + system-sender + build-now. Built + reviewed + tested; **DEPLOY IS ON HOLD** pending cross-project coordination approval (operator instruction). 3 new commits on top of the prior 7: `5c3c1a9ee` (BFF /email colleague recipient + internal-only egress guard, 8/8 contract tests), `21e5ad3dd` (client #2 Email Briefing via shared SendEmailDialog + #3 Email Item draft activity; deterministic body/link helpers; 11/11), `2807b4237` (Step-9.5 review fixes). Design/decisions/review: `notes/email-share-feature-plan.md`. Reply to redesign-r2 E-12: `notes/REPLY-to-redesign-r2-E12-consumer-response.md` (ready to send). Pre-existing unrelated test failures on branch: `legalWorkspaceSectionRegistry` + `ActivityNotesSection.callbacks` (onKeep ttl) — 090 /defer candidates. **When deploy is approved:** merge branch→master, re-deploy BFF (picks up 002 @odata.bind fixes + /email change), deploy SpaarkeAi widget, UAT (incl. Email Briefing + Email Item), close 017/024/038/022, then 090 wrap (+ prompt-shape-parity test defer, + note-passthrough fast-follow for #2).
-
-
-
 | Field | Value |
 |---|---|
-| **Project** | spaarke-daily-update-service-r5 — **21/26 tasks done; CODE-COMPLETE**. Remaining are deploy/operator/wrap only. |
-| **Branch** | `work/spaarke-daily-update-service-r5`. Merged to master once (PR #597, merge `1355a830a`). **Since then 7 new local commits, PUSHED-then-DIVERGED — see below; NOT re-merged to master.** |
-| **Status** | Awaiting operator decision on the **Email Briefing / Email item feature (#2/#3)** — see Next Action. UI polish + follow-up hardening all committed locally. |
-| **Next Action** | Operator was deciding how to build the **"Email Briefing / Email item" share feature**. I recommended: **(A) extend `/email` to accept a recipient + reuse `SendEmailStep`; system-sender; build now.** Awaiting their pick of: A-vs-B body source, user-mailbox-vs-system sender, build-now-vs-follow-up. THEN build it, then merge+deploy+UAT. |
+| **Project** | Daily Briefing R5. Core project shipped. Now in **operator-UAT-driven fix mode** on the live SpaarkeAi Daily Briefing (spaarkedev1). |
+| **Branch** | `work/spaarke-daily-update-service-r5`. HEAD `0bf7b1fb9`. **3 commits ahead of origin/master** (1 merge + 2 fixes), NOT yet re-merged to master, NOT yet deployed. |
+| **Next Action** | **Deploy the 2 uncommitted-to-master fixes** (`/bff-deploy` + `/code-page-deploy` SpaarkeAi) → operator verifies → then merge branch → master. See "Immediate next step". |
 
-### Unpushed/undiverged local commits since master merge `1355a830a` (newest first)
-- `8546b5e6b` DigestHeader vertical dots (MoreVertical)
-- `432ae5ce6` StatTiles Overdue/New-matters count hardening (exact category-key match)
-- `9b32c1c8a` **8 @odata.bind nav-prop bugs fixed** (task-002 metadata verification)
-- `c1e658850` formalize 021/023 complete + UI polish bookkeeping
-- `9834e0e16` StatTiles "Open items" → "Updates" relabel
-- `0980bfc09` DigestHeader "Last updated {date} at {time}" (dropped "N items")
-- (earlier this session, already on master via #597: 002/012/036/037/015/031/032/016)
+### The 2 branch commits since master (NOT deployed, NOT merged to master)
+- `3171ea3c7` **#2 Contact link fix** (BFF): `IdentityNormalizationService` now resolves `ContactId` from **`systemuser.sprk_primarycontact`** (the Spaarke model), not `contact.azureactivedirectoryobjectid` (absent on contact here). Makes assigned-attorney/paralegal membership work. Tested 11/11. **Validated**: acting user (Ralph, systemuserid `1d02f31c-1872-f011-b4cb-7c1e52671ad0`) has `sprk_primarycontact=8e9918a9-9021-f111-88b5-7c1e520aa4df`; 5 matters have that contact as assigned attorney/paralegal (incl. CMRCL-482295) → will surface via `assignedAttorney` role after deploy.
+- `0bf7b1fb9` **#1 Richer activity rows** (BFF + client): Matters/Documents/Tasks/Projects rows now carry **description** (source `Body`, 2-line clamp under title) + **"Updated {date}" caption** (source `ModifiedOn`, the qualifying date). Server: `NarrativeBulletDto` + `NarrativeBulletResult` gain `description`+`date`; `BuildDeterministicBullet` populates from `ChannelItemDto.Body`/`.CreatedOn`. Client: `ActivityNotesSection` threads them; `NarrativeBullet` renders them. BFF 0 errors, client green.
 
-> **NOTE**: I last pushed the branch during the PR #597 flow; the 6 UI/hardening commits above were made AFTER and are **local-only** (not pushed, not merged). Push + re-merge them with the email feature at deploy time.
+### Immediate next step (deploy the 2 fixes)
+1. **`/bff-deploy`** (`pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1`) — picks up #2 (contact) + #1 (server DTO). Hash-verify + healthz.
+2. **`/code-page-deploy` SpaarkeAi** — `cd src/solutions/SpaarkeAi; npm install --legacy-peer-deps --no-audit --no-fund; rm -rf dist/ node_modules/.vite/ .vite/; npm run build`; verify bundle has "Updated" / "description"; then `pwsh -File scripts/Deploy-SpaarkeAi.ps1` (from repo root). Picks up #1 client (richer rows).
+3. **CACHE CAVEAT for verifying #2**: the membership resolver caches per-user results (5-min TTL, `CacheVersion=3`) AND `IdentityNormalizationService` caches `PersonIdentity` (ContactId). Post-deploy, a stale cache (ContactId=null / owner-only matterIds) can mask #2 for a few minutes. To verify quickly, either wait out the ~5-min TTLs then refresh, OR bump `MembershipResolverService.CacheVersion` 3→4 (and consider the identity cache) in the deploy. The assigned-attorney matters appear as EXTRA rows/roles beyond owner.
+4. Operator UAT: (a) #2 — assigned-attorney matters show; (b) #1 — rows show description + "Updated {date}".
+5. Then **merge branch → master** (sync master first; PR + auto-merge; master is protected → Path A).
 
-### Critical context
-- **BFF IS DEPLOYED to spaarkedev1** (`spaarke-bff-dev`, hash-verified, `/healthz` 200, briefing endpoints 401) — but deployed BEFORE the 6 local commits above, so the **002 @odata.bind fixes + UI changes are NOT live yet**. Re-deploy BFF at final deploy to pick up the 002 fixes.
-- **Daily Briefing UI is NOT deployed** — the redesign + all UI tweaks live in `@spaarke/daily-briefing-components`, hosted by the **SpaarkeAi code page** (operator confirmed: only surface). Needs a **client/widget deploy** for the visuals to go live.
-- **Dataverse MCP is authorized** (spaarkedev1). Also an **`az` Dataverse token works**: `az account get-access-token --resource https://spaarkedev1.crm.dynamics.com`. Metadata verification recipe: `GET {org}/api/data/v9.2/EntityDefinitions(LogicalName='X')/ManyToOneRelationships?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName` → the nav prop IS the `@odata.bind` key.
-- **012 live retirement DONE**: Action `BRIEF-NARRATE-CHANNEL` (`dc3533c0-…`) deactivated (statecode 1). **032 restore DONE**: node `sprk_playbooknode=0fa4e8db-…` has `sprk_documenttype` restored as `type:"choice"` + 13-option map (data-verified; end-to-end EXECUTION round-trip is a UAT step — see #3 in the UAT checklist).
+### How to verify live (App Insights — I have az/Dataverse access)
+- Correct App Insights for the BFF: **`spe-insights-dev-67e2xz`**, appId **`6a76b012-46d9-412f-b4ab-4905658a9559`** (NOT sprkspaarkedev-aif-insights — that's the wrong one). ikey `09a9beed-...`.
+- Query pattern: find newest `POST /api/ai/daily-briefing/render` request → get `operation_Id` → `traces | where operation_Id == '{id}'`. Key lines: `DailyBriefingCollector membership-resolved IDs: events=X, matters=Y, projects=Z` and `DailyBriefingCollector completed: ...`.
+- Dataverse token: `az account get-access-token --resource https://spaarkedev1.crm.dynamics.com`.
 
 ---
 
-## Email Briefing / Email item feature (#2/#3) — READY TO BUILD (awaiting operator go)
+## What's DONE this session (all merged to master via PR #607 unless noted)
 
-**Operator UAT feedback (2026-07-09):** (1) ✅ done: main-toolbar dots → vertical. (2) want **"Email Briefing"** ("how do I share this with a colleague") = email a **link + HTML summary**. (3) same for an **individual item**. Operator suggested reusing the "email wizard shared component."
+**Shipped + merged (PR #607) + live on dev:**
+- **Email-share #2/#3**: "Email Briefing" (server-sends caller's briefing to an internal colleague via `/email` + internal-only egress guard) + per-item "Email" (draft/send email activity). Reuses shared `SendEmailDialog`.
+- **Critical Today ⋮ menu** (Open record + Email); **wider email dialog** (720px/70vh); header **"Last updated"**; **vertical ⋮** menus; StatTiles "Updates" relabel + count hardening; **8 metadata-verified `@odata.bind` fixes**.
+- **Settings Display Parameters wired end-to-end**: Due-soon window + Recency window now drive the collector (`/render` accepts `{dueWithinDays, recencyHours}`; `CollectAsync` takes `BriefingWindowOptions`); re-fetch on Save; generous defaults (5d/7d).
+- **MEMBERSHIP COMPLETENESS FIX (the big one)**: the resolver's FetchXml used `distinct='true'` without projecting the primary key → Dataverse returned empty ids → `MaterializeResults` dropped them → **membership resolved to 0** for a user owning 45 matters → briefing silently omitted EVERY membership-scoped record. Removed `distinct` (both queries). **Verified live: 0 → 49 matters.** Regression test guards it. `CacheVersion` bumped 1→3.
 
-**Investigation result (grounded):**
-- **Reuse `SendEmailStep`** — `src/client/shared/Spaarke.UI.Components/src/components/EmailStep/SendEmailStep.tsx` — the shared "recipients → subject → body → send" step. Precedent: **`DocumentEmailWizard`** (`Spaarke.UI.Components/DocumentEmailWizard/`) wraps it for "email these documents" (builds `{to, subject, body}`). Also exists: `EmailComposeWidget` (`Spaarke.AI.Widgets/.../EmailComposeWidget.tsx`). Do NOT use `ComposeWorkspace` (TipTap doc editor — wrong tool).
-- **Server already 80% there**: `POST /api/ai/daily-briefing/email` → `composite.EmailAsync(systemUserId, tenantId, recipientEmail, ct)` (`DailyBriefingCompositeService.cs:170`) **generates the briefing HTML + sends via the Communication service**, but hardcodes recipient = caller (`DailyBriefingEndpoints.cs` HandleEmail ~line 174-193). Gap: accept a colleague recipient + a UI to pick them.
-
-**Recommended plan (per §11 default-to-reuse):**
-- **#2 Email Briefing**: DigestHeader ⋮ menu item "Email Briefing" → dialog hosting `SendEmailStep`, prefilled subject "Daily Briefing — {date}" + body = briefing HTML summary + **deep link to the SpaarkeAi Daily Briefing**. **Option A (recommended)**: extend `/email` to take a `recipient` → server sends its existing HTML. Option B: client-composes the body.
-- **#3 Email item**: item ⋮ menu "Email" → same `SendEmailStep` dialog, body = single item's summary + **deep link to the record**. No server "email-one-item" leg → build body client-side.
-- **New scope flag**: this is a feature beyond R5's accuracy/appearance/hardening charter (reuses existing components, but it's a feature). Batch into the pending deploy.
-- **Open decisions**: A vs B (rec A) · user-mailbox vs system sender (EmailAsync uses Communication/system today) · build-now vs follow-up.
+**Committed on branch, NOT merged to master, NOT deployed:** `3171ea3c7` (#2 contact) + `0bf7b1fb9` (#1 richer rows) — see above.
 
 ---
 
-## Full State
+## Environment facts (took work to establish — reuse these)
+- **Membership resolution is app-only** (`IDataverseService` singleton = BFF app user `SDAP-BFF-SPE-API`, **System Administrator**, full read). The collector's OTHER queries (todos, high-priority) run OBO (as the user).
+- **Contact model**: user→contact link is `systemuser.sprk_primarycontact` (lookup→contact). `contact` table has NO `azureactivedirectoryobjectid` field in this env.
+- **Assigned-* fields** on sprk_matter (`sprk_assignedattorney1/2`, `sprk_assignedparalegal1/2`, `assignedtointernal/external`) are all **contact-typed**; membership matches them via ContactId (now fixed via #2).
+- Deploy scripts: BFF = `scripts/Deploy-BffApi.ps1`; SpaarkeAi = `scripts/Deploy-SpaarkeAi.ps1` (build separately first — it only uploads `dist/spaarkeai.html`).
+- SpaarkeAi consumes shared libs from **source via Vite aliases** — clear `node_modules/.vite` before build; no dist to stale.
+- Husky pre-commit hook has an ESM glitch on **merge commits** — do merges with `git merge --no-ff <ref> --no-edit` (lint-staged skips on merges) rather than `--no-commit` then `git commit`.
 
-### Tasks (21/26 ✅ — see tasks/TASK-INDEX.md)
-✅ 001,002,010,011,012,013,014,015,016,020,021,023,030,031,032,033,034,035,036,037,040
-🔲 **017** (Phase A deploy+UAT), **022** (operator harness sign-off), **024** (Phase D deploy+UAT), **038** (Phase B deploy+UAT), **090** (wrap: /test-diet + /defer). **ALL need deploy + browser UAT on spaarkedev1 + operator.**
+## Deferred / follow-ups
+- Email-share **typed-personal-note passthrough** for "Email Briefing" (the Message field is cosmetic; server owns the HTML) — deferred fast-follow.
+- redesign-r2 **E-12 consumer reply** drafted at `notes/REPLY-to-redesign-r2-E12-consumer-response.md` (ready to send; prompt-shape-parity test is a 090 /defer candidate).
+- Pre-existing unrelated branch test failures: `legalWorkspaceSectionRegistry`, `ActivityNotesSection.callbacks` (onKeep ttl) — 090 /defer candidates.
+- 090 wrap (/test-diet + /defer) when the project closes.
 
-### UAT checklist (provided; operator runs after final deploy)
-- **G-R5-A accuracy**: row provenance (Open record opens the row's OWN record); TL;DR only names real shown items; tile counts true.
-- **G-R5-C hardening**: **document-type round-trip** (profile a doc → open sprk_document → Document Type set, no 500 — this is the 030+032 proof); collaborator scope (only own items).
-- **G-R5-D appearance**: header "Last updated {date} at {time}"; tiles "Updates/Overdue/Critical/New matters" (Critical can exceed Updates — OK); Fluent v9 light+dark, Segoe UI 20px #242424.
-
-### Deploy runbook (when operator says go)
-1. Merge branch → master (sync origin/master first to catch conflicts; PR + auto-merge, master is protected → Path A).
-2. **Re-deploy BFF**: `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1` (app `spaarke-bff-dev`, rg `rg-spaarke-dev`). Hash-verify + `/healthz`. Picks up the 002 fixes.
-3. **Deploy the SpaarkeAi client widget** (host of Daily Briefing) — need the SpaarkeAi code-page deploy path/skill.
-4. Operator runs the UAT checklist → close 017/024/038/022.
-5. **090 wrap**: `/test-diet` (reconcile tests added this project) + `/defer` (Monitored-For D-3, EventDetailSidePane, StatTiles category-key coupling, any remaining).
-
-### Key deferred/tracked items (for 090 /defer)
-- Monitored-For schema (D-3) — future round.
-- `EventDetailSidePane/TodoSection.tsx:233` `sprk_assignedto` casing — deferred (side pane not in use); should be `sprk_AssignedTo`.
-- 002 `@odata.bind`: 8 fixed, 2 confirmed correct; EventDetailSidePane still deferred. Report: `notes/odata-bind-audit.md`.
-
-### Coordination
-r2-core (`spaarke-ai-architecture-redesign-r2`) owns `Services/Ai/` engine internals; r5 owns `Narrators/DailyBriefing*` + `Nodes/UpdateRecordNodeExecutor`. Registered in `projects/INDEX.md`.
+## Notes files (this session)
+- `notes/email-share-feature-plan.md` — email-share design + all UAT rounds.
+- `notes/REPLY-to-redesign-r2-E12-consumer-response.md` — E-12 reply.
