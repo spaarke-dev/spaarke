@@ -158,7 +158,7 @@ public class AuditLogServiceTests
 
         var cosmosClientMock = new Mock<CosmosClient>();
         cosmosClientMock
-            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit"))
+            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit-partitioned"))
             .Returns(containerMock.Object);
 
         var service = new AuditLogService(cosmosClientMock.Object, "spaarke-ai", logger.Object);
@@ -182,7 +182,7 @@ public class AuditLogServiceTests
         var logger = new Mock<ILogger<AuditLogService>>();
         var cosmosClientMock = new Mock<CosmosClient>();
         cosmosClientMock
-            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit"))
+            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit-partitioned"))
             .Returns(new Mock<Container>().Object);
 
         var service = new AuditLogService(cosmosClientMock.Object, "spaarke-ai", logger.Object);
@@ -246,7 +246,7 @@ public class AuditLogServiceTests
 
         var cosmosClientMock = new Mock<CosmosClient>();
         cosmosClientMock
-            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit"))
+            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit-partitioned"))
             .Returns(containerMock.Object);
 
         var service = new AuditLogService(cosmosClientMock.Object, "spaarke-ai", logger.Object);
@@ -261,11 +261,12 @@ public class AuditLogServiceTests
         // for sub-second background-task completion + keeps the test fast.
         await Task.Delay(1000); // Allow background task to complete (CI-VM-safe buffer)
 
-        // Assert: CreateItemAsync called; forbidden operations never called
+        // Assert: CreateItemAsync called; forbidden operations never called.
+        // Partition key is the synthetic /partitionKey value (AIR2-074 re-key), NOT bare tenantId.
         containerMock.Verify(
             c => c.CreateItemAsync(
                 It.Is<AuditEntry>(e => e.Id == entry.Id),
-                It.Is<PartitionKey>(pk => pk == new PartitionKey(entry.TenantId)),
+                It.Is<PartitionKey>(pk => pk == new PartitionKey(entry.PartitionKey)),
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()),
             Times.Once,
@@ -335,7 +336,7 @@ public class AuditLogServiceTests
     // =========================================================================
 
     [Fact]
-    public async Task LogInteractionAsync_PartitionsByTenantId()
+    public async Task LogInteractionAsync_PartitionsByTenantAndMonthBucket_NotBareTenantId()
     {
         // Arrange
         var logger = new Mock<ILogger<AuditLogService>>();
@@ -354,18 +355,31 @@ public class AuditLogServiceTests
 
         var cosmosClientMock = new Mock<CosmosClient>();
         cosmosClientMock
-            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit"))
+            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit-partitioned"))
             .Returns(containerMock.Object);
 
         var service = new AuditLogService(cosmosClientMock.Object, "spaarke-ai", logger.Object);
-        var entry = BuildEntry(tenantId: "tenant-xyz");
+        // Construct with a fixed timestamp so the monthly bucket is deterministic (2026-03).
+        var entry = new AuditEntry
+        {
+            TenantId = "tenant-xyz",
+            UserId = "u",
+            SessionId = "s",
+            Action = "chat_response",
+            ResponseHash = "abc",
+            Timestamp = new DateTimeOffset(2026, 3, 15, 9, 0, 0, TimeSpan.Zero)
+        };
 
         // Act
         await service.LogInteractionAsync(entry);
         await Task.Delay(200);
 
-        // Assert
-        capturedPk.Should().Be(new PartitionKey("tenant-xyz"),
-            "partition key must always be tenantId (ADR-015 cross-tenant isolation)");
+        // Assert — AIR2-074 re-key (FR-D-05): partition is the synthetic tenant + monthly-bucket
+        // value, NOT bare /tenantId (which would collapse a dedicated tenant into one logical
+        // partition against the Cosmos 20 GB cap).
+        capturedPk.Should().Be(new PartitionKey("tenant-xyz|2026-03"),
+            "partition key must be the synthetic {tenantId}|{yyyy-MM} value");
+        capturedPk.Should().NotBe(new PartitionKey("tenant-xyz"),
+            "bare /tenantId must no longer be the partition key after the AIR2-074 re-key");
     }
 }
