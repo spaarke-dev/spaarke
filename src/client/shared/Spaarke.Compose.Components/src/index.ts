@@ -32,9 +32,16 @@ export {
   ComposeAiToolbar,
   registerComposeAiToolbarAction,
   getComposeAiToolbarActions,
+  subscribeComposeAiToolbarActions,
   __resetComposeAiToolbarActionsForTests,
 } from './widgets/ComposeAiToolbar';
 export type { ComposeAiToolbarProps, ComposeAiToolbarAction, ComposeActionEnqueue } from './widgets/ComposeAiToolbar';
+
+// AI-action toolbar activation (task 048 — closes e2e-gap 2.2): on Compose mount,
+// reads GET /api/ai/capabilities?surface=compose and registers each returned
+// capability's real bindingId onto the matching toolbar action.
+export { useComposeToolbarActivation } from './widgets/useComposeToolbarActivation';
+export type { UseComposeToolbarActivationOptions } from './widgets/useComposeToolbarActivation';
 
 // -------------------------------------------------------------------------
 // Workspace-level widgets (Phase 7 task 091 — moved from SpaarkeAi)

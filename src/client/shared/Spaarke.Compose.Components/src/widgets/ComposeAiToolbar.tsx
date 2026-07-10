@@ -263,14 +263,43 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
 let registeredActions: ComposeAiToolbarAction[] = [];
 
 /**
- * Register (or replace, by `id`) an inline AI toolbar action. Phase 4 calls
- * this once per catalog row to swap a stub's `bindingId: ''` for the real
- * Binding GUID; a follow-on project calls this to add a wholly new action
- * (e.g. clause-insertion, design.md §2.0's "canonical deferred extension")
- * WITHOUT editing this file.
+ * Re-render subscribers. `registerComposeAiToolbarAction` is called from the
+ * HOST mount path (an ANCESTOR of this component — see
+ * `useComposeToolbarActivation`), so a registration mutates MODULE state
+ * without re-rendering an already-mounted toolbar via props. Each mounted
+ * toolbar subscribes here so a LATE registration (the async
+ * capability-discovery fetch resolves AFTER first paint) flips the matching
+ * buttons disabled → enabled WITHOUT a remount and WITHOUT waiting for an
+ * unrelated selection/transaction to force a re-read. This is a private module
+ * signal — NOT a PaneEventBus event (ADR-030 closed union untouched); one
+ * listener per mounted toolbar, removed on unmount.
+ */
+const registrationListeners = new Set<() => void>();
+
+/**
+ * Register (or replace, by `id`) an inline AI toolbar action. Task 048 (the
+ * capability-discovery activation hook) calls this once per matching compose
+ * capability to swap a stub's `bindingId: ''` for the real deployed Binding
+ * GUID; a follow-on project calls this to add a wholly new action (e.g.
+ * clause-insertion, design.md §2.0's "canonical deferred extension") WITHOUT
+ * editing this file. Notifies subscribed toolbars so the change is visible
+ * immediately.
  */
 export function registerComposeAiToolbarAction(action: ComposeAiToolbarAction): void {
   registeredActions = [...registeredActions.filter(a => a.id !== action.id), action];
+  registrationListeners.forEach(listener => listener());
+}
+
+/**
+ * Subscribe to registry mutations; returns an unsubscribe fn. Consumed by
+ * `ComposeAiToolbar` so an async host registration re-renders the mounted
+ * toolbar.
+ */
+export function subscribeComposeAiToolbarActions(listener: () => void): () => void {
+  registrationListeners.add(listener);
+  return () => {
+    registrationListeners.delete(listener);
+  };
 }
 
 /** Merges `DEFAULT_ACTIONS` with registrations (registrations win by id). */
@@ -367,6 +396,13 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
       editor.off('transaction', handler);
     };
   }, [editor]);
+
+  // Re-render when the module action registry changes — a host's async
+  // capability-discovery registration (task 048) lands AFTER first paint, so
+  // an already-mounted toolbar must re-read `getComposeAiToolbarActions()` to
+  // flip the matching buttons from stub-disabled to enabled. `forceUpdate` is
+  // stable (useReducer dispatch), so an empty dep set is correct.
+  React.useEffect(() => subscribeComposeAiToolbarActions(() => forceUpdate()), []);
 
   const { getAccessToken } = useAuth();
 

@@ -76,6 +76,7 @@ import {
   ComposeWorkspace,
   useComposeLaunch,
   useComposeActionBridge,
+  useComposeToolbarActivation,
 } from "@spaarke/compose-components";
 // FR-05 create-on-save (task 100, gap 1.3): resolve the user's Business-Unit SPE container
 // CLIENT-SIDE via the SAME convention the 7 Create*Wizards use (Fork A, owner-approved
@@ -138,6 +139,18 @@ const ComposeSectionMount: React.FC<ComposeSectionMountProps> = ({ bffBaseUrl })
   // always initialized before this mount because SpaarkeAi + LegalWorkspace
   // both bootstrap `initAuth` before `createRoot(...).render(...)`).
   const tenantId = resolveTenantIdSync();
+
+  // Task 048 (closes e2e-gap 2.2): ACTIVATE the inline AI toolbar. On mount this
+  // reads the EXISTING capability-discovery endpoint
+  // (GET /api/ai/capabilities?surface=compose) and registers each returned
+  // capability's real deployed bindingId onto the matching toolbar action
+  // (`registerComposeAiToolbarAction`), flipping the five stub buttons from
+  // disabled → enabled. This is the ONLY compose choke point that mounts
+  // ComposeWorkspace (SpaarkeAi three-pane AND standalone LegalWorkspace), so
+  // wiring it here covers every entry path. Graceful before the 047 deploy: 0
+  // capabilities → buttons stay disabled, no error UI. No hardcoded GUID, no new
+  // endpoint (ADR-039); ADR-028 auth via the hook's internal authenticatedFetch.
+  useComposeToolbarActivation({ bffBaseUrl });
 
   // FR-05 create-on-save (task 100, gap 1.3): resolve the user's BU SPE container once on mount
   // and thread it as a prop so a transient (Browse/Upload) draft's first Save (create-on-save)
