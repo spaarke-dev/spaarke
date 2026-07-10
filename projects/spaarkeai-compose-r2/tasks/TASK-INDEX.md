@@ -53,7 +53,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 052 | FR-26 SPE webhook subscription + BackgroundService renewal + delta query | 5 Word | 🟢 | none | ✅ | FULL | opus | high |
 | 053 | FR-26 webhooks/spe-doc-changed + check-changes endpoints | 5 Word | 🟢 | 052 | ✅ | FULL | sonnet | high |
 | 054 | FR-27 return-from-Word re-anchoring (bands ≥0.85/0.6–0.85/<0.6) + conflict banner | 5 Word | 🟢 | 051,006 | ✅ | FULL | opus | high |
-| 055 | FR-28 push/save deterministic path (gate dialog + OutcomeCard = splittable) | 5 Word | 🟡 | 050 | 🔄 | FULL | sonnet | high |
+| 055 | FR-28 push/save deterministic path (gate dialog + OutcomeCard = splittable) | 5 Word | 🟡 | 050 | ✅ deterministic half (gated UI ◐ core-A0: GateDecision v2 / OutcomeCard v1) | FULL | sonnet | high |
 | 056 | Deploy + Word for Web round-trip verification (Spikes 5/6 as gate) | 5 Word | 🟢 | 050,051,053,054 | 🔲 | STANDARD | sonnet | high |
 | 060 | FR-29 anchored annotations in Compose session payload (doc-adjacent) | 6 Memory | 🟢 | none | ✅◐ | FULL | sonnet | high |
 | 061 | FR-31 action history via ledger queries (no duplicate structure) | 6 Memory | 🟢 | none | ✅ | FULL | sonnet | high |

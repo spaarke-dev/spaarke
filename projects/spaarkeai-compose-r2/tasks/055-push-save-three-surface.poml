@@ -3,7 +3,8 @@
     <title>FR-28 push/save deterministic path (gate dialog + OutcomeCard = splittable)</title>
     <phase>5 Word</phase>
     <gate>splittable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
+    <completion-note>Deterministic half complete 2026-07-10 (sonnet/high, FULL). Extended ComposeService.PushAnnotationsAsync (per-step JobAwareCompletionState) + PreviewPushAnnotationsAsync; new ComposePushSavePreviewCalculator (pure) + ComposePushSaveStatusStore (Redis, ADR-009); new POST /document/{id}/push-preview route. 15 unit tests + WebApplicationFactory forcing test ComposePushSaveEndpointContractTests (4/4, incl. route-existence proof + etag-412 no-partial-write + Redis-persisted per-step state through the wire). Full compose contract band 19/19; BFF suite 8143/0; publish 46.60 MB; Step 9.5 clean; NetArchTest facade green. GATED UI HALVES (Policy v2 Tier-2c gate dialog + JobAwareCompletionState OutcomeCard rendering) remain a clean seam pending core Phase A0 contracts (GateDecision v2 / OutcomeCard v1) — attach to ComposePushSaveStatusStore.GetAsync + PreviewPushAnnotationsAsync. Escalation not raised (task scoped to the deterministic seam).</completion-note>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>

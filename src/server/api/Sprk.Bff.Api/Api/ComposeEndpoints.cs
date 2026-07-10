@@ -159,6 +159,19 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status423Locked)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // (9b) POST /api/compose/document/{documentSpeId}/push-preview — FR-28 (task 055):
+        // Tier-2c PRE-CONFIRM preview (comment/track-change counts + Word-vs-Compose split).
+        // Non-mutating — no SPE download, no write. The clean seam the future Policy v2 Tier 2c
+        // gate dialog calls; this task builds no dialog/rendering.
+        group.MapPost("/document/{documentSpeId}/push-preview", PushPreview)
+            .WithName("ComposePushPreview")
+            .WithSummary("Compute the Tier-2c push preview (comment/track-change counts + Word-vs-Compose split) without writing")
+            .RequireRateLimiting("ai-context")
+            .Produces<PushPreviewResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status500InternalServerError);
+
         // (10) POST /api/compose/document/{documentSpeId}/pull-annotations — FR-25 (task 051):
         // download the CURRENT SPE bytes and parse them for native w:comment/w:ins/w:del
         // (DocxAnnotationReader), returning the structured payload the Compose UI uses to
@@ -345,6 +358,7 @@ public static class ComposeEndpoints
                 TenantId = body.TenantId,
                 IfMatch = body.IfMatch,
                 Annotations = body.Annotations,
+                SessionId = body.SessionId,
             };
 
             var result = await composeService.PushAnnotationsAsync(request, httpContext, ct).ConfigureAwait(false);
@@ -356,7 +370,9 @@ public static class ComposeEndpoints
                 ETag: result.ETag,
                 Size: result.Size,
                 AnnotationCount: result.AnnotationCount,
-                CorrelationId: httpContext.TraceIdentifier));
+                CorrelationId: httpContext.TraceIdentifier,
+                Preview: result.Preview,
+                CompletionState: result.CompletionState));
         }
         catch (ArgumentException ex)
         {
@@ -425,6 +441,56 @@ public static class ComposeEndpoints
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 detail: "An unexpected error occurred while pushing annotations.");
+        }
+    }
+
+    // FR-28 (task 055): Tier-2c PRE-CONFIRM preview — deterministic comment/track-change counts +
+    // the Word-vs-Compose split for an annotation batch the caller is ABOUT to push. Non-mutating
+    // (no SPE download, no write, no ETag) — safe to call repeatedly while the user is still
+    // deciding accept/reject in the (not-yet-built) gate dialog. This route is the clean seam the
+    // future Policy v2 Tier 2c dialog calls; it renders no UI itself (ADR-013/ADR-039 — no AI
+    // dispatch either; pure deterministic categorization).
+    private static async Task<IResult> PushPreview(
+        string documentSpeId,
+        [FromBody] PushPreviewBody? body,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+        if (body.Annotations is null || body.Annotations.Count == 0) return BadRequest("annotations must contain at least one annotation.");
+
+        try
+        {
+            var request = new PreviewPushAnnotationsRequest
+            {
+                TenantId = body.TenantId,
+                Annotations = body.Annotations,
+                SessionId = body.SessionId,
+            };
+
+            var preview = await composeService.PreviewPushAnnotationsAsync(request, ct).ConfigureAwait(false);
+
+            return Results.Ok(new PushPreviewResponse(
+                Preview: preview,
+                CorrelationId: httpContext.TraceIdentifier));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose push-preview: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while computing the push preview.");
         }
     }
 
@@ -1526,10 +1592,15 @@ public sealed record PushAnnotationsBody(
     [property: JsonPropertyName("driveId")] string DriveId,
     [property: JsonPropertyName("tenantId")] string TenantId,
     [property: JsonPropertyName("ifMatch")] string IfMatch,
-    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation> Annotations);
+    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation> Annotations,
+    /// <summary>FR-28 (task 055, additive/optional): bound ChatSession id — enables the
+    /// Compose-only side of the response's <c>preview</c> split. See
+    /// <see cref="PushAnnotationsRequest.SessionId"/> remarks.</summary>
+    [property: JsonPropertyName("sessionId")] string? SessionId = null);
 
 /// <summary>Response shape for <c>POST /api/compose/document/{id}/push-annotations</c> (FR-24) —
-/// the new SPE version id + ETag the client uses as the next optimistic-concurrency token.</summary>
+/// the new SPE version id + ETag the client uses as the next optimistic-concurrency token, plus
+/// (FR-28, task 055) the Tier-2c preview + per-step completion state as post-write evidence.</summary>
 public sealed record PushAnnotationsResponse(
     [property: JsonPropertyName("documentSpeId")] string DocumentSpeId,
     [property: JsonPropertyName("driveId")] string? DriveId,
@@ -1537,6 +1608,22 @@ public sealed record PushAnnotationsResponse(
     [property: JsonPropertyName("eTag")] string? ETag,
     [property: JsonPropertyName("size")] long? Size,
     [property: JsonPropertyName("annotationCount")] int AnnotationCount,
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    [property: JsonPropertyName("preview")] ComposePushSavePreview? Preview = null,
+    [property: JsonPropertyName("completionState")] Sprk.Bff.Api.Services.Ai.PublicContracts.JobAwareCompletionState? CompletionState = null);
+
+/// <summary>Request body for <c>POST /api/compose/document/{id}/push-preview</c> (FR-28, task 055)
+/// — the Tier-2c PRE-CONFIRM preview call. Non-mutating: no SPE download, no write. Safe to call
+/// repeatedly as the user adjusts accept/reject choices before confirming the gate dialog (not
+/// built by this task — see <see cref="IComposeService.PreviewPushAnnotationsAsync"/> remarks).</summary>
+public sealed record PushPreviewBody(
+    [property: JsonPropertyName("tenantId")] string TenantId,
+    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation> Annotations,
+    [property: JsonPropertyName("sessionId")] string? SessionId = null);
+
+/// <summary>Response shape for <c>POST /api/compose/document/{id}/push-preview</c> (FR-28).</summary>
+public sealed record PushPreviewResponse(
+    [property: JsonPropertyName("preview")] ComposePushSavePreview Preview,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
 /// <summary>Response shape for <c>GET /api/compose/documents/{id}</c>. The three FR-29/FR-33

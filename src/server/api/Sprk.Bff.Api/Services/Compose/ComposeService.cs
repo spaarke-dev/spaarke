@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -52,7 +53,16 @@ public class ComposeService : IComposeService
     internal const string StepProfileAnalysis = "profile-analysis";
     internal const string StepIndexing = "indexing";
 
+    // FR-28 push/save pipeline (task 055) — the consumer-declared step set for the
+    // push-annotations orchestration: push (native OOXML render) → save (SPE write) →
+    // version (new version id confirmed). Mirrors the FR-05 step-naming convention above
+    // (stable string keys a future JobAwareCompletionState OutcomeCard renders).
+    internal const string StepPush = "push";
+    internal const string StepSave = "save";
+    internal const string StepVersion = "version";
+
     private const string ComposeCreateOnSaveJobType = "compose-create-on-save";
+    private const string ComposePushSaveJobType = "compose-push-save";
     private const string DocxContentType =
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -62,6 +72,7 @@ public class ComposeService : IComposeService
     private readonly DocxAnnotationWriter _annotationWriter;
     private readonly IPostUploadIndexingEnqueuer _indexing;
     private readonly ILogger<ComposeService> _logger;
+    private readonly ComposePushSaveStatusStore? _pushSaveStatusStore;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -69,7 +80,8 @@ public class ComposeService : IComposeService
         IGenericEntityService dataverse,
         DocxAnnotationWriter annotationWriter,
         IPostUploadIndexingEnqueuer indexing,
-        ILogger<ComposeService> logger)
+        ILogger<ComposeService> logger,
+        IDistributedCache? cache = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -77,6 +89,12 @@ public class ComposeService : IComposeService
         _annotationWriter = annotationWriter;
         _indexing = indexing;
         _logger = logger;
+        // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
+        // Optional + defaults null so existing 6-arg test constructors (sibling task suites
+        // 013/050/060/062/102) keep compiling unchanged; DI (AddScoped<IComposeService,
+        // ComposeService>) resolves the real IDistributedCache registered via
+        // AddStackExchangeRedisCache in every non-test host, so production always persists.
+        _pushSaveStatusStore = cache is not null ? new ComposePushSaveStatusStore(cache) : null;
     }
 
     /// <inheritdoc />
@@ -685,6 +703,8 @@ public class ComposeService : IComposeService
             "Compose push-annotations: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} annotations={AnnotationCount}",
             request.TenantId, request.DriveId, request.DocumentSpeId, request.Annotations.Count);
 
+        var observedAt = DateTimeOffset.UtcNow;
+
         // 1) Download the CURRENT bytes via the facade (ADR-007 — no Graph type here).
         var stream = await _spe.DownloadFileAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
             .ConfigureAwait(false);
@@ -702,26 +722,95 @@ public class ComposeService : IComposeService
             sourceBytes = buffer.ToArray();
         }
 
+        // ────────────────────────────────────────────────────────────────────────────
+        // FR-28 (task 055) — push/save pipeline with per-step JobAwareCompletionState
+        // projection (push → save → version). A failure at either step aborts the pipeline
+        // with NO partial write: the SPE write only happens after the pure Annotate render
+        // fully succeeds (an in-memory transform — nothing is sent to SPE until step 3), and
+        // ReplaceFileContentAsUserAsync's If-Match is atomic at the Graph boundary (the whole
+        // new version lands or the whole call is rejected — never a half-applied version).
+        // Every branch below persists the resulting per-step state to Redis (ADR-009) before
+        // propagating/returning, so a future job-aware OutcomeCard has real state to read
+        // regardless of outcome.
+        // ────────────────────────────────────────────────────────────────────────────
+
         // 2) Render annotations into native OOXML markup. Pure — no I/O, no AI (ADR-013).
         //    DocxAnnotationException (malformed / target-not-found) propagates to the endpoint,
         //    which maps it to 400 / 422 ProblemDetails. This runs BEFORE the write, so a bad
         //    annotation batch never leaves a partial SPE version.
-        var annotatedBytes = _annotationWriter.Annotate(sourceBytes, request.Annotations);
+        byte[] annotatedBytes;
+        try
+        {
+            annotatedBytes = _annotationWriter.Annotate(sourceBytes, request.Annotations);
+        }
+        catch (Exception ex)
+        {
+            await PersistPushSaveStatusAsync(
+                    request.DocumentSpeId,
+                    FailedSignal(StepPush, $"push failed: {ex.Message}"),
+                    NotStartedSignal(StepSave),
+                    NotStartedSignal(StepVersion),
+                    observedAt,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            throw;
+        }
 
         // 3) Persist with optimistic concurrency (If-Match). A drive-item that moved under the
         //    caller (Word autosave) surfaces as EtagPreconditionFailedException (412); an open
         //    Word co-authoring session surfaces as DocumentLockedByWordException (423). Both
         //    propagate to the endpoint. Nothing partially writes.
         using var annotatedStream = new MemoryStream(annotatedBytes, writable: false);
-        var saved = await _spe.ReplaceFileContentAsUserAsync(
-                httpContext, request.DriveId, request.DocumentSpeId, annotatedStream, request.IfMatch, cancellationToken)
-            .ConfigureAwait(false);
+        FileHandleDto? saved;
+        try
+        {
+            saved = await _spe.ReplaceFileContentAsUserAsync(
+                    httpContext, request.DriveId, request.DocumentSpeId, annotatedStream, request.IfMatch, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await PersistPushSaveStatusAsync(
+                    request.DocumentSpeId,
+                    CompletedSignal(StepPush),
+                    FailedSignal(StepSave, $"save failed: {ex.Message}"),
+                    NotStartedSignal(StepVersion),
+                    observedAt,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            throw;
+        }
 
         if (saved is null || string.IsNullOrEmpty(saved.Id))
         {
+            await PersistPushSaveStatusAsync(
+                    request.DocumentSpeId,
+                    CompletedSignal(StepPush),
+                    FailedSignal(StepSave, "SPE annotated-write returned no version id"),
+                    NotStartedSignal(StepVersion),
+                    observedAt,
+                    cancellationToken)
+                .ConfigureAwait(false);
             throw new InvalidOperationException(
                 $"SPE annotated-write failed: drive-item not found or version not returned. drive={request.DriveId} item={request.DocumentSpeId}");
         }
+
+        // 4) All three steps landed — persist the terminal-success state.
+        var completion = await PersistPushSaveStatusAsync(
+                request.DocumentSpeId,
+                CompletedSignal(StepPush),
+                CompletedSignal(StepSave),
+                CompletedSignal(StepVersion),
+                observedAt,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        // 5) Tier-2c preview echo (design.md §2.4 / HANDOFF §4): comment/track-change counts +
+        //    the Word-vs-Compose split, attached as post-write completion evidence. The SAME
+        //    calculator backs the pre-confirm PreviewPushAnnotationsAsync path below.
+        var composeOnlyCount = await ResolveComposeOnlyCountAsync(request.TenantId, request.SessionId, cancellationToken)
+            .ConfigureAwait(false);
+        var preview = ComposePushSavePreviewCalculator.Compute(request.Annotations, composeOnlyCount);
 
         return new PushAnnotationsResult
         {
@@ -731,8 +820,120 @@ public class ComposeService : IComposeService
             ETag = saved.ETag,
             Size = saved.Size,
             AnnotationCount = request.Annotations.Count,
+            Preview = preview,
+            CompletionState = completion,
         };
     }
+
+    /// <inheritdoc />
+    public async Task<ComposePushSavePreview> PreviewPushAnnotationsAsync(
+        PreviewPushAnnotationsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.TenantId))
+            throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
+        if (request.Annotations is null || request.Annotations.Count == 0)
+            throw new ArgumentException("At least one annotation is required.", nameof(request));
+
+        var composeOnlyCount = await ResolveComposeOnlyCountAsync(request.TenantId, request.SessionId, cancellationToken)
+            .ConfigureAwait(false);
+        return ComposePushSavePreviewCalculator.Compute(request.Annotations, composeOnlyCount);
+    }
+
+    // =========================================================================
+    // FR-28 push/save pipeline — helpers (per-step job-aware projection + Redis persistence).
+    // Mirrors the FR-05 create-on-save helpers above (CompletedSignal / ProjectCreateOnSaveState)
+    // — same JobAwareCompletionStateProjector, a different consumer-declared step set.
+    // =========================================================================
+
+    /// <summary>
+    /// FR-28: resolves the "stays in Compose only" count for the Tier-2c preview from the
+    /// session's <c>DefinedTermsTracking</c> (FR-29) — the one Compose-domain collection with no
+    /// Word-native OOXML representation (contrast anchored annotations, which map onto the
+    /// <c>DocxAnnotation</c> push payload). Returns 0 (graceful degrade, not a failure) when no
+    /// session id is supplied — callers that predate this optional field still get a valid
+    /// preview, just with <c>ComposeOnlyCount</c> = 0.
+    /// </summary>
+    private async Task<int> ResolveComposeOnlyCountAsync(string tenantId, string? sessionId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return 0;
+        }
+
+        var state = await GetComposeAnnotationsAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+        return state.DefinedTermsTracking.Count;
+    }
+
+    /// <summary>
+    /// FR-28: projects the push/save per-step signals through the shared
+    /// <see cref="JobAwareCompletionStateProjector"/> and persists the result to Redis (ADR-009)
+    /// via <see cref="ComposePushSaveStatusStore"/> — best-effort: a Redis outage is logged and
+    /// swallowed here so it never masks or rolls back a document write/failure that has already
+    /// happened on its own terms (see <see cref="ComposePushSaveStatusStore"/> remarks). The
+    /// projected state is always returned/used for the in-flight HTTP response regardless of
+    /// whether the Redis write succeeded.
+    /// </summary>
+    private async Task<JobAwareCompletionState> PersistPushSaveStatusAsync(
+        string documentSpeId,
+        StoredStepSignal pushSignal,
+        StoredStepSignal saveSignal,
+        StoredStepSignal versionSignal,
+        DateTimeOffset observedAt,
+        CancellationToken ct)
+    {
+        var job = new JobContract
+        {
+            JobType = ComposePushSaveJobType,
+            SubjectId = documentSpeId,
+            CorrelationId = documentSpeId,
+            IdempotencyKey = $"compose-push-save-{documentSpeId}-{observedAt.Ticks}",
+        };
+
+        var completion = JobAwareCompletionStateProjector.Project(
+            job,
+            new List<StoredStepSignal> { pushSignal, saveSignal, versionSignal },
+            observedAt);
+
+        if (_pushSaveStatusStore is not null)
+        {
+            try
+            {
+                await _pushSaveStatusStore.SaveAsync(documentSpeId, completion, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose push-save: failed to persist cross-request completion state to Redis for driveItem={DocumentSpeId} — the in-flight response is unaffected.",
+                    documentSpeId);
+            }
+        }
+
+        return completion;
+    }
+
+    /// <summary>A stored terminal-failure signal for a step (single attempt, so never
+    /// RetryPending — the push/save pipeline does not auto-retry within one HTTP call).</summary>
+    private static StoredStepSignal FailedSignal(string stepName, string detail) => new()
+    {
+        StepName = stepName,
+        StoredStatus = JobStatus.Failed,
+        Started = true,
+        Attempt = 1,
+        MaxAttempts = 1,
+        Detail = detail,
+    };
+
+    /// <summary>A stored non-terminal "never started" signal for a step that never ran because an
+    /// earlier step in the SAME pipeline invocation failed first (pipeline-abort semantics — no
+    /// partial write, no partial step).</summary>
+    private static StoredStepSignal NotStartedSignal(string stepName) => new()
+    {
+        StepName = stepName,
+        StoredStatus = null,
+        Started = false,
+    };
 
     // =========================================================================
     // FR-29 anchored annotations (task 060). See design.md §8 + ChatSession.cs

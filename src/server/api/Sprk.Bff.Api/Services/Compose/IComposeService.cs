@@ -172,6 +172,24 @@ public interface IComposeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// FR-28 (task 055) — Tier-2c PRE-CONFIRM preview: computes the deterministic
+    /// <see cref="ComposePushSavePreview"/> (comment/track-change counts + the Word-vs-Compose
+    /// split) for an annotation batch the caller is ABOUT to push, WITHOUT touching SPE (no
+    /// download, no write — purely categorizes the supplied batch + an optional session-derived
+    /// Compose-only count). This is the data the future Policy v2 Tier 2c gate dialog renders
+    /// inside its ONE confirmation surface (design.md §2.4) BEFORE the user commits to
+    /// <see cref="PushAnnotationsAsync"/> — no UI is built here (clean seam; see the escalation
+    /// trigger in the owning task's POML for the gate-dialog + OutcomeCard rendering halves).
+    /// </summary>
+    /// <param name="request">Preview payload: tenant id + the annotation batch under
+    /// consideration + optional bound session id (for the Compose-only count).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The computed <see cref="ComposePushSavePreview"/>.</returns>
+    Task<ComposePushSavePreview> PreviewPushAnnotationsAsync(
+        PreviewPushAnnotationsRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// FR-29 read: projects the CURRENT <see cref="AnchoredAnnotation"/> and
     /// <see cref="DefinedTerm"/> collections stored on a Compose session (design.md §8).
     /// Read-only — used internally by <see cref="LoadAsync"/> and available standalone
@@ -481,6 +499,35 @@ public sealed record PushAnnotationsRequest
     /// <summary>The accepted annotations (track-change insertions/deletions + comments) to
     /// materialize as native Open XML markup. Required, non-empty.</summary>
     public required IReadOnlyList<DocxAnnotation> Annotations { get; init; }
+
+    /// <summary>
+    /// FR-28 (task 055, additive/optional): bound <c>ChatSession</c> id. When supplied, the
+    /// Tier-2c preview attached to <see cref="PushAnnotationsResult.Preview"/> reflects the
+    /// session's current <c>DefinedTermsTracking</c> (FR-29) count as the "stays in Compose only"
+    /// side of the split (see <see cref="ComposePushSavePreview.ComposeOnlyCount"/>). Null (the
+    /// R2 default until the client sends it) degrades gracefully to <c>ComposeOnlyCount</c> = 0 —
+    /// never a failure.
+    /// </summary>
+    public string? SessionId { get; init; }
+}
+
+/// <summary>
+/// FR-28 (task 055) — Tier-2c PRE-CONFIRM preview request payload. See
+/// <see cref="IComposeService.PreviewPushAnnotationsAsync"/>.
+/// </summary>
+public sealed record PreviewPushAnnotationsRequest
+{
+    /// <summary>Tenant id (multi-tenant isolation per ADR-015 Tier 3). Required.</summary>
+    public required string TenantId { get; init; }
+
+    /// <summary>The annotation batch under consideration for push. Required, non-empty.</summary>
+    public required IReadOnlyList<DocxAnnotation> Annotations { get; init; }
+
+    /// <summary>
+    /// Optional bound <c>ChatSession</c> id — see <see cref="PushAnnotationsRequest.SessionId"/>
+    /// remarks for the identical Compose-only-count semantics.
+    /// </summary>
+    public string? SessionId { get; init; }
 }
 
 /// <summary>FR-24 push-annotations outcome — new SPE version id + ETag + size. Standalone (not a
@@ -505,6 +552,24 @@ public sealed record PushAnnotationsResult
 
     /// <summary>Count of annotations materialized into the document.</summary>
     public required int AnnotationCount { get; init; }
+
+    /// <summary>
+    /// FR-28 (task 055): the Tier-2c preview computed as post-write completion evidence — the
+    /// SAME payload shape a future pre-confirm gate-dialog call
+    /// (<see cref="IComposeService.PreviewPushAnnotationsAsync"/>) returns before the push, echoed
+    /// back here so the completion OutcomeCard can show what was actually applied. Always
+    /// populated by the current push path.
+    /// </summary>
+    public ComposePushSavePreview? Preview { get; init; }
+
+    /// <summary>
+    /// FR-28 per-step push/save projection over the existing job pipeline
+    /// (<see cref="JobAwareCompletionState"/>): the ordered steps <c>push → save → version</c>
+    /// with each step's state, shaped to feed a future job-aware OutcomeCard once the core
+    /// Phase A0 contract (HANDOFF §2/§3) is consumable by the UI. Null only for legacy callers
+    /// that predate FR-28 (always populated by the current push path).
+    /// </summary>
+    public JobAwareCompletionState? CompletionState { get; init; }
 }
 
 /// <summary>
