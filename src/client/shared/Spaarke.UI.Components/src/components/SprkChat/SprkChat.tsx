@@ -357,6 +357,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // R6 Pillar 8 task 097b / TIER-C surface completion — fires whenever the
   // internal messages array changes. Optional; ADR-012 context-agnostic.
   onMessagesChange,
+  // spaarkeai-compose-r2 task 072 (FR-35 Doc Q&A stretch) — fires with the full
+  // ICitation[] (incl. excerpt) whenever a non-empty citations set arrives.
+  // Optional observation callback; ADR-012 context-agnostic.
+  onCitations,
   // R6 Pillar 8 (tasks 080+) outbound-body decoration hook (optional; ADR-012
   // context-agnostic). Existing consumers ignore.
   onDecorateOutboundBody,
@@ -1224,6 +1228,17 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       onMessagesChange(messages);
     }
   }, [messages, onMessagesChange]);
+
+  // spaarkeai-compose-r2 task 072 (FR-35 Doc Q&A stretch) — fire onCitations
+  // whenever the SSE `citations` event populates a non-empty set (the SAME
+  // `streamCitations` state already attached to the last assistant message's
+  // render props above). Never fires on an empty array — an uncited answer
+  // must not trigger any downstream "grounded answer" reaction (ADR-039).
+  React.useEffect(() => {
+    if (onCitations && streamCitations.length > 0) {
+      onCitations(streamCitations);
+    }
+  }, [streamCitations, onCitations]);
 
   // Send a message and start streaming the response
   const handleSend = React.useCallback(

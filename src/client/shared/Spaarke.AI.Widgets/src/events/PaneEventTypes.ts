@@ -300,7 +300,15 @@ export interface WorkspacePaneEvent {
     //   block lower in this interface + `@spaarke/compose-components`
     //   `ComposeContextToWorkspaceFlow` / `ComposeAssistantToWorkspaceFlow`.
     | 'compose_context_insert'
-    | 'compose_assistant_insert';
+    | 'compose_assistant_insert'
+    // ── Compose Doc Q&A ephemeral highlight (spaarkeai-compose-r2 task 072,
+    //    FR-35 stretch) ── Assistant → Workspace. A grounded, CITED Text-path
+    //    answer over the session-mounted document (ADR-039: rides the
+    //    EXISTING bounded agent loop — no new capability/playbook/dispatch)
+    //    asks the Workspace pane to ephemerally highlight the cited source
+    //    span. Additive discriminant; see the qaSourceText/qaSectionLabel
+    //    field block below.
+    | 'compose_qa_highlight';
 
   /** Identifies the widget kind (e.g. `"document-summary"`, `"clause-list"`). */
   widgetType?: string;
@@ -786,6 +794,34 @@ export interface WorkspacePaneEvent {
    * addressable identifier, not content).
    */
   ledgerRef?: string;
+
+  // ── Compose Doc Q&A ephemeral highlight fields (task 072, FR-35) ──────────
+  //
+  // Carried by the `compose_qa_highlight` discriminant ONLY. Dispatched by the
+  // Assistant pane after a grounded, cited Text-path answer over the
+  // session-mounted document (the `citations` SSE mechanism — SHIPPED,
+  // unchanged). ComposeEditor resolves `qaSourceText` against the CURRENT
+  // document text using the SAME strict-match, do-not-guess semantics as the
+  // FR-16 redline `target_text` resolution (`resolveTargetSpans`) and renders
+  // a TRANSIENT, non-persisted highlight (a ProseMirror decoration — never a
+  // Mark, never part of DOCX serialization). No-op when no document is
+  // mounted, or the text isn't found/is ambiguous — the event carries no
+  // document identity because the Workspace pane already owns it.
+
+  /**
+   * The cited excerpt text to locate in the open document. Present when
+   * `type === 'compose_qa_highlight'`. Tier-3 (RAG/LLM-sourced citation
+   * content already rendered to the user in the Assistant pane) — used only
+   * for in-document text matching; never logged.
+   */
+  qaSourceText?: string;
+
+  /**
+   * Display label for the cited source/section (e.g. the citation's source
+   * name), shown in the ephemeral "Found in …" affordance. Present when
+   * `type === 'compose_qa_highlight'`. Tier-1 safe.
+   */
+  qaSectionLabel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1223,8 +1259,14 @@ export interface ContextPaneEvent {
   documentRef?: ComposeFlowDocumentRef;
   /** Editor selection payload (Flow 1). `selectionText` is Tier-3. */
   selection?: ComposeFlowSelection;
-  /** Derived-insight kind (Flow 6). Tier-1 safe. */
-  insightKind?: 'summary' | 'risk' | 'entity' | 'clause-type' | 'recommendation';
+  /**
+   * Derived-insight kind (Flow 6). Tier-1 safe.
+   *
+   * `'citation'` (task 072, FR-35): a Doc Q&A grounded-answer citation was
+   * surfaced audit-only in the Context pane (paired with the
+   * `compose_qa_highlight` workspace-channel event — see PaneEventTypes.ts).
+   */
+  insightKind?: 'summary' | 'risk' | 'entity' | 'clause-type' | 'recommendation' | 'citation';
   /** Derived-insight narrative text (Flow 6). Tier-3 content. */
   insightText?: string;
   /** Optional source span linking a Flow-6 insight to a document region. Tier-1. */

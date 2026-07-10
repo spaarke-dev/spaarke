@@ -17,6 +17,8 @@
  *   Flow 4 compose_context_offer       (Context→Assistant)  → ComposeAssistantCoordination
  *   Flow 5 compose_assistant_insert    (Assistant→Workspace)→ useComposeWorkspaceReceivers
  *   Flow 6 compose_assistant_insight   (Assistant→Context)  → ContextPaneController
+ *   Flow 7 compose_qa_highlight        (Assistant→Workspace)→ useComposeWorkspaceReceivers
+ *          (task 072, FR-35 Doc Q&A stretch — added without disturbing Flows 1-6)
  *
  * The receivers exercised here are the SHIPPED ones (the same components/hook the
  * running host mounts) — no parallel test-only implementation. The workspace-leg
@@ -69,10 +71,12 @@ function makeStageContext(overrides: Partial<ShellStageContextValue> = {}): Shel
 function WorkspaceReceiverHarness(props: {
   onContextInsert: (e: WorkspacePaneEvent) => void;
   onAssistantInsert: (e: WorkspacePaneEvent) => void;
+  onQaHighlight: (e: WorkspacePaneEvent) => void;
 }): React.JSX.Element {
   useComposeWorkspaceReceivers({
     onContextInsert: props.onContextInsert,
     onAssistantInsert: props.onAssistantInsert,
+    onQaHighlight: props.onQaHighlight,
   });
   return <div data-testid="workspace-receiver-harness" />;
 }
@@ -81,12 +85,14 @@ interface Harness {
   bus: PaneEventBus;
   onContextInsert: jest.Mock;
   onAssistantInsert: jest.Mock;
+  onQaHighlight: jest.Mock;
 }
 
 function renderThreePane(): Harness {
   const bus = new PaneEventBus();
   const onContextInsert = jest.fn();
   const onAssistantInsert = jest.fn();
+  const onQaHighlight = jest.fn();
 
   render(
     <FluentProvider theme={webLightTheme}>
@@ -97,16 +103,17 @@ function renderThreePane(): Harness {
         </ShellStageContext.Provider>
         {/* Assistant pane — Flows 2 + 4 */}
         <ComposeAssistantCoordination />
-        {/* Workspace pane — Flows 3 + 5 (shipped hook, spy handlers) */}
+        {/* Workspace pane — Flows 3 + 5 + 7 (shipped hook, spy handlers) */}
         <WorkspaceReceiverHarness
           onContextInsert={onContextInsert}
           onAssistantInsert={onAssistantInsert}
+          onQaHighlight={onQaHighlight}
         />
       </PaneEventBusProvider>
     </FluentProvider>
   );
 
-  return { bus, onContextInsert, onAssistantInsert };
+  return { bus, onContextInsert, onAssistantInsert, onQaHighlight };
 }
 
 const DOC = { speDriveItemId: 'drive-item-1' } as const;
@@ -249,6 +256,52 @@ describe('three-pane Compose coordination — real PaneEventBus cross-pane (task
     expect(received.ledgerRef).toBe('binding-1@t1');
     // Flow 5 must NOT be misrouted to the Flow 3 handler.
     expect(onContextInsert).not.toHaveBeenCalled();
+  });
+
+  // ── Flow 7 (task 072, FR-35 Doc Q&A stretch) ──────────────────────────────
+
+  it('Flow 7 (Assistant→Workspace): compose_qa_highlight reaches the Workspace editor receiver', () => {
+    const { bus, onQaHighlight, onContextInsert, onAssistantInsert } = renderThreePane();
+
+    act(() => {
+      bus.dispatch('workspace', {
+        type: 'compose_qa_highlight',
+        qaSourceText: 'the indemnification cap is $500,000',
+        qaSectionLabel: 'Section 7.3',
+        sessionId: 'sess-1',
+        timestamp: NOW,
+      });
+    });
+
+    expect(onQaHighlight).toHaveBeenCalledTimes(1);
+    const received = onQaHighlight.mock.calls[0][0] as WorkspacePaneEvent;
+    expect(received.type).toBe('compose_qa_highlight');
+    expect(received.qaSourceText).toBe('the indemnification cap is $500,000');
+    expect(received.qaSectionLabel).toBe('Section 7.3');
+    // Must NOT be misrouted to the Flow 3/5 handlers.
+    expect(onContextInsert).not.toHaveBeenCalled();
+    expect(onAssistantInsert).not.toHaveBeenCalled();
+  });
+
+  it('Flow 6 with insightKind "citation" (task 072): a Doc Q&A citation surfaces audit-only on the Context pane', async () => {
+    const { bus } = renderThreePane();
+
+    act(() => {
+      bus.dispatch('context', {
+        type: 'compose_assistant_insight',
+        insightKind: 'citation',
+        insightText: 'Cited from Section 7.3',
+        sessionId: 'sess-1',
+        timestamp: NOW,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('context-compose-insight')).toBeInTheDocument();
+    });
+    const insight = screen.getByTestId('context-compose-insight');
+    expect(insight).toHaveTextContent('Cited from Section 7.3');
+    expect(insight).toHaveAttribute('data-insight-kind', 'citation');
   });
 
   // ── Cross-pane isolation regression ───────────────────────────────────────

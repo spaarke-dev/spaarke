@@ -1026,6 +1026,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       }
       dispatch({ kind: 'pendingAssistantInsert', payload: toAssistantInsertPayload(event) });
     },
+    // task 072 (FR-35 Doc Q&A stretch) — ephemeral highlight only; no document
+    // mutation, no ledger entry, no-op if the editor isn't mounted yet.
+    onQaHighlight: (event) => {
+      if (!event.qaSourceText) return;
+      editorRef.current?.highlightCitedSpan(event.qaSourceText, event.qaSectionLabel);
+    },
   });
 
   // FR-04 refresh-durability (task 016): on (re)load of a session, re-materialize the CURRENT

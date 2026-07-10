@@ -2,7 +2,8 @@
   <metadata>
     <title>FR-35 Document Q&amp;A over session-mounted document (stretch)</title>
     <phase>7 Coord</phase>
-    <status>in-progress</status>
+    <status>completed</status>
+    <completion-note>Client UX complete + tested 2026-07-10 (sonnet/high, STANDARD). Rides the EXISTING citations SSE mechanism — NO new capability/playbook/dispatch. New QaHighlightExtension (ProseMirror VIEW decoration — never a Mark, never serialized into the DOCX) + useDocQaHighlight (reuses FR-16 resolveTargetSpans strict-match/no-guess) + useDocQaCitationBridge (first citation → compose_qa_highlight [workspace] + compose_assistant_insight insightKind:'citation' [Flow-6 context, audit-only]) + SprkChat onCitations observer prop. Additive bus discriminants only (ADR-030). 17 new/changed tests all pass (useDocQaHighlight 7/7, useDocQaCitationBridge 6/6, +2 citationsIntegration, +2 three-pane e2e); Compose.Components 89/89, SprkChat 393/393, SpaarkeAi 76/76; Step 9.5 clean. Client-only, no BFF. ✅◐ E2E-PENDING ON DEPLOY: only the live grounded-answer generation (deployed Text-path loop returning a real cited excerpt over a mounted doc) — deploy-frozen; everything downstream proven with a stubbed ICitation.</completion-note>
     <estimated-hours>6</estimated-hours>
     <dependencies>none</dependencies>
     <blocks></blocks>

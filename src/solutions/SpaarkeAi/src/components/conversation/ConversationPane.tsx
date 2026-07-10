@@ -37,6 +37,7 @@ import { useEventBatch } from "./useEventBatch";
 import { useAttachments } from "./useAttachments";
 import { useConsumerChips } from "./useConsumerChips";
 import { useContextEventBridge } from "./useContextEventBridge";
+import { useDocQaCitationBridge } from "./useDocQaCitationBridge";
 import { usePlaybookSelection } from "./usePlaybookSelection";
 import { usePlaybookOptions } from "./usePlaybookOptions";
 import { useCommandRouting } from "./useCommandRouting";
@@ -224,6 +225,11 @@ export function ConversationPane(): React.JSX.Element {
       );
     }
   }, [actionQueue.inFlightId, actionQueue.pendingCount, dispatchComposeAction]);
+
+  // FR-35 Doc Q&A ephemeral highlight (task 072, stretch) — bridges SprkChat's
+  // existing citation mechanism to the Compose workspace/context choreography.
+  // See useDocQaCitationBridge.ts for the full ADR-039/015 rationale.
+  const docQaCitation = useDocQaCitationBridge({ dispatch, getSessionId });
 
   const contextBridge = useContextEventBridge({
     dispatch,
@@ -433,6 +439,7 @@ export function ConversationPane(): React.JSX.Element {
               onSelectPlaybook={playbookOptions.handleSelectPlaybook}
               onOpenLibraryModal={playbookOptions.handleOpenLibraryModal}
               onContextEvent={contextBridge.handleContextEvent}
+              onCitations={docQaCitation.onCitations}
             />
             <HelpAffordance onClick={() => commands.setHelpPanelOpen(true)} />
             <CommandHelpPanel

@@ -1203,6 +1203,29 @@ export interface ISprkChatProps {
   onDecorateOutboundBody?: (
     body: Record<string, unknown>
   ) => Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
+
+  /**
+   * Fires with the FULL citation list (`ICitation[]`, including `excerpt` +
+   * `source`) whenever the SSE `citations` event populates a non-empty set for
+   * the latest assistant answer (the SAME data SprkChat already renders as
+   * `[N]` superscript markers via `SprkChatMessage`'s `citations` prop —
+   * see `streamCitations` in `useSseStream`).
+   *
+   * This is an OBSERVATION callback (mirrors `onMessagesChange` /
+   * `onPaneEvent`) — SprkChat's own citation rendering is unaffected whether
+   * or not a host provides this prop. Added for spaarkeai-compose-r2 task 072
+   * (FR-35 Document Q&A stretch): the Compose host uses the excerpt text to
+   * drive an in-document ephemeral highlight of the cited span. Never fires
+   * for an uncited answer (empty citations array) — hosts MUST NOT treat the
+   * absence of a call as an error; it is the expected "ungrounded/no citation"
+   * case (ADR-039 grounded-output invariant).
+   *
+   * ADR-015: citation `excerpt` text is the SAME content already rendered to
+   * the user in the transcript (not a new content surface) — hosts bridging
+   * this to telemetry must still strip it per the existing citation-content
+   * privacy contract.
+   */
+  onCitations?: ((citations: ICitation[]) => void) | null;
 }
 
 /** Props for SprkChatMessage sub-component. */
