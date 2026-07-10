@@ -311,6 +311,7 @@ public class SessionDispatchOrchestrator
                                 ? a.GetRawText()
                                 : "{}",
                             UserId = null,
+                            ActingUserEmail = request.ActingUserEmail,
                         },
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -848,12 +849,19 @@ public class SessionDispatchOrchestrator
 /// <c>sprk_inputschema</c> owns the future vocabulary). Null = no args.
 /// </param>
 /// <param name="CorrelationId">Optional correlation ID propagated to the run context (NFR-17).</param>
+/// <param name="ActingUserEmail">
+/// The acting user's email, resolved from the caller's auth claims at the dispatch endpoint
+/// (E-30). Flows to <c>CodedWorkflowContext.ActingUserEmail</c> so a coded workflow can address a
+/// NOTIFICATION email to the user server-side (never a client-supplied recipient). Null for the
+/// prompted path and for callers that do not resolve it (backward-compatible default).
+/// </param>
 public sealed record SessionDispatchRequest(
     string TenantId,
     string SessionId,
     Guid BindingId,
     JsonElement? Args,
-    string? CorrelationId = null);
+    string? CorrelationId = null,
+    string? ActingUserEmail = null);
 
 /// <summary>
 /// A Click dispatch that was refused at the catalog-resolution boundary (ADR-039:

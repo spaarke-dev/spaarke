@@ -201,12 +201,22 @@ public static class DispatchSessionEndpoint
         using var meteringScope = Sprk.Bff.Api.Telemetry.AiMeteringContext.Begin(
             tenantId, callerOid, Sprk.Bff.Api.Telemetry.AiMeteringContext.EntryPathClick);
 
+        // E-30: resolve the acting user's email from the auth claims so a coded NOTIFICATION
+        // workflow can address the requesting user server-side (never a client-supplied recipient).
+        // preferred_username / upn is the AAD email vocabulary; null degrades gracefully (a
+        // notification workflow that needs it fails honestly).
+        var actingUserEmail = httpContext.User.FindFirst("preferred_username")?.Value
+            ?? httpContext.User.FindFirst("upn")?.Value
+            ?? httpContext.User.FindFirst(ClaimTypes.Email)?.Value
+            ?? httpContext.User.FindFirst("email")?.Value;
+
         var request = new SessionDispatchRequest(
             TenantId: tenantId,
             SessionId: sessionId,
             BindingId: bindingId,
             Args: body.Args,
-            CorrelationId: correlationId);
+            CorrelationId: correlationId,
+            ActingUserEmail: actingUserEmail);
 
         // ADR-015: identifiers only — never log args content (chip args may carry
         // maker-authored values; file ids are identifiers, but the raw JSON is not parsed
