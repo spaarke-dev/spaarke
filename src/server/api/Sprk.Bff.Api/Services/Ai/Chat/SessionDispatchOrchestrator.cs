@@ -365,7 +365,7 @@ public class SessionDispatchOrchestrator
             // so the "context selected" leg is anchored to the turn it grounds (OutputRouter allocates the
             // SAME ordinal for the SessionOutput below — no output is appended between).
             var contextTurn = (session.Outputs is { Count: > 0 } ? session.Outputs.Max(o => o.Turn) : 0) + 1;
-            var conversationTail = BuildConversationTail(session);
+            var conversationTail = ConversationContextProducer.BuildConversationTail(session);
 
             BoundInputs boundInputs;
 
@@ -386,6 +386,13 @@ public class SessionDispatchOrchestrator
                                 Args = request.Args,
                                 LedgerOutputs = session.Outputs,
                                 ConversationTail = conversationTail,
+                                // Task 053 (FR-B-04): the host record makes the envelope feature-complete
+                                // (Business host-identity + Record memory refs). Id-only shape — no lazy
+                                // name fetch here; deterministic + pinned. Prompts are UNCHANGED (the
+                                // executor renders the operand only; the envelope feeds fingerprint/counts).
+                                HostEntityType = session.HostContext?.EntityType,
+                                HostEntityId = session.HostContext?.EntityId,
+                                HostEntityName = session.HostContext?.EntityName,
                                 TenantId = request.TenantId,
                                 SessionId = request.SessionId,
                                 Turn = contextTurn,
@@ -662,6 +669,12 @@ public class SessionDispatchOrchestrator
                 {
                     FileDocument = documentText,
                     ConversationTail = conversationTail,
+                    // Task 053 (FR-B-04): feature-complete envelope on the file-operand path too — Business
+                    // host-identity + Record memory refs from the host record. Prompts UNCHANGED (the
+                    // executor renders the `## Document` operand only).
+                    HostEntityType = session.HostContext?.EntityType,
+                    HostEntityId = session.HostContext?.EntityId,
+                    HostEntityName = session.HostContext?.EntityName,
                     TenantId = request.TenantId,
                     SessionId = request.SessionId,
                     Turn = contextTurn,
@@ -677,28 +690,9 @@ public class SessionDispatchOrchestrator
         };
     }
 
-    /// <summary>
-    /// The session's prior <see cref="SessionOutput"/>s projected as ADR-040 ledger REFERENCES for the
-    /// ContextEnvelope <c>Memory.Conversation</c> tail (identifiers only — the payloads live in the ledger,
-    /// never copied into the envelope). Empty on a first turn.
-    /// </summary>
-    private static IReadOnlyList<LedgerEntryReference> BuildConversationTail(ChatSession session)
-    {
-        var outputs = session.Outputs;
-        if (outputs is not { Count: > 0 })
-        {
-            return Array.Empty<LedgerEntryReference>();
-        }
-
-        return outputs
-            .Select(o => new LedgerEntryReference
-            {
-                Key = o.Key,
-                UcId = o.UcId,
-                Disposition = o.Disposition,
-            })
-            .ToList();
-    }
+    // Task 053 (FR-B-04): the conversation-tail reference projection moved to
+    // ContextSliceProducers.ConversationContextProducer.BuildConversationTail so tail production is
+    // single-home (this orchestrator + the interactive ChatEndpoints path both call it).
 
     /// <summary>Outcome of <see cref="ResolveFileOperandAsync"/>: either resolved <see cref="Inputs"/> or an <see cref="Error"/> to stream.</summary>
     private sealed record FileOperandResult

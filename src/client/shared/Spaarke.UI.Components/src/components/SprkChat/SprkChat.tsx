@@ -365,6 +365,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onPlaybookOptions: onPlaybookOptionsProp,
   onSelectPlaybook,
   onOpenLibraryModal,
+  // spaarke-ai-architecture-redesign-r2 task 062 (FR-A1-06 / FR-B-13) — outcome_card
+  // next-step chip click forwarding to host. Optional; ADR-012 generic seam (same
+  // pattern as onSelectPlaybook/onOpenLibraryModal above).
+  onNextStep,
   // R6 Pillar 6c / task 095 — trace bridge: context_event SSE forwarding to host.
   onContextEvent: onContextEventProp,
   // FR-P2-03 task 032 — capture_mode: modal wizard escape forwarding to host.
@@ -2371,6 +2375,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           // onOpenLibraryModal callbacks down so the inline link buttons in
           // the playbook_options card can dispatch the right actions (FR-50 / 51).
           const isPlaybookOptions = msg.metadata?.responseType === 'playbook_options';
+          // spaarke-ai-architecture-redesign-r2 task 062 (FR-A1-06 / FR-B-13) — thread
+          // onNextStep down so the outcome_card's next-step chips can dispatch.
+          const isOutcomeCard = msg.metadata?.responseType === 'outcome_card';
 
           // ── FR-14: Merge persistence state into document_status messages ────
           // The persistence state is tracked locally in documentPersistenceState map
@@ -2429,6 +2436,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             ...(isPlaybookOptions && {
               onSelectPlaybook,
               onOpenLibraryModal,
+            }),
+            // spaarke-ai-architecture-redesign-r2 task 062 — wire the next-step chip
+            // click handler for the outcome_card card. When a host doesn't supply
+            // onNextStep, SprkChatMessageRenderer/OutcomeCard render the chips
+            // disabled (defensive UX, same pattern as playbook_options above).
+            ...(isOutcomeCard && {
+              onNextStep,
             }),
           };
 

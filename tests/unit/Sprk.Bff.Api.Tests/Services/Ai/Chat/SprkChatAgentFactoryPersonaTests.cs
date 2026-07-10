@@ -305,10 +305,10 @@ public class SprkChatAgentFactoryPersonaTests
             _playbookServiceMock.Object,
             _dataverseServiceMock.Object,
             _loggerMock.Object,
-            // R6 task 069 follow-up housekeeping: task 068 made IMatterMemoryService a
+            // R6 task 069 follow-up housekeeping: task 068 made IMemoryItemStore a
             // required ctor param without migrating this fixture. Pass a default mock so
             // the matter-memory append path is a no-op for these tests.
-            new Mock<IMatterMemoryService>().Object);
+            new Mock<IMemoryItemStore>().Object);
 
     /// <summary>
     /// Normalize line endings to LF so cross-host (Windows CRLF, Linux LF) FR-04

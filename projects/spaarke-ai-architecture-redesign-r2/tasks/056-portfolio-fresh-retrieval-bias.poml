@@ -35,6 +35,7 @@
     <constraint source="ADR-040">No parallel cache — the policy governs use of the ledger tail; store-before-render preserved.</constraint>
     <constraint source="project">Aggregate/portfolio intents bias fresh; point-lookup recall is unaffected — do not force freshness on all reads.</constraint>
     <constraint source="ADR-039">Intent detection for "portfolio-level" is deterministic policy DATA, not runtime LLM risk judgment.</constraint>
+    <constraint source="design-guidance-2026-07-09">Prefer LEDGER-SIDE determinism over utterance classification: aggregate/portfolio ledger outputs are deterministically identifiable by their ORIGINATING TOOL + result shape (catalog data — e.g., list/count query results), so mark those ledger entries non-reusable-for-recall in the Conversation slice and pair with a directive instructing fresh re-query for aggregates. Do NOT regex-classify user utterances (brittle) or LLM-judge them (ADR-039 violation); any utterance-side signal must be closed policy data with a documented token set.</constraint>
     <constraint source="ADR-038">Retrieval-policy tests are KEEP-path; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
     <constraint source="bff-hygiene">Run bff-extensions.md checklist; measure publish-size; no new HIGH CVE; state Placement Justification.</constraint>
   </constraints>

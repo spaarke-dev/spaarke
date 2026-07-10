@@ -370,7 +370,7 @@ public class PlaybookChatContextProviderEntityNameLazyFetchTests
             _playbookServiceMock.Object,
             _dataverseServiceMock.Object,
             _loggerMock.Object,
-            new Mock<IMatterMemoryService>().Object,
+            new Mock<IMemoryItemStore>().Object,
             promptBudgetTracker: null,
             // R7 Wave 12 task 151 — IGenericEntityService satisfied by the same IDataverseService
             // composite mock (IDataverseService inherits IGenericEntityService per

@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.Safety.CrossMatter;
 using Sprk.Bff.Api.Services.Ai.Sessions;
@@ -612,7 +613,7 @@ public static class ChatEndpoints
             // question. Appended AFTER history, BEFORE the user turn: volatile content
             // rides the tail so the [system]+[history] prefix stays prompt-cache-stable
             // (NFR-04). Recent-window + per-output caps in ChatHistoryManager.
-            var ledgerOutputsContext = ChatHistoryManager.BuildLedgerOutputsContext(session.Outputs);
+            var ledgerOutputsContext = ConversationContextProducer.BuildLedgerOutputsContext(session.Outputs);
             if (ledgerOutputsContext is not null)
             {
                 var augmented = new List<AiChatMessage>(history.Count + 1);
@@ -621,6 +622,58 @@ public static class ChatEndpoints
                 history = augmented;
             }
             // === End finding-3 ledger context =========================================
+
+            // === AIR2-053 (FR-B-04) — interactive Context Binder convergence =============
+            // The interactive chat turn now assembles ONE ContextEnvelope per turn through the
+            // Context Binder — the SAME seam the dispatch path uses — so the six R1 prompt
+            // primitives are folded into one contract (no forbidden dual assembly path). The
+            // prompt strings above are still produced by the SAME ContextSliceProducers the
+            // envelope is built from, so the interactive prompt bytes are UNCHANGED; this bind
+            // makes the envelope + its context fingerprint (ADR-040 store-before-render, NFR-07
+            // ids/counts only) go live on chat. Envelope-truthfulness note: the Business fragment
+            // uses the id-only-or-provided-name shape (no lazy name fetch at bind time), while the
+            // rendered prompt may carry the lazily-fetched name variant — both are
+            // HostIdentityProducer outputs; the fingerprint is counts-only, so this recorded
+            // variance is NOT a prompt-bytes diff (the prompt is untouched).
+            //
+            // OPTIONAL resolution: IContextBinder is registered only in the compound-ON path
+            // (AnalysisServicesModule) — resolve via GetService and skip when null so compound-OFF
+            // environments are unaffected. Soft-fail: a bind failure NEVER fails the message turn.
+            var contextBinder = httpContext.RequestServices.GetService<IContextBinder>();
+            if (contextBinder is not null)
+            {
+                try
+                {
+                    var contextTurn =
+                        (session.Outputs is { Count: > 0 } ? session.Outputs.Max(o => o.Turn) : 0) + 1;
+                    await contextBinder.BindAsync(
+                        new ContextBindingRequest
+                        {
+                            HostEntityType = session.HostContext?.EntityType,
+                            HostEntityId = session.HostContext?.EntityId,
+                            HostEntityName = session.HostContext?.EntityName,
+                            ConversationTail = ConversationContextProducer.BuildConversationTail(session),
+                            TenantId = tenantId,
+                            SessionId = sessionId,
+                            Turn = contextTurn,
+                        },
+                        cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // NFR-07 identifiers only. The envelope/fingerprint is telemetry-grade — a bind
+                    // failure must never take down the user's message turn.
+                    logger.LogWarning(ex,
+                        "AIR2-053: interactive Context Binder bind failed — continuing without envelope/fingerprint " +
+                        "for this turn (the message turn is never failed by context assembly). session={SessionId}",
+                        sessionId);
+                }
+            }
+            // === End AIR2-053 interactive bind ========================================
 
             // === FR-P2-05 HARD CUTOVER (task 034) — legacy dispatch pre-passes DELETED ===
             // Before the cutover, three pre-passes ran here between agent creation and the
@@ -2071,7 +2124,7 @@ public static class ChatEndpoints
                 // (append-only, after the `confirmed` approval marker), and (b) the
                 // honest failure is persisted as an assistant transcript message so the
                 // next turn's history carries the real outcome.
-                var failureText = BuildGateOutcomeMessage(
+                var failureText = GateOutcomeProducer.BuildGateOutcomeMessage(
                     success: false, resolution.Tool.Name, outcome.Error, ledgerKey: null);
                 await pendingPlanManager.WriteGateMarkerAsync(
                     tenantId, sessionId, gateId,
@@ -2097,7 +2150,7 @@ public static class ChatEndpoints
             var userFacingSummary = outcome.UserSummary ?? outcome.Summary;
             await PersistGateOutcomeMessageAsync(
                 httpContext, tenantId, sessionId,
-                BuildGateOutcomeMessage(
+                GateOutcomeProducer.BuildGateOutcomeMessage(
                     success: true, resolution.Tool.Name, userFacingSummary, outcome.LedgerKey, outcome.RecordUrl),
                 logger, cancellationToken);
 
@@ -2169,7 +2222,7 @@ public static class ChatEndpoints
                     missingFields: null, turn: invocation.Turn, ct: cancellationToken);
                 await PersistGateOutcomeMessageAsync(
                     httpContext, tenantId, sessionId,
-                    BuildGateOutcomeMessage(success: false, invocation.Title ?? invocation.ToolId, error, ledgerKey: null),
+                    GateOutcomeProducer.BuildGateOutcomeMessage(success: false, invocation.Title ?? invocation.ToolId, error, ledgerKey: null),
                     logger, cancellationToken);
 
                 return BuildGateDispatchFailedProblem(error);
@@ -2177,7 +2230,7 @@ public static class ChatEndpoints
 
             await PersistGateOutcomeMessageAsync(
                 httpContext, tenantId, sessionId,
-                BuildGateOutcomeMessage(success: true, invocation.Title ?? invocation.ToolId, summary, ledgerKey: null),
+                GateOutcomeProducer.BuildGateOutcomeMessage(success: true, invocation.Title ?? invocation.ToolId, summary, ledgerKey: null),
                 logger, cancellationToken);
 
             return Results.Ok(new GateResolveResult("confirmed", summary));
@@ -2225,36 +2278,10 @@ public static class ChatEndpoints
         title: "Dispatch Failed",
         extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.dispatch-failed" });
 
-    /// <summary>
-    /// Maximum characters of a gate-outcome transcript message (Dataverse
-    /// <c>sprk_content</c> caps at 10 000; outcomes are summaries, not payloads).
-    /// </summary>
-    internal const int MaxGateOutcomeMessageChars = 2_000;
-
-    /// <summary>
-    /// Builds the honest gate-resolution transcript message (G-P3 UAT round-2
-    /// R2-A/R2-C, 2026-07-07). Success carries the executed summary (+ a clickable
-    /// markdown record link when the handler reported the created/updated record —
-    /// R4-3, 2026-07-07 — and the ledger key when present); failure states EXPLICITLY
-    /// that nothing was created or modified — the exact counter-copy to the round-2
-    /// fabrication pattern. The success detail SHOULD be the handler's USER-facing
-    /// outcome sentence (R4-6): this message renders verbatim in the operator's
-    /// transcript, so instruction-to-model text must never reach it.
-    /// </summary>
-    internal static string BuildGateOutcomeMessage(
-        bool success, string actionName, string? detail, string? ledgerKey, string? recordUrl = null)
-    {
-        var text = success
-            ? $"✅ Confirmed action '{actionName}' executed. {detail ?? "Completed."}" +
-              (recordUrl is null ? string.Empty : $" [Open record]({recordUrl})") +
-              (ledgerKey is null ? string.Empty : $" (ledger: {ledgerKey})")
-            : $"❌ Confirmed action '{actionName}' FAILED: {detail ?? "The confirmed action failed."} " +
-              "No record was created or modified by this confirmation.";
-
-        return text.Length <= MaxGateOutcomeMessageChars
-            ? text
-            : text[..MaxGateOutcomeMessageChars] + "…";
-    }
+    // Task 053 (FR-B-04): BuildGateOutcomeMessage + MaxGateOutcomeMessageChars (the gate-outcome
+    // transcript primitive) moved to ContextSliceProducers.GateOutcomeProducer — the single production
+    // home for this Memory.Conversation primitive. Persistence (PersistGateOutcomeMessageAsync below)
+    // stays here: it is session plumbing, not string production.
 
     /// <summary>
     /// Persists a gate-resolution outcome as an Assistant transcript message so

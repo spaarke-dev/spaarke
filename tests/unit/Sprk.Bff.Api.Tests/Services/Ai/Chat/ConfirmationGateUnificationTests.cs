@@ -251,65 +251,9 @@ public class ConfirmationGateUnificationTests
             PendingPlanManager.GateStatusDispatchFailed);
     }
 
-    [Fact]
-    public void BuildGateOutcomeMessage_Failure_StatesNothingWasCreated_AndCarriesTheRealError()
-    {
-        var text = Sprk.Bff.Api.Api.Ai.ChatEndpoints.BuildGateOutcomeMessage(
-            success: false,
-            actionName: "SYS-Dataverse Create Record",
-            detail: "Column 'sprk_assignedto': lookup objects require a 'recordId' GUID on the native transport.",
-            ledgerKey: null);
-
-        text.Should().StartWith("❌");
-        text.Should().Contain("FAILED");
-        text.Should().Contain("recordId",
-            because: "the handler's instructive error is the user's + next-turn model's correction signal");
-        text.Should().Contain("No record was created or modified",
-            because: "the exact counter-copy to the round-2 fabrication pattern");
-    }
-
-    [Fact]
-    public void BuildGateOutcomeMessage_Success_CarriesSummaryAndLedgerKey_AndCapsLength()
-    {
-        var ok = Sprk.Bff.Api.Api.Ai.ChatEndpoints.BuildGateOutcomeMessage(
-            success: true, actionName: "SYS-Dataverse Create Record",
-            detail: "Created record 651194cd-3670-f111-ab0e-70a8a590c51c in 'sprk_event'.",
-            ledgerKey: "loop@t3");
-        ok.Should().StartWith("✅");
-        ok.Should().Contain("loop@t3");
-
-        var longDetail = new string('x', 5_000);
-        var capped = Sprk.Bff.Api.Api.Ai.ChatEndpoints.BuildGateOutcomeMessage(
-            success: true, actionName: "A", detail: longDetail, ledgerKey: null);
-        capped.Length.Should().BeLessThanOrEqualTo(
-            Sprk.Bff.Api.Api.Ai.ChatEndpoints.MaxGateOutcomeMessageChars + 1,
-            because: "transcript messages must stay well inside the Dataverse sprk_content cap");
-    }
-
-    [Fact]
-    public void BuildGateOutcomeMessage_Success_WithRecordUrl_CarriesClickableMarkdownLink()
-    {
-        // G-P3 UAT round-4 R4-3 (2026-07-07): the ✅ transcript message must carry a
-        // CLICKABLE MDA deep link to the created record — durable across reloads
-        // (server-persisted) and the model's REAL link to relay instead of inventing
-        // one (round-4 saw a fabricated /WebResources/tables/… URL).
-        var url = "https://spaarkedev1.crm.dynamics.com/main.aspx?pagetype=entityrecord" +
-                  "&etn=sprk_matter&id=651194cd-3670-f111-ab0e-70a8a590c51c";
-        var text = Sprk.Bff.Api.Api.Ai.ChatEndpoints.BuildGateOutcomeMessage(
-            success: true, actionName: "SYS-Dataverse Create Record",
-            detail: "Record created in 'sprk_matter' (id 651194cd-3670-f111-ab0e-70a8a590c51c).",
-            ledgerKey: "loop@t3",
-            recordUrl: url);
-
-        text.Should().Contain($"[Open record]({url})",
-            because: "the transcript renders markdown — this is the clickable record link");
-        text.Should().Contain("loop@t3", because: "the ledger key still rides the message");
-
-        // Failure leg never carries a link — nothing exists to link to.
-        var failed = Sprk.Bff.Api.Api.Ai.ChatEndpoints.BuildGateOutcomeMessage(
-            success: false, actionName: "A", detail: "boom", ledgerKey: null, recordUrl: url);
-        failed.Should().NotContain("[Open record]");
-    }
+    // Task 053 (FR-B-04): the BuildGateOutcomeMessage producer tests moved to
+    // ContextSliceProducersTests (the gate-outcome string production moved to
+    // ContextSliceProducers.GateOutcomeProducer). The gate-RESOLUTION-FLOW tests stay here.
 
     [Fact]
     public void BuildGateDispatchFailedProblem_MapsTo422_WithStableErrorCodeAndDetail()

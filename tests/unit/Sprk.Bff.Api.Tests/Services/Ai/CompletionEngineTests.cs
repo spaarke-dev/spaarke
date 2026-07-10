@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.Json;
 using FluentAssertions;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -45,8 +46,56 @@ public class CompletionEngineTests
         chips.Should().HaveCount(2);
         chips[0].Label.Should().Be("Analyze the document");
         chips[0].ActionKind.Should().Be("invoke_capability", "a transition naming a target Binding invokes a capability");
+        chips[0].TargetBindingId.Should().Be("UC-A-2",
+            "an invoke_capability chip must carry the dispatchable target (task 062 — the Click path's dispatchConsumer(bindingId, args) needs it)");
         chips[1].Label.Should().Be("Open the library");
         chips[1].ActionKind.Should().Be("navigate", "a bare label with no target Binding is a navigation placeholder");
+        chips[1].TargetBindingId.Should().BeNull("a navigate placeholder declares no target Binding");
+    }
+
+    // ─── NEGATIVE (task 062, FR-A1-06): chips are never model-invented ────────────────────────
+
+    [Fact]
+    public void MapNextStepChips_TargetBindingId_IsAlwaysSourcedFromTheDeclaredTransition_NeverInvented()
+    {
+        // The ONLY input to this mapping is Binding.ChipTransitions (catalog data). There is no
+        // second parameter, no model output, and no fallback default a chip's TargetBindingId
+        // could otherwise derive from — a chip's target is either the exact declared transition
+        // value or null. This test pins that closed shape.
+        var binding = BuildBinding() with
+        {
+            ChipTransitions = new[]
+            {
+                new ChipTransition { ChipLabel = "Draft a reply", TargetBindingId = "UC-B-9" },
+                new ChipTransition { ChipLabel = "Open the library" }, // no TargetBindingId declared
+            },
+        };
+
+        var chips = CompletionEngine.MapNextStepChips(binding);
+
+        chips.Select(c => c.TargetBindingId).Should().Equal(new[] { "UC-B-9", null },
+            "every emitted TargetBindingId is either the exact declared transition value or null — " +
+            "nothing outside binding.ChipTransitions can reach the chip");
+    }
+
+    [Fact]
+    public void MapNextStepChips_DroppedTransition_NeverLeaksItsTargetBindingIdIntoAnotherChip()
+    {
+        // A transition dropped for having no label must not "donate" its TargetBindingId to a
+        // surviving chip — each chip's TargetBindingId maps 1:1 to its OWN source transition.
+        var binding = BuildBinding() with
+        {
+            ChipTransitions = new[]
+            {
+                new ChipTransition { ChipLabel = null, TargetBindingId = "UC-DROPPED" },
+                new ChipTransition { ChipLabel = "Keep me", TargetBindingId = "UC-KEPT" },
+            },
+        };
+
+        var chip = CompletionEngine.MapNextStepChips(binding).Should().ContainSingle().Subject;
+
+        chip.Label.Should().Be("Keep me");
+        chip.TargetBindingId.Should().Be("UC-KEPT");
     }
 
     [Fact]

@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Context;
@@ -39,6 +40,8 @@ public sealed class ContextBinder : IContextBinder
     private readonly IOrganizationalContextProvider _organizationalContextProvider;
     private readonly ICallerContactResolver _callerContactResolver;
     private readonly IHttpContextAccessor? _httpContextAccessor;
+    private readonly IMemoryItemStore? _memoryItemStore;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<ContextBinder> _logger;
 
     /// <summary>
@@ -76,18 +79,34 @@ public sealed class ContextBinder : IContextBinder
     /// null in background/pre-session binds and in most tests. <see cref="ContextBindingRequest.Caller"/>,
     /// when supplied, always takes precedence over the ambient <c>HttpContext.User</c>.
     /// </param>
+    /// <param name="memoryItemStore">
+    /// Record/User structured-memory store (task 050). Optional — when null (or a caller constructs
+    /// <see cref="ContextBinder"/> directly, e.g. existing tests) the Binder self-produces NO Memory
+    /// references from host context (the Memory slice stays empty). When present AND a host record is
+    /// supplied, the Binder reads the record's memory (task 053, FR-B-04) with a DEFENSE-IN-DEPTH
+    /// Dataverse-field-mirror filter; a store read failure soft-fails to empty items (bind never takes
+    /// down dispatch). Registered unconditionally (AiPersistenceModule) so DI injects it in production.
+    /// </param>
+    /// <param name="timeProvider">
+    /// Clock for the Workspace slice's environment-facts (current-date) production (task 053). Optional —
+    /// defaults to <see cref="TimeProvider.System"/>; tests inject a fake for a deterministic date slice.
+    /// </param>
     public ContextBinder(
         ChatSessionManager sessionManager,
         ILogger<ContextBinder> logger,
         IOrganizationalContextProvider? organizationalContextProvider = null,
         ICallerContactResolver? callerContactResolver = null,
-        IHttpContextAccessor? httpContextAccessor = null)
+        IHttpContextAccessor? httpContextAccessor = null,
+        IMemoryItemStore? memoryItemStore = null,
+        TimeProvider? timeProvider = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _organizationalContextProvider = organizationalContextProvider ?? new NullOrganizationalContextProvider();
         _callerContactResolver = callerContactResolver ?? NullCallerContactResolver.Instance;
         _httpContextAccessor = httpContextAccessor;
+        _memoryItemStore = memoryItemStore;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -345,12 +364,42 @@ public sealed class ContextBinder : IContextBinder
     private async Task<ContextEnvelope> AssembleEnvelopeAsync(
         ContextBindingRequest request, string? callerContactId, CancellationToken ct)
     {
+        // Task 053 self-production (FR-B-04): fold the six R1 primitives into the Binder. An EXPLICIT
+        // request fragment ALWAYS wins; otherwise the Binder produces the slice from the SAME
+        // ContextSliceProducers the interactive prompt-append sites use (one source, no dual path).
+        var hasHost = !string.IsNullOrWhiteSpace(request.HostEntityType)
+                      && !string.IsNullOrWhiteSpace(request.HostEntityId);
+
+        // Business: explicit fragment, else the host-identity block (id-only-or-provided-name shape;
+        // deterministic — no lazy name fetch here; the byte-pin is BusinessSliceDeterminismContractTests).
+        var businessFragment = request.BusinessFragment;
+        if (string.IsNullOrEmpty(businessFragment) && hasHost)
+        {
+            businessFragment = HostIdentityProducer.BuildEnrichmentBlock(
+                request.HostEntityType!, request.HostEntityId!, request.HostEntityName, request.HostPageTypeLabel);
+        }
+
+        // Workspace: explicit fragment, else ALWAYS the environment-facts (current-date) directive —
+        // environment facts exist every turn; day-granular, so byte-stable across turns within a UTC day.
+        var workspaceFragment = string.IsNullOrEmpty(request.WorkspaceFragment)
+            ? EnvironmentFactsProducer.BuildCurrentDateDirective(_timeProvider.GetUtcNow())
+            : request.WorkspaceFragment;
+
+        // Memory items: explicit references, else record memory from the store when a host + store are
+        // available. DEFENSE-IN-DEPTH mirror filter + soft-fail (store outage → empty, never fails bind).
+        var memoryItems = request.MemoryItems;
+        if (memoryItems is null && hasHost && _memoryItemStore is not null)
+        {
+            memoryItems = await ResolveRecordMemoryReferencesAsync(
+                request.HostEntityType!, request.HostEntityId!, ct).ConfigureAwait(false);
+        }
+
         var envelope = ContextEnvelopeReferenceProducer.Assemble(
             userFragment: request.UserFragment,
-            workspaceFragment: request.WorkspaceFragment,
-            businessFragment: request.BusinessFragment,
+            workspaceFragment: workspaceFragment,
+            businessFragment: businessFragment,
             conversation: request.ConversationTail,
-            memoryItems: request.MemoryItems,
+            memoryItems: memoryItems,
             callerContactId: callerContactId);
 
         // Organizational slice (task 060, FR-B-11): read through the inbound provider seam rather than
@@ -378,6 +427,65 @@ public sealed class ContextBinder : IContextBinder
                 ProviderImplemented = orgResult.ProviderImplemented,
             },
         };
+    }
+
+    // ── Record-memory references (task 053, FR-B-04): read the host record's structured memory and
+    //    project it as identifier-only MemoryItemReferences. DEFENSE-IN-DEPTH mirror filter excludes any
+    //    fact whose key mirrors a live Dataverse field (the Binder reads those directly), and a store
+    //    read failure soft-fails to empty — the Memory slice must never take down a bind/dispatch. ──────
+
+    private async Task<IReadOnlyList<MemoryItemReference>> ResolveRecordMemoryReferencesAsync(
+        string hostEntityType, string hostEntityId, CancellationToken ct)
+    {
+        try
+        {
+            var items = await _memoryItemStore!
+                .GetForRecordAsync(hostEntityType, hostEntityId, ct)
+                .ConfigureAwait(false);
+            if (items.Count == 0)
+            {
+                return Array.Empty<MemoryItemReference>();
+            }
+
+            var references = new List<MemoryItemReference>(items.Count);
+            foreach (var item in items)
+            {
+                // FR-B-04 NEGATIVE criterion: a stored fact that merely mirrors a live Dataverse field is
+                // EXCLUDED from the envelope (the Binder reads live fields directly — a mirror would be a
+                // stale duplicate). Excluded item logged by identifier only (NFR-07).
+                if (DataverseFieldMirrorGuard.IsDataverseFieldMirror(item.Fact))
+                {
+                    _logger.LogDebug(
+                        "ContextBinder: excluded record-memory item {ItemId} — its fact key mirrors a live " +
+                        "Dataverse field; the Binder reads those directly (FR-B-04).",
+                        item.Id);
+                    continue;
+                }
+
+                references.Add(new MemoryItemReference
+                {
+                    ItemId = item.Id,
+                    Scope = item.Scope,
+                    Source = item.Source,
+                });
+            }
+
+            return references;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Soft-fail (mirrors the interactive provider's AppendRecordMemoryAsync posture): a store outage
+            // degrades the Memory slice to empty; the bind proceeds. NFR-07 identifiers only.
+            _logger.LogWarning(ex,
+                "ContextBinder: record-memory store read failed for host {HostEntityType}/{HostEntityId} — " +
+                "Memory items degrade to empty (soft-fail; a bind/dispatch is never taken down by memory).",
+                hostEntityType, hostEntityId);
+            return Array.Empty<MemoryItemReference>();
+        }
     }
 
     // ── Fingerprint writer (task-038 dark seam → live; ADR-040 store-before-render; NFR-07) ──────

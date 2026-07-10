@@ -149,7 +149,7 @@ public class P2LoopInjectionEvalSuiteTests
         var namespaced = rows.Where(r => r.ToolId is not null).ToList();
 
         namespaced.Should().HaveCountGreaterOrEqualTo(12,
-            "the catalog carries 12 namespaced tool rows (6 dataverse.* + 3 text.* + 2 analysis.* at P2; + email.draft at P3 task 041)");
+            "the catalog carries ≥12 namespaced tool rows (6 dataverse.* + 3 text.* + 2 analysis.* at P2; + email.draft at P3 task 041; + memory.write at AIR2-057)");
         namespaced.Select(r => r.ToolId).Should().OnlyHaveUniqueItems(
             "sprk_toolid is the loop's LLM-facing function identity — duplicates would be ambiguous dispatch");
 
@@ -169,9 +169,17 @@ public class P2LoopInjectionEvalSuiteTests
         // executes immediately — the re-run only regenerates the session's own analysis
         // output; the gate stays for record-writes (dataverse.*). Its seed row now
         // declares Read, so the read/pure half below covers it.
+        //
+        // memory.write (AIR2-057, FR-B-08) declares Write so the ONE gate WRAPS it
+        // (RequiresConfirmation == true — the contract asserted here). It is nonetheless
+        // executed SILENTLY at runtime: the Confirmation Policy v2 engine reads the row's
+        // declared low-tier reversible riskProfile and resolves to Execute (no dialog). That
+        // engine decision is a SEPARATE concern from this gate-WRAPPING contract and is proven
+        // in MemoryWriteCaptureRecallEvalTests; here we only assert the declaration gates.
         var declaredWrites = new[]
         {
             "dataverse.create_record", "dataverse.update_record", "dataverse.delete_record",
+            "memory.write",
         };
         foreach (var toolId in declaredWrites)
         {
