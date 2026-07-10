@@ -657,3 +657,105 @@ describe('dispatchConsumer progressive section reveal pacing (task 039 / D-F5)',
     expect(events.some(e => e.event.type === 'section_started' || e.event.type === 'section_completed')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// suppressWorkspaceSectionBridge (spaarkeai-compose-r2 task 112, UAT-R3 defect
+// #3c): the Compose surface has no `workspace`-channel section-renderer
+// subscriber — publishing section events there was dead output, and awaiting
+// the paced reveal needlessly delayed the dispatch Promise for a renderer
+// nobody mounts. Additive + default-false: unset behaves exactly like every
+// pre-existing test above (their dispatchers never set the flag).
+// ---------------------------------------------------------------------------
+
+describe('dispatchConsumer suppressWorkspaceSectionBridge (task 112, Compose-surface scoping)', () => {
+  it('publishes ZERO workspace events for an object-shaped complete result when suppressed', async () => {
+    const { publish, events } = makePublishSpy();
+    const dispatchConsumer = createConsumerDispatcher({
+      bffBaseUrl: BFF_BASE,
+      getSessionId: () => SESSION_ID,
+      getAccessToken: async () => 'test-token',
+      publishPaneEvent: publish,
+      sectionRevealDelayMs: 0,
+      suppressWorkspaceSectionBridge: true,
+    });
+    mockFetch.mockResolvedValueOnce(
+      sseResponse([
+        JSON.stringify({
+          type: 'complete',
+          done: true,
+          result: { explanation: 'This clause caps liability.', keyConcepts: ['liability', 'cap'] },
+        }),
+      ])
+    );
+
+    const result = await dispatchConsumer(BINDING_ID, { streamId: 'compose-1' });
+
+    // The dispatch still resolves with the terminal result (the injection seam
+    // depends on this) — only the workspace-channel side effects are suppressed.
+    expect(result.status).toBe('complete');
+    expect(result.result).toEqual({ explanation: 'This clause caps liability.', keyConcepts: ['liability', 'cap'] });
+    expect(events).toHaveLength(0);
+  });
+
+  it('does NOT publish widget_load / streaming_started for a workspaceTarget dispatch when suppressed', async () => {
+    const { publish, events } = makePublishSpy();
+    const dispatchConsumer = createConsumerDispatcher({
+      bffBaseUrl: BFF_BASE,
+      getSessionId: () => SESSION_ID,
+      getAccessToken: async () => 'test-token',
+      publishPaneEvent: publish,
+      suppressWorkspaceSectionBridge: true,
+    });
+    mockFetch.mockResolvedValueOnce(sseResponse(['{"type":"complete","done":true}']));
+
+    await dispatchConsumer(BINDING_ID, {
+      streamId: 'compose-2',
+      workspaceTarget: { widgetType: 'structured-output-stream' },
+    });
+
+    expect(events).toHaveLength(0);
+  });
+
+  it('publishes ZERO workspace events on an error/declined terminal when suppressed', async () => {
+    const { publish, events } = makePublishSpy();
+    const dispatchConsumer = createConsumerDispatcher({
+      bffBaseUrl: BFF_BASE,
+      getSessionId: () => SESSION_ID,
+      getAccessToken: async () => 'test-token',
+      publishPaneEvent: publish,
+      suppressWorkspaceSectionBridge: true,
+    });
+    mockFetch.mockResolvedValueOnce(sseResponse(['{"type":"error","error":"boom","done":true}']));
+
+    await expect(dispatchConsumer(BINDING_ID, { streamId: 'compose-3' })).rejects.toThrow(/stream reported an error/);
+    expect(events).toHaveLength(0);
+  });
+
+  it('regression: leaving the flag unset preserves the pre-task-112 section-bridge behavior', async () => {
+    const { publish, events } = makePublishSpy();
+    const dispatchConsumer = createConsumerDispatcher({
+      bffBaseUrl: BFF_BASE,
+      getSessionId: () => SESSION_ID,
+      getAccessToken: async () => 'test-token',
+      publishPaneEvent: publish,
+      sectionRevealDelayMs: 0,
+      // suppressWorkspaceSectionBridge intentionally omitted — default false.
+    });
+    mockFetch.mockResolvedValueOnce(
+      sseResponse([
+        JSON.stringify({ type: 'complete', done: true, result: { tldr: 'Short version', keywords: ['a'] } }),
+      ])
+    );
+
+    await dispatchConsumer(BINDING_ID, { streamId: 'chip-1' });
+
+    expect(events.map(e => e.event.type)).toEqual([
+      'streaming_started',
+      'section_started',
+      'section_completed',
+      'section_started',
+      'section_completed',
+      'streaming_complete',
+    ]);
+  });
+});

@@ -3,17 +3,26 @@
  *
  * Renders a persistent Fluent v9 Toolbar above the TipTap editor with the
  * block-level controls users cannot access via selection-only UI (headings,
- * lists, blockquote, alignment, undo/redo).
+ * lists, blockquote, alignment, undo/redo) PLUS the inline character-format
+ * controls (bold / italic / underline / strikethrough / link).
  *
- * Inline controls (Bold / Italic / Underline / Strike / Link) live in a
- * TipTap BubbleMenu overlayed on the selection — see ComposeEditor.tsx.
+ * TASK 111 (UAT-R2, 2026-07-10): the inline character-format controls
+ * (Bold / Italic / Underline / Strikethrough / Link) were RELOCATED here from
+ * the TipTap selection BubbleMenu (owner decision — the BubbleMenu is now
+ * AI-actions ONLY; see ComposeEditor.tsx). They are always-visible top-toolbar
+ * controls now, grouped after the align controls behind a `ToolbarDivider`.
+ * The active-state highlighting (`isActive('bold')` etc.) and the Link
+ * add/edit `window.prompt` flow are preserved byte-for-byte from the former
+ * BubbleMenu implementation — no formatting capability was lost, only relocated.
  *
  * Extensions consumed here MUST match the LOCKED_EXTENSIONS list in
- * ComposeEditor.tsx (StarterKit headings 1–3 subset, BulletList, OrderedList,
- * Blockquote, TextAlign, History). Adding a button here without loading the
- * corresponding extension will make TipTap silently ignore the command.
+ * ComposeEditor.tsx (StarterKit headings 1–3 subset + Bold/Italic/Strike,
+ * BulletList, OrderedList, Blockquote, TextAlign, History; Underline + Link
+ * are the additive `@tiptap/extension-underline` / `@tiptap/extension-link`).
+ * Adding a button here without loading the corresponding extension will make
+ * TipTap silently ignore the command.
  *
- * @see ComposeEditor.tsx (host + BubbleMenu wiring)
+ * @see ComposeEditor.tsx (host + AI-only BubbleMenu wiring)
  */
 
 import * as React from 'react';
@@ -32,6 +41,12 @@ import {
   Button,
 } from '@fluentui/react-components';
 import {
+  TextBold24Regular,
+  TextItalic24Regular,
+  TextUnderline24Regular,
+  TextStrikethrough24Regular,
+  Link24Regular,
+  LinkDismiss24Regular,
   TextBulletListLtr24Regular,
   TextNumberListLtr24Regular,
   TextQuote24Regular,
@@ -112,6 +127,27 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     } else {
       chain.toggleHeading({ level }).run();
     }
+  };
+
+  // Task 111 — Link add/edit handler, relocated verbatim from the former
+  // BubbleMenu implementation (ComposeEditor.tsx `toggleLink`): prompts for a
+  // URL and applies it as a link mark to the current selection; removing an
+  // existing link uses the same button when a link is already active.
+  const toggleLink = (): void => {
+    if (controlDisabled) return;
+    if (editor.isActive('link')) {
+      editor.chain().focus().unsetLink().run();
+      return;
+    }
+    const previousUrl = editor.getAttributes('link').href as string | undefined;
+    // eslint-disable-next-line no-alert
+    const url = window.prompt('Enter URL', previousUrl ?? 'https://');
+    if (url === null) return; // cancelled
+    if (url.trim() === '') {
+      editor.chain().focus().unsetLink().run();
+      return;
+    }
+    editor.chain().focus().extendMarkRange('link').setLink({ href: url.trim() }).run();
   };
 
   return (
@@ -207,6 +243,64 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         disabled={controlDisabled}
         onClick={() => editor.chain().focus().setTextAlign('right').run()}
         data-testid="compose-format-align-right"
+      />
+
+      <ToolbarDivider />
+
+      {/* ===================================================================
+          INLINE CHARACTER-FORMAT GROUP — task 111 (UAT-R2). Relocated from the
+          selection BubbleMenu (now AI-only). Active-state highlight + Link
+          add/edit `window.prompt` flow preserved verbatim from the former
+          BubbleMenu impl. See file header "TASK 111".
+          =================================================================== */}
+      <ToolbarButton
+        appearance={editor.isActive('bold') ? 'primary' : 'subtle'}
+        icon={<TextBold24Regular />}
+        aria-label="Bold"
+        aria-pressed={editor.isActive('bold')}
+        disabled={controlDisabled}
+        onClick={() => editor.chain().focus().toggleBold().run()}
+        data-testid="compose-format-bold"
+      />
+
+      <ToolbarButton
+        appearance={editor.isActive('italic') ? 'primary' : 'subtle'}
+        icon={<TextItalic24Regular />}
+        aria-label="Italic"
+        aria-pressed={editor.isActive('italic')}
+        disabled={controlDisabled}
+        onClick={() => editor.chain().focus().toggleItalic().run()}
+        data-testid="compose-format-italic"
+      />
+
+      <ToolbarButton
+        appearance={editor.isActive('underline') ? 'primary' : 'subtle'}
+        icon={<TextUnderline24Regular />}
+        aria-label="Underline"
+        aria-pressed={editor.isActive('underline')}
+        disabled={controlDisabled}
+        onClick={() => editor.chain().focus().toggleUnderline().run()}
+        data-testid="compose-format-underline"
+      />
+
+      <ToolbarButton
+        appearance={editor.isActive('strike') ? 'primary' : 'subtle'}
+        icon={<TextStrikethrough24Regular />}
+        aria-label="Strikethrough"
+        aria-pressed={editor.isActive('strike')}
+        disabled={controlDisabled}
+        onClick={() => editor.chain().focus().toggleStrike().run()}
+        data-testid="compose-format-strike"
+      />
+
+      <ToolbarButton
+        appearance={editor.isActive('link') ? 'primary' : 'subtle'}
+        icon={editor.isActive('link') ? <LinkDismiss24Regular /> : <Link24Regular />}
+        aria-label={editor.isActive('link') ? 'Remove link' : 'Add link'}
+        aria-pressed={editor.isActive('link')}
+        disabled={controlDisabled}
+        onClick={toggleLink}
+        data-testid="compose-format-link"
       />
 
       <ToolbarDivider />

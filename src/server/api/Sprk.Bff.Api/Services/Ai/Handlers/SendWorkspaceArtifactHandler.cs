@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Models.Workspace;
+using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Workspace;
@@ -106,11 +108,22 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     /// </summary>
     internal static readonly TimeSpan WorkspaceTabAckTimeout = TimeSpan.FromSeconds(8);
 
+    /// <summary>
+    /// Default workspace layout used when the tool call targets a Compose open without an
+    /// explicit layout (R5 / UAT defects 6/7). The handler is chat-only and Compose is its
+    /// flagship layout; defaulting a missing layout to this is strictly better than the prior
+    /// hard-error that forced the model to synthesize a layout id. This is a PARAMETER default
+    /// (not an intent-detection mechanism — ADR-039 §MUST NOT): it never selects a capability
+    /// or routes dispatch, it just fills a missing tool argument.
+    /// </summary>
+    internal const string DefaultComposeLayoutName = "Compose";
+
     private readonly IGuidProvider _guidProvider;
     private readonly TimeProvider _timeProvider;
     private readonly WorkspaceLayoutService _layoutService;
     private readonly IDataverseUserClient _dataverse;
     private readonly IUiActionAckCoordinator _ackCoordinator;
+    private readonly ChatSessionManager _sessionManager;
     private readonly ILogger<SendWorkspaceArtifactHandler> _logger;
 
     public SendWorkspaceArtifactHandler(
@@ -119,6 +132,7 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
         WorkspaceLayoutService layoutService,
         IDataverseUserClient dataverse,
         IUiActionAckCoordinator ackCoordinator,
+        ChatSessionManager sessionManager,
         ILogger<SendWorkspaceArtifactHandler> logger)
     {
         _guidProvider = guidProvider ?? throw new ArgumentNullException(nameof(guidProvider));
@@ -131,6 +145,11 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
         // D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): gates this tool's success
         // on a client ack referencing the emitted frame id (see ExecuteOpenWorkspaceTabAsync).
         _ackCoordinator = ackCoordinator ?? throw new ArgumentNullException(nameof(ackCoordinator));
+        // task 113 (UAT defect 5): reads the session-scoped ActiveDocument to resolve the Compose
+        // mount target when the LLM supplies no explicit current pointer — so "edit in Compose"
+        // mounts the just-uploaded file, not a stale stored one. AI-internal→AI-internal injection
+        // (both under Services/Ai) — ADR-013 compliant; ADR-010 concrete-injection.
+        _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -244,21 +263,15 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                     $"'widgetData.kind' ('{kindProp.GetString()}') must equal 'widgetType' ('{widgetType}').");
             }
 
-            // Workspace layout tabs (R2-D): the payload must name the layout to open.
+            // Workspace layout tabs (R2-D): the payload MAY name the layout to open.
             if (string.Equals(widgetType, "Workspace", StringComparison.Ordinal))
             {
-                var hasLayoutName = dataProp.TryGetProperty("layoutName", out var lnProp) &&
-                                    lnProp.ValueKind == JsonValueKind.String &&
-                                    !string.IsNullOrWhiteSpace(lnProp.GetString());
-                var hasLayoutId = dataProp.TryGetProperty("layoutId", out var liProp) &&
-                                  liProp.ValueKind == JsonValueKind.String &&
-                                  Guid.TryParse(liProp.GetString(), out _);
-                if (!hasLayoutName && !hasLayoutId)
-                {
-                    return ToolValidationResult.Failure(
-                        "'widgetData' for widgetType 'Workspace' must include 'layoutName' (the layout's " +
-                        "display name, e.g. 'Compose') or 'layoutId' (a GUID).");
-                }
+                // R5 (task 113 / UAT defects 6/7): layoutName/layoutId are NO LONGER required.
+                // When neither is supplied the execute path defaults to the 'Compose' layout
+                // (ExecuteOpenWorkspaceTabAsync), so a literal-following model never has to
+                // synthesize a layout id for "open/edit in compose". This is a parameter default,
+                // not a new intent-detection mechanism (ADR-039). The optional documentId /
+                // sessionFileId checks below still apply.
 
                 // R4-2 (2026-07-07): optional STORED-document pre-seed pointer — a real
                 // sprk_document GUID resolved server-side to its SPE drive-item.
@@ -440,14 +453,44 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 Timed());
         }
 
+        // ── task 113 (UAT defect 5): resolve the Compose mount target from the session-scoped
+        // ACTIVE-DOCUMENT when the LLM supplied NO explicit current pointer ───────────────────
+        // "edit in Compose" after a fresh upload must mount THAT upload, not a stale stored doc.
+        // An explicit documentId/sessionFileId from the model always wins (the stored-document
+        // "open this specific doc" override) — we only consult the active document when BOTH are
+        // absent. Deterministic session-state read (not intent detection — ADR-039).
+        if (documentId == Guid.Empty && sessionFileId is null)
+        {
+            var active = await ResolveActiveDocumentAsync(context, cancellationToken).ConfigureAwait(false);
+            if (active is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(active.SessionFileId))
+                {
+                    sessionFileId = active.SessionFileId;
+                    _logger.LogInformation(
+                        "SendWorkspaceArtifactHandler ({Correlation}) resolved Compose mount from active document — source={Source} kind=session-upload",
+                        correlationLogId, active.Source);
+                }
+                else if (!string.IsNullOrWhiteSpace(active.SprkDocumentId) &&
+                         Guid.TryParse(active.SprkDocumentId, out var activeDocGuid))
+                {
+                    documentId = activeDocGuid;
+                    _logger.LogInformation(
+                        "SendWorkspaceArtifactHandler ({Correlation}) resolved Compose mount from active document — source={Source} kind=stored",
+                        correlationLogId, active.Source);
+                }
+            }
+        }
+
+        // R5 (task 113 / UAT defects 6/7): default a missing layout to 'Compose' rather than
+        // erroring, so a literal-following model never has to synthesize a layout id for
+        // "open/edit in compose". Parameter default, not intent detection (ADR-039).
         if (layoutId == Guid.Empty && string.IsNullOrWhiteSpace(layoutName))
         {
-            stopwatch.Stop();
-            return ToolResult.Error(
-                HandlerId, tool.Id, tool.Name,
-                "widgetData for widgetType 'Workspace' must include 'layoutName' (e.g. 'Compose') or a 'layoutId' GUID.",
-                ToolErrorCodes.ValidationFailed,
-                Timed());
+            layoutName = DefaultComposeLayoutName;
+            _logger.LogInformation(
+                "SendWorkspaceArtifactHandler ({Correlation}) no layout supplied — defaulting to '{Layout}' (R5 / UAT defects 6/7).",
+                correlationLogId, DefaultComposeLayoutName);
         }
 
         try
@@ -651,6 +694,60 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 ToolErrorCodes.InternalError,
                 Timed());
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Active-document resolution (task 113 / UAT defect 5)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Loads the chat session for this invocation and returns its session-scoped
+    /// <see cref="ActiveDocumentIdentity"/> (or null when the session/identity is absent).
+    /// Probes the session id in "N" form first (the canonical <c>ChatSessionManager</c> key —
+    /// <c>Guid.ToString("N")</c>) then "D", mirroring the Compose upload path's tolerance for
+    /// either spelling. Fail-soft: any lookup error degrades to null (the handler then behaves
+    /// exactly as it did before — the model's explicit pointer or an honest empty open).
+    /// </summary>
+    private async Task<ActiveDocumentIdentity?> ResolveActiveDocumentAsync(
+        ChatInvocationContext context,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(context.TenantId))
+        {
+            return null;
+        }
+
+        try
+        {
+            foreach (var sessionIdForm in new[]
+                     {
+                         context.ChatSessionId.ToString("N"),
+                         context.ChatSessionId.ToString("D"),
+                     })
+            {
+                var session = await _sessionManager
+                    .GetSessionAsync(context.TenantId, sessionIdForm, cancellationToken)
+                    .ConfigureAwait(false);
+                if (session?.ActiveDocument is { } active)
+                {
+                    return active;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Fail-soft (ADR-015: identifiers only) — never let an active-document lookup
+            // failure break the tab-open; the model's explicit pointer / empty open still works.
+            _logger.LogWarning(ex,
+                "SendWorkspaceArtifactHandler active-document resolution failed for session={Session} — degrading to no active document.",
+                context.ChatSessionId);
+        }
+
+        return null;
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

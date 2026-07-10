@@ -262,8 +262,9 @@ public class ComposeService : IComposeService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.SessionId))
-            throw new ArgumentException("SessionId is required for first-Save promotion rebind.", nameof(request));
+        // SessionId is OPTIONAL (task 110): the Browse/local-file first Save legitimately has no
+        // chat session. The FR-07 rebind this would drive is skipped below when SessionId is
+        // absent (empty/whitespace). TenantId + Content remain hard preconditions.
         if (string.IsNullOrWhiteSpace(request.TenantId))
             throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
         if (request.Content.IsEmpty)
@@ -428,8 +429,8 @@ public class ComposeService : IComposeService
     {
         if (string.IsNullOrWhiteSpace(request.DocumentSpeId))
             throw new ArgumentException("DocumentSpeId (drive-item id) is required.", nameof(request));
-        if (string.IsNullOrWhiteSpace(request.SessionId))
-            throw new ArgumentException("SessionId is required for the ephemeral→promoted rebind.", nameof(request));
+        // SessionId is OPTIONAL (task 110): the ephemeral→promoted rebind is skipped when no
+        // session is bound (transient Browse/local-file first Save). See the conditional rebinds below.
         if (string.IsNullOrWhiteSpace(request.TenantId))
             throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
 
@@ -443,13 +444,19 @@ public class ComposeService : IComposeService
                 "Compose promote: existing sprk_document {DocumentRecordId} found for driveItem={DocumentSpeId} — idempotent no-op",
                 existingId.Value, request.DocumentSpeId);
 
-            await RebindSessionDocumentIdAsync(
-                    tenantId: request.TenantId,
-                    sessionId: request.SessionId,
-                    currentDocumentId: request.DocumentSpeId,
-                    newDocumentId: existingId.Value.ToString(),
-                    cancellationToken)
-                .ConfigureAwait(false);
+            // FR-07 rebind is OPTIONAL (task 110): skip entirely when no session is bound
+            // (transient Browse/local-file first Save). RebindSessionDocumentIdAsync is already
+            // null-tolerant, but skipping avoids an empty-session lookup + a misleading warn.
+            if (!string.IsNullOrWhiteSpace(request.SessionId))
+            {
+                await RebindSessionDocumentIdAsync(
+                        tenantId: request.TenantId,
+                        sessionId: request.SessionId,
+                        currentDocumentId: request.DocumentSpeId,
+                        newDocumentId: existingId.Value.ToString(),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             return new PromoteComposeDocumentResult
             {
@@ -500,13 +507,18 @@ public class ComposeService : IComposeService
         }
 
         // 3) Rebind the ChatSession DocumentId from SPE id → new sprk_documentid (FR-07).
-        await RebindSessionDocumentIdAsync(
-                tenantId: request.TenantId,
-                sessionId: request.SessionId,
-                currentDocumentId: request.DocumentSpeId,
-                newDocumentId: newId.ToString(),
-                cancellationToken)
-            .ConfigureAwait(false);
+        //    OPTIONAL (task 110): skip when no session is bound (transient Browse/local-file
+        //    first Save). The sprk_document create above already completed without a session.
+        if (!string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            await RebindSessionDocumentIdAsync(
+                    tenantId: request.TenantId,
+                    sessionId: request.SessionId,
+                    currentDocumentId: request.DocumentSpeId,
+                    newDocumentId: newId.ToString(),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         return new PromoteComposeDocumentResult
         {

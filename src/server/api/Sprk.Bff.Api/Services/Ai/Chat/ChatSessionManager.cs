@@ -550,7 +550,12 @@ public class ChatSessionManager
             // directly (see StoredSession remarks). Action history is NOT stored — it projects over
             // Outputs (above), which already round-trip.
             AnchoredAnnotations = session.AnchoredAnnotations?.ToList() ?? [],
-            DefinedTermsTracking = session.DefinedTermsTracking?.ToList() ?? []
+            DefinedTermsTracking = session.DefinedTermsTracking?.ToList() ?? [],
+
+            // R2 session-scoped active-document pointer (task 113): carry it through the warm tier
+            // so a Redis eviction / cold restore does not silently drop the active document (the
+            // ADR-040 document-reference-survival MUST — the same P2 class this mapper documents).
+            ActiveDocument = session.ActiveDocument
         };
     }
 
@@ -625,7 +630,12 @@ public class ChatSessionManager
                 : null,
             DefinedTermsTracking = stored.DefinedTermsTracking is { Count: > 0 }
                 ? stored.DefinedTermsTracking
-                : null
+                : null,
+
+            // R2 session-scoped active-document pointer (task 113) — restore from the warm tier
+            // (null when the Cosmos document pre-dates the field). Matches the sibling collections'
+            // convention: absent → null ("no active document yet").
+            ActiveDocument = stored.ActiveDocument
         };
     }
 }
