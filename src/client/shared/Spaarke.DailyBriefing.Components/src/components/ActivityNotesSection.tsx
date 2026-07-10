@@ -88,6 +88,9 @@ interface ChannelNarrativeBullet {
   primaryEntityType: string;
   primaryEntityId: string;
   primaryEntityName: string;
+  /** R5 richer-rows (2026-07-09): record description + qualifying date (source ModifiedOn). */
+  description?: string;
+  date?: string;
 }
 
 /** Shape of a channel narrative group. */
@@ -262,6 +265,8 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
                 primaryEntityId={bullet.primaryEntityId}
                 itemIds={bullet.itemIds}
                 dueStatus={bullet.dueStatus}
+                description={bullet.description}
+                date={bullet.date}
                 onAddToTodo={onAddToTodo}
                 onDismiss={onDismiss}
                 isTodoCreated={isTodoCreated(firstItemId)}

@@ -129,6 +129,19 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
+  // R5 richer-rows: record description under the title, truncated to 2 lines.
+  description: {
+    color: tokens.colorNeutralForeground2,
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical' as const,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  // R5 richer-rows: subtle "Updated {date}" caption — the qualifying-date signal.
+  dateCaption: {
+    color: tokens.colorNeutralForeground3,
+  },
   metaRow: {
     display: 'flex',
     alignItems: 'center',
@@ -209,6 +222,16 @@ export interface NarrativeBulletProps {
    * "Tasks" section. Derived from the item's due date, never from LLM text.
    */
   dueStatus?: 'Overdue' | 'DueToday' | 'DueSoon';
+  /**
+   * R5 richer-rows (2026-07-09): the record's own description/subject, shown truncated
+   * beneath the title. Deterministic source field; omitted/empty → not rendered.
+   */
+  description?: string;
+  /**
+   * R5 richer-rows (2026-07-09): ISO 8601 date that qualified this record for the briefing
+   * (source ModifiedOn), shown as an "Updated {date}" caption. Omitted/empty → not rendered.
+   */
+  date?: string;
   /** Callback to add the covered notifications to To Do. */
   onAddToTodo: (itemIds: string[]) => void;
   /** Callback to dismiss the covered notifications. */
@@ -285,6 +308,8 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   primaryEntityId,
   itemIds,
   dueStatus,
+  description,
+  date,
   onAddToTodo,
   onDismiss,
   isTodoCreated,
@@ -334,6 +359,21 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
         : dueStatus === 'DueSoon'
           ? { label: 'Due soon', color: 'informative' as const }
           : null;
+
+  // R5 richer-rows (2026-07-09): render the record's description + an "Updated {date}"
+  // caption (the qualifying date). Both are deterministic source fields.
+  const trimmedDescription = description?.trim() ?? '';
+  const hasDescription = trimmedDescription.length > 0;
+  const formattedUpdated = ((): string | null => {
+    if (!date) return null;
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return null;
+    try {
+      return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(d);
+    } catch {
+      return null;
+    }
+  })();
 
   // Resolve the Xrm globals once (used by both the inline regarding-name link
   // and the fallback "Open record" overflow-menu handler).
@@ -450,8 +490,14 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
           onOpenRecord={onOpenRecord}
           textSize={300}
         />
-        {/* Meta line: status pill (Tasks) or due-date pill + (non-inlined) regarding link. */}
-        {(statusBadge || singleItemDueDate || (hasRegardingTarget && !isRegardingInlined)) && (
+        {/* R5 richer-rows: the record's own description, truncated to 2 lines. */}
+        {hasDescription && (
+          <Text size={200} className={styles.description}>
+            {trimmedDescription}
+          </Text>
+        )}
+        {/* Meta line: status pill (Tasks) or due-date pill + "Updated {date}" + (non-inlined) regarding link. */}
+        {(statusBadge || singleItemDueDate || formattedUpdated || (hasRegardingTarget && !isRegardingInlined)) && (
           <div className={styles.metaRow}>
             {statusBadge && (
               <Badge appearance="tint" color={statusBadge.color} size="small">
@@ -462,6 +508,11 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
               <Badge appearance="tint" color={isSingleItemOverdue ? 'danger' : 'informative'} size="small">
                 {singleItemDueDate}
               </Badge>
+            )}
+            {formattedUpdated && (
+              <Text size={200} className={styles.dateCaption}>
+                Updated {formattedUpdated}
+              </Text>
             )}
             {hasRegardingTarget && !isRegardingInlined && (
               <Text

@@ -183,6 +183,16 @@ export interface NarrativeBulletResult {
   primaryEntityType: string;
   primaryEntityId: string;
   primaryEntityName: string;
+  /**
+   * R5 richer-rows (2026-07-09): the record's own description/subject (deterministic source
+   * `Body`). Rendered truncated beneath the title. Optional for backward compatibility.
+   */
+  description?: string;
+  /**
+   * R5 richer-rows (2026-07-09): ISO 8601 date that qualified this record for the briefing
+   * (source ModifiedOn). Rendered as an "Updated {date}" caption. Optional.
+   */
+  date?: string;
 }
 
 /**
