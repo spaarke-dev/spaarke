@@ -40,13 +40,13 @@
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
+using Moq;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
-using Moq;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
