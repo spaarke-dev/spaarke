@@ -27,7 +27,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 013 | FR-05 create-on-save pipeline — extend PromoteIfEphemeralAsync (container/record/index; profile→core) | 1 Entry | 🟢 | none | ✅ | FULL | opus | xhigh |
 | 014 | FR-05 optional parent-association prompt (Tier 2c dialog integration) | 1 Entry | 🟡 | 013 | ✅ | FULL | sonnet | high |
 | 015 | FR-06a upload fidelity branch (original-if-unedited) | 1 Entry | 🟢 | 013 | 🔲 | FULL | sonnet | high |
-| 016 | FR-04 draft-into-editor via compose disposition | 1 Entry | 🟢 | 000 | 🔲 | FULL | opus | high |
+| 016 | FR-04 draft-into-editor via compose disposition | 1 Entry | 🟢 | 000 | ✅ | FULL | opus | high |
 | 017 | Deploy — BFF + SpaarkeAi (entry paths) + verify 1a/1b/1c mount | 1 Entry | 🟢 | 010,011,012,013,015 | 🔲 | STANDARD | sonnet | high |
 | 020 | FR-19 IComposeEditValidator + POST /edit-batch/validate | 2 LLM | 🟢 | 002 | ✅ | FULL | sonnet | xhigh |
 | 021 | FR-20 ComposeEditBatch (4-phase pipeline) | 2 LLM | 🟢 | 003 | ✅ | FULL | sonnet | high |

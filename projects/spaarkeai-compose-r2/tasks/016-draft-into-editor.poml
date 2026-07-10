@@ -2,7 +2,7 @@
   <metadata>
     <title>FR-04 draft-into-editor via compose disposition</title>
     <phase>1 Entry</phase>
-    <status>blocked</status>
+    <status>completed</status>
     <estimated-hours>16</estimated-hours>
     <effort>high</effort>
     <dependencies>000</dependencies>
@@ -108,4 +108,29 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    COMPLETED 2026-07-09 (E2E re-verify pass, post-E-20). The BFF + frontend legs shipped 2026-07-08/09;
+    this pass CLEARED THE FALSE-GREEN by proving the compose disposition dispatches end-to-end through the
+    REAL SessionDispatchOrchestrator now that E-20's DispositionRoutability admits Compose (Routable=true;
+    admit-gate at SessionDispatchOrchestrator.cs:244 derives admission from the registry). Before E-20 the
+    admit-gate 422'd Compose ("routable-but-unadmitted"), so the unit/router tests were green while the
+    seam was broken.
+
+    Proof (24/24 green, no code change this pass):
+    - tests/integration/seam/Ai/DispositionRoutabilitySeamTests.DispatchAsync_ComposeDisposition_Admits_Routes_Stores_AndRenders
+      — REAL orchestrator/binder/runner/router (only LLM + catalog boundaries doubled): admit (no error frame)
+      → route (pass-through) → store (ledger "compose") → render (terminal complete). This IS the E2E proof.
+    - tests/integration/contract/Api/Ai/ComposeDispositionContractTests — locks ComposeDisposition v1 frame
+      shape (ledger_ref not payload; store-before-render; supersession round-trip).
+    - ComposeDraftDispositionTests — FR-04 ledger-first consumer (BuildDraftOutput/BuildFrame/MaterializeDraft/
+      ResolveCurrent; provenance {bindingId}@t{n}; fail-loud on truncation/absent-store).
+    Frontend materialization-from-ledger_ref wired in usePendingRedline.ts + compose-contracts.ts (shipped leg).
+
+    Acceptance criteria: all 6 met. No publish-size/CVE delta (verification only). Step 9.5 gates N/A (no files modified).
+    Downstream: this same admit-gate carries 033 (pending-redline) and 042 (draft-alternative) — their prior
+    false-green is cleared by the same E-20 landing (one admit-gate, one OutputRouter compose leg). NEXT real
+    work: 046 (dispatch wiring), 034 (undo/replace), 047 (deploy compose Binding row), 084 (seam test —
+    largely satisfied by DispositionRoutabilitySeamTests; confirm scope), 082 (flagship, live env).
+  </notes>
 </task>
