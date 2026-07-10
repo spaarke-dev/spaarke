@@ -73,7 +73,13 @@ jobs:
   build-test:
     name: Build & Test
     runs-on: windows-latest
-    continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
+    # 2026-07-10 (redesign-r2 audit F-5 completion): job-level continue-on-error
+    # REMOVED. The 2026-06-24 "informational-only" posture predated the two-pass
+    # classifier + reliability registry and silently swallowed the classifier's
+    # verdict (a failed job still produced a green run — observed live on master
+    # run 29126132011). The full solution is 0-failures as of ef5d098b4; genuine
+    # timing flakes belong in tests/.reliability-registry.json, not in a
+    # job-level swallow.
     strategy:
       # When one matrix configuration fails (e.g., a flaky timing test in
       # Release), the default fail-fast=true cancels the sibling Debug job
