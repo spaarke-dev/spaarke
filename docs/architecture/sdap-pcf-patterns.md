@@ -42,6 +42,8 @@ The key architectural decision was ADR-006: **field-bound controls on a Datavers
 | UpdateRelatedButton | `src/client/pcf/UpdateRelatedButton/` | Triggers BFF API field mapping rules on related records | StandardControl (ReactDOM.render) |
 | SpaarkeGridCustomizer | `src/client/pcf/SpaarkeGridCustomizer/` | Custom cell renderers for Power Apps Grid Control (regarding links) | PAOneGridCustomizer |
 
+> ⛔ **Orphaned controls — do not maintain:** `AssociationResolver`, `DueDatesWidget`, `EventAutoAssociate`, `EventFormController`, `FieldMappingAdmin` (+ `EventCalendarFilter`, `RegardingLink`) are deployed-but-orphaned in `spaarkedev1` and approved for removal. Do not build/redeploy/update or re-investigate them. Authoritative determination: [`client-resources-inventory.md` §0](client-resources-inventory.md#0-orphaned-pcf-controls--do-not-maintain-authoritative-2026-07-10).
+
 ### Visualization & Layout Controls
 
 | Control | Path | Purpose | React API |

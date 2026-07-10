@@ -1,7 +1,27 @@
 # Client Resources Inventory — Definitive Reference
 
-> **Last Updated**: 2026-05-19 (added Dataverse-verified usage data)
+> **Last Updated**: 2026-07-10 (added §0 orphaned-PCF determination — supersedes scattered "verify usage" rows below for those controls)
 > **Purpose**: Single source of truth for "what client-side components do we have, what's their status, when were they last updated, and ARE THEY ACTUALLY USED on forms?"
+
+---
+
+## 0. Orphaned PCF Controls — ⛔ DO NOT MAINTAIN (authoritative, 2026-07-10)
+
+**These controls are dead weight. Do NOT build, redeploy, version-bump, update, review, or re-investigate "what is this for" — the determination is final and recorded here.** They remain **deployed in `spaarkedev1`** (confirmed by live `customcontrol` query 2026-07-10) only because the vetted deletion session never ran — see "Deletion status" below. Where a row below (§1.2, §2.x, §5) still shows these as "verify usage" / "safe to delete folder", **this section supersedes it.**
+
+| Control (`sprk_Spaarke.Controls.*`) | Ver | What it does (settled — do not re-ask) | Why it's orphaned | Source in repo | Backup ZIP |
+|---|---|---|---|---|---|
+| **AssociationResolver** | 1.1.0 | Parent entity-type/record picker on Event forms **+ write-time field mapping** | ⛔ Retired **SRFR-045 (2026-07-05)**: picker + subgrid auto-detect folded into **RegardingResolver**; field-value copying moved to the `FieldMappingService` engine | ❌ deleted | ⚠️ **none** (retired after the 2026-06-22 backup run — capture a baseline before any deletion) |
+| **DueDatesWidget** | 1.0.8 | Widget rendering upcoming/overdue due dates | Superseded by **VisualHost** due-date card (VisualHost carries `DueDatesWidget.stories.tsx`); zero importers | ❌ none | ✅ `projects/pcf-orphan-cleanup-r1/backups-2026-06-22/baseline-DueDatesWidget-…zip` |
+| **EventAutoAssociate** | 1.0.0 | Auto-associates a new Event to its parent record | Superseded by **RegardingResolver** subgrid auto-detect; oldest/smallest orphan | ❌ none | ✅ `…/baseline-EventAutoAssociateSolution-…zip` |
+| **EventFormController** | 1.0.6 | Form-level orchestration controller on the Event form | Zero importers; no live binding found | ❌ none | ✅ `…/baseline-EventFormControllerSolution-…zip` |
+| **FieldMappingAdmin** | 1.1.0 | **Legacy** admin PCF to author field-mapping profiles/rules (ProfileEditor / RulesList / RuleEditor) | Superseded by **native Dataverse forms** (current authoring path); manifest hard-codes the *retired* `spe-api-dev-67e2xz` BFF URL | ⚠️ bundle only, in `infrastructure/dataverse/solutions/FieldMappingAdminSolution/` | ✅ `…/baseline-FieldMappingAdminSolution-…zip` |
+
+**Same-bucket siblings** (also orphaned, same disposition, from the same audit — listed for completeness): `EventCalendarFilter` (→ `@spaarke/events-components` CalendarFilterPane), `RegardingLink` (predecessor of RegardingResolver), `AnalysisBuilder` / `AnalysisWorkspace` PCF / `LegalWorkspace` PCF (→ Code Pages), `UniversalQuickCreate`, `SpeDocumentViewer`. **Exception — do NOT retire:** `AnalysisWorkspace` PCF + its canvas app are on **permanent hold** (live ribbon ref, DEV-001).
+
+**Deletion status (why they still exist):** `pcf-orphan-cleanup-r1` completed pre-flight (backups + 4-check, 2026-06-22) and vetted 10/11 controls as **ready-to-delete**, but its **Task 003 (the Dataverse deletion session) was never executed** — it's still `🔲 not-started`. So these are approved-for-removal but physically still deployed. The authoritative per-control disposition is [`projects/pcf-orphan-cleanup-r1/notes/preflight-results-spaarkedev1.md`](../../projects/pcf-orphan-cleanup-r1/notes/preflight-results-spaarkedev1.md); resuming removal = running that project's Task 003 (HIGH blast radius; Maker-portal "Used By" re-check + AssociationResolver backup required first).
+
+---
 > **Method**:
 > - Repo signal: last-commit dates from `git log`; `ControlManifest.Input.xml` existence as build-readiness signal.
 > - **Deployment signal**: live `systemform.formxml` LIKE queries against Dataverse (via MCP `read_query`). Also queried `savedquery.layoutxml` + `customcontroldefaultconfig.controldescriptionxml` — both returned zero PCF bindings, confirming PCFs in this environment are bound only via forms.
@@ -99,8 +119,8 @@
 |---|---|---|---|
 | `pcf/AnalysisWorkspace` | 2026-03-15 | Replaced by `code-pages/AnalysisWorkspace` (2026-05-16) | Delete folder; build artifacts are not source-of-truth |
 | `pcf/AIMetadataExtractor` | 2025-12-02 | Unknown — never deployed | Delete folder |
-| `pcf/DueDatesWidget` | 2026-03-15 | Unknown — never deployed | Delete folder |
-| `pcf/EventFormController` | 2026-03-15 | Unknown — never deployed | Delete folder |
+| `pcf/DueDatesWidget` | 2026-03-15 | **See §0** — IS deployed in Dataverse (not "never deployed"); superseded by VisualHost due-date card | Orphan — retire per §0 (Task 003) |
+| `pcf/EventFormController` | 2026-03-15 | **See §0** — IS deployed in Dataverse (not "never deployed") | Orphan — retire per §0 (Task 003) |
 | `pcf/PlaybookBuilderHost` | 2026-03-15 | Replaced by `code-pages/PlaybookBuilder` (2026-04-04) | Delete folder |
 | `pcf/RegardingLink` | 2026-03-15 | Unknown — never deployed | Delete folder |
 | `pcf/SpeFileViewer` | 2026-03-15 | Likely replaced by `SpeDocumentViewer` (2026-05-14) | Delete folder |
