@@ -126,14 +126,15 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
                     "RoutingConsumerTypeHealthCheck FAILED: {DriftReport}",
                     report.BuildDriftDescription());
             }
-            else if (report.HasInvalidSchemas)
+            else if (report.HasInvalidSchemas || report.HasForwardDeclaredConstants)
             {
-                // G-P3 UAT round-1 H1: degraded (not drift) — the projection excludes
-                // the offending rows; startup logs the findings loudly so the missing
-                // capability is diagnosable without waiting for a /healthz probe.
+                // Degraded (not drift): invalid schemas (G-P3 UAT round-1 H1 — projection excludes
+                // the rows) OR forward-declared constants (E-40/E-42 — a constant ahead of its row,
+                // the mirror-first seam). Startup logs the findings loudly so they're diagnosable
+                // without waiting for a /healthz probe, but neither blocks the deploy.
                 _logger.LogWarning(
-                    "RoutingConsumerTypeHealthCheck DEGRADED: {InvalidSchemaReport}",
-                    report.BuildInvalidSchemaDescription());
+                    "RoutingConsumerTypeHealthCheck DEGRADED: {DegradedReport}",
+                    report.BuildDegradedDescription());
             }
             else
             {
@@ -199,8 +200,8 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
                 return HealthCheckResult.Unhealthy(report.BuildDriftDescription());
             }
 
-            return report.HasInvalidSchemas
-                ? HealthCheckResult.Degraded(report.BuildInvalidSchemaDescription())
+            return report.HasInvalidSchemas || report.HasForwardDeclaredConstants
+                ? HealthCheckResult.Degraded(report.BuildDegradedDescription())
                 : HealthCheckResult.Healthy(report.BuildHealthyDescription());
         }
         catch (OperationCanceledException)
@@ -497,13 +498,25 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
         /// MUST have a <c>sprk_analysistool</c> row (or be deleted).
         /// </summary>
         public bool HasDrift =>
-            ConstantsWithoutRows.Count > 0 ||
             RowsWithoutConstants.Count > 0 ||
             ToolRowsWithoutHandlers.Count > 0 ||
             ToolRowsMissingHandlerClass.Count > 0 ||
             DuplicateToolRowsPerHandler.Count > 0 ||
             HandlersWithoutToolRows.Count > 0 ||
             ToolRowsWithDescriptionDrift.Count > 0;
+
+        /// <summary>
+        /// Forward-declared constants (a <c>ConsumerTypes</c> constant registered ahead of its Binding
+        /// row) are DEGRADED, not Unhealthy (E-40 / E-42 decision, 2026-07-09). The mirror-first seam
+        /// pattern deliberately registers a constant BEFORE its Dataverse row is deployed so a satellite
+        /// project's row-deploy lands without a BFF code change (e.g. the 5 compose consumer types
+        /// registered by E-42). A constant WITHOUT a row is therefore a benign forward-declaration on an
+        /// environment where the row is not yet seeded — visible at <c>/healthz</c> so an operator knows
+        /// to seed the row, but NOT a deploy-blocking failure. The REVERSE — a Binding ROW without a
+        /// constant (<see cref="RowsWithoutConstants"/>) — stays full drift/Unhealthy: that is the
+        /// admin-typo class (the 2026-06-24 <c>matter-pre-fil</c> incident) the FR-P0-04 gate exists for.
+        /// </summary>
+        public bool HasForwardDeclaredConstants => ConstantsWithoutRows.Count > 0;
 
         /// <summary>
         /// Invalid-schema findings are DEGRADED, never Unhealthy (G-P3 UAT
@@ -537,15 +550,37 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
                 + string.Join("; ", parts) + ".";
         }
 
-        public string BuildDriftDescription()
+        /// <summary>
+        /// The combined Degraded description (E-40): forward-declared constants (benign mirror-first
+        /// seam) + any invalid-schema findings. Used wherever the ladder resolves to Degraded so both
+        /// non-blocking finding classes are surfaced at /healthz.
+        /// </summary>
+        public string BuildDegradedDescription()
         {
             var parts = new List<string>();
 
             if (ConstantsWithoutRows.Count > 0)
             {
                 parts.Add(
-                    $"ConsumerTypes constants without Binding row (missing sprk_playbookconsumer seed — scripts/dataverse/Seed-PlaybookConsumers.ps1): {string.Join(", ", ConstantsWithoutRows)}");
+                    $"ConsumerTypes constants registered ahead of their Binding row (forward-declared mirror-first seam — benign until the sprk_playbookconsumer row is seeded via scripts/dataverse/Seed-PlaybookConsumers.ps1): {string.Join(", ", ConstantsWithoutRows)}");
             }
+
+            if (HasInvalidSchemas)
+            {
+                parts.Add(BuildInvalidSchemaDescription());
+            }
+
+            return
+                "AI catalog reconciliation DEGRADED (platform still functions; findings surfaced so an operator can resolve them): "
+                + string.Join("; ", parts) + ".";
+        }
+
+        public string BuildDriftDescription()
+        {
+            var parts = new List<string>();
+
+            // NOTE (E-40/E-42): ConstantsWithoutRows is NO LONGER drift — it is a Degraded
+            // forward-declaration (see HasForwardDeclaredConstants / BuildDegradedDescription).
 
             if (RowsWithoutConstants.Count > 0)
             {

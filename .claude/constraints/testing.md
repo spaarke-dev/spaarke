@@ -24,9 +24,9 @@ Load when:
 
 ## MUST Rules
 
-### 1. Six KEEP path categories (deletion-protected)
+### 1. Seven KEEP path categories (deletion-protected)
 
-Tests under these six paths are **KEEP-protected**. Deleting a file under any of these paths in a PR requires **a same-PR replacement** covering the same scenario. Enforced at code-review (`task-execute` Step 9.5) by path inspection — NOT by CSV lookup.
+Tests under these seven paths are **KEEP-protected**. Deleting a file under any of these paths in a PR requires **a same-PR replacement** covering the same scenario. Enforced at code-review (`task-execute` Step 9.5) by path inspection — NOT by CSV lookup.
 
 | Path | Category | What lives here |
 |---|---|---|
@@ -35,6 +35,7 @@ Tests under these six paths are **KEEP-protected**. Deleting a file under any of
 | `tests/integration/data-mutation/**` | data-mutation | Writes, transactions, rollback semantics |
 | `tests/integration/tenant/**` | tenant-isolation | Tenant boundary enforcement (cross-tenant reads MUST 404, not 403) |
 | `tests/integration/contract/**` | endpoint-contract | Route + status + ProblemDetails + payload shape. "Every new endpoint = ≥1 integration test." |
+| `tests/integration/seam/**` | vertical-slice-seam | **(Added 2026-07-09, E-40.)** End-to-end vertical slice across an AI convergence seam (dispatch → input resolution → executor → ledger → disposition → render) using PRODUCTION types, only the LLM/catalog/transport boundaries doubled. A green router-unit / contract-shape test is NOT a substitute (that is how the compose 422 shipped "done"). Definition-of-done for any dispatch-spine change. |
 | `tests/unit/domain/**` | domain-logic | Pure domain logic: calculations, mappings, parsing, serialization, handler-internal orchestration |
 
 ### 2. Authoring rules
@@ -99,7 +100,7 @@ The first 5 (B1-B5) attack wiring antipatterns; B6-B17 attack the deeper scaffol
 - ❌ **MUST NOT** ignore or skip tests without a `[Trait("skip-reason", "<concrete reason + ticket>")]` marker and a follow-up issue
 - ❌ **MUST NOT** use `Thread.Sleep` or arbitrary delays (use `TimeProvider`/`FakeTimeProvider`)
 - ❌ **MUST NOT** mock value objects or DTOs
-- ❌ **MUST NOT** introduce a new test under any path OTHER than the 6 KEEP categories — if you have a test that doesn't fit, the test is the wrong shape OR a new KEEP category needs an ADR amendment first.
+- ❌ **MUST NOT** introduce a new test under any path OTHER than the 7 KEEP categories — if you have a test that doesn't fit, the test is the wrong shape OR a new KEEP category needs an ADR amendment first.
 
 ---
 

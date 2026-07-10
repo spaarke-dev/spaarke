@@ -36,7 +36,7 @@ Spec `ci-cd-unit-test-remediation-r1` FR-B01..FR-B07 + design.md §§4–5 + SC-
 
 - Drop coverage-% MUST rules from both directive files.
 - Replace mock-first authoring template with integration-first.
-- Encode 6 KEEP path categories as MUST rules (deletion requires same-PR replacement).
+- Encode 7 KEEP path categories as MUST rules (deletion requires same-PR replacement). (Was 6; the `tests/integration/seam/**` vertical-slice-seam category was added 2026-07-09 by spaarke-ai-architecture-redesign-r2 E-40.)
 - Ban specific antipatterns (`Mock<HttpMessageHandler>`, `Mock<IServiceClient>`, DI-registration tests, constructor null-checks).
 - Coverage measurement remains observable (tracked nightly via augmented `nightly-health.yml`), never gating.
 - Cultural reset binding for ≥6 months from 2026-06-26.
@@ -47,7 +47,7 @@ Spec `ci-cd-unit-test-remediation-r1` FR-B01..FR-B07 + design.md §§4–5 + SC-
 
 The portfolio is heavy at the integration boundary, modest at the unit boundary, no UI tests yet. Approximate ratio of the surviving suite: ~70% integration / ~30% unit. This is **shape**, not a hard target.
 
-### 2. Six KEEP path categories as MUST rules
+### 2. Seven KEEP path categories as MUST rules
 
 Tests under these paths are KEEP-protected. Deletion requires a same-PR replacement covering the same scenario. Enforced at code-review (Step 9.5 of `task-execute`) by path check, NOT by CSV consultation at runtime.
 
@@ -58,6 +58,7 @@ Tests under these paths are KEEP-protected. Deletion requires a same-PR replacem
 | `tests/integration/data-mutation/**` | data-mutation | Writes, transactions, rollback semantics |
 | `tests/integration/tenant/**` | tenant-isolation | Tenant boundary enforcement (cross-tenant reads must 404, not 403) |
 | `tests/integration/contract/**` | endpoint-contract | Endpoint HTTP contract: route + status + ProblemDetails + payload shape. "Every new endpoint = ≥1 integration test." |
+| `tests/integration/seam/**` | vertical-slice-seam | **(Added 2026-07-09 by spaarke-ai-architecture-redesign-r2 E-40.)** End-to-end vertical slice across an AI convergence seam (dispatch → input resolution → executor → ledger → disposition → render): exercises PRODUCTION types (`SessionDispatchOrchestrator`, `OutputRouter`, `ContextBinder`, `ChatSessionManager`) with only the LLM, catalog-data, and side-effect-transport boundaries doubled. A green contract-shape / router-unit test is **NOT** a substitute — this category exists precisely because the compose-disposition 422 shipped "done" at the router/unit layer while the admit-gate was un-widened (the "green contract-shape ≠ working slice" defect). The **definition-of-done for any dispatch-spine change** is a passing test here. |
 | `tests/unit/domain/**` | domain-logic | Pure domain logic — calculation / mapping / parsing / serialization / handler-internal orchestration |
 
 ### 3. Coverage as observation, never gate
@@ -83,7 +84,7 @@ The policy is enforced at three layers:
 
 1. **`task-execute` Step 9.5** (modified by task CICD-060) — runs `code-review` + `adr-check` UNCONDITIONALLY on test-modifying PRs, regardless of default rigor level. The override is binding per spec FR-B07.
 2. **`nightly-health.yml` Tier 3 coverage job** — observation only; surfaces drift in nightly issue.
-3. **Path-check deletion safety** — any deletion under the 6 KEEP paths requires same-PR replacement (Step 9.5 enforces by path inspection, not CSV).
+3. **Path-check deletion safety** — any deletion under the 7 KEEP paths requires same-PR replacement (Step 9.5 enforces by path inspection, not CSV).
 
 ### 7. Build-vs-Maintain Criteria (Scaffolding-Test Bans — added 2026-06-26 per spec FR-B08)
 
