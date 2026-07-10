@@ -347,50 +347,108 @@ public class SessionDispatchOrchestrator
         }
         else
         {
-        // ── ADR-043 (E-10) input resolution: ContextBinder resolves the Action's DECLARED inputs into
-        // grounding context (ContextEnvelope) + the typed operand, and writes the ContextEnvelope
-        // fingerprint (task-038's dark seam, now live; ADR-040 store-before-render; NFR-07 ids/counts).
-        // The operand branch is deterministic over the declared schema (ADR-039): an Action declaring a
-        // structured operand (selectionText/changesText/documentText arg, or a ledger_resolution
-        // reference — e.g. the compose actions) resolves from the dispatch args WITHOUT session files;
-        // otherwise the shipped file/`## Document` path runs unchanged (non-regression).
-        var runContext = new LinearRunContext
-        {
-            ConsumerType = binding.ConsumerType,
-            CorrelationId = request.CorrelationId,
-            TenantId = request.TenantId,
-        };
+            // ── ADR-043 (E-10) input resolution: ContextBinder resolves the Action's DECLARED inputs into
+            // grounding context (ContextEnvelope) + the typed operand, and writes the ContextEnvelope
+            // fingerprint (task-038's dark seam, now live; ADR-040 store-before-render; NFR-07 ids/counts).
+            // The operand branch is deterministic over the declared schema (ADR-039): an Action declaring a
+            // structured operand (selectionText/changesText/documentText arg, or a ledger_resolution
+            // reference — e.g. the compose actions) resolves from the dispatch args WITHOUT session files;
+            // otherwise the shipped file/`## Document` path runs unchanged (non-regression).
+            var runContext = new LinearRunContext
+            {
+                ConsumerType = binding.ConsumerType,
+                CorrelationId = request.CorrelationId,
+                TenantId = request.TenantId,
+            };
 
-        // The context fingerprint + the output entry share the turn ordinal (max prior output turn + 1),
-        // so the "context selected" leg is anchored to the turn it grounds (OutputRouter allocates the
-        // SAME ordinal for the SessionOutput below — no output is appended between).
-        var contextTurn = (session.Outputs is { Count: > 0 } ? session.Outputs.Max(o => o.Turn) : 0) + 1;
-        var conversationTail = BuildConversationTail(session);
+            // The context fingerprint + the output entry share the turn ordinal (max prior output turn + 1),
+            // so the "context selected" leg is anchored to the turn it grounds (OutputRouter allocates the
+            // SAME ordinal for the SessionOutput below — no output is appended between).
+            var contextTurn = (session.Outputs is { Count: > 0 } ? session.Outputs.Max(o => o.Turn) : 0) + 1;
+            var conversationTail = BuildConversationTail(session);
 
-        BoundInputs boundInputs;
+            BoundInputs boundInputs;
 
-        if (_contextBinder.HasStructuredOperand(binding.InputSchemaJson, request.Args))
-        {
-            // ── Structured-operand path (args-text / ledger_resolution — the compose-B2 shape). No
-            // session files are required; the no-file hard stop is relaxed. ContextBinder resolves the
-            // declared operand (and, for ledger_resolution, a prior SessionOutput by reference — ADR-040).
-            BoundInputs? bound = null;
-            string? bindError = null;
+            if (_contextBinder.HasStructuredOperand(binding.InputSchemaJson, request.Args))
+            {
+                // ── Structured-operand path (args-text / ledger_resolution — the compose-B2 shape). No
+                // session files are required; the no-file hard stop is relaxed. ContextBinder resolves the
+                // declared operand (and, for ledger_resolution, a prior SessionOutput by reference — ADR-040).
+                BoundInputs? bound = null;
+                string? bindError = null;
+                try
+                {
+                    bound = await _contextBinder
+                        .BindAsync(
+                            new ContextBindingRequest
+                            {
+                                InputSchemaJson = binding.InputSchemaJson,
+                                Args = request.Args,
+                                LedgerOutputs = session.Outputs,
+                                ConversationTail = conversationTail,
+                                TenantId = request.TenantId,
+                                SessionId = request.SessionId,
+                                Turn = contextTurn,
+                            },
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // A dangling / truncated ledger_resolution reference (ADR-040) or a malformed operand
+                    // surfaces here — loud, never a silent fallback. Identifiers only (NFR-07).
+                    _logger.LogError(ex,
+                        "SessionDispatchOrchestrator: input resolution failed for binding {BindingId} action {ActionId}. TenantId={TenantId} SessionId={SessionId}",
+                        binding.BindingId, action.Id, request.TenantId, request.SessionId);
+                    bindError = "The AI action could not resolve its inputs. Please check the request and try again.";
+                }
+
+                if (bindError is not null)
+                {
+                    yield return AnalysisChunk.FromError(bindError);
+                    yield break;
+                }
+
+                boundInputs = bound!;
+            }
+            else
+            {
+                // ── File-operand path: the shipped summarize behavior, unchanged. Resolve session files,
+                // probe for manifest readiness, fetch text, then bind the file as a `## Document` operand.
+                boundInputs = default!;
+                var fileBind = await ResolveFileOperandAsync(
+                    request, session, binding, requestedFileIds, conversationTail, contextTurn, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (fileBind.Error is not null)
+                {
+                    yield return AnalysisChunk.FromError(fileBind.Error);
+                    yield break;
+                }
+
+                boundInputs = fileBind.Inputs!;
+                // The manifest readiness probe may have refreshed the session — carry the refreshed instance
+                // to the ledger write (preserves the pre-E-10 behavior where the probe's session flowed to RouteAsync).
+                session = fileBind.Session;
+                sourceRefs = fileBind.SourceRefs;
+            }
+
+            // Route the output write on top of the fingerprint-inclusive session ContextBinder returned, so the
+            // output write (read-modify-write) does not clobber the context fingerprint just written (ADR-040
+            // append-only; both writes mutate the session). Falls back to the current session when no fingerprint
+            // was written (e.g. the session vanished from the store mid-turn).
+            session = boundInputs.UpdatedSession ?? session;
+
+            output = default;
+            string? llmError = null;
             try
             {
-                bound = await _contextBinder
-                    .BindAsync(
-                        new ContextBindingRequest
-                        {
-                            InputSchemaJson = binding.InputSchemaJson,
-                            Args = request.Args,
-                            LedgerOutputs = session.Outputs,
-                            ConversationTail = conversationTail,
-                            TenantId = request.TenantId,
-                            SessionId = request.SessionId,
-                            Turn = contextTurn,
-                        },
-                        cancellationToken)
+                output = await _actionRunner
+                    .RunAsync(action, boundInputs, runContext, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -399,84 +457,26 @@ public class SessionDispatchOrchestrator
             }
             catch (Exception ex)
             {
-                // A dangling / truncated ledger_resolution reference (ADR-040) or a malformed operand
-                // surfaces here — loud, never a silent fallback. Identifiers only (NFR-07).
                 _logger.LogError(ex,
-                    "SessionDispatchOrchestrator: input resolution failed for binding {BindingId} action {ActionId}. TenantId={TenantId} SessionId={SessionId}",
+                    "SessionDispatchOrchestrator: prompted executor failed for binding {BindingId} action {ActionId}. TenantId={TenantId} SessionId={SessionId}",
                     binding.BindingId, action.Id, request.TenantId, request.SessionId);
-                bindError = "The AI action could not resolve its inputs. Please check the request and try again.";
+                llmError = "The AI action failed. Please try again.";
             }
 
-            if (bindError is not null)
+            // FR-P4-05 per-tenant metering (task 054): one capability-invocation increment at THE dispatch
+            // seam — covers chip clicks, the loop's BindingCapabilityTool, gate resolution, and /summarize.
+            _aiTelemetry.RecordCapabilityInvocation(
+                request.TenantId,
+                userId: null,     // ambient scope
+                entryPath: null,  // ambient scope (default "click")
+                capability: binding.Ucid ?? binding.ConsumerType,
+                outcome: llmError is null ? "success" : "failed");
+
+            if (llmError is not null)
             {
-                yield return AnalysisChunk.FromError(bindError);
+                yield return AnalysisChunk.FromError(llmError);
                 yield break;
             }
-
-            boundInputs = bound!;
-        }
-        else
-        {
-            // ── File-operand path: the shipped summarize behavior, unchanged. Resolve session files,
-            // probe for manifest readiness, fetch text, then bind the file as a `## Document` operand.
-            boundInputs = default!;
-            var fileBind = await ResolveFileOperandAsync(
-                request, session, binding, requestedFileIds, conversationTail, contextTurn, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (fileBind.Error is not null)
-            {
-                yield return AnalysisChunk.FromError(fileBind.Error);
-                yield break;
-            }
-
-            boundInputs = fileBind.Inputs!;
-            // The manifest readiness probe may have refreshed the session — carry the refreshed instance
-            // to the ledger write (preserves the pre-E-10 behavior where the probe's session flowed to RouteAsync).
-            session = fileBind.Session;
-            sourceRefs = fileBind.SourceRefs;
-        }
-
-        // Route the output write on top of the fingerprint-inclusive session ContextBinder returned, so the
-        // output write (read-modify-write) does not clobber the context fingerprint just written (ADR-040
-        // append-only; both writes mutate the session). Falls back to the current session when no fingerprint
-        // was written (e.g. the session vanished from the store mid-turn).
-        session = boundInputs.UpdatedSession ?? session;
-
-        output = default;
-        string? llmError = null;
-        try
-        {
-            output = await _actionRunner
-                .RunAsync(action, boundInputs, runContext, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "SessionDispatchOrchestrator: prompted executor failed for binding {BindingId} action {ActionId}. TenantId={TenantId} SessionId={SessionId}",
-                binding.BindingId, action.Id, request.TenantId, request.SessionId);
-            llmError = "The AI action failed. Please try again.";
-        }
-
-        // FR-P4-05 per-tenant metering (task 054): one capability-invocation increment at THE dispatch
-        // seam — covers chip clicks, the loop's BindingCapabilityTool, gate resolution, and /summarize.
-        _aiTelemetry.RecordCapabilityInvocation(
-            request.TenantId,
-            userId: null,     // ambient scope
-            entryPath: null,  // ambient scope (default "click")
-            capability: binding.Ucid ?? binding.ConsumerType,
-            outcome: llmError is null ? "success" : "failed");
-
-        if (llmError is not null)
-        {
-            yield return AnalysisChunk.FromError(llmError);
-            yield break;
-        }
         }
 
         // ── ADR-040 SEAM (FR-P1-02): the universal ledger write BEFORE render. The OutputRouter writes
