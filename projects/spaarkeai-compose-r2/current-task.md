@@ -6,14 +6,22 @@
 
 ---
 
-## Quick Recovery (READ THIS FIRST) — 2026-07-10
+## Quick Recovery (READ THIS FIRST) — 2026-07-10 (Phase 9b UAT remediation)
 
 | Field | Value |
 |-------|-------|
 | **Project** | spaarkeai-compose-r2 — AI-native legal drafting workspace |
-| **Milestone** | ✅ **SHIPPED**: merged to master (PR **#626**, master `14dd8ee3c`) + BFF & code page redeployed to spaarkedev1 (both projects live). AI activation complete E2E. |
-| **Status** | Effectively complete pending (a) owner UI smoke test of the AI toolbar, (b) core flipping 3 retired rows, (c) remaining owner/core-gated items. |
-| **Next Action** | **Owner smoke test**: open Compose → select clause → AI toolbar (Explain/Compare/Draft/+overflow) ENABLED → click Explain → dispatches. (Allow ≤5 min for BFF 5-min catalog cache.) |
+| **Milestone** | Owner smoke test (2026-07-10) found 7 real defects (the earlier "AI complete E2E" was unit-green/user-broken). **Phase 9b UAT remediation: 4 fix tasks (110/111/112/113) DONE + committed on branch** with through-the-wire tests. Deploy (114) pending owner go-ahead. |
+| **Status** | 110 Save-400 ✅ `e13029fc8` · 112 AI-result-prose ✅ `73a268760` · 111 AI-only-bubble+right-click+formatting-to-top-toolbar ✅ `76eb86872` · 113 active-document-bridge (chat↔Compose #4/5/6/7) ✅ `bd18321d1`. Build gate green (BFF 0 err; shared libs clean; SpaarkeAi vite prod ✓). NOT yet deployed. |
+| **Next Action** | **Task 114 deploy — awaiting owner go-ahead** (bounces shared spaarkedev1 the owner is UAT-ing; needs redesign-r2 heads-up). Sequence: re-merge master → `Deploy-BffApi.ps1` (hash+health) → clear Vite cache + `Deploy-SpaarkeAi.ps1` → §10 verify → owner re-UAT via `notes/UAT-r2-reuat-checklist.md`. |
+
+### Phase 9b remediation (this session) — see `notes/uat-r2-defect-triage-2026-07-10.md`
+- Root-caused the 7 UAT items → 5 themes via 3 parallel investigations. Owner chose the **unified active-document identity** for R4. conflict-check: shared handler/session co-owned with redesign-r2, **no live overlap**.
+- 110 (server: sessionId optional on transient-create) · 111 (client: AI-only inline popup + right-click/point trigger + B/I/U/S/Link ported to top toolbar) · 112 (client: per-action prose formatter + workspace-channel suppress) · 113 (BFF+client: additive session-scoped `ActiveDocument` on ChatSession; server-side mount resolution + `layoutName='Compose'` default; Compose uploads register with the chat session).
+- 113 out-of-list edits (justified): `StoredSession.cs`/`ChatSessionManager.cs` (warm-tier restore of ActiveDocument, ADR-040), `composeActionBridge.ts` (cross-pane seam vs frozen mount plumbing). ADR-013 register-endpoint warning accepted **Path A**. `OutputRouter.cs`/`Binding.cs` untouched.
+
+### Prior milestone (still true)
+- Merged to master (PR **#626**, master `14dd8ee3c`) + BFF & code page deployed. Phase-9 E2E remediation (100-104), 048/055/072/081/083 all landed. AI catalog deployed (5 actions + 5 bindings + Compose disposition 100000006).
 
 ### What's DONE (this session — all committed on master via #626)
 - **Phase-9 E2E remediation COMPLETE**: 100 create-on-save, 102 memory-resume, 104 three-pane, 101 dispatch, 103 Word-shuttle — each with a WebApplicationFactory/real-bus forcing test.
