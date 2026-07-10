@@ -6,6 +6,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Compose;
@@ -77,6 +78,24 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // (3b) POST /api/compose/documents/create-on-save — FR-05 create-on-save (task 100).
+        // A TRANSIENT Browse/Upload draft has NO SPE drive-item, so the `{documentSpeId}` path
+        // segment on the replace route (3) would be empty → `/documents//save` 404s. This
+        // literal-segment sibling route carries no id in the path; the client sends the
+        // client-resolved BU `containerId` (Fork A) and no `documentSpeId`, reaching
+        // ComposeService.SaveAsync's transient-create branch (container → record → indexing).
+        // Distinct literal `create-on-save` cannot collide with `{documentSpeId}/save` (3) or
+        // GET `{documentSpeId}` (2) — different segment counts / verbs.
+        group.MapPost("/documents/create-on-save", CreateOnSave)
+            .WithName("ComposeCreateOnSaveDocument")
+            .WithSummary("Create a new sprk_document from a transient Compose draft in the client-resolved BU container (FR-05)")
+            .RequireRateLimiting("ai-upload")
+            .Produces<SaveComposeDocumentResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status500InternalServerError);
+
         // (4) POST /api/compose/documents/{documentSpeId}/promote — explicit promotion
         group.MapPost("/documents/{documentSpeId}/promote", Promote)
             .WithName("ComposePromoteDocument")
@@ -138,6 +157,19 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status412PreconditionFailed)
             .Produces(StatusCodes.Status422UnprocessableEntity)
             .Produces(StatusCodes.Status423Locked)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        // (9b) POST /api/compose/document/{documentSpeId}/push-preview — FR-28 (task 055):
+        // Tier-2c PRE-CONFIRM preview (comment/track-change counts + Word-vs-Compose split).
+        // Non-mutating — no SPE download, no write. The clean seam the future Policy v2 Tier 2c
+        // gate dialog calls; this task builds no dialog/rendering.
+        group.MapPost("/document/{documentSpeId}/push-preview", PushPreview)
+            .WithName("ComposePushPreview")
+            .WithSummary("Compute the Tier-2c push preview (comment/track-change counts + Word-vs-Compose split) without writing")
+            .RequireRateLimiting("ai-context")
+            .Produces<PushPreviewResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status500InternalServerError);
 
         // (10) POST /api/compose/document/{documentSpeId}/pull-annotations — FR-25 (task 051):
@@ -227,6 +259,40 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // (14) GET /api/compose/sessions/{sessionId}/annotations — FR-29 (task 102, gap 4.3): read
+        // the CURRENT anchored annotations + defined-terms stored on a Compose session so the client
+        // can rehydrate them (Load already returns them on the document-open path; this is the
+        // standalone read for a Context-pane refresh or a re-sync). Session-keyed because the two
+        // collections live on the ChatSession (ADR-015 Tier 3), exactly matching
+        // ComposeService.GetComposeAnnotationsAsync. Read-only — no SPE/Graph, no AI dispatch
+        // (ADR-013/ADR-039). Injects only IComposeService (the CRUD facade), never an AI internal.
+        group.MapGet("/sessions/{sessionId}/annotations", GetAnnotations)
+            .WithName("ComposeGetAnnotations")
+            .WithSummary("Read a Compose session's anchored annotations + defined-terms (FR-29)")
+            .RequireRateLimiting("ai-context")
+            .Produces<ComposeAnnotationsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        // (15) POST /api/compose/sessions/{sessionId}/annotations — FR-29 (task 102, gap 4.3): the
+        // WRITE half that makes annotations survive a reopen. Persists the client's anchored
+        // annotations + defined-terms onto the EXISTING session via
+        // ComposeService.SaveComposeAnnotationsAsync (partial-replace: a null collection leaves the
+        // stored one unchanged; a non-null one replaces it wholesale). These are MUTABLE session
+        // UI state (accept/reject/edit), NOT the append-only ledger (contrast push-annotations,
+        // which writes native OOXML into the .docx). A malformed ADR-040 provenance ledgerRef 400s;
+        // a missing session 404s. No SPE/Graph, no AI dispatch (ADR-013/ADR-039).
+        group.MapPost("/sessions/{sessionId}/annotations", SaveAnnotations)
+            .WithName("ComposeSaveAnnotations")
+            .WithSummary("Persist a Compose session's anchored annotations + defined-terms (FR-29)")
+            .RequireRateLimiting("ai-upload")
+            .Produces<ComposeAnnotationsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status500InternalServerError);
+
         return routes;
     }
 
@@ -292,6 +358,7 @@ public static class ComposeEndpoints
                 TenantId = body.TenantId,
                 IfMatch = body.IfMatch,
                 Annotations = body.Annotations,
+                SessionId = body.SessionId,
             };
 
             var result = await composeService.PushAnnotationsAsync(request, httpContext, ct).ConfigureAwait(false);
@@ -303,7 +370,9 @@ public static class ComposeEndpoints
                 ETag: result.ETag,
                 Size: result.Size,
                 AnnotationCount: result.AnnotationCount,
-                CorrelationId: httpContext.TraceIdentifier));
+                CorrelationId: httpContext.TraceIdentifier,
+                Preview: result.Preview,
+                CompletionState: result.CompletionState));
         }
         catch (ArgumentException ex)
         {
@@ -372,6 +441,56 @@ public static class ComposeEndpoints
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 detail: "An unexpected error occurred while pushing annotations.");
+        }
+    }
+
+    // FR-28 (task 055): Tier-2c PRE-CONFIRM preview — deterministic comment/track-change counts +
+    // the Word-vs-Compose split for an annotation batch the caller is ABOUT to push. Non-mutating
+    // (no SPE download, no write, no ETag) — safe to call repeatedly while the user is still
+    // deciding accept/reject in the (not-yet-built) gate dialog. This route is the clean seam the
+    // future Policy v2 Tier 2c dialog calls; it renders no UI itself (ADR-013/ADR-039 — no AI
+    // dispatch either; pure deterministic categorization).
+    private static async Task<IResult> PushPreview(
+        string documentSpeId,
+        [FromBody] PushPreviewBody? body,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+        if (body.Annotations is null || body.Annotations.Count == 0) return BadRequest("annotations must contain at least one annotation.");
+
+        try
+        {
+            var request = new PreviewPushAnnotationsRequest
+            {
+                TenantId = body.TenantId,
+                Annotations = body.Annotations,
+                SessionId = body.SessionId,
+            };
+
+            var preview = await composeService.PreviewPushAnnotationsAsync(request, ct).ConfigureAwait(false);
+
+            return Results.Ok(new PushPreviewResponse(
+                Preview: preview,
+                CorrelationId: httpContext.TraceIdentifier));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose push-preview: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while computing the push preview.");
         }
     }
 
@@ -763,6 +882,110 @@ public static class ComposeEndpoints
         }
     }
 
+    // FR-29 (task 102, gap 4.3): read a Compose session's anchored annotations + defined-terms.
+    // Pure delegation to IComposeService.GetComposeAnnotationsAsync (the CRUD facade — no AI
+    // internals per ADR-013). Returns empty collections (never null) for a session with none
+    // stored, or an unknown session id — same contract as the service.
+    private static async Task<IResult> GetAnnotations(
+        string sessionId,
+        [FromQuery] string tenantId,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (string.IsNullOrWhiteSpace(sessionId)) return BadRequest("sessionId is required.");
+        if (string.IsNullOrWhiteSpace(tenantId)) return BadRequest("tenantId query parameter is required for multi-tenant isolation.");
+
+        try
+        {
+            var state = await composeService.GetComposeAnnotationsAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+
+            return Results.Ok(new ComposeAnnotationsResponse(
+                SessionId: sessionId,
+                AnchoredAnnotations: state.AnchoredAnnotations,
+                DefinedTermsTracking: state.DefinedTermsTracking,
+                CorrelationId: httpContext.TraceIdentifier));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose get-annotations: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while reading annotations.");
+        }
+    }
+
+    // FR-29 (task 102, gap 4.3): persist a Compose session's anchored annotations + defined-terms.
+    // Delegates to IComposeService.SaveComposeAnnotationsAsync (partial-replace semantics). A
+    // malformed ADR-040 provenance ledgerRef surfaces as ArgumentException → 400; a missing session
+    // surfaces as InvalidOperationException("...not found") → 404.
+    private static async Task<IResult> SaveAnnotations(
+        string sessionId,
+        [FromBody] SaveComposeAnnotationsBody? body,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (string.IsNullOrWhiteSpace(sessionId)) return BadRequest("sessionId is required.");
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+
+        logger.LogInformation(
+            "Compose save-annotations: tenant={TenantId} session={SessionId} annotations={AnnotationCount} definedTerms={DefinedTermCount} TraceId={TraceId}",
+            body.TenantId, sessionId, body.AnchoredAnnotations?.Count, body.DefinedTermsTracking?.Count, httpContext.TraceIdentifier);
+
+        try
+        {
+            var state = await composeService.SaveComposeAnnotationsAsync(
+                new SaveComposeAnnotationsRequest
+                {
+                    TenantId = body.TenantId,
+                    SessionId = sessionId,
+                    AnchoredAnnotations = body.AnchoredAnnotations,
+                    DefinedTermsTracking = body.DefinedTermsTracking,
+                },
+                ct).ConfigureAwait(false);
+
+            return Results.Ok(new ComposeAnnotationsResponse(
+                SessionId: sessionId,
+                AnchoredAnnotations: state.AnchoredAnnotations,
+                DefinedTermsTracking: state.DefinedTermsTracking,
+                CorrelationId: httpContext.TraceIdentifier));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning(ex, "Compose save-annotations: session not found. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status404NotFound,
+                title: "Session Not Found",
+                detail: "The Compose session was not found. Annotations can only be saved onto an existing session (open the document first).",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose save-annotations: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while saving annotations.");
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // FR-03 (task 012): retained-bytes serving for the transient Compose mount.
     // The chat upload pipeline (ChatDocumentEndpoints.UploadDocumentAsync step 9b)
@@ -911,7 +1134,20 @@ public static class ComposeEndpoints
         [FromQuery] string tenantId,
         [FromQuery] Guid? documentRecordId,
         [FromQuery] string? displayName,
+        // FR-29/FR-33 (task 102, gap 4.1 — the linchpin): a reopen carries the KNOWN prior
+        // sessionId (and, when hosted on a Matter, the matterId) so ComposeService.LoadAsync
+        // RESUMES that session — restoring its anchored annotations, defined terms, and action
+        // history — instead of minting a fresh empty session on every reopen. Both are OPTIONAL:
+        // a missing/unmatched sessionId falls back to the R1 mint-new behavior unchanged, and a
+        // null matterId preserves the FR-29 DocumentId-only resume match (backward compatible).
+        [FromQuery] string? sessionId,
+        [FromQuery] string? matterId,
         IComposeService composeService,
+        // FR-26 (task 103, gap 3.2): the SPE change-detection origin call. EnsureSubscriptionAsync
+        // had ZERO callers, so the container was never tracked → the renewal service renewed an
+        // empty set forever AND the poll path had no state to build on. Opening a Compose document
+        // is the natural origin: it is exactly when return-from-Word change detection must begin.
+        SpeSyncOrchestrator syncOrchestrator,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken ct)
@@ -923,8 +1159,8 @@ public static class ComposeEndpoints
         if (string.IsNullOrWhiteSpace(tenantId)) return BadRequest("tenantId query parameter is required for multi-tenant isolation.");
 
         logger.LogInformation(
-            "Compose load: tenant={TenantId} drive={DriveId} item={DocumentSpeId} record={DocumentRecordId} TraceId={TraceId}",
-            tenantId, driveId, documentSpeId, documentRecordId, httpContext.TraceIdentifier);
+            "Compose load: tenant={TenantId} drive={DriveId} item={DocumentSpeId} record={DocumentRecordId} session={SessionId} matter={MatterId} TraceId={TraceId}",
+            tenantId, driveId, documentSpeId, documentRecordId, sessionId, matterId, httpContext.TraceIdentifier);
 
         try
         {
@@ -935,9 +1171,36 @@ public static class ComposeEndpoints
                 TenantId = tenantId,
                 DocumentRecordId = documentRecordId,
                 DisplayName = displayName,
+                // gap 4.1: honor the incoming resume key so a reopen resumes the SAME session.
+                SessionId = sessionId,
+                MatterId = matterId,
             };
 
             var result = await composeService.LoadAsync(request, httpContext, ct).ConfigureAwait(false);
+
+            // FR-26 (task 103, gap 3.2): ensure the SPE change-detection subscription exists for
+            // this document's drive so a return-from-Word save is detected. The drive id IS a valid
+            // container key here — SpeFileStore.ResolveDriveIdAsync returns a `b!` drive id unchanged
+            // (ISpeFileOperations contract), and EnsureSubscriptionAsync keys its Redis state by that
+            // value consistently with the poll/check-changes path (task 053). When the webhook config
+            // (Compose:Webhook:{SigningKey,ClientState,NotificationUrl}) is UNPROVISIONED (owner task
+            // 056 / DEF-03), EnsureSubscriptionAsync makes NO Graph call — it persists the container
+            // into the tracked index with FallbackToPolling=true, which (a) stops the renewal service
+            // renewing an empty set forever and (b) seeds the poll-fallback state the client's
+            // poll-on-focus check-changes path drives. Non-fatal by construction: a subscription
+            // failure degrades to poll and MUST NOT fail the document load.
+            // ✅◐ E2E-pending on task 056 for the webhook-DELIVERY leg (secrets); the origin call +
+            // poll fallback are fully wired + testable here.
+            try
+            {
+                await syncOrchestrator.EnsureSubscriptionAsync(result.DriveId ?? driveId, ct).ConfigureAwait(false);
+            }
+            catch (Exception subEx)
+            {
+                logger.LogWarning(subEx,
+                    "Compose load: EnsureSubscriptionAsync origin call failed for drive {DriveId} (non-fatal; change detection degrades to poll). TraceId={TraceId}",
+                    result.DriveId ?? driveId, httpContext.TraceIdentifier);
+            }
 
             return Results.Ok(new LoadComposeDocumentResponse(
                 DocumentSpeId: result.DocumentSpeId,
@@ -948,6 +1211,11 @@ public static class ComposeEndpoints
                 ETag: result.ETag,
                 FileName: result.FileName,
                 Size: result.Size,
+                // gaps 4.2/4.4: surface the three collections the (unchanged) service already
+                // returns from the resumed/created session — previously dropped before the wire.
+                AnchoredAnnotations: result.AnchoredAnnotations,
+                DefinedTermsTracking: result.DefinedTermsTracking,
+                ActionHistory: result.ActionHistory,
                 CorrelationId: httpContext.TraceIdentifier));
         }
         catch (ArgumentException ex)
@@ -1003,19 +1271,83 @@ public static class ComposeEndpoints
             "Compose save: tenant={TenantId} drive={DriveId} item={DocumentSpeId} session={SessionId} record={DocumentRecordId} size={SizeBytes} TraceId={TraceId}",
             body.TenantId, body.DriveId, documentSpeId, body.SessionId, body.DocumentRecordId, body.Content.Length, httpContext.TraceIdentifier);
 
+        var request = new SaveComposeDocumentRequest
+        {
+            DriveId = body.DriveId,
+            DocumentSpeId = documentSpeId,
+            // ContainerId is ignored on the replace path (DocumentSpeId present) but forwarded
+            // for symmetry so both save routes map the same body shape.
+            ContainerId = body.ContainerId,
+            Content = body.Content,
+            SessionId = body.SessionId,
+            TenantId = body.TenantId,
+            DocumentRecordId = body.DocumentRecordId,
+            DisplayName = body.DisplayName,
+        };
+
+        return await ExecuteSaveAsync(request, documentSpeId, composeService, logger, httpContext, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// POST /api/compose/documents/create-on-save — FR-05 create-on-save (task 100). Persists a
+    /// TRANSIENT Browse/Upload draft (no SPE drive-item yet) as a new <c>sprk_document</c> in the
+    /// client-resolved Business-Unit <c>containerId</c> (Fork A — the BFF does NOT resolve
+    /// BU→container; the client passes it in, same convention as the 7 Create*Wizards). Maps a
+    /// null <c>DocumentSpeId</c> into <see cref="SaveComposeDocumentRequest"/> so
+    /// <see cref="IComposeService.SaveAsync"/> takes its transient-create branch
+    /// (container → record → indexing), then rebinds the session's DocumentId to the new record.
+    /// </summary>
+    private static async Task<IResult> CreateOnSave(
+        [FromBody] SaveComposeDocumentBody body,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.ContainerId)) return BadRequest("containerId is required for create-on-save (the client resolves it from the user's Business Unit).");
+        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+        if (string.IsNullOrWhiteSpace(body.SessionId)) return BadRequest("sessionId is required in the request body for first-Save promotion rebind.");
+        if (body.Content is null || body.Content.Length == 0) return BadRequest("content is required and must be non-empty.");
+
+        logger.LogInformation(
+            "Compose create-on-save: tenant={TenantId} container={ContainerId} session={SessionId} size={SizeBytes} TraceId={TraceId}",
+            body.TenantId, body.ContainerId, body.SessionId, body.Content.Length, httpContext.TraceIdentifier);
+
+        var request = new SaveComposeDocumentRequest
+        {
+            // DocumentSpeId null → SaveAsync transient-create branch. DriveId is derived from
+            // ContainerId server-side; the client does not (and cannot) know it for a new draft.
+            DocumentSpeId = null,
+            DriveId = null,
+            ContainerId = body.ContainerId,
+            Content = body.Content,
+            SessionId = body.SessionId,
+            TenantId = body.TenantId,
+            DocumentRecordId = null,
+            DisplayName = body.DisplayName,
+        };
+
+        return await ExecuteSaveAsync(request, documentSpeId: null, composeService, logger, httpContext, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Shared save execution used by both the replace route (<see cref="Save"/>) and the
+    /// create-on-save route (<see cref="CreateOnSave"/>). Delegates to
+    /// <see cref="IComposeService.SaveAsync"/> and maps the result / exceptions to HTTP.
+    /// </summary>
+    private static async Task<IResult> ExecuteSaveAsync(
+        SaveComposeDocumentRequest request,
+        string? documentSpeId,
+        IComposeService composeService,
+        ILogger logger,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
         try
         {
-            var request = new SaveComposeDocumentRequest
-            {
-                DriveId = body.DriveId,
-                DocumentSpeId = documentSpeId,
-                Content = body.Content,
-                SessionId = body.SessionId,
-                TenantId = body.TenantId,
-                DocumentRecordId = body.DocumentRecordId,
-                DisplayName = body.DisplayName,
-            };
-
             var result = await composeService.SaveAsync(request, httpContext, ct).ConfigureAwait(false);
 
             return Results.Ok(new SaveComposeDocumentResponse(
@@ -1039,7 +1371,7 @@ public static class ComposeEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status404NotFound,
                 title: "Document Not Found",
-                detail: $"SPE drive-item '{documentSpeId}' was not found or could not be written.",
+                detail: $"SPE drive-item '{documentSpeId ?? "(transient create)"}' was not found or could not be written.",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
         }
         catch (UnauthorizedAccessException ex)
@@ -1231,12 +1563,18 @@ public sealed record ComposeUploadResponse(
     [property: JsonPropertyName("size")] long Size,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
-/// <summary>Request body for <c>POST /api/compose/documents/{id}/save</c>.</summary>
+/// <summary>Request body for <c>POST /api/compose/documents/{id}/save</c> (replace path) and
+/// <c>POST /api/compose/documents/create-on-save</c> (FR-05 transient create path, task 100).
+/// On the create-on-save path <see cref="DriveId"/> is null and <see cref="ContainerId"/> carries
+/// the client-resolved BU container; on the replace path <see cref="ContainerId"/> is ignored.</summary>
 public sealed record SaveComposeDocumentBody(
-    [property: JsonPropertyName("driveId")] string DriveId,
     [property: JsonPropertyName("sessionId")] string SessionId,
     [property: JsonPropertyName("tenantId")] string TenantId,
     [property: JsonPropertyName("content")] byte[] Content,
+    [property: JsonPropertyName("driveId")] string? DriveId = null,
+    /// <summary>Client-resolved SPE container id for the create-on-save path (Fork A —
+    /// businessunit.sprk_containerid). Required when there is no drive-item yet; ignored on replace.</summary>
+    [property: JsonPropertyName("containerId")] string? ContainerId = null,
     [property: JsonPropertyName("documentRecordId")] Guid? DocumentRecordId = null,
     [property: JsonPropertyName("displayName")] string? DisplayName = null);
 
@@ -1254,10 +1592,15 @@ public sealed record PushAnnotationsBody(
     [property: JsonPropertyName("driveId")] string DriveId,
     [property: JsonPropertyName("tenantId")] string TenantId,
     [property: JsonPropertyName("ifMatch")] string IfMatch,
-    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation> Annotations);
+    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation> Annotations,
+    /// <summary>FR-28 (task 055, additive/optional): bound ChatSession id — enables the
+    /// Compose-only side of the response's <c>preview</c> split. See
+    /// <see cref="PushAnnotationsRequest.SessionId"/> remarks.</summary>
+    [property: JsonPropertyName("sessionId")] string? SessionId = null);
 
 /// <summary>Response shape for <c>POST /api/compose/document/{id}/push-annotations</c> (FR-24) —
-/// the new SPE version id + ETag the client uses as the next optimistic-concurrency token.</summary>
+/// the new SPE version id + ETag the client uses as the next optimistic-concurrency token, plus
+/// (FR-28, task 055) the Tier-2c preview + per-step completion state as post-write evidence.</summary>
 public sealed record PushAnnotationsResponse(
     [property: JsonPropertyName("documentSpeId")] string DocumentSpeId,
     [property: JsonPropertyName("driveId")] string? DriveId,
@@ -1265,9 +1608,28 @@ public sealed record PushAnnotationsResponse(
     [property: JsonPropertyName("eTag")] string? ETag,
     [property: JsonPropertyName("size")] long? Size,
     [property: JsonPropertyName("annotationCount")] int AnnotationCount,
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    [property: JsonPropertyName("preview")] ComposePushSavePreview? Preview = null,
+    [property: JsonPropertyName("completionState")] Sprk.Bff.Api.Services.Ai.PublicContracts.JobAwareCompletionState? CompletionState = null);
+
+/// <summary>Request body for <c>POST /api/compose/document/{id}/push-preview</c> (FR-28, task 055)
+/// — the Tier-2c PRE-CONFIRM preview call. Non-mutating: no SPE download, no write. Safe to call
+/// repeatedly as the user adjusts accept/reject choices before confirming the gate dialog (not
+/// built by this task — see <see cref="IComposeService.PreviewPushAnnotationsAsync"/> remarks).</summary>
+public sealed record PushPreviewBody(
+    [property: JsonPropertyName("tenantId")] string TenantId,
+    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation> Annotations,
+    [property: JsonPropertyName("sessionId")] string? SessionId = null);
+
+/// <summary>Response shape for <c>POST /api/compose/document/{id}/push-preview</c> (FR-28).</summary>
+public sealed record PushPreviewResponse(
+    [property: JsonPropertyName("preview")] ComposePushSavePreview Preview,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
-/// <summary>Response shape for <c>GET /api/compose/documents/{id}</c>.</summary>
+/// <summary>Response shape for <c>GET /api/compose/documents/{id}</c>. The three FR-29/FR-33
+/// collections (task 102, gaps 4.2/4.4) are projected from the (unchanged)
+/// <see cref="LoadComposeDocumentResult"/> the service returns for the resumed/created session —
+/// this is what makes a reopen restore prior annotations, defined terms, and action history.</summary>
 public sealed record LoadComposeDocumentResponse(
     [property: JsonPropertyName("documentSpeId")] string DocumentSpeId,
     [property: JsonPropertyName("driveId")] string? DriveId,
@@ -1277,6 +1639,26 @@ public sealed record LoadComposeDocumentResponse(
     [property: JsonPropertyName("eTag")] string? ETag,
     [property: JsonPropertyName("fileName")] string? FileName,
     [property: JsonPropertyName("size")] long? Size,
+    [property: JsonPropertyName("anchoredAnnotations")] IReadOnlyList<AnchoredAnnotation> AnchoredAnnotations,
+    [property: JsonPropertyName("definedTermsTracking")] IReadOnlyList<DefinedTerm> DefinedTermsTracking,
+    [property: JsonPropertyName("actionHistory")] IReadOnlyList<ComposeActionHistoryEntry> ActionHistory,
+    [property: JsonPropertyName("correlationId")] string CorrelationId);
+
+/// <summary>Request body for <c>POST /api/compose/sessions/{sessionId}/annotations</c> (FR-29,
+/// task 102). Partial-replace: a <c>null</c> collection leaves the stored one unchanged; a non-null
+/// (possibly empty) collection replaces it wholesale — mirrors
+/// <see cref="SaveComposeAnnotationsRequest"/> (sessionId comes from the route).</summary>
+public sealed record SaveComposeAnnotationsBody(
+    [property: JsonPropertyName("tenantId")] string TenantId,
+    [property: JsonPropertyName("anchoredAnnotations")] IReadOnlyList<AnchoredAnnotation>? AnchoredAnnotations = null,
+    [property: JsonPropertyName("definedTermsTracking")] IReadOnlyList<DefinedTerm>? DefinedTermsTracking = null);
+
+/// <summary>Response shape for the <c>GET/POST /api/compose/sessions/{sessionId}/annotations</c>
+/// routes (FR-29, task 102) — the CURRENT session collections after the read/write.</summary>
+public sealed record ComposeAnnotationsResponse(
+    [property: JsonPropertyName("sessionId")] string SessionId,
+    [property: JsonPropertyName("anchoredAnnotations")] IReadOnlyList<AnchoredAnnotation> AnchoredAnnotations,
+    [property: JsonPropertyName("definedTermsTracking")] IReadOnlyList<DefinedTerm> DefinedTermsTracking,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/save</c>.</summary>

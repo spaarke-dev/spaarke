@@ -292,6 +292,94 @@ describe('SprkChat - Citations Integration', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────
+  // Test 1b: sseFlow_CitationsEvent_FiresOnCitationsCallback (task 072,
+  // FR-35 Doc Q&A stretch — the observation hook Compose bridges to
+  // drive the ephemeral highlight). Proves the SAME citation data already
+  // rendered above (marker [1]/[2]) is ALSO delivered to the host via the
+  // new `onCitations` prop, and that it carries the `excerpt` text a host
+  // needs to locate the cited span in an open document.
+  // ─────────────────────────────────────────────────────────────────────
+
+  it('sseFlow_CitationsEvent_FiresOnCitationsCallback', async () => {
+    const onCitations = jest.fn();
+    const user = userEvent.setup();
+
+    await act(async () => {
+      renderWithProviders(<SprkChat {...defaultProps} onCitations={onCitations} />);
+    });
+    await waitFor(() => {
+      const textarea = screen.getByTestId('chat-input-textarea');
+      const nativeTextarea = textarea.querySelector('textarea') || textarea;
+      expect(nativeTextarea).not.toBeDisabled();
+    });
+
+    const sseEvents = [
+      { type: 'token', content: 'The cap is stated here [1].' },
+      {
+        type: 'citations',
+        content: null,
+        data: {
+          citations: [
+            { id: 1, sourceName: 'Contract.docx', excerpt: 'the indemnification cap is $500,000', chunkId: 'c-1' },
+          ],
+        },
+      },
+      { type: 'done', content: null },
+    ];
+    pendingSseResponses.push(createSseStreamResponse(sseEvents));
+
+    const textarea = screen.getByTestId('chat-input-textarea');
+    const nativeTextarea = textarea.querySelector('textarea') || textarea;
+    await user.type(nativeTextarea, "What's the indemnification cap?");
+    await user.click(screen.getByTestId('chat-send-button'));
+
+    await waitFor(() => {
+      expect(onCitations).toHaveBeenCalled();
+    });
+    const [delivered] = onCitations.mock.calls[onCitations.mock.calls.length - 1];
+    expect(delivered).toEqual([
+      expect.objectContaining({
+        id: 1,
+        source: 'Contract.docx',
+        excerpt: 'the indemnification cap is $500,000',
+      }),
+    ]);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 1c: sseFlow_NoCitations_DoesNotFireOnCitations — the grounded-output
+  // negative case (task 072): an uncited answer must NOT drive any downstream
+  // "grounded answer" reaction.
+  // ─────────────────────────────────────────────────────────────────────
+
+  it('sseFlow_NoCitations_DoesNotFireOnCitations', async () => {
+    const onCitations = jest.fn();
+    const user = userEvent.setup();
+
+    await act(async () => {
+      renderWithProviders(<SprkChat {...defaultProps} onCitations={onCitations} />);
+    });
+    await waitFor(() => {
+      const textarea = screen.getByTestId('chat-input-textarea');
+      const nativeTextarea = textarea.querySelector('textarea') || textarea;
+      expect(nativeTextarea).not.toBeDisabled();
+    });
+
+    const sseEvents = [{ type: 'token', content: 'A plain, uncited answer.' }, { type: 'done', content: null }];
+    pendingSseResponses.push(createSseStreamResponse(sseEvents));
+
+    const textarea = screen.getByTestId('chat-input-textarea');
+    const nativeTextarea = textarea.querySelector('textarea') || textarea;
+    await user.type(nativeTextarea, 'Say something uncited.');
+    await user.click(screen.getByTestId('chat-send-button'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/A plain, uncited answer\./)).toBeInTheDocument();
+    });
+    expect(onCitations).not.toHaveBeenCalled();
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
   // Test 2: sseFlow_CitationClick_OpensPopover
   // ─────────────────────────────────────────────────────────────────────
 

@@ -3,7 +3,7 @@
     <title>FR-33 compaction over ledger + cross-version persistence (DocumentId+MatterId)</title>
     <phase>6 Memory</phase>
     <gate>startable-now</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
@@ -100,4 +100,51 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-09. Verified (no code change needed) that the redesign-r1 compacted
+    digest (ChatHistoryManager.BuildOutputDigestSection) already generalizes over EVERY
+    SessionOutput disposition, including `compose` — Compose rides it with zero special-casing,
+    satisfying "no parallel compaction path" (ADR-040).
+
+    Implemented the DocumentId+MatterId cross-version binding in
+    `ComposeService.LoadAsync` via two new private static helpers, `IsSameCrossVersionBinding`
+    and `BuildMatterHostContext`: a resumed session must match the existing version-independent
+    DocumentId binding (bindingId — task 060) AND, when the caller supplies one, the session's
+    Matter (carried on the EXISTING `ChatSession.HostContext`, EntityType `"matter"` — no new
+    stored field). A null MatterId preserves the FR-29 DocumentId-only match unchanged (backward
+    compatible). Also wired task 061's `GetActionHistory` query into the restored
+    `LoadComposeDocumentResult.ActionHistory` so "prior decisions" restore alongside "prior
+    annotations" on a resumed load.
+
+    SCOPE NOTE (flagged transparently, not hidden): implementing `MatterId` (request) and
+    `ActionHistory` (result) required adding two optional/backward-compatible properties to
+    `LoadComposeDocumentRequest`/`LoadComposeDocumentResult` in
+    `Services/Compose/IComposeService.cs` — outside the dispatch prompt's literal
+    ComposeService.cs-only file list, but inside the same Services/Compose/ C# domain (no
+    frontend `.ts`/`.tsx`, no `.claude/` touched). Necessary because those DTOs are declared in
+    that file; without the addition the DocumentId+MatterId acceptance criterion would not be
+    testable end-to-end. `ComposeEndpoints.cs` (the actual HTTP query-param wiring for MatterId)
+    was intentionally NOT touched — out of this task's scope; a follow-up should wire the query
+    param when a caller needs to pass MatterId over the wire.
+
+    New tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/CrossVersionSessionPersistenceTests.cs`
+    (9 tests) — version-change-preserves-session, MatterId match/mismatch/backward-compat,
+    new-session HostContext seeding, action-history restore, empty-history negative case, digest
+    verbatim-key-survival (against the real ChatHistoryManager.TriggerSummarisationAsync), and a
+    structural ADR-015 assertion that ChatHistoryManager has no Memory Service dependency. All
+    green; full Compose suite (162 tests) + ADR-013 Tier-1 NetArchTest facade test green.
+
+    Quality gates (Step 9.5, mandatory per CLAUDE.md §8 test-modifying override): code-review
+    and adr-check both run — 0 Critical, 0 Violations. code-review raised 1 Warning (the scope
+    note above, self-flagged) + 2 Suggestions (minor comment clarity); adr-check found 0
+    violations across ADR-013/040/015/010.
+
+    Publish size: 46 MB compressed (tar.gz) incl. PDBs — at/under the ~49.63 MB incl-PDB
+    baseline; zero packages added, delta ~0 as expected. CVE scan: same pre-existing
+    Microsoft.Kiota.Abstractions HIGH advisory (GHSA-7j59-v9qr-6fq9) as baseline — not
+    introduced by this task, no new HIGH/Critical CVE.
+
+    No deferrals filed — all 5 acceptance criteria met.
+  </notes>
 </task>

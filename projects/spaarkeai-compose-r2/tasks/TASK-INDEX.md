@@ -26,9 +26,9 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 012 | FR-03 1b upload → transient mount (flip send_workspace_artifact + feed bytes) | 1 Entry | 🟢 | none | ✅ | FULL | opus | high |
 | 013 | FR-05 create-on-save pipeline — extend PromoteIfEphemeralAsync (container/record/index; profile→core) | 1 Entry | 🟢 | none | ✅ | FULL | opus | xhigh |
 | 014 | FR-05 optional parent-association prompt (Tier 2c dialog integration) | 1 Entry | 🟡 | 013 | ✅ | FULL | sonnet | high |
-| 015 | FR-06a upload fidelity branch (original-if-unedited) | 1 Entry | 🟢 | 013 | 🔲 | FULL | sonnet | high |
-| 016 | FR-04 draft-into-editor via compose disposition | 1 Entry | 🟢 | 000 | 🔲 | FULL | opus | high |
-| 017 | Deploy — BFF + SpaarkeAi (entry paths) + verify 1a/1b/1c mount | 1 Entry | 🟢 | 010,011,012,013,015 | 🔲 | STANDARD | sonnet | high |
+| 015 | FR-06a upload fidelity branch (original-if-unedited) | 1 Entry | 🟢 | 013 | ✅ | FULL | sonnet | high |
+| 016 | FR-04 draft-into-editor via compose disposition | 1 Entry | 🟢 | 000 | ✅ | FULL | opus | high |
+| 017 | Deploy — BFF + SpaarkeAi (entry paths) + verify 1a/1b/1c mount | 1 Entry | 🟢 | 010,011,012,013,015 | ✅◐ deployed 2026-07-10 (mount-verify = owner Tier-1 UAT) | STANDARD | sonnet | high |
 | 020 | FR-19 IComposeEditValidator + POST /edit-batch/validate | 2 LLM | 🟢 | 002 | ✅ | FULL | sonnet | xhigh |
 | 021 | FR-20 ComposeEditBatch (4-phase pipeline) | 2 LLM | 🟢 | 003 | ✅ | FULL | sonnet | high |
 | 022 | FR-21 ComposeEditTransaction (snapshot/rollback) | 2 LLM | 🟢 | 021 | ✅ | FULL | sonnet | high |
@@ -46,33 +46,51 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 043 | FR-10 compose-summarize-word-changes Action + Binding | 4 Catalog | 🟢 | 001,006 | ✅ | FULL | sonnet | high |
 | 044 | FR-11 compose-defined-terms Action + Binding (overflow trigger → Context) | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
 | 045 | FR-12 eval cases per row (golden + dispatch ≥5) + schema validation | 4 Catalog | 🟢 | 040,041,042,043,044 | ✅ | FULL | sonnet | high |
-| 046 | FR-13 dispatch wiring (compose_selection_offer choreography + direct dispatchConsumer) | 4 Catalog | 🟢 | 016,030 | 🔲 | FULL | opus | high |
-| 047 | Deploy catalog rows to Dataverse (mirror-first) | 4 Catalog | 🟢 | 045 | 🔲 | STANDARD | sonnet | high |
+| 046 | FR-13 dispatch wiring (compose_selection_offer choreography + direct dispatchConsumer) | 4 Catalog | 🟢 | 016,030 | ✅ | FULL | opus | high |
+| 047 | Deploy catalog rows to Dataverse (mirror-first) | 4 Catalog | 🟢 | 045 | ✅ deployed 2026-07-10 (5 actions + 5 bindings via direct API; +compose disposition optionset value 100000006) | STANDARD | sonnet | high |
+| 048 | AI-action toolbar activation — capability-discovery → registerComposeAiToolbarAction (closes 101 gap 2.2 code side) | 4 Catalog | 🟢 | 046,101 | ✅ (code; toolbar lights up after 047 bindings) | FULL | opus | high |
 | 050 | FR-24 DocxAnnotationWriter (comments + track changes, edge cases) + push endpoint | 5 Word | 🟢 | 005 | ✅ | FULL | opus | xhigh |
 | 051 | FR-25 DocxAnnotationReader (parse w:comment/w:ins/w:del) + pull endpoint | 5 Word | 🟢 | 006 | ✅ | FULL | sonnet | high |
 | 052 | FR-26 SPE webhook subscription + BackgroundService renewal + delta query | 5 Word | 🟢 | none | ✅ | FULL | opus | high |
 | 053 | FR-26 webhooks/spe-doc-changed + check-changes endpoints | 5 Word | 🟢 | 052 | ✅ | FULL | sonnet | high |
 | 054 | FR-27 return-from-Word re-anchoring (bands ≥0.85/0.6–0.85/<0.6) + conflict banner | 5 Word | 🟢 | 051,006 | ✅ | FULL | opus | high |
-| 055 | FR-28 push/save deterministic path (gate dialog + OutcomeCard = splittable) | 5 Word | 🟡 | 050 | 🔲 | FULL | sonnet | high |
+| 055 | FR-28 push/save deterministic path (gate dialog + OutcomeCard = splittable) | 5 Word | 🟡 | 050 | ✅ deterministic half (gated UI ◐ core-A0: GateDecision v2 / OutcomeCard v1) | FULL | sonnet | high |
 | 056 | Deploy + Word for Web round-trip verification (Spikes 5/6 as gate) | 5 Word | 🟢 | 050,051,053,054 | 🔲 | STANDARD | sonnet | high |
 | 060 | FR-29 anchored annotations in Compose session payload (doc-adjacent) | 6 Memory | 🟢 | none | ✅◐ | FULL | sonnet | high |
 | 061 | FR-31 action history via ledger queries (no duplicate structure) | 6 Memory | 🟢 | none | ✅ | FULL | sonnet | high |
-| 062 | FR-33 compaction over ledger + cross-version persistence (DocumentId+MatterId) | 6 Memory | 🟢 | 061 | 🔲 | STANDARD | sonnet | high |
+| 062 | FR-33 compaction over ledger + cross-version persistence (DocumentId+MatterId) | 6 Memory | 🟢 | 061 | ✅ | STANDARD | sonnet | high |
 | 063 | FR-30 workspace-scope MemoryItems via gated memory.write | 6 Memory | 🔴 | none | ⛔ | FULL | sonnet | high |
 | 064 | FR-32 Context-pane provenance + D-F4 trace hosting | 6 Memory | 🔴 | none | ⛔ | FULL | sonnet | high |
-| 070 | FR-34 activate six coordinated flows (PaneEventBus choreography) | 7 Coord | 🟡 | 030,031 | 🔲 | FULL | opus | high |
+| 070 | FR-34 activate six coordinated flows (PaneEventBus choreography) | 7 Coord | 🟡 | 030,031 | ⭐ SUPERSEDED by 104 | FULL | opus | high |
 | 071 | FR-34 D-F3 UI ack-on-frame-id | 7 Coord | 🔴 | 070 | ⛔ | FULL | sonnet | high |
-| 072 | FR-35 Document Q&A over session-mounted document (stretch) | 7 Coord | 🟢 | none | 🔲 | STANDARD | sonnet | high |
+| 072 | FR-35 Document Q&A over session-mounted document (stretch) | 7 Coord | 🟢 | none | ✅◐ UX+tests done; live grounded-answer E2E-pending deploy | STANDARD | sonnet | high |
 | 080 | R1 spec.md amendment (two Word-native non-goals → "shipped in R2") | 8 Wrap | 🟢 | none | ✅ | MINIMAL | sonnet | high |
-| 081 | Publish-size ≤60 MB + CVE scan + NetArchTest facade verification (NFR-01/02/05) | 8 Wrap | 🟢 | 025,050,052 | 🔲 | STANDARD | sonnet | high |
+| 081 | Publish-size ≤60 MB + CVE scan + NetArchTest facade verification (NFR-01/02/05) | 8 Wrap | 🟢 | 025,050,052 | ✅ (45.27 MB · no new CVE · facade 2/2) | STANDARD | sonnet | high |
 | 082 | Flagship gate G-R2-C — browser-verified full chain on spaarkedev1 | 8 Wrap | 🔴 | 016,033,042,046,047,014,055 | ⛔ | FULL | opus | high |
-| 083 | AnchoredAnnotation Path-A deviation code-review sign-off | 8 Wrap | 🟢 | 060 | 🔲 | MINIMAL | sonnet | high |
-| 084 | Consumer-side vertical-slice seam test — compose dispatch E2E (ADR-043 B6 / O3) | 8 Wrap | 🔴 | 016,046 (+core E-20/E-40) | ⛔ | FULL | sonnet | high |
+| 083 | AnchoredAnnotation Path-A deviation code-review sign-off | 8 Wrap | 🟢 | 060 | ✅ ACCEPT (not a MemoryItem — 5/5 claims verified) | MINIMAL | sonnet | high |
+| 084 | Consumer-side vertical-slice seam test — compose dispatch E2E (ADR-043 B6 / O3) | 8 Wrap | 🟢 (E-20 landed) | 016,046 | ✅ via 101 (confirm at 090) | FULL | sonnet | high |
 | 090 | Project wrap-up (code-review, adr-check, repo-cleanup, /test-diet, lessons) | 8 Wrap | 🔴 | all | ⛔ | FULL | opus | high |
 
 **Totals**: 57 tasks (084 added 2026-07-09) — Task 045 rigor bumped STANDARD→FULL per CLAUDE.md §8 TEST-MODIFYING override.
 
-> **⚠️ E-20 GATING CORRECTION (2026-07-09, from [ADR-043-impact-review.md](../notes/ADR-043-impact-review.md))**: the compose-disposition dispatch is **422-broken end-to-end on master** — the admit-gate (`SessionDispatchOrchestrator.cs:229`) still admits only `Informational|WorkProduct`; our routing promotion fixed the router/ledger leg (2 of 3 lists) but NOT the admit-gate. The fix is **core E-20 (`DispositionRoutability`), 🔲 not started.** So **042/033/034 are shipped-but-GATED (false-green for E2E)** — they pass the router/unit layer but 422 through `/dispatch`; **re-verify after E-20**. The **4 informational actions dispatch E2E now** (E-10 fixed the input path). **042/033/034/046/047 (compose row)/082/084 all wait on E-20 ONLY.** ~~034 additionally waits on E-30~~ — **CORRECTED 2026-07-09 by core** ([REPLY-to-compose-r2-e20-e30-forkc.md](../notes/REPLY-to-compose-r2-e20-e30-forkc.md) §2): 034's supersession-write mechanism is **already shipped in Phase A0** (`ComposeDisposition.BuildFrame`/`ResolveCurrent`, locked by `ComposeDispositionContractTests`); E-30 (deterministic `ActionKind`) is for coded chat-loop actions, **orthogonal to compose supersession**. Build 034's write mechanism against the A0 contract now; it dispatches once E-20 admits `Compose`. **E-20 is DONE in core's worktree (admits `Compose`), pending merge** — core offered a fast-merge. **FREEZE compose edits to `OutputRouter.cs` + `Binding.cs` until E-20** (core owns the collapse).
+## Phase 9 — E2E Remediation (added 2026-07-09 after the 5-slice E2E audit)
+
+> **Source of truth**: [notes/e2e-gap-register.md](../notes/e2e-gap-register.md) — the 5-slice audit found the feature is built-in-halves + unit-green but E2E-inert on every create/write/coordinate path (~30 gaps, 5 clusters). These remediation tasks close the register cluster-by-cluster, each landing with a **non-waivable WebApplicationFactory through-the-wire slice test** (the anti-recurrence forcing function). Owner directive: **fix, do not defer.**
+
+| ID | Title | Cluster | Gate | Deps | Status | Rigor | Model | Effort |
+|----|-------|---------|------|------|--------|-------|-------|--------|
+| 100 | E2E-R1 getting-started vertical (upload/search→load→Save→sprk_document) | 1 create-on-save | 🟢 | 010-013,015 | ✅ | FULL | opus | xhigh |
+| 101 | E2E-R2 AI-action activation (toolbar bindingId registration + 2 missing triggers + 084 HTTP-slice test) | 2 dispatch | 🟢 (code); 047 deploy owner-run | 016,046 | ✅◐ E2E-pending(047) | FULL | opus | high |
+| 102 | E2E-R3 memory-resume (Load sessionId/matterId + response fields + annotation save route + client + Cosmos) | 4 memory | 🟢 | 060,061,062 | ✅ | FULL | opus | high |
+| 103 | E2E-R4 Word-shuttle wiring (client callers + subscription origin call + config + task 055 deterministic path) | 3 word | 🟡 | 050-054 | ✅ (webhook-delivery leg ◐ 056-pending) | FULL | opus | high |
+| 104 | E2E-R5 three-pane coordination (real receivers on Context+Assistant panes + Flows 3/4/6 + typed discriminants) — supersedes/absorbs 070 | 5 three-pane | 🟢 | 030,031,046 | ✅ | FULL | opus | high |
+
+**Remediation sequencing**: 100 (foundational, SOLO now) → 102 (BFF-heavy) + 104 (frontend) can parallelize (disjoint) → 101 code side (then 047 deploy owner-run) → 103. Each is SOLO-or-disjoint per file-overlap; 100/102/103 all touch ComposeEndpoints.cs so they serialize. The 084 HTTP-boundary compose-dispatch test folds into 101.
+
+### 🚩 False-green reconciliation (the ✅ marks these tasks carry OVERSTATE completeness)
+Per the audit, these ✅ tasks are **E2E-inert** and are re-scoped by the Phase-9 remediation above (their service/component halves are correct; the wires are missing): **013** (create-on-save → 100), **050/051/052/053/054** (Word shuttle → 103), **060/061** (memory → 102), **062** (cross-version → 102), **030/043/044** (AI-action triggers → 101), **070→104**. Treat their ✅ as "unit-complete, E2E-pending-remediation" until the matching Phase-9 task lands with its slice test.
+
+> **✅ E-20 LANDED ON MASTER 2026-07-09 (`c300ab12d`) — COMPOSE DISPATCH UNBLOCKED.** The Phase-E batch (E-20/E-12/E-30/E-42) merged. `DispositionRoutability` admits `Compose` (`Routable=true`, `IsAdmissible=IsRoutable`) and the admit-gate follows the registry — **the 422 is gone.** Our routing hand-patch was cleanly superseded (core owns the 3-list collapse; 408/408 dispatch+compose+summarize green). **FREEZE LIFTED** on `OutputRouter.cs`/`Binding.cs`. **NOW EXECUTABLE**: **016** (re-verify E2E through `/dispatch` — clear the false-green) → **042/033/046** → **034** (undo — supersession mechanism already in A0, NOT E-30-gated per core REPLY §2) → **047** (compose row) → **084** (seam test) → **082** (flagship). The 4 informational compose actions now dispatch E2E for real. History: E-20 was 422-gated until this merge (admit-gate `SessionDispatchOrchestrator.cs:229` had admitted only `Informational|WorkProduct`; our promotion fixed 2 of 3 lists, E-20 completed the collapse). Caught+fixed core's E-30 fixture drift on the way in (23 tests, commit `5f59cbc0b`); residual pre-existing `AuditLogService` full-suite flake noted.
 
 ## Parallel Execution Plan (startable 🟢 tracks)
 

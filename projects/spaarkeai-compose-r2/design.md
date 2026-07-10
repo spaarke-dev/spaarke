@@ -686,7 +686,8 @@ R2 introduces **no new AI dispatch endpoint**. The server dispatch surface is th
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/compose/document/{spe-id}/push-annotations` | **NEW** — applies pending Compose annotations to DOCX as `<w:comment>` and `<w:ins>`/`<w:del>` via Open XML SDK; saves to SPE via `SpeFileStore.ReplaceFileContentAsUserAsync` (added in PR #544) with `If-Match` etag |
+| `POST /api/compose/document/{spe-id}/push-annotations` | **NEW** — applies pending Compose annotations to DOCX as `<w:comment>` and `<w:ins>`/`<w:del>` via Open XML SDK; saves to SPE via `SpeFileStore.ReplaceFileContentAsUserAsync` (added in PR #544) with `If-Match` etag. Task 055: also returns the Tier-2c preview (comment/track-change counts + Word-vs-Compose split) and a per-step `JobAwareCompletionState` (push → save → version) as post-write completion evidence; per-step state additionally persists to Redis (`sdap:compose:pushsave:{documentSpeId}`, ADR-009) for cross-request reads once a job-aware OutcomeCard consumer exists. |
+| `POST /api/compose/document/{spe-id}/push-preview` | **NEW (task 055, FR-28)** — Tier-2c PRE-CONFIRM preview: deterministic comment/track-change counts + the Word-vs-Compose split for an annotation batch about to be pushed. Non-mutating (no SPE download, no write) — the clean seam a future Policy v2 Tier 2c gate dialog calls before the user confirms; this task builds no dialog/rendering. |
 | `POST /api/compose/document/{spe-id}/pull-annotations` | **NEW** — parses incoming DOCX from SPE via Open XML SDK; extracts annotations; returns structured annotation payload to Compose UI for re-anchoring |
 | `POST /api/compose/webhooks/spe-doc-changed` | **NEW** — SPE webhook receiver; enqueues delta query and downstream re-anchor work |
 | `POST /api/compose/document/{spe-id}/check-changes` | **NEW** — explicit poll variant (in case webhook fails or for testing); BFF compares stored etag vs current SPE etag |

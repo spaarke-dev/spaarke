@@ -91,7 +91,9 @@ import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar'
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
+import { QaHighlightExtension } from './marks/QaHighlightExtension';
 import { usePendingRedline, type MaterializeStatus } from './hooks/usePendingRedline';
+import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighlight';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the side-effect widget
 // registration (`register-workspace-widgets.ts` transitively pulls in
@@ -147,6 +149,14 @@ const LOCKED_EXTENSIONS = [
  * lives in `useStyles().editorSurface` via the `compose-mark-*` classes (semantic tokens; ADR-021).
  */
 const COMPOSE_R2_MARKS = [InsertionMark, DeletionMark, CommentAnchorMark];
+
+/**
+ * FR-35 Doc Q&A ephemeral highlight (task 072, stretch) — a single ProseMirror
+ * VIEW-DECORATION plugin (NOT a Mark; see the extension's file header). Kept
+ * as its own additive array, separate from COMPOSE_R2_MARKS, because it is a
+ * structurally different kind of extension (plugin-only, no schema mark).
+ */
+const COMPOSE_R2_QA_HIGHLIGHT = [QaHighlightExtension];
 
 // ---------------------------------------------------------------------------
 // Constants — selection debounce
@@ -341,6 +351,21 @@ export interface ComposeEditorHandle {
    * the FR-19 "do not guess" rule. The true ledger-supersession WRITE is FR-17/034.
    */
   materializePendingRedline(draft: ComposeDraftPayload, provenance: ComposeDraftProvenance): MaterializeStatus;
+
+  /**
+   * FR-35 Doc Q&A ephemeral highlight (spaarkeai-compose-r2 task 072, stretch).
+   * Resolve `sourceText` (the cited excerpt from a grounded Text-path answer)
+   * against the CURRENT document and, on a unique match, render a TRANSIENT
+   * highlight decoration + scroll it into view. `sectionLabel` drives the
+   * "Found in …" affordance. Returns the outcome (`'highlighted'` /
+   * `'not_found'` / `'ambiguous'` / `'noop'`) so the caller can distinguish a
+   * genuine miss (the citation belongs to a different source than this open
+   * document) from success — never guesses (FR-19 sibling rule).
+   */
+  highlightCitedSpan(sourceText: string, sectionLabel?: string): QaHighlightStatus;
+
+  /** Clear the active Doc Q&A ephemeral highlight immediately (no-op if none active). */
+  clearCitedHighlight(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -416,6 +441,14 @@ const useStyles = makeStyles({
       color: tokens.colorNeutralForeground1,
       borderRadius: tokens.borderRadiusSmall,
     },
+    // FR-35 Doc Q&A ephemeral highlight (task 072) — a ProseMirror view
+    // decoration, NOT a doc Mark (never serializes to DOCX). Semantic tokens
+    // only (ADR-021 dark-mode-correct).
+    '& .compose-qa-highlight': {
+      backgroundColor: tokens.colorPaletteMarigoldBackground2,
+      borderRadius: tokens.borderRadiusSmall,
+      transition: 'background-color 0.2s ease-out',
+    },
   },
   loadingState: {
     display: 'flex',
@@ -470,6 +503,17 @@ const useStyles = makeStyles({
   redlineErrorText: {
     flex: 1,
     minWidth: 0,
+  },
+  // FR-35 Doc Q&A ephemeral highlight banner (task 072, stretch). Semantic
+  // tokens only (ADR-021 dark-mode-correct) — transient, dismissible-by-timeout.
+  qaHighlightBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+    padding: tokens.spacingHorizontalS,
+    backgroundColor: tokens.colorPaletteMarigoldBackground1,
+    color: tokens.colorPaletteMarigoldForeground1,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
 });
 
@@ -546,11 +590,10 @@ function useSelectionEventDispatch(
         // Flow 1 — always fires on selection-change (even collapsed selections,
         // because subscribers may want to update precedent context as cursor
         // moves through clauses).
-        // Per ADR-030: the Compose discriminants are additive on the existing
-        // `context` channel typed union; we cast through `unknown` because the
-        // PaneEventChannelMap doesn't yet enumerate these Compose additions at
-        // the shared-lib level (compose-contracts.ts is solution-local until a
-        // second consumer needs the types — see Spike #2 §11 / task 041).
+        // Per ADR-030: `compose_selection_changed` is now a TYPED additive
+        // discriminant on the `context` channel (ContextPaneEvent — enumerated at
+        // the shared-lib bus layer by task 104). No `as any` — the literal is
+        // type-checked against the channel union.
         dispatch('context', {
           type: 'compose_selection_changed',
           documentRef,
@@ -561,11 +604,12 @@ function useSelectionEventDispatch(
           },
           sessionId,
           timestamp,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any);
+        });
 
         // Flow 2 — fires only when selection is meaningful (non-collapsed +
         // ≥10 chars) to avoid noise on click-only cursor moves.
+        // `compose_selection_offer` is a TYPED additive discriminant on the
+        // `conversation` channel (ConversationPaneEvent — task 104).
         const isCollapsed = from === to;
         if (!isCollapsed && selectionText.length >= FLOW2_MIN_CHARS) {
           dispatch('conversation', {
@@ -579,8 +623,7 @@ function useSelectionEventDispatch(
             jpsScope: 'compose-selection',
             sessionId,
             timestamp,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          } as any);
+          });
         }
       }, SELECTION_DEBOUNCE_MS);
     };
@@ -637,7 +680,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const editor = useEditor({
       // LOCKED Spike #1 set + the ADDITIVE R2 custom marks (task 031) — the locked list itself
       // is unchanged (spread, not mutated), honoring the "do not touch the locked list" constraint.
-      extensions: [...LOCKED_EXTENSIONS, ...COMPOSE_R2_MARKS],
+      extensions: [...LOCKED_EXTENSIONS, ...COMPOSE_R2_MARKS, ...COMPOSE_R2_QA_HIGHLIGHT],
       content: '<p></p>',
       // editorProps to apply Fluent v9 inherited foreground; semantic-token
       // styling on `.ProseMirror` lives in useStyles above.
@@ -667,14 +710,22 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         onDirtyChange?.(false);
         return;
       }
+      // gap 1.6 / DEF-01: a TRANSIENT (Browse/Upload) mount has no SPE pointer yet (empty
+      // speDriveItemId). Its create-on-save first Save must be reachable, so we report
+      // dirty=true to the workspace (there IS unsaved work — the draft has never been
+      // persisted). The editor's OWN dirtyRef stays FALSE below so an *untouched* transient
+      // Save still persists the pristine ORIGINAL bytes byte-identical (FR-06a, task 015) —
+      // triggerSave keys the byte-branch off `editorRef.current.isDirty()` (= dirtyRef), NOT
+      // the workspace-facing onDirtyChange signal. A stored (non-transient) load reports clean.
+      const isTransientMount = !documentRef?.speDriveItemId;
       let cancelled = false;
       setIsImporting(true);
       docxToTipTapHtml(docxBytes)
         .then(({ html, messages }) => {
           if (cancelled) return;
           editor.commands.setContent(html);
-          dirtyRef.current = false; // fresh load is clean
-          onDirtyChange?.(false);
+          dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
+          onDirtyChange?.(isTransientMount);
           // Privacy: messages are Tier 1 safe (configuration metadata).
           // Document HTML itself is Tier 3 — NEVER logged.
           if (messages.length > 0) {
@@ -695,6 +746,12 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       return () => {
         cancelled = true;
       };
+      // `documentRef?.speDriveItemId` is read (transient-vs-stored) but intentionally NOT a dep:
+      // the effect must re-run ONLY on a new `docxBytes` mount. Adding it would re-run on
+      // save-success (when speDriveItemId gets populated on the same bytes) and clobber the
+      // user's edits by re-importing the original mount bytes. The captured value is correct
+      // because `mountTransient` sets docxBytes + documentRef atomically in one render.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [editor, docxBytes, onDirtyChange, onImportWarnings]);
 
     // ----- Selection dispatch (heartbeat hoisted to ComposeWorkspace) -----
@@ -703,6 +760,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // ----- FR-16 pending-redline materialization (task 033) ---------------
     // Owns materialize-from-ledger → FR-15 marks + accept/reject + supersession.
     const redline = usePendingRedline(editor);
+
+    // ----- FR-35 Doc Q&A ephemeral highlight (task 072, stretch) -----------
+    const qaHighlight = useDocQaHighlight(editor);
 
     // ----- Imperative handle ----------------------------------------------
     React.useImperativeHandle(
@@ -737,8 +797,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           redline.materialize(draft, provenance);
         },
         materializePendingRedline: (draft, provenance) => redline.materialize(draft, provenance),
+        highlightCitedSpan: (sourceText, sectionLabel) => qaHighlight.highlight(sourceText, sectionLabel),
+        clearCitedHighlight: () => qaHighlight.clear(),
       }),
-      [editor, redline]
+      [editor, redline, qaHighlight]
     );
 
     // ----- Render ---------------------------------------------------------
@@ -837,6 +899,19 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             />
             {/* =================== END AI TOOLBAR MOUNT (task 030) =================== */}
           </BubbleMenu>
+        ) : null}
+
+        {/* ===================================================================
+            FR-35 Doc Q&A ephemeral highlight banner — task 072 (stretch).
+            Renders ONLY while a cited answer's source span is highlighted
+            (auto-clears after HIGHLIGHT_TTL_MS or on the next Q&A / clear).
+            =================================================================== */}
+        {qaHighlight.activeHighlight ? (
+          <div className={styles.qaHighlightBanner} role="status" data-testid="compose-qa-highlight-banner">
+            <Text size={200}>
+              Found in {qaHighlight.activeHighlight.sectionLabel ?? 'this document'}
+            </Text>
+          </div>
         ) : null}
 
         {/* ===================================================================

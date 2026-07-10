@@ -30,6 +30,60 @@
 export type PaneChannel = 'workspace' | 'context' | 'conversation' | 'safety';
 
 // ---------------------------------------------------------------------------
+// Compose flow payload sub-types (spaarkeai-compose-r2 task 104 — E2E-R5)
+// ---------------------------------------------------------------------------
+//
+// The six Compose three-pane coordination flows are ADDITIVE discriminants on
+// the existing `workspace` / `context` / `conversation` channels (ADR-030
+// additive-types rule; NO sixth channel). Their rich domain interfaces live in
+// `@spaarke/compose-components` (`types/compose-contracts.ts`) — the Compose
+// domain source of truth. That package already imports `PaneChannel` from here,
+// so the bus contract (this file) MUST NOT import back from it (would create a
+// package-graph cycle). Instead we declare the two structural sub-types the
+// compose discriminants carry HERE, at the bus layer, so the channel event
+// interfaces below can enumerate the compose discriminants as first-class typed
+// members. The compose-contracts interfaces are structurally assignable to these
+// (identical field shapes), so dispatch/subscribe are fully typed with ZERO
+// `as any` (closes gap 5.2 / ADR-030 "no untyped payloads").
+//
+// Privacy (ADR-015): `selectionText` (ComposeFlowSelection) is Tier-3
+// user-content — subscribers bridging to telemetry MUST strip it; the
+// identifier fields (speDriveItemId, etc.) are Tier-1 safe. Mirrors the existing
+// `WorkspacePaneEvent.selectionText` privacy contract.
+
+/**
+ * Stable pointer to a document open in Compose. Structural mirror of
+ * `@spaarke/compose-components` `ComposeDocumentRef` / `ComposeEditorDocumentRef`
+ * (identical shape — assignable in both directions). Identifier only (Tier-1).
+ */
+export interface ComposeFlowDocumentRef {
+  /** SPE drive-item id (always present) — canonical identity. */
+  speDriveItemId: string;
+  /** Dataverse `sprk_documentid` (present after first-Save promotion). */
+  sprkDocumentId?: string;
+  /** Optional human-readable file name for UI labelling. */
+  fileName?: string;
+  /** SPE container id (multi-tenant scoping). */
+  containerId?: string;
+}
+
+/**
+ * Editor selection span carried by compose Flow 1 / Flow 2. Structural mirror of
+ * `@spaarke/compose-components` `ComposeSelection`. `selectionText` is Tier-3
+ * user content (see ADR-015 note above).
+ */
+export interface ComposeFlowSelection {
+  /** ProseMirror "from" position (inclusive). */
+  from: number;
+  /** ProseMirror "to" position (exclusive). */
+  to: number;
+  /** Selected text payload (Tier-3 — subscribers strip before logging). */
+  selectionText: string;
+  /** Short human-readable context label (e.g. "Clause 3.4"). Tier-1 safe. */
+  contextLabel?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Workspace channel
 // ---------------------------------------------------------------------------
 
@@ -236,7 +290,25 @@ export interface WorkspacePaneEvent {
     | 'user_selection'
     | 'tab_edited'
     | 'tab_focused'
-    | 'tab_provenance_clicked';
+    | 'tab_provenance_clicked'
+    // ── Compose three-pane flows on `workspace` (spaarkeai-compose-r2 task 104) ──
+    // Flow 3 (Context → Workspace): insert a precedent/library clause into the
+    //   editor at cursor. Flow 5 (Assistant → Workspace): materialize an AI draft
+    //   FROM the stored ledger entry (ADR-040 render-follows-store). Both are
+    //   additive discriminants; the Compose editor receiver (ComposeWorkspace via
+    //   `useComposeWorkspaceReceivers`) narrows on these. See the compose field
+    //   block lower in this interface + `@spaarke/compose-components`
+    //   `ComposeContextToWorkspaceFlow` / `ComposeAssistantToWorkspaceFlow`.
+    | 'compose_context_insert'
+    | 'compose_assistant_insert'
+    // ── Compose Doc Q&A ephemeral highlight (spaarkeai-compose-r2 task 072,
+    //    FR-35 stretch) ── Assistant → Workspace. A grounded, CITED Text-path
+    //    answer over the session-mounted document (ADR-039: rides the
+    //    EXISTING bounded agent loop — no new capability/playbook/dispatch)
+    //    asks the Workspace pane to ephemerally highlight the cited source
+    //    span. Additive discriminant; see the qaSourceText/qaSectionLabel
+    //    field block below.
+    | 'compose_qa_highlight';
 
   /** Identifies the widget kind (e.g. `"document-summary"`, `"clause-list"`). */
   widgetType?: string;
@@ -684,6 +756,72 @@ export interface WorkspacePaneEvent {
    * safe). NOT a user-content surface.
    */
   provenanceId?: string;
+
+  // ── Compose flow fields (spaarkeai-compose-r2 task 104) ───────────────────
+  //
+  // Carried by the two Compose `workspace`-channel discriminants
+  // (`compose_context_insert` = Flow 3, `compose_assistant_insert` = Flow 5).
+  // All optional on the base type so existing subscribers stay type-safe;
+  // receivers narrow on `event.type` first. `sessionId` + `timestamp` are
+  // declared above (reused). Structural mirrors of the compose-contracts
+  // `ComposeContextToWorkspaceFlow` / `ComposeAssistantToWorkspaceFlow` fields.
+  //
+  // ADR-015: `contentHtml` is Tier-3 (clause / LLM-draft content) — never
+  // logged to telemetry. `documentRef` / ids / `ledgerRef` are Tier-1 safe.
+
+  /** Target document pointer (Flow 3 + Flow 5). Tier-1 safe. */
+  documentRef?: ComposeFlowDocumentRef;
+  /** Source precedent/library clause id being inserted (Flow 3). Tier-1 safe. */
+  sourceClauseId?: string;
+  /** Content payload to insert / draft (Flow 3 + legacy Flow 5). Tier-3. */
+  contentHtml?: string;
+  /** Payload format hint (Flow 3 + Flow 5). Tier-1 safe. */
+  format?: 'html' | 'prosemirror-json';
+  /** Optional target insertion position; absent → cursor (Flow 3). Tier-1. */
+  insertAt?: number;
+  /** Producing playbook node id (Flow 5 provenance). Tier-1 safe. */
+  sourceNodeId?: string;
+  /** Producing playbook id (Flow 5 provenance). Tier-1 safe. */
+  sourcePlaybookId?: string;
+  /** Insertion mode signal (Flow 5). Tier-1 safe. */
+  insertMode?: 'replace-selection' | 'insert-at-cursor' | 'append';
+  /** R1 manual-confirm gate flag (Flow 5). Tier-1 safe. */
+  requireUserConfirm?: boolean;
+  /**
+   * FR-04 render-follows-store reference (`{bindingId}@t{n}`) for Flow 5. When
+   * present, ComposeWorkspace re-reads the STORED compose output from the
+   * session ledger (ADR-040) instead of the event payload. Tier-1 safe (an
+   * addressable identifier, not content).
+   */
+  ledgerRef?: string;
+
+  // ── Compose Doc Q&A ephemeral highlight fields (task 072, FR-35) ──────────
+  //
+  // Carried by the `compose_qa_highlight` discriminant ONLY. Dispatched by the
+  // Assistant pane after a grounded, cited Text-path answer over the
+  // session-mounted document (the `citations` SSE mechanism — SHIPPED,
+  // unchanged). ComposeEditor resolves `qaSourceText` against the CURRENT
+  // document text using the SAME strict-match, do-not-guess semantics as the
+  // FR-16 redline `target_text` resolution (`resolveTargetSpans`) and renders
+  // a TRANSIENT, non-persisted highlight (a ProseMirror decoration — never a
+  // Mark, never part of DOCX serialization). No-op when no document is
+  // mounted, or the text isn't found/is ambiguous — the event carries no
+  // document identity because the Workspace pane already owns it.
+
+  /**
+   * The cited excerpt text to locate in the open document. Present when
+   * `type === 'compose_qa_highlight'`. Tier-3 (RAG/LLM-sourced citation
+   * content already rendered to the user in the Assistant pane) — used only
+   * for in-document text matching; never logged.
+   */
+  qaSourceText?: string;
+
+  /**
+   * Display label for the cited source/section (e.g. the citation's source
+   * name), shown in the ephemeral "Found in …" affordance. Present when
+   * `type === 'compose_qa_highlight'`. Tier-1 safe.
+   */
+  qaSectionLabel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -821,7 +959,16 @@ export interface ContextPaneEvent {
     | 'playbook_node_executing'
     | 'playbook_node_completed'
     | 'decision_made'
-    | 'tool_chain';
+    | 'tool_chain'
+    // ── Compose three-pane flows on `context` (spaarkeai-compose-r2 task 104) ──
+    // Flow 1 (Workspace → Context): the editor selection changed — the Context
+    //   pane surfaces the active clause. Flow 6 (Assistant → Context): an AI
+    //   derived insight is surfaced read-only in the Context pane (audit-only).
+    //   Receivers: ContextPaneController. See the compose field block below +
+    //   `@spaarke/compose-components` `ComposeWorkspaceToContextFlow` /
+    //   `ComposeAssistantToContextFlow`.
+    | 'compose_selection_changed'
+    | 'compose_assistant_insight';
 
   /** Classifies the context payload (e.g. `"document"`, `"email"`, `"clause"`). */
   contextType?: string;
@@ -1095,6 +1242,37 @@ export interface ContextPaneEvent {
    * record projected onto the wire (identifiers/filters/counts only).
    */
   toolChainCalls?: ReadonlyArray<TraceToolCallSummary>;
+
+  // ── Compose flow fields (spaarkeai-compose-r2 task 104) ───────────────────
+  //
+  // Carried by the two Compose `context`-channel discriminants
+  // (`compose_selection_changed` = Flow 1, `compose_assistant_insight` = Flow 6).
+  // All optional; receivers (ContextPaneController) narrow on `event.type`.
+  // `sessionId` + `timestamp` are declared above (reused). Structural mirrors of
+  // compose-contracts `ComposeWorkspaceToContextFlow` / `ComposeAssistantToContextFlow`.
+  //
+  // ADR-015: `selection.selectionText` + `insightText` are Tier-3 content —
+  // never logged to the `context.*` trace/telemetry channel. `documentRef`,
+  // `insightKind`, `sourceNodeId`, `sourceSpan` are Tier-1 safe.
+
+  /** Active document pointer (Flow 1 + Flow 6). Tier-1 safe. */
+  documentRef?: ComposeFlowDocumentRef;
+  /** Editor selection payload (Flow 1). `selectionText` is Tier-3. */
+  selection?: ComposeFlowSelection;
+  /**
+   * Derived-insight kind (Flow 6). Tier-1 safe.
+   *
+   * `'citation'` (task 072, FR-35): a Doc Q&A grounded-answer citation was
+   * surfaced audit-only in the Context pane (paired with the
+   * `compose_qa_highlight` workspace-channel event — see PaneEventTypes.ts).
+   */
+  insightKind?: 'summary' | 'risk' | 'entity' | 'clause-type' | 'recommendation' | 'citation';
+  /** Derived-insight narrative text (Flow 6). Tier-3 content. */
+  insightText?: string;
+  /** Optional source span linking a Flow-6 insight to a document region. Tier-1. */
+  sourceSpan?: { from: number; to: number };
+  /** Producing playbook node id (Flow 6 provenance). Tier-1 safe. */
+  sourceNodeId?: string;
 }
 
 /**
@@ -1157,7 +1335,21 @@ export interface ConversationPaneEvent {
    *                         Dispatched by ConversationPane on prompt button click.
    *                         ShellStageManager marks hasSession=true on receipt.
    */
-  type: 'suggestion' | 'playbook_change' | 'playbook-selected' | 'refine_request' | 'first_message';
+  type:
+    | 'suggestion'
+    | 'playbook_change'
+    | 'playbook-selected'
+    | 'refine_request'
+    | 'first_message'
+    // ── Compose three-pane flows on `conversation` (spaarkeai-compose-r2 task 104) ──
+    // Flow 2 (Workspace → Assistant): the editor selection settled — the
+    //   Assistant offers playbook actions for it. Flow 4 (Context → Assistant):
+    //   a Context-pane precedent is staged as input for the next action.
+    //   Receivers: ConversationPane (`ComposeAssistantCoordination`). See the
+    //   compose field block below + `@spaarke/compose-components`
+    //   `ComposeWorkspaceToAssistantFlow` / `ComposeContextToAssistantFlow`.
+    | 'compose_selection_offer'
+    | 'compose_context_offer';
 
   /** Human-readable suggestion text when `type === 'suggestion'`. */
   suggestionText?: string;
@@ -1197,6 +1389,32 @@ export interface ConversationPaneEvent {
 
   /** Structured refinement instruction payload for `refine_request`. */
   refineData?: unknown;
+
+  // ── Compose flow fields (spaarkeai-compose-r2 task 104) ───────────────────
+  //
+  // Carried by the two Compose `conversation`-channel discriminants
+  // (`compose_selection_offer` = Flow 2, `compose_context_offer` = Flow 4).
+  // All optional; receivers (ConversationPane → ComposeAssistantCoordination)
+  // narrow on `event.type`. Structural mirrors of compose-contracts
+  // `ComposeWorkspaceToAssistantFlow` / `ComposeContextToAssistantFlow`.
+  //
+  // ADR-015: `selection.selectionText` + `contentHtml` are Tier-3 content —
+  // never logged to telemetry. Ids + `jpsScope` + `documentRef` are Tier-1 safe.
+
+  /** Active document pointer (Flow 2 + Flow 4). Tier-1 safe. */
+  documentRef?: ComposeFlowDocumentRef;
+  /** Editor selection payload (Flow 2). `selectionText` is Tier-3. */
+  selection?: ComposeFlowSelection;
+  /** Source precedent/clause id staged as input (Flow 4). Tier-1 safe. */
+  sourceClauseId?: string;
+  /** Precedent content to stage as scope input (Flow 4). Tier-3 content. */
+  contentHtml?: string;
+  /** JPS scope name the offer binds to (Flow 2 / Flow 4). Tier-1 safe. */
+  jpsScope?: 'compose-selection' | 'compose-document';
+  /** ChatSession id correlating the flow. Tier-1 safe. */
+  sessionId?: string;
+  /** ISO-8601 UTC timestamp the flow fired. Tier-1 safe. */
+  timestamp?: string;
 }
 
 // ---------------------------------------------------------------------------

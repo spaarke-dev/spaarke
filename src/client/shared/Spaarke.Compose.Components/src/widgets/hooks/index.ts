@@ -31,3 +31,7 @@ export type {
   RedlineSpan,
   ResolveResult,
 } from './usePendingRedline';
+
+// task 072 (FR-35 Doc Q&A stretch) — ephemeral highlight over a cited span.
+export { useDocQaHighlight } from './useDocQaHighlight';
+export type { UseDocQaHighlightResult, ActiveQaHighlight, QaHighlightStatus } from './useDocQaHighlight';

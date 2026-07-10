@@ -259,6 +259,28 @@ describe('ComposeAiToolbar — dispatch + extensibility', () => {
     );
   });
 
+  it('gap 2.3: the two whole-document actions (summarize-word-changes, defined-terms) are triggerable from the overflow (DEFAULT_ACTIONS)', async () => {
+    const user = userEvent.setup();
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+
+    // No `actions` prop → reads the REAL module DEFAULT_ACTIONS, which now
+    // carries the two previously-untriggerable overflow actions (gap 2.3).
+    renderToolbar({ editor });
+
+    await user.click(screen.getByTestId('compose-ai-toolbar-more'));
+
+    const summarize = await screen.findByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes');
+    const definedTerms = await screen.findByTestId('compose-ai-toolbar-overflow-compose-defined-terms');
+    expect(summarize).toBeInTheDocument();
+    expect(definedTerms).toBeInTheDocument();
+
+    // Phase-4 stub: disabled until the seeded Binding GUID is registered
+    // (button ENABLEMENT is E2E-pending on task 047) — but the trigger ENTRY
+    // POINTS now exist, which is what gap 2.3 required.
+    expect(summarize).toHaveAttribute('aria-disabled', 'true');
+    expect(definedTerms).toHaveAttribute('aria-disabled', 'true');
+  });
+
   it('the overflow menu shows a placeholder when no overflow actions are registered', async () => {
     const user = userEvent.setup();
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
