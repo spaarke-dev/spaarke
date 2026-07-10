@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Json;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
@@ -142,8 +143,25 @@ public sealed record ContextBindingRequest
     /// <summary>Assembled Business-slice fragment (host-record identity + schema card).</summary>
     public string? BusinessFragment { get; init; }
 
-    /// <summary>Server-resolved caller contact id (claims→contact) — reference, not free text.</summary>
+    /// <summary>
+    /// Pre-resolved server-side caller contact id (claims→contact) — reference, not free text. When
+    /// null, <see cref="ContextBinder"/> resolves it deterministically from <see cref="Caller"/> (or
+    /// the ambient <c>IHttpContextAccessor.HttpContext.User</c> in production) via
+    /// <see cref="ICallerContactResolver"/> (FR-B-06, task 055). Explicit callers that already hold a
+    /// resolved id (e.g. a caller with its own claims-resolution path) MAY set this directly; either
+    /// way the value ALWAYS originates from server-side deterministic resolution, never from client
+    /// args or a model completion (ADR-039 "no runtime judgment for what should be data").
+    /// </summary>
     public string? CallerContactId { get; init; }
+
+    /// <summary>
+    /// The caller's claims principal for server-side contact resolution (FR-B-06, task 055). Optional —
+    /// tests and non-HTTP callers (background/pre-session binds) supply it explicitly; the live HTTP
+    /// dispatch path leaves this null and <see cref="ContextBinder"/> falls back to the ambient
+    /// <c>IHttpContextAccessor.HttpContext.User</c>. Never populated from dispatch <c>Args</c> or any
+    /// client-supplied JSON — the ONLY source is the authenticated request's own <see cref="ClaimsPrincipal"/>.
+    /// </summary>
+    public ClaimsPrincipal? Caller { get; init; }
 
     /// <summary>Ledger conversation tail as references (ADR-040 facade — never copied payloads).</summary>
     public IReadOnlyList<LedgerEntryReference>? ConversationTail { get; init; }
