@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
@@ -140,24 +141,29 @@ public class ComposeService : IComposeService
             ? request.DocumentRecordId.Value.ToString()
             : request.DocumentSpeId;
 
-        // FR-29 (R2, design.md §8): if the caller supplies a known prior SessionId bound to
-        // THIS SAME document identity, RESUME it instead of minting a new one — this is what
-        // carries AnchoredAnnotations/DefinedTermsTracking forward across a document re-open
-        // (the annotations are keyed to document identity, not to a DOCX version — design.md
-        // §8 "Cross-version persistence"). A mismatched or missing session falls back to the
-        // R1 mint-new behavior unchanged (purely additive).
+        // FR-29 (R2, design.md §8) + FR-33 (task 062): if the caller supplies a known prior
+        // SessionId bound to THIS SAME cross-version key — DocumentId (bindingId, already
+        // version-independent: sprk_documentid or the SPE drive-item id, NEVER a DOCX version
+        // identifier) AND, when supplied, MatterId — RESUME it instead of minting a new one.
+        // This is what carries AnchoredAnnotations/DefinedTermsTracking/action-history forward
+        // across a document re-open (design.md §8 "Cross-version persistence": bound to
+        // `DocumentId + MatterId`, NOT to a specific DOCX version — a Word save that produces a
+        // new version never changes this key). A mismatched or missing session falls back to
+        // the R1 mint-new behavior unchanged (purely additive; see
+        // <see cref="IsSameCrossVersionBinding"/>).
         ChatSession? session = null;
         if (!string.IsNullOrWhiteSpace(request.SessionId))
         {
             var candidate = await _sessions.GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
                 .ConfigureAwait(false);
-            if (candidate is not null && string.Equals(candidate.DocumentId, bindingId, StringComparison.Ordinal))
+            if (candidate is not null && IsSameCrossVersionBinding(candidate, bindingId, request.MatterId))
             {
                 session = candidate;
                 _logger.LogDebug(
-                    "Compose load: resumed existing session {SessionId} bound to document={BindingId} (tenant={TenantId}) — restoring {AnnotationCount} annotation(s), {DefinedTermCount} defined term(s)",
-                    session.SessionId, bindingId, request.TenantId,
-                    session.AnchoredAnnotations?.Count ?? 0, session.DefinedTermsTracking?.Count ?? 0);
+                    "Compose load: resumed existing session {SessionId} bound to document={BindingId} matter={MatterId} (tenant={TenantId}) — restoring {AnnotationCount} annotation(s), {DefinedTermCount} defined term(s), {OutputCount} ledger output(s)",
+                    session.SessionId, bindingId, request.MatterId, request.TenantId,
+                    session.AnchoredAnnotations?.Count ?? 0, session.DefinedTermsTracking?.Count ?? 0,
+                    session.Outputs?.Count ?? 0);
             }
         }
 
@@ -165,9 +171,15 @@ public class ComposeService : IComposeService
                 tenantId: request.TenantId,
                 documentId: bindingId,
                 playbookId: null,
-                hostContext: null,
+                hostContext: BuildMatterHostContext(request.MatterId),
                 ct: cancellationToken)
             .ConfigureAwait(false);
+
+        // FR-33 (task 062, design.md §8): restore prior decisions from the ledger alongside the
+        // FR-29 annotations — task 061's read-only GetActionHistory query over the resumed
+        // session's Outputs/ToolChains. No new stored structure (ADR-040); a freshly-minted
+        // session naturally has an empty ledger.
+        var actionHistory = GetActionHistory(session);
 
         return new LoadComposeDocumentResult
         {
@@ -181,8 +193,50 @@ public class ComposeService : IComposeService
             Size = metadata.Size,
             AnchoredAnnotations = session.AnchoredAnnotations ?? Array.Empty<AnchoredAnnotation>(),
             DefinedTermsTracking = session.DefinedTermsTracking ?? Array.Empty<DefinedTerm>(),
+            ActionHistory = actionHistory,
         };
     }
+
+    /// <summary>
+    /// FR-33 (design.md §8) cross-version session-binding predicate: a resumed session must
+    /// match the SAME <c>DocumentId</c> binding (<paramref name="bindingId"/> — version
+    /// independent by construction; see <see cref="LoadAsync"/> remarks) AND, when the caller
+    /// supplies a <paramref name="matterId"/>, the SAME Matter — read from the candidate
+    /// session's <see cref="ChatHostContext"/> (canonical <c>EntityType == "matter"</c> per
+    /// <see cref="Models.Ai.Chat.EntityTypeNormalizer"/>, <c>EntityId == matterId</c>). A
+    /// <c>null</c>/whitespace <paramref name="matterId"/> preserves the FR-29 DocumentId-only
+    /// match (backward compatible with callers that predate FR-33). This augments the EXISTING
+    /// caller-supplied-SessionId resume path — no new lookup index, no parallel session cache
+    /// (ADR-040).
+    /// </summary>
+    private static bool IsSameCrossVersionBinding(ChatSession candidate, string bindingId, string? matterId)
+    {
+        if (!string.Equals(candidate.DocumentId, bindingId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(matterId))
+        {
+            return true;
+        }
+
+        return candidate.HostContext is { } hostContext
+            && string.Equals(hostContext.EntityType, ParentEntityContext.EntityTypes.Matter, StringComparison.Ordinal)
+            && string.Equals(hostContext.EntityId, matterId, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// FR-33 (design.md §8): seeds a new Compose session's <see cref="ChatHostContext"/> with
+    /// the Matter binding when the caller supplies one, so the NEXT <see cref="LoadAsync"/>
+    /// call for the same document + matter can resume via
+    /// <see cref="IsSameCrossVersionBinding"/>. Returns <c>null</c> (R1 behavior, unchanged)
+    /// when no <paramref name="matterId"/> is supplied.
+    /// </summary>
+    private static ChatHostContext? BuildMatterHostContext(string? matterId) =>
+        string.IsNullOrWhiteSpace(matterId)
+            ? null
+            : new ChatHostContext(EntityType: ParentEntityContext.EntityTypes.Matter, EntityId: matterId);
 
     /// <inheritdoc />
     public async Task<SaveComposeDocumentResult> SaveAsync(

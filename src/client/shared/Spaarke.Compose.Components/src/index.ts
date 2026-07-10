@@ -100,6 +100,24 @@ export { ComposeLaunchContext, useComposeLaunch } from './context/composeLaunchC
 export type { ComposeLaunchContextValue } from './context/composeLaunchContext';
 
 // -------------------------------------------------------------------------
+// Compose action bridge (spaarkeai-compose-r2 task 046 / FR-13) — the
+// cross-pane conduit that lets the inline AI toolbar (workspace pane) reach
+// the Assistant pane's FIFO serial dispatch queue (FR-18) via a DIRECT
+// `dispatchConsumer` call, NOT a PaneEventBus event (Spike 0 / design §7.2).
+// Zero new PaneEventBus discriminants (ADR-030 closed union untouched).
+// -------------------------------------------------------------------------
+export {
+  ComposeActionBridgeContext,
+  ComposeActionBridgeProvider,
+  useComposeActionBridge,
+  useRegisterComposeActionDispatcher,
+} from './context/composeActionBridge';
+export type {
+  ComposeActionBridgeValue,
+  ComposeActionBridgeProviderProps,
+} from './context/composeActionBridge';
+
+// -------------------------------------------------------------------------
 // Data contracts (Phase 4 task 041 — promoted from SpaarkeAi in task 091)
 //
 // Flow contracts for the three-pane PaneEventBus wiring. Additive

@@ -294,6 +294,23 @@ public sealed record LoadComposeDocumentRequest
     /// unchanged) — this parameter is purely additive.
     /// </summary>
     public string? SessionId { get; init; }
+
+    /// <summary>
+    /// FR-33 (R2, design.md §8): optional Matter identifier completing the cross-version
+    /// session binding key <c>DocumentId + MatterId</c> (ADR-040 — augments the EXISTING
+    /// FR-29 <see cref="SessionId"/> resume-match; it is NOT a new lookup index or a parallel
+    /// session cache). When supplied alongside <see cref="SessionId"/>, the candidate session
+    /// must match BOTH the document-identity binding AND this Matter id (via the session's
+    /// <see cref="Models.Ai.Chat.ChatHostContext"/> — canonical <c>EntityType == "matter"</c>,
+    /// <c>EntityId == MatterId</c>) before it is reused — see
+    /// <see cref="ComposeService.LoadAsync"/> remarks. A DOCX version change (Word save) never
+    /// changes this key, so the resumed session — and its restored annotations + action
+    /// history — survives Word handoffs. A <c>null</c> value preserves the FR-29
+    /// DocumentId-only match (backward compatible with callers that predate FR-33). When a NEW
+    /// session is minted, this value seeds the session's <c>ChatHostContext</c> so the next
+    /// Load can resume by the same key.
+    /// </summary>
+    public string? MatterId { get; init; }
 }
 
 /// <summary>Load outcome — DOCX bytes + session id + (Path A) <c>sprk_documentid</c>.</summary>
@@ -322,6 +339,17 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     /// resumed/created session. Empty (never null) when none exist yet.
     /// </summary>
     public IReadOnlyList<DefinedTerm> DefinedTermsTracking { get; init; } = Array.Empty<DefinedTerm>();
+
+    /// <summary>
+    /// FR-33 rehydrate (design.md §8): prior action-history entries — "prior decisions" —
+    /// restored from the resumed session's ledger via
+    /// <see cref="ComposeService.GetActionHistory(Models.Ai.Chat.ChatSession, string?)"/> (task
+    /// 061's read-only ledger query). Restored alongside <see cref="AnchoredAnnotations"/> /
+    /// <see cref="DefinedTermsTracking"/> ("prior annotations") whenever a Word round-trip
+    /// resumes an existing session (FR-33 cross-version persistence). Empty (never null) for a
+    /// freshly-minted session or a resumed session whose ledger has no outputs yet.
+    /// </summary>
+    public IReadOnlyList<ComposeActionHistoryEntry> ActionHistory { get; init; } = Array.Empty<ComposeActionHistoryEntry>();
 }
 
 /// <summary>Save request payload.</summary>

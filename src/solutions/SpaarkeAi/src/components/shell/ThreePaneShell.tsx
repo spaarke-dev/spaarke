@@ -86,6 +86,7 @@ import type { PaneId } from "../../hooks/usePaneCollapse";
 // (e.g. WorkspacePane) so the local import path stays stable.
 import {
   ComposeLaunchContext,
+  ComposeActionBridgeProvider,
   type ComposeLaunchContextValue,
   type ComposeDocumentRef,
 } from "@spaarke/compose-components";
@@ -672,6 +673,16 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
 
   return (
     <ComposeLaunchContext.Provider value={composeLaunch}>
+    {/*
+     * FR-13 (task 046): the Compose action bridge spans both panes so the inline
+     * AI toolbar (workspace pane) can route its dispatch into the Assistant
+     * pane's FIFO serial queue (ConversationPane.dispatchComposeAction, FR-18)
+     * via a DIRECT dispatchConsumer call — NOT a PaneEventBus event (Spike 0 /
+     * design §7.2). Placed above both panes; ConversationPane registers its
+     * dispatcher, the workspace section factory consumes it. Zero new
+     * PaneEventBus discriminants (ADR-030 closed union untouched).
+     */}
+    <ComposeActionBridgeProvider>
     <PaneEventBusProvider>
       <AiSessionProvider
         bffBaseUrl={bffBaseUrl}
@@ -754,6 +765,7 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
         </ShellStageManager>
       </AiSessionProvider>
     </PaneEventBusProvider>
+    </ComposeActionBridgeProvider>
     </ComposeLaunchContext.Provider>
   );
 }

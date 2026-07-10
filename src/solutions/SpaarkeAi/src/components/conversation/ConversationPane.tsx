@@ -39,6 +39,12 @@ import { usePlaybookOptions } from "./usePlaybookOptions";
 import { useCommandRouting } from "./useCommandRouting";
 import { useSelectionChip } from "./useSelectionChip";
 import { useSerialActionQueue, type ComposeActionRequest } from "./useSerialActionQueue";
+// Deep-import the cross-pane bridge hook (not the `@spaarke/compose-components`
+// barrel) so this Assistant-pane module does NOT transitively pull the TipTap
+// editor widgets — mirrors ComposeEditor/ComposeWorkspace's `@spaarke/ai-widgets/events`
+// deep-import rationale. Resolves in both Vite (alias → src dir) and jest.
+import { useRegisterComposeActionDispatcher } from "@spaarke/compose-components/context/composeActionBridge";
+import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./composeApplyLeg";
 import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
 import { makeLocalAssistantMessage } from "./summarizeRouting";
 import {
@@ -148,16 +154,58 @@ export function ConversationPane(): React.JSX.Element {
     [bffBaseUrl, getSessionId, getAccessToken, dispatch]
   );
   const actionQueue = useSerialActionQueue(composeActionDispatcher);
+
+  // ── FR-13 Step 3: draft-alternative APPLY leg (design §3 Flow 5 + §7.2) ──
+  // After a Compose action dispatches, a `compose-draft-alternative` writes a
+  // `compose`-disposition SessionOutput to the ledger (ADR-040 store-before-
+  // render). The Assistant then emits the EXISTING `workspace.compose_assistant_insert`
+  // discriminant REFERENCING that stored entry (`ledgerRef = {bindingId}@t{n}`) —
+  // NEVER the edit payload; ComposeWorkspace re-materializes the pending redline
+  // FROM the ledger. Informational actions write no compose output → no emit
+  // (resolveCurrentComposeLedgerRef gates on bindingId). Fire-and-forget + fully
+  // soft-fail: ComposeWorkspace's refresh-materialize path recovers regardless.
+  // Uses the ledger READ endpoint (no new route) + an EXISTING discriminant
+  // (zero new PaneEventBus discriminants — ADR-030).
+  const emitComposeApplyLeg = React.useCallback(
+    async (bindingId: string): Promise<void> => {
+      const sessionId = getSessionId();
+      if (!sessionId || !bffBaseUrl) return;
+      try {
+        const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/compose-outputs`;
+        const response = await authenticatedFetch(url, { method: "GET" });
+        if (!response.ok) return; // 404 = no compose outputs yet — nothing to apply
+        const outputs = (await response.json()) as unknown;
+        const ledgerRef = resolveCurrentComposeLedgerRef(outputs, bindingId);
+        if (!ledgerRef) return; // not a compose-writing action (e.g. explain/compare)
+        dispatch("workspace", buildComposeApplyEvent(ledgerRef, bindingId, sessionId) as unknown as WorkspacePaneEvent);
+      } catch {
+        // Non-fatal: the compose SSE frame + ComposeWorkspace refresh-materialize
+        // path (ADR-040) still recover the drafted content on next load.
+      }
+    },
+    [getSessionId, bffBaseUrl, authenticatedFetch, dispatch]
+  );
+
   const dispatchComposeAction = React.useCallback(
     (request: ComposeActionRequest): Promise<DispatchConsumerResult> =>
       actionQueue.enqueue(request).then((dispatched) => {
         if (dispatched.result !== undefined && dispatched.result !== null) {
           injection.enqueue(makeLocalAssistantMessage(formatEventOutputMarkdown(dispatched.result)));
         }
+        // Draft-alternative apply leg (Flow 5) — references the ledger entry, never the payload.
+        void emitComposeApplyLeg(request.bindingId);
         return dispatched;
       }),
-    [actionQueue, injection]
+    [actionQueue, injection, emitComposeApplyLeg]
   );
+
+  // FR-13 Step 1: publish `dispatchComposeAction` into the cross-pane Compose
+  // action bridge so the inline AI toolbar (workspace pane, ComposeAiToolbar's
+  // `enqueueComposeAction`) routes THROUGH this Assistant-pane serial queue
+  // (FR-18) via a DIRECT dispatchConsumer call — NOT a PaneEventBus event
+  // (Spike 0 / design §7.2). No-op when rendered outside a bridge provider
+  // (e.g. isolated tests / standalone LegalWorkspace mount).
+  useRegisterComposeActionDispatcher(dispatchComposeAction);
   // ADR-015: structural signal only (queue depth + in-flight correlation id —
   // never the action's bindingId/args/content). Also keeps `dispatchComposeAction`
   // + queue state live/observable ahead of the task-030 toolbar hand-off.

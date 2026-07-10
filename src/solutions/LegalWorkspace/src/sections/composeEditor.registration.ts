@@ -75,6 +75,7 @@ import type {
 import {
   ComposeWorkspace,
   useComposeLaunch,
+  useComposeActionBridge,
 } from "@spaarke/compose-components";
 // spaarkeai-compose-r1 hotfix 2026-07-02 (smoke-1): `ComposeWorkspace` requires
 // `tenantId` as a required prop (widened facade for compose-summarize per
@@ -116,6 +117,14 @@ interface ComposeSectionMountProps {
 
 const ComposeSectionMount: React.FC<ComposeSectionMountProps> = ({ bffBaseUrl }) => {
   const composeLaunch = useComposeLaunch();
+  // FR-13 (task 046): the cross-pane Compose action bridge. When SpaarkeAi's
+  // ThreePaneShell provides it AND the Assistant pane has registered its serial
+  // dispatch queue (`hasDispatcher`), forward `bridge.enqueue` so the inline AI
+  // toolbar routes THROUGH ConversationPane.dispatchComposeAction (FR-18) via a
+  // DIRECT dispatchConsumer call (design §7.2). When absent (standalone
+  // LegalWorkspace mount — no ThreePaneShell in the tree) the bridge is null and
+  // the toolbar falls back to its own bound dispatcher.
+  const bridge = useComposeActionBridge();
   // 2026-07-02 smoke-1 hotfix — read tenantId from the MSAL singleton so
   // ComposeWorkspace's Load endpoint gate passes. `resolveTenantIdSync` is
   // synchronous + safe to call inside render. Xrm.Utility fallback covers
@@ -133,6 +142,9 @@ const ComposeSectionMount: React.FC<ComposeSectionMountProps> = ({ bffBaseUrl })
     // picker paths.
     initialUploadRef: composeLaunch?.upload ?? null,
     initialSessionId: "",
+    // FR-13 (task 046): thread the Assistant queue ONLY when registered — else
+    // omit so ComposeAiToolbar falls back to its own dispatcher (standalone).
+    enqueueComposeAction: bridge?.hasDispatcher ? bridge.enqueue : undefined,
   });
 };
 
