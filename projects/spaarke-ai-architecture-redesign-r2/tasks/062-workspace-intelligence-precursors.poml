@@ -34,6 +34,7 @@
   <constraints>
     <constraint source="project">PRECURSORS ONLY — no goal-tracking subsystem, no state machine, no new Dataverse tables. Full goal-tracking is a named deferral.</constraint>
     <constraint source="project">Next-step chips are sourced from the Binding's declared transitions (catalog DATA), NOT model-invented next steps (ADR-039).</constraint>
+    <constraint source="audit-2026-07-09">The chips half SUBSTANTIALLY EXISTS already: `Binding.ChipTransitions` (`sprk_chiptransitions`, PublicContracts/Binding.cs:76) + task-035's OutcomeCard next-step chips ship declared-transition chips today. Do NOT rebuild — VERIFY the existing surface against FR-A1-06, close only genuine gaps, and cite the verification in task notes. The net-new half of this task is the record-scope precursor memory items through the task-050 service + task-051 envelope.</constraint>
     <constraint source="project">Record-scope memory items go through the generalized service (task 050) with the governance envelope (task 051).</constraint>
     <constraint source="ADR-013">Chips/memory reach SpaarkeAi via PublicContracts / the OutcomeCard contract; no AI-internal leak.</constraint>
     <constraint source="ADR-038">Tests are KEEP-path; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>

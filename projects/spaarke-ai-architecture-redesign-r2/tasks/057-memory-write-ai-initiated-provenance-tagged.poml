@@ -65,6 +65,7 @@
     </dependencies>
     <related-work>
       <item>052 governs stored memory (retention/read/delete) — the FR-B-03 review/delete control surface for what this task WRITES. 016 defines the MemoryItem provenance envelope this write populates.</item>
+      <item>LIVE catalog-row seeding (Dataverse) is a GATE-DEPLOY step at task 069 prep — mirror the DEF-003/task-049 create-matter pattern (author mirror-first through the task-020 JSON source here; seed constant+row atomically at the gate).</item>
     </related-work>
   </context>
 
@@ -91,7 +92,9 @@
 
   <acceptance-criteria>
     <criterion testable="true">`memory.write` is a typed tool with a catalog-declared `side_effect_class` authored through the task-020 triple-twin source (validator-enforced parity across all three surfaces).</criterion>
-    <criterion testable="true">`memory.write` is AI-INITIATED + SILENT: the assistant captures a salient fact automatically with NO write-gate, NO explicit-only check, and NO confirmation dialog — a test asserts a write completes without any confirmation/gate step.</criterion>
+    <criterion testable="true">`memory.write` is AI-INITIATED + SILENT: the assistant captures a salient fact automatically with NO write-gate, NO explicit-only check, and NO confirmation dialog — asserted through the REAL SideEffectGateAIFunction/ConfirmationPolicyEngine path (task-044 anti-shim precedent): the catalog row declares a low risk tier + `reversible=true` so silent execution is the ENGINE's decision from catalog data, not a gate bypass.</criterion>
+    <criterion testable="true">CAPTURE RELIABILITY (added 2026-07-09 pre-flight review): at least one eval case proves the ROUND TRIP — the assistant automatically invokes `memory.write` for a clearly salient fact in turn N and the fact is surfaced/reused in a later turn — guarding the silent-failure mode where the tool ships but the model never calls it. Wire into the eval gate alongside the golden-utterance families.</criterion>
+    <criterion testable="true">Writes honor the upsert-by-(Type,Key)-per-subject supersession semantics from task 050 — a repeated capture for the same key UPDATES the fact (no duplicate accumulation), asserted by a test.</criterion>
     <criterion testable="true">Each write records a provenance envelope as METADATA at capture time: `source` (user | ai-derived | insights-engine), `bindingId`/`ledgerRef`, `trustLevel` — asserted by a test; provenance does NOT block the write.</criterion>
     <criterion testable="true">Provenance is surfaced on read so the FR-B-03 review/delete surface can act on it.</criterion>
     <criterion testable="true">The deferred hard-governance rules (untrusted-origin ban, poisoning evals, `trustLevel` enforcement) are NOT implemented and are documented as out of scope for this stage.</criterion>

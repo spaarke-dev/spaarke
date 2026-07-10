@@ -15,7 +15,7 @@
   </metadata>
 
   <prompt>
-    Author ADR-042 "Memory Architecture &amp; Governance" (FR-B-16), mirroring the ADR-039/040 promotion-gate pattern (concise `.claude/adr/` + full `docs/adr/`), Proposed at spec → Accepted at G-R2-B. It must codify: the TWO active scopes (Record `(entityType,entityId)` + User `userId`) + ledger + interfaces; the SUBJECT-PARTITIONING rationale (dedicated-per-customer envs / no `/tenantId`); the governance envelope; the EXPLICIT-ONLY write floor + the DEFERRED hard-governance boundary; erasure semantics (ADR-015 Tier 3); the not-a-parallel-session-cache rule (ADR-040 by construction); and the Insights-Engine-as-consumer direction.
+    Author ADR-042 "Memory Architecture &amp; Governance" (FR-B-16), mirroring the ADR-039/040 promotion-gate pattern (concise `.claude/adr/` + full `docs/adr/`), Proposed at spec → Accepted at G-R2-B. It must codify: the TWO active scopes (Record `(entityType,entityId)` + User `userId`) + ledger + interfaces; the SUBJECT-PARTITIONING rationale (dedicated-per-customer envs / no `/tenantId`); the governance envelope; the AI-INITIATED + SILENT + PROVENANCE-TAGGED write posture (NO write-gate — the explicit-only floor was REMOVED by operator ruling 2026-07-08; do not codify it) + the DEFERRED hard-governance boundary; erasure semantics (ADR-015 Tier 3); the not-a-parallel-session-cache rule (ADR-040 by construction); and the Insights-Engine-as-consumer direction.
   </prompt>
 
   <role>Architecture writer fluent in the Spaarke ADR format, ADR-039/040 promotion-gate precedent, and the memory subsystem decisions this project made.</role>
