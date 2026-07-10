@@ -1279,7 +1279,8 @@ public static class ComposeEndpoints
             // for symmetry so both save routes map the same body shape.
             ContainerId = body.ContainerId,
             Content = body.Content,
-            SessionId = body.SessionId,
+            // Replace path still requires a session (guarded above at the endpoint); non-null here.
+            SessionId = body.SessionId!,
             TenantId = body.TenantId,
             DocumentRecordId = body.DocumentRecordId,
             DisplayName = body.DisplayName,
@@ -1309,7 +1310,9 @@ public static class ComposeEndpoints
         if (body is null) return BadRequest("Request body is required.");
         if (string.IsNullOrWhiteSpace(body.ContainerId)) return BadRequest("containerId is required for create-on-save (the client resolves it from the user's Business Unit).");
         if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
-        if (string.IsNullOrWhiteSpace(body.SessionId)) return BadRequest("sessionId is required in the request body for first-Save promotion rebind.");
+        // sessionId is OPTIONAL on the transient-create path (task 110): a Browse/local-file first
+        // Save has no chat session. The FR-07 rebind is skipped server-side when it is absent; the
+        // SPE create + sprk_document create + indexing all complete without one.
         if (body.Content is null || body.Content.Length == 0) return BadRequest("content is required and must be non-empty.");
 
         logger.LogInformation(
@@ -1324,7 +1327,9 @@ public static class ComposeEndpoints
             DriveId = null,
             ContainerId = body.ContainerId,
             Content = body.Content,
-            SessionId = body.SessionId,
+            // Empty when no session is bound (Browse/local-file first Save). The service treats an
+            // empty/whitespace SessionId as "no session" and skips the FR-07 rebind (task 110).
+            SessionId = body.SessionId ?? string.Empty,
             TenantId = body.TenantId,
             DocumentRecordId = null,
             DisplayName = body.DisplayName,
@@ -1568,7 +1573,10 @@ public sealed record ComposeUploadResponse(
 /// On the create-on-save path <see cref="DriveId"/> is null and <see cref="ContainerId"/> carries
 /// the client-resolved BU container; on the replace path <see cref="ContainerId"/> is ignored.</summary>
 public sealed record SaveComposeDocumentBody(
-    [property: JsonPropertyName("sessionId")] string SessionId,
+    /// <summary>Bound ChatSession id. OPTIONAL on the create-on-save (transient Browse/local-file)
+    /// path (task 110) — absent when the draft has no chat session; the server skips the FR-07
+    /// rebind. Still REQUIRED on the replace path (guarded at that endpoint).</summary>
+    [property: JsonPropertyName("sessionId")] string? SessionId,
     [property: JsonPropertyName("tenantId")] string TenantId,
     [property: JsonPropertyName("content")] byte[] Content,
     [property: JsonPropertyName("driveId")] string? DriveId = null,
