@@ -84,6 +84,8 @@ import {
   tokens,
   Text,
   Badge,
+  Button,
+  Tooltip,
   Menu,
   MenuTrigger,
   MenuButton,
@@ -97,6 +99,7 @@ import {
   DismissRegular,
   CalendarAddRegular,
   OpenRegular,
+  DocumentRegular,
 } from '@fluentui/react-icons';
 import type { NotificationItem } from '../types/notifications';
 import { formatDueDate } from '../utils/formatDueDate';
@@ -295,6 +298,20 @@ export interface NarrativeBulletProps {
    * supplied — matching the inline link's existing precondition).
    */
   onOpenRecord?: (entityType: string, entityId: string) => void;
+  /**
+   * Operator UAT (2026-07-09, item D) — open this row's file in the shared
+   * `RichFilePreviewDialog` file-preview modal (the same modal wired to the
+   * Semantic Search PCF). Supplied ONLY for Documents-channel rows, alongside
+   * `documentId`. When both are present, a visible document icon button + an
+   * "Open document" overflow-menu item appear; otherwise neither renders (all
+   * other channels keep the existing action set unchanged).
+   */
+  onPreviewDocument?: (documentId: string, documentName: string) => void;
+  /**
+   * The `sprk_document` record GUID for this row (Documents channel only —
+   * sourced from `bullet.itemIds[0]`). Gates the preview affordances above.
+   */
+  documentId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +339,8 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   onRemove,
   onKeep,
   onOpenRecord,
+  onPreviewDocument,
+  documentId,
 }) => {
   const styles = useStyles();
 
@@ -473,6 +492,14 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   // the inline regarding-name link's precondition).
   const canOpenRecord = Boolean(primaryEntityType && primaryEntityId);
 
+  // Operator UAT (2026-07-09, item D): document rows get a file-preview affordance
+  // (visible icon + "Open document" menu item) that launches the shared
+  // RichFilePreviewDialog. Gated on BOTH the callback and the document GUID.
+  const canPreviewDocument = Boolean(onPreviewDocument && documentId);
+  const handlePreviewDocument = (): void => {
+    if (onPreviewDocument && documentId) onPreviewDocument(documentId, narrative);
+  };
+
   return (
     <div className={styles.root}>
       <div className={styles.content}>
@@ -542,6 +569,20 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
         )}
       </div>
       <div className={styles.actions}>
+        {/* Operator UAT (2026-07-09, item D): document rows show a visible
+             file-open icon that launches the shared file-preview modal. Only
+             rendered when this is a Documents-channel row (documentId supplied). */}
+        {canPreviewDocument && (
+          <Tooltip content="Open document" relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<DocumentRegular />}
+              aria-label="Open document"
+              onClick={handlePreviewDocument}
+            />
+          </Tooltip>
+        )}
         {/* Operator (2026-07-09): "Add to To Do" moved into the overflow menu —
              the row now shows only the three-dot menu trigger. The menu component
              is preserved for future tools per the R7 W12 task-134 note. */}
@@ -571,6 +612,11 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
           </MenuTrigger>
           <MenuPopover>
             <MenuList>
+              {canPreviewDocument && (
+                <MenuItem icon={<DocumentRegular />} onClick={handlePreviewDocument}>
+                  Open document
+                </MenuItem>
+              )}
               {onCheck && (
                 <MenuItem icon={<CheckmarkRegular />} onClick={handleMenuMarkAsRead}>
                   Mark as read

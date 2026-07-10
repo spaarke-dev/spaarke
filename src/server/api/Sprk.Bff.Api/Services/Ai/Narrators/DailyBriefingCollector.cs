@@ -815,6 +815,7 @@ public class DailyBriefingCollector : ICodedWorkflow
                     "sprk_documentid",
                     "sprk_documentname",
                     "sprk_filename",
+                    "sprk_documentdescription",
                     "modifiedon",
                     "sprk_matter",
                     "sprk_project",
@@ -881,6 +882,7 @@ public class DailyBriefingCollector : ICodedWorkflow
                     "sprk_matterid",
                     "sprk_mattername",
                     "sprk_matternumber",
+                    "sprk_matterdescription",
                     "modifiedon",
                     "statecode",
                     "statuscode")
@@ -936,6 +938,7 @@ public class DailyBriefingCollector : ICodedWorkflow
                     "sprk_projectid",
                     "sprk_projectname",
                     "sprk_projectnumber",
+                    "sprk_projectdescription",
                     "modifiedon",
                     "statecode",
                     "statuscode")
@@ -1077,6 +1080,7 @@ public class DailyBriefingCollector : ICodedWorkflow
             EntityType = EntityDocument,
             EntityId = entity.GetAttributeValue<Guid>("sprk_documentid").ToString(),
             Title = name,
+            Body = entity.GetAttributeValue<string>("sprk_documentdescription"),
             Priority = "normal",
             DueDate = null,
             RegardingMatterName = matterRef?.Name,
@@ -1095,6 +1099,7 @@ public class DailyBriefingCollector : ICodedWorkflow
             EntityType = EntityMatter,
             EntityId = matterId.ToString(),
             Title = matterName,
+            Body = entity.GetAttributeValue<string>("sprk_matterdescription"),
             Priority = "normal",
             DueDate = null,
             // Self-regarding — the matter IS the regarding entity, surface as click-through.
@@ -1114,6 +1119,7 @@ public class DailyBriefingCollector : ICodedWorkflow
             EntityType = EntityProject,
             EntityId = projectId.ToString(),
             Title = projectName,
+            Body = entity.GetAttributeValue<string>("sprk_projectdescription"),
             Priority = "normal",
             DueDate = null,
             // Self-regarding — entity-link points to the project itself.

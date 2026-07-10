@@ -130,6 +130,12 @@ export interface ActivityNotesSectionProps {
    * Xrm.Navigation.navigateTo + surfaces a Toaster toast on 403.
    */
   onOpenRecord?: (entityType: string, entityId: string) => void;
+  /**
+   * Operator UAT (2026-07-09, item D) — open a document's file in the shared
+   * file-preview modal. Passed straight through to NarrativeBullet; only wired
+   * (with a documentId) for rows in the Documents channel.
+   */
+  onPreviewDocument?: (documentId: string, documentName: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +176,7 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
   onRemove,
   onKeep,
   onOpenRecord,
+  onPreviewDocument,
 }) => {
   const styles = useStyles();
 
@@ -255,6 +262,9 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
             // Determine todo state from the first item ID. In the /render path
             // itemIds are source-record GUIDs (sprk_event, sprk_document, etc.).
             const firstItemId = bullet.itemIds[0] ?? '';
+            // Operator UAT (2026-07-09, item D): only Documents-channel rows get
+            // the file-preview affordance — firstItemId is the sprk_document GUID.
+            const isDocumentsSection = section.key === 'documents';
 
             return (
               <NarrativeBullet
@@ -284,6 +294,9 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
                 // (FR-18 / AC-18a #6). DailyBriefingApp owns the 403-fallback
                 // toast dispatch via the shared Toaster instance.
                 onOpenRecord={onOpenRecord}
+                // Item D (2026-07-09): file-preview modal for Documents rows only.
+                onPreviewDocument={isDocumentsSection ? onPreviewDocument : undefined}
+                documentId={isDocumentsSection ? firstItemId : undefined}
               />
             );
           })}
