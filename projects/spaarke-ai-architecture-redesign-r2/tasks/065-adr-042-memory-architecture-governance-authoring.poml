@@ -1,7 +1,7 @@
 <task id="AIR2-065" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>ADR-042 authoring — Memory Architecture &amp; Governance (Proposed→Accepted at G-R2-B)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>M — G-R2-B Memory</phase>
     <gate>G-R2-B (memory)</gate>
     <estimated-effort>1 day</estimated-effort>
