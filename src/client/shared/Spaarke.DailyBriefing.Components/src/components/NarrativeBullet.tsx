@@ -97,6 +97,7 @@ import {
   DismissRegular,
   CalendarAddRegular,
   OpenRegular,
+  DocumentRegular,
 } from '@fluentui/react-icons';
 import type { NotificationItem } from '../types/notifications';
 import { formatDueDate } from '../utils/formatDueDate';
@@ -128,6 +129,20 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
+  },
+  // R5 richer-rows: record description under the title. Operator UAT (2026-07-09)
+  // asked for a single concatenated line — clamp to 1 line with ellipsis.
+  description: {
+    color: tokens.colorNeutralForeground2,
+    display: '-webkit-box',
+    WebkitLineClamp: 1,
+    WebkitBoxOrient: 'vertical' as const,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  // R5 richer-rows: subtle "Updated {date}" caption — the qualifying-date signal.
+  dateCaption: {
+    color: tokens.colorNeutralForeground3,
   },
   metaRow: {
     display: 'flex',
@@ -209,6 +224,16 @@ export interface NarrativeBulletProps {
    * "Tasks" section. Derived from the item's due date, never from LLM text.
    */
   dueStatus?: 'Overdue' | 'DueToday' | 'DueSoon';
+  /**
+   * R5 richer-rows (2026-07-09): the record's own description/subject, shown truncated
+   * beneath the title. Deterministic source field; omitted/empty → not rendered.
+   */
+  description?: string;
+  /**
+   * R5 richer-rows (2026-07-09): ISO 8601 date that qualified this record for the briefing
+   * (source ModifiedOn), shown as an "Updated {date}" caption. Omitted/empty → not rendered.
+   */
+  date?: string;
   /** Callback to add the covered notifications to To Do. */
   onAddToTodo: (itemIds: string[]) => void;
   /** Callback to dismiss the covered notifications. */
@@ -272,6 +297,20 @@ export interface NarrativeBulletProps {
    * supplied — matching the inline link's existing precondition).
    */
   onOpenRecord?: (entityType: string, entityId: string) => void;
+  /**
+   * Operator UAT (2026-07-09, item D) — open this row's file in the shared
+   * `RichFilePreviewDialog` file-preview modal (the same modal wired to the
+   * Semantic Search PCF). Supplied ONLY for Documents-channel rows, alongside
+   * `documentId`. When both are present, a visible document icon button + an
+   * "Open document" overflow-menu item appear; otherwise neither renders (all
+   * other channels keep the existing action set unchanged).
+   */
+  onPreviewDocument?: (documentId: string, documentName: string) => void;
+  /**
+   * The `sprk_document` record GUID for this row (Documents channel only —
+   * sourced from `bullet.itemIds[0]`). Gates the preview affordances above.
+   */
+  documentId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +324,8 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   primaryEntityId,
   itemIds,
   dueStatus,
+  description,
+  date,
   onAddToTodo,
   onDismiss,
   isTodoCreated,
@@ -297,6 +338,8 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   onRemove,
   onKeep,
   onOpenRecord,
+  onPreviewDocument,
+  documentId,
 }) => {
   const styles = useStyles();
 
@@ -334,6 +377,21 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
         : dueStatus === 'DueSoon'
           ? { label: 'Due soon', color: 'informative' as const }
           : null;
+
+  // R5 richer-rows (2026-07-09): render the record's description + an "Updated {date}"
+  // caption (the qualifying date). Both are deterministic source fields.
+  const trimmedDescription = description?.trim() ?? '';
+  const hasDescription = trimmedDescription.length > 0;
+  const formattedUpdated = ((): string | null => {
+    if (!date) return null;
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return null;
+    try {
+      return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(d);
+    } catch {
+      return null;
+    }
+  })();
 
   // Resolve the Xrm globals once (used by both the inline regarding-name link
   // and the fallback "Open record" overflow-menu handler).
@@ -433,6 +491,14 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   // the inline regarding-name link's precondition).
   const canOpenRecord = Boolean(primaryEntityType && primaryEntityId);
 
+  // Operator UAT (2026-07-09, item D): document rows get a file-preview affordance
+  // (visible icon + "Open document" menu item) that launches the shared
+  // RichFilePreviewDialog. Gated on BOTH the callback and the document GUID.
+  const canPreviewDocument = Boolean(onPreviewDocument && documentId);
+  const handlePreviewDocument = (): void => {
+    if (onPreviewDocument && documentId) onPreviewDocument(documentId, narrative);
+  };
+
   return (
     <div className={styles.root}>
       <div className={styles.content}>
@@ -450,8 +516,14 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
           onOpenRecord={onOpenRecord}
           textSize={300}
         />
-        {/* Meta line: status pill (Tasks) or due-date pill + (non-inlined) regarding link. */}
-        {(statusBadge || singleItemDueDate || (hasRegardingTarget && !isRegardingInlined)) && (
+        {/* R5 richer-rows: the record's own description, truncated to 2 lines. */}
+        {hasDescription && (
+          <Text size={200} className={styles.description}>
+            {trimmedDescription}
+          </Text>
+        )}
+        {/* Meta line: status pill (Tasks) or due-date pill + "Updated {date}" + (non-inlined) regarding link. */}
+        {(statusBadge || singleItemDueDate || formattedUpdated || (hasRegardingTarget && !isRegardingInlined)) && (
           <div className={styles.metaRow}>
             {statusBadge && (
               <Badge appearance="tint" color={statusBadge.color} size="small">
@@ -462,6 +534,11 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
               <Badge appearance="tint" color={isSingleItemOverdue ? 'danger' : 'informative'} size="small">
                 {singleItemDueDate}
               </Badge>
+            )}
+            {formattedUpdated && (
+              <Text size={200} className={styles.dateCaption}>
+                Updated {formattedUpdated}
+              </Text>
             )}
             {hasRegardingTarget && !isRegardingInlined && (
               <Text
@@ -491,6 +568,9 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
         )}
       </div>
       <div className={styles.actions}>
+        {/* Operator UAT (2026-07-09): the standalone document-open icon was
+             removed as redundant — the file-preview modal is reached via the
+             "Open document" overflow-menu item below (Documents rows only). */}
         {/* Operator (2026-07-09): "Add to To Do" moved into the overflow menu —
              the row now shows only the three-dot menu trigger. The menu component
              is preserved for future tools per the R7 W12 task-134 note. */}
@@ -520,6 +600,11 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
           </MenuTrigger>
           <MenuPopover>
             <MenuList>
+              {canPreviewDocument && (
+                <MenuItem icon={<DocumentRegular />} onClick={handlePreviewDocument}>
+                  Open document
+                </MenuItem>
+              )}
               {onCheck && (
                 <MenuItem icon={<CheckmarkRegular />} onClick={handleMenuMarkAsRead}>
                   Mark as read

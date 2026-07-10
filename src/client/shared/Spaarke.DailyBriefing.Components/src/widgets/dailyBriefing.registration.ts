@@ -221,8 +221,11 @@ export function createDailyBriefingRegistration(
 
       return {
         id: 'daily-briefing',
+        // Operator UAT (2026-07-10): drop the redundant section-chrome title —
+        // the widget's own DigestHeader already renders "Daily Briefing" + the
+        // "Last updated" line + actions, so the host title bar was a duplicate.
         type: 'content',
-        title: 'Daily Briefing',
+        title: '',
         style: {},
         renderContent: () =>
           React.createElement(DailyBriefingApp, { params: {}, onBrowsePlaybooks: handleBrowsePlaybooks }),
