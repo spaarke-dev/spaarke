@@ -93,10 +93,6 @@ export {
   // Dataverse rejects as "Error in query syntax"). No-op on already-bare ids.
   cleanGuid,
   findNavProp,
-  // cleanGuid — canonical GUID normalizer (strip braces, lowercase) for @odata.bind /
-  // /entityset(id) URLs. Exported from the barrel (task 100) so consumers use the ONE
-  // implementation instead of hand-rolling `.replace(/[{}]/g,'')` (a repo-wide bug source).
-  cleanGuid,
   // Shared nav-prop discovery — consolidated 2026-07-09 (task 011, Path A).
   // Used by the array-form wizard services + the field-mapping engine (task 012).
   discoverNavProps,
