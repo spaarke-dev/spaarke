@@ -195,8 +195,11 @@ public sealed class ComposeDispatchEndpointContractTests : IClassFixture<Dispatc
 
         // ADR-040 store-before-render: the SessionOutput was stored with the informational ledger
         // value, and its payload IS the executor output (the terminal chunk renders FROM this stored
-        // entry — the render-follows-store contract; the wire chunk itself coerces to the shared
-        // DocumentAnalysisResult shape, so the marker is asserted on the source-of-truth stored entry).
+        // entry — the render-follows-store contract). NOTE (spaarkeai-compose-r2 wire-loss fix): the
+        // wire chunk NO LONGER coerces a compose payload to DocumentAnalysisResult — the compose
+        // fields now survive on the wire (asserted directly in
+        // Post_ComposeInformationalAction_ComposeFieldsSurviveOnTheWire below). This test still
+        // asserts the stored-entry source of truth as before.
         _fx.Router.LastRouted.Should().NotBeNull("the ADR-040 ledger write ran before render");
         _fx.Router.LastRouted!.Entry.Disposition.Should().Be("informational");
         _fx.Router.LastRouted!.Entry.Key.Should().Be($"{ComposeBindingId}@t1");
@@ -304,5 +307,108 @@ public sealed class ComposeDispatchEndpointContractTests : IClassFixture<Dispatc
         _fx.Router.LastRouted.Should().BeNull(
             "no operand ⇒ no execution ⇒ no ledger write — proving the selectionText operand is " +
             "load-bearing in the positive tests, not incidental");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 4. THE WIRE-BODY anti-recurrence proof (spaarkeai-compose-r2 UAT wire-loss
+    //    fix). The prior tests all assert on the STORED ledger entry (or a mere
+    //    "type":"complete" substring) — the exact blind spot that let the empty-
+    //    DocumentAnalysisResult blob ship: DeserializeResultChunk coerced EVERY
+    //    payload to DocumentAnalysisResult and System.Text.Json dropped the compose
+    //    fields on the wire. This test asserts the ACTUAL SSE RESPONSE BODY (the
+    //    bytes the client dispatchConsumer reads at `dispatched.result`) still
+    //    carries the compose fields (`explanation`, `keyConcepts`) — the value the
+    //    client formatter (composeResultFormat.ts) shape-detects on.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Post_ComposeInformationalAction_ComposeFieldsSurviveOnTheWire()
+    {
+        SeedComposeBinding(BindingDisposition.Informational, ConsumerTypes.ComposeExplainClause);
+        // The compose-explain-clause shape: distinctive marker values so we can prove they reached
+        // the WIRE, not just the ledger. The executor stores exactly this (OutputRouter stores verbatim;
+        // the stub returns it verbatim; ActionRunner returns the raw LLM JSON).
+        _fx.OpenAi.RawJsonToReturn =
+            """{"explanation":"WIRE_EXPLANATION_MARKER caps aggregate liability.","keyConcepts":["WIRE_KEYCONCEPT_LIABILITY","WIRE_KEYCONCEPT_CAP"],"relatedPlaybookIds":[]}""";
+
+        var client = _fx.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/dispatch",
+            BuildToolbarDispatchBody(ComposeBindingId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("text/event-stream");
+
+        // THE assertion the shipped blind-spot test lacked: read the WIRE body (the SSE chunk the
+        // client actually receives) and prove the compose fields SURVIVE there — not merely in the
+        // stored ledger. Before the fix these were stripped to an empty DocumentAnalysisResult blob.
+        var body = await response.Content.ReadAsStringAsync();
+
+        body.Should().Contain("\"type\":\"complete\"", "the compose dispatch yields a terminal complete chunk");
+        body.Should().Contain("\"explanation\":\"WIRE_EXPLANATION_MARKER caps aggregate liability.\"",
+            "the compose `explanation` field MUST survive on the wire at `result` — the client formatter " +
+            "(composeResultFormat.ts formatExplainClauseResult) shape-detects on it");
+        body.Should().Contain("\"keyConcepts\":[", "the compose `keyConcepts` array MUST survive on the wire");
+        body.Should().Contain("WIRE_KEYCONCEPT_LIABILITY").And.Contain("WIRE_KEYCONCEPT_CAP");
+
+        // And the coercion that shipped the bug is gone: the wire result is NOT an empty
+        // DocumentAnalysisResult blob (no synthesized DAR default fields on a compose payload).
+        body.Should().NotContain("\"tldr\":[]",
+            "a compose payload must NOT be coerced to a DocumentAnalysisResult (the empty-DAR blob that shipped)");
+        body.Should().NotContain("\"parsedSuccessfully\"",
+            "the compose wire result carries the RAW capability shape, not synthesized DAR defaults");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 5. NON-REGRESSION — a summarize / DocumentAnalysisResult dispatch STILL
+    //    renders as the coerced DAR shape ON THE WIRE (incl. DAR defaults). Proves
+    //    the fix's discriminator preserves the shipped summarize contract byte-for-
+    //    byte and did NOT turn the summarize path into a raw pass-through.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Post_SummarizeAction_StillRendersDocumentAnalysisResultOnTheWire_NoRegression()
+    {
+        // The fixture DEFAULT binding is the chat-summarize row (file-operand path) — reset restores it.
+        _fx.Reset();
+        _fx.Sessions.Session = new ChatSession(
+            SessionId: TestSessionId,
+            TenantId: "00000000-0000-0000-0000-000000000abc",
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>(),
+            HostContext: null,
+            AdditionalDocumentIds: null,
+            UploadedFiles: new[]
+            {
+                new ChatSessionFile(
+                    FileId: "file-sum", FileName: "sum.pdf", ContentType: "application/pdf",
+                    SizeBytes: 1024, SearchDocumentIdsCsv: "doc-file-sum-1", UploadedAt: DateTimeOffset.UtcNow),
+            });
+        // A genuine DocumentAnalysisResult-shaped payload (has `tldr` — the DAR signature).
+        _fx.OpenAi.RawJsonToReturn =
+            """{"tldr":["SUMMARIZE_WIRE_MARKER"],"summary":"A summarize summary.","keywords":"k","entities":{"organizations":[],"persons":[]}}""";
+
+        var client = _fx.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/dispatch",
+            new { bindingId = DispatchSessionEndpointTestFixture.DispatchBindingId.ToString(), args = new { } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+
+        body.Should().Contain("\"type\":\"complete\"");
+        body.Should().Contain("SUMMARIZE_WIRE_MARKER", "the summarize output flows to the wire");
+        // The discriminator (tldr present) coerced this to the typed DAR — so the DAR-specific default
+        // fields ARE synthesized on the wire, proving the summarize contract is unchanged (NOT a raw
+        // pass-through). `parsedSuccessfully` is a DAR-only field with no source in the raw payload.
+        body.Should().Contain("\"parsedSuccessfully\":true",
+            "a DocumentAnalysisResult-shaped payload is STILL coerced to the typed DAR on the wire " +
+            "(byte-identical summarize contract) — the fix's discriminator is summarize-preserving");
+        body.Should().Contain("\"entities\":", "the DAR `entities` field is present on the summarize wire shape");
     }
 }

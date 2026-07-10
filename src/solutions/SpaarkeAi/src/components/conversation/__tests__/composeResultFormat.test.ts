@@ -20,6 +20,14 @@ import {
   formatSummarizeWordChangesResult,
   formatDefinedTermsResult,
 } from '../composeResultFormat';
+import { createConsumerDispatcher } from '@spaarke/ui-components';
+import { TextEncoder as NodeTextEncoder, TextDecoder as NodeTextDecoder } from 'util';
+
+// jsdom does not polyfill TextEncoder/TextDecoder — Node's are needed by readSseStream.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+if (typeof (globalThis as any).TextEncoder === 'undefined') (globalThis as any).TextEncoder = NodeTextEncoder;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+if (typeof (globalThis as any).TextDecoder === 'undefined') (globalThis as any).TextDecoder = NodeTextDecoder;
 
 describe('formatExplainClauseResult', () => {
   it('renders explanation + key concepts + related playbook ids', () => {
@@ -151,5 +159,113 @@ describe('formatComposeActionResultMarkdown (dispatcher)', () => {
   it('picks the explain-clause formatter for its shape', () => {
     const md = formatComposeActionResultMarkdown({ explanation: 'x', keyConcepts: ['y'] });
     expect(md).toContain('**Explanation:** x');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FULL-LOOP end-to-end (spaarkeai-compose-r2 UAT wire-loss fix): drive the EXACT
+// server SSE wire chunk (as emitted by the BFF DeserializeResultChunk CompletedRaw
+// path — compose fields carried verbatim at `result`, NOT coerced to an empty
+// DocumentAnalysisResult) through the REAL @spaarke/ui-components dispatchConsumer
+// SSE parse, then through the REAL composeResultFormat formatter. This closes the
+// gap ConversationPane.compose-action-format.test.tsx left: THAT test mocks the
+// dispatcher's return value with a hand-authored correct object, so it stayed green
+// while the wire actually delivered an empty DAR blob. THIS test proves the formatter
+// is no longer starved — the object it shape-detects on is the one the wire delivers.
+// ---------------------------------------------------------------------------
+
+describe('compose wire → dispatchConsumer parse → formatter (full loop)', () => {
+  const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+  afterEach(() => {
+    (globalThis as { fetch?: unknown }).fetch = originalFetch;
+  });
+
+  /** A Response whose body streams the given SSE `data:` frames (mirrors dispatchConsumer.test.ts). */
+  function sseResponse(chunks: string[]): Response {
+    const wire = chunks.map((c) => `data: ${c}\n\n`).join('');
+    const payload = new NodeTextEncoder().encode(wire);
+    let pulled = false;
+    const reader = {
+      async read(): Promise<{ done: boolean; value?: Uint8Array }> {
+        if (pulled) return { done: true, value: undefined };
+        pulled = true;
+        return { done: false, value: payload };
+      },
+      releaseLock() {
+        /* noop */
+      },
+    };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+      text: async () => wire,
+      body: { getReader: () => reader },
+      headers: new Headers(),
+    } as unknown as Response;
+  }
+
+  function dispatcherOverWire(chunks: string[]) {
+    const fetchMock = jest.fn(async () => sseResponse(chunks));
+    (globalThis as { fetch?: unknown }).fetch = fetchMock;
+    return createConsumerDispatcher({
+      bffBaseUrl: 'https://bff.test',
+      getSessionId: () => '11111111-2222-3333-4444-555555555555',
+      getAccessToken: async () => 'test-token',
+      publishPaneEvent: () => {
+        /* noop — pane bridging is covered by dispatchConsumer.test.ts */
+      },
+      sectionRevealDelayMs: 0,
+    });
+  }
+
+  it('an explain-clause complete chunk survives the wire and renders PROSE (not an empty-DAR blob)', async () => {
+    // THE EXACT wire the BFF now emits for a compose dispatch: AnalysisChunk.CompletedRaw
+    // serialized camelCase — `result` carries the raw compose payload verbatim, `summary` is null.
+    const wireChunk = JSON.stringify({
+      type: 'complete',
+      content: '',
+      done: true,
+      summary: null,
+      result: {
+        explanation: 'This clause caps aggregate liability at the fees paid in the prior year.',
+        keyConcepts: ['liability cap', 'indemnification'],
+        relatedPlaybookIds: [],
+      },
+      error: null,
+    });
+
+    const dispatch = dispatcherOverWire([wireChunk]);
+    const dispatched = await dispatch('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+
+    // The compose fields survived the wire → the formatter is NOT starved.
+    const result = dispatched.result as Record<string, unknown>;
+    expect(result.explanation).toBe(
+      'This clause caps aggregate liability at the fees paid in the prior year.'
+    );
+    expect(result.keyConcepts).toEqual(['liability cap', 'indemnification']);
+
+    // And the formatter (composeResultFormat) renders grounded PROSE from the wire object.
+    const md = formatComposeActionResultMarkdown(dispatched.result);
+    expect(md).not.toBeNull();
+    expect(md).toContain('**Explanation:** This clause caps aggregate liability');
+    expect(md).toContain('**Key concepts:** liability cap, indemnification');
+    expect(md).not.toContain('```json');
+  });
+
+  it('REGRESSION GUARD: the pre-fix empty-DAR wire blob would starve the formatter (returns null)', () => {
+    // What the wire delivered BEFORE the fix: every compose payload coerced to an empty
+    // DocumentAnalysisResult (unknown props dropped by System.Text.Json). Proves the
+    // formatter genuinely depends on the compose fields surviving — the fix is load-bearing.
+    const preFixEmptyDarBlob = {
+      summary: '',
+      tldr: [],
+      keywords: '',
+      entities: { organizations: [], persons: [], amounts: [], dates: [], references: [] },
+      rawResponse: null,
+      parsedSuccessfully: true,
+      emailMetadata: null,
+    };
+    expect(formatComposeActionResultMarkdown(preFixEmptyDarBlob)).toBeNull();
   });
 });
