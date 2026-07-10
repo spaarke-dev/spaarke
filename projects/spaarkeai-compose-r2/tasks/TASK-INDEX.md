@@ -79,7 +79,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | ID | Title | Cluster | Gate | Deps | Status | Rigor | Model | Effort |
 |----|-------|---------|------|------|--------|-------|-------|--------|
 | 100 | E2E-R1 getting-started vertical (upload/search→load→Save→sprk_document) | 1 create-on-save | 🟢 | 010-013,015 | ✅ | FULL | opus | xhigh |
-| 101 | E2E-R2 AI-action activation (toolbar bindingId registration + 2 missing triggers + 084 HTTP-slice test) | 2 dispatch | 🟢 (code); 047 deploy owner-run | 016,046 | 🔲 | FULL | opus | high |
+| 101 | E2E-R2 AI-action activation (toolbar bindingId registration + 2 missing triggers + 084 HTTP-slice test) | 2 dispatch | 🟢 (code); 047 deploy owner-run | 016,046 | 🔄 | FULL | opus | high |
 | 102 | E2E-R3 memory-resume (Load sessionId/matterId + response fields + annotation save route + client + Cosmos) | 4 memory | 🟢 | 060,061,062 | ✅ | FULL | opus | high |
 | 103 | E2E-R4 Word-shuttle wiring (client callers + subscription origin call + config + task 055 deterministic path) | 3 word | 🟡 | 050-054 | 🔲 | FULL | opus | high |
 | 104 | E2E-R5 three-pane coordination (real receivers on Context+Assistant panes + Flows 3/4/6 + typed discriminants) — supersedes/absorbs 070 | 5 three-pane | 🟢 | 030,031,046 | ✅ | FULL | opus | high |
