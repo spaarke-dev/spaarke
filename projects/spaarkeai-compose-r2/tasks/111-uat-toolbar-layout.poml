@@ -1,0 +1,111 @@
+<task id="111" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>UAT-R2 — fix the inline AI BubbleMenu toolbar layout (orphaned divider + nested Toolbar + overflow)</title>
+    <phase>9 UAT-Fix</phase>
+    <status>pending</status>
+    <estimated-hours>3</estimated-hours>
+    <effort>high</effort>
+    <dependencies>none</dependencies>
+    <blocks>114</blocks>
+    <tags>pcf,react,fluent-ui,compose,frontend,uat-remediation</tags>
+    <rigor-hint reason="Modifies .tsx UI; FULL; render-level DoD">FULL</rigor-hint>
+    <model-tier reason="Contained Fluent v9 layout fix in a single widget; sonnet">sonnet</model-tier>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe reason="Edits only ComposeAiToolbar.tsx + ComposeEditor.tsx (the BubbleMenu). Disjoint from 110 (BFF) and 112 (ConversationPane/formatter). No file overlap with any Wave-1 sibling.">true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    UAT defect #3a: when the user highlights text in Compose, the inline AI popup toolbar renders with broken
+    layout. Root cause: `ComposeAiToolbar` returns a Fragment whose FIRST child is a bare `&lt;ToolbarDivider /&gt;`
+    followed by a SECOND `&lt;Toolbar&gt;`, and both are mounted as direct children of the BubbleMenu flex row
+    (`styles.bubbleMenu`) alongside the formatting `&lt;Toolbar&gt;`. Fluent v9 `ToolbarDivider` derives its
+    orientation/height/margins from Toolbar context via `useToolbarContext` — rendered outside any Toolbar it
+    collapses/misaligns; two sibling Toolbars each apply their own padding; and with no `flexWrap`/`maxWidth` the
+    text-labelled AI buttons overflow the popup width. Fix so the popup is ONE clean, aligned bar.
+  </prompt>
+
+  <role>
+    Frontend engineer fluent in TipTap BubbleMenu + Fluent UI v9 Toolbar/ToolbarButton/ToolbarDivider composition
+    and `makeStyles` token-based styling (ADR-021). You correct a Toolbar-composition bug without changing the
+    action set, dispatch behavior, or the disabled-until-registered gating.
+  </role>
+
+  <goal>
+    The selection popup renders as a single aligned toolbar: formatting controls, a properly-contextualized
+    divider, then the AI action buttons — no collapsed/misaligned divider, no double padding, no horizontal
+    overflow (buttons wrap or the bar caps to a sensible max-width). Dispatch wiring (handleActionClick →
+    composeActionBridge) and the disabled-until-bindingId gating are unchanged.
+  </goal>
+
+  <context>
+    <background>
+      Files: `ComposeAiToolbar.tsx:482-485` (the Fragment `&lt;&gt;&lt;ToolbarDivider/&gt;&lt;Toolbar .../&gt;`),
+      `:357-363` (`styles.toolbar` re-imposing display:flex/columnGap over the Fluent Toolbar), `:219-260` (the 5
+      DEFAULT_ACTIONS, each shipping `bindingId:''` → disabled until `registerComposeAiToolbarAction`). Host:
+      `ComposeEditor.tsx:461-470` (`styles.bubbleMenu`, a center-aligned plain flex row), `:849-885` (the
+      formatting `&lt;Toolbar&gt;`), `:848` (BubbleMenu), `:892-899` (where `&lt;ComposeAiToolbar/&gt;` is mounted).
+    </background>
+    <relevant-files>
+      <file purpose="fix-toolbar-composition" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</file>
+      <file purpose="host-bubblemenu-and-toolbar" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+    </relevant-files>
+    <notes>
+      Preferred fix: have `ComposeAiToolbar` emit the divider + AI `ToolbarButton`s as ITEMS of the EXISTING
+      BubbleMenu `&lt;Toolbar&gt;` (pass-through, no nested Toolbar), so the divider gets Toolbar context and one
+      flex/gap system governs the whole bar. Acceptable alternative: keep a nested Toolbar but move the divider
+      INSIDE it and add `flexWrap: 'wrap'` + a `maxWidth` to `styles.bubbleMenu`. Either way: remove the
+      orphaned top-level divider, and drop the redundant `display:flex`/`columnGap` override in `styles.toolbar`
+      that fights Fluent's own Toolbar layout. Use semantic tokens (ADR-021), verify dark mode.
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="project (E2E DoD)">This is a UI-render defect: DoD is a render/DOM assertion (React Testing Library or the project's component test harness) that the popup mounts as a single Toolbar with the divider inside Toolbar context and no overflow — not merely a build-pass. The toolbar must also be shown MOUNTED + REACHABLE in the BubbleMenu.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; no hard-coded colors; dark-mode correct.</constraint>
+    <constraint source="project">Do NOT change the 5 action ids, dispatch wiring, or the disabled-until-bindingId gating (that is task 048's contract).</constraint>
+    <constraint source="ADR-028">No auth/fetch changes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose/inline-toolbar, tiptap-bubblemenu, fluent-v9-toolbar</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r2/notes/uat-r2-defect-triage-2026-07-10.md</file>
+      <file>projects/spaarkeai-compose-r2/tasks/030-bubble-menu-toolbar.poml</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <justification component="No new component — corrects existing Toolbar composition">
+    <existing>ComposeAiToolbar + the BubbleMenu Toolbar already exist (task 030).</existing>
+    <extension>Refactor the existing composition (fold AI items into the host Toolbar / fix divider context + overflow). No new component.</extension>
+    <cost-of-doing-nothing>The inline AI affordance — the primary FR-14 surface — renders visibly broken, undermining the whole inline-AI UX the owner just tested.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Load the triage note + task 030 + ADR-021. Read `ComposeAiToolbar.tsx:357-363/482-485` and `ComposeEditor.tsx:461-470/848-899` to confirm the composition.</step>
+    <step order="1">Refactor so the AI divider + action buttons are children of a SINGLE Toolbar (fold into the host BubbleMenu Toolbar, pass-through), OR move the divider inside the nested Toolbar and add flexWrap+maxWidth to `bubbleMenu`. Remove the orphaned top-level `&lt;ToolbarDivider/&gt;`.</step>
+    <step order="2">Drop the redundant `display:flex`/`columnGap` override in `styles.toolbar`; rely on Fluent Toolbar layout. Ensure buttons wrap or the bar caps width; verify dark mode + semantic tokens.</step>
+    <step order="3">Add/extend a component render test asserting: one Toolbar in the popup, the divider is within Toolbar context, all 5 AI buttons present, and the bar does not overflow (width-cap or wrap). Confirm the toolbar mounts inside the BubbleMenu (reachable).</step>
+    <step order="4">Recompile the shared lib (`@spaarke/ui-components`/compose components) per code-page-deploy cache rules; run the component tests + lint.</step>
+    <step order="5">code-review + adr-check (Step 9.5). Update TASK-INDEX + current-task.md.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</output>
+    <output type="test">Spaarke.Compose.Components toolbar render test (single-Toolbar + divider-context + no-overflow assertions)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The popup renders as ONE Toolbar; the divider is a child of a Toolbar (has context) — no orphaned top-level ToolbarDivider remains.</criterion>
+    <criterion testable="true">The AI action buttons do not overflow the popup: they wrap or the bar is width-capped (asserted in the render test).</criterion>
+    <criterion testable="true">All 5 AI actions still render, retain their ids, and keep the disabled-until-bindingId gating and dispatch wiring unchanged.</criterion>
+    <criterion testable="true">Colors use Fluent v9 semantic tokens; the toolbar is correct in dark mode (ADR-021).</criterion>
+    <criterion testable="true">Component render test proves the toolbar is mounted inside the BubbleMenu (reachable), not merely built in isolation.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

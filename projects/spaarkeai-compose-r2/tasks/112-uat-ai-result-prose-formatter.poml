@@ -1,0 +1,123 @@
+<task id="112" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>UAT-R3 — render Compose AI action results as prose (per-action formatter) instead of a raw JSON fence</title>
+    <phase>9 UAT-Fix</phase>
+    <status>pending</status>
+    <estimated-hours>5</estimated-hours>
+    <effort>high</effort>
+    <dependencies>none</dependencies>
+    <blocks>114</blocks>
+    <tags>react,compose,frontend,ai,uat-remediation</tags>
+    <rigor-hint reason="Modifies .tsx result-rendering path on the dispatch→chat seam; FULL; real-bus DoD">FULL</rigor-hint>
+    <model-tier reason="Contained client formatter keyed on known output schemas; sonnet">sonnet</model-tier>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe reason="Edits ConversationPane.tsx (dispatchComposeAction) + the formatter module (DocumentUploadedEventStream.ts / summarizeRouting.ts). Disjoint from 110 (BFF) and 111 (ComposeAiToolbar/ComposeEditor). NOTE: 113 also touches ConversationPane.tsx — 113 is Wave 2, so no co-run.">true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    UAT defect #3b/#3c: clicking an inline AI action shows a raw-JSON-looking blob in the Assistant pane and
+    "nothing else happens". Root cause: the only formatter between the dispatched structured result and the chat
+    message, `formatEventOutputMarkdown`, understands ONLY the summarize schema (`tldr`/`summary`/`keywords`); it
+    falls into a `tldr===null &amp;&amp; summary===null` branch that renders the object as a ` ```json ` fence. Every
+    Compose action returns a different schema (e.g. `compose-explain-clause` → `{explanation, keyConcepts,
+    relatedPlaybookIds}`), so all 5 hit the JSON fallback. Separately, `dispatchConsumer` ALSO bridges the terminal
+    result onto the `workspace` PaneEventBus channel as section events, which in Compose is the editor (no section
+    renderer subscribed) → the "nothing else happens" half. Fix: a Compose-aware, per-action PROSE formatter keyed
+    on the action id / bindingId; keep the JSON fence only as a genuine last-resort for unknown shapes.
+  </prompt>
+
+  <role>
+    Frontend engineer fluent in the Compose dispatch→chat seam (`dispatchComposeAction` → `dispatchConsumer` →
+    `formatEventOutputMarkdown` → `makeLocalAssistantMessage`) and the 5 Compose action output schemas. You add a
+    grounded prose formatter that never paraphrases beyond the returned fields.
+  </role>
+
+  <goal>
+    Each of the 5 Compose actions renders its structured result as readable prose in the Assistant: e.g.
+    explain-clause → the `explanation` paragraph + a "Key concepts" list (+ related-playbook refs if present);
+    compare-to-playbook / draft-alternative / summarize-word-changes / defined-terms mapped to their own field
+    shapes. The generic ` ```json ` fence appears ONLY for a genuinely unrecognized shape. The stray
+    `workspace`-channel section bridge in the Compose surface no longer produces dead/duplicate output (suppressed
+    or routed to the intended sink, e.g. the task-072 Q&A highlight), so a click yields exactly one coherent
+    Assistant response.
+  </goal>
+
+  <context>
+    <background>
+      Path: `ComposeAiToolbar.handleActionClick` (`ComposeAiToolbar.tsx:463-465`) → composeActionBridge →
+      `ConversationPane.dispatchComposeAction` (`ConversationPane.tsx:196-207`) → `dispatchConsumer`
+      (`dispatchConsumer.ts:383-612`, returns `.result`) → `formatEventOutputMarkdown(dispatched.result)`
+      (`DocumentUploadedEventStream.ts:218-232`) → `makeLocalAssistantMessage` (`summarizeRouting.ts:172-179`,
+      tags `responseType:"markdown"`). Workspace-channel bridge: `dispatchConsumer.ts:487-527`
+      (`section_started`/`section_completed`). Output schemas: `infra/dataverse/outputschemas/compose-*.schema.json`
+      (explain-clause, compare-to-playbook, draft-alternative, summarize-word-changes, defined-terms).
+    </background>
+    <relevant-files>
+      <file purpose="dispatch-to-chat-injection" edit="true">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (dispatchComposeAction ~196-207)</file>
+      <file purpose="result-formatter" edit="true">the formatter that owns formatEventOutputMarkdown (DocumentUploadedEventStream.ts ~218-232) and/or a new compose-result-format module co-located with summarizeRouting.ts</file>
+      <file purpose="workspace-channel-bridge" edit="maybe">dispatchConsumer.ts ~487-527 (decide the Compose-surface destination for section events; suppress or route to 072 QA)</file>
+      <file purpose="output-schemas" edit="false">infra/dataverse/outputschemas/compose-explain-clause.schema.json (+ the other 4)</file>
+      <file purpose="local-message-shape" edit="false">summarizeRouting.ts ~172-179 (makeLocalAssistantMessage)</file>
+    </relevant-files>
+    <notes>
+      Key the formatter on the action id / bindingId (available in the ComposeActionRequest), NOT on sniffing
+      tldr/summary. Render grounded output only — map the schema's own fields to prose, never invent. Keep the
+      JSON fence as a fallback for unknown shapes. For the workspace-channel bridge: in the Compose surface the
+      editor has no section renderer, so either suppress those events for compose dispatches or route them to the
+      task-072 `compose_qa_highlight`/citation sink — pick the one that yields a single coherent response and
+      note the decision.
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="project (E2E DoD, binding)">NOT ✅ until a REAL-PaneEventBus test drives a Compose action's terminal result (e.g. an explain-clause `{explanation, keyConcepts}` payload) through `dispatchComposeAction` and asserts the injected Assistant message is PROSE (contains the explanation text + key-concepts), NOT a ```json code block. A shape-only unit test on the formatter alone is insufficient — it must go through the injection seam.</constraint>
+    <constraint source="project">Grounded output only — the formatter maps returned fields; it must not paraphrase or add content beyond the payload (matches the "render verbatim, never paraphrased" intent of the current fallback).</constraint>
+    <constraint source="project">Keep the JSON fence as the last-resort branch for genuinely unknown shapes (do not delete it).</constraint>
+    <constraint source="ADR-030">PaneEventBus usage stays within the established contract; if suppressing/rerouting the workspace-channel bridge, do it at the Compose-surface boundary, not by mutating the shared dispatchConsumer contract for other surfaces.</constraint>
+    <constraint source="ADR-021">Markdown/prose renders within the existing chat message renderer; no new hard-coded styling.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose/dispatch-to-chat, output-schema-rendering, paneeventbus</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r2/notes/uat-r2-defect-triage-2026-07-10.md</file>
+      <file>projects/spaarkeai-compose-r2/tasks/046-dispatch-wiring.poml</file>
+      <file>projects/spaarkeai-compose-r2/tasks/072-doc-qa-stretch.poml</file>
+      <file>.claude/adr/ADR-030-paneeventbus.md</file>
+      <file>infra/dataverse/outputschemas/compose-explain-clause.schema.json</file>
+    </files>
+  </knowledge>
+
+  <justification component="Compose-aware result formatter (extends formatEventOutputMarkdown)">
+    <existing>`formatEventOutputMarkdown` + `makeLocalAssistantMessage` already own the dispatched-result→chat rendering; it handles the summarize schema.</existing>
+    <extension>Extend the same formatter (branch by action id) to the 5 Compose schemas; keep the generic JSON fence as fallback. No new rendering pipeline.</extension>
+    <cost-of-doing-nothing>Without it, every inline AI action shows an unreadable JSON blob — the actions "work" on the wire but are unusable, exactly the owner's UAT experience.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Load the triage note + tasks 046/072 + the 5 output schemas. Read the dispatch→chat path and confirm the tldr/summary fallback branch + the workspace-channel bridge.</step>
+    <step order="1">Add a per-action prose formatter (keyed on action id/bindingId) mapping each of the 5 Compose output schemas to grounded markdown; wire it into `dispatchComposeAction`'s injection (or into `formatEventOutputMarkdown` with an action-id branch). Keep the JSON fence as last resort.</step>
+    <step order="2">Resolve the workspace-channel bridge for the Compose surface (suppress for compose dispatches or route to the 072 QA highlight) so a click yields exactly one coherent Assistant response; document the decision.</step>
+    <step order="3">Add a real-PaneEventBus test: feed an explain-clause `{explanation, keyConcepts}` terminal result through `dispatchComposeAction` and assert the injected message is prose (explanation + key concepts), not ```json; add at least one more action shape (e.g. defined-terms) and an unknown-shape case asserting the fallback still fences.</step>
+    <step order="4">Recompile the affected packages per code-page-deploy cache rules; run the bus/component tests + lint.</step>
+    <step order="5">code-review + adr-check (Step 9.5). Update TASK-INDEX + current-task.md.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+    <output type="code">the compose result formatter module (extended formatEventOutputMarkdown / new co-located formatter)</output>
+    <output type="test">real-PaneEventBus test: Compose action result → prose Assistant message (per-action + unknown-shape fallback)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">(E2E, non-waivable) A real-PaneEventBus test drives an explain-clause terminal result through `dispatchComposeAction` and asserts the injected Assistant message is PROSE (explanation + key concepts), not a ```json fence.</criterion>
+    <criterion testable="true">At least 2 of the 5 action schemas are covered by tests; each renders grounded prose from its own fields.</criterion>
+    <criterion testable="true">(negative) A genuinely unknown result shape still renders via the JSON fence fallback (branch preserved).</criterion>
+    <criterion testable="true">A single inline-AI click yields exactly one coherent Assistant response — the workspace-channel section bridge no longer produces dead/duplicate output in the Compose surface.</criterion>
+    <criterion testable="true">The formatter adds no content beyond the returned payload fields (grounded).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -92,6 +92,20 @@ Per the audit, these ✅ tasks are **E2E-inert** and are re-scoped by the Phase-
 
 > **✅ E-20 LANDED ON MASTER 2026-07-09 (`c300ab12d`) — COMPOSE DISPATCH UNBLOCKED.** The Phase-E batch (E-20/E-12/E-30/E-42) merged. `DispositionRoutability` admits `Compose` (`Routable=true`, `IsAdmissible=IsRoutable`) and the admit-gate follows the registry — **the 422 is gone.** Our routing hand-patch was cleanly superseded (core owns the 3-list collapse; 408/408 dispatch+compose+summarize green). **FREEZE LIFTED** on `OutputRouter.cs`/`Binding.cs`. **NOW EXECUTABLE**: **016** (re-verify E2E through `/dispatch` — clear the false-green) → **042/033/046** → **034** (undo — supersession mechanism already in A0, NOT E-30-gated per core REPLY §2) → **047** (compose row) → **084** (seam test) → **082** (flagship). The 4 informational compose actions now dispatch E2E for real. History: E-20 was 422-gated until this merge (admit-gate `SessionDispatchOrchestrator.cs:229` had admitted only `Informational|WorkProduct`; our promotion fixed 2 of 3 lists, E-20 completed the collapse). Caught+fixed core's E-30 fixture drift on the way in (23 tests, commit `5f59cbc0b`); residual pre-existing `AuditLogService` full-suite flake noted.
 
+## Phase 9b — UAT Remediation (owner smoke test 2026-07-10)
+
+> **Source of truth**: [notes/uat-r2-defect-triage-2026-07-10.md](../notes/uat-r2-defect-triage-2026-07-10.md) — the owner's live smoke test of the deployed AI toolbar surfaced 7 defects (save 400; broken inline toolbar; AI result as raw JSON; chat↔Compose document-context disconnect ×4). Three parallel root-cause investigations reduced them to 5 themes → 5 tasks. This **overturns the earlier "AI activation complete E2E" claim** — the surface was unit-green / user-broken. Owner directive: **fix, do not defer.** Each carries the binding E2E DoD (WAF / real-PaneEventBus). Owner chose the **unified active-document identity** approach for R4 (fixes defects 4/5/6/7 as a class). conflict-check 2026-07-10: shared handler/session co-owned with redesign-r2 but **no live file overlap** — soft-warn (coordinate merge ordering).
+
+| ID | Title | Theme (UAT item) | Surface | Gate | Deps | Status | Rigor | Model | Effort |
+|----|-------|------------------|---------|------|------|--------|-------|-------|--------|
+| 110 | create-on-save: sessionId → optional on transient-create | R1 (#2 save 400) | BFF | 🟢 | none | 🔲 | FULL | opus | high |
+| 111 | fix inline AI BubbleMenu toolbar layout (divider/overflow) | R2 (#3a) | client | 🟢 | none | 🔲 | FULL | sonnet | high |
+| 112 | AI action result → per-action prose (not raw JSON) | R3 (#3b/#3c) | client | 🟢 | none | 🔲 | FULL | sonnet | high |
+| 113 | session-scoped active-document identity bridge + Compose layout default | R4+R5 (#4/#5/#6/#7) | BFF+client (**shared**) | 🟢 | 110,112 | 🔲 | FULL | opus | xhigh |
+| 114 | re-merge + deploy BFF/SpaarkeAi + §10 verify + owner re-UAT | — | deploy | 🟢 | 110,111,112,113 | 🔲 | STANDARD | sonnet | high |
+
+**Sequencing**: **W-UAT1** (parallel, disjoint files): 110 (BFF: ComposeEndpoints/ComposeService) · 111 (client: ComposeAiToolbar/ComposeEditor) · 112 (client: ConversationPane/formatter). → **W-UAT2** (solo): 113 (unified bridge; touches ComposeEndpoints.cs [110] + ConversationPane.tsx [112] + co-owned SendWorkspaceArtifactHandler.cs/ChatSession.cs). → **W-UAT3** (solo): 114 deploy. **FROZEN guard**: 113 must NOT edit OutputRouter.cs/Binding.cs (clear now that E-20 landed, but no need — the bridge doesn't touch dispatch routing).
+
 ## Parallel Execution Plan (startable 🟢 tracks)
 
 > Waves list only startable tasks. 🔴 tasks join the plan when core A0 publishes. `.claude/` boundary: none of these touch `.claude/` (all main-session-or-subagent-safe under `projects/` + `src/`), but file-overlap within `src/` is enforced below.

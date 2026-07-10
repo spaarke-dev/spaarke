@@ -1,0 +1,93 @@
+<task id="114" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>UAT remediation — re-merge master, deploy BFF + SpaarkeAi, §10 verification, owner re-UAT of the 7 items</title>
+    <phase>9 UAT-Fix</phase>
+    <status>pending</status>
+    <estimated-hours>3</estimated-hours>
+    <effort>high</effort>
+    <dependencies>110,111,112,113</dependencies>
+    <blocks>none</blocks>
+    <tags>deploy,bff-api,spaarke-ai,uat-remediation</tags>
+    <rigor-hint reason="Deployment + verification task; STANDARD with deploy-context loading">STANDARD</rigor-hint>
+    <model-tier reason="Operational deploy + verification; sonnet">sonnet</model-tier>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe reason="Solo — depends on all four fix tasks; deploys the merged result.">false</parallel-safe>
+    <coordination target="spaarke-ai-architecture-redesign-r2">Re-merge master (pick up any core edits to the co-owned handler/session) BEFORE deploy; give core the deploy heads-up per the standing handoff cadence.</coordination>
+  </metadata>
+
+  <prompt>
+    Ship the Phase-9 UAT remediation. Re-merge master into the branch (watch for the barrel-export class of merge
+    defect the production build catches but ts-jest tolerates), run the consolidated gate, deploy BFF + the
+    SpaarkeAi code page from the merged state (per bff-deploy + code-page-deploy skills — clear Vite cache, verify
+    hash + health), run the §10 verification (publish-size ≤60 MB vs 49.63 baseline, CVE, NetArch facade), and
+    hand the owner a crisp re-UAT checklist covering all 7 original items. Allow ≤5 min for the BFF catalog/route
+    cache after deploy.
+  </prompt>
+
+  <role>
+    Release engineer executing the project's proven deploy cadence (bff-deploy hash-verify + health;
+    code-page-deploy cache-clear + verify) and coordinating the shared-surface merge with redesign-r2.
+  </role>
+
+  <goal>
+    BFF + SpaarkeAi redeployed to spaarkedev1 from a clean master re-merge carrying tasks 110–113; /healthz Healthy;
+    compose + open-tab routes live; §10 verification recorded; owner given a re-UAT checklist that maps 1:1 to the
+    7 UAT items. redesign-r2 is coordinated (re-merge + deploy heads-up).</goal>
+
+  <context>
+    <background>
+      Deploy scripts + cadence are proven this project: `scripts/Deploy-BffApi.ps1` (pwsh; hash-verify + 120s Linux
+      health window) and `scripts/Deploy-SpaarkeAi.ps1` (invoke via the call operator `&amp; "…Deploy-SpaarkeAi.ps1"`;
+      clear Vite cache first). The shared handler/session files are co-owned with redesign-r2 — re-merge master
+      first. BFF catalog/route cache is a 5-min IMemoryCache TTL.
+    </background>
+    <relevant-files>
+      <file purpose="bff-deploy" edit="false">scripts/Deploy-BffApi.ps1</file>
+      <file purpose="code-page-deploy" edit="false">scripts/Deploy-SpaarkeAi.ps1</file>
+      <file purpose="re-uat-checklist" edit="true">projects/spaarkeai-compose-r2/notes/UAT-r2-reuat-checklist.md (new)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="skill">Use bff-deploy (hash-verify + health; never trust deploy success alone) and code-page-deploy (clear Vite cache + recompile shared libs first; verify a known string in the built HTML).</constraint>
+    <constraint source="bff-hygiene §10">Report publish-size (≤60 MB; vs 49.63 baseline), CVE scan result, NetArch facade result in the task notes / PR description.</constraint>
+    <constraint source="coordination">Re-merge master before deploy; give redesign-r2 the before/after deploy heads-up; reconcile any co-owned-file drift.</constraint>
+    <constraint source="project">Do NOT treat owner re-UAT as a gate for closing the wave — record it as the verification step; the owner drives it and returns feedback (consistent with the standing "UAT is not a gate" direction).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deploy/bff, deploy/code-page, uat-verification</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r2/notes/uat-r2-defect-triage-2026-07-10.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Confirm 110–113 are ✅ (gates green). Re-merge origin/master into the branch; resolve conflicts; run the consolidated build/test gate (BFF build 0 err; compose/dispatch/session bus suites; production code-page build to catch barrel-export defects).</step>
+    <step order="1">Deploy BFF via `pwsh -File scripts/Deploy-BffApi.ps1`; confirm hash-verify MATCH + health passed; verify compose + open-tab routes return 401 (live, not 404).</step>
+    <step order="2">Clear Vite cache + recompile shared libs; deploy the SpaarkeAi code page via the call operator; verify a known string (e.g. the active-document/registration marker) in the built HTML.</step>
+    <step order="3">Record §10 verification (publish-size vs 49.63; CVE; NetArch facade) in task notes.</step>
+    <step order="4">Write `notes/UAT-r2-reuat-checklist.md` mapping each of the 7 UAT items to its fix (110/111/112/113) with the exact click-path to re-test; note the ≤5-min cache allowance. Give redesign-r2 the deploy-done heads-up.</step>
+    <step order="5">Update TASK-INDEX + current-task.md.</step>
+  </steps>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r2/notes/UAT-r2-reuat-checklist.md</output>
+    <output type="deploy">BFF + SpaarkeAi redeployed from merged master; §10 verification recorded</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Master re-merged; consolidated gate green incl. a production code-page build (barrel-export class caught).</criterion>
+    <criterion testable="true">BFF deployed with hash-verify MATCH + /healthz Healthy; compose + open-tab routes return 401 (live).</criterion>
+    <criterion testable="true">SpaarkeAi code page deployed with cache cleared; a known change marker verified in the built HTML.</criterion>
+    <criterion testable="true">§10 verification recorded (publish-size ≤60 MB vs 49.63; CVE; NetArch facade).</criterion>
+    <criterion testable="true">Re-UAT checklist written mapping all 7 items to fixes; redesign-r2 coordinated (re-merge + deploy heads-up).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
