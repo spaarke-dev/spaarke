@@ -22,6 +22,19 @@
 | **Branch** | `work/spaarke-ai-architecture-redesign-r2` — all work merged to master via PR #600. Clean. |
 | **Next Action** | ✅ E-30 COMPLETE (seam + proving consumer, committed 0507609a1). **NEXT = E-40** (governance main-session: seam/** → ADR-038 KEEP + CLAUDE.md §10 + named owner; fold in E-42 health-severity decision) → then memory wave (050–065). ~~E-30~~ (deterministic ActionKind + supersession-write; dep E-20; SERIAL — touches SessionDispatchOrchestrator ~209 ActionKind gate + OutputRouter supersession leg; POML not yet authored) → **E-40** (governance main-session: seam/** → ADR-038 KEEP + CLAUDE.md §10 + named owner; fold in decision (a) health severity) → memory wave. Separately AWAITING OPERATOR: G-R2-A browser UAT — round-1 feedback PARKED in `notes/uat-feedback-consolidation.md` (hold-for-milestone; now incl. AI-friendly inline-create "invert the wizard" design direction). |
 
+### ⚑ CHECKPOINT (2026-07-09, pre-compact) — Phase E CLOSED + memory-wave batch 1 done; ALL ON MASTER (PR #608)
+**Progress: 39 of 62 tasks.** Everything through here is committed + MERGED TO MASTER (PR #608, master `fa40efbc8`; main repo synced). Working tree clean.
+- **Phase E CLOSED**: E-00/E-10/E-12/E-20/E-30/E-40/E-42 all ✅. E-30 = coded-workflow dispatch seam + `SendUploadNotificationWorkflow` proving consumer. E-40 = 7th ADR-038 KEEP category `tests/integration/seam/**` + E-42 health-severity fix (ConstantsWithoutRows→Degraded).
+- **Memory-wave batch 1 (parallel, 4 agents) ✅**: 055 (caller-contact resolver, wired via ambient HttpContext), 060 (org-scope provider iface), 061 (semantic-scope provider iface; ContextBinder wiring deferred=PE-D6), 063 (ACL spike → 🔔 PE-D5 HIGH security gap, held in deferral list per operator).
+- **compose-r2 forcing-consumer validation PASSED** (their `HANDOFF-to-core-forcing-consumer-validation-passed.md`): E-20 unblocked compose end-to-end through the real seam (24/24). Core reply written (`REPLY-to-compose-r2-validation-passed.md`): 084 reduces to a scope-note (DispositionRoutabilitySeamTests suffices); E-40 landed. AuditLog flake accepted → PE-D7.
+- **Deferrals (defer-issues.md)**: PE-D1..D7. D5=HIGH matter-retrieval ACL (own security project, operator to open — HELD). D4=Fork-C facade (operator scheduling decision). D6=semantic-slice ContextBinder wiring. D7=AuditLog flake.
+
+**⏭️ NEXT WAVE (memory core — mostly MAIN-SESSION, parallel-safe:false):**
+- **050** (RecordMemory/UserMemory generalize + NEW Cosmos container partitioned by SUBJECT) — `opus·xhigh`, **HIGH-RISK/irreversible Cosmos partition + escalation trigger** — main session, careful.
+- **053** (Context Binder + ContextEnvelope assembly) — `opus·xhigh` — but **VERIFY FIRST**: task 055's agent found 053 may already be substantially implemented via E-10 (commit `02fbef11d` created ContextBinder). Check 053's POML goal vs. what E-10/055/060 already built before executing.
+- Then **M-serial**: 051,052 (dep 050), 054 (dep 053), 057 (dep 050, memory.write), 065 (ADR-042, dep 050,057). And **M-parallel remainder**: 056 (dep 053), 062 (dep 035,050) — parallelize after 050/053.
+- Also open: 017 (A0 seam-publication ordering), 064 (ADR-040 inline size-cap, dep 001), G-R2-D (070-079), 090 wrap-up. Operator gates 049/069 (UAT — operator-only).
+
 ### ✅ E-30 COMPLETE (2026-07-09) — coded-workflow dispatch seam + proving consumer, committed 0507609a1
 Seam (6615229ee) + proving consumer (0507609a1) both done + on this branch. 3 seam tests green + 234/0 dispatch/seam/summarize regression. TASK-INDEX row flipped ✅. Deferred (documented in commit + POML): clickable file-link (OBO), live catalog Binding/consumerType wiring (deployment), Action Engine internals. NEXT = E-40 (governance) → memory wave.
 
