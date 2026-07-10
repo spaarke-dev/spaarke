@@ -815,6 +815,7 @@ public class DailyBriefingCollector : ICodedWorkflow
                     "sprk_documentid",
                     "sprk_documentname",
                     "sprk_filename",
+                    "sprk_documentdescription",
                     "modifiedon",
                     "sprk_matter",
                     "sprk_project",
@@ -881,6 +882,7 @@ public class DailyBriefingCollector : ICodedWorkflow
                     "sprk_matterid",
                     "sprk_mattername",
                     "sprk_matternumber",
+                    "sprk_matterdescription",
                     "modifiedon",
                     "statecode",
                     "statuscode")
@@ -936,6 +938,7 @@ public class DailyBriefingCollector : ICodedWorkflow
                     "sprk_projectid",
                     "sprk_projectname",
                     "sprk_projectnumber",
+                    "sprk_projectdescription",
                     "modifiedon",
                     "statecode",
                     "statuscode")
@@ -1077,6 +1080,7 @@ public class DailyBriefingCollector : ICodedWorkflow
             EntityType = EntityDocument,
             EntityId = entity.GetAttributeValue<Guid>("sprk_documentid").ToString(),
             Title = name,
+            Body = entity.GetAttributeValue<string>("sprk_documentdescription"),
             Priority = "normal",
             DueDate = null,
             RegardingMatterName = matterRef?.Name,
@@ -1089,12 +1093,17 @@ public class DailyBriefingCollector : ICodedWorkflow
     {
         var matterId = entity.GetAttributeValue<Guid>("sprk_matterid");
         var matterName = entity.GetAttributeValue<string>("sprk_mattername") ?? "(untitled matter)";
+        // Operator UAT (2026-07-09): title line = "{number}   {name}". Number omitted
+        // gracefully when the matter has none (falls back to name only).
+        var matterNumber = entity.GetAttributeValue<string>("sprk_matternumber");
+        var matterTitle = string.IsNullOrWhiteSpace(matterNumber) ? matterName : $"{matterNumber}   {matterName}";
         return new BriefingItem
         {
             Id = entity.Id.ToString(),
             EntityType = EntityMatter,
             EntityId = matterId.ToString(),
-            Title = matterName,
+            Title = matterTitle,
+            Body = entity.GetAttributeValue<string>("sprk_matterdescription"),
             Priority = "normal",
             DueDate = null,
             // Self-regarding — the matter IS the regarding entity, surface as click-through.
@@ -1108,12 +1117,16 @@ public class DailyBriefingCollector : ICodedWorkflow
     {
         var projectId = entity.GetAttributeValue<Guid>("sprk_projectid");
         var projectName = entity.GetAttributeValue<string>("sprk_projectname") ?? "(untitled project)";
+        // Operator UAT (2026-07-09): title line = "{number}   {name}" (same as matters).
+        var projectNumber = entity.GetAttributeValue<string>("sprk_projectnumber");
+        var projectTitle = string.IsNullOrWhiteSpace(projectNumber) ? projectName : $"{projectNumber}   {projectName}";
         return new BriefingItem
         {
             Id = entity.Id.ToString(),
             EntityType = EntityProject,
             EntityId = projectId.ToString(),
-            Title = projectName,
+            Title = projectTitle,
+            Body = entity.GetAttributeValue<string>("sprk_projectdescription"),
             Priority = "normal",
             DueDate = null,
             // Self-regarding — entity-link points to the project itself.

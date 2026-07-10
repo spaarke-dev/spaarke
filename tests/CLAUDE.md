@@ -14,7 +14,7 @@
 
 ## Module Overview
 
-Test projects for validating Spaarke .NET components, organized into **6 KEEP path categories** (canonical at runtime per ADR-038):
+Test projects for validating Spaarke .NET components, organized into **7 KEEP path categories** (canonical at runtime per ADR-038):
 
 ```
 tests/
@@ -23,12 +23,13 @@ tests/
 │   ├── regression/**        # one file per past production bug — "every bug = regression test"
 │   ├── data-mutation/**     # writes, transactions, rollback semantics
 │   ├── tenant/**            # tenant boundary enforcement (cross-tenant reads MUST 404)
-│   └── contract/**          # endpoint contract: route + status + ProblemDetails + payload shape
+│   ├── contract/**          # endpoint contract: route + status + ProblemDetails + payload shape
+│   └── seam/**              # vertical-slice seam: end-to-end across an AI convergence seam (dispatch→executor→ledger→disposition) with production types — router-unit ≠ working slice (E-40)
 └── unit/
     └── domain/**            # pure domain logic — calculations, mappings, parsing, serialization
 ```
 
-These six paths are **deletion-protected**. Removing a file under any of them requires a same-PR replacement covering the same scenario. Enforced at code-review (`task-execute` Step 9.5).
+These seven paths are **deletion-protected**. Removing a file under any of them requires a same-PR replacement covering the same scenario. Enforced at code-review (`task-execute` Step 9.5).
 
 ---
 
@@ -285,19 +286,19 @@ dto.Email.Should().Be(user.Email);
 
 ## Expect to Defend at Project Close
 
-**Every test you write today, expect to defend at project close.** If it can't be defended as integrate/maintain class — that is, a regression-protector, a contract-anchor, or a business-logic-with-branches test under one of the 6 KEEP paths — it gets deleted in the `/test-diet` pass at the project's `090-wrapup-*` task (added by spec FR-B09 / task CICD-081).
+**Every test you write today, expect to defend at project close.** If it can't be defended as integrate/maintain class — that is, a regression-protector, a contract-anchor, or a business-logic-with-branches test under one of the 7 KEEP paths — it gets deleted in the `/test-diet` pass at the project's `090-wrapup-*` task (added by spec FR-B09 / task CICD-081).
 
 The build-vs-maintain distinction:
 
 | Class | Half-life | Purpose | KEEP path? |
 |---|---|---|---|
 | **Build-class** | days/weeks (the project) | Drive design, validate construction, satisfy coverage % | NO — deleted in diet pass |
-| **Maintain-class** | months/years | Protect against regression, anchor a contract, exercise branched business logic | YES — lives in one of the 6 KEEP paths |
+| **Maintain-class** | months/years | Protect against regression, anchor a contract, exercise branched business logic | YES — lives in one of the 7 KEEP paths |
 
 When authoring a test, ask three questions:
 
 1. **What production behavior would break if this test were deleted?** If you can't name a concrete behavior, it's build-class — the test exists for design or coverage, not protection.
-2. **Does this test live under one of the 6 KEEP paths?** If not, the test is the wrong shape — re-scope to a KEEP path or escalate to an ADR amendment.
+2. **Does this test live under one of the 7 KEEP paths?** If not, the test is the wrong shape — re-scope to a KEEP path or escalate to an ADR amendment.
 3. **Is the assertion in this test about behavior the caller would notice, or about implementation the caller can't see?** If the latter, it's scaffolding by ADR-038 §7 definition.
 
 A test that survives all three questions is maintain-class — author it, name it per `{Method}_{Scenario}_{ExpectedResult}`, place it at the right KEEP path, and trust it to defend itself at project close.
@@ -428,7 +429,7 @@ Real test tenants > in-memory emulators where the production code is exercising 
 
 | ✅ DO | ❌ DON'T |
 |-------|----------|
-| Author tests under one of the 6 KEEP paths | Author tests under any other path |
+| Author tests under one of the 7 KEEP paths | Author tests under any other path |
 | Write a regression test for every fixed bug | Skip "we'll add the test later" |
 | Write an integration test for every new endpoint | Rely on unit test of the handler only |
 | Use FluentAssertions for assertions | Use basic `Assert.Equal` / `Assert.NotNull` |

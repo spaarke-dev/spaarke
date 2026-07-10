@@ -2,7 +2,7 @@
 
 > **Purpose**: Cross-cutting failure patterns that don't belong inside any single skill's Gotchas section. The agent should mentally cross-reference this catalog before executing a skill; sessions that hit a NEW failure type should append an entry here.
 
-> **Last Updated**: 2026-05-14 (inaugural entries)
+> **Last Updated**: 2026-07-09 (added AP-6: braced GUIDs in `@odata.bind` → use `cleanGuid`)
 
 ---
 
@@ -25,6 +25,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-3: GUID case mismatch between Xrm and Web API clients (case-sensitive AI Search filters)](#ap-3-guid-case-mismatch-between-xrm-and-web-api-clients)
 - [AP-4: Silent dev/demo deployed-bundle drift causing /api-prefix bug](#ap-4-silent-devdemo-deployed-bundle-drift-causing-api-prefix-bug)
 - [AP-5: AbortController in a useEffect whose deps include your own state transition](#ap-5-abortcontroller-in-a-useeffect-whose-deps-include-your-own-state-transition)
+- [AP-6: Interpolating a raw GUID into `@odata.bind` — braces cause "Error in query syntax" (use `cleanGuid`)](#ap-6-interpolating-a-raw-guid-into-odatabind--braces-cause-error-in-query-syntax)
 
 ### Gotchas
 - [G-1: Settings-file schema malformation silently disables permission rules + hooks](#g-1-settings-file-schema-malformation-silently-disables-permission-rules--hooks)
@@ -206,6 +207,40 @@ Existing uppercase chunks in dev were intentionally left as-is per owner decisio
 - Type-safe ID wrappers would help long-term. Today every GUID is a `string` in TypeScript and C#; both languages have the tools to make a stronger guarantee (branded types in TS, `record struct DocumentId(Guid Value)` in C#).
 
 **Evidence**: commit `fbbaee29`, live Azure Search records showing both casings coexisting after the 2026-05-22 test session.
+
+---
+
+### AP-6: Interpolating a raw GUID into `@odata.bind` — braces cause "Error in query syntax"
+
+**Title**: Building an `@odata.bind` value (or any `/entityset(guid)` reference URL) from a GUID that came from an Xrm source without normalizing it. Xrm returns registry-format GUIDs (`{UPPERCASE-...}`); the Dataverse OData key predicate requires a **bare** GUID and rejects a braced one with HTTP 400 `Bad Request - Error in query syntax`. The error names **no property** — it's a URL-parse failure, not payload validation — which is the tell that distinguishes it from a bad scalar field.
+
+**Date**: 2026-07-09 (Create Matter/Project 400 on record creation)
+
+**Classification**: Anti-pattern (sibling of [AP-3](#ap-3-guid-case-mismatch-between-xrm-and-web-api-clients) — same root cause, different symptom: AP-3 is GUID *case* breaking AI Search `eq`; AP-6 is GUID *braces* breaking `@odata.bind`).
+
+**What happened**: Create Matter failed at `createRecord('sprk_matter', …)` with `Bad Request - Error in query syntax`. The payload's lookup binds carried braced GUIDs (`/sprk_mattertype_refs({6CEDD99B-…})`) while a clean-sourced bind alongside them worked. The braced values came from the native lookup picker (`Xrm.Utility.lookupObjects` via `DataverseLookupField.openLookup`); the create path interpolated them raw. Five of seven `Create*Wizard` services + two shared services had the raw pattern; only Invoice/ReportCard had a local cleaner — so the fix was never uniform, which is exactly how one wizard (Matter) shipped broken.
+
+**Root cause**: `Xrm.Utility.lookupObjects`, `getGlobalContext().userSettings.userId`, and `Xrm.WebApi.createRecord` all return braced (often uppercase) GUIDs. The OData `@odata.bind` key predicate `/entityset(<guid>)` accepts only a bare GUID.
+
+**Fix** (PR #603 + barrel export PR #609):
+- Single canonical **`cleanGuid()`** in `@spaarke/ui-components` (`PolymorphicResolverService`) — strips braces/whitespace + lowercases; no-op on already-bare ids. Consolidated 5 duplicate cleaners into it.
+- Applied at every `@odata.bind` site across all 7 `Create*Wizard` services + `FieldMappingService` + `EntityCreationService`.
+- Boundary normalization where Xrm hands GUIDs in: `xrmNavigationServiceAdapter.openLookup`, `xrmDataServiceAdapter.createRecord` return, `DataverseLookupField.onChange`.
+- Re-exported from the package barrel so external consumers can import it directly.
+
+**Directive — when + how to use `cleanGuid`**:
+- **WHEN**: any time you build an `@odata.bind` value OR a `/entityset(guid)` reference URL from a GUID that *could* originate from Xrm — the native picker / `lookupObjects`, `userSettings.userId`, a `Xrm.WebApi.createRecord` return, or an AI pre-fill/resolver that echoes Dataverse GUIDs. Also apply it at **ingestion** (the moment an Xrm GUID enters component/service state) so braces never propagate downstream.
+- **HOW**:
+  ```ts
+  import { cleanGuid } from '@spaarke/ui-components';
+  payload[`${navProp}@odata.bind`] = `/contacts(${cleanGuid(contactId)})`;
+  ```
+  Deep-import fallback if the consumer is pinned to a stale `@spaarke/ui-components` that predates the barrel export (e.g. a tarball-pinned PCF): `import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService'`.
+- **Rule of thumb**: it's a no-op on bare GUIDs, so wrap **every** GUID that goes into an OData bind/URL — no downside, and it's the one place that cannot tolerate braces. **Do NOT hand-roll a local `.replace(/[{}]/g, '')`** — reuse the shared helper (scattered local copies are what caused this bug).
+
+**Prevention**: Treat Dataverse GUIDs as having a canonical form (bare, lowercase) and normalize at every boundary crossing a system, per AP-3. Prefer the shared `cleanGuid` over per-file cleaners. Solution-local code that builds its own binds outside the shared services (e.g. SmartTodo's `DataverseService`, EventDetailSidePane) must normalize at its own GUID source — SmartTodo already does this correctly via `getUserId()`.
+
+**Evidence**: PR #603 (fix, merged as `d2696b616`), PR #609 (barrel export).
 
 ---
 

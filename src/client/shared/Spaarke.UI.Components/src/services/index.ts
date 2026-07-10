@@ -87,6 +87,11 @@ export type {
 export {
   resolveRecordType,
   buildRecordUrl,
+  // Canonical GUID normalizer for @odata.bind key predicates. Strips
+  // registry-format braces + lowercases (Xrm.Utility.lookupObjects /
+  // userSettings.userId / Xrm.WebApi.createRecord return braced GUIDs which
+  // Dataverse rejects as "Error in query syntax"). No-op on already-bare ids.
+  cleanGuid,
   findNavProp,
   // cleanGuid — canonical GUID normalizer (strip braces, lowercase) for @odata.bind /
   // /entityset(id) URLs. Exported from the barrel (task 100) so consumers use the ONE
