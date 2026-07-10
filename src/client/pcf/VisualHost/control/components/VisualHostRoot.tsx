@@ -502,7 +502,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
           setCreateAuthContext({
             bffBaseUrl: '',
             tenantId: '',
-            authenticatedFetch: (url, init) => fetch(url, init),
+            authenticatedFetch: (url: string, init?: RequestInit) => fetch(url, init),
           });
         });
     }

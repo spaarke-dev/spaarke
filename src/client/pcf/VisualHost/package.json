@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@spaarke/auth": "file:../../shared/Spaarke.Auth",
-    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components/spaarke-ui-components-2.0.0.tgz"
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"
   },
   "devDependencies": {
     "@azure/msal-browser": "^3.30.0",
