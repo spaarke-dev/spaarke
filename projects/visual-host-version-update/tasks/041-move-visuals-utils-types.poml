@@ -1,0 +1,41 @@
+<task id="VHVU-041" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Move 15 presentational visuals + 7 utils + viz types into @spaarke/visuals</title>
+    <status>not-started</status>
+    <phase>B2</phase>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>shared-lib, extraction, visuals</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-040</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Move the cleanly-presentational visuals and their pure supporting utils/types out of the VisualHost PCF into @spaarke/visuals so they become reusable. Keep the 3 self-fetch visuals (handled in VHVU-050) and CardChrome (host-side) in the PCF for now.</prompt>
+  <role>Front-end engineer doing a careful component extraction</role>
+  <goal>The 15 presentational visuals + 7 pure utils + visualization types live in @spaarke/visuals; VisualHost imports them from the package; build green.</goal>
+  <constraints>
+    <constraint source="NFR-05">@spaarke/visuals must have no Xrm/WebAPI/ComponentFramework/FetchXML references.</constraint>
+    <constraint source="design">Move: MetricCard, MetricCardMatrix, BarChart, LineChart, DonutChart, GaugeVisual, HorizontalStackedBar, StatusDistributionBar, TrendCard, GradeMetricCard, MiniTable, EventDueDateCard, ChartRenderer, ErrorBoundary (+ the 7 utils: chartColors, valueFormatters, gradeUtils, tokenSetColors, trendAnalysis, cardConfigResolver, logger) and the viz types.</constraint>
+    <constraint source="design">Leave CardChrome + ClickActionHandler + the config-driven services in the PCF. Leave CalendarVisual/DueDateCard/DueDateCardList for VHVU-050.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/VisualHost/control/components/</file>
+      <file>src/client/pcf/VisualHost/control/utils/</file>
+      <file>src/client/pcf/VisualHost/control/types/index.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Move the 15 presentational visuals into @spaarke/visuals/src/components; fix relative imports.</step>
+    <step id="2">Move the 7 pure utils + the visualization types into the package.</step>
+    <step id="3">Invert the `trendAnalysis → TrendCard` type dependency if needed (util should not import a component).</step>
+    <step id="4">Repoint VisualHost to import moved symbols from @spaarke/visuals; keep ChartRenderer wiring intact.</step>
+    <step id="5">`build:prod` green; no Xrm/WebAPI refs in the package (grep to confirm).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>15 visuals + 7 utils + viz types in @spaarke/visuals.</criterion>
+    <criterion>Package has zero Xrm/WebAPI/ComponentFramework references.</criterion>
+    <criterion>VisualHost build green consuming from the package.</criterion>
+  </acceptance-criteria>
+</task>

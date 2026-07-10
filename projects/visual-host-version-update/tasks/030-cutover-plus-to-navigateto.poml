@@ -1,0 +1,43 @@
+<task id="VHVU-030" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Cut over VisualHost "+" to navigateTo; delete inline embedding + casts</title>
+    <status>not-started</status>
+    <phase>A3</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>pcf, navigateto, decouple, react, auth</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-020</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Replace VisualHost's inline React.lazy wizard embedding with Xrm.Navigation.navigateTo to the wizard code pages (webresource dialog, 60%x70%). This removes the shared-lib-src wizard imports — eliminating the @spaarke/sdap-client/@spaarke/auth leakage and the React 16/17-vs-19 skew — and removes auth wiring from the PCF.</prompt>
+  <role>PCF developer familiar with Xrm.Navigation + the existing VisualHost drill-through navigateTo</role>
+  <goal>VisualHost's "+" launches Event/Invoice/Report Card via navigateTo with the host envelope; inline embedding, lazy @spaarke/auth bootstrap, and the three React-skew casts are deleted; the leak set is gone from the build graph.</goal>
+  <constraints>
+    <constraint source="MODAL-DECISION-CRITERIA">Use the established wizard navigateTo webresource-dialog pattern (60%x70%), consistent with sprk_wizard_commands.js.</constraint>
+    <constraint source="ADR-028">No auth code remains in VisualHost for the create flow (the page owns it).</constraint>
+    <constraint source="design">Marshal entityType+entityId (+recordName) into the navigate data envelope; pass themeOption.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx</file>
+      <file>src/client/webresources/js/sprk_wizard_commands.js</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Replace the inline Dialog + React.lazy wizard mount in VisualHostRoot with a navigateTo call (webresource dialog 60%x70%), resolving the target page from the wizard key/entity.</step>
+    <step id="2">Build the data envelope (entityType, entityId, recordName, themeOption) from host context.</step>
+    <step id="3">Delete the inline embedding, `ensureCreateWizardAuthInitialized()` lazy @spaarke/auth bootstrap, and the three `as unknown as React.ComponentType` casts (CardChrome + VisualHostRoot ×2).</step>
+    <step id="4">Remove now-unused shared-lib-src wizard imports (wizardRegistry, adapters, AssociateToStep types). Confirm `@spaarke/sdap-client`/`@spaarke/auth` no longer appear in VisualHost's build graph.</step>
+    <step id="5">`npm run build:prod`; confirm green + bundle size (should drop — msal/wizard code removed).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>"+" launches all three wizards via navigateTo with correct context.</criterion>
+    <criterion>No `../../../../shared/**/src/**` wizard imports remain in VisualHost.</criterion>
+    <criterion>@spaarke/sdap-client + @spaarke/auth absent from VisualHost's build graph.</criterion>
+    <criterion>The three React-skew casts are deleted; build green.</criterion>
+    <criterion>Bundle size reduced (msal/wizard code no longer bundled).</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,39 @@
+<task id="VHVU-040" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Scaffold @spaarke/visuals sibling package</title>
+    <status>not-started</status>
+    <phase>B1</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>shared-lib, package, scaffold</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-031</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Create the @spaarke/visuals package as a top-level shared sibling (not buried under ui-components), mirroring the source-only style of @spaarke/events-components, with @fluentui/react-charting as a peer dependency and zero internal Spaarke dependencies.</prompt>
+  <role>Front-end package engineer</role>
+  <goal>An empty-but-valid @spaarke/visuals at src/client/shared/Spaarke.Visuals/ that typechecks and is ready to receive the visuals.</goal>
+  <constraints>
+    <constraint source="design">Source-only: `"main": "./src/index.ts"`, subpath `exports` (./components, ./types, ./utils), `"build": "tsc --noEmit"`.</constraint>
+    <constraint source="design">Peer deps: react, @fluentui/react-components, @fluentui/react-icons, @fluentui/react-charting. Zero internal Spaarke deps (CardChrome stays in PCF).</constraint>
+    <constraint source="ADR-012">Amended boundary — this is a governed canonical sibling (see VHVU-070).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.Events.Components/package.json</file>
+      <file>src/client/shared/Spaarke.Events.Components/</file>
+      <file>src/client/shared/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Create `src/client/shared/Spaarke.Visuals/` with package.json mirroring events-components (source-only, exports, peer-deps incl. react-charting).</step>
+    <step id="2">Add tsconfig + `src/index.ts` barrel + `src/components/`, `src/utils/`, `src/types/` placeholders.</step>
+    <step id="3">`tsc --noEmit` passes.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Package resolves as @spaarke/visuals; `tsc --noEmit` green.</criterion>
+    <criterion>Peer-deps include @fluentui/react-charting; zero internal Spaarke deps.</criterion>
+    <criterion>Top-level sibling (not under ui-components).</criterion>
+  </acceptance-criteria>
+</task>

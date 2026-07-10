@@ -1,0 +1,47 @@
+<task id="VHVU-001" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Harden shared-package build + declare @spaarke/auth on ui-components</title>
+    <status>not-started</status>
+    <phase>A0</phase>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>pcf, shared-lib, build, auth</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>none</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Make VisualHost build green from a clean worktree deterministically. The build breaks because VisualHost bundles shared-lib src, whose transitive imports (@spaarke/sdap-client, @spaarke/auth) resolve against the shared lib's node_modules — and (a) sdap-client's dist was never built, (b) @spaarke/auth is used by the shared lib (SprkChat, LookupField) but never declared as a dependency. Fix both at the source (shared packages), not with a VisualHost band-aid.</prompt>
+  <role>Front-end build engineer familiar with npm file: deps, tsc, and PCF webpack builds</role>
+  <goal>A fresh `npm install` + `npm run build:prod` in VisualHost succeeds with zero undeclared-module errors, reproducibly, without any `--no-save` hand-installs.</goal>
+  <constraints>
+    <constraint source="design">Fix at the shared-package source; do NOT declare sdap-client on VisualHost as a band-aid.</constraint>
+    <constraint source="ADR-028">Auth stays on @spaarke/auth; no MSAL/token changes.</constraint>
+    <constraint source="shared-surface">@spaarke/ui-components is consumed by 8 PCFs — the @spaarke/auth declaration must be additive and not break their dist-based consumption. Coordinate with PR #508.</constraint>
+    <constraint source="project">Do not modify VisualHost wizard-embedding code in this task (that is VHVU-030).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js</file>
+      <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+      <file>src/client/shared/Spaarke.SdapClient/package.json</file>
+      <file>src/client/shared/Spaarke.Auth/package.json</file>
+      <file>src/client/pcf/VisualHost/package.json</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Declare `@spaarke/auth` (`file:../Spaarke.Auth`) as a dependency of `@spaarke/ui-components` (it genuinely uses it via SprkChat/LookupField); `npm install` in the shared lib to link it.</step>
+    <step id="2">Ensure `@spaarke/sdap-client` and `@spaarke/auth` `dist` are built. Extend the `ensure-dist-fresh` prebuild pattern (or add a sibling prebuild step) so these two packages' `dist` are kept fresh for consumers that bundle shared-lib src — mirroring how ui-components' own dist is kept fresh.</step>
+    <step id="3">Confirm `@spaarke/ui-components` is repointed to the directory dependency in VisualHost (already done in commit 1c319c66e — verify).</step>
+    <step id="4">From a clean state (`rm -rf` VisualHost node_modules or a fresh worktree), run `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build:prod` and confirm `[build] Succeeded` with no `TS2307`/`Cannot find module` errors.</step>
+    <step id="5">Confirm the shipped bundle contains the cleanGuid normalization (grep `out/controls/control/bundle.js`).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>`@spaarke/auth` is declared in `@spaarke/ui-components` package.json.</criterion>
+    <criterion>`@spaarke/sdap-client` + `@spaarke/auth` dist build is automated (not a manual step).</criterion>
+    <criterion>Clean-worktree `build:prod` is green with no undeclared-module errors.</criterion>
+    <criterion>`cleanGuid` present in the shipped bundle.</criterion>
+    <criterion>No band-aid deps added to VisualHost's own package.json for the wizard chain.</criterion>
+  </acceptance-criteria>
+</task>

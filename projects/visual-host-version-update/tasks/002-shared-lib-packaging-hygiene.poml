@@ -1,0 +1,39 @@
+<task id="VHVU-002" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Shared-lib packaging hygiene (.tgz removal + files allow-list + storybook-static)</title>
+    <status>not-started</status>
+    <phase>A0</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>hygiene, shared-lib, git</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-001</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Remove committed bloat and prevent future bloated packs. Two git-tracked .tgz artifacts (1.0.0 192KB, 2.0.0 4.5MB) are dead once VisualHost uses the directory dep; the shared lib has no `files` allow-list so `npm pack` includes coverage/.storybook/storybook-static. VisualHost is also the only PCF committing storybook-static/ (92 files).</prompt>
+  <role>Repo hygiene engineer</role>
+  <goal>Stale artifacts removed, shared-lib pack scoped to dist, and VisualHost's committed storybook-static removed + gitignored.</goal>
+  <constraints>
+    <constraint source="design">Do NOT remove the committed Solution bundle.js — all 10 PCFs commit it (repo convention).</constraint>
+    <constraint source="design">Validate the `files` allow-list still includes everything consumers import (dist/**, package.json) before adopting.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+      <file>src/client/pcf/VisualHost/.gitignore</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">`git rm` the two `.tgz` artifacts under `src/client/shared/Spaarke.UI.Components/`.</step>
+    <step id="2">Add a `files` allow-list (or `.npmignore`) to the shared-lib package.json so `npm pack` excludes coverage/, .storybook/, storybook-static/. Verify a test `npm pack` includes `dist/**` + package.json.</step>
+    <step id="3">`git rm -r` VisualHost's committed `storybook-static/` (92 files) and add it to `.gitignore`.</step>
+    <step id="4">Confirm `git ls-files` no longer lists the .tgz or storybook-static files.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Both `.tgz` artifacts removed from git.</criterion>
+    <criterion>Shared-lib `npm pack` excludes coverage/.storybook/storybook-static and includes dist/**.</criterion>
+    <criterion>VisualHost storybook-static/ removed + gitignored.</criterion>
+    <criterion>Solution bundle.js retained.</criterion>
+  </acceptance-criteria>
+</task>

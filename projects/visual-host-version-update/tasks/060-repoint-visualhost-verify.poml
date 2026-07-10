@@ -1,0 +1,40 @@
+<task id="VHVU-060" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Repoint VisualHost to @spaarke/visuals; verify build/bundle/drill-through</title>
+    <status>not-started</status>
+    <phase>B4</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>pcf, integration, verify</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-042,VHVU-050</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Finalize VisualHost as a thin host over @spaarke/visuals: consume all visuals from the package, keep CardChrome + the config-driven tool registry + drill-through host-side, and verify no regressions.</prompt>
+  <role>PCF developer</role>
+  <goal>VisualHost consumes visuals from @spaarke/visuals; CardChrome + tool registry + drill-through stay host-side and config-driven; build green; bundle ≈1.27 MiB or less.</goal>
+  <constraints>
+    <constraint source="design">Drill-through/expand stays host-side (ClickActionHandler + sprk_chartdefinition), wired via onDrillInteraction.</constraint>
+    <constraint source="design">CardChrome + tool registry stay in the PCF, composing shared AiSummaryPopover.</constraint>
+    <constraint source="NFR-01">Bundle within tolerance of 1.27 MiB.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/VisualHost/control/components/ChartRenderer.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/CardChrome.tsx</file>
+      <file>src/client/pcf/VisualHost/control/services/ClickActionHandler.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Ensure all visual imports resolve from @spaarke/visuals; ChartRenderer dispatches to package components.</step>
+    <step id="2">Confirm CardChrome + tool registry + ClickActionHandler drill-through remain host-side and config-driven.</step>
+    <step id="3">`build:prod` green; measure bundle size vs 1.27 MiB baseline.</step>
+    <step id="4">Regression-check all visual types + drill-through/expand.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>VisualHost consumes visuals from @spaarke/visuals.</criterion>
+    <criterion>Drill-through/expand unchanged, config-driven.</criterion>
+    <criterion>Build green; bundle within tolerance.</criterion>
+  </acceptance-criteria>
+</task>

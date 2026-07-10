@@ -1,0 +1,39 @@
+<task id="VHVU-020" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Wire initialAssociation/lockAssociation + themeOption in 3 wizard pages</title>
+    <status>not-started</status>
+    <phase>A2</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>code-page, regarding, theme, wizard</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-011,VHVU-012</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Make the wizard code pages honor the launch context that VisualHost's "+" needs: pin the host record as parent (hide Associate-To step) and render in the host's theme. The wizard machinery already supports this via CreateRecordWizard config; the pages just need to populate it from the navigate URL envelope.</prompt>
+  <role>Code-page developer familiar with CreateRecordWizard config + themeStorage</role>
+  <goal>All three pages parse entityType+entityId from the navigate data envelope → build initialAssociation → pass lockAssociation:true, and honor themeOption=dark|light.</goal>
+  <constraints>
+    <constraint source="design">Use the existing ICreateRecordWizardConfig initialAssociation/lockAssociation — do not add new wizard logic.</constraint>
+    <constraint source="design">Normalize the themeOption token mismatch (applyMdaTheme writes `darkmode`; detectDarkModeFromUrl matches `dark`).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts</file>
+      <file>src/client/webresources/js/sprk_wizard_commands.js</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">In each page's bootstrap, parse `entityType`+`entityId` (+ recordName) from the navigate `data` envelope.</step>
+    <step id="2">Build `initialAssociation` and pass `lockAssociation:true` into the wizard config.</step>
+    <step id="3">Parse `themeOption` and resolve theme accordingly; fix the `dark`/`darkmode` token mismatch consistently across writer + reader.</step>
+    <step id="4">Smoke-test each page with a sample envelope in dev.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Each page pins the host record (Associate-To hidden) from the envelope.</criterion>
+    <criterion>Each page renders in the passed theme; no dark/light flash from token mismatch.</criterion>
+    <criterion>themeOption token normalized across writer and reader.</criterion>
+  </acceptance-criteria>
+</task>

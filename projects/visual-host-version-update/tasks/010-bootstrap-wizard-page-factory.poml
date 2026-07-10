@@ -1,0 +1,38 @@
+<task id="VHVU-010" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Add shared bootstrapWizardPage() factory + adopt in Event page</title>
+    <status>not-started</status>
+    <phase>A1</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>code-page, auth, factory, react</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-004</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Extract the wizard code-page bootstrap (auth via @spaarke/auth, service adapters, theme) into a single reusable helper so the Invoice/Report Card pages (VHVU-011/012) don't triplicate ~90 lines from CreateEventWizard/main.tsx. DRY, not new architecture.</prompt>
+  <role>Code-page developer with @spaarke/auth + Fluent v9 experience</role>
+  <goal>A `bootstrapWizardPage()` helper (auth + services + theme + FluentProvider) that CreateEventWizard's page consumes with identical behavior.</goal>
+  <constraints>
+    <constraint source="ADR-028">Auth exclusively via @spaarke/auth (resolveRuntimeConfig/initAuth/authenticatedFetch). No MSAL/token props.</constraint>
+    <constraint source="project">Behavior-preserving for the Event page (no UX change).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/solutions/CreateEventWizard/src/main.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Identify the shared bootstrap concerns in CreateEventWizard/main.tsx (auth init, service adapters, theme resolve+listener, FluentProvider).</step>
+    <step id="2">Author `bootstrapWizardPage()` (location: a shared code-page util or the wizard-pages solution shared module) returning the wired context + theme state.</step>
+    <step id="3">Refactor CreateEventWizard/main.tsx to use it; verify the page builds + behaves identically.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>`bootstrapWizardPage()` exists and is consumed by the Event page.</criterion>
+    <criterion>Event page builds; auth + theme behavior unchanged.</criterion>
+    <criterion>Auth remains 100% on @spaarke/auth.</criterion>
+  </acceptance-criteria>
+</task>

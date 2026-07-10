@@ -1,0 +1,38 @@
+<task id="VHVU-011" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Build Invoice wizard code page</title>
+    <status>not-started</status>
+    <phase>A1</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>code-page, wizard, react, invoice</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-010</dependencies>
+    <parallel-group>A1-pages</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Create a standalone code page that mounts the shared CreateInvoiceWizard, mirroring CreateEventWizard's page but using the bootstrapWizardPage() factory. Needed because VisualHost's "+" will navigateTo this page (VHVU-030) instead of embedding the wizard inline.</prompt>
+  <role>Code-page developer</role>
+  <goal>A deployable Invoice wizard code page (Vite solution + web resource) that mounts CreateInvoiceWizard full-page via the shared factory.</goal>
+  <constraints>
+    <constraint source="ADR-028">Auth via @spaarke/auth only (through the factory).</constraint>
+    <constraint source="project">Mirror the Event page structure; do not fork the bootstrap.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/solutions/CreateEventWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/</file>
+      <file>src/client/webresources/js/sprk_wizard_commands.js</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Scaffold `src/solutions/CreateInvoiceWizard/` (Vite + index.html + main.tsx) mirroring the Event solution.</step>
+    <step id="2">Mount `CreateInvoiceWizard` via `bootstrapWizardPage()`.</step>
+    <step id="3">Build via the solution Vite pipeline; confirm the web resource name/envelope contract matches sprk_wizard_commands conventions.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Invoice wizard code page builds.</criterion>
+    <criterion>Uses the shared factory (no bootstrap fork).</criterion>
+    <criterion>Web-resource naming follows the wizard-commands convention.</criterion>
+  </acceptance-criteria>
+</task>

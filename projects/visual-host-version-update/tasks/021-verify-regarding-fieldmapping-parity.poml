@@ -1,0 +1,36 @@
+<task id="VHVU-021" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Verify regarding-resolver + field-mapping parity from the "+"</title>
+    <status>not-started</status>
+    <phase>A2</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>verify, regarding, field-mapping, uat</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-020</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Confirm the "+" create still applies the regarding resolver and field mapping identically to the current inline path, now that the wizard runs in a code page reached via navigateTo. The wizard services already do this; verify the launch-context wiring feeds them correctly.</prompt>
+  <role>QA engineer with Dataverse regarding/field-mapping knowledge</role>
+  <goal>Created Event/Invoice/Report Card records (via a navigateTo-launched page with the host envelope) have correct sprk_regarding* fields + mapped fields — parity with the standalone-page create.</goal>
+  <constraints>
+    <constraint source="ADR-024">Regarding resolution semantics unchanged.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/invoiceService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Launch each wizard page with a host envelope (as VisualHost will) and complete a create.</step>
+    <step id="2">Inspect the created record's sprk_regarding* fields + mapped fields.</step>
+    <step id="3">Compare against a create done from the standalone page / prior inline path.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Regarding fields correct for all three entities.</criterion>
+    <criterion>Field-mapping output matches the inline-path baseline.</criterion>
+  </acceptance-criteria>
+</task>
