@@ -47,7 +47,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 044 | FR-11 compose-defined-terms Action + Binding (overflow trigger → Context) | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
 | 045 | FR-12 eval cases per row (golden + dispatch ≥5) + schema validation | 4 Catalog | 🟢 | 040,041,042,043,044 | ✅ | FULL | sonnet | high |
 | 046 | FR-13 dispatch wiring (compose_selection_offer choreography + direct dispatchConsumer) | 4 Catalog | 🟢 | 016,030 | ✅ | FULL | opus | high |
-| 047 | Deploy catalog rows to Dataverse (mirror-first) | 4 Catalog | 🟢 | 045 | 🔄 5 actions deployed 2026-07-10; 5 bindings pending (dev freeze + seed-script drift → direct API POST) | STANDARD | sonnet | high |
+| 047 | Deploy catalog rows to Dataverse (mirror-first) | 4 Catalog | 🟢 | 045 | ✅ deployed 2026-07-10 (5 actions + 5 bindings via direct API; +compose disposition optionset value 100000006) | STANDARD | sonnet | high |
 | 048 | AI-action toolbar activation — capability-discovery → registerComposeAiToolbarAction (closes 101 gap 2.2 code side) | 4 Catalog | 🟢 | 046,101 | ✅ (code; toolbar lights up after 047 bindings) | FULL | opus | high |
 | 050 | FR-24 DocxAnnotationWriter (comments + track changes, edge cases) + push endpoint | 5 Word | 🟢 | 005 | ✅ | FULL | opus | xhigh |
 | 051 | FR-25 DocxAnnotationReader (parse w:comment/w:ins/w:del) + pull endpoint | 5 Word | 🟢 | 006 | ✅ | FULL | sonnet | high |

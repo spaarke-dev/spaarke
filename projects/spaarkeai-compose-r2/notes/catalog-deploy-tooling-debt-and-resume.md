@@ -26,3 +26,14 @@
 4. **Smoke test:** open Compose, select a clause, click **Explain** → confirm it dispatches (the 046 seam) and returns a schema-valid result.
 
 After step 4, Compose surfaces AI end-to-end for a user (closes 101 gap 2.2 fully + task 047).
+
+---
+
+## RESOLVED 2026-07-10 (freeze lifted) — AI activation DEPLOYED
+
+- ✅ **5 actions** deployed (direct API upsert).
+- ✅ **5 bindings** deployed (direct API POST, `sprk_Action@odata.bind`; corrected `…,compose` surfaces; resolved action links; enabled; tooldescriptions present).
+- 🔧 **Schema gap found + fixed**: `compose-draft-alternative` uses `sprk_disposition = 100000006` (Compose, per `Binding.cs:150`), but the local optionset `new_sprk_playbookconsumer_sprk_disposition` on dev only had 100000000–100000005. Added option **100000006 "Compose"** via `InsertOptionValue` + `PublishXml`, then the binding POSTed cleanly. **TOOLING-DEBT #3**: `Deploy-AiCatalogSchemaExtensions.ps1` (line ~216, the `sprk_disposition` picklist definition) should be updated to include the Compose=100000006 option so a fresh environment gets it — otherwise this gap recurs on the next env.
+- ✅ **Code page redeployed** (`sprk_spaarkeai`, bundle carries task-048 activation wiring + task-072 Q&A; verified `api/ai/capabilities` + `compose_qa_highlight` in the built HTML).
+- **BFF catalog cache = 5-min IMemoryCache TTL** → the deployed BFF serves the 5 compose capabilities on the next read; no restart needed.
+- **Owner smoke test (definitive proof)**: open Compose → select a clause → the AI toolbar buttons (Explain / Compare / Draft / + overflow) should be ENABLED → click Explain → dispatches via the 046 seam and streams a schema-valid answer. (Give the BFF cache up to 5 min after the binding deploy.)
