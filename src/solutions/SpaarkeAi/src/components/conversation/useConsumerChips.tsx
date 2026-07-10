@@ -62,6 +62,17 @@ export interface ConsumerChipsController {
    * set REPLACES the strip; empty/malformed payloads never clear it.
    */
   acceptChips: (raw: unknown) => void;
+  /**
+   * Dispatch an arbitrary Binding id through the SAME shared dispatchConsumer
+   * path a Click-path chip uses (render dispatched output as an Assistant
+   * message + re-arm the strip from the stream's next-step chips + stable
+   * failure line). The single reuse seam for OTHER carriers of a
+   * `sprk_playbookconsumer` Binding id — e.g. the OutcomeCard `invoke_capability`
+   * next-step chips (`INextStepChip.targetBindingId`) wired by ConversationPane's
+   * `onNextStep` (F-4, e2e-completion-audit 2026-07-10). Not a new dispatch
+   * path — it is the existing one, hoisted so the host reuses it.
+   */
+  dispatchBinding: (bindingId: string, args?: { slots?: Record<string, unknown> }) => void;
   /** Chips are session-scoped — clear on session change. */
   resetForSession: () => void;
 }
@@ -94,21 +105,27 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
   );
 
   /**
-   * Chip click → dispatchConsumer(chip.bindingId, args). Prefill slots
-   * forward verbatim as capability args; failures surface as a stable local
-   * Assistant line (ADR-019 — never raw server detail).
+   * The ONE dispatch+render+re-arm core: dispatchConsumer(bindingId, args) →
+   * render the STORED output (ADR-040) as an Assistant message → re-arm the
+   * strip from the stream's next-step chips (G-P1 Defect-1 fix). Failures
+   * surface as a stable local Assistant line (ADR-019 — never raw server
+   * detail). Shared by the Click-path chip strip AND any other carrier of a
+   * Binding id (OutcomeCard next-step chips via `dispatchBinding` below).
    */
-  const handleConsumerChipClick = React.useCallback(
-    (chip: ConsumerChip): void => {
+  const runBindingDispatch = React.useCallback(
+    (
+      bindingId: string,
+      opts?: { slots?: Record<string, unknown>; requiresAttachments?: boolean }
+    ): void => {
       // Single dispatch decision per turn: consume the chip set on click.
       setConsumerChips([]);
 
       // ADR-015: structural signal only — never the label/binding values.
       console.log("[ConversationPane] consumer chip dispatched");
 
-      void dispatchConsumer(chip.bindingId, {
-        slots: chip.prefillSlots,
-        requiresAttachments: chip.requiresAttachments,
+      void dispatchConsumer(bindingId, {
+        slots: opts?.slots,
+        requiresAttachments: opts?.requiresAttachments,
         attachmentCount: sessionAttachmentCount,
       })
         .then((dispatched) => {
@@ -130,6 +147,32 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
         });
     },
     [sessionAttachmentCount, dispatchConsumer, enqueueAssistantMessage, inject]
+  );
+
+  /**
+   * Chip click → dispatchConsumer(chip.bindingId, args). Prefill slots
+   * forward verbatim as capability args; the attachment precondition applies.
+   */
+  const handleConsumerChipClick = React.useCallback(
+    (chip: ConsumerChip): void => {
+      runBindingDispatch(chip.bindingId, {
+        slots: chip.prefillSlots,
+        requiresAttachments: chip.requiresAttachments,
+      });
+    },
+    [runBindingDispatch]
+  );
+
+  /**
+   * Public reuse seam: dispatch an arbitrary Binding id (e.g. an OutcomeCard
+   * `invoke_capability` next-step chip's `targetBindingId`) through the exact
+   * same core. Next-step chips carry no attachment precondition.
+   */
+  const dispatchBinding = React.useCallback(
+    (bindingId: string, args?: { slots?: Record<string, unknown> }): void => {
+      runBindingDispatch(bindingId, { slots: args?.slots });
+    },
+    [runBindingDispatch]
   );
 
   const consumerChipsSlot = React.useMemo(
@@ -156,7 +199,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
 
   // Stable controller identity (Step 9.5 review) — changes only with the slot.
   return React.useMemo(
-    () => ({ consumerChipsSlot, acceptChips, resetForSession }),
-    [consumerChipsSlot, acceptChips, resetForSession]
+    () => ({ consumerChipsSlot, acceptChips, dispatchBinding, resetForSession }),
+    [consumerChipsSlot, acceptChips, dispatchBinding, resetForSession]
   );
 }
