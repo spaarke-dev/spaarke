@@ -99,7 +99,7 @@ Per the audit, these ✅ tasks are **E2E-inert** and are re-scoped by the Phase-
 | ID | Title | Theme (UAT item) | Surface | Gate | Deps | Status | Rigor | Model | Effort |
 |----|-------|------------------|---------|------|------|--------|-------|-------|--------|
 | 110 | create-on-save: sessionId → optional on transient-create | R1 (#2 save 400) | BFF | 🟢 | none | ✅ (WAF 4/4; 46.59 MB; no new CVE; facade 1/1) | FULL | opus | high |
-| 111 | inline AI popup: AI-only (no formatting) + right-click/point trigger + layout fix | R2 (#3a; owner refine 2026-07-10) | client | 🟢 | none | 🔄 in-flight | FULL | sonnet | high |
+| 111 | inline AI popup: AI-only + right-click/point trigger; B/I/U/S/Link ported to top toolbar | R2 (#3a; owner refine 2026-07-10) | client | 🟢 | none | ✅ (108/108; AI-only bubble; right-click+dedupe; formatting→top toolbar) | FULL | sonnet | high |
 | 112 | AI action result → per-action prose (not raw JSON) | R3 (#3b/#3c) | client | 🟢 | none | ✅ (real-bus 4/4; workspace-bridge suppressed; shape-keyed) | FULL | sonnet | high |
 | 113 | session-scoped active-document identity bridge + Compose layout default | R4+R5 (#4/#5/#6/#7) | BFF+client (**shared**) | 🟢 | 110,112 | 🔲 | FULL | opus | xhigh |
 | 114 | re-merge + deploy BFF/SpaarkeAi + §10 verify + owner re-UAT | — | deploy | 🟢 | 110,111,112,113 | 🔲 | STANDARD | sonnet | high |
