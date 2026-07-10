@@ -50,6 +50,7 @@ import { useSerialActionQueue, type ComposeActionRequest } from "./useSerialActi
 import { useRegisterComposeActionDispatcher } from "@spaarke/compose-components/context/composeActionBridge";
 import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./composeApplyLeg";
 import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
+import { formatComposeActionResultMarkdown } from "./composeResultFormat";
 import { makeLocalAssistantMessage } from "./summarizeRouting";
 import {
   AuthLoadingState,
@@ -154,6 +155,19 @@ export function ConversationPane(): React.JSX.Element {
         getSessionId,
         getAccessToken,
         publishPaneEvent: (channel, event: DispatchWorkspaceEvent) => dispatch(channel, event as WorkspacePaneEvent),
+        // UAT-R3 defect #3c (task 112): the Compose editor tab has NO renderer
+        // subscribed to the `workspace`-channel section-reveal bridge
+        // (`useComposeWorkspaceReceivers` only reacts to `compose_context_insert`
+        // / `compose_assistant_insert` / `compose_qa_highlight`) — those events
+        // were dead output ("nothing else happens"), and awaiting their paced
+        // reveal needlessly delayed this Promise for a renderer nobody mounts.
+        // Suppressed HERE ONLY (this dispatcher instance, scoped to the Compose
+        // surface) — `useConsumerChips`'s own `createConsumerDispatcher` call
+        // is untouched, so the general Assistant/chip surface keeps rendering
+        // dispatched results into the WorkspacePane exactly as before
+        // (ADR-030: additive, default-false option; shared contract for other
+        // surfaces unchanged).
+        suppressWorkspaceSectionBridge: true,
       }),
     [bffBaseUrl, getSessionId, getAccessToken, dispatch]
   );
@@ -197,7 +211,13 @@ export function ConversationPane(): React.JSX.Element {
     (request: ComposeActionRequest): Promise<DispatchConsumerResult> =>
       actionQueue.enqueue(request).then((dispatched) => {
         if (dispatched.result !== undefined && dispatched.result !== null) {
-          injection.enqueue(makeLocalAssistantMessage(formatEventOutputMarkdown(dispatched.result)));
+          // UAT-R3 defect #3b (task 112): try the 5 Compose action shapes
+          // first (grounded prose); fall back to the general Event-path
+          // formatter (which still degrades genuinely unknown shapes to the
+          // ```json``` fence — that last-resort branch is preserved verbatim).
+          const formatted =
+            formatComposeActionResultMarkdown(dispatched.result) ?? formatEventOutputMarkdown(dispatched.result);
+          injection.enqueue(makeLocalAssistantMessage(formatted));
         }
         // Draft-alternative apply leg (Flow 5) — references the ledger entry, never the payload.
         void emitComposeApplyLeg(request.bindingId);
