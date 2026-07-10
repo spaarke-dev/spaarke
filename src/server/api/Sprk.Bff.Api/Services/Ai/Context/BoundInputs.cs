@@ -109,6 +109,17 @@ public sealed record BoundInputs
     /// A breach is surfaced (logged), never silently truncated.
     /// </summary>
     public ContextBudgetReport? BudgetReport { get; init; }
+
+    /// <summary>
+    /// The host record's cross-session RECORD-memory prompt fragment (F-2/F-7 envelope-convergence task,
+    /// FR-B-04), produced by the Binder from the SAME <see cref="Sprk.Bff.Api.Services.Ai.Memory.IMemoryItemStore.ToRecordPromptFragmentAsync"/>
+    /// the interactive provider used — the single source both the interactive prompt (D1) and the dispatch
+    /// prompt (D6/PE-D8(b)) consume. Carried HERE as prompt text (not in the <see cref="Context"/> envelope,
+    /// whose Memory slice stays references-only per ADR-040/NFR-07). Empty when no host record / no memory /
+    /// no store / a soft-failed store read. Its measured token count feeds the RecordMemory budget line
+    /// (FR-B-05, real per-turn measurement — the F-7 fix).
+    /// </summary>
+    public string? RecordMemoryFragment { get; init; }
 }
 
 /// <summary>
@@ -179,6 +190,15 @@ public sealed record ContextBindingRequest
     /// args or a model completion (ADR-039 "no runtime judgment for what should be data").
     /// </summary>
     public string? CallerContactId { get; init; }
+
+    /// <summary>
+    /// Pre-resolved server-side caller <c>systemuserid</c> (claims→systemuser) — the canonical key for the
+    /// User slice's user-memory RECALL fragment (F-2 / D3; operator ruling 2026-07-09 (c)). When null,
+    /// <see cref="ContextBinder"/> resolves it deterministically from <see cref="Caller"/> (or the ambient
+    /// <c>IHttpContextAccessor.HttpContext.User</c> in production) via <see cref="ICallerSystemUserResolver"/>.
+    /// Always originates from server-side deterministic resolution, never client args or a model completion.
+    /// </summary>
+    public string? CallerSystemUserId { get; init; }
 
     /// <summary>
     /// The caller's claims principal for server-side contact resolution (FR-B-06, task 055). Optional —

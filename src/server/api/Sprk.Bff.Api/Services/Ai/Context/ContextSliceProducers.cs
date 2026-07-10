@@ -193,8 +193,15 @@ public static class ConversationContextProducer
     /// dispatch orchestrator and the interactive chat endpoint both call this).
     /// </summary>
     public static IReadOnlyList<LedgerEntryReference> BuildConversationTail(ChatSession session)
+        => BuildConversationTail(session.Outputs);
+
+    /// <summary>
+    /// The ledger-tail reference projection over an outputs list directly (F-1/D1: the interactive provider
+    /// binds from <c>session.Outputs</c> without a full <see cref="ChatSession"/>). Single-source with the
+    /// <see cref="ChatSession"/> overload above.
+    /// </summary>
+    public static IReadOnlyList<LedgerEntryReference> BuildConversationTail(IReadOnlyList<SessionOutput>? outputs)
     {
-        var outputs = session.Outputs;
         if (outputs is not { Count: > 0 })
         {
             return Array.Empty<LedgerEntryReference>();

@@ -97,10 +97,22 @@ public record ChatKnowledgeScope(
 /// Treat <c>null</c> and an empty list identically (both mean "no manifest").
 /// </para>
 /// </param>
+/// <param name="BoundEnvelope">
+/// The per-turn <see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.ContextEnvelope"/> the provider bound
+/// for this turn (F-1/F-2/F-7 envelope-convergence task, D1). Non-null when the provider resolved
+/// <c>IContextBinder</c> and bound the turn (the compound-ON live path). The provider itself already
+/// consumed the Business (host-identity) + User (user-memory) fragments into <see cref="SystemPrompt"/>;
+/// this is surfaced so <see cref="Sprk.Bff.Api.Services.Ai.Chat.SprkChatAgentFactory"/> renders the
+/// environment (current-date) SUFFIX from the SAME envelope via
+/// <see cref="Sprk.Bff.Api.Services.Ai.Context.ContextEnvelopeRenderer.RenderEnvironmentSuffix"/> instead
+/// of calling the date producer directly. Null on the no-binder fallback path (compound-OFF / legacy
+/// tests), where the factory falls back to the shared date producer — byte-identical output either way.
+/// </param>
 public record ChatContext(
     string SystemPrompt,
     string? DocumentSummary,
     IReadOnlyDictionary<string, string>? AnalysisMetadata,
     Guid? PlaybookId,
     ChatKnowledgeScope? KnowledgeScope = null,
-    IReadOnlyList<ChatSessionFile>? UploadedFiles = null);
+    IReadOnlyList<ChatSessionFile>? UploadedFiles = null,
+    Sprk.Bff.Api.Services.Ai.PublicContracts.ContextEnvelope? BoundEnvelope = null);

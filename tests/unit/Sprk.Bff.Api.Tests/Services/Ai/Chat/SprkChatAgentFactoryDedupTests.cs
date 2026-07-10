@@ -306,6 +306,8 @@ public class SprkChatAgentFactoryDedupTests
                 It.IsAny<ChatHostContext?>(),
                 It.IsAny<IReadOnlyList<string>?>(),
                 It.IsAny<IReadOnlyList<ChatSessionFile>?>(),
+                It.IsAny<string?>(),
+                It.IsAny<IReadOnlyList<SessionOutput>?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(ctx);
         return mock.Object;

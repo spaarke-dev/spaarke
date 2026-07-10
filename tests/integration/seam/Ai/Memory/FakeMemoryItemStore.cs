@@ -106,4 +106,20 @@ internal sealed class FakeMemoryItemStore : IMemoryItemStore
             ? string.Empty
             : MemoryItemStore.BuildPromptFragment(items.Select(i => i.Fact).ToList(), subjectType);
     }
+
+    public async Task<string> ToUserPromptFragmentAsync(string userId, CancellationToken ct = default)
+    {
+        var items = await GetForUserAsync(userId, ct).ConfigureAwait(false);
+        if (items.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var facts = items
+            .Select(i => i.Fact)
+            .Where(f => !DataverseFieldMirrorGuard.IsDataverseFieldMirror(f))
+            .ToList();
+
+        return facts.Count == 0 ? string.Empty : MemoryItemStore.BuildUserPromptFragment(facts);
+    }
 }

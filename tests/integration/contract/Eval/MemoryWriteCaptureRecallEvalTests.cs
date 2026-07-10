@@ -12,7 +12,9 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.Gate;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Handlers;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Sprk.Bff.Api.Tests.Integration.Seam.Ai.Memory;
@@ -112,6 +114,84 @@ public class MemoryWriteCaptureRecallEvalTests
             "a later read for the same subject surfaces the captured fact (round-trip recall)");
         var fragment = await store.ToRecordPromptFragmentAsync("matter", matterId.ToString());
         fragment.Should().Contain("2026-09-01", "the captured fact is recalled into the record's system-prompt memory fragment");
+    }
+
+    // =====================================================================================
+    // F-2 (D3/D5.3) — USER-scope capture→recall through the REAL bind + render path: a
+    // memory.write scope=user fact is recalled into the User slice fragment and rendered into the
+    // stable-prefix additions the interactive/dispatch prompt consumes. Joins the CI gate via the
+    // class-level GoldenUtteranceEval trait.
+    // =====================================================================================
+    [Fact]
+    public async Task UserScopeMemory_IsRecalled_ViaTheRealBindAndRenderPath()
+    {
+        var store = new FakeMemoryItemStore(TimeProvider.System);
+        const string systemUserId = "9b0e6a1e-0000-4000-8000-000000000009";
+
+        // Turn N (an earlier session): the assistant captured a durable USER preference (scope=user).
+        await store.UpsertAsync(new MemoryItem
+        {
+            Version = MemoryItemContract.SchemaVersion,
+            Scope = MemoryScope.User,
+            UserId = systemUserId,
+            Source = MemoryOrigin.AiDerived,
+            Fact = new MemoryFact
+            {
+                Type = MemoryFactType.KeyFact,
+                Key = "Preferred citation style",
+                Value = "Bluebook",
+                ConfirmedByUser = true,
+                Confidence = 1.0,
+            },
+        }, Tenant);
+
+        // Turn M (next session): the REAL ContextBinder resolves the User slice's recall fragment.
+        var binder = BuildBinder(store);
+        var bound = await binder.BindAsync(
+            new ContextBindingRequest { CallerSystemUserId = systemUserId }, CancellationToken.None);
+
+        bound.Context.User!.Fragment.Should().Contain("Bluebook",
+            "F-2: the captured user preference is recalled into the ContextEnvelope User slice fragment");
+        ContextEnvelopeRenderer.RenderStablePrefixAdditions(bound.Context).Should().Contain("Bluebook",
+            "and it renders into the stable-prefix additions the interactive (D1) + dispatch (D6) prompts consume");
+    }
+
+    // =====================================================================================
+    // F-2 negative (D5.4) — a user with ZERO memory contributes no recall fragment, so the stable
+    // prefix is byte-IDENTICAL to the host-identity block alone (additive-only — no prompt drift).
+    // =====================================================================================
+    [Fact]
+    public async Task UserWithNoMemory_ProducesNoUserFragment_StablePrefixIsHostIdentityOnly()
+    {
+        var store = new FakeMemoryItemStore(TimeProvider.System);
+        var binder = BuildBinder(store);
+
+        var bound = await binder.BindAsync(new ContextBindingRequest
+        {
+            CallerSystemUserId = "00000000-0000-0000-0000-0000000000ff",
+            HostEntityType = "matter",
+            HostEntityId = "22222222-2222-2222-2222-222222222222",
+        }, CancellationToken.None);
+
+        bound.Context.User?.Fragment.Should().BeNull("a user with zero memory contributes no recall fragment");
+        var hostOnly = HostIdentityProducer.BuildEnrichmentBlock("matter", "22222222-2222-2222-2222-222222222222", null, null);
+        ContextEnvelopeRenderer.RenderStablePrefixAdditions(bound.Context).Should().Be(hostOnly,
+            "with no user memory the stable prefix is byte-identical to the host-identity block alone — the negative parity pin");
+    }
+
+    private static ContextBinder BuildBinder(FakeMemoryItemStore store)
+    {
+        var cache = new InMemoryTenantCache();
+        var sessionManager = new ChatSessionManager(
+            cache,
+            new Mock<IChatDataverseRepository>().Object,
+            new Mock<Microsoft.Extensions.Logging.ILogger<ChatSessionManager>>().Object);
+
+        return new ContextBinder(
+            sessionManager,
+            NullLogger<ContextBinder>.Instance,
+            memoryItemStore: store,
+            timeProvider: TimeProvider.System);
     }
 
     // =====================================================================================

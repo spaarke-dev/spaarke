@@ -49,6 +49,10 @@ public class ConfirmationPolicyGateLiveDecisionTests
     // Declared 2b but the factor floor (irreversible + record-of-truth) ESCALATES to Tier 4.
     private const string IrreversibleDeleteSupersede =
         """{"riskProfile":{"tier":"2b","reversible":false,"recordOfTruthImpact":true}}""";
+    // memory.write's REAL catalog profile (infra/dataverse/sprk_analysistool-memory-write-row.json):
+    // Tier 1, reversible, no escalating factors — the silent-eligible tier-1 example (auto-executes).
+    private const string MemoryWriteTier1 =
+        """{"riskProfile":{"tier":"1","reversible":true,"externallyVisible":false,"deadlineImpact":false,"confidentialityImpact":false,"recordOfTruthImpact":false}}""";
 
     private const string SchemaTablenameRequired =
         """{"type":"object","properties":{"tablename":{"type":"string"},"subject":{"type":"string"}},"required":["tablename"]}""";
@@ -208,6 +212,104 @@ public class ConfirmationPolicyGateLiveDecisionTests
     }
 
     // =====================================================================================
+    // (F-8) SAFETY-PERIMETER DEGRADED (overlay 2) — the REAL PromptShield fail-open verdict,
+    // routed through the gate's safetyPerimeterDegradedProbe. These prove the gate HONORS the
+    // signal end-to-end on the real path (engine NOT mocked). Each fails if the signal were
+    // hardcoded false (audit F-8: the gate's SafetyPerimeterDegraded input was a plumbed-but-
+    // unfed seam). The live production PRODUCER (SafetyPipelineMiddleware) is not yet wired onto
+    // the chat hot path — that activation is escalated for sign-off; here the probe supplies the
+    // real signal exactly as the perimeter would.
+    // =====================================================================================
+    [Fact]
+    public async Task Invoke_Tier2bWrite_WhenSafetyPerimeterDegraded_ConfirmsInsteadOfExecuting()
+    {
+        var handler = new SpyHandler { CreatedRecord = new ToolCreatedRecord("sprk_task", Guid.NewGuid()) };
+        // SAME Tier-2b tool as test (i) — the ONLY difference is the honored perimeter-degraded probe.
+        var gate = BuildGate(handler, Tier2bReversibleCreate, SchemaTablenameRequired,
+            ToolSideEffectClass.Write, out var sessionManager, out var sessionId, out var sse,
+            safetyPerimeterDegradedProbe: () => true);
+
+        var result = await gate.InvokeAsync(new AIFunctionArguments { ["tablename"] = "sprk_task" }, CancellationToken.None);
+
+        result.Should().BeOfType<string>().Which.Should().Contain("ACTION SUSPENDED",
+            "overlay 2: a degraded PromptShield perimeter (fail-open) degrades a gated WRITE to confirm-required");
+        handler.ExecuteChatCalled.Should().BeFalse("the degraded-perimeter write suspends rather than auto-executing");
+        sse.Should().ContainSingle(e => e.Type == "action_confirmation", "exactly one confirmation dialog");
+        (await sessionManager.GetSessionAsync(TenantId, sessionId))!.Gates!
+            .Should().ContainSingle(g => g.Status == PendingPlanManager.GateStatusPending, "exactly one suspend marker");
+    }
+
+    [Fact]
+    public async Task Invoke_Tier1MemoryWrite_WhenSafetyPerimeterDegraded_StillExecutes_ReadsAndDraftsFailOpen()
+    {
+        var handler = new SpyHandler
+        {
+            CreatedRecord = new ToolCreatedRecord("sprk_aimemory", Guid.NewGuid()),
+            UserSummary = "Captured the preference.",
+        };
+        // memory.write is Tier 1 — overlay 2 degrades WRITES (Tier >= 2) but leaves reads/drafts fail-open.
+        var gate = BuildGate(handler, MemoryWriteTier1, SchemaTablenameRequired,
+            ToolSideEffectClass.Write, out var sessionManager, out var sessionId, out var sse,
+            safetyPerimeterDegradedProbe: () => true);
+
+        var result = await gate.InvokeAsync(new AIFunctionArguments { ["tablename"] = "sprk_aimemory" }, CancellationToken.None);
+
+        handler.ExecuteChatCalled.Should().BeTrue(
+            "overlay 2 leaves Tier 0/1 reads/drafts fail-open (D-F0(b)) — a degraded perimeter never over-gates a silent-eligible Tier-1 tool");
+        result.Should().BeOfType<string>().Which.Should().Contain("ACTION EXECUTED");
+        sse.Should().NotContain(e => e.Type == "action_confirmation", "no dialog for a Tier-1 tool even under a degraded perimeter");
+        ((await sessionManager.GetSessionAsync(TenantId, sessionId))!.Gates ?? [])
+            .Should().NotContain(g => g.Status == PendingPlanManager.GateStatusPending);
+    }
+
+    [Fact]
+    public async Task Invoke_Tier1MemoryWrite_HealthyRequest_ExecutesSilently_NoDialog()
+    {
+        var handler = new SpyHandler
+        {
+            CreatedRecord = new ToolCreatedRecord("sprk_aimemory", Guid.NewGuid()),
+            UserSummary = "Captured the preference.",
+        };
+        // No probes fired ⇒ byte-identical legacy behavior (regression pin for F-8: absent/healthy signal
+        // must not change the happy path).
+        var gate = BuildGate(handler, MemoryWriteTier1, SchemaTablenameRequired,
+            ToolSideEffectClass.Write, out var sessionManager, out var sessionId, out var sse);
+
+        var result = await gate.InvokeAsync(new AIFunctionArguments { ["tablename"] = "sprk_aimemory" }, CancellationToken.None);
+
+        handler.ExecuteChatCalled.Should().BeTrue("a healthy Tier-1 request executes silently");
+        result.Should().BeOfType<string>().Which.Should().Contain("ACTION EXECUTED");
+        sse.Should().NotContain(e => e.Type == "action_confirmation", "no probe fired ⇒ byte-identical legacy silent execute");
+        ((await sessionManager.GetSessionAsync(TenantId, sessionId))!.Gates ?? [])
+            .Should().NotContain(g => g.Status == PendingPlanManager.GateStatusPending);
+    }
+
+    // =====================================================================================
+    // (F-8 / task test (a)) Overlay 1 (injection-suspect) forces a confirm dialog EVEN for a
+    // Tier-1 silent-eligible tool (memory.write). ContentSafetyFlagged and dispatchUncertain feed
+    // the SAME overlay-1 bucket in ConfirmationPolicyEngine (injectionSuspect = DispatchUncertain
+    // || ContentSafetyFlagged), so a content-safety flag would take this identical path; the
+    // dispatchUncertain probe is the seam the gate exposes today.
+    // =====================================================================================
+    [Fact]
+    public async Task Invoke_Tier1MemoryWrite_WhenInjectionSuspectOverlayFires_Confirms_EvenThoughSilentEligible()
+    {
+        var handler = new SpyHandler { CreatedRecord = new ToolCreatedRecord("sprk_aimemory", Guid.NewGuid()) };
+        var gate = BuildGate(handler, MemoryWriteTier1, SchemaTablenameRequired,
+            ToolSideEffectClass.Write, out var sessionManager, out var sessionId, out var sse,
+            dispatchUncertaintyProbe: () => true);
+
+        var result = await gate.InvokeAsync(new AIFunctionArguments { ["tablename"] = "sprk_aimemory" }, CancellationToken.None);
+
+        result.Should().BeOfType<string>().Which.Should().Contain("ACTION SUSPENDED",
+            "overlay 1 (injection-suspect) always wins and forces a confirm dialog regardless of tier");
+        handler.ExecuteChatCalled.Should().BeFalse("injection-suspect suspends even a Tier-1 silent-eligible tool");
+        sse.Should().ContainSingle(e => e.Type == "action_confirmation");
+        (await sessionManager.GetSessionAsync(TenantId, sessionId))!.Gates!
+            .Should().ContainSingle(g => g.Status == PendingPlanManager.GateStatusPending);
+    }
+
+    // =====================================================================================
     // (vii) R5-E hard block → honest ❌ + affordance, ZERO Dataverse writes
     // =====================================================================================
     [Fact]
@@ -270,7 +372,8 @@ public class ConfirmationPolicyGateLiveDecisionTests
         out ChatSessionManager sessionManager,
         out string sessionId,
         out List<ChatSseEvent> sseEvents,
-        Func<bool>? dispatchUncertaintyProbe = null)
+        Func<bool>? dispatchUncertaintyProbe = null,
+        Func<bool>? safetyPerimeterDegradedProbe = null)
     {
         var cache = new InMemoryTenantCache();
         sessionManager = new ChatSessionManager(
@@ -327,7 +430,8 @@ public class ConfirmationPolicyGateLiveDecisionTests
             sessionId,
             NullLogger.Instance,
             sseWriter: (evt, _) => { captured.Add(evt); return Task.CompletedTask; },
-            dispatchUncertaintyProbe: dispatchUncertaintyProbe);
+            dispatchUncertaintyProbe: dispatchUncertaintyProbe,
+            safetyPerimeterDegradedProbe: safetyPerimeterDegradedProbe);
     }
 
     /// <summary>

@@ -17,7 +17,15 @@ namespace Sprk.Bff.Api.Services.Registration;
 /// </summary>
 public class RegistrationDataverseService : IDisposable
 {
+    /// <summary>
+    /// Named <see cref="IHttpClientFactory"/> client for registration Dataverse calls.
+    /// Registered in <c>RegistrationModule</c> so HTTP connections are pooled per ADR-010
+    /// (avoids ad-hoc HttpClient instantiation, which starves the connection pool).
+    /// </summary>
+    public const string HttpClientName = "RegistrationDataverse";
+
     private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly string _apiUrl;
     private readonly TokenCredential _credential;
     private readonly ILogger<RegistrationDataverseService> _logger;
@@ -40,12 +48,14 @@ public class RegistrationDataverseService : IDisposable
         IOptions<DemoProvisioningOptions> options,
         TrackingIdGenerator trackingIdGenerator,
         TokenCredential credential,
+        IHttpClientFactory httpClientFactory,
         ILogger<RegistrationDataverseService> logger)
     {
         _logger = logger;
         _options = options.Value;
         _trackingIdGenerator = trackingIdGenerator;
         _credential = credential;
+        _httpClientFactory = httpClientFactory;
 
         // Admin Dataverse URL: prefer DATAVERSE_URL config, fall back to legacy Environments config
         var dataverseUrl = configuration["DATAVERSE_URL"];
@@ -67,10 +77,12 @@ public class RegistrationDataverseService : IDisposable
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
         _logger.LogInformation("RegistrationDataverseService targeting Dataverse at {ApiUrl}", _apiUrl);
 
-        _httpClient = new HttpClient
-        {
-            BaseAddress = new Uri(_apiUrl.TrimEnd('/') + "/")
-        };
+        // Factory-created client (pooled handler per ADR-010). BaseAddress + default Prefer
+        // header are set imperatively here because the Dataverse URL is resolved from runtime
+        // config above, not known at DI registration time. Cross-environment helpers request a
+        // bare client from the same factory (absolute URLs, no BaseAddress/Prefer needed).
+        _httpClient = httpClientFactory.CreateClient(HttpClientName);
+        _httpClient.BaseAddress = new Uri(_apiUrl.TrimEnd('/') + "/");
         _httpClient.DefaultRequestHeaders.Add("Prefer",
             "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
     }
@@ -372,7 +384,7 @@ public class RegistrationDataverseService : IDisposable
             using var request = await CreateAuthenticatedRequestForUrlAsync(
                 HttpMethod.Post, targetDataverseUrl, SystemUserEntitySet, ct);
             request.Content = JsonContent.Create(entity);
-            using var client = new HttpClient();
+            using var client = _httpClientFactory.CreateClient(HttpClientName);
             response = await client.SendAsync(request, ct);
         }
         else
@@ -428,7 +440,7 @@ public class RegistrationDataverseService : IDisposable
                 HttpMethod.Post, targetDataverseUrl, navigationUrl, ct);
             request.Content = JsonContent.Create(refBody);
             request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-            using var client = new HttpClient();
+            using var client = _httpClientFactory.CreateClient(HttpClientName);
             response = await client.SendAsync(request, ct);
         }
         else
@@ -464,7 +476,7 @@ public class RegistrationDataverseService : IDisposable
         {
             using var request = await CreateAuthenticatedRequestForUrlAsync(
                 HttpMethod.Delete, targetDataverseUrl, navigationUrl, ct);
-            using var client = new HttpClient();
+            using var client = _httpClientFactory.CreateClient(HttpClientName);
             response = await client.SendAsync(request, ct);
         }
         else
@@ -519,7 +531,7 @@ public class RegistrationDataverseService : IDisposable
         {
             using var request = await CreateAuthenticatedRequestForUrlAsync(
                 HttpMethod.Get, targetDataverseUrl, relativePath, ct);
-            using var client = new HttpClient();
+            using var client = _httpClientFactory.CreateClient(HttpClientName);
             response = await client.SendAsync(request, ct);
         }
         else
@@ -549,7 +561,7 @@ public class RegistrationDataverseService : IDisposable
         {
             using var request = await CreateAuthenticatedRequestForUrlAsync(
                 HttpMethod.Get, targetDataverseUrl, relativePath, ct);
-            using var client = new HttpClient();
+            using var client = _httpClientFactory.CreateClient(HttpClientName);
             response = await client.SendAsync(request, ct);
         }
         else
@@ -629,9 +641,10 @@ public class RegistrationDataverseService : IDisposable
 
     public void Dispose()
     {
+        // _httpClient is owned by IHttpClientFactory (pooled handler) — not disposed here.
+        // The semaphores are process-local resources this service owns and must dispose.
         _tokenSemaphore?.Dispose();
         _envTokenSemaphore?.Dispose();
-        _httpClient?.Dispose();
     }
 
     #endregion
