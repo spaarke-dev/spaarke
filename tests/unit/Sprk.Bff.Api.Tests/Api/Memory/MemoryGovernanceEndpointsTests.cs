@@ -36,15 +36,15 @@ public class MemoryGovernanceEndpointsTests
 
     private static MemoryItem UserItem(string key = "Drafting Style", string value = SecretValue,
         string? sensitivity = null, string? deletionPolicy = null) => new()
-    {
-        Version = MemoryItemContract.SchemaVersion,
-        Scope = MemoryScope.User,
-        UserId = SystemUserId.ToString(),
-        Fact = new MemoryFact { Type = MemoryFactType.KeyFact, Key = key, Value = value, ConfirmedByUser = true },
-        Source = MemoryOrigin.User,
-        Sensitivity = sensitivity,
-        DeletionPolicy = deletionPolicy,
-    };
+        {
+            Version = MemoryItemContract.SchemaVersion,
+            Scope = MemoryScope.User,
+            UserId = SystemUserId.ToString(),
+            Fact = new MemoryFact { Type = MemoryFactType.KeyFact, Key = key, Value = value, ConfirmedByUser = true },
+            Source = MemoryOrigin.User,
+            Sensitivity = sensitivity,
+            DeletionPolicy = deletionPolicy,
+        };
 
     private static MemoryItem RecordItem() => new()
     {
