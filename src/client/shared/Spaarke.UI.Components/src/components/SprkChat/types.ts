@@ -18,6 +18,7 @@
 // "N files attached" indicator, per-file remove cascade, and ready-batch
 // inline-confirmation injection.
 import type { ChatAttachment, AttachmentChip } from './hooks/useChatFileAttachment';
+import type { INextStepChip } from './OutcomeCard';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chat Message Types
@@ -950,6 +951,22 @@ export interface ISprkChatProps {
    * the link renders disabled.
    */
   onOpenLibraryModal?: (sessionAttachmentIds: string[]) => void;
+
+  /**
+   * Callback fired when the user clicks a next-step chip rendered by `OutcomeCard`
+   * for `responseType === 'outcome_card'` (spaarke-ai-architecture-redesign-r2 task 062 —
+   * FR-A1-06 / FR-B-13 workspace-intelligence precursor).
+   *
+   * The chip's `targetBindingId` (present when `actionKind === 'invoke_capability'`,
+   * sourced ONLY from the Binding's DECLARED `sprk_chiptransitions` — never model-invented)
+   * is the routing datum the ONE Click-path helper needs:
+   * `dispatchConsumer(chip.targetBindingId, args)` from `services/dispatchConsumer.ts`.
+   * SprkChat threads this straight through to `SprkChatMessage`/`SprkChatMessageRenderer`;
+   * it never calls dispatchConsumer itself (ADR-012 context-agnostic).
+   *
+   * When the prop is omitted the chips render disabled.
+   */
+  onNextStep?: (chip: INextStepChip) => void;
 
   /**
    * Callback fired when a chat attachment finishes client-side extraction and

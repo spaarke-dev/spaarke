@@ -265,6 +265,15 @@ $RowFiles = @{
     # Namespaced tool ids per the FR-P0-03 contract: analysis.rerun / analysis.refine.
     "ANALYSIS-RERUN"                   = "$RepoRoot/infra/dataverse/sprk_analysistool-analysis-rerun-row.json"
     "ANALYSIS-REFINE"                  = "$RepoRoot/infra/dataverse/sprk_analysistool-analysis-refine-row.json"
+
+    # spaarke-ai-architecture-redesign-r2 task 057 (FR-B-08 / FR-30) — MemoryWriteHandler.
+    # memory.write is AI-INITIATED + SILENT + provenance-tagged: it declares
+    # sprk_sideeffectclass = Write (100000001) so the ONE gate wraps it, but its declared
+    # riskProfile (tier 1 + reversible) makes the Confirmation Policy v2 engine execute it
+    # silently (no dialog) — the silence is the ENGINE's decision from catalog DATA, not a
+    # gate bypass. Namespaced tool id: memory.write. LIVE seeding is deferred to the task 069
+    # gate-deploy prep (mirror-first here).
+    "MEMORY-WRITE"                     = "$RepoRoot/infra/dataverse/sprk_analysistool-memory-write-row.json"
 }
 
 # -----------------------------------------------------------------------------

@@ -25,7 +25,7 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// Partition key <c>/tenantId</c>. Document discriminator <c>"workspace-tab"</c> co-exists
 /// with the existing matter-memory documents on the same partition without conflict (id
 /// prefix <c>workspace-tab_</c> guarantees no id collision with
-/// <see cref="Sprk.Bff.Api.Services.Ai.Memory.MatterMemoryService"/>'s <c>{tenantId}_{matterId}</c>
+/// the retired <c>MatterMemoryService</c>'s <c>{tenantId}_{matterId}</c>
 /// format).
 /// </para>
 ///
