@@ -28,7 +28,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 014 | FR-05 optional parent-association prompt (Tier 2c dialog integration) | 1 Entry | 🟡 | 013 | ✅ | FULL | sonnet | high |
 | 015 | FR-06a upload fidelity branch (original-if-unedited) | 1 Entry | 🟢 | 013 | ✅ | FULL | sonnet | high |
 | 016 | FR-04 draft-into-editor via compose disposition | 1 Entry | 🟢 | 000 | ✅ | FULL | opus | high |
-| 017 | Deploy — BFF + SpaarkeAi (entry paths) + verify 1a/1b/1c mount | 1 Entry | 🟢 | 010,011,012,013,015 | 🔲 | STANDARD | sonnet | high |
+| 017 | Deploy — BFF + SpaarkeAi (entry paths) + verify 1a/1b/1c mount | 1 Entry | 🟢 | 010,011,012,013,015 | ✅◐ deployed 2026-07-10 (mount-verify = owner Tier-1 UAT) | STANDARD | sonnet | high |
 | 020 | FR-19 IComposeEditValidator + POST /edit-batch/validate | 2 LLM | 🟢 | 002 | ✅ | FULL | sonnet | xhigh |
 | 021 | FR-20 ComposeEditBatch (4-phase pipeline) | 2 LLM | 🟢 | 003 | ✅ | FULL | sonnet | high |
 | 022 | FR-21 ComposeEditTransaction (snapshot/rollback) | 2 LLM | 🟢 | 021 | ✅ | FULL | sonnet | high |
@@ -46,14 +46,14 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 043 | FR-10 compose-summarize-word-changes Action + Binding | 4 Catalog | 🟢 | 001,006 | ✅ | FULL | sonnet | high |
 | 044 | FR-11 compose-defined-terms Action + Binding (overflow trigger → Context) | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
 | 045 | FR-12 eval cases per row (golden + dispatch ≥5) + schema validation | 4 Catalog | 🟢 | 040,041,042,043,044 | ✅ | FULL | sonnet | high |
-| 046 | FR-13 dispatch wiring (compose_selection_offer choreography + direct dispatchConsumer) | 4 Catalog | 🟢 | 016,030 | 🔲 | FULL | opus | high |
+| 046 | FR-13 dispatch wiring (compose_selection_offer choreography + direct dispatchConsumer) | 4 Catalog | 🟢 | 016,030 | ✅ | FULL | opus | high |
 | 047 | Deploy catalog rows to Dataverse (mirror-first) | 4 Catalog | 🟢 | 045 | 🔲 | STANDARD | sonnet | high |
 | 050 | FR-24 DocxAnnotationWriter (comments + track changes, edge cases) + push endpoint | 5 Word | 🟢 | 005 | ✅ | FULL | opus | xhigh |
 | 051 | FR-25 DocxAnnotationReader (parse w:comment/w:ins/w:del) + pull endpoint | 5 Word | 🟢 | 006 | ✅ | FULL | sonnet | high |
 | 052 | FR-26 SPE webhook subscription + BackgroundService renewal + delta query | 5 Word | 🟢 | none | ✅ | FULL | opus | high |
 | 053 | FR-26 webhooks/spe-doc-changed + check-changes endpoints | 5 Word | 🟢 | 052 | ✅ | FULL | sonnet | high |
 | 054 | FR-27 return-from-Word re-anchoring (bands ≥0.85/0.6–0.85/<0.6) + conflict banner | 5 Word | 🟢 | 051,006 | ✅ | FULL | opus | high |
-| 055 | FR-28 push/save deterministic path (gate dialog + OutcomeCard = splittable) | 5 Word | 🟡 | 050 | 🔲 | FULL | sonnet | high |
+| 055 | FR-28 push/save deterministic path (gate dialog + OutcomeCard = splittable) | 5 Word | 🟡 | 050 | 🔄 | FULL | sonnet | high |
 | 056 | Deploy + Word for Web round-trip verification (Spikes 5/6 as gate) | 5 Word | 🟢 | 050,051,053,054 | 🔲 | STANDARD | sonnet | high |
 | 060 | FR-29 anchored annotations in Compose session payload (doc-adjacent) | 6 Memory | 🟢 | none | ✅◐ | FULL | sonnet | high |
 | 061 | FR-31 action history via ledger queries (no duplicate structure) | 6 Memory | 🟢 | none | ✅ | FULL | sonnet | high |
@@ -67,7 +67,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 081 | Publish-size ≤60 MB + CVE scan + NetArchTest facade verification (NFR-01/02/05) | 8 Wrap | 🟢 | 025,050,052 | 🔲 | STANDARD | sonnet | high |
 | 082 | Flagship gate G-R2-C — browser-verified full chain on spaarkedev1 | 8 Wrap | 🔴 | 016,033,042,046,047,014,055 | ⛔ | FULL | opus | high |
 | 083 | AnchoredAnnotation Path-A deviation code-review sign-off | 8 Wrap | 🟢 | 060 | 🔲 | MINIMAL | sonnet | high |
-| 084 | Consumer-side vertical-slice seam test — compose dispatch E2E (ADR-043 B6 / O3) | 8 Wrap | 🔴 | 016,046 (+core E-20/E-40) | ⛔ | FULL | sonnet | high |
+| 084 | Consumer-side vertical-slice seam test — compose dispatch E2E (ADR-043 B6 / O3) | 8 Wrap | 🟢 (E-20 landed) | 016,046 | ✅ via 101 (confirm at 090) | FULL | sonnet | high |
 | 090 | Project wrap-up (code-review, adr-check, repo-cleanup, /test-diet, lessons) | 8 Wrap | 🔴 | all | ⛔ | FULL | opus | high |
 
 **Totals**: 57 tasks (084 added 2026-07-09) — Task 045 rigor bumped STANDARD→FULL per CLAUDE.md §8 TEST-MODIFYING override.

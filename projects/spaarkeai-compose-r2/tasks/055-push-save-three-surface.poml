@@ -3,7 +3,7 @@
     <title>FR-28 push/save deterministic path (gate dialog + OutcomeCard = splittable)</title>
     <phase>5 Word</phase>
     <gate>splittable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
