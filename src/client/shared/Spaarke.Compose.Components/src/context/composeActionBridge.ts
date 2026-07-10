@@ -57,8 +57,10 @@ import type { ComposeActionEnqueue } from '../widgets/ComposeAiToolbar';
  * above — bytes travel by a DIRECT function call (never a PaneEventBus payload; ADR-030 §MUST NOT /
  * ADR-015 keep the bus content-free). Fire-and-forget from the widget's perspective.
  */
-export type ComposeActiveDocumentRegistration =
-  (info: { docxBytes: ArrayBuffer; fileName?: string }) => void | Promise<void>;
+export type ComposeActiveDocumentRegistration = (info: {
+  docxBytes: ArrayBuffer;
+  fileName?: string;
+}) => void | Promise<void>;
 
 export interface ComposeActionBridgeValue {
   /**
@@ -130,13 +132,10 @@ export function ComposeActionBridgeProvider(props: ComposeActionBridgeProviderPr
     return dispatcher(request);
   }, []);
 
-  const setActiveDocumentHandler = React.useCallback(
-    (handler: ComposeActiveDocumentRegistration | null): void => {
-      activeDocHandlerRef.current = handler;
-      setHasActiveDocumentHandler(handler !== null);
-    },
-    []
-  );
+  const setActiveDocumentHandler = React.useCallback((handler: ComposeActiveDocumentRegistration | null): void => {
+    activeDocHandlerRef.current = handler;
+    setHasActiveDocumentHandler(handler !== null);
+  }, []);
 
   const registerActiveDocument = React.useCallback<ComposeActiveDocumentRegistration>(info => {
     const handler = activeDocHandlerRef.current;
