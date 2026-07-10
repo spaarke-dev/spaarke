@@ -1,8 +1,38 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-09 (by context-handoff — PRE-COMPACT; working tree CLEAN, all committed, no agents running; branch 1 ahead of origin/master = tracking commit `17bdc8d09`)
+> **Last Updated**: 2026-07-10 (by context-handoff — POST merge-to-master + coordinated redeploy; working tree CLEAN, all committed + pushed, no agents running; HEAD `c67b130ea`, branch 4 ahead / 0 behind master)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+
+---
+
+## Quick Recovery (READ THIS FIRST) — 2026-07-10
+
+| Field | Value |
+|-------|-------|
+| **Project** | spaarkeai-compose-r2 — AI-native legal drafting workspace |
+| **Milestone** | ✅ **SHIPPED**: merged to master (PR **#626**, master `14dd8ee3c`) + BFF & code page redeployed to spaarkedev1 (both projects live). AI activation complete E2E. |
+| **Status** | Effectively complete pending (a) owner UI smoke test of the AI toolbar, (b) core flipping 3 retired rows, (c) remaining owner/core-gated items. |
+| **Next Action** | **Owner smoke test**: open Compose → select clause → AI toolbar (Explain/Compare/Draft/+overflow) ENABLED → click Explain → dispatches. (Allow ≤5 min for BFF 5-min catalog cache.) |
+
+### What's DONE (this session — all committed on master via #626)
+- **Phase-9 E2E remediation COMPLETE**: 100 create-on-save, 102 memory-resume, 104 three-pane, 101 dispatch, 103 Word-shuttle — each with a WebApplicationFactory/real-bus forcing test.
+- **055** deterministic push/save · **048** AI-toolbar activation wiring · **072** Doc Q&A (✅◐ live-answer deploy-pending) · **081** NFR verify · **083** Path-A sign-off.
+- **AI catalog DEPLOYED** to spaarkedev1: 5 `sprk_analysisaction` + 5 `sprk_playbookconsumer` rows + **added Compose disposition optionset value 100000006** (was missing). Fixed 2 drifted deploy scripts (`Seed-PlaybookConsumers.ps1` `sprk_Action` casing; documented `Deploy-AnalysisAction.ps1` staleness).
+- **Merged to master + coordinated re-merge** of core PRs #622/#624/#625 (clean; heads-ups verified zero compose impact). **Redeployed BFF + code page**; `/healthz` Healthy; AI routes 401 (live).
+
+### Files/handoffs of note
+- `notes/HANDOFF-to-core-deploy-done-flip-rows-2026-07-10.md` — **instructions given to redesign-r2** (flip 3 retired `sprk_analysistool` rows; deploy done, flip at convenience).
+- `notes/HANDOFF-from-core-deploy-coordination-2026-07-10.md` — core's plan (we own deploy; core flips rows).
+- `notes/catalog-deploy-tooling-debt-and-resume.md` — the 3 deploy-script drift findings + optionset fix.
+- `notes/e2e-gap-register.md` — the original 5-slice audit (source of truth for Phase-9).
+
+### Critical context / OPEN items (for whoever continues)
+1. **Owner smoke test pending** — is the AI toolbar actually enabled + does Explain dispatch on the live env? If buttons stay disabled >5 min, bounce the BFF App Service (forces fresh 5-min catalog cache read).
+2. **Core action pending** — redesign-r2 to deactivate 3 retired rows (coordinated, non-urgent; /healthz already Healthy).
+3. **OWNER DECISION still open — task 034** (FR-17 undo/replace scope: full durable-retract Path B vs replace-only). The one remaining non-deploy FEATURE; mechanism (E-30 coded-workflow seam + 033 ledger supersession) is in place — buildable once owner picks scope. Core confirmed 034 is NOT E-30-gated (see `REPLY-to-compose-r2-e20-e30-forkc.md` §2).
+4. **Remaining gated**: 056 (webhook KV config → instant Word return), 082 (flagship browser gate), core-blocked 063/064/071, then 090 wrap-up.
+5. **Shared-env**: #621 (session-cleanup GET-after-DELETE 500) is a shared pre-existing flake — do NOT diagnose as compose's.
 
 ---
 
