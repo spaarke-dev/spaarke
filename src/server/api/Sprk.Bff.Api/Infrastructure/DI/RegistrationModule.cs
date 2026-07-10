@@ -19,6 +19,11 @@ public static class RegistrationModule
             .Bind(configuration.GetSection(DemoProvisioningOptions.SectionName))
             .ValidateDataAnnotations();
 
+        // ADR-010: pooled HttpClient via IHttpClientFactory (no ad-hoc new HttpClient()).
+        // BaseAddress/default headers are set per-instance in the service ctor because the
+        // Dataverse URL is resolved from runtime config, not known at registration time.
+        services.AddHttpClient(RegistrationDataverseService.HttpClientName);
+
         // ADR-010: Concrete registrations (no interfaces)
         services.AddSingleton<PasswordGenerator>();
         services.AddSingleton<GraphUserService>();
