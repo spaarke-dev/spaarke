@@ -2,7 +2,7 @@
   <metadata>
     <title>E2E-R1 — Getting-started vertical: upload/search → load → Save → persisted sprk_document (Cluster 1)</title>
     <phase>9 E2E Remediation</phase>
-    <status>in-progress</status>
+    <status>completed</status>
     <estimated-hours>16</estimated-hours>
     <effort>xhigh</effort>
     <dependencies>010, 011, 012, 013, 015</dependencies>
@@ -122,4 +122,55 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-10 (SOLO, FULL rigor, opus/xhigh). Made the getting-started create-on-save
+    vertical reachable end-to-end over HTTP without rewriting the (correct) ComposeService backbone.
+
+    Per-gap closure (Cluster 1, all 8 closed):
+    - 1.1/1.2 — Added `POST /api/compose/documents/create-on-save` (literal route, no id segment →
+      no `/documents//save` 404) + `containerId` on `SaveComposeDocumentBody` (+ `driveId` now
+      optional). Maps `DocumentSpeId=null` + `ContainerId` into `SaveComposeDocumentRequest` →
+      reaches SaveAsync's transient branch. Shared `ExecuteSaveAsync` DRYs replace + create paths.
+    - 1.3 — BU→container resolved CLIENT-SIDE at the compose mount host
+      (`composeEditor.registration.ts` `ComposeSectionMount`) via
+      `EntityCreationService.resolveUserBuDefaults` (`businessunit.sprk_containerid`, Fork A) and
+      threaded as the new `containerId` prop → `mountTransient` → `documentRef.containerId`. NO BFF
+      resolver added. App.tsx no longer sets `containerId: undefined` on the load ref (comment fixed).
+      NOTE (directional deviation): the POML said "App.tsx (+ compose mount host)"; post-092/093 the
+      real mount host is `composeEditor.registration.ts`, so resolution landed there (covers SpaarkeAi
+      three-pane AND standalone LegalWorkspace). App.tsx load-ref cleaned per gap-1.3 evidence.
+    - 1.4 — `triggerSave` sends `containerId` on the create-on-save body; gate relaxed
+      (transient ? needs containerId : needs driveId); honest banner when the BU has no container.
+    - 1.5 — Save button gated on `isDirty || hasTransientDraft` (new prop), not `documentId` (DEF-07).
+    - 1.6 — ComposeEditor keeps internal `dirtyRef=false` for a transient mount (FR-06a original bytes)
+      but reports `onDirtyChange(true)` so Save stays enabled (DEF-01 decoupled from FR-06a).
+    - 1.7 — `saveSucceeded` reducer writes the server-minted `documentSpeId` into `speDriveItemId`
+      so a 2nd Save takes the replace path.
+    - 1.8 — `ComposeWorkspace.onCreateOnSaveComplete(newDocId)` fires on transient-create success;
+      provided via `ComposeLaunchContext` from `ThreePaneShell` → `useCreateOnSaveAssociation.associate`.
+      `documentAssociationWrite` now uses `cleanGuid` (replaced hand-rolled brace-strip) on BOTH the
+      @odata.bind recordId AND the document id. The associate() WIRE is landed; hosting the
+      selection PROMPT in the Tier-2c dialog remains the documented follow-up (defer-issues, narrowed).
+
+    cleanGuid: exported from `@spaarke/ui-components` barrel; applied on the Xrm user id (mount host),
+    association recordId + document id. containerId is an SPE id in a JSON body (not an OData URL) →
+    correctly NOT wrapped.
+
+    Anti-recurrence test (definition-of-done): tests/integration/contract/Api/Ai/
+    ComposeCreateOnSaveEndpointContractTests.cs — WebApplicationFactory with the REAL ComposeService
+    (only SPE/Dataverse/indexing mocked at module boundaries). Drives POST upload → POST create-on-save
+    (containerId, no documentSpeId) through the real routes; asserts new sprk_document (captured
+    CreateAsync entity carries the minted SPE id) + SPE item minted in the resolved BU drive + session
+    rebind to the new sprk_documentid. Plus 400-on-missing-containerId + 401-unauth. 3/3 pass.
+
+    Verification: BFF build 0 errors; dotnet test 293 compose tests pass (290 existing + 3 new).
+    compose-components tsc clean + 69 jest pass (browse/upload/search LOAD paths verified, not rebuilt).
+    ui-components/SpaarkeAi/LegalWorkspace tsc: my files clean (remaining errors are pre-existing
+    unrelated noise). Publish 45.23 MB compressed incl PDBs (< 49.63 baseline, < 60 ceiling).
+    CVE: only pre-existing Kiota HIGH (GHSA-7j59-v9qr-6fq9), no new. Step 9.5 code-review + adr-check:
+    0 critical, 0 new ADR violations; ADR-013 Compose-facade NetArchTest green (5 ArchTest failures are
+    pre-existing baseline on untouched code). DEF-06 + DEF-07 removed from defer-issues.md (fixed);
+    the 014-split entry narrowed to the remaining prompt-hosting UI.
+  </notes>
 </task>

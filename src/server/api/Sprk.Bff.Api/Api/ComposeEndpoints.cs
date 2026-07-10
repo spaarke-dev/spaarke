@@ -77,6 +77,24 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // (3b) POST /api/compose/documents/create-on-save — FR-05 create-on-save (task 100).
+        // A TRANSIENT Browse/Upload draft has NO SPE drive-item, so the `{documentSpeId}` path
+        // segment on the replace route (3) would be empty → `/documents//save` 404s. This
+        // literal-segment sibling route carries no id in the path; the client sends the
+        // client-resolved BU `containerId` (Fork A) and no `documentSpeId`, reaching
+        // ComposeService.SaveAsync's transient-create branch (container → record → indexing).
+        // Distinct literal `create-on-save` cannot collide with `{documentSpeId}/save` (3) or
+        // GET `{documentSpeId}` (2) — different segment counts / verbs.
+        group.MapPost("/documents/create-on-save", CreateOnSave)
+            .WithName("ComposeCreateOnSaveDocument")
+            .WithSummary("Create a new sprk_document from a transient Compose draft in the client-resolved BU container (FR-05)")
+            .RequireRateLimiting("ai-upload")
+            .Produces<SaveComposeDocumentResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status500InternalServerError);
+
         // (4) POST /api/compose/documents/{documentSpeId}/promote — explicit promotion
         group.MapPost("/documents/{documentSpeId}/promote", Promote)
             .WithName("ComposePromoteDocument")
@@ -1003,19 +1021,83 @@ public static class ComposeEndpoints
             "Compose save: tenant={TenantId} drive={DriveId} item={DocumentSpeId} session={SessionId} record={DocumentRecordId} size={SizeBytes} TraceId={TraceId}",
             body.TenantId, body.DriveId, documentSpeId, body.SessionId, body.DocumentRecordId, body.Content.Length, httpContext.TraceIdentifier);
 
+        var request = new SaveComposeDocumentRequest
+        {
+            DriveId = body.DriveId,
+            DocumentSpeId = documentSpeId,
+            // ContainerId is ignored on the replace path (DocumentSpeId present) but forwarded
+            // for symmetry so both save routes map the same body shape.
+            ContainerId = body.ContainerId,
+            Content = body.Content,
+            SessionId = body.SessionId,
+            TenantId = body.TenantId,
+            DocumentRecordId = body.DocumentRecordId,
+            DisplayName = body.DisplayName,
+        };
+
+        return await ExecuteSaveAsync(request, documentSpeId, composeService, logger, httpContext, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// POST /api/compose/documents/create-on-save — FR-05 create-on-save (task 100). Persists a
+    /// TRANSIENT Browse/Upload draft (no SPE drive-item yet) as a new <c>sprk_document</c> in the
+    /// client-resolved Business-Unit <c>containerId</c> (Fork A — the BFF does NOT resolve
+    /// BU→container; the client passes it in, same convention as the 7 Create*Wizards). Maps a
+    /// null <c>DocumentSpeId</c> into <see cref="SaveComposeDocumentRequest"/> so
+    /// <see cref="IComposeService.SaveAsync"/> takes its transient-create branch
+    /// (container → record → indexing), then rebinds the session's DocumentId to the new record.
+    /// </summary>
+    private static async Task<IResult> CreateOnSave(
+        [FromBody] SaveComposeDocumentBody body,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.ContainerId)) return BadRequest("containerId is required for create-on-save (the client resolves it from the user's Business Unit).");
+        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+        if (string.IsNullOrWhiteSpace(body.SessionId)) return BadRequest("sessionId is required in the request body for first-Save promotion rebind.");
+        if (body.Content is null || body.Content.Length == 0) return BadRequest("content is required and must be non-empty.");
+
+        logger.LogInformation(
+            "Compose create-on-save: tenant={TenantId} container={ContainerId} session={SessionId} size={SizeBytes} TraceId={TraceId}",
+            body.TenantId, body.ContainerId, body.SessionId, body.Content.Length, httpContext.TraceIdentifier);
+
+        var request = new SaveComposeDocumentRequest
+        {
+            // DocumentSpeId null → SaveAsync transient-create branch. DriveId is derived from
+            // ContainerId server-side; the client does not (and cannot) know it for a new draft.
+            DocumentSpeId = null,
+            DriveId = null,
+            ContainerId = body.ContainerId,
+            Content = body.Content,
+            SessionId = body.SessionId,
+            TenantId = body.TenantId,
+            DocumentRecordId = null,
+            DisplayName = body.DisplayName,
+        };
+
+        return await ExecuteSaveAsync(request, documentSpeId: null, composeService, logger, httpContext, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Shared save execution used by both the replace route (<see cref="Save"/>) and the
+    /// create-on-save route (<see cref="CreateOnSave"/>). Delegates to
+    /// <see cref="IComposeService.SaveAsync"/> and maps the result / exceptions to HTTP.
+    /// </summary>
+    private static async Task<IResult> ExecuteSaveAsync(
+        SaveComposeDocumentRequest request,
+        string? documentSpeId,
+        IComposeService composeService,
+        ILogger logger,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
         try
         {
-            var request = new SaveComposeDocumentRequest
-            {
-                DriveId = body.DriveId,
-                DocumentSpeId = documentSpeId,
-                Content = body.Content,
-                SessionId = body.SessionId,
-                TenantId = body.TenantId,
-                DocumentRecordId = body.DocumentRecordId,
-                DisplayName = body.DisplayName,
-            };
-
             var result = await composeService.SaveAsync(request, httpContext, ct).ConfigureAwait(false);
 
             return Results.Ok(new SaveComposeDocumentResponse(
@@ -1039,7 +1121,7 @@ public static class ComposeEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status404NotFound,
                 title: "Document Not Found",
-                detail: $"SPE drive-item '{documentSpeId}' was not found or could not be written.",
+                detail: $"SPE drive-item '{documentSpeId ?? "(transient create)"}' was not found or could not be written.",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
         }
         catch (UnauthorizedAccessException ex)
@@ -1231,12 +1313,18 @@ public sealed record ComposeUploadResponse(
     [property: JsonPropertyName("size")] long Size,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
-/// <summary>Request body for <c>POST /api/compose/documents/{id}/save</c>.</summary>
+/// <summary>Request body for <c>POST /api/compose/documents/{id}/save</c> (replace path) and
+/// <c>POST /api/compose/documents/create-on-save</c> (FR-05 transient create path, task 100).
+/// On the create-on-save path <see cref="DriveId"/> is null and <see cref="ContainerId"/> carries
+/// the client-resolved BU container; on the replace path <see cref="ContainerId"/> is ignored.</summary>
 public sealed record SaveComposeDocumentBody(
-    [property: JsonPropertyName("driveId")] string DriveId,
     [property: JsonPropertyName("sessionId")] string SessionId,
     [property: JsonPropertyName("tenantId")] string TenantId,
     [property: JsonPropertyName("content")] byte[] Content,
+    [property: JsonPropertyName("driveId")] string? DriveId = null,
+    /// <summary>Client-resolved SPE container id for the create-on-save path (Fork A —
+    /// businessunit.sprk_containerid). Required when there is no drive-item yet; ignored on replace.</summary>
+    [property: JsonPropertyName("containerId")] string? ContainerId = null,
     [property: JsonPropertyName("documentRecordId")] Guid? DocumentRecordId = null,
     [property: JsonPropertyName("displayName")] string? DisplayName = null);
 

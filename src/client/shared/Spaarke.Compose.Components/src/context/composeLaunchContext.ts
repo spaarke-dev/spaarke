@@ -46,6 +46,16 @@ export interface ComposeLaunchContextValue {
    * transiently (create-on-save). Absent/undefined for the stored-document + picker paths.
    */
   upload?: ComposeUploadRef | null;
+  /**
+   * FR-05 create-on-save (task 100, gap 1.8): invoked once a transient draft is persisted as a
+   * NEW `sprk_document` on first Save, with the server-minted `sprk_documentid`. SpaarkeAi's
+   * ThreePaneShell (the only surface that can host the SpaarkeAi-owned
+   * `useCreateOnSaveAssociation` hook) provides this; the LegalWorkspace compose section factory
+   * forwards it to `<ComposeWorkspace onCreateOnSaveComplete>`. Absent on standalone /
+   * picker-only mounts (association simply not offered). Kept on this shared context because the
+   * section factory lives in LegalWorkspace and cannot import from `src/solutions/SpaarkeAi/*`.
+   */
+  onCreateOnSaveComplete?: (newSprkDocumentId: string) => void | Promise<void>;
 }
 
 export const ComposeLaunchContext = React.createContext<ComposeLaunchContextValue | null>(null);

@@ -77,6 +77,12 @@ import {
   useComposeLaunch,
   useComposeActionBridge,
 } from "@spaarke/compose-components";
+// FR-05 create-on-save (task 100, gap 1.3): resolve the user's Business-Unit SPE container
+// CLIENT-SIDE via the SAME convention the 7 Create*Wizards use (Fork A, owner-approved
+// 2026-07-09) — `EntityCreationService.resolveUserBuDefaults` reads
+// `businessunit.sprk_containerid`. `cleanGuid` normalizes the Xrm-sourced user id before it
+// enters the `/systemusers(id)` lookup URL (never hand-roll `.replace(/[{}]/g,'')`).
+import { EntityCreationService, cleanGuid } from "@spaarke/ui-components";
 // spaarkeai-compose-r1 hotfix 2026-07-02 (smoke-1): `ComposeWorkspace` requires
 // `tenantId` as a required prop (widened facade for compose-summarize per
 // task 095 / ADR-013 amendment 2026-07-01). Neither `SectionFactoryContext`
@@ -132,10 +138,45 @@ const ComposeSectionMount: React.FC<ComposeSectionMountProps> = ({ bffBaseUrl })
   // always initialized before this mount because SpaarkeAi + LegalWorkspace
   // both bootstrap `initAuth` before `createRoot(...).render(...)`).
   const tenantId = resolveTenantIdSync();
+
+  // FR-05 create-on-save (task 100, gap 1.3): resolve the user's BU SPE container once on mount
+  // and thread it as a prop so a transient (Browse/Upload) draft's first Save (create-on-save)
+  // knows which container to mint the new sprk_document in. Covers ALL compose entry paths
+  // (SpaarkeAi three-pane AND standalone LegalWorkspace). Undefined in a non-Dataverse host or
+  // until resolution completes — ComposeWorkspace gates a transient Save on it.
+  const [containerId, setContainerId] = React.useState<string | undefined>(undefined);
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xrm = (globalThis as any).Xrm;
+        const rawUserId: string | undefined = xrm?.Utility?.getGlobalContext?.().userSettings?.userId;
+        const webApi = xrm?.WebApi;
+        if (!rawUserId || !webApi) return; // no Dataverse host — create-on-save container unavailable
+        // cleanGuid: the Xrm user id is brace-wrapped and flows into `/systemusers(id)` inside
+        // resolveUserBuDefaults — wrap it here (no-op on bare GUIDs) per the cleanGuid constraint.
+        const userId = cleanGuid(rawUserId);
+        const defaults = await EntityCreationService.resolveUserBuDefaults(webApi, userId);
+        if (!cancelled) setContainerId(defaults.containerId);
+      } catch (err) {
+        // Non-fatal: transient Save surfaces an honest "no container configured" banner if attempted.
+        // eslint-disable-next-line no-console
+        console.warn("[ComposeSectionMount] BU container resolution failed:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return React.createElement(ComposeWorkspace, {
     bffBaseUrl,
     driveId: composeLaunch?.driveId ?? "",
     tenantId,
+    // FR-05 (task 100): host-resolved BU container + save-completion association callback.
+    containerId,
+    onCreateOnSaveComplete: composeLaunch?.onCreateOnSaveComplete,
     initialDocumentRef: composeLaunch?.document ?? null,
     // FR-03 (task 012): transient upload-mount pointer from a chat "open in Compose" on an
     // Assistant-uploaded file (ComposeLaunchContext.upload). Null on the stored-document /

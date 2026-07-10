@@ -92,6 +92,11 @@ import {
 } from "@spaarke/compose-components";
 export { useComposeLaunch } from "@spaarke/compose-components";
 export type { ComposeLaunchContextValue } from "@spaarke/compose-components";
+// FR-05 create-on-save (task 100, gap 1.8): ThreePaneShell is the only compose-mounting surface
+// that can host the SpaarkeAi-owned association hook (LegalWorkspace's compose section factory
+// cannot import from `src/solutions/SpaarkeAi/*`). It provides `onCreateOnSaveComplete` on the
+// launch context so a chosen parent association is written when a transient draft is first saved.
+import { useCreateOnSaveAssociation } from "../compose/useCreateOnSaveAssociation";
 
 // ---------------------------------------------------------------------------
 // ShellStage — lifecycle state type (four-stage, design.md Section 2.3)
@@ -620,6 +625,12 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
   // downstream panes can respond to modal-launch mode. `null` when the app is
   // not in Compose mode — consumers use `useComposeLaunch()` and fall through
   // to default behaviour when the value is null.
+  // FR-05 create-on-save (task 100, gap 1.8): owns the optional parent-association selection +
+  // write for create-on-save. `associate(newDocumentId)` is a graceful no-op when no parent was
+  // chosen (Save is never blocked on a parent, spec FR-05). Provided to the compose section
+  // factory via the launch context so it fires from the transient draft's first Save completion.
+  const { associate: associateCreateOnSaveParent } = useCreateOnSaveAssociation();
+
   const composeLaunch = React.useMemo<ComposeLaunchContextValue | null>(
     () =>
       composeMode === "editor"
@@ -627,9 +638,15 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
             composeMode: "editor",
             document: composeDocument,
             driveId: composeDriveId,
+            onCreateOnSaveComplete: async (newDocumentId: string): Promise<void> => {
+              // associate() returns a rich result / no-ops on "none"; the context contract is
+              // fire-and-forget (void). Swallow the result — a failed association is non-fatal
+              // (the document already exists) and surfaces via the hook's own `error` state.
+              await associateCreateOnSaveParent(newDocumentId);
+            },
           }
         : null,
-    [composeMode, composeDocument, composeDriveId],
+    [composeMode, composeDocument, composeDriveId, associateCreateOnSaveParent],
   );
 
   // Build the entity context for AiSessionProvider from URL params.

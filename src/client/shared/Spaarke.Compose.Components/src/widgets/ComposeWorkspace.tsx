@@ -190,6 +190,25 @@ export interface ComposeWorkspaceProps {
   /** Microsoft Entra tenant id (multi-tenant scoping per ADR-015 Tier 3). */
   tenantId: string;
 
+  /**
+   * FR-05 create-on-save (task 100): the user's Business-Unit SPE container id, resolved
+   * CLIENT-SIDE by the host via `EntityCreationService.resolveUserBuDefaults`
+   * (`businessunit.sprk_containerid`) — the SAME convention the 7 Create*Wizards use (Fork A,
+   * owner-approved 2026-07-09). Threaded into a transient (Browse/Upload) draft's `documentRef`
+   * so the first Save persists it as a new `sprk_document` in this container. Undefined when the
+   * host has no Dataverse context (standalone) or is still resolving — a transient Save is gated
+   * until it is present. The BFF does NOT resolve BU→container (multi-container INV-7).
+   */
+  containerId?: string;
+
+  /**
+   * FR-05 create-on-save (task 100): invoked once a transient draft is persisted as a NEW
+   * `sprk_document` on first Save, with the server-minted `sprk_documentid`. The host wires this
+   * to `useCreateOnSaveAssociation.associate(newDocumentId)` so a chosen parent association is
+   * written (a no-op when the user chose "none"). Non-fatal — the document already exists.
+   */
+  onCreateOnSaveComplete?: (newSprkDocumentId: string) => void | Promise<void>;
+
   /** Called when the user clicks Browse in the empty state. */
   onBrowseRequested?: () => void;
 
@@ -281,6 +300,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     bffBaseUrl,
     driveId,
     tenantId,
+    containerId,
+    onCreateOnSaveComplete,
     onBrowseRequested,
     onSearchRequested,
     onComposeMount,
@@ -290,6 +311,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   } = props;
 
   const [state, dispatch] = React.useReducer(composeWorkspaceReducer, INITIAL_STATE);
+
+  // FR-05 (task 100): keep the latest host-resolved BU container id in a ref so the Browse
+  // handler + upload effect (whose closures would otherwise capture a stale prop) always thread
+  // the current value into `mountTransient` → `documentRef.containerId`. triggerSave also falls
+  // back to this ref if the reducer state predates resolution (async-resolve race).
+  const containerIdRef = React.useRef<string | undefined>(containerId);
+  React.useEffect(() => {
+    containerIdRef.current = containerId;
+  }, [containerId]);
 
   // Imperative editor ref for save (TipTap → DOCX bytes).
   const editorRef = React.useRef<ComposeEditorHandle | null>(null);
@@ -524,10 +554,37 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const triggerSave = React.useCallback(async (): Promise<void> => {
     if (state.status !== 'loaded') return;
     if (!state.documentRef || !editorRef.current) return;
-    if (!bffBaseUrl || !effectiveDriveId || !tenantId) {
+
+    // FR-05 (task 100): a TRANSIENT (Browse/Upload) draft has NO SPE drive-item — it persists via
+    // create-on-save into the client-resolved BU container, not the replace path. Branch on the
+    // absence of a real speDriveItemId (mountTransient sets it to '').
+    const isTransientCreate = !state.documentRef.speDriveItemId;
+    const saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
+
+    if (!bffBaseUrl || !tenantId) {
       dispatch({
         kind: 'saveFailed',
-        errorMessage: 'Cannot save — BFF base URL or SPE configuration missing.',
+        errorMessage: 'Cannot save — BFF base URL or tenant configuration missing.',
+      });
+      return;
+    }
+    if (isTransientCreate) {
+      if (!saveContainerId) {
+        // gap 1.4: don't abort silently as the pre-100 code did — surface an honest, actionable
+        // banner. The container resolves from the user's Business Unit; if it's missing the BU is
+        // unconfigured (or we're in a non-Dataverse host).
+        dispatch({
+          kind: 'saveFailed',
+          errorMessage:
+            'Cannot save this new document — your Business Unit has no storage container configured. ' +
+            'Contact an administrator to set the container on your Business Unit.',
+        });
+        return;
+      }
+    } else if (!effectiveDriveId) {
+      dispatch({
+        kind: 'saveFailed',
+        errorMessage: 'Cannot save — SPE drive configuration missing.',
       });
       return;
     }
@@ -551,7 +608,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const editorIsDirty = editorRef.current.isDirty();
       const bytes =
         editorIsDirty || !state.docxBytes ? await editorRef.current.serialize() : state.docxBytes;
-      const url = `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(state.documentRef.speDriveItemId)}/save`;
+
+      // FR-05 (task 100): the create-on-save route carries no id in the path (the draft has no
+      // drive-item yet) and sends `containerId`; the replace route carries the SPE id + driveId.
+      // Both hit ComposeService.SaveAsync — the server branches on DocumentSpeId presence.
+      const url = isTransientCreate
+        ? `${bffBaseUrl}/api/compose/documents/create-on-save`
+        : `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(state.documentRef.speDriveItemId)}/save`;
 
       // Encode bytes -> base64. ASP.NET Core deserializes byte[] from
       // base64 strings, NOT from JSON number arrays. Iterate rather than
@@ -563,17 +626,27 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       }
       const base64Content = btoa(binary);
 
+      const requestBody = isTransientCreate
+        ? {
+            containerId: saveContainerId,
+            tenantId,
+            sessionId: state.sessionId,
+            content: base64Content,
+            displayName: state.documentRef.fileName ?? null,
+          }
+        : {
+            driveId: effectiveDriveId,
+            tenantId,
+            sessionId: state.sessionId,
+            content: base64Content,
+            documentRecordId: state.documentRef.sprkDocumentId ?? null,
+            displayName: state.documentRef.fileName ?? null,
+          };
+
       const response = await authenticatedFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          driveId: effectiveDriveId,
-          tenantId,
-          sessionId: state.sessionId,
-          content: base64Content,
-          documentRecordId: state.documentRef.sprkDocumentId ?? null,
-          displayName: state.documentRef.fileName ?? null,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -610,17 +683,33 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       dispatch({
         kind: 'saveSucceeded',
         sprkDocumentId: payload.documentRecordId,
+        // gap 1.7: carry the server-minted SPE id back into documentRef.speDriveItemId so a second
+        // Save on this mount takes the replace path (no longer transient).
+        documentSpeId: payload.documentSpeId,
         etag: payload.eTag ?? null,
       });
       // Clear the local dirty flag so the Save button disables until the
       // next edit. ComposeEditor's internal dirtyRef also resets on the
       // next load; here we mirror that for post-save.
       setIsDirty(false);
+
+      // FR-05 (task 100, gap 1.8): once a transient draft is persisted as a NEW sprk_document,
+      // let the host write any chosen parent association (associate() no-ops on "none"). The
+      // document already exists, so an association failure is non-fatal — do not surface it as a
+      // save failure.
+      if (isTransientCreate && onCreateOnSaveComplete && payload.documentRecordId) {
+        try {
+          await onCreateOnSaveComplete(payload.documentRecordId);
+        } catch (assocErr) {
+          // eslint-disable-next-line no-console
+          console.warn('[ComposeWorkspace] create-on-save association write failed (non-fatal):', assocErr);
+        }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       dispatch({ kind: 'saveFailed', errorMessage: `Save failed: ${message}` });
     }
-  }, [state.status, state.documentRef, state.docxBytes, state.sessionId, bffBaseUrl, effectiveDriveId, tenantId]);
+  }, [state.status, state.documentRef, state.docxBytes, state.sessionId, bffBaseUrl, effectiveDriveId, tenantId, onCreateOnSaveComplete]);
 
   // Keyboard shortcut: Ctrl/Cmd+S → save.
   React.useEffect(() => {
@@ -871,7 +960,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // A Browse mount has no SPE drive — clear any stale Search-resolved drive id
       // (FR-02/task 011) so a later Save doesn't key off the WRONG drive.
       setSearchResolvedDriveId(null);
-      dispatch({ kind: 'mountTransient', docxBytes: result, fileName: file.name });
+      // FR-05 (task 100): carry the host-resolved BU container so the first Save (create-on-save)
+      // knows which SPE container to mint the new sprk_document's drive-item in.
+      dispatch({ kind: 'mountTransient', docxBytes: result, fileName: file.name, containerId: containerIdRef.current });
       // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
       // (create-on-save, task 013) is enabled immediately.
       setIsDirty(true);
@@ -951,6 +1042,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           kind: 'mountTransient',
           docxBytes: bytes.buffer,
           fileName: payload.fileName ?? uploadRef.fileName,
+          // FR-05 (task 100): thread the host-resolved BU container for create-on-save.
+          containerId: containerIdRef.current,
         });
         // A freshly-mounted upload is unsaved by definition — mark dirty so Save
         // (create-on-save, task 013) is enabled immediately.
@@ -980,6 +1073,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   // Toolbar documentId (Open-in-Word handoff) — accepts SPE id or sprk_documentid.
   const toolbarDocumentId = state.documentRef?.sprkDocumentId ?? state.documentRef?.speDriveItemId ?? '';
+
+  // FR-05 (task 100, gap 1.5): a transient (Browse/Upload) draft has no SPE pointer yet — the Save
+  // button must be enabled for it (create-on-save) even though its editor dirty flag is false for
+  // an unedited mount (FR-06a keeps the original bytes). A draft exists whenever the workspace is
+  // showing an editor for a documentRef that has no real speDriveItemId.
+  const hasTransientDraft =
+    (state.status === 'loaded' || state.status === 'saving') &&
+    !!state.documentRef &&
+    !state.documentRef.speDriveItemId;
 
   // -------------------------------------------------------------------------
   // Render
@@ -1059,6 +1161,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 void triggerSave();
               }}
               isDirty={isDirty}
+              hasTransientDraft={hasTransientDraft}
               isSaving={state.status === 'saving'}
             />
           </div>

@@ -59,6 +59,14 @@ export interface ComposeToolbarProps {
   isDirty?: boolean;
 
   /**
+   * FR-05 (task 100, gap 1.5 / DEF-07): true when a TRANSIENT Browse/Upload draft is mounted that
+   * has never been persisted. The Save button must be enabled for it (first Save = create-on-save)
+   * even when `isDirty` is false — an unedited transient mount reports clean (FR-06a keeps the
+   * original bytes) yet still has unsaved work: it has no `sprk_document` yet.
+   */
+  hasTransientDraft?: boolean;
+
+  /**
    * True while a save is in flight.
    */
   isSaving?: boolean;
@@ -85,14 +93,29 @@ const useStyles = makeStyles({
 
 export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
   const styles = useStyles();
-  const { documentId, bffBaseUrl, disabled, className, onSaveRequested, isDirty = false, isSaving = false } = props;
+  const {
+    documentId,
+    bffBaseUrl,
+    disabled,
+    className,
+    onSaveRequested,
+    isDirty = false,
+    hasTransientDraft = false,
+    isSaving = false,
+  } = props;
 
   const { openInWeb, openInDesktop, isActing } = useDocumentActions({
     bffBaseUrl,
   });
 
   const isToolbarDisabled = disabled === true;
+  // Open-in-Word needs a real, persisted document id (SPE id or sprk_documentid).
   const hasDocument = documentId.length > 0 && bffBaseUrl.length > 0;
+  // gap 1.5 / DEF-07: Save is available when the workspace is mounted (bffBaseUrl present) and
+  // there is unsaved work — either an edit (`isDirty`) OR an unpersisted transient draft. It is
+  // NOT gated on `documentId`, which is empty for a brand-new transient mount (the exact case
+  // create-on-save exists to handle).
+  const canSave = !isToolbarDisabled && bffBaseUrl.length > 0 && (isDirty || hasTransientDraft);
 
   const openInWebDisabled = isToolbarDisabled || !hasDocument || isActing;
   const openInDesktopDisabled = isToolbarDisabled || !hasDocument || isActing;
@@ -140,19 +163,19 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
       {onSaveRequested ? (
         <Tooltip
           content={
-            isToolbarDisabled || !hasDocument
-              ? 'No document loaded'
-              : isSaving
-                ? 'Saving…'
-                : isDirty
-                  ? 'Save changes (Ctrl+S)'
+            isSaving
+              ? 'Saving…'
+              : canSave
+                ? 'Save changes (Ctrl+S)'
+                : hasTransientDraft || isDirty
+                  ? 'Saving is unavailable right now'
                   : 'No unsaved changes'
           }
           relationship="label"
         >
           <ToolbarButton
             icon={<SaveRegular />}
-            disabled={isToolbarDisabled || !hasDocument || isSaving || !isDirty}
+            disabled={!canSave || isSaving}
             onClick={onSaveRequested}
             aria-label={isSaving ? 'Saving' : 'Save changes'}
           >

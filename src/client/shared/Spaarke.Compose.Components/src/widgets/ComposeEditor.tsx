@@ -667,14 +667,22 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         onDirtyChange?.(false);
         return;
       }
+      // gap 1.6 / DEF-01: a TRANSIENT (Browse/Upload) mount has no SPE pointer yet (empty
+      // speDriveItemId). Its create-on-save first Save must be reachable, so we report
+      // dirty=true to the workspace (there IS unsaved work — the draft has never been
+      // persisted). The editor's OWN dirtyRef stays FALSE below so an *untouched* transient
+      // Save still persists the pristine ORIGINAL bytes byte-identical (FR-06a, task 015) —
+      // triggerSave keys the byte-branch off `editorRef.current.isDirty()` (= dirtyRef), NOT
+      // the workspace-facing onDirtyChange signal. A stored (non-transient) load reports clean.
+      const isTransientMount = !documentRef?.speDriveItemId;
       let cancelled = false;
       setIsImporting(true);
       docxToTipTapHtml(docxBytes)
         .then(({ html, messages }) => {
           if (cancelled) return;
           editor.commands.setContent(html);
-          dirtyRef.current = false; // fresh load is clean
-          onDirtyChange?.(false);
+          dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
+          onDirtyChange?.(isTransientMount);
           // Privacy: messages are Tier 1 safe (configuration metadata).
           // Document HTML itself is Tier 3 — NEVER logged.
           if (messages.length > 0) {
@@ -695,6 +703,12 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       return () => {
         cancelled = true;
       };
+      // `documentRef?.speDriveItemId` is read (transient-vs-stored) but intentionally NOT a dep:
+      // the effect must re-run ONLY on a new `docxBytes` mount. Adding it would re-run on
+      // save-success (when speDriveItemId gets populated on the same bytes) and clobber the
+      // user's edits by re-importing the original mount bytes. The captured value is correct
+      // because `mountTransient` sets docxBytes + documentRef atomically in one render.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [editor, docxBytes, onDirtyChange, onImportWarnings]);
 
     // ----- Selection dispatch (heartbeat hoisted to ComposeWorkspace) -----
