@@ -52,6 +52,9 @@ import {
   useRegisterComposeActiveDocumentHandler,
 } from "@spaarke/compose-components/context/composeActionBridge";
 import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./composeApplyLeg";
+// FR-17 undo/replace (task 034) — the durable ledger-supersession hook + its Assistant affordance.
+import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession";
+import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-components/types/compose-contracts";
 import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
 import { formatComposeActionResultMarkdown } from "./composeResultFormat";
 import { makeLocalAssistantMessage } from "./summarizeRouting";
@@ -188,27 +191,45 @@ export function ConversationPane(): React.JSX.Element {
   // Uses the ledger READ endpoint (no new route) + an EXISTING discriminant
   // (zero new PaneEventBus discriminants — ADR-030).
   const emitComposeApplyLeg = React.useCallback(
-    async (bindingId: string): Promise<void> => {
+    async (bindingId: string): Promise<string | null> => {
       const sessionId = getSessionId();
-      if (!sessionId || !bffBaseUrl) return;
+      if (!sessionId || !bffBaseUrl) return null;
       try {
         const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/compose-outputs`;
         const response = await authenticatedFetch(url, { method: "GET" });
-        if (!response.ok) return; // 404 = no compose outputs yet — nothing to apply
+        if (!response.ok) return null; // 404 = no compose outputs yet — nothing to apply
         const outputs = (await response.json()) as unknown;
         const ledgerRef = resolveCurrentComposeLedgerRef(outputs, bindingId);
-        if (!ledgerRef) return; // not a compose-writing action (e.g. explain/compare)
+        if (!ledgerRef) return null; // not a compose-writing action (e.g. explain/compare)
         // Flow 5 emit — `compose_assistant_insert` is now a TYPED discriminant on
         // the `workspace` channel (task 104), so the built event is assignable
         // directly with no cast (was `as unknown as WorkspacePaneEvent`).
         dispatch("workspace", buildComposeApplyEvent(ledgerRef, bindingId, sessionId));
+        // Return the applied compose ledger key so the FR-17 undo/replace affordance (task 034)
+        // can target THIS edit for a durable supersession.
+        return ledgerRef;
       } catch {
         // Non-fatal: the compose SSE frame + ComposeWorkspace refresh-materialize
         // path (ADR-040) still recover the drafted content on next load.
+        return null;
       }
     },
     [getSessionId, bffBaseUrl, authenticatedFetch, dispatch]
   );
+
+  // ── FR-17 undo/replace via ledger supersession (task 034) ────────────────
+  // "undo that" / "try another approach" retract the last AI-applied redline as a DURABLE ledger
+  // supersession (a new superseding `compose` SessionOutput), never a client DOM undo (ADR-040). The
+  // hook re-materializes via the SAME Flow-5 apply signal above (references the ledger entry, not the
+  // payload — ADR-030) + task 033's usePendingRedline. `dispatchApply` wraps the workspace-channel
+  // dispatch so the hook stays decoupled from the bus.
+  const dispatchApply = React.useCallback(
+    (event: ComposeAssistantToWorkspaceFlow) => dispatch("workspace", event as WorkspacePaneEvent),
+    [dispatch]
+  );
+  const supersession = useEditSupersession({ bffBaseUrl, getSessionId, authenticatedFetch, dispatchApply });
+  // Destructure the memoized callbacks so downstream useCallbacks depend on stable identities.
+  const { trackAppliedEdit, undo: undoEdit, tryAnother: tryAnotherEdit } = supersession;
 
   const dispatchComposeAction = React.useCallback(
     (request: ComposeActionRequest): Promise<DispatchConsumerResult> =>
@@ -223,11 +244,30 @@ export function ConversationPane(): React.JSX.Element {
           injection.enqueue(makeLocalAssistantMessage(formatted));
         }
         // Draft-alternative apply leg (Flow 5) — references the ledger entry, never the payload.
-        void emitComposeApplyLeg(request.bindingId);
+        // Capture the applied compose ledger key so the FR-17 undo/replace affordance targets THIS
+        // edit (task 034). Informational actions resolve no compose output → no track → no affordance.
+        void emitComposeApplyLeg(request.bindingId).then((ledgerRef) => {
+          if (ledgerRef) {
+            trackAppliedEdit({ ledgerRef, bindingId: request.bindingId, request });
+          }
+        });
         return dispatched;
       }),
-    [actionQueue, injection, emitComposeApplyLeg]
+    // Depend on the memoized `trackAppliedEdit` (stable), not the whole `supersession` object (new
+    // identity each render) — keeps dispatchComposeAction stable so the bridge registration + serial
+    // queue don't re-register every render.
+    [actionQueue, injection, emitComposeApplyLeg, trackAppliedEdit]
   );
+
+  // FR-17 affordance handlers (task 034). "Try another approach" passes the CURRENT
+  // dispatchComposeAction so the fresh Draft-Alternative re-runs through the serial queue + apply leg
+  // (which re-materializes + re-tracks the new edit); passing it at call time avoids a definition cycle.
+  const handleUndoEdit = React.useCallback(() => {
+    void undoEdit();
+  }, [undoEdit]);
+  const handleReplaceEdit = React.useCallback(() => {
+    void tryAnotherEdit(dispatchComposeAction);
+  }, [tryAnotherEdit, dispatchComposeAction]);
 
   // FR-13 Step 1: publish `dispatchComposeAction` into the cross-pane Compose
   // action bridge so the inline AI toolbar (workspace pane, ComposeAiToolbar's
@@ -460,6 +500,17 @@ export function ConversationPane(): React.JSX.Element {
           {/* Compose three-pane coordination — Assistant leg (Flows 2 + 4).
               Renders nothing until a compose flow fires (task 104). */}
           <ComposeAssistantCoordination />
+
+          {/* FR-17 undo/replace affordance (task 034) — appears after an AI redline is applied;
+              both intents route to durable ledger supersessions (never a DOM undo). */}
+          <EditSupersessionBar
+            lastEdit={supersession.lastEdit}
+            busy={supersession.busy}
+            error={supersession.error}
+            onUndo={handleUndoEdit}
+            onTryAnother={handleReplaceEdit}
+            onDismissError={supersession.clearError}
+          />
 
           {selection.selectionChip !== null && (
             <RefinementChipBar

@@ -39,7 +39,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 031 | FR-15 custom ProseMirror marks (insertion/deletion/commentAnchor) | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
 | 032 | FR-18 serial action queueing in ConversationPane | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
 | 033 | FR-16 pending track-change materialization from ledger (compose disposition) | 3 Inline | 🟢 | 031,016 | ✅ | FULL | opus | high |
-| 034 | FR-17 undo/replace via ledger supersession | 3 Inline | 🟢 (unblocked: 033 ✅ + A0 supersession + E-20) | 033 | 🔄 in-flight (owner chose FULL undo+replace 2026-07-10) | FULL | opus | high |
+| 034 | FR-17 undo/replace via ledger supersession | 3 Inline | 🟢 | 033 | ✅ FULL undo+replace (WAF 5/5 durable supersede endpoint; RTL 4/4 real-bus/TipTap; 0 ADR viol; OutputRouter/Binding untouched; 45.26 MB) | FULL | opus | high |
 | 040 | FR-07 compose-explain-clause Action + Binding | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
 | 041 | FR-08 compose-compare-to-playbook Action + Binding | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
 | 042 | FR-09 compose-draft-alternative Action + Binding (compose disposition) | 4 Catalog | 🟢 | 001,016 | ✅ | FULL | opus | high |
