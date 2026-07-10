@@ -546,11 +546,10 @@ function useSelectionEventDispatch(
         // Flow 1 — always fires on selection-change (even collapsed selections,
         // because subscribers may want to update precedent context as cursor
         // moves through clauses).
-        // Per ADR-030: the Compose discriminants are additive on the existing
-        // `context` channel typed union; we cast through `unknown` because the
-        // PaneEventChannelMap doesn't yet enumerate these Compose additions at
-        // the shared-lib level (compose-contracts.ts is solution-local until a
-        // second consumer needs the types — see Spike #2 §11 / task 041).
+        // Per ADR-030: `compose_selection_changed` is now a TYPED additive
+        // discriminant on the `context` channel (ContextPaneEvent — enumerated at
+        // the shared-lib bus layer by task 104). No `as any` — the literal is
+        // type-checked against the channel union.
         dispatch('context', {
           type: 'compose_selection_changed',
           documentRef,
@@ -561,11 +560,12 @@ function useSelectionEventDispatch(
           },
           sessionId,
           timestamp,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any);
+        });
 
         // Flow 2 — fires only when selection is meaningful (non-collapsed +
         // ≥10 chars) to avoid noise on click-only cursor moves.
+        // `compose_selection_offer` is a TYPED additive discriminant on the
+        // `conversation` channel (ConversationPaneEvent — task 104).
         const isCollapsed = from === to;
         if (!isCollapsed && selectionText.length >= FLOW2_MIN_CHARS) {
           dispatch('conversation', {
@@ -579,8 +579,7 @@ function useSelectionEventDispatch(
             jpsScope: 'compose-selection',
             sessionId,
             timestamp,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          } as any);
+          });
         }
       }, SELECTION_DEBOUNCE_MS);
     };

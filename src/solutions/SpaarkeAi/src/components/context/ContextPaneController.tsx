@@ -186,6 +186,31 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
 
+  // Task 104 — Compose three-pane coordination surface (Flow 1 selection +
+  // Flow 6 derived insights). Read-only (audit-only pane). Sits directly under
+  // the PaneHeader above the stage-adaptive content so compose reactions are
+  // visible regardless of ContextStage.
+  composeCoordination: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXS,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    ...shorthands.borderBottom("1px", "solid", tokens.colorNeutralStroke2),
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  composeInsightRow: {
+    display: "flex",
+    flexDirection: "column",
+    paddingTop: tokens.spacingVerticalXXS,
+  },
+  composeCoordinationTitle: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
+  },
+
   // Content area — scrollable
   content: {
     flex: 1,
@@ -403,6 +428,21 @@ export function ContextPaneController(): React.JSX.Element {
   // so context_highlight events can be forwarded without re-render.
   const highlightRef = React.useRef<ContextWidgetImperativeHandle | null>(null);
 
+  // ── Compose three-pane coordination — CONTEXT leg (task 104 / E2E-R5) ─────
+  //
+  // The Context pane OWNS the reaction for the two Compose flows whose
+  // destination is the Context pane:
+  //   Flow 1 `compose_selection_changed` (Workspace → Context): surface the
+  //     active editor selection (the clause the user is working on).
+  //   Flow 6 `compose_assistant_insight` (Assistant → Context): surface an AI
+  //     derived insight, READ-ONLY (the Context pane is audit-only — never an
+  //     interactive input surface, per project CLAUDE.md).
+  // These reactions used to sit as log-only handlers on the WRONG pane
+  // (ComposeWorkspace); task 104 relocates them here (gap 5.1). The events are
+  // now TYPED discriminants on the `context` channel (ADR-030) — no casts.
+  const [composeSelectionLabel, setComposeSelectionLabel] = React.useState<string | null>(null);
+  const [composeInsights, setComposeInsights] = React.useState<Array<{ kind: string; text: string }>>([]);
+
   // Keep contextStage in sync with shell stage changes (fallback when no
   // context_update has set a specific stage for the new shell stage).
   //
@@ -480,6 +520,29 @@ export function ContextPaneController(): React.JSX.Element {
         setIsResolving(false);
         // stage transitions are handled by the ShellStageManager via the
         // same event; contextStage will update via the useEffect above.
+        break;
+      }
+
+      case "compose_selection_changed": {
+        // Flow 1 — Workspace → Context. Surface the active editor selection so
+        // the Context pane reflects the clause the user is working on. We keep a
+        // short label only (contextLabel, else a truncated selection preview) —
+        // the full Tier-3 selectionText is NOT persisted or logged.
+        const sel = event.selection;
+        const label = sel?.contextLabel ?? (sel?.selectionText ? sel.selectionText.slice(0, 60) : "");
+        setComposeSelectionLabel(label.length > 0 ? label : "Selection");
+        break;
+      }
+
+      case "compose_assistant_insight": {
+        // Flow 6 — Assistant → Context. Append an AI derived insight, rendered
+        // READ-ONLY (audit-only pane). insightText is user-facing content shown
+        // in the pane (allowed) but never routed to the trace/telemetry channel.
+        if (event.insightText) {
+          const kind = event.insightKind ?? "summary";
+          const text = event.insightText;
+          setComposeInsights((prev) => [...prev, { kind, text }]);
+        }
         break;
       }
 
@@ -948,6 +1011,38 @@ export function ContextPaneController(): React.JSX.Element {
           />
         }
       />
+
+      {/* Task 104 — Compose coordination surface (Flow 1 selection + Flow 6
+          insights). Read-only; only rendered when a compose flow has fired. */}
+      {(composeSelectionLabel !== null || composeInsights.length > 0) && (
+        <div className={styles.composeCoordination} data-testid="context-compose-coordination">
+          {composeSelectionLabel !== null && (
+            <div data-testid="context-compose-selection">
+              <Text size={200} className={styles.composeCoordinationTitle}>
+                Working on:{" "}
+              </Text>
+              <Text size={200}>{composeSelectionLabel}</Text>
+            </div>
+          )}
+          {composeInsights.length > 0 && (
+            <div data-testid="context-compose-insights">
+              <Text size={200} className={styles.composeCoordinationTitle}>
+                Derived insights
+              </Text>
+              {composeInsights.map((ins, i) => (
+                <div
+                  key={i}
+                  className={styles.composeInsightRow}
+                  data-testid="context-compose-insight"
+                  data-insight-kind={ins.kind}
+                >
+                  <Text size={200}>{ins.text}</Text>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Content — adaptive based on stage and event state */}
       {renderContent()}

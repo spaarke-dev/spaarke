@@ -60,7 +60,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 062 | FR-33 compaction over ledger + cross-version persistence (DocumentId+MatterId) | 6 Memory | 🟢 | 061 | ✅ | STANDARD | sonnet | high |
 | 063 | FR-30 workspace-scope MemoryItems via gated memory.write | 6 Memory | 🔴 | none | ⛔ | FULL | sonnet | high |
 | 064 | FR-32 Context-pane provenance + D-F4 trace hosting | 6 Memory | 🔴 | none | ⛔ | FULL | sonnet | high |
-| 070 | FR-34 activate six coordinated flows (PaneEventBus choreography) | 7 Coord | 🟡 | 030,031 | 🔲 | FULL | opus | high |
+| 070 | FR-34 activate six coordinated flows (PaneEventBus choreography) | 7 Coord | 🟡 | 030,031 | ⭐ SUPERSEDED by 104 | FULL | opus | high |
 | 071 | FR-34 D-F3 UI ack-on-frame-id | 7 Coord | 🔴 | 070 | ⛔ | FULL | sonnet | high |
 | 072 | FR-35 Document Q&A over session-mounted document (stretch) | 7 Coord | 🟢 | none | 🔲 | STANDARD | sonnet | high |
 | 080 | R1 spec.md amendment (two Word-native non-goals → "shipped in R2") | 8 Wrap | 🟢 | none | ✅ | MINIMAL | sonnet | high |
@@ -82,7 +82,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 101 | E2E-R2 AI-action activation (toolbar bindingId registration + 2 missing triggers + 084 HTTP-slice test) | 2 dispatch | 🟢 (code); 047 deploy owner-run | 016,046 | 🔲 | FULL | opus | high |
 | 102 | E2E-R3 memory-resume (Load sessionId/matterId + response fields + annotation save route + client + Cosmos) | 4 memory | 🟢 | 060,061,062 | ✅ | FULL | opus | high |
 | 103 | E2E-R4 Word-shuttle wiring (client callers + subscription origin call + config + task 055 deterministic path) | 3 word | 🟡 | 050-054 | 🔲 | FULL | opus | high |
-| 104 | E2E-R5 three-pane coordination (real receivers on Context+Assistant panes + Flows 3/4/6 + typed discriminants) — supersedes/absorbs 070 | 5 three-pane | 🟢 | 030,031,046 | 🔄 | FULL | opus | high |
+| 104 | E2E-R5 three-pane coordination (real receivers on Context+Assistant panes + Flows 3/4/6 + typed discriminants) — supersedes/absorbs 070 | 5 three-pane | 🟢 | 030,031,046 | ✅ | FULL | opus | high |
 
 **Remediation sequencing**: 100 (foundational, SOLO now) → 102 (BFF-heavy) + 104 (frontend) can parallelize (disjoint) → 101 code side (then 047 deploy owner-run) → 103. Each is SOLO-or-disjoint per file-overlap; 100/102/103 all touch ComposeEndpoints.cs so they serialize. The 084 HTTP-boundary compose-dispatch test folds into 101.
 

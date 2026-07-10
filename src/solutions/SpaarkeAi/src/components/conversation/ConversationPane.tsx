@@ -25,6 +25,9 @@ import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type { IChatMessage, DispatchWorkspaceEvent, DispatchConsumerResult } from "@spaarke/ui-components";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
+// Compose three-pane coordination — ASSISTANT leg (task 104 / E2E-R5). Typed
+// receivers for Flow 2 (compose_selection_offer) + Flow 4 (compose_context_offer).
+import { ComposeAssistantCoordination } from "./ComposeAssistantCoordination";
 import { useShellStage, useRestoreContext, usePaneCollapseContext } from "../shell/ThreePaneShell";
 import { HistoryMenu } from "./HistoryOverlay";
 import { CommandHelpPanel } from "./CommandHelpPanel";
@@ -177,7 +180,10 @@ export function ConversationPane(): React.JSX.Element {
         const outputs = (await response.json()) as unknown;
         const ledgerRef = resolveCurrentComposeLedgerRef(outputs, bindingId);
         if (!ledgerRef) return; // not a compose-writing action (e.g. explain/compare)
-        dispatch("workspace", buildComposeApplyEvent(ledgerRef, bindingId, sessionId) as unknown as WorkspacePaneEvent);
+        // Flow 5 emit — `compose_assistant_insert` is now a TYPED discriminant on
+        // the `workspace` channel (task 104), so the built event is assignable
+        // directly with no cast (was `as unknown as WorkspacePaneEvent`).
+        dispatch("workspace", buildComposeApplyEvent(ledgerRef, bindingId, sessionId));
       } catch {
         // Non-fatal: the compose SSE frame + ComposeWorkspace refresh-materialize
         // path (ADR-040) still recover the drafted content on next load.
@@ -377,6 +383,10 @@ export function ConversationPane(): React.JSX.Element {
             hasStaleEntities={restoreCtx?.hasStaleEntities ?? false}
             conversationSummary={restoreCtx?.conversationSummary}
           />
+
+          {/* Compose three-pane coordination — Assistant leg (Flows 2 + 4).
+              Renders nothing until a compose flow fires (task 104). */}
+          <ComposeAssistantCoordination />
 
           {selection.selectionChip !== null && (
             <RefinementChipBar

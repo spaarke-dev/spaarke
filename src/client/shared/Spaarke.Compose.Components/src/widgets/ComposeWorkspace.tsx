@@ -73,11 +73,11 @@ import type { ComposeActionEnqueue } from './ComposeAiToolbar';
 // cannot resolve). Matches the SpaarkeAi `useWorkspaceLayouts` adapter pattern
 // (documented in `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`).
 import {
-  usePaneEvent,
   type WorkspacePaneEvent,
-  type ContextPaneEvent,
-  type ConversationPaneEvent,
 } from '@spaarke/ai-widgets/events';
+// Compose three-pane coordination — WORKSPACE leg (task 104 / E2E-R5). Typed
+// receivers for Flow 3 (compose_context_insert) + Flow 5 (compose_assistant_insert).
+import { useComposeWorkspaceReceivers } from './useComposeWorkspaceReceivers';
 import { authenticatedFetch } from '@spaarke/auth';
 // FR-02 (task 011): "Search for Document" opens the standard Dataverse lookup dialog
 // (Xrm.Utility.lookupObjects) scoped to `sprk_document`, then resolves the picked
@@ -96,8 +96,6 @@ import type {
   ComposeDocumentRef,
   ComposeUploadRef,
   ComposeAssistantToWorkspaceFlow,
-  ComposeWorkspaceToContextFlow,
-  ComposeWorkspaceToAssistantFlow,
   AnchoredAnnotation,
   DefinedTerm,
   ComposeActionHistoryEntry,
@@ -106,6 +104,29 @@ import type {
 // Re-export for consumers wiring the FR-29/FR-33 rehydrate state (annotations authoring UX is a
 // follow-up task; this workspace only receives + stores what LoadAsync's response carries).
 export type { AnchoredAnnotation, DefinedTerm, ComposeActionHistoryEntry } from '../types/compose-contracts';
+
+/**
+ * Rebuild the rich `ComposeAssistantToWorkspaceFlow` (Flow 5 reducer payload)
+ * from the typed `workspace` channel event (task 104). Only reached on the
+ * LEGACY no-`ledgerRef` path (the `ledgerRef` path materializes directly and
+ * returns first). Zero casts — every field is read from the now-typed
+ * WorkspacePaneEvent compose fields with honest defaults for the R1 shape.
+ */
+function toAssistantInsertPayload(event: WorkspacePaneEvent): ComposeAssistantToWorkspaceFlow {
+  return {
+    type: 'compose_assistant_insert',
+    documentRef: event.documentRef ?? { speDriveItemId: '' },
+    sourceNodeId: event.sourceNodeId ?? '',
+    sourcePlaybookId: event.sourcePlaybookId ?? '',
+    contentHtml: event.contentHtml ?? '',
+    format: event.format ?? 'html',
+    insertMode: event.insertMode ?? 'insert-at-cursor',
+    requireUserConfirm: event.requireUserConfirm ?? true,
+    sessionId: event.sessionId ?? '',
+    timestamp: event.timestamp ?? new Date().toISOString(),
+    ledgerRef: event.ledgerRef,
+  };
+}
 
 // Re-export types for backwards-compatible consumer imports.
 export type { ComposeCheckoutStatus, ComposeWorkspaceState, ComposeWorkspaceAction } from './ComposeWorkspace.types';
@@ -863,63 +884,42 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   );
 
   // -------------------------------------------------------------------------
-  // PaneEventBus subscribers — Flow 1, 2, 5 (R1 WIRED per matrix)
+  // PaneEventBus receivers — Compose three-pane coordination, WORKSPACE leg
+  // (task 104 / E2E-R5; supersedes/absorbs task 070). The Workspace pane OWNS
+  // only the two flows whose reaction is an editor mutation:
+  //   Flow 3 `compose_context_insert`  — insert a precedent clause at cursor.
+  //   Flow 5 `compose_assistant_insert` — materialize an AI draft (FROM the
+  //     stored ledger entry when `ledgerRef` present — ADR-040 render-follows-
+  //     store; else the legacy R1 manual-confirm staging path).
+  // Flows 1/2/6 react on the Context / Assistant panes (ContextPaneController /
+  // ComposeAssistantCoordination) — ComposeWorkspace emits/relays but is NEVER
+  // the terminal handler for those. Reception is via the typed
+  // `useComposeWorkspaceReceivers` hook (zero `as any`; discriminants enumerated
+  // on the shared-lib bus union).
   // -------------------------------------------------------------------------
-
-  // Flow 1 — `compose_selection_changed` on `context`. R1: LOG only.
-  usePaneEvent('context', (event: ContextPaneEvent) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const e = event as unknown as { type?: string };
-    if (e.type !== 'compose_selection_changed') return;
-    const narrowed = event as unknown as ComposeWorkspaceToContextFlow;
-    // eslint-disable-next-line no-console
-    console.info('[ComposeWorkspace] Flow 1 (selection_changed) observed', {
-      sessionId: narrowed.sessionId,
-      timestamp: narrowed.timestamp,
-      speId: narrowed.documentRef?.speDriveItemId,
-    });
-  });
-
-  // Flow 2 — `compose_selection_offer` on `conversation`. R1: LOG only.
-  usePaneEvent('conversation', (event: ConversationPaneEvent) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const e = event as unknown as { type?: string };
-    if (e.type !== 'compose_selection_offer') return;
-    const narrowed = event as unknown as ComposeWorkspaceToAssistantFlow;
-    // eslint-disable-next-line no-console
-    console.info('[ComposeWorkspace] Flow 2 (selection_offer) observed', {
-      sessionId: narrowed.sessionId,
-      timestamp: narrowed.timestamp,
-      jpsScope: narrowed.jpsScope,
-      speId: narrowed.documentRef?.speDriveItemId,
-    });
-  });
-
-  // Flow 5 — `compose_assistant_insert` on `workspace`.
-  // FR-04 (task 016): when the signal carries a `ledgerRef`, materialize the drafted content
-  // FROM the stored ledger entry (ADR-040 render-follows-store) — never from the event payload.
-  // A legacy Flow-5 event without a ledgerRef keeps the R1 manual-confirm staging path
-  // (Spike #2 §10.3).
-  usePaneEvent('workspace', (event: WorkspacePaneEvent) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const e = event as unknown as { type?: string };
-    if (e.type !== 'compose_assistant_insert') return;
-    const narrowed = event as unknown as ComposeAssistantToWorkspaceFlow;
-    // eslint-disable-next-line no-console
-    console.info('[ComposeWorkspace] Flow 5 (assistant_insert) observed', {
-      sessionId: narrowed.sessionId,
-      timestamp: narrowed.timestamp,
-      sourceNodeId: narrowed.sourceNodeId,
-      insertMode: narrowed.insertMode,
-      ledgerRef: narrowed.ledgerRef,
-    });
-
-    if (narrowed.ledgerRef) {
-      void materializeComposeDraftFromLedger(narrowed.ledgerRef);
-      return;
-    }
-
-    dispatch({ kind: 'pendingAssistantInsert', payload: narrowed });
+  useComposeWorkspaceReceivers({
+    // Flow 3 — Context → Workspace: insert the precedent/library clause into the
+    // editor at cursor as a pending insertion (the editor's materialize seam).
+    onContextInsert: (event) => {
+      const html = event.contentHtml ?? '';
+      if (!html) return;
+      const clauseId = event.sourceClauseId ?? 'context-insert';
+      editorRef.current?.materializeComposeDraft(
+        { new_text: html },
+        { ledgerRef: `context-insert:${clauseId}`, bindingId: clauseId, turn: 0 }
+      );
+    },
+    // Flow 5 — Assistant → Workspace: materialize FROM the stored ledger entry
+    // when a `ledgerRef` is present (ADR-040); else keep the R1 manual-confirm
+    // staging path. Runtime contract preserved verbatim from the prior inline
+    // receiver — only the (now-typed) event access + call site changed.
+    onAssistantInsert: (event) => {
+      if (event.ledgerRef) {
+        void materializeComposeDraftFromLedger(event.ledgerRef);
+        return;
+      }
+      dispatch({ kind: 'pendingAssistantInsert', payload: toAssistantInsertPayload(event) });
+    },
   });
 
   // FR-04 refresh-durability (task 016): on (re)load of a session, re-materialize the CURRENT

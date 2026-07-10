@@ -118,6 +118,49 @@
   </execution>
 
   <notes>
-    (to be filled by the executing agent)
+    DONE 2026-07-10 (opus/high, FULL rigor). Client-only; NO BFF/C# touched. cleanGuid N/A (no Dataverse writes).
+
+    Gap 5.2 (typed discriminants) — CLOSED. The real bus union lives in @spaarke/ai-widgets
+    (PaneEventTypes.ts), NOT events-components (the POML file-list was uncertain). Added the 6
+    compose_* discriminants additively to the 3 channel unions (WorkspacePaneEvent: Flows 3+5;
+    ContextPaneEvent: Flows 1+6; ConversationPaneEvent: Flows 2+4) + optional payload fields + 2
+    structural sub-types (ComposeFlowDocumentRef, ComposeFlowSelection) declared at the bus layer to
+    avoid a package-graph cycle (compose-contracts.ts already imports PaneChannel from ai-widgets;
+    ai-widgets must not import back). PaneChannel unchanged (still 4 members — added ZERO channels;
+    ADR-030 "no new channel" respected). ZERO `as any` on compose events (removed 2 in ComposeEditor,
+    1 `as unknown as` in composeApplyLeg, 3 `as unknown as` in ComposeWorkspace receivers). No invented
+    names (compose_action_request/compose_edit_apply_request appear ONLY in pre-existing guard-comments).
+    compose-contracts.ts type DEFS untouched (102's ComposeActionHistoryEntry preserved); its rich
+    interfaces are structurally assignable to the extended channel unions.
+
+    Gap 5.1 (real receivers on owning panes) — CLOSED. Flows relocated/built:
+      Flow 1 (Workspace→Context)  compose_selection_changed  → ContextPaneController (was log-only on ComposeWorkspace) — surfaces active clause.
+      Flow 2 (Workspace→Assistant) compose_selection_offer    → ComposeAssistantCoordination (new; was log-only on ComposeWorkspace) — action affordance.
+      Flow 3 (Context→Workspace)   compose_context_insert     → useComposeWorkspaceReceivers → editor materialize (BUILT — was stub).
+      Flow 4 (Context→Assistant)   compose_context_offer      → ComposeAssistantCoordination (BUILT — was stub) — precedent staged.
+      Flow 5 (Assistant→Workspace) compose_assistant_insert   → useComposeWorkspaceReceivers (relocated from inline; runtime contract preserved verbatim — ledgerRef materialize else manual-confirm).
+      Flow 6 (Assistant→Context)   compose_assistant_insight  → ContextPaneController (BUILT — was stub) — read-only derived insight (audit-only pane).
+    ComposeWorkspace now EMITS/relays only + owns the two →Workspace editor-mutation flows (3,5); it is
+    NOT the terminal handler for 1/2/6.
+
+    Task 070 FOLDED IN: 070 was 🔲 (never implemented) — no parallel impl existed to remove; its intent
+    is realized as ONE coordination layer (this task). Component Justification §11: 2 new files
+    (useComposeWorkspaceReceivers hook + ComposeAssistantCoordination component) exist so the shipped
+    receivers are independently MOUNTED+REACHABLE-testable on a real bus without a full TipTap/AiSession
+    mount (DoD row 3) and to consolidate the flows; both are consumed by the running host.
+
+    Forcing function: src/solutions/SpaarkeAi/src/components/shell/__tests__/three-pane-compose-coordination.e2e.test.tsx
+    — REAL PaneEventBus (not mocked), all 3 receiver surfaces co-mounted under ONE PaneEventBusProvider;
+    per-flow emit-on-source → assert-receiving-pane-effect (+ misroute-isolation regressions). 7/7 PASS.
+
+    Verify: tsc clean — ai-widgets (rebuilt dist), compose-components, SpaarkeAi surface-gate (0 surface-owned;
+    63 pre-existing shared-lib errs unrelated). events-components has NO typecheck script + is not in the
+    change path → N/A. jest: forcing-function 7/7; regression compose-components 22/22 (ComposeWorkspace
+    browse/search/upload, composeActionBridge, ComposeEditor), SpaarkeAi 83/83 (ContextPaneController,
+    all ConversationPane suites, composeApplyLeg). Flow 5 still works (composeApplyLeg + ComposeWorkspace
+    tests green). Step 9.5 code-review + adr-check: PASS (ADR-030 additive/typed/5-channel-cap respected;
+    ADR-015 no Tier-3 logging — selectionText read only for a truncated UI label; ADR-021 tokens only).
+    No BFF publish-size needed (client-only). Topology confirmed: App.tsx always mounts ThreePaneShell;
+    composeMode=editor co-mounts ComposeWorkspace + Context/Assistant panes under one bus (no escalation).
   </notes>
 </task>
