@@ -1,7 +1,7 @@
 <task id="AIR2-056" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Portfolio fresh-retrieval bias — Memory.Conversation retrieval policy</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>M — G-R2-B Memory</phase>
     <gate>G-R2-B (memory)</gate>
     <estimated-effort>1 day</estimated-effort>

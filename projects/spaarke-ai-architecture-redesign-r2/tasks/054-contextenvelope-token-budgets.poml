@@ -1,7 +1,7 @@
 <task id="AIR2-054" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>ContextEnvelope token budgets — fix against task-002 measurement; breach-fails-eval</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>M — G-R2-B Memory</phase>
     <gate>G-R2-B (memory)</gate>
     <estimated-effort>1.5 days</estimated-effort>
