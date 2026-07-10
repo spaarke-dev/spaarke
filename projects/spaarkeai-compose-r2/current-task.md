@@ -46,10 +46,18 @@
 
 **▶ Owner runs Tier-1 UAT** (script: `notes/UAT-tier1-getting-started.md`) against the live sandbox — NOT a gate for continuing work (owner directive 2026-07-10: "I'll UAT and come back with feedback"). Bring UAT results back for gap remediation. Owner queue stays: 047 (Tier-2 AI actions) → 056 (Tier-3 webhook) → merge-to-master (core-first) → 034 undo decision.
 
-**▶ CONTINUING (non-UAT-gated work, 2026-07-10):**
-- 🔄 **055 RUNNING** (agent, sonnet) — FR-28 push/save DETERMINISTIC half (orchestration + Tier-2c preview computation + per-step status producer over task-050 writer + SPE save-back; Redis job state). Gate-dialog + OutcomeCard UI halves stay a SEAM pending core A0 (GateDecision v2 / JobAwareCompletionState v1) — escalation trigger armed.
-- ✅ **Index reconciled to reality**: 046 🔲→✅ (POML completed), 017 → ✅◐ deployed-2026-07-10 (mount-verify = owner Tier-1 UAT), 084 → ✅ via 101's ComposeDispatchEndpointContractTests (E-20 landed; confirm at 090), 070 ⭐ superseded-by-104.
-- **Remaining actionable (non-owner) queue after 055**: 072 (Doc Q&A stretch, inherits 104 Flow-6) · 081 (publish-size/CVE/NetArch verify — needs BFF build, run when no agent building) · 083 (AnchoredAnnotation Path-A code-review sign-off, MINIMAL). Owner-gated: 034/047/056/082. Core-blocked: 063/064/071. No more independent work remains within the hard limits. **OWNER wake-up queue** (all owner/live-env): (1) **deploy** BFF (017) + SpaarkeAi code page to sandbox → run **Tier-1 UAT** (script staged); (2) **047** catalog deploy → Tier-2 (AI actions) + flips /healthz green; (3) **056** webhook KV config → Tier-3 (instant Word return); (4) **merge to master** after UAT (coordinate core-first per the handoff); (5) the **034 undo/replace scope** decision (still OPEN). Expect Tier-1 UAT to surface 1–3 real-env gaps (auth/container-resolution/CORS) — that is the point of deploying early.
+**▶ CONTINUED (non-UAT-gated work, 2026-07-10) — DONE this cycle:**
+- ✅ **055** FR-28 push/save DETERMINISTIC half (`14968ddc1`) — ComposeService orchestration + ComposePushSavePreviewCalculator + ComposePushSaveStatusStore (Redis) + push-preview route; 15 unit + WebApplicationFactory forcing test (4/4, incl. route-existence proof + etag-412 no-partial-write + Redis-persisted state through the wire). **Sent the agent back once** to add the WAF test — held 055 to the same E2E DoD as every other task (service-only tests didn't cross the boundary). Gated UI halves = clean seam pending core A0.
+- ✅ **081** BFF-hygiene NFRs (`e18d9170b`) — publish 45.27 MB compressed (−4.36 vs baseline; no lever needed), no new CVE, NetArchTest facade 2/2. Report: `notes/publish-size-cve-netarch-verification.md`. ADR-029 baseline ratcheted.
+- ✅ **083** AnchoredAnnotation Path-A ACCEPT (`e18d9170b`) — 5/5 claims verified; implementation self-documents the boundary; facade-enforced. Report: `notes/anchored-annotation-path-a-signoff.md`.
+- ✅ **Index reconciled**: 046 →✅, 017 →✅◐ deployed, 084 →✅ via 101, 070 ⭐ superseded.
+
+**▶ BOUNDARY REACHED — only ONE non-gated actionable task remains:**
+- **072** (FR-35 Document Q&A over session-mounted document) — 🟢 STANDARD, has POML, inherits 104's Flow-6. **STRETCH goal.** Awaiting owner priority call (stretch + imminent UAT feedback = judgment decision, not an obvious default).
+- **Owner-gated**: 034 (undo scope decision, OPEN) · 047 (Tier-2 catalog deploy) · 056 (Tier-3 webhook config) · 082 (flagship browser gate) · 017 mount-verify (= Tier-1 UAT).
+- **Core-blocked (⛔)**: 063/064 (memory.write / D-F4 trace) · 071 (UI ack-on-frame-id) · 055 gated-UI + 072 Flow-6 depth both attach to core Phase A0 contracts.
+- **090 wrap-up**: needs all of the above; not yet startable.
+- **Low-value optional**: 001/008 spikes. No more independent work remains within the hard limits. **OWNER wake-up queue** (all owner/live-env): (1) **deploy** BFF (017) + SpaarkeAi code page to sandbox → run **Tier-1 UAT** (script staged); (2) **047** catalog deploy → Tier-2 (AI actions) + flips /healthz green; (3) **056** webhook KV config → Tier-3 (instant Word return); (4) **merge to master** after UAT (coordinate core-first per the handoff); (5) the **034 undo/replace scope** decision (still OPEN). Expect Tier-1 UAT to surface 1–3 real-env gaps (auth/container-resolution/CORS) — that is the point of deploying early.
 
 ---
 
