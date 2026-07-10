@@ -534,7 +534,23 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
     dispatch({ kind: 'requestSave' });
     try {
-      const bytes = await editorRef.current.serialize();
+      // FR-06a (task 015) upload fidelity branch: an UNEDITED mount must persist the
+      // pristine ORIGINAL bytes byte-identical — avoiding the lossy mammoth
+      // `docxToTipTapHtml` -> `tipTapToDocxBytes` round-trip for a file the user never
+      // touched. `editorRef.current.isDirty()` is the editor's OWN authoritative dirty
+      // flag (ComposeEditor's internal `dirtyRef`), read fresh at Save time — this is
+      // deliberately NOT the local `isDirty` React state above (which only gates the
+      // toolbar button's enabled/disabled visual and can lag behind an in-flight
+      // mammoth import; see DEF-01). `state.docxBytes` is the retained ORIGINAL mount
+      // bytes: set once by the `loadSucceeded`/`mountTransient` reducer actions (see
+      // ComposeWorkspace.types.ts) and never mutated by any other action for the life
+      // of the mount, so it is still the pristine upload/load payload at Save time.
+      // Only a genuinely dirty editor (or the defensive fallback when, unexpectedly,
+      // no original bytes were retained) pays the regeneration cost via the EXISTING
+      // `tipTapToDocxBytes` path — that path is otherwise unchanged.
+      const editorIsDirty = editorRef.current.isDirty();
+      const bytes =
+        editorIsDirty || !state.docxBytes ? await editorRef.current.serialize() : state.docxBytes;
       const url = `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(state.documentRef.speDriveItemId)}/save`;
 
       // Encode bytes -> base64. ASP.NET Core deserializes byte[] from
@@ -604,7 +620,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const message = err instanceof Error ? err.message : String(err);
       dispatch({ kind: 'saveFailed', errorMessage: `Save failed: ${message}` });
     }
-  }, [state.status, state.documentRef, state.sessionId, bffBaseUrl, effectiveDriveId, tenantId]);
+  }, [state.status, state.documentRef, state.docxBytes, state.sessionId, bffBaseUrl, effectiveDriveId, tenantId]);
 
   // Keyboard shortcut: Ctrl/Cmd+S → save.
   React.useEffect(() => {
