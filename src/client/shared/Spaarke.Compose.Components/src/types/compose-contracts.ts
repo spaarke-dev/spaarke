@@ -176,6 +176,34 @@ export interface DefinedTerm {
   provenance?: AnchoredAnnotationProvenance;
 }
 
+/**
+ * R2 action-history entry (spaarkeai-compose-r2 FR-33 / task 102) — a read-only projection of one
+ * prior ledger action ("prior decision") restored alongside {@link AnchoredAnnotation}s when a
+ * document reopen RESUMES its session (design.md §8 cross-version persistence). Client mirror of
+ * `Sprk.Bff.Api.Services.Compose.ComposeActionHistoryEntry`; camelCase per the Web serializer.
+ * This is a QUERY RESULT projected from the session ledger, never a stored structure — the workspace
+ * receives it on the Load response and (in a follow-up UI task) renders it read-only in the Context
+ * pane. Identifiers only (Tier 1 safe).
+ */
+export interface ComposeActionHistoryEntry {
+  /** Addressable ledger key `{bindingId}@t{n}` of the underlying output. */
+  outputRef: string;
+  /** Binding (`sprk_playbookconsumer`) id that produced the output. */
+  bindingId: string;
+  /** Stable use-case vocabulary id. */
+  ucId: string;
+  /** Rendering-contract disposition the output was routed under. */
+  disposition: string;
+  /** 1-based session turn (output ordinal) the action was produced on. */
+  turn: number;
+  /** Best-effort args summary correlated from a tool-chain entry sharing the turn. */
+  args?: string[];
+  /** ISO-8601 UTC timestamp the underlying output was written to the ledger. */
+  createdAt: string;
+  /** True when a later-turn output for the same binding exists (ADR-040 supersession). */
+  isSuperseded: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Shared types — pointers, not entities
 // ---------------------------------------------------------------------------

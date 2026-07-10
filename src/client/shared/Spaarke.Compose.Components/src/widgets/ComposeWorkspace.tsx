@@ -100,11 +100,12 @@ import type {
   ComposeWorkspaceToAssistantFlow,
   AnchoredAnnotation,
   DefinedTerm,
+  ComposeActionHistoryEntry,
 } from '../types/compose-contracts';
 
-// Re-export for consumers wiring the FR-29 rehydrate state (annotations authoring UX is a
+// Re-export for consumers wiring the FR-29/FR-33 rehydrate state (annotations authoring UX is a
 // follow-up task; this workspace only receives + stores what LoadAsync's response carries).
-export type { AnchoredAnnotation, DefinedTerm } from '../types/compose-contracts';
+export type { AnchoredAnnotation, DefinedTerm, ComposeActionHistoryEntry } from '../types/compose-contracts';
 
 // Re-export types for backwards-compatible consumer imports.
 export type { ComposeCheckoutStatus, ComposeWorkspaceState, ComposeWorkspaceAction } from './ComposeWorkspace.types';
@@ -180,6 +181,16 @@ export interface ComposeWorkspaceProps {
 
   /** Optional initial ChatSession id (correlation). */
   initialSessionId?: string;
+
+  /**
+   * FR-33 (task 102, gap 4.1): optional Matter id completing the cross-version resume key
+   * (`DocumentId + MatterId`, design.md §8). When the host is a Matter workspace, forwarding it on
+   * the Load request lets the BFF resume the SAME session for this document + matter across a Word
+   * round-trip (a new DOCX version never changes the key), restoring prior annotations, defined
+   * terms, and action history. Optional — omitting it preserves the DocumentId-only resume match
+   * (backward compatible). The BFF binds it as an optional query param.
+   */
+  matterId?: string;
 
   /** BFF base URL (host only, e.g. `https://host.azurewebsites.net`). */
   bffBaseUrl: string;
@@ -297,6 +308,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     initialDocumentRef,
     initialUploadRef,
     initialSessionId,
+    matterId,
     bffBaseUrl,
     driveId,
     tenantId,
@@ -347,17 +359,31 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const [composeDraftError, setComposeDraftError] = React.useState<string | null>(null);
 
   // -------------------------------------------------------------------------
-  // FR-29 (R2, task 060) — anchored annotations + defined-terms rehydrate
+  // FR-29 / FR-33 (R2, tasks 060/102) — anchored annotations + defined-terms +
+  // action-history rehydrate, and annotation save-on-mutation
   // -------------------------------------------------------------------------
-  // Restored from the Load response's `anchoredAnnotations`/`definedTermsTracking` fields
-  // (design.md §8) when the BFF's `LoadComposeDocumentResponse` carries them — see the Load
-  // effect below. NOTE (deferred wiring, see task 060 report): the BFF Load endpoint
-  // (`ComposeEndpoints.Load` → `LoadComposeDocumentResponse`) does not yet project these two
-  // fields onto the wire response, so today this always rehydrates to empty until a follow-up
-  // task threads them through. Parsing is defensive/optional so this workspace is ready the
-  // moment that wiring lands, with no further client change needed.
+  // Restored from the Load response's `anchoredAnnotations`/`definedTermsTracking`/`actionHistory`
+  // fields (design.md §8) — task 102 (gaps 4.1/4.2/4.4) wired the BFF Load endpoint to (a) RESUME
+  // the prior session for this document+matter and (b) PROJECT these three collections onto the
+  // wire response. `anchoredAnnotations`/`definedTermsTracking` are the single mutable store for
+  // this workspace (no parallel store); `actionHistory` is a read-only projection restored for a
+  // future Context-pane render.
   const [anchoredAnnotations, setAnchoredAnnotations] = React.useState<AnchoredAnnotation[]>([]);
   const [definedTermsTracking, setDefinedTermsTracking] = React.useState<DefinedTerm[]>([]);
+  const [actionHistory, setActionHistory] = React.useState<ComposeActionHistoryEntry[]>([]);
+
+  // Save-on-mutation sync marker (gap 4.3). Holds a JSON snapshot of the annotation collections as
+  // last SYNCED with the server (hydrated from Load OR just persisted). The persist effect below
+  // POSTs to the session-annotations route only when the live state DIVERGES from this snapshot —
+  // so a hydrate never writes back, and any real mutation (accept/reject/edit, or the Word-return
+  // reanchor write-back once mounted) durably persists so it survives a reopen past the Redis TTL.
+  // Initialized to the EMPTY snapshot so a still-empty session never triggers a spurious write.
+  const annotationsSnapshot = React.useCallback(
+    (a: AnchoredAnnotation[], d: DefinedTerm[]): string =>
+      JSON.stringify({ anchoredAnnotations: a, definedTermsTracking: d }),
+    []
+  );
+  const syncedAnnotationsRef = React.useRef<string>(annotationsSnapshot([], []));
 
   // -------------------------------------------------------------------------
   // Mount/Unmount host hooks per LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT §6
@@ -434,10 +460,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         const qs = new URLSearchParams({ driveId: effectiveDriveId, tenantId });
         if (docRef.sprkDocumentId) qs.set('documentRecordId', docRef.sprkDocumentId);
         if (docRef.fileName) qs.set('displayName', docRef.fileName);
-        // FR-29 (R2, task 060): forward a known prior session id so the BFF can RESUME it
-        // (design.md §8 — annotations are keyed to document identity, surviving a re-open)
-        // instead of always minting a fresh session. Purely additive — omitted when unknown.
+        // FR-29/FR-33 (R2, tasks 060/102 gap 4.1): forward the known prior session id — and, when
+        // the host is a Matter workspace, the matter id — so the BFF RESUMES that session (design.md
+        // §8 — annotations are keyed to document identity + matter, surviving a re-open) instead of
+        // minting a fresh empty one. Purely additive — each omitted when unknown.
         if (initialSessionId) qs.set('sessionId', initialSessionId);
+        if (matterId) qs.set('matterId', matterId);
 
         const url = `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(docRef.speDriveItemId)}?${qs.toString()}`;
 
@@ -466,12 +494,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           fileName?: string;
           size: number;
           correlationId?: string;
-          // FR-29 (R2, task 060, design.md §8): OPTIONAL — present once the BFF Load response
-          // is wired to project ComposeService.LoadAsync's AnchoredAnnotations/
-          // DefinedTermsTracking (see the state note above this effect). Absent today; parsed
-          // defensively so no further client change is needed once that wiring lands.
+          // FR-29/FR-33 (R2, tasks 060/102, design.md §8): the three collections the BFF Load
+          // response now projects from the resumed/created session (gaps 4.2/4.4). Parsed
+          // defensively (optional) so an older BFF that predates the wiring still loads.
           anchoredAnnotations?: AnchoredAnnotation[];
           definedTermsTracking?: DefinedTerm[];
+          actionHistory?: ComposeActionHistoryEntry[];
         };
 
         // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
@@ -481,8 +509,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           bytes[i] = binary.charCodeAt(i);
         }
         if (ac.signal.aborted) return;
-        setAnchoredAnnotations(Array.isArray(payload.anchoredAnnotations) ? payload.anchoredAnnotations : []);
-        setDefinedTermsTracking(Array.isArray(payload.definedTermsTracking) ? payload.definedTermsTracking : []);
+        const hydratedAnnotations = Array.isArray(payload.anchoredAnnotations) ? payload.anchoredAnnotations : [];
+        const hydratedDefinedTerms = Array.isArray(payload.definedTermsTracking) ? payload.definedTermsTracking : [];
+        setAnchoredAnnotations(hydratedAnnotations);
+        setDefinedTermsTracking(hydratedDefinedTerms);
+        setActionHistory(Array.isArray(payload.actionHistory) ? payload.actionHistory : []);
+        // gap 4.3: mark the just-hydrated collections as server-synced so the persist effect below
+        // does NOT write them straight back — only a subsequent LOCAL mutation persists.
+        syncedAnnotationsRef.current = annotationsSnapshot(hydratedAnnotations, hydratedDefinedTerms);
         dispatch({
           kind: 'loadSucceeded',
           docxBytes: bytes.buffer,
@@ -503,7 +537,48 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.status, state.documentRef?.speDriveItemId, bffBaseUrl, effectiveDriveId, tenantId, initialSessionId]);
+  }, [state.status, state.documentRef?.speDriveItemId, bffBaseUrl, effectiveDriveId, tenantId, initialSessionId, matterId]);
+
+  // -------------------------------------------------------------------------
+  // FR-29 (task 102, gap 4.3) — persist anchored annotations + defined-terms on MUTATION
+  // -------------------------------------------------------------------------
+  // Closes the write half so annotations survive a reopen: whenever the live annotation state
+  // DIVERGES from the last server-synced snapshot (a local mutation — accept/reject/edit, or the
+  // Word-return reanchor write-back once that UI is mounted), POST it to the session-annotations
+  // route (`POST /api/compose/sessions/{sessionId}/annotations`, ComposeService.SaveComposeAnnotations
+  // → the ChatSession's mutable collections → Redis hot + Cosmos warm tiers). A hydrate does NOT
+  // write back (the Load effect seeds `syncedAnnotationsRef` to the hydrated snapshot). Reuses the
+  // existing `anchoredAnnotations`/`definedTermsTracking` store — no parallel store, no new service.
+  React.useEffect(() => {
+    if (state.status !== 'loaded' && state.status !== 'saving') return;
+    if (!bffBaseUrl || !tenantId || !state.sessionId) return;
+
+    const snapshot = annotationsSnapshot(anchoredAnnotations, definedTermsTracking);
+    if (snapshot === syncedAnnotationsRef.current) return; // hydrated or unchanged — no write
+
+    const ac = new AbortController();
+    (async () => {
+      try {
+        const url = `${bffBaseUrl}/api/compose/sessions/${encodeURIComponent(state.sessionId)}/annotations`;
+        const response = await authenticatedFetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tenantId, anchoredAnnotations, definedTermsTracking }),
+          signal: ac.signal,
+        });
+        if (response.ok && !ac.signal.aborted) {
+          // Mark this state as server-synced so we don't re-POST it on the next unrelated render.
+          syncedAnnotationsRef.current = snapshot;
+        }
+      } catch {
+        // Non-fatal: a failed annotation persist must never break the editing session. The next
+        // mutation retries (the snapshot still differs from the synced ref).
+      }
+    })();
+
+    return () => ac.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchoredAnnotations, definedTermsTracking, state.status, state.sessionId, bffBaseUrl, tenantId]);
 
   // -------------------------------------------------------------------------
   // Multi-tab BroadcastChannel hook — owns "focus-me" + "force-closed" signaling
@@ -1095,11 +1170,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       aria-label={state.documentRef?.fileName ?? 'Compose workspace'}
       data-compose-workspace-status={state.status}
       data-compose-checkout-status={state.checkoutStatus}
-      // FR-29 (R2, task 060): rehydrated annotation counts — a lightweight, test-observable
-      // signal that the Load response's anchoredAnnotations/definedTermsTracking (once wired,
-      // see the state note above the Load effect) reached this component.
+      // FR-29/FR-33 (R2, tasks 060/102): rehydrated collection counts — a lightweight,
+      // test-observable signal that the Load response's anchoredAnnotations/definedTermsTracking/
+      // actionHistory reached this component (the resume restored prior state).
       data-compose-anchored-annotation-count={anchoredAnnotations.length}
       data-compose-defined-term-count={definedTermsTracking.length}
+      data-compose-action-history-count={actionHistory.length}
       data-testid="compose-workspace"
     >
       {/*

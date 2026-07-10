@@ -6,6 +6,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Compose;
@@ -242,6 +243,40 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        // (14) GET /api/compose/sessions/{sessionId}/annotations — FR-29 (task 102, gap 4.3): read
+        // the CURRENT anchored annotations + defined-terms stored on a Compose session so the client
+        // can rehydrate them (Load already returns them on the document-open path; this is the
+        // standalone read for a Context-pane refresh or a re-sync). Session-keyed because the two
+        // collections live on the ChatSession (ADR-015 Tier 3), exactly matching
+        // ComposeService.GetComposeAnnotationsAsync. Read-only — no SPE/Graph, no AI dispatch
+        // (ADR-013/ADR-039). Injects only IComposeService (the CRUD facade), never an AI internal.
+        group.MapGet("/sessions/{sessionId}/annotations", GetAnnotations)
+            .WithName("ComposeGetAnnotations")
+            .WithSummary("Read a Compose session's anchored annotations + defined-terms (FR-29)")
+            .RequireRateLimiting("ai-context")
+            .Produces<ComposeAnnotationsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        // (15) POST /api/compose/sessions/{sessionId}/annotations — FR-29 (task 102, gap 4.3): the
+        // WRITE half that makes annotations survive a reopen. Persists the client's anchored
+        // annotations + defined-terms onto the EXISTING session via
+        // ComposeService.SaveComposeAnnotationsAsync (partial-replace: a null collection leaves the
+        // stored one unchanged; a non-null one replaces it wholesale). These are MUTABLE session
+        // UI state (accept/reject/edit), NOT the append-only ledger (contrast push-annotations,
+        // which writes native OOXML into the .docx). A malformed ADR-040 provenance ledgerRef 400s;
+        // a missing session 404s. No SPE/Graph, no AI dispatch (ADR-013/ADR-039).
+        group.MapPost("/sessions/{sessionId}/annotations", SaveAnnotations)
+            .WithName("ComposeSaveAnnotations")
+            .WithSummary("Persist a Compose session's anchored annotations + defined-terms (FR-29)")
+            .RequireRateLimiting("ai-upload")
+            .Produces<ComposeAnnotationsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
@@ -781,6 +816,110 @@ public static class ComposeEndpoints
         }
     }
 
+    // FR-29 (task 102, gap 4.3): read a Compose session's anchored annotations + defined-terms.
+    // Pure delegation to IComposeService.GetComposeAnnotationsAsync (the CRUD facade — no AI
+    // internals per ADR-013). Returns empty collections (never null) for a session with none
+    // stored, or an unknown session id — same contract as the service.
+    private static async Task<IResult> GetAnnotations(
+        string sessionId,
+        [FromQuery] string tenantId,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (string.IsNullOrWhiteSpace(sessionId)) return BadRequest("sessionId is required.");
+        if (string.IsNullOrWhiteSpace(tenantId)) return BadRequest("tenantId query parameter is required for multi-tenant isolation.");
+
+        try
+        {
+            var state = await composeService.GetComposeAnnotationsAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+
+            return Results.Ok(new ComposeAnnotationsResponse(
+                SessionId: sessionId,
+                AnchoredAnnotations: state.AnchoredAnnotations,
+                DefinedTermsTracking: state.DefinedTermsTracking,
+                CorrelationId: httpContext.TraceIdentifier));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose get-annotations: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while reading annotations.");
+        }
+    }
+
+    // FR-29 (task 102, gap 4.3): persist a Compose session's anchored annotations + defined-terms.
+    // Delegates to IComposeService.SaveComposeAnnotationsAsync (partial-replace semantics). A
+    // malformed ADR-040 provenance ledgerRef surfaces as ArgumentException → 400; a missing session
+    // surfaces as InvalidOperationException("...not found") → 404.
+    private static async Task<IResult> SaveAnnotations(
+        string sessionId,
+        [FromBody] SaveComposeAnnotationsBody? body,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (string.IsNullOrWhiteSpace(sessionId)) return BadRequest("sessionId is required.");
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+
+        logger.LogInformation(
+            "Compose save-annotations: tenant={TenantId} session={SessionId} annotations={AnnotationCount} definedTerms={DefinedTermCount} TraceId={TraceId}",
+            body.TenantId, sessionId, body.AnchoredAnnotations?.Count, body.DefinedTermsTracking?.Count, httpContext.TraceIdentifier);
+
+        try
+        {
+            var state = await composeService.SaveComposeAnnotationsAsync(
+                new SaveComposeAnnotationsRequest
+                {
+                    TenantId = body.TenantId,
+                    SessionId = sessionId,
+                    AnchoredAnnotations = body.AnchoredAnnotations,
+                    DefinedTermsTracking = body.DefinedTermsTracking,
+                },
+                ct).ConfigureAwait(false);
+
+            return Results.Ok(new ComposeAnnotationsResponse(
+                SessionId: sessionId,
+                AnchoredAnnotations: state.AnchoredAnnotations,
+                DefinedTermsTracking: state.DefinedTermsTracking,
+                CorrelationId: httpContext.TraceIdentifier));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning(ex, "Compose save-annotations: session not found. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status404NotFound,
+                title: "Session Not Found",
+                detail: "The Compose session was not found. Annotations can only be saved onto an existing session (open the document first).",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose save-annotations: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while saving annotations.");
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // FR-03 (task 012): retained-bytes serving for the transient Compose mount.
     // The chat upload pipeline (ChatDocumentEndpoints.UploadDocumentAsync step 9b)
@@ -929,6 +1068,14 @@ public static class ComposeEndpoints
         [FromQuery] string tenantId,
         [FromQuery] Guid? documentRecordId,
         [FromQuery] string? displayName,
+        // FR-29/FR-33 (task 102, gap 4.1 — the linchpin): a reopen carries the KNOWN prior
+        // sessionId (and, when hosted on a Matter, the matterId) so ComposeService.LoadAsync
+        // RESUMES that session — restoring its anchored annotations, defined terms, and action
+        // history — instead of minting a fresh empty session on every reopen. Both are OPTIONAL:
+        // a missing/unmatched sessionId falls back to the R1 mint-new behavior unchanged, and a
+        // null matterId preserves the FR-29 DocumentId-only resume match (backward compatible).
+        [FromQuery] string? sessionId,
+        [FromQuery] string? matterId,
         IComposeService composeService,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
@@ -941,8 +1088,8 @@ public static class ComposeEndpoints
         if (string.IsNullOrWhiteSpace(tenantId)) return BadRequest("tenantId query parameter is required for multi-tenant isolation.");
 
         logger.LogInformation(
-            "Compose load: tenant={TenantId} drive={DriveId} item={DocumentSpeId} record={DocumentRecordId} TraceId={TraceId}",
-            tenantId, driveId, documentSpeId, documentRecordId, httpContext.TraceIdentifier);
+            "Compose load: tenant={TenantId} drive={DriveId} item={DocumentSpeId} record={DocumentRecordId} session={SessionId} matter={MatterId} TraceId={TraceId}",
+            tenantId, driveId, documentSpeId, documentRecordId, sessionId, matterId, httpContext.TraceIdentifier);
 
         try
         {
@@ -953,6 +1100,9 @@ public static class ComposeEndpoints
                 TenantId = tenantId,
                 DocumentRecordId = documentRecordId,
                 DisplayName = displayName,
+                // gap 4.1: honor the incoming resume key so a reopen resumes the SAME session.
+                SessionId = sessionId,
+                MatterId = matterId,
             };
 
             var result = await composeService.LoadAsync(request, httpContext, ct).ConfigureAwait(false);
@@ -966,6 +1116,11 @@ public static class ComposeEndpoints
                 ETag: result.ETag,
                 FileName: result.FileName,
                 Size: result.Size,
+                // gaps 4.2/4.4: surface the three collections the (unchanged) service already
+                // returns from the resumed/created session — previously dropped before the wire.
+                AnchoredAnnotations: result.AnchoredAnnotations,
+                DefinedTermsTracking: result.DefinedTermsTracking,
+                ActionHistory: result.ActionHistory,
                 CorrelationId: httpContext.TraceIdentifier));
         }
         catch (ArgumentException ex)
@@ -1355,7 +1510,10 @@ public sealed record PushAnnotationsResponse(
     [property: JsonPropertyName("annotationCount")] int AnnotationCount,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
-/// <summary>Response shape for <c>GET /api/compose/documents/{id}</c>.</summary>
+/// <summary>Response shape for <c>GET /api/compose/documents/{id}</c>. The three FR-29/FR-33
+/// collections (task 102, gaps 4.2/4.4) are projected from the (unchanged)
+/// <see cref="LoadComposeDocumentResult"/> the service returns for the resumed/created session —
+/// this is what makes a reopen restore prior annotations, defined terms, and action history.</summary>
 public sealed record LoadComposeDocumentResponse(
     [property: JsonPropertyName("documentSpeId")] string DocumentSpeId,
     [property: JsonPropertyName("driveId")] string? DriveId,
@@ -1365,6 +1523,26 @@ public sealed record LoadComposeDocumentResponse(
     [property: JsonPropertyName("eTag")] string? ETag,
     [property: JsonPropertyName("fileName")] string? FileName,
     [property: JsonPropertyName("size")] long? Size,
+    [property: JsonPropertyName("anchoredAnnotations")] IReadOnlyList<AnchoredAnnotation> AnchoredAnnotations,
+    [property: JsonPropertyName("definedTermsTracking")] IReadOnlyList<DefinedTerm> DefinedTermsTracking,
+    [property: JsonPropertyName("actionHistory")] IReadOnlyList<ComposeActionHistoryEntry> ActionHistory,
+    [property: JsonPropertyName("correlationId")] string CorrelationId);
+
+/// <summary>Request body for <c>POST /api/compose/sessions/{sessionId}/annotations</c> (FR-29,
+/// task 102). Partial-replace: a <c>null</c> collection leaves the stored one unchanged; a non-null
+/// (possibly empty) collection replaces it wholesale — mirrors
+/// <see cref="SaveComposeAnnotationsRequest"/> (sessionId comes from the route).</summary>
+public sealed record SaveComposeAnnotationsBody(
+    [property: JsonPropertyName("tenantId")] string TenantId,
+    [property: JsonPropertyName("anchoredAnnotations")] IReadOnlyList<AnchoredAnnotation>? AnchoredAnnotations = null,
+    [property: JsonPropertyName("definedTermsTracking")] IReadOnlyList<DefinedTerm>? DefinedTermsTracking = null);
+
+/// <summary>Response shape for the <c>GET/POST /api/compose/sessions/{sessionId}/annotations</c>
+/// routes (FR-29, task 102) — the CURRENT session collections after the read/write.</summary>
+public sealed record ComposeAnnotationsResponse(
+    [property: JsonPropertyName("sessionId")] string SessionId,
+    [property: JsonPropertyName("anchoredAnnotations")] IReadOnlyList<AnchoredAnnotation> AnchoredAnnotations,
+    [property: JsonPropertyName("definedTermsTracking")] IReadOnlyList<DefinedTerm> DefinedTermsTracking,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/save</c>.</summary>

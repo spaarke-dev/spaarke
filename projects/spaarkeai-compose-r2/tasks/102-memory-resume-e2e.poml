@@ -2,7 +2,7 @@
   <metadata>
     <title>E2E-R3 — Memory / annotations / cross-version resume survives a reopen (Cluster 4)</title>
     <phase>9 E2E Remediation</phase>
-    <status>in-progress</status>
+    <status>completed</status>
     <estimated-hours>14</estimated-hours>
     <effort>high</effort>
     <dependencies>060, 061, 062</dependencies>
@@ -121,6 +121,55 @@
   </execution>
 
   <notes>
-    (to be filled by the executing agent)
+    Completed 2026-07-10 (SOLO, FULL rigor, opus/high). Made the memory/annotations/cross-version
+    resume slice reachable end-to-end over HTTP WITHOUT rewriting the (correct) ComposeService
+    resume branch (~154-176) or the action-history method (~995-1050) — made them reachable +
+    persisted. All 5 Cluster-4 gaps closed.
+
+    Per-gap closure (Cluster 4, all 5 closed):
+    - 4.1 (linchpin) — `ComposeEndpoints.Load` now binds `[FromQuery] string? sessionId` +
+      `[FromQuery] string? matterId` and passes them into `LoadComposeDocumentRequest` (the request
+      DTO already carried both). A reopen with sessionId+matterId now hits `LoadAsync`'s
+      `IsSameCrossVersionBinding` resume branch → the SAME session resumes instead of minting a new
+      empty one. Client `ComposeWorkspace.tsx` already forwarded `sessionId` (task 062); added an
+      optional `matterId` prop forwarded on the Load query (additive; null preserves DocumentId-only
+      resume). Both remain OPTIONAL — a missing/unmatched key falls back to R1 mint-new.
+    - 4.2/4.4 — added `anchoredAnnotations` + `definedTermsTracking` + `actionHistory` to
+      `LoadComposeDocumentResponse`, mapped from the (unchanged) `LoadComposeDocumentResult` the
+      service already returns. Client parses all three (was already parsing annotations defensively;
+      added actionHistory) and exposes counts via `data-compose-*-count` attributes.
+    - 4.3 — added `GET/POST /api/compose/sessions/{sessionId}/annotations` → the existing
+      `GetComposeAnnotationsAsync` / `SaveComposeAnnotationsAsync` (session-keyed, matching the
+      service contract). New DTOs `SaveComposeAnnotationsBody` + `ComposeAnnotationsResponse`. Client
+      persists on mutation via a divergence-guarded effect over the EXISTING
+      `anchoredAnnotations`/`definedTermsTracking` useState (no parallel store, §11): a JSON
+      sync-marker seeded from the Load hydrate means only a real local mutation POSTs (a hydrate
+      never writes back). Malformed ADR-040 ledgerRef → 400; missing session → 404.
+    - 4.5 / DEF-05 — extended `StoredSession` with `AnchoredAnnotations` + `DefinedTermsTracking`
+      (domain records stored directly — §11, no parallel Stored* DTOs) and mapped both in
+      `ChatSessionManager.MapChatSessionToStoredSession` (persist) + `MapStoredSessionToChatSession`
+      (restore). Action history is NOT stored (it projects over the already-persisted `Outputs`).
+
+    Owner constraints honored: FIX-not-defer (DEF-04 + DEF-05 removed from defer-issues.md, marked
+    resolved). cleanGuid — N/A: no Xrm-sourced GUID enters an @odata.bind/entityset URL here
+    (sessionId/matterId/tenantId are query/body values, not OData URLs). No version suffix used.
+    ComposeService resume branch + action-history method NOT rewritten. 063/064 untouched.
+
+    Anti-recurrence test (definition-of-done): tests/integration/contract/Api/Ai/
+    ComposeMemoryResumeEndpointContractTests.cs — WebApplicationFactory with the REAL ComposeService
+    + ChatSessionManager (only SPE/Dataverse/indexing mocked at module boundaries). Drives
+    POST save-annotation → GET Load(sessionId, matterId) through the real routes; asserts (a) the
+    SAME session resumed (loaded.SessionId == the pre-created id, NOT a new one) and (b)
+    anchoredAnnotations + definedTermsTracking + actionHistory all restored. Plus a negative-contrast
+    (reopen WITHOUT sessionId mints a NEW empty session — proves the linchpin is load-bearing), a
+    GET-annotations round-trip, a 404-on-unknown-session, and a 401-unauth. 5/5 pass.
+
+    Verification: BFF build 0 errors; dotnet test 343 pass (5 new + 338 Compose/session regression).
+    compose-components tsc clean + 69/69 jest (LOAD/upload/search paths unbroken). Publish 45.24 MB
+    compressed incl PDBs (< 49.63 baseline, < 60 ceiling; ~0 delta — no new packages). CVE: only the
+    pre-existing Kiota HIGH (GHSA-7j59-v9qr-6fq9), no new. Step 9.5 code-review 0 critical/0 warning;
+    adr-check clean for my changes (ADR-013 Compose-facade NetArchTest green; the 5 NetArchTest
+    failures are the pre-existing baseline task 100 documented — ADR-007/010×3/009 codebase-wide, not
+    my additive changes). No escalations; no owner-only decisions hit.
   </notes>
 </task>
