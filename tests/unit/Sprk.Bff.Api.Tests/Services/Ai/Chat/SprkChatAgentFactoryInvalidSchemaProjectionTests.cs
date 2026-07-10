@@ -285,7 +285,7 @@ public class SprkChatAgentFactoryInvalidSchemaProjectionTests
             .Setup(p => p.GetContextAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
                 It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(),
-                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<SessionOutput>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(ctx);
 
         services.AddSingleton(Mock.Of<IChatClient>());

@@ -39,6 +39,7 @@ public sealed class ContextBinder : IContextBinder
     private readonly ChatSessionManager _sessionManager;
     private readonly IOrganizationalContextProvider _organizationalContextProvider;
     private readonly ICallerContactResolver _callerContactResolver;
+    private readonly ICallerSystemUserResolver _callerSystemUserResolver;
     private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly IMemoryItemStore? _memoryItemStore;
     private readonly TimeProvider _timeProvider;
@@ -91,6 +92,13 @@ public sealed class ContextBinder : IContextBinder
     /// Clock for the Workspace slice's environment-facts (current-date) production (task 053). Optional —
     /// defaults to <see cref="TimeProvider.System"/>; tests inject a fake for a deterministic date slice.
     /// </param>
+    /// <param name="callerSystemUserResolver">
+    /// Deterministic claims→Dataverse-systemuser resolver (F-2 / D3) keying the User slice's user-memory
+    /// RECALL fragment. Optional — when the DI container has no registration (or a caller constructs
+    /// <see cref="ContextBinder"/> directly, e.g. existing tests), the Binder falls back to
+    /// <see cref="NullCallerSystemUserResolver"/> (ADR-032 empty default) so the User slice's user-memory
+    /// fragment stays honestly absent rather than throwing.
+    /// </param>
     public ContextBinder(
         ChatSessionManager sessionManager,
         ILogger<ContextBinder> logger,
@@ -98,12 +106,14 @@ public sealed class ContextBinder : IContextBinder
         ICallerContactResolver? callerContactResolver = null,
         IHttpContextAccessor? httpContextAccessor = null,
         IMemoryItemStore? memoryItemStore = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        ICallerSystemUserResolver? callerSystemUserResolver = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _organizationalContextProvider = organizationalContextProvider ?? new NullOrganizationalContextProvider();
         _callerContactResolver = callerContactResolver ?? NullCallerContactResolver.Instance;
+        _callerSystemUserResolver = callerSystemUserResolver ?? NullCallerSystemUserResolver.Instance;
         _httpContextAccessor = httpContextAccessor;
         _memoryItemStore = memoryItemStore;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -133,8 +143,9 @@ public sealed class ContextBinder : IContextBinder
 
         var operand = ResolveOperand(request);
         var callerContactId = await ResolveCallerContactIdAsync(request, ct).ConfigureAwait(false);
-        var envelope = await AssembleEnvelopeAsync(request, callerContactId, ct).ConfigureAwait(false);
-        var budgetReport = EvaluateAndLogBudget(request, envelope);
+        var (envelope, recordMemoryFragment) =
+            await AssembleEnvelopeAsync(request, callerContactId, ct).ConfigureAwait(false);
+        var budgetReport = EvaluateAndLogBudget(request, envelope, recordMemoryFragment);
         var (fingerprint, updatedSession) = await WriteFingerprintAsync(request, envelope, ct).ConfigureAwait(false);
 
         return new BoundInputs
@@ -144,6 +155,7 @@ public sealed class ContextBinder : IContextBinder
             Fingerprint = fingerprint,
             UpdatedSession = updatedSession,
             BudgetReport = budgetReport,
+            RecordMemoryFragment = recordMemoryFragment,
         };
     }
 
@@ -363,7 +375,7 @@ public sealed class ContextBinder : IContextBinder
     // ── Context envelope assembly (frozen task-015 contract for User/Workspace/Business/Memory/Semantic;
     //    the Organizational slice is read through IOrganizationalContextProvider — task 060, FR-B-11) ──
 
-    private async Task<ContextEnvelope> AssembleEnvelopeAsync(
+    private async Task<(ContextEnvelope Envelope, string? RecordMemoryFragment)> AssembleEnvelopeAsync(
         ContextBindingRequest request, string? callerContactId, CancellationToken ct)
     {
         // Task 053 self-production (FR-B-04): fold the six R1 primitives into the Binder. An EXPLICIT
@@ -387,6 +399,14 @@ public sealed class ContextBinder : IContextBinder
             ? EnvironmentFactsProducer.BuildCurrentDateDirective(_timeProvider.GetUtcNow())
             : request.WorkspaceFragment;
 
+        // User: explicit fragment, else the caller's USER-scope memory RECALL fragment (F-2 / D3). Resolves
+        // the caller's systemuserid (claims→systemuser, server-side only) and renders the same-discipline
+        // fragment; the renderer's RenderStablePrefixAdditions already renders User.Fragment, so F-2 recall
+        // ships through the D1 cutover automatically. Soft-fail to null (never takes down a bind).
+        var userFragment = string.IsNullOrEmpty(request.UserFragment)
+            ? await ResolveUserMemoryFragmentAsync(request, ct).ConfigureAwait(false)
+            : request.UserFragment;
+
         // Memory items: explicit references, else record memory from the store when a host + store are
         // available. DEFENSE-IN-DEPTH mirror filter + soft-fail (store outage → empty, never fails bind).
         var memoryItems = request.MemoryItems;
@@ -396,8 +416,19 @@ public sealed class ContextBinder : IContextBinder
                 request.HostEntityType!, request.HostEntityId!, ct).ConfigureAwait(false);
         }
 
+        // Record-memory PROMPT FRAGMENT (F-2/F-7/D6): produced from the SAME store method the interactive
+        // provider used (byte-identical). Carried on BoundInputs (NOT the envelope — Memory stays
+        // references-only, ADR-040/NFR-07); consumed by the interactive prompt (D1) + dispatch prompt (D6),
+        // and its measured token count feeds the live RecordMemory budget (D4). Soft-fail to null.
+        string? recordMemoryFragment = null;
+        if (hasHost && _memoryItemStore is not null)
+        {
+            recordMemoryFragment = await ResolveRecordMemoryFragmentAsync(
+                request.HostEntityType!, request.HostEntityId!, ct).ConfigureAwait(false);
+        }
+
         var envelope = ContextEnvelopeReferenceProducer.Assemble(
-            userFragment: request.UserFragment,
+            userFragment: userFragment,
             workspaceFragment: workspaceFragment,
             businessFragment: businessFragment,
             conversation: request.ConversationTail,
@@ -414,7 +445,7 @@ public sealed class ContextBinder : IContextBinder
                 ct)
             .ConfigureAwait(false);
 
-        return envelope with
+        var assembled = envelope with
         {
             Organizational = new OrganizationalSlice
             {
@@ -429,6 +460,97 @@ public sealed class ContextBinder : IContextBinder
                 ProviderImplemented = orgResult.ProviderImplemented,
             },
         };
+
+        return (assembled, recordMemoryFragment);
+    }
+
+    // ── User-scope memory recall (F-2 / D3): resolve the caller's systemuserid (server-side, deterministic)
+    //    and render the same-discipline USER prompt fragment. Soft-fail to null (a store outage / unresolved
+    //    caller degrades the User recall fragment to absent; a bind is never taken down by memory). ──────
+
+    private async Task<string?> ResolveUserMemoryFragmentAsync(ContextBindingRequest request, CancellationToken ct)
+    {
+        if (_memoryItemStore is null)
+        {
+            return null;
+        }
+
+        var systemUserId = await ResolveCallerSystemUserIdAsync(request, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(systemUserId))
+        {
+            return null;
+        }
+
+        try
+        {
+            var fragment = await _memoryItemStore
+                .ToUserPromptFragmentAsync(systemUserId, ct)
+                .ConfigureAwait(false);
+            return string.IsNullOrEmpty(fragment) ? null : fragment;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "ContextBinder: user-memory store read failed for the resolved caller — User recall " +
+                "fragment degrades to absent (soft-fail; a bind is never taken down by memory). NFR-07.");
+            return null;
+        }
+    }
+
+    // ── Caller-systemuser resolution (F-2 / D3): mirrors ResolveCallerContactIdAsync — deterministic
+    //    claims→systemuser, server-side only. An explicit pre-resolved id wins; else resolve from the
+    //    caller principal (or the ambient HttpContext.User). NEVER reads Args / an LLM completion. ──────
+
+    private async Task<string?> ResolveCallerSystemUserIdAsync(ContextBindingRequest request, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(request.CallerSystemUserId))
+        {
+            return request.CallerSystemUserId;
+        }
+
+        var principal = request.Caller ?? _httpContextAccessor?.HttpContext?.User;
+        var resolution = await _callerSystemUserResolver.ResolveAsync(principal, ct).ConfigureAwait(false);
+        if (!resolution.IsResolved)
+        {
+            _logger.LogDebug(
+                "ContextBinder: caller-systemuser resolution unresolved (reason={Reason}) — User recall " +
+                "fragment stays absent (F-2 fail-honestly; never a guessed user).",
+                resolution.UnresolvedReason);
+            return null;
+        }
+
+        return resolution.SystemUserId;
+    }
+
+    // ── Record-memory PROMPT FRAGMENT (F-2/F-7/D6): produced from the SAME store method the interactive
+    //    provider used (byte-identical). Soft-fails to null so a store outage never takes down the bind. ──
+
+    private async Task<string?> ResolveRecordMemoryFragmentAsync(
+        string hostEntityType, string hostEntityId, CancellationToken ct)
+    {
+        try
+        {
+            var fragment = await _memoryItemStore!
+                .ToRecordPromptFragmentAsync(hostEntityType, hostEntityId, ct)
+                .ConfigureAwait(false);
+            return string.IsNullOrEmpty(fragment) ? null : fragment;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "ContextBinder: record-memory fragment read failed for host {HostEntityType}/{HostEntityId} — " +
+                "the record-memory prompt fragment degrades to absent (soft-fail). NFR-07.",
+                hostEntityType, hostEntityId);
+            return null;
+        }
     }
 
     // ── Record-memory references (task 053, FR-B-04): read the host record's structured memory and
@@ -499,9 +621,19 @@ public sealed class ContextBinder : IContextBinder
     //    silently truncated — a live turn is not failed on a budget breach (that would 500 a user), but
     //    the golden-utterance eval gate turns the same breach into a hard pre-merge failure (FR-D-02). ──
 
-    private ContextBudgetReport EvaluateAndLogBudget(ContextBindingRequest request, ContextEnvelope envelope)
+    private ContextBudgetReport EvaluateAndLogBudget(
+        ContextBindingRequest request, ContextEnvelope envelope, string? recordMemoryFragment)
     {
-        var report = EnvelopeBudget.Evaluate(envelope);
+        // F-7 (D4): measure the VOLATILE TAIL live. The Conversation ledger tail and the Record-memory
+        // items carry NO content in the envelope (ADR-040 references-only), so their real rendered token
+        // counts are computed HERE from the SAME producers + the SAME estimator the budget-eval tests use
+        // (EnvelopeBudget.EstimateTokens = chars/4) — no new tokenizer. The ~8k Conversation worst case
+        // (task-002 escalation) now logs a live warn on a real turn (breach stays warn-never-500).
+        var conversationTokens = EnvelopeBudget.EstimateTokens(
+            ConversationContextProducer.BuildLedgerOutputsContext(request.LedgerOutputs));
+        var recordMemoryTokens = EnvelopeBudget.EstimateTokens(recordMemoryFragment);
+
+        var report = EnvelopeBudget.Evaluate(envelope, conversationTokens, recordMemoryTokens);
 
         if (report.HasBreach)
         {

@@ -114,6 +114,7 @@ public sealed class SideEffectGateAIFunction : AIFunction
     private readonly ILogger _logger;
     private readonly Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? _sseWriter;
     private readonly Func<bool>? _dispatchUncertaintyProbe;
+    private readonly Func<bool>? _safetyPerimeterDegradedProbe;
 
     /// <param name="inner">The wrapped side-effecting tool (typed-handler adapter).</param>
     /// <param name="declaredClass">The row's declared <c>sprk_sideeffectclass</c> that fired the gate.</param>
@@ -137,8 +138,25 @@ public sealed class SideEffectGateAIFunction : AIFunction
     /// (layer 1, ADR-039's sanctioned decider). Production wires <c>null</c> today (no live
     /// low-confidence producer reaches this gate; genuine capability ambiguity is diverted upstream
     /// by layer 1), so the overlay honestly stays unfired — the gate HONORS a real signal when one
-    /// exists rather than hardcoding it. Threading a real producer (routing candidate-match count /
-    /// content-safety fail-open) is the documented follow-on.
+    /// exists rather than hardcoding it. Threading a real routing-confidence producer is the
+    /// documented follow-on; the content-safety <i>fail-open</i> perimeter signal is a DISTINCT
+    /// overlay (overlay 2) handled by <paramref name="safetyPerimeterDegradedProbe"/>, not here.
+    /// </param>
+    /// <param name="safetyPerimeterDegradedProbe">
+    /// OPTIONAL gate-side safety-perimeter backstop (Policy v2 overlay 2 — F-8 follow-on to task 044).
+    /// When supplied and it returns <c>true</c>, the invocation is evaluated as occurring on a turn
+    /// whose PromptShield perimeter FAILED OPEN (timeout / 429 / 5xx), so gated WRITES (Tier ≥ 2)
+    /// degrade to confirm-required while reads/drafts (Tier ≤ 1) stay fail-open (D-F0(b)). The REAL
+    /// producer is the per-turn <see cref="Safety.PromptShieldResult.FailedOpen"/> verdict computed in
+    /// <see cref="Middleware.SafetyPipelineMiddleware"/>. Production wires <c>null</c> TODAY, for a
+    /// precise reason: that middleware — the ONLY component that runs PromptShield and computes the
+    /// fail-open verdict — is not currently added by <c>SprkChatAgentFactory.WrapWithMiddleware</c>
+    /// (it was dropped from the live pipeline by the R1 dispatcher-deletion, commit 26fde1f68), so
+    /// no live per-turn perimeter verdict is produced at gate time. Activating that perimeter on the
+    /// chat hot path is a security-posture change (pre-LLM shielding + a hard-block leg + latency on
+    /// every turn) and is ESCALATED for human sign-off rather than wired silently here. Until then the
+    /// gate HONORS a real signal when one is threaded (proven by the anti-shim test) and honestly
+    /// stays unfired otherwise — the value flows from the probe and is NEVER hardcoded.
     /// </param>
     public SideEffectGateAIFunction(
         AIFunction inner,
@@ -148,7 +166,8 @@ public sealed class SideEffectGateAIFunction : AIFunction
         string sessionId,
         ILogger logger,
         Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter = null,
-        Func<bool>? dispatchUncertaintyProbe = null)
+        Func<bool>? dispatchUncertaintyProbe = null,
+        Func<bool>? safetyPerimeterDegradedProbe = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _declaredClass = declaredClass;
@@ -158,6 +177,7 @@ public sealed class SideEffectGateAIFunction : AIFunction
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _sseWriter = sseWriter;
         _dispatchUncertaintyProbe = dispatchUncertaintyProbe;
+        _safetyPerimeterDegradedProbe = safetyPerimeterDegradedProbe;
     }
 
     /// <summary>The wrapped inner function (exposed for projection fingerprinting + tests).</summary>
@@ -384,6 +404,14 @@ public sealed class SideEffectGateAIFunction : AIFunction
         // the integration proof fails if this were faked to a constant.
         var dispatchUncertain = _dispatchUncertaintyProbe?.Invoke() ?? false;
 
+        // OPTIONAL safety-perimeter backstop (overlay 2) — HONORED from the injected probe. The REAL
+        // producer is the per-turn PromptShield fail-OPEN verdict (timeout / 429 / 5xx). Like
+        // dispatchUncertain it is NOT hardcoded: the value flows from the probe, so a degraded turn
+        // flips a gated WRITE to confirm-required (Tier ≤ 1 reads/drafts stay fail-open) and the
+        // anti-shim test fails if this were faked. Production passes null TODAY — see the ctor param
+        // remark for the precise, escalated reason the live producer is not yet threaded.
+        var safetyPerimeterDegraded = _safetyPerimeterDegradedProbe?.Invoke() ?? false;
+
         var confident = declaredProfile is not null && !dispatchUncertain;
         var origin = new GateOriginRequest
         {
@@ -397,12 +425,17 @@ public sealed class SideEffectGateAIFunction : AIFunction
             Origin = origin,
             ArgsComplete = argsComplete,
             DispatchUncertain = dispatchUncertain,
-            // No live content-safety / safety-perimeter producer is threaded to THIS gate today: a
-            // Prompt-Shields BLOCKED turn yield-breaks upstream and never reaches the loop, and a
-            // fail-OPEN degradation is not yet propagated here. These stay false honestly; the
-            // overlay plumbing already honors a real signal (documented follow-on to thread one).
+            // Overlay 1 (injection-suspect) has NO distinct live producer: the PromptShield perimeter
+            // is block-or-pass — a detected injection is a HARD BLOCK that yield-breaks upstream and
+            // never reaches this loop, so there is no "flagged-but-proceeding" content-safety verdict
+            // to thread here. The overlay-1 bucket the engine keys on ContentSafetyFlagged is the SAME
+            // bucket dispatchUncertain feeds (ConfirmationPolicyEngine: injectionSuspect =
+            // DispatchUncertain || ContentSafetyFlagged), so overlay 1 is already reachable/honored via
+            // the probe above. Kept honestly false — never a fabricated positive verdict.
             ContentSafetyFlagged = false,
-            SafetyPerimeterDegraded = false,
+            // Overlay 2 (safety-perimeter degraded) — the REAL PromptShield fail-open verdict, routed
+            // through the probe. False when no producer is threaded (today, production); never hardcoded.
+            SafetyPerimeterDegraded = safetyPerimeterDegraded,
             // First evaluation of a fresh invocation — no gate id yet ⇒ ConfirmationState = None
             // (the ADR-040 "no second ask" applies on the resume path, not this first pass).
             Ledger = null,

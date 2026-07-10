@@ -111,6 +111,16 @@ public class PlaybookChatContextProvider : IChatContextProvider
     private readonly Dictionary<string, string?> _entityNameCache =
         new(StringComparer.OrdinalIgnoreCase);
 
+    // F-1/F-2/F-7 envelope-convergence task (D1) — the interactive prompt now CONSUMES the per-turn
+    // ContextEnvelope via the Context Binder (the SAME seam the dispatch path uses): host-identity
+    // (Business), user-memory (User, F-2 recall), and record-memory fragments are produced ONCE by the
+    // Binder and consumed here through ContextEnvelopeRenderer / BoundInputs — the direct producer-append
+    // sites retire on the live path. OPTIONAL: registered only in the compound-ON path (AnalysisServicesModule);
+    // when null (compound-OFF / the many legacy provider tests + BusinessSliceDeterminismContractTests,
+    // which construct this provider WITHOUT a binder) the provider falls back to the shipped direct-append
+    // path — byte-identical output either way (proven by the renderer-vs-legacy parity pins).
+    private readonly IContextBinder? _contextBinder;
+
     public PlaybookChatContextProvider(
         IScopeResolverService scopeResolver,
         IPlaybookService playbookService,
@@ -118,7 +128,8 @@ public class PlaybookChatContextProvider : IChatContextProvider
         ILogger<PlaybookChatContextProvider> logger,
         IMemoryItemStore memoryItemStore,
         IPromptBudgetTracker? promptBudgetTracker = null,
-        IGenericEntityService? entityService = null)
+        IGenericEntityService? entityService = null,
+        IContextBinder? contextBinder = null)
     {
         _scopeResolver = scopeResolver;
         _playbookService = playbookService;
@@ -127,6 +138,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
         _memoryItemStore = memoryItemStore;
         _promptBudgetTracker = promptBudgetTracker;
         _entityService = entityService;
+        _contextBinder = contextBinder;
     }
 
     /// <inheritdoc />
@@ -189,6 +201,8 @@ public class PlaybookChatContextProvider : IChatContextProvider
         ChatHostContext? hostContext = null,
         IReadOnlyList<string>? additionalDocumentIds = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
+        string? sessionId = null,
+        IReadOnlyList<SessionOutput>? ledgerOutputs = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -264,18 +278,15 @@ public class PlaybookChatContextProvider : IChatContextProvider
                 defaultPrompt = BuildDefaultSystemPrompt(null);
             }
 
-            // 6. Append entity metadata enrichment (generic mode)
-            // R7 Wave 12 task 151 (audit 120 Gap B): now async — performs server-side lazy
-            // EntityName fetch when client did not populate it but EntityType + EntityId are set.
-            defaultPrompt = await AppendEntityEnrichmentAsync(defaultPrompt, hostContext, cancellationToken);
-
-            // 7. R6 task 068 (D-C-21 / FR-45), generalized by task 050 (FR-B-01) — append the
-            // cross-session RECORD memory fragment when the host context identifies any record
-            // and the IMemoryItemStore is wired. ADR-015: fragment may carry user-authored facts
-            // (parties / dates / analyses); it lives in the prompt by design, not in logs.
-            // Soft-fails to no-op.
-            defaultPrompt = await AppendRecordMemoryAsync(
-                defaultPrompt, tenantId, hostContext, cancellationToken);
+            // 6 + 7. F-1/F-2/F-7 envelope-convergence (D1): the host-identity (Business), user-memory
+            // (User, F-2 recall), and cross-session record-memory sections are now produced ONCE by the
+            // Context Binder and consumed here via ContextEnvelopeRenderer / BoundInputs (single source —
+            // the SAME seam the dispatch path uses). Falls back to the shipped direct-append path when no
+            // binder is registered (compound-OFF / legacy tests) — byte-identical output either way.
+            var boundGeneric = await ApplyBoundContextAsync(
+                defaultPrompt, tenantId, hostContext, sessionId, ledgerOutputs, cancellationToken);
+            defaultPrompt = boundGeneric.SystemPrompt;
+            var defaultBoundEnvelope = boundGeneric.Envelope;
 
             // Still load document summary for inline context (skipped when documentId is null/empty)
             string? defaultDocSummary = null;
@@ -334,7 +345,8 @@ public class PlaybookChatContextProvider : IChatContextProvider
                 AnalysisMetadata: defaultMetadata,
                 PlaybookId: null,
                 KnowledgeScope: defaultKnowledgeScope,
-                UploadedFiles: normalizedUploadedFiles);
+                UploadedFiles: normalizedUploadedFiles,
+                BoundEnvelope: defaultBoundEnvelope);
         }
 
         // 1. Load playbook to get ActionIds
@@ -377,17 +389,14 @@ public class PlaybookChatContextProvider : IChatContextProvider
         // 4. Enrich system prompt with inline knowledge and skill instructions
         systemPrompt = EnrichSystemPrompt(systemPrompt, knowledgeScope);
 
-        // 5. Append entity metadata enrichment (after all other sections)
-        // R7 Wave 12 task 151 (audit 120 Gap B): now async — performs server-side lazy
-        // EntityName fetch when client did not populate it but EntityType + EntityId are set.
-        systemPrompt = await AppendEntityEnrichmentAsync(systemPrompt, hostContext, cancellationToken);
-
-        // 5b. R6 task 068 (D-C-21 / FR-45), generalized by task 050 (FR-B-01) — append the
-        // cross-session RECORD memory fragment when the host context identifies any record
-        // and the IMemoryItemStore is wired. Same soft-fail posture + budget gating as the
-        // generic-mode path.
-        systemPrompt = await AppendRecordMemoryAsync(
-            systemPrompt, tenantId, hostContext, cancellationToken);
+        // 5 + 5b. F-1/F-2/F-7 envelope-convergence (D1): host-identity (Business), user-memory (User,
+        // F-2 recall), and cross-session record-memory are produced ONCE by the Context Binder and consumed
+        // here via ContextEnvelopeRenderer / BoundInputs (single source — same seam as dispatch). Falls back
+        // to the shipped direct-append path when no binder is registered — byte-identical output either way.
+        var boundPlaybook = await ApplyBoundContextAsync(
+            systemPrompt, tenantId, hostContext, sessionId, ledgerOutputs, cancellationToken);
+        systemPrompt = boundPlaybook.SystemPrompt;
+        var playbookBoundEnvelope = boundPlaybook.Envelope;
 
         // 6. Load document summary for inline context injection
         string? documentSummary = null;
@@ -432,7 +441,8 @@ public class PlaybookChatContextProvider : IChatContextProvider
             AnalysisMetadata: analysisMetadata,
             PlaybookId: playbookId,
             KnowledgeScope: knowledgeScope,
-            UploadedFiles: normalizedUploadedFiles);
+            UploadedFiles: normalizedUploadedFiles,
+            BoundEnvelope: playbookBoundEnvelope);
     }
 
     /// <summary>
@@ -609,21 +619,42 @@ public class PlaybookChatContextProvider : IChatContextProvider
         ChatHostContext? hostContext,
         CancellationToken cancellationToken)
     {
-        // Guard: no host context / no record identity at all. G-P3 UAT round-1 H7
-        // (2026-07-07): EntityType + EntityId are the ONLY hard requirements — the
-        // pre-H7 guards silently dropped the ENTIRE block when the display name could
-        // not be resolved or the page type was unmapped, leaving the loop blind to
-        // its host record (the operator's "what's the link?" turn searched for a
-        // matter NAME lifted from the uploaded document instead of the actual host
-        // record). Name and page-type sentences now degrade individually; the record
-        // identity line always renders.
+        // Direct-append path (the no-binder fallback, retained so BusinessSliceDeterminismContractTests —
+        // constructed WITHOUT a binder — stays green UNEDITED, and compound-OFF is unaffected). Resolves
+        // the host-identity inputs, builds the SHARED HostIdentityProducer block, and applies the guards.
+        var inputs = await ResolveEntityEnrichmentInputsAsync(hostContext, cancellationToken);
+        if (inputs is null)
+        {
+            return systemPrompt;
+        }
+
+        var enrichmentBlock = HostIdentityProducer.BuildEnrichmentBlock(
+            inputs.Value.EntityType, inputs.Value.EntityId, inputs.Value.EntityName, inputs.Value.HumanReadablePageType);
+
+        return AppendEnrichmentBlock(systemPrompt, enrichmentBlock);
+    }
+
+    /// <summary>
+    /// Resolves the host-record identity inputs (guards → server-side name lazy-fetch → page-type mapping)
+    /// — the TOP of the R1 entity-enrichment logic, extracted so BOTH the direct-append fallback
+    /// (<see cref="AppendEntityEnrichmentAsync"/>) and the D1 Context-Binder path resolve them identically
+    /// (feeding the SAME name/page into the Binder's Business fragment → byte-identical output). Returns
+    /// null when there is no host record (the H7 guard). NFR-04: deterministic — no timestamp/GUID minted.
+    /// </summary>
+    private async Task<(string EntityType, string EntityId, string? EntityName, string? HumanReadablePageType)?>
+        ResolveEntityEnrichmentInputsAsync(ChatHostContext? hostContext, CancellationToken cancellationToken)
+    {
+        // Guard: no host context / no record identity at all (G-P3 UAT round-1 H7): EntityType + EntityId
+        // are the ONLY hard requirements; name + page-type sentences degrade individually below.
         if (hostContext is null ||
             string.IsNullOrWhiteSpace(hostContext.EntityType) ||
             string.IsNullOrWhiteSpace(hostContext.EntityId))
-            return systemPrompt;
+        {
+            return null;
+        }
 
-        // Resolve EntityName — populated from client OR server-side lazy-fetch (T151).
-        // Optional since H7: an unresolvable name degrades to the id-only identity line.
+        // Resolve EntityName — populated from client OR server-side lazy-fetch (T151). Optional since H7:
+        // an unresolvable name degrades to the id-only identity line.
         var entityName = hostContext.EntityName;
         if (string.IsNullOrWhiteSpace(entityName))
         {
@@ -631,10 +662,9 @@ public class PlaybookChatContextProvider : IChatContextProvider
                 hostContext.EntityType, hostContext.EntityId, cancellationToken);
         }
 
-        // R7 Wave 12 task 152 (audit 120 Gap C): apply DefaultPageType when client omitted
-        // the field. "unknown" is the client's explicit not-known signal and is NOT defaulted.
-        // Since H7 the page sentence is OPTIONAL — missing/unknown/unmapped page types drop
-        // only the sentence, never the record identity.
+        // R7 Wave 12 task 152 (audit 120 Gap C): apply DefaultPageType when client omitted the field.
+        // "unknown" is the client's explicit not-known signal and is NOT defaulted. Since H7 the page
+        // sentence is OPTIONAL — missing/unknown/unmapped page types drop only the sentence.
         var pageType = string.IsNullOrWhiteSpace(hostContext.PageType)
             ? DefaultPageType
             : hostContext.PageType;
@@ -648,20 +678,22 @@ public class PlaybookChatContextProvider : IChatContextProvider
                 pageType);
         }
 
-        // Build the enrichment block (G-P3 H7 shape): deterministic host-record identity —
-        // entity type + display name (when resolvable) + Dataverse record id — plus the
-        // "this record" binding instruction so utterances like "save this summary to the
-        // matter" / "what's the link?" resolve to the HOST record, never to a lookalike
-        // name found in uploaded-document text. Static per session (prompt-cache-friendly:
-        // lives in the stable context-provider prefix, not the volatile tail).
-        //
-        // Task 053 (FR-B-04): the block string is now produced by the SHARED
-        // HostIdentityProducer (ContextSliceProducers) — the ONE source the Context Binder's
-        // Business slice also uses. The provider keeps its guards, name lazy-fetch, page-type
-        // mapping, and budget gating above/below; only the string build folds in. Byte-identical
-        // to the R1 inline build — BusinessSliceDeterminismContractTests pins it unchanged.
-        var enrichmentBlock = HostIdentityProducer.BuildEnrichmentBlock(
-            hostContext.EntityType, hostContext.EntityId, entityName, humanReadablePageType);
+        return (hostContext.EntityType, hostContext.EntityId, entityName, humanReadablePageType);
+    }
+
+    /// <summary>
+    /// Applies the host-identity block's budget guards + append — the TAIL of the R1 entity-enrichment
+    /// logic, extracted so the direct-append fallback and the D1 Binder path (which passes the byte-identical
+    /// <c>envelope.Business.Fragment</c>) share ONE guard/append implementation. Returns <paramref name="systemPrompt"/>
+    /// unchanged when the block is empty, over the ≤<see cref="MaxEnrichmentTokens"/> cap, or denied by the
+    /// shared budget tracker — byte-identical semantics to the pre-refactor inline tail.
+    /// </summary>
+    private string AppendEnrichmentBlock(string systemPrompt, string? enrichmentBlock)
+    {
+        if (string.IsNullOrEmpty(enrichmentBlock))
+        {
+            return systemPrompt;
+        }
 
         // Guard: enrichment block itself must be ≤ MaxEnrichmentTokens
         var enrichmentTokenEstimate = EstimateTokenCount(enrichmentBlock);
@@ -673,11 +705,10 @@ public class PlaybookChatContextProvider : IChatContextProvider
             return systemPrompt;
         }
 
-        // Guard: total system prompt budget. When the shared per-turn tracker is wired,
-        // it owns the authoritative accounting + truncation telemetry (R6 task 068).
-        // Fallback: when the tracker is absent (legacy tests, pre-task-068 environments),
-        // we re-estimate locally against the static MaxSystemPromptTokenBudget so behaviour
-        // is unchanged on those paths.
+        // Guard: total system prompt budget. When the shared per-turn tracker is wired, it owns the
+        // authoritative accounting + truncation telemetry (R6 task 068). Fallback: when the tracker is
+        // absent (legacy tests, pre-task-068 environments), re-estimate locally against the static
+        // MaxSystemPromptTokenBudget so behaviour is unchanged on those paths.
         if (_promptBudgetTracker is not null)
         {
             if (!_promptBudgetTracker.TryReserve(
@@ -686,7 +717,6 @@ public class PlaybookChatContextProvider : IChatContextProvider
                     sessionId: null,
                     tenantId: null))
             {
-                // Tracker emits truncation telemetry; we log soft-fail rationale here.
                 _logger.LogWarning(
                     "R6 task 068: entity enrichment denied by shared prompt budget tracker (requested={EnrichmentTokens}, remaining={Remaining}); skipping enrichment",
                     enrichmentTokenEstimate, _promptBudgetTracker.Remaining);
@@ -706,6 +736,123 @@ public class PlaybookChatContextProvider : IChatContextProvider
         }
 
         return systemPrompt + "\n\n" + enrichmentBlock;
+    }
+
+    // ── F-1/F-2/F-7 envelope-convergence (D1): the ONE per-turn bind + consumption of the bound envelope
+    //    for the interactive prompt's host-identity (Business), user-memory (User), and record-memory
+    //    sections. When no binder is registered, the shipped direct-append path runs (byte-identical). ──
+
+    private async Task<(string SystemPrompt, PublicContracts.ContextEnvelope? Envelope)> ApplyBoundContextAsync(
+        string systemPrompt,
+        string tenantId,
+        ChatHostContext? hostContext,
+        string? sessionId,
+        IReadOnlyList<SessionOutput>? ledgerOutputs,
+        CancellationToken cancellationToken)
+    {
+        // No binder (compound-OFF / the many legacy provider tests + BusinessSliceDeterminismContractTests):
+        // fall back to the shipped direct-append path — the byte-identical legacy behaviour.
+        if (_contextBinder is null)
+        {
+            systemPrompt = await AppendEntityEnrichmentAsync(systemPrompt, hostContext, cancellationToken);
+            systemPrompt = await AppendRecordMemoryAsync(systemPrompt, tenantId, hostContext, cancellationToken);
+            return (systemPrompt, null);
+        }
+
+        // Resolve the host-identity inputs ONCE so the Binder's Business fragment is byte-identical to the
+        // legacy append (same resolved name + page label feed HostIdentityProducer on both sides).
+        var enrichmentInputs = await ResolveEntityEnrichmentInputsAsync(hostContext, cancellationToken);
+
+        BoundInputs? bound = null;
+        try
+        {
+            var contextTurn = (ledgerOutputs is { Count: > 0 } ? ledgerOutputs.Max(o => o.Turn) : 0) + 1;
+            bound = await _contextBinder.BindAsync(
+                new ContextBindingRequest
+                {
+                    // Feed the resolved (lazily-fetched) name + page label so the envelope's Business
+                    // fragment matches the interactive prompt byte-for-byte (D2 parity).
+                    HostEntityType = enrichmentInputs?.EntityType ?? hostContext?.EntityType,
+                    HostEntityId = enrichmentInputs?.EntityId ?? hostContext?.EntityId,
+                    HostEntityName = enrichmentInputs?.EntityName ?? hostContext?.EntityName,
+                    HostPageTypeLabel = enrichmentInputs?.HumanReadablePageType,
+                    ConversationTail = Context.ConversationContextProducer.BuildConversationTail(ledgerOutputs),
+                    LedgerOutputs = ledgerOutputs,
+                    TenantId = tenantId,
+                    SessionId = sessionId,
+                    Turn = contextTurn,
+                },
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Soft-fail: a bind failure must NEVER fail the message turn (envelope/fingerprint are
+            // telemetry-grade). Fall back to the direct-append path so the prompt still assembles. NFR-07.
+            _logger.LogWarning(ex,
+                "F-1 (D1): interactive Context Binder bind failed — falling back to the direct-append path " +
+                "for this turn (the message turn is never failed by context assembly). session={SessionId}",
+                sessionId);
+            systemPrompt = await AppendEntityEnrichmentAsync(systemPrompt, hostContext, cancellationToken);
+            systemPrompt = await AppendRecordMemoryAsync(systemPrompt, tenantId, hostContext, cancellationToken);
+            return (systemPrompt, null);
+        }
+
+        // D1 live path — CONSUME the bound envelope via the renderer / BoundInputs (single source):
+        // (a) F-2 user-memory recall fragment (NEW, additive) — stable prefix, User before Business;
+        if (bound.Context.User?.Fragment is { Length: > 0 } userFragment)
+        {
+            systemPrompt = AppendUserMemoryFragment(systemPrompt, userFragment);
+        }
+
+        // (b) host-identity (Business) — the SAME guards/budget as the legacy append, byte-identical block;
+        systemPrompt = AppendEnrichmentBlock(systemPrompt, bound.Context.Business?.Fragment);
+
+        // (c) cross-session record-memory — the Binder-produced fragment (byte-identical), same budget guards.
+        systemPrompt = AppendRecordMemoryFragmentGuarded(
+            systemPrompt, tenantId, hostContext, bound.RecordMemoryFragment);
+
+        return (systemPrompt, bound.Context);
+    }
+
+    /// <summary>
+    /// Appends the F-2 USER-scope memory recall fragment (D3) to the stable prompt prefix (User before
+    /// Business), under the shared budget tracker. Additive — absent for callers/fixtures with no user
+    /// memory, so the prompt bytes are unchanged there (the negative parity pin).
+    /// </summary>
+    private string AppendUserMemoryFragment(string systemPrompt, string userFragment)
+    {
+        var fragmentTokens = EstimateTokenCount(userFragment);
+        if (_promptBudgetTracker is not null)
+        {
+            if (!_promptBudgetTracker.TryReserve("user-memory", fragmentTokens, sessionId: null, tenantId: null))
+            {
+                _logger.LogWarning(
+                    "F-2: user-memory recall fragment denied by shared prompt budget tracker (requested={Tokens}, remaining={Remaining}); skipping",
+                    fragmentTokens, _promptBudgetTracker.Remaining);
+                return systemPrompt;
+            }
+        }
+        else
+        {
+            var currentTokenEstimate = EstimateTokenCount(systemPrompt);
+            if (currentTokenEstimate + fragmentTokens > MaxSystemPromptTokenBudget)
+            {
+                _logger.LogWarning(
+                    "F-2: user-memory recall fragment would exceed system prompt budget ({Current} + {Fragment} > {Budget}); skipping",
+                    currentTokenEstimate, fragmentTokens, MaxSystemPromptTokenBudget);
+                return systemPrompt;
+            }
+        }
+
+        _logger.LogInformation(
+            "F-2: appended user-memory recall fragment to system prompt (fragmentTokens={Tokens} fragmentLength={Length})",
+            fragmentTokens, userFragment.Length);
+
+        return systemPrompt + "\n\n" + userFragment;
     }
 
     /// <summary>
@@ -887,48 +1034,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
             var fragment = await _memoryItemStore.ToRecordPromptFragmentAsync(
                 hostContext.EntityType, hostContext.EntityId, cancellationToken);
 
-            if (string.IsNullOrWhiteSpace(fragment))
-            {
-                _logger.LogDebug(
-                    "R6 task 068 / task 050: record memory empty for {EntityType}={EntityId} tenant={TenantId}; no fragment appended",
-                    hostContext.EntityType, hostContext.EntityId, tenantId);
-                return systemPrompt;
-            }
-
-            var fragmentTokens = EstimateTokenCount(fragment);
-
-            // Budget gate via shared tracker when present
-            if (_promptBudgetTracker is not null)
-            {
-                if (!_promptBudgetTracker.TryReserve(
-                        "record-memory",
-                        fragmentTokens,
-                        sessionId: null,
-                        tenantId: tenantId))
-                {
-                    _logger.LogWarning(
-                        "R6 task 068 / task 050: record memory fragment denied by shared prompt budget tracker (requested={Tokens}, remaining={Remaining}, {EntityType}={EntityId}); skipping",
-                        fragmentTokens, _promptBudgetTracker.Remaining, hostContext.EntityType, hostContext.EntityId);
-                    return systemPrompt;
-                }
-            }
-            else
-            {
-                var currentTokenEstimate = EstimateTokenCount(systemPrompt);
-                if (currentTokenEstimate + fragmentTokens > MaxSystemPromptTokenBudget)
-                {
-                    _logger.LogWarning(
-                        "R6 task 068 / task 050: record memory fragment would exceed system prompt budget ({Current} + {Fragment} > {Budget}); skipping",
-                        currentTokenEstimate, fragmentTokens, MaxSystemPromptTokenBudget);
-                    return systemPrompt;
-                }
-            }
-
-            _logger.LogInformation(
-                "R6 task 068 / task 050: appended record memory fragment to system prompt — {EntityType}={EntityId} tenant={TenantId} fragmentTokens={Tokens} fragmentLength={Length}",
-                hostContext.EntityType, hostContext.EntityId, tenantId, fragmentTokens, fragment.Length);
-
-            return systemPrompt + "\n\n" + fragment;
+            return AppendRecordMemoryFragmentGuarded(systemPrompt, tenantId, hostContext, fragment);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -943,6 +1049,62 @@ public class PlaybookChatContextProvider : IChatContextProvider
                 hostContext.EntityType, hostContext.EntityId, tenantId);
             return systemPrompt;
         }
+    }
+
+    /// <summary>
+    /// Applies the record-memory fragment's budget guards + append — the TAIL of the R1 record-memory
+    /// logic, extracted so the direct-append fallback (<see cref="AppendRecordMemoryAsync"/>) and the D1
+    /// Binder path (which passes the byte-identical <see cref="BoundInputs.RecordMemoryFragment"/> produced
+    /// from the SAME <see cref="IMemoryItemStore.ToRecordPromptFragmentAsync"/>) share ONE guard/append
+    /// implementation. Returns <paramref name="systemPrompt"/> unchanged when the fragment is empty or the
+    /// budget denies it — byte-identical semantics to the pre-refactor inline tail. <paramref name="hostContext"/>
+    /// is non-null on every call site (identifiers-only logging, NFR-07).
+    /// </summary>
+    private string AppendRecordMemoryFragmentGuarded(
+        string systemPrompt, string tenantId, ChatHostContext? hostContext, string? fragment)
+    {
+        if (string.IsNullOrWhiteSpace(fragment))
+        {
+            _logger.LogDebug(
+                "R6 task 068 / task 050: record memory empty for {EntityType}={EntityId} tenant={TenantId}; no fragment appended",
+                hostContext?.EntityType, hostContext?.EntityId, tenantId);
+            return systemPrompt;
+        }
+
+        var fragmentTokens = EstimateTokenCount(fragment);
+
+        // Budget gate via shared tracker when present
+        if (_promptBudgetTracker is not null)
+        {
+            if (!_promptBudgetTracker.TryReserve(
+                    "record-memory",
+                    fragmentTokens,
+                    sessionId: null,
+                    tenantId: tenantId))
+            {
+                _logger.LogWarning(
+                    "R6 task 068 / task 050: record memory fragment denied by shared prompt budget tracker (requested={Tokens}, remaining={Remaining}, {EntityType}={EntityId}); skipping",
+                    fragmentTokens, _promptBudgetTracker.Remaining, hostContext?.EntityType, hostContext?.EntityId);
+                return systemPrompt;
+            }
+        }
+        else
+        {
+            var currentTokenEstimate = EstimateTokenCount(systemPrompt);
+            if (currentTokenEstimate + fragmentTokens > MaxSystemPromptTokenBudget)
+            {
+                _logger.LogWarning(
+                    "R6 task 068 / task 050: record memory fragment would exceed system prompt budget ({Current} + {Fragment} > {Budget}); skipping",
+                    currentTokenEstimate, fragmentTokens, MaxSystemPromptTokenBudget);
+                return systemPrompt;
+            }
+        }
+
+        _logger.LogInformation(
+            "R6 task 068 / task 050: appended record memory fragment to system prompt — {EntityType}={EntityId} tenant={TenantId} fragmentTokens={Tokens} fragmentLength={Length}",
+            hostContext?.EntityType, hostContext?.EntityId, tenantId, fragmentTokens, fragment.Length);
+
+        return systemPrompt + "\n\n" + fragment;
     }
 
     /// <summary>
