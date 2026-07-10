@@ -15,7 +15,7 @@
 
 import * as React from 'react';
 import { Toolbar, ToolbarButton, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { OpenRegular, DesktopRegular, SaveRegular } from '@fluentui/react-icons';
+import { OpenRegular, DesktopRegular, SaveRegular, ArrowUploadRegular } from '@fluentui/react-icons';
 import { useDocumentActions } from '@spaarke/document-operations';
 
 // ---------------------------------------------------------------------------
@@ -70,6 +70,24 @@ export interface ComposeToolbarProps {
    * True while a save is in flight.
    */
   isSaving?: boolean;
+
+  /**
+   * FR-24 (task 103, gap 3.1): "Push to Word" handler. When provided, the toolbar renders a
+   * "Push to Word" button that renders the session's accepted annotations into the .docx as native
+   * Word track-changes + comments (via the push-annotations endpoint). Omit to hide the button.
+   */
+  onPushToWordRequested?: () => void;
+
+  /**
+   * True when there is something to push (a persisted document + at least one accepted annotation).
+   * The button is disabled otherwise so an empty push is never issued.
+   */
+  canPushToWord?: boolean;
+
+  /**
+   * True while a push-to-Word is in flight.
+   */
+  isPushingToWord?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +120,9 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
     isDirty = false,
     hasTransientDraft = false,
     isSaving = false,
+    onPushToWordRequested,
+    canPushToWord = false,
+    isPushingToWord = false,
   } = props;
 
   const { openInWeb, openInDesktop, isActing } = useDocumentActions({
@@ -180,6 +201,29 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
             aria-label={isSaving ? 'Saving' : 'Save changes'}
           >
             {isSaving ? 'Saving…' : 'Save'}
+          </ToolbarButton>
+        </Tooltip>
+      ) : null}
+
+      {onPushToWordRequested ? (
+        <Tooltip
+          content={
+            isPushingToWord
+              ? 'Pushing annotations to Word…'
+              : canPushToWord
+                ? 'Render accepted annotations into the document as native Word track-changes + comments'
+                : 'No accepted annotations to push, or no saved document yet'
+          }
+          relationship="label"
+        >
+          <ToolbarButton
+            icon={<ArrowUploadRegular />}
+            disabled={isToolbarDisabled || !canPushToWord || isPushingToWord}
+            onClick={onPushToWordRequested}
+            aria-label={isPushingToWord ? 'Pushing to Word' : 'Push to Word'}
+            data-testid="compose-toolbar-push-to-word"
+          >
+            {isPushingToWord ? 'Pushing…' : 'Push to Word'}
           </ToolbarButton>
         </Tooltip>
       ) : null}

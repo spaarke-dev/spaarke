@@ -62,6 +62,30 @@ export type {
   UseComposeReanchorResult,
   ReanchorRequestArgs,
 } from './widgets/useComposeReanchor';
+
+// Word round-trip shuttle client callers (task 103 — gaps 3.1 / 3.4 / poll half of 3.5)
+export {
+  useComposePushAnnotations,
+  useComposePullAnnotations,
+  useComposeCheckChanges,
+  anchoredAnnotationsToPriorAnchors,
+  anchoredAnnotationsToDocxAnnotations,
+  DocxTrackChangeKind,
+} from './widgets/useComposeWordShuttle';
+export type {
+  UseComposeWordShuttleOptions,
+  DocxAnnotationInput,
+  RecoveredComment,
+  RecoveredRevision,
+  PullAnnotationsResult,
+  CheckChangesResult,
+  PushAnnotationsArgs,
+  UseComposePushAnnotationsResult,
+  PullAnnotationsArgs,
+  UseComposePullAnnotationsResult,
+  CheckChangesArgs,
+  UseComposeCheckChangesResult,
+} from './widgets/useComposeWordShuttle';
 export type {
   ReanchorBand,
   ReanchoredAnnotation,

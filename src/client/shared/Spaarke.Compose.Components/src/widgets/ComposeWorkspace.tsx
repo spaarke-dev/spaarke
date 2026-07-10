@@ -90,6 +90,19 @@ import { createXrmNavigationService, createXrmDataService, type LookupResult } f
 import { ComposeToolbar } from './ComposeToolbar';
 import { ComposeEmptyState } from './ComposeEmptyState';
 import { ComposeConflictDialog } from './ComposeConflictDialog';
+// Return-from-Word re-anchor UX (task 054 — BUILT; mounted here by task 103, gap 3.5).
+import { ComposeReanchorBanner } from './ComposeReanchorBanner';
+import { ComposeReanchorConflictPanel } from './ComposeReanchorConflictPanel';
+import { useComposeReanchor } from './useComposeReanchor';
+import type { ReanchorResolutionDecision } from './ComposeReanchor.types';
+// Word round-trip shuttle client callers (task 103 — gaps 3.1 / 3.4 / poll half of 3.5).
+import {
+  useComposePushAnnotations,
+  useComposePullAnnotations,
+  useComposeCheckChanges,
+  anchoredAnnotationsToPriorAnchors,
+  anchoredAnnotationsToDocxAnnotations,
+} from './useComposeWordShuttle';
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
 import { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHeartbeatGate } from './hooks';
 import type {
@@ -600,6 +613,99 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchoredAnnotations, definedTermsTracking, state.status, state.sessionId, bffBaseUrl, tenantId]);
+
+  // -------------------------------------------------------------------------
+  // Word round-trip shuttle (task 103) — push (3.1) / pull (3.4) / reanchor + poll (3.5)
+  // -------------------------------------------------------------------------
+  // The push-annotations (050), pull-annotations (051), check-changes (053), and reanchor (054)
+  // endpoints + the 054 reanchor banner/panel were all BUILT but never CONNECTED. This block wires
+  // them: a "Push to Word" toolbar action (3.1), and a return-from-Word poll-on-focus that pulls the
+  // current native annotations (3.4) + re-anchors prior anchors (3.5) into the mounted banner/panel.
+  const { summary: reanchorSummary, reanchor: runReanchor, reset: resetReanchor } = useComposeReanchor({ bffBaseUrl });
+  const { push: pushAnnotations, pushing: isPushingToWord } = useComposePushAnnotations({ bffBaseUrl });
+  const { pull: pullAnnotations } = useComposePullAnnotations({ bffBaseUrl });
+  const { checkChanges } = useComposeCheckChanges({ bffBaseUrl });
+
+  const [reanchorPanelOpen, setReanchorPanelOpen] = React.useState(false);
+  const [pulledAnnotationCount, setPulledAnnotationCount] = React.useState(0);
+
+  // gap 3.1 — the accepted annotations rendered as native Word track-changes + comments.
+  const composeDocxAnnotations = React.useMemo(
+    () => anchoredAnnotationsToDocxAnnotations(anchoredAnnotations),
+    [anchoredAnnotations]
+  );
+  const canPushToWord =
+    (state.status === 'loaded' || state.status === 'saving') &&
+    !!state.documentRef?.speDriveItemId &&
+    !!effectiveDriveId &&
+    !!state.etag &&
+    composeDocxAnnotations.length > 0;
+
+  const handlePushToWord = React.useCallback(async (): Promise<void> => {
+    if (!state.documentRef?.speDriveItemId || !effectiveDriveId || !state.etag) return;
+    if (composeDocxAnnotations.length === 0) return;
+    try {
+      await pushAnnotations({
+        documentSpeId: state.documentRef.speDriveItemId,
+        driveId: effectiveDriveId,
+        tenantId,
+        ifMatch: state.etag,
+        annotations: composeDocxAnnotations,
+      });
+    } catch {
+      // The hook surfaces a user-safe error; a push failure must not crash the editing session.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.documentRef?.speDriveItemId, state.etag, effectiveDriveId, tenantId, composeDocxAnnotations, pushAnnotations]);
+
+  // gaps 3.4/3.5 — return-from-Word: on window focus (the user came back from Word), poll
+  // check-changes; when the document changed, PULL the current native annotations (3.4) and
+  // RE-ANCHOR prior anchors (3.5). The poll fallback needs no webhook secrets (owner task 056 /
+  // DEF-03); it drives the same Redis-backed delta/etag substrate the webhook would. The change
+  // signal is internal React state (the reanchor summary → banner) — NO PaneEventBus discriminant
+  // is emitted (task 104 froze the compose bus discriminant set; adding one is forbidden).
+  const runReturnFromWordCheck = React.useCallback(async (): Promise<void> => {
+    const speId = state.documentRef?.speDriveItemId;
+    if (state.status !== 'loaded') return;
+    if (!speId || !effectiveDriveId || !bffBaseUrl || !tenantId) return;
+    try {
+      const changes = await checkChanges({ documentSpeId: speId, containerId: effectiveDriveId });
+      if (!changes.changed) return;
+
+      // 3.4 — surface what Word added (native comments/revisions). Count is test-observable.
+      try {
+        const pulled = await pullAnnotations({ documentSpeId: speId, driveId: effectiveDriveId, tenantId });
+        setPulledAnnotationCount((pulled.comments?.length ?? 0) + (pulled.revisions?.length ?? 0));
+      } catch {
+        // non-fatal — reanchor is the primary return-from-Word affordance.
+      }
+
+      // 3.5 — re-anchor the prior Compose anchors against the updated document → banner/panel.
+      const priorAnchors = anchoredAnnotationsToPriorAnchors(anchoredAnnotations);
+      await runReanchor({ documentSpeId: speId, driveId: effectiveDriveId, tenantId, priorAnchors });
+    } catch {
+      // Poll/reanchor failures are non-fatal — the editing session continues.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.status, state.documentRef?.speDriveItemId, effectiveDriveId, bffBaseUrl, tenantId, checkChanges, pullAnnotations, runReanchor, anchoredAnnotations]);
+
+  React.useEffect(() => {
+    if (state.status !== 'loaded') return;
+    if (!state.documentRef?.speDriveItemId) return;
+    const onFocus = (): void => { void runReturnFromWordCheck(); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [state.status, state.documentRef?.speDriveItemId, runReturnFromWordCheck]);
+
+  // gap 3.5 — resolve a flagged/orphaned anchor from the conflict panel. Discard is the only path
+  // that removes an annotation (explicit user action — the engine never drops one silently, FR-27);
+  // accept/keep retain it. The mutation flows through the existing annotations-persist effect
+  // (gap 4.3) so it survives a reopen.
+  const handleReanchorResolve = React.useCallback((decision: ReanchorResolutionDecision): void => {
+    if (decision.resolution === 'discard') {
+      setAnchoredAnnotations(prev => prev.filter(a => a.id !== decision.annotationId));
+    }
+  }, []);
 
   // -------------------------------------------------------------------------
   // Multi-tab BroadcastChannel hook — owns "focus-me" + "force-closed" signaling
@@ -1176,6 +1282,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       data-compose-anchored-annotation-count={anchoredAnnotations.length}
       data-compose-defined-term-count={definedTermsTracking.length}
       data-compose-action-history-count={actionHistory.length}
+      data-compose-pulled-annotation-count={pulledAnnotationCount}
+      data-compose-reanchor-total={reanchorSummary?.total ?? 0}
       data-testid="compose-workspace"
     >
       {/*
@@ -1239,8 +1347,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               isDirty={isDirty}
               hasTransientDraft={hasTransientDraft}
               isSaving={state.status === 'saving'}
+              // gap 3.1 — only offer Push-to-Word for a persisted document (a transient draft has
+              // no SPE drive-item to write native annotations into yet).
+              onPushToWordRequested={
+                state.documentRef?.speDriveItemId ? () => { void handlePushToWord(); } : undefined
+              }
+              canPushToWord={canPushToWord}
+              isPushingToWord={isPushingToWord}
             />
           </div>
+
+          {/* gap 3.5 — return-from-Word re-anchor summary banner (task 054 component, mounted here). */}
+          <ComposeReanchorBanner
+            summary={reanchorSummary}
+            onReview={() => setReanchorPanelOpen(true)}
+            onDismiss={resetReanchor}
+          />
 
           {/* Banner stack — errors / warnings / checkout status / assistant pending */}
           <ComposeBannerStack
@@ -1298,6 +1420,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           void forceCloseAndAcquire();
         }}
         onCancel={discardAndCancel}
+      />
+
+      {/* gap 3.5 — return-from-Word conflict panel (task 054 component, mounted here). Opened from
+          the reanchor banner's "Review changes" button; resolves flagged/orphaned anchors. */}
+      <ComposeReanchorConflictPanel
+        open={reanchorPanelOpen}
+        summary={reanchorSummary}
+        onResolve={handleReanchorResolve}
+        onClose={() => setReanchorPanelOpen(false)}
       />
 
       {/* Error state — load failed; no document loaded */}

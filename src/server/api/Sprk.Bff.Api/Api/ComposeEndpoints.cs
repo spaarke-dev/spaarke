@@ -1077,6 +1077,11 @@ public static class ComposeEndpoints
         [FromQuery] string? sessionId,
         [FromQuery] string? matterId,
         IComposeService composeService,
+        // FR-26 (task 103, gap 3.2): the SPE change-detection origin call. EnsureSubscriptionAsync
+        // had ZERO callers, so the container was never tracked → the renewal service renewed an
+        // empty set forever AND the poll path had no state to build on. Opening a Compose document
+        // is the natural origin: it is exactly when return-from-Word change detection must begin.
+        SpeSyncOrchestrator syncOrchestrator,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken ct)
@@ -1106,6 +1111,30 @@ public static class ComposeEndpoints
             };
 
             var result = await composeService.LoadAsync(request, httpContext, ct).ConfigureAwait(false);
+
+            // FR-26 (task 103, gap 3.2): ensure the SPE change-detection subscription exists for
+            // this document's drive so a return-from-Word save is detected. The drive id IS a valid
+            // container key here — SpeFileStore.ResolveDriveIdAsync returns a `b!` drive id unchanged
+            // (ISpeFileOperations contract), and EnsureSubscriptionAsync keys its Redis state by that
+            // value consistently with the poll/check-changes path (task 053). When the webhook config
+            // (Compose:Webhook:{SigningKey,ClientState,NotificationUrl}) is UNPROVISIONED (owner task
+            // 056 / DEF-03), EnsureSubscriptionAsync makes NO Graph call — it persists the container
+            // into the tracked index with FallbackToPolling=true, which (a) stops the renewal service
+            // renewing an empty set forever and (b) seeds the poll-fallback state the client's
+            // poll-on-focus check-changes path drives. Non-fatal by construction: a subscription
+            // failure degrades to poll and MUST NOT fail the document load.
+            // ✅◐ E2E-pending on task 056 for the webhook-DELIVERY leg (secrets); the origin call +
+            // poll fallback are fully wired + testable here.
+            try
+            {
+                await syncOrchestrator.EnsureSubscriptionAsync(result.DriveId ?? driveId, ct).ConfigureAwait(false);
+            }
+            catch (Exception subEx)
+            {
+                logger.LogWarning(subEx,
+                    "Compose load: EnsureSubscriptionAsync origin call failed for drive {DriveId} (non-fatal; change detection degrades to poll). TraceId={TraceId}",
+                    result.DriveId ?? driveId, httpContext.TraceIdentifier);
+            }
 
             return Results.Ok(new LoadComposeDocumentResponse(
                 DocumentSpeId: result.DocumentSpeId,
