@@ -76,6 +76,11 @@ import { type WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 // Compose three-pane coordination — WORKSPACE leg (task 104 / E2E-R5). Typed
 // receivers for Flow 3 (compose_context_insert) + Flow 5 (compose_assistant_insert).
 import { useComposeWorkspaceReceivers } from './useComposeWorkspaceReceivers';
+// task 113 (UAT defect 4): the host-injected active-document registrar. When present (SpaarkeAi
+// mount, under ComposeActionBridgeProvider), a Browse/direct transient mount is registered with the
+// active chat session so chat "summarize this document" + "edit in Compose" resolve it. Null on a
+// standalone LegalWorkspace mount (no bridge provider) → registration is skipped, Save still works.
+import { useComposeActiveDocumentRegistration } from '../context/composeActionBridge';
 import { authenticatedFetch } from '@spaarke/auth';
 // FR-02 (task 011): "Search for Document" opens the standard Dataverse lookup dialog
 // (Xrm.Utility.lookupObjects) scoped to `sprk_document`, then resolves the picked
@@ -1162,6 +1167,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // uses for Assistant-uploaded files (`mountTransient` reducer action). No
   // `sprk_document` is created and no BFF round-trip occurs (ADR-040) — persistence
   // happens on first Save (create-on-save, FR-05/task 013).
+  // task 113 (UAT defect 4): host-injected active-document registrar (null on standalone mounts).
+  // Held in a ref so the stable-`[]` Browse callback below can read the latest value without churn.
+  const registerActiveDocument = useComposeActiveDocumentRegistration();
+  const registerActiveDocumentRef = React.useRef(registerActiveDocument);
+  registerActiveDocumentRef.current = registerActiveDocument;
+
   const handleBrowseRequested = React.useCallback((): void => {
     onBrowseRequested?.();
     browseFileInputRef.current?.click();
@@ -1186,6 +1197,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
       // (create-on-save, task 013) is enabled immediately.
       setIsDirty(true);
+      // task 113 (UAT defect 4): register this Browse/direct mount with the active chat session so
+      // chat "summarize this document" + a later "edit in Compose" resolve THIS file. Fire-and-
+      // forget; the host lands the bytes as a ChatSessionFile + marks the active document. Null
+      // (no-op) on a standalone LegalWorkspace mount. Bytes travel by a direct function call — never
+      // the PaneEventBus (ADR-015 keeps the bus content-free).
+      void registerActiveDocumentRef.current?.({ docxBytes: result, fileName: file.name });
     };
     reader.onerror = () => {
       dispatch({

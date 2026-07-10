@@ -179,6 +179,93 @@ public record ChatSession(
     /// governance + mutability notes as <see cref="AnchoredAnnotations"/>.
     /// </summary>
     public IReadOnlyList<DefinedTerm>? DefinedTermsTracking { get; init; }
+
+    // =========================================================================
+    // R2 session-scoped ACTIVE-DOCUMENT identity (spaarkeai-compose-r2 task 113;
+    // UAT-R4/R5 defects 4/5/6/7 — the "which document is the user acting on?" fact).
+    //
+    // A document lives in four disjoint identity spaces (chat-uploaded ChatSessionFile;
+    // stored sprk_document; Compose client-only Browse bytes; Compose transient
+    // upload-mount). The only connective tissue before this field was the LLM guessing
+    // between documentId / sessionFileId on send_workspace_artifact. This single MUTABLE
+    // nullable field is the shared "which document is active" fact both surfaces
+    // read/write deterministically:
+    //   - WRITTEN by the compose-direct/upload mount registration
+    //     (ComposeEndpoints.RegisterActiveDocument, POST /api/compose/active-document).
+    //   - READ by SendWorkspaceArtifactHandler when the LLM supplies no explicit current
+    //     pointer, so "edit in Compose" mounts the just-uploaded file, not a stale one.
+    //
+    // Like AnchoredAnnotations / DefinedTermsTracking above it is MUTABLE (registration
+    // REPLACES it wholesale — it is a pointer, not an append-only ledger entry), rides the
+    // SAME three-tier ChatSession stack (Redis hot / Cosmos warm / Dataverse cold), and is
+    // NOT a MemoryItem: it is transient document-selection state (like a cursor), never
+    // retrieved by the Context Binder, never surfaced in the memory review/delete view.
+    // Governance: ADR-015 Tier 3 (user-owned, GDPR-erasable with the session); tenant-scoped
+    // via TenantId. Null (like the sibling collections) means "no active document yet" —
+    // pre-task-113 Redis/Cosmos payloads deserialize cleanly (backward compatible).
+    // =========================================================================
+
+    /// <summary>
+    /// R2 session-scoped active-document identity (task 113) — the document the user is
+    /// currently acting on across the chat↔Compose bridge. Null when no document is active.
+    /// See the class-level remarks above for the mutability + governance notes.
+    /// </summary>
+    public ActiveDocumentIdentity? ActiveDocument { get; init; }
+}
+
+/// <summary>
+/// R2 session-scoped active-document identity (spaarkeai-compose-r2 task 113) — the shared
+/// "which document is the user acting on?" fact that both the chat surface and the Compose
+/// surface read/write deterministically, fixing the chat↔Compose bridge defects (UAT-R4/R5
+/// #4/#5/#6/#7) as a class.
+///
+/// <para>
+/// It is a POINTER, not content: it carries deterministic identifiers only (ADR-015 Tier 3)
+/// and at most one of a stored-document pointer (<see cref="SprkDocumentId"/>) or a
+/// session-upload pointer (<see cref="SessionFileId"/>), discriminated by <see cref="Source"/>.
+/// The optional SPE pointer fields are populated only when already known (stored documents);
+/// they are never resolved here (that resolution stays behind the SpeFileStore facade — ADR-007).
+/// </para>
+/// </summary>
+/// <param name="Source">
+/// Origin discriminant — one of <see cref="SourceStored"/> (a stored <c>sprk_document</c>),
+/// <see cref="SourceSessionUpload"/> (a chat-uploaded <see cref="ChatSessionFile"/>), or
+/// <see cref="SourceComposeDirect"/> (a file Browse-mounted directly in Compose then landed
+/// server-side as a <see cref="ChatSessionFile"/>). Session-upload and compose-direct both
+/// resolve through <see cref="SessionFileId"/>; the discriminant preserves provenance for
+/// telemetry + future policy.
+/// </param>
+/// <param name="SessionFileId">
+/// The <see cref="ChatSessionFile.FileId"/> for a session-upload / compose-direct active
+/// document. Null for a stored-document active document. This is the pointer
+/// <c>SendWorkspaceArtifactHandler</c> resolves into a transient Compose upload-mount.
+/// </param>
+/// <param name="SprkDocumentId">
+/// The stored <c>sprk_document</c> GUID (D form) for a stored active document. Null for a
+/// session-upload / compose-direct active document. Resolved into a Compose pre-seed (SPE
+/// pointer) by <c>SendWorkspaceArtifactHandler.ResolveComposeSeedAsync</c> under OBO.
+/// </param>
+/// <param name="SpeDriveItemId">Optional SPE drive-item id when already known (stored documents). Never resolved here.</param>
+/// <param name="SpeDriveId">Optional SPE drive id when already known (stored documents).</param>
+/// <param name="FileName">Optional display file name (best-effort; display only).</param>
+/// <param name="RegisteredAt">UTC timestamp the document became active (observability / most-recent-wins).</param>
+public sealed record ActiveDocumentIdentity(
+    string Source,
+    string? SessionFileId = null,
+    string? SprkDocumentId = null,
+    string? SpeDriveItemId = null,
+    string? SpeDriveId = null,
+    string? FileName = null,
+    DateTimeOffset? RegisteredAt = null)
+{
+    /// <summary>Source discriminant: a stored <c>sprk_document</c> row.</summary>
+    public const string SourceStored = "stored";
+
+    /// <summary>Source discriminant: a file the user uploaded into the chat session.</summary>
+    public const string SourceSessionUpload = "session-upload";
+
+    /// <summary>Source discriminant: a file Browse-mounted directly in Compose, landed server-side as a <see cref="ChatSessionFile"/>.</summary>
+    public const string SourceComposeDirect = "compose-direct";
 }
 
 /// <summary>

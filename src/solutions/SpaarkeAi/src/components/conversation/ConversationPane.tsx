@@ -47,7 +47,10 @@ import { useSerialActionQueue, type ComposeActionRequest } from "./useSerialActi
 // barrel) so this Assistant-pane module does NOT transitively pull the TipTap
 // editor widgets — mirrors ComposeEditor/ComposeWorkspace's `@spaarke/ai-widgets/events`
 // deep-import rationale. Resolves in both Vite (alias → src dir) and jest.
-import { useRegisterComposeActionDispatcher } from "@spaarke/compose-components/context/composeActionBridge";
+import {
+  useRegisterComposeActionDispatcher,
+  useRegisterComposeActiveDocumentHandler,
+} from "@spaarke/compose-components/context/composeActionBridge";
 import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./composeApplyLeg";
 import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
 import { formatComposeActionResultMarkdown } from "./composeResultFormat";
@@ -233,6 +236,50 @@ export function ConversationPane(): React.JSX.Element {
   // (Spike 0 / design §7.2). No-op when rendered outside a bridge provider
   // (e.g. isolated tests / standalone LegalWorkspace mount).
   useRegisterComposeActionDispatcher(dispatchComposeAction);
+
+  // task 113 (UAT defect 4): host-side registration of a Compose-direct (Browse) mount with the
+  // active chat session. ComposeWorkspace hands us the mounted file's bytes by a DIRECT call (not
+  // the PaneEventBus — ADR-015 keeps the bus content-free); we (1) land them as a ChatSessionFile
+  // via the EXISTING chat upload endpoint so chat "summarize this document" sees them (no parallel
+  // byte pipeline — CLAUDE.md §11), then (2) mark it the session's active document (POST
+  // /api/compose/active-document) so a later "edit in Compose" mounts THIS file, not a stale one.
+  // `@spaarke/auth` fetch (ADR-028). Fully soft-fail: on failure only chat-visibility is lost; the
+  // Compose Save path is unaffected. No-op outside the bridge provider (standalone LegalWorkspace).
+  const registerComposeActiveDocument = React.useCallback(
+    async ({ docxBytes, fileName }: { docxBytes: ArrayBuffer; fileName?: string }): Promise<void> => {
+      const sessionId = getSessionId();
+      if (!sessionId || !bffBaseUrl) return;
+      try {
+        const name = fileName ?? "compose-document.docx";
+        const form = new FormData();
+        form.append(
+          "file",
+          new Blob([docxBytes], {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          }),
+          name
+        );
+        form.append("filename", name);
+        const uploadResp = await authenticatedFetch(
+          `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents`,
+          { method: "POST", body: form }
+        );
+        if (!uploadResp.ok) return;
+        const uploaded = (await uploadResp.json()) as { documentId?: string };
+        const sessionFileId = uploaded?.documentId;
+        if (!sessionFileId) return;
+        await authenticatedFetch(`${bffBaseUrl}/api/compose/active-document`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, sessionFileId, source: "compose-direct", fileName: name }),
+        });
+      } catch {
+        // Non-fatal: the direct upload just won't be chat-visible; the Compose Save path is unaffected.
+      }
+    },
+    [getSessionId, bffBaseUrl, authenticatedFetch]
+  );
+  useRegisterComposeActiveDocumentHandler(registerComposeActiveDocument);
   // ADR-015: structural signal only (queue depth + in-flight correlation id —
   // never the action's bindingId/args/content). Also keeps `dispatchComposeAction`
   // + queue state live/observable ahead of the task-030 toolbar hand-off.

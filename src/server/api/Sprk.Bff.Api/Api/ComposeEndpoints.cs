@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Compose;
 
@@ -288,6 +289,24 @@ public static class ComposeEndpoints
             .WithSummary("Persist a Compose session's anchored annotations + defined-terms (FR-29)")
             .RequireRateLimiting("ai-upload")
             .Produces<ComposeAnnotationsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        // (16) POST /api/compose/active-document — task 113 (UAT defects 4/5): register the
+        // session-scoped ACTIVE-DOCUMENT so both surfaces resolve "the document the user is acting
+        // on" deterministically. Marks an already-landed session file (compose-direct Browse upload
+        // or a chat upload — its bytes become a ChatSessionFile via the existing chat upload
+        // endpoint, reused client-side) OR a stored sprk_document as active on the chat session.
+        // Deterministic ChatSession write via ChatSessionManager (no parallel document store —
+        // CLAUDE.md §11) — NOT AI dispatch (ADR-039) and NOT SPE/Graph access (ADR-007). Authz via
+        // the group's RequireAuthorization() (ADR-008 / ADR-028).
+        group.MapPost("/active-document", RegisterActiveDocument)
+            .WithName("ComposeRegisterActiveDocument")
+            .WithSummary("Register the session-scoped active document for the chat↔Compose bridge (task 113)")
+            .RequireRateLimiting("ai-context")
+            .Produces<ComposeActiveDocumentResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status404NotFound)
@@ -1534,6 +1553,149 @@ public static class ComposeEndpoints
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // task 113 (UAT defects 4/5): session-scoped active-document registration.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// POST /api/compose/active-document — records which document the user is acting on
+    /// (session-scoped) so (a) chat can resolve a Compose-direct upload ("summarize this
+    /// document") and (b) <c>SendWorkspaceArtifactHandler</c> mounts the just-active document
+    /// when the LLM supplies no explicit pointer ("edit in Compose"). Provide EXACTLY ONE of
+    /// <c>sessionFileId</c> (a session-uploaded / compose-direct <see cref="ChatSessionFile"/>)
+    /// or <c>documentId</c> (a stored <c>sprk_document</c> GUID). Deterministic
+    /// <see cref="ChatSession"/> write via <see cref="ChatSessionManager"/> — no AI dispatch
+    /// (ADR-039), no SPE/Graph (ADR-007). The compose-direct file's BYTES are landed as a
+    /// ChatSessionFile by the EXISTING chat upload endpoint (reused client-side, CLAUDE.md §11);
+    /// this endpoint only records the pointer.
+    /// </summary>
+    private static async Task<IResult> RegisterActiveDocument(
+        [FromBody] ComposeActiveDocumentRequest? body,
+        ChatSessionManager sessionManager,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.SessionId)) return BadRequest("sessionId is required.");
+
+        var hasSessionFile = !string.IsNullOrWhiteSpace(body.SessionFileId);
+        var hasDocument = !string.IsNullOrWhiteSpace(body.DocumentId);
+        if (!hasSessionFile && !hasDocument)
+            return BadRequest("Provide sessionFileId (a session-uploaded / compose-direct file) or documentId (a stored sprk_document).");
+        if (hasSessionFile && hasDocument)
+            return BadRequest("Provide at most one of sessionFileId or documentId — they are mutually exclusive (upload vs stored).");
+
+        var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Unauthorized",
+                detail: "Tenant identity not found in token claims.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+        }
+
+        try
+        {
+            var (session, sessionKey) = await ResolveSessionAsync(sessionManager, tenantId, body.SessionId, ct)
+                .ConfigureAwait(false);
+            if (session is null)
+            {
+                logger.LogWarning(
+                    "Compose active-document: session not found tenant={TenantId} session={SessionId} TraceId={TraceId}",
+                    tenantId, body.SessionId, httpContext.TraceIdentifier);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Session Not Found",
+                    detail: "The chat session was not found or has expired. Register the active document on an existing session.",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+            }
+
+            ActiveDocumentIdentity identity;
+            if (hasSessionFile)
+            {
+                // Best-effort display name from the session manifest (the bytes were landed as a
+                // ChatSessionFile by the existing chat upload endpoint — reused client-side).
+                var file = session.UploadedFiles?
+                    .FirstOrDefault(f => string.Equals(f.FileId, body.SessionFileId, StringComparison.Ordinal));
+                var source = string.IsNullOrWhiteSpace(body.Source)
+                    ? ActiveDocumentIdentity.SourceComposeDirect
+                    : body.Source!;
+                identity = new ActiveDocumentIdentity(
+                    Source: source,
+                    SessionFileId: body.SessionFileId,
+                    FileName: body.FileName ?? file?.FileName,
+                    RegisteredAt: DateTimeOffset.UtcNow);
+            }
+            else
+            {
+                identity = new ActiveDocumentIdentity(
+                    Source: ActiveDocumentIdentity.SourceStored,
+                    SprkDocumentId: body.DocumentId,
+                    SpeDriveItemId: body.SpeDriveItemId,
+                    SpeDriveId: body.SpeDriveId,
+                    FileName: body.FileName,
+                    RegisteredAt: DateTimeOffset.UtcNow);
+            }
+
+            var updated = session with { ActiveDocument = identity };
+            await sessionManager.UpdateSessionCacheAsync(updated, ct).ConfigureAwait(false);
+
+            logger.LogInformation(
+                "Compose active-document registered: tenant={TenantId} session={SessionKey} source={Source} kind={Kind} TraceId={TraceId}",
+                tenantId, sessionKey, identity.Source, hasSessionFile ? "session-file" : "stored", httpContext.TraceIdentifier);
+
+            return Results.Ok(new ComposeActiveDocumentResponse(
+                SessionId: body.SessionId,
+                Source: identity.Source,
+                SessionFileId: identity.SessionFileId,
+                DocumentId: identity.SprkDocumentId,
+                FileName: identity.FileName,
+                CorrelationId: httpContext.TraceIdentifier));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose active-document: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while registering the active document.");
+        }
+    }
+
+    /// <summary>
+    /// Resolves a chat session, probing the client-sent id then its GUID "N"/"D" normalizations —
+    /// the same tolerance the Compose upload path applies, since a client may send either spelling.
+    /// </summary>
+    private static async Task<(ChatSession? Session, string? Key)> ResolveSessionAsync(
+        ChatSessionManager sessionManager, string tenantId, string sessionId, CancellationToken ct)
+    {
+        foreach (var candidate in EnumerateSessionIdForms(sessionId))
+        {
+            var session = await sessionManager.GetSessionAsync(tenantId, candidate, ct).ConfigureAwait(false);
+            if (session is not null) return (session, candidate);
+        }
+        return (null, null);
+    }
+
+    private static IEnumerable<string> EnumerateSessionIdForms(string sessionId)
+    {
+        yield return sessionId;
+        if (Guid.TryParse(sessionId, out var g))
+        {
+            var n = g.ToString("N");
+            var d = g.ToString("D");
+            if (!string.Equals(n, sessionId, StringComparison.Ordinal)) yield return n;
+            if (!string.Equals(d, sessionId, StringComparison.Ordinal)) yield return d;
+        }
+    }
+
     private static IResult BadRequest(string detail) =>
         Results.Problem(
             statusCode: StatusCodes.Status400BadRequest,
@@ -1566,6 +1728,33 @@ public sealed record ComposeUploadResponse(
     [property: JsonPropertyName("contentType")] string ContentType,
     [property: JsonPropertyName("content")] byte[] Content,
     [property: JsonPropertyName("size")] long Size,
+    [property: JsonPropertyName("correlationId")] string CorrelationId);
+
+/// <summary>
+/// Request body for <c>POST /api/compose/active-document</c> (task 113 / UAT defects 4/5).
+/// Registers the session-scoped active document on the chat session. Provide EXACTLY ONE of
+/// <see cref="SessionFileId"/> (a session-uploaded / compose-direct <see cref="ChatSessionFile"/>)
+/// or <see cref="DocumentId"/> (a stored <c>sprk_document</c> GUID, D form). <see cref="Source"/>
+/// is an optional provenance discriminant (defaults to <c>compose-direct</c> for a session file,
+/// <c>stored</c> for a document) — see <see cref="ActiveDocumentIdentity"/>.
+/// </summary>
+public sealed record ComposeActiveDocumentRequest(
+    [property: JsonPropertyName("sessionId")] string SessionId,
+    [property: JsonPropertyName("sessionFileId")] string? SessionFileId = null,
+    [property: JsonPropertyName("documentId")] string? DocumentId = null,
+    [property: JsonPropertyName("source")] string? Source = null,
+    [property: JsonPropertyName("fileName")] string? FileName = null,
+    [property: JsonPropertyName("speDriveItemId")] string? SpeDriveItemId = null,
+    [property: JsonPropertyName("speDriveId")] string? SpeDriveId = null);
+
+/// <summary>Response shape for <c>POST /api/compose/active-document</c> (task 113) — echoes the
+/// registered active-document pointer.</summary>
+public sealed record ComposeActiveDocumentResponse(
+    [property: JsonPropertyName("sessionId")] string SessionId,
+    [property: JsonPropertyName("source")] string Source,
+    [property: JsonPropertyName("sessionFileId")] string? SessionFileId,
+    [property: JsonPropertyName("documentId")] string? DocumentId,
+    [property: JsonPropertyName("fileName")] string? FileName,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
 /// <summary>Request body for <c>POST /api/compose/documents/{id}/save</c> (replace path) and
