@@ -98,7 +98,13 @@ import type {
   ComposeAssistantToWorkspaceFlow,
   ComposeWorkspaceToContextFlow,
   ComposeWorkspaceToAssistantFlow,
+  AnchoredAnnotation,
+  DefinedTerm,
 } from '../types/compose-contracts';
+
+// Re-export for consumers wiring the FR-29 rehydrate state (annotations authoring UX is a
+// follow-up task; this workspace only receives + stores what LoadAsync's response carries).
+export type { AnchoredAnnotation, DefinedTerm } from '../types/compose-contracts';
 
 // Re-export types for backwards-compatible consumer imports.
 export type { ComposeCheckoutStatus, ComposeWorkspaceState, ComposeWorkspaceAction } from './ComposeWorkspace.types';
@@ -311,6 +317,19 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const [composeDraftError, setComposeDraftError] = React.useState<string | null>(null);
 
   // -------------------------------------------------------------------------
+  // FR-29 (R2, task 060) — anchored annotations + defined-terms rehydrate
+  // -------------------------------------------------------------------------
+  // Restored from the Load response's `anchoredAnnotations`/`definedTermsTracking` fields
+  // (design.md §8) when the BFF's `LoadComposeDocumentResponse` carries them — see the Load
+  // effect below. NOTE (deferred wiring, see task 060 report): the BFF Load endpoint
+  // (`ComposeEndpoints.Load` → `LoadComposeDocumentResponse`) does not yet project these two
+  // fields onto the wire response, so today this always rehydrates to empty until a follow-up
+  // task threads them through. Parsing is defensive/optional so this workspace is ready the
+  // moment that wiring lands, with no further client change needed.
+  const [anchoredAnnotations, setAnchoredAnnotations] = React.useState<AnchoredAnnotation[]>([]);
+  const [definedTermsTracking, setDefinedTermsTracking] = React.useState<DefinedTerm[]>([]);
+
+  // -------------------------------------------------------------------------
   // Mount/Unmount host hooks per LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT §6
   // -------------------------------------------------------------------------
   React.useEffect(() => {
@@ -385,6 +404,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         const qs = new URLSearchParams({ driveId: effectiveDriveId, tenantId });
         if (docRef.sprkDocumentId) qs.set('documentRecordId', docRef.sprkDocumentId);
         if (docRef.fileName) qs.set('displayName', docRef.fileName);
+        // FR-29 (R2, task 060): forward a known prior session id so the BFF can RESUME it
+        // (design.md §8 — annotations are keyed to document identity, surviving a re-open)
+        // instead of always minting a fresh session. Purely additive — omitted when unknown.
+        if (initialSessionId) qs.set('sessionId', initialSessionId);
 
         const url = `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(docRef.speDriveItemId)}?${qs.toString()}`;
 
@@ -413,6 +436,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           fileName?: string;
           size: number;
           correlationId?: string;
+          // FR-29 (R2, task 060, design.md §8): OPTIONAL — present once the BFF Load response
+          // is wired to project ComposeService.LoadAsync's AnchoredAnnotations/
+          // DefinedTermsTracking (see the state note above this effect). Absent today; parsed
+          // defensively so no further client change is needed once that wiring lands.
+          anchoredAnnotations?: AnchoredAnnotation[];
+          definedTermsTracking?: DefinedTerm[];
         };
 
         // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
@@ -422,6 +451,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           bytes[i] = binary.charCodeAt(i);
         }
         if (ac.signal.aborted) return;
+        setAnchoredAnnotations(Array.isArray(payload.anchoredAnnotations) ? payload.anchoredAnnotations : []);
+        setDefinedTermsTracking(Array.isArray(payload.definedTermsTracking) ? payload.definedTermsTracking : []);
         dispatch({
           kind: 'loadSucceeded',
           docxBytes: bytes.buffer,
@@ -442,7 +473,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.status, state.documentRef?.speDriveItemId, bffBaseUrl, effectiveDriveId, tenantId]);
+  }, [state.status, state.documentRef?.speDriveItemId, bffBaseUrl, effectiveDriveId, tenantId, initialSessionId]);
 
   // -------------------------------------------------------------------------
   // Multi-tab BroadcastChannel hook — owns "focus-me" + "force-closed" signaling
@@ -946,6 +977,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       aria-label={state.documentRef?.fileName ?? 'Compose workspace'}
       data-compose-workspace-status={state.status}
       data-compose-checkout-status={state.checkoutStatus}
+      // FR-29 (R2, task 060): rehydrated annotation counts — a lightweight, test-observable
+      // signal that the Load response's anchoredAnnotations/definedTermsTracking (once wired,
+      // see the state note above the Load effect) reached this component.
+      data-compose-anchored-annotation-count={anchoredAnnotations.length}
+      data-compose-defined-term-count={definedTermsTracking.length}
       data-testid="compose-workspace"
     >
       {/*

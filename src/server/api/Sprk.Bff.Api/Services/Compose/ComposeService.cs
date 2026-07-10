@@ -140,7 +140,28 @@ public class ComposeService : IComposeService
             ? request.DocumentRecordId.Value.ToString()
             : request.DocumentSpeId;
 
-        var session = await _sessions.CreateSessionAsync(
+        // FR-29 (R2, design.md §8): if the caller supplies a known prior SessionId bound to
+        // THIS SAME document identity, RESUME it instead of minting a new one — this is what
+        // carries AnchoredAnnotations/DefinedTermsTracking forward across a document re-open
+        // (the annotations are keyed to document identity, not to a DOCX version — design.md
+        // §8 "Cross-version persistence"). A mismatched or missing session falls back to the
+        // R1 mint-new behavior unchanged (purely additive).
+        ChatSession? session = null;
+        if (!string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            var candidate = await _sessions.GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
+                .ConfigureAwait(false);
+            if (candidate is not null && string.Equals(candidate.DocumentId, bindingId, StringComparison.Ordinal))
+            {
+                session = candidate;
+                _logger.LogDebug(
+                    "Compose load: resumed existing session {SessionId} bound to document={BindingId} (tenant={TenantId}) — restoring {AnnotationCount} annotation(s), {DefinedTermCount} defined term(s)",
+                    session.SessionId, bindingId, request.TenantId,
+                    session.AnchoredAnnotations?.Count ?? 0, session.DefinedTermsTracking?.Count ?? 0);
+            }
+        }
+
+        session ??= await _sessions.CreateSessionAsync(
                 tenantId: request.TenantId,
                 documentId: bindingId,
                 playbookId: null,
@@ -158,6 +179,8 @@ public class ComposeService : IComposeService
             ETag = metadata.ETag,
             FileName = metadata.Name,
             Size = metadata.Size,
+            AnchoredAnnotations = session.AnchoredAnnotations ?? Array.Empty<AnchoredAnnotation>(),
+            DefinedTermsTracking = session.DefinedTermsTracking ?? Array.Empty<DefinedTerm>(),
         };
     }
 
@@ -645,6 +668,120 @@ public class ComposeService : IComposeService
             Size = saved.Size,
             AnnotationCount = request.Annotations.Count,
         };
+    }
+
+    // =========================================================================
+    // FR-29 anchored annotations (task 060). See design.md §8 + ChatSession.cs
+    // class-level remarks on AnchoredAnnotation for the Path-A deviation note.
+    // These two methods are the ONLY read/write surface for the two Compose-domain
+    // session collections — mutable partial-replace, NOT ledger writes.
+    // =========================================================================
+
+    /// <summary>ADR-040 <c>{bindingId}@t{n}</c> ledger-ref shape validator (mirrors <see cref="Ai.PublicContracts.OutcomeCard"/>'s own ledger-key validation intent).</summary>
+    private static readonly System.Text.RegularExpressions.Regex LedgerRefPattern =
+        new(@"^.+@t\d+$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <inheritdoc />
+    public async Task<ComposeAnnotationsState> GetComposeAnnotationsAsync(
+        string tenantId,
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId))
+            throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(tenantId));
+        if (string.IsNullOrWhiteSpace(sessionId))
+            throw new ArgumentException("SessionId is required.", nameof(sessionId));
+
+        var session = await _sessions.GetSessionAsync(tenantId, sessionId, cancellationToken).ConfigureAwait(false);
+        return new ComposeAnnotationsState
+        {
+            AnchoredAnnotations = session?.AnchoredAnnotations ?? Array.Empty<AnchoredAnnotation>(),
+            DefinedTermsTracking = session?.DefinedTermsTracking ?? Array.Empty<DefinedTerm>(),
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<ComposeAnnotationsState> SaveComposeAnnotationsAsync(
+        SaveComposeAnnotationsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.TenantId))
+            throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.SessionId))
+            throw new ArgumentException("SessionId is required.", nameof(request));
+
+        ValidateLedgerRefs(request.AnchoredAnnotations, request.DefinedTermsTracking);
+
+        var session = await _sessions.GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
+            .ConfigureAwait(false);
+        if (session is null)
+        {
+            throw new InvalidOperationException(
+                $"Compose session not found: session={request.SessionId} tenant={request.TenantId}. " +
+                "Annotations can only be saved onto an existing session (create one via LoadAsync first).");
+        }
+
+        // Partial-replace: a null collection on the request leaves the stored collection
+        // unchanged; a non-null (possibly empty) collection replaces it wholesale. Mutable
+        // by design (accept/reject/edit) — NOT an append to the append-only ledger.
+        var updated = session with
+        {
+            AnchoredAnnotations = request.AnchoredAnnotations ?? session.AnchoredAnnotations,
+            DefinedTermsTracking = request.DefinedTermsTracking ?? session.DefinedTermsTracking,
+            LastActivity = DateTimeOffset.UtcNow,
+        };
+
+        await _sessions.UpdateSessionCacheAsync(updated, cancellationToken).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Compose annotations saved: tenant={TenantId} session={SessionId} annotations={AnnotationCount} definedTerms={DefinedTermCount}",
+            request.TenantId, request.SessionId,
+            updated.AnchoredAnnotations?.Count ?? 0, updated.DefinedTermsTracking?.Count ?? 0);
+
+        return new ComposeAnnotationsState
+        {
+            AnchoredAnnotations = updated.AnchoredAnnotations ?? Array.Empty<AnchoredAnnotation>(),
+            DefinedTermsTracking = updated.DefinedTermsTracking ?? Array.Empty<DefinedTerm>(),
+        };
+    }
+
+    /// <summary>
+    /// Validates that every supplied <see cref="AnchoredAnnotation.Provenance"/> /
+    /// <see cref="DefinedTerm.Provenance"/> ledger ref is in ADR-040 <c>{bindingId}@t{n}</c>
+    /// form BEFORE anything persists (fail fast — no partial writes).
+    /// </summary>
+    private static void ValidateLedgerRefs(
+        IReadOnlyList<AnchoredAnnotation>? annotations,
+        IReadOnlyList<DefinedTerm>? definedTerms)
+    {
+        if (annotations is not null)
+        {
+            foreach (var a in annotations)
+            {
+                if (a.Provenance is not null && !LedgerRefPattern.IsMatch(a.Provenance.LedgerRef))
+                {
+                    throw new ArgumentException(
+                        $"AnchoredAnnotation '{a.Id}' provenance.ledgerRef '{a.Provenance.LedgerRef}' " +
+                        "does not match the ADR-040 {bindingId}@t{n} format.",
+                        nameof(annotations));
+                }
+            }
+        }
+
+        if (definedTerms is not null)
+        {
+            foreach (var t in definedTerms)
+            {
+                if (t.Provenance is not null && !LedgerRefPattern.IsMatch(t.Provenance.LedgerRef))
+                {
+                    throw new ArgumentException(
+                        $"DefinedTerm '{t.Term}' provenance.ledgerRef '{t.Provenance.LedgerRef}' " +
+                        "does not match the ADR-040 {bindingId}@t{n} format.",
+                        nameof(definedTerms));
+                }
+            }
+        }
     }
 
     /// <summary>

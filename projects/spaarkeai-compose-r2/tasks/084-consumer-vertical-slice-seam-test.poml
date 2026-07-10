@@ -1,0 +1,74 @@
+<task id="084" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Consumer-side vertical-slice seam test — compose dispatch end-to-end (ADR-043 B6 / O3)</title>
+    <phase>8 Wrap</phase>
+    <status>not-started</status>
+    <gate>blocked-on-core</gate>
+    <dependencies>016,046</dependencies>
+    <blocks>082</blocks>
+    <tags>testing,integration-test,bff-api,seam</tags>
+    <rigor-hint reason="Modifies tests/**; the anti-recurrence definition-of-done gate; FULL per CLAUDE.md §8 TEST-MODIFYING override">FULL</rigor-hint>
+    <model-tier reason="Contract-anchoring integration test against the shared seam; bounded">sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <core-gate>
+      BLOCKED on core E-20 (`DispositionRoutability` registry — admits `compose` at the dispatch admit-gate `SessionDispatchOrchestrator.cs:229`) AND E-40 (formal `tests/integration/seam/**` KEEP category + governance). The test CANNOT pass end-to-end until E-20 lands (compose disposition currently 422s at the admit-gate). Author + run only after E-20 is on master. Verify via `notes/HANDOFF-to-core-e20-timing-and-forkc-reping.md`.
+    </core-gate>
+  </metadata>
+
+  <prompt>
+    Author the compose consumer-side **vertical-slice seam test** on core's `tests/integration/seam/**` KEEP
+    category (ADR-043 §5 governance, obligation O3/B6): a real dispatch of a compose Action through the FULL
+    shipped seam — `dispatchConsumer(bindingId, {slots})` → `POST /api/ai/chat/sessions/{id}/dispatch` →
+    `SessionDispatchOrchestrator.DispatchAsync` → `ActionRunner` (via `ContextBinder`) → stored `SessionOutput`
+    (ADR-040 store-before-render) → the rendered/streamed frame. This is the **definition-of-done** that catches
+    the "green contract-shape test while 422-broken end-to-end" failure that shipped 016/042 falsely green. It
+    MUST exercise the disposition admit-gate, not just the OutputRouter unit layer.
+  </prompt>
+
+  <role>.NET 8 integration-test author fluent in WebApplicationFactory, the ADR-039 dispatch seam, ADR-040 ledger, and the ADR-038 seam KEEP category.</role>
+
+  <goal>
+    A `tests/integration/seam/**` test that dispatches at least one compose Informational action AND (post-E-20)
+    the `draft-alternative` compose-disposition action end-to-end and asserts: (1) 200/streamed (not 422),
+    (2) a `SessionOutput` was stored with the correct disposition BEFORE render, (3) the operand reached
+    `## Input` (not the session-file path). The test fails if the admit-gate rejects the compose disposition.
+  </goal>
+
+  <context>
+    <background>
+      ADR-043 adds `tests/integration/seam/**` as a KEEP category and makes the vertical-slice test the
+      definition-of-done for any dispatch/execution change. Compose is the forcing consumer. Today the 4
+      informational compose actions dispatch end-to-end (E-10 fixed the input path); `draft-alternative` 422s at
+      the admit-gate until E-20. This test encodes both states so it goes green exactly when E-20 lands.
+    </background>
+    <relevant-files>
+      <file role="reference">tests/integration/seam/Ai/ContextBinderActionRunnerSeamTests.cs — core's E-10 seam test; mirror its harness</file>
+      <file role="reference">tests/integration/seam/README.md — the KEEP-category contract</file>
+      <file role="new">tests/integration/seam/Ai/ComposeDispatchSeamTests.cs — this task</file>
+      <file role="seam">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs — the gates under test (admit-gate :229, HasStructuredOperand branch :276)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Integration-first; real WebApplicationFactory boundary; no `Mock&lt;HttpMessageHandler&gt;`; place under `tests/integration/seam/**` (KEEP path).</constraint>
+    <constraint source="ADR-043">The test MUST exercise the full seam through the disposition admit-gate — a router/unit-layer assertion is explicitly insufficient (that is the failure this closes).</constraint>
+    <constraint source="ADR-040">Assert store-before-render: the `SessionOutput` exists with the compose disposition before the frame renders.</constraint>
+    <constraint source="core-gate">Do not author against a guessed E-20 shape — run after E-20 is on master; confirm `DispositionRoutability` admits `compose` at the admit-gate.</constraint>
+  </constraints>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A compose Informational action dispatches end-to-end through `/dispatch` and returns streamed output (not 422), with a stored `SessionOutput`.</criterion>
+    <criterion testable="true">(post-E-20) `draft-alternative` (compose disposition) dispatches end-to-end — the admit-gate admits it — and stores a `compose`-disposition `SessionOutput` before render.</criterion>
+    <criterion testable="true">The operand (`selectionText`) is asserted to reach `## Input` (via ContextBinder), not the session-file path.</criterion>
+    <criterion testable="true">The test is under `tests/integration/seam/**` and fails if the admit-gate rejects the compose disposition (guards against the false-green regression).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If E-20 has not landed (compose disposition still 422s at the admit-gate), STOP — do not weaken the test to pass at the router layer. Report the block and wait for E-20.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
