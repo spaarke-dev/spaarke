@@ -83,9 +83,7 @@ export interface ComposeActionBridgeProviderProps {
  * workspace section re-renders and threads `enqueue` the moment the assistant
  * registers its queue).
  */
-export function ComposeActionBridgeProvider(
-  props: ComposeActionBridgeProviderProps
-): React.JSX.Element {
+export function ComposeActionBridgeProvider(props: ComposeActionBridgeProviderProps): React.JSX.Element {
   const dispatcherRef = React.useRef<ComposeActionEnqueue | null>(null);
   const [hasDispatcher, setHasDispatcher] = React.useState<boolean>(false);
 
@@ -94,7 +92,7 @@ export function ComposeActionBridgeProvider(
     setHasDispatcher(dispatcher !== null);
   }, []);
 
-  const enqueue = React.useCallback<ComposeActionEnqueue>((request) => {
+  const enqueue = React.useCallback<ComposeActionEnqueue>(request => {
     const dispatcher = dispatcherRef.current;
     if (!dispatcher) {
       return Promise.reject(

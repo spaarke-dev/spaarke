@@ -30,15 +30,11 @@ describe('composeActionBridge', () => {
     const { result } = renderHook(() => useComposeActionBridge(), { wrapper });
     expect(result.current).not.toBeNull();
     expect(result.current!.hasDispatcher).toBe(false);
-    await expect(result.current!.enqueue({ id: 'x', bindingId: 'b' })).rejects.toThrow(
-      /no host dispatcher/i
-    );
+    await expect(result.current!.enqueue({ id: 'x', bindingId: 'b' })).rejects.toThrow(/no host dispatcher/i);
   });
 
   it('registering a dispatcher flips hasDispatcher and delegates enqueue DIRECTLY', async () => {
-    const dispatcher: ComposeActionEnqueue = jest
-      .fn()
-      .mockResolvedValue({ streamId: 's1', status: 'complete' });
+    const dispatcher: ComposeActionEnqueue = jest.fn().mockResolvedValue({ streamId: 's1', status: 'complete' });
 
     const { result } = renderHook(
       () => {
@@ -51,7 +47,11 @@ describe('composeActionBridge', () => {
 
     await waitFor(() => expect(result.current!.hasDispatcher).toBe(true));
 
-    const request = { id: 'compose-draft-alternative#1', bindingId: 'binding-1', args: { slots: { selectionText: 'x' } } };
+    const request = {
+      id: 'compose-draft-alternative#1',
+      bindingId: 'binding-1',
+      args: { slots: { selectionText: 'x' } },
+    };
     const res = await result.current!.enqueue(request);
 
     expect(dispatcher).toHaveBeenCalledTimes(1);
@@ -101,8 +101,6 @@ describe('composeActionBridge', () => {
     // Clear (what the effect cleanup does on unmount).
     act(() => result.current!.setDispatcher(null));
     await waitFor(() => expect(result.current!.hasDispatcher).toBe(false));
-    await expect(result.current!.enqueue({ id: 'z', bindingId: 'b' })).rejects.toThrow(
-      /no host dispatcher/i
-    );
+    await expect(result.current!.enqueue({ id: 'z', bindingId: 'b' })).rejects.toThrow(/no host dispatcher/i);
   });
 });

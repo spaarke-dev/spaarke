@@ -908,9 +908,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             =================================================================== */}
         {qaHighlight.activeHighlight ? (
           <div className={styles.qaHighlightBanner} role="status" data-testid="compose-qa-highlight-banner">
-            <Text size={200}>
-              Found in {qaHighlight.activeHighlight.sectionLabel ?? 'this document'}
-            </Text>
+            <Text size={200}>Found in {qaHighlight.activeHighlight.sectionLabel ?? 'this document'}</Text>
           </div>
         ) : null}
 
