@@ -4,17 +4,25 @@ using Microsoft.Extensions.Logging;
 namespace Sprk.Bff.Api.Services.Ai.Audit;
 
 /// <summary>
-/// Writes append-only compliance audit records for AI interactions to the Cosmos DB <c>audit</c> container.
+/// Writes append-only compliance audit records for AI interactions to the Cosmos DB
+/// <c>audit-partitioned</c> container.
 ///
 /// ADR-015 Tier 2 compliance enforced in code:
 /// - Only <see cref="Container.CreateItemAsync{T}"/> is used — no upsert, replace, or delete.
-/// - Partition key is <c>/tenantId</c> for all writes.
+/// - Partition key is the synthetic <c>/partitionKey</c> value (<c>{tenantId}|{yyyy-MM}</c>) for all
+///   writes — re-keyed off bare <c>/tenantId</c> by task AIR2-074 (FR-D-05) so a customer-dedicated
+///   tenant's audit trail does not collapse into one logical partition against the Cosmos 20 GB cap.
+///   The synthetic value is derived at the single write chokepoint via <see cref="AuditEntry.PartitionKey"/>
+///   / <see cref="AuditPartitionKey"/> — the same single-synthetic-key discipline the memory-items
+///   store uses (task AIR2-050 / ADR-042).
 /// - SHA-256 response hash stored instead of verbatim text.
 ///
 /// INFRASTRUCTURE REQUIREMENT (must be applied at provisioning time):
-/// The <c>audit</c> container MUST be created with an immutable policy so that data-plane
+/// The <c>audit-partitioned</c> container MUST be created with an immutable policy so that data-plane
 /// updates and deletes are impossible even with Cosmos DB Built-in Data Contributor access.
 /// See <c>infrastructure/cosmos/audit-container-policy.json</c> for the required policy definition.
+/// The predecessor <c>audit</c> container is left intact and untouched (append-only compliance data
+/// is never migrated destructively — AIR2-074 migration record in project notes).
 ///
 /// Fire-and-forget pattern:
 /// <see cref="LogInteractionAsync"/> enqueues the write on the thread pool via <see cref="Task.Run"/>.
@@ -23,7 +31,9 @@ namespace Sprk.Bff.Api.Services.Ai.Audit;
 /// </summary>
 public sealed class AuditLogService : IAuditLogService
 {
-    private const string ContainerName = "audit";
+    // AIR2-074 (FR-D-05): re-keyed successor to the legacy "audit" container. New container because
+    // Cosmos partition keys cannot change in place; the legacy "audit" container is left untouched.
+    private const string ContainerName = "audit-partitioned";
 
     private readonly Container _container;
     private readonly ILogger<AuditLogService> _logger;
@@ -78,9 +88,14 @@ public sealed class AuditLogService : IAuditLogService
             // UpsertItemAsync, ReplaceItemAsync, and DeleteItemAsync are intentionally absent
             // from this service. The infrastructure immutable policy provides the second layer
             // of enforcement (see infrastructure/cosmos/audit-container-policy.json).
+            //
+            // Partition key = the synthetic /partitionKey value ({tenantId}|{yyyy-MM}), read from the
+            // same derived AuditEntry.PartitionKey property that is serialized onto the document, so
+            // the write's partition and the document's partition value are guaranteed identical
+            // (AIR2-074 re-key; never bare /tenantId).
             await _container.CreateItemAsync(
                 item: entry,
-                partitionKey: new PartitionKey(entry.TenantId),
+                partitionKey: new PartitionKey(entry.PartitionKey),
                 cancellationToken: ct);
         }
         catch (OperationCanceledException)

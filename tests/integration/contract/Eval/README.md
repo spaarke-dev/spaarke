@@ -82,6 +82,12 @@ A **net-new** family joined to the SAME merge gate (via the `Category=GoldenUtte
 - **Perturbation-verified** (2026-07-09, task 033): the E-1 negative case (`E1Negative_AffirmationAfterTwoProposals_ClassifiesInferred_NeverExplicit`) and the E-6 negative case (`E6Negative_DispatchUncertainOverExplicitRequest_ForcesDialogWithSuspicion_NeverAutoExecutes`) were each hand-verified to go RED against a deliberately perturbed production classifier/engine, then the perturbation was reverted (no net diff) — confirming the family is not a vacuous pass.
 - Net-new-coverage dedupe vs the golden + resourcefulness suites (`OC-` case-id namespace; `e1`..`e6` family keys).
 
+## Eval-suite-green merge gate — full family scope (r2 task 071 / FR-D-02, NFR-02)
+
+The `eval-gate` job in `sdap-ci.yml` gates on the `Category=GoldenUtteranceEval` trait, which now spans **every** in-scope R2 family: the golden-utterance suite + P2 loop/injection, the D-F0(e) Resourcefulness family (task 031), the Origin-classification family (task 033), the ContextEnvelope budget-breach-fails-eval check (task 054, FR-B-05), and the memory-write capture→recall family (task 057). Any single family red fails the merge — no family is exempt, and no second gate mechanism exists.
+
+**Memory-poisoning eval families are explicitly OUT OF SCOPE and MUST NOT be added to this gate.** They are DEFERRED to the separate memory-governance project per spec FR-B-10 (`projects/spaarke-ai-architecture-redesign-r2/spec.md` item 38 + the Memory hard-governance rules deferral). This is a deliberate scope boundary, not an oversight — do not add a `[Trait("Category", "GoldenUtteranceEval")]` memory-poisoning case here until the governance project ships one.
+
 ## Deletion-safety
 
 KEEP-protected per ADR-038 (`tests/integration/contract/**`). Since P1 (task 026) the suite is an ACTIVE merge gate (NFR-02); every catalog/prompt change adds or updates cases (NFR-06).

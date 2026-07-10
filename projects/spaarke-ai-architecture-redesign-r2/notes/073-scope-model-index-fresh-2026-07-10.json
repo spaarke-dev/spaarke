@@ -1,4 +1,4 @@
-{
+﻿{
   "$schema": "https://spaarke.com/schemas/scope-model-index/v1",
   "$generated": "2026-07-10T10:30:51Z",
   "actions": [
@@ -1345,6 +1345,26 @@
       "tags": null
     },
     {
+      "code": "GET-WORKSPACE-TAB-CONTENT",
+      "id": "cb930271-0e71-f111-ab0e-7ced8ddc4a05",
+      "toolId": null,
+      "name": "SYS-Get Workspace Tab Content",
+      "handler": "GetWorkspaceTabContentHandler",
+      "sideEffectClass": null,
+      "description": "Read the composed widget state of an existing workspace tab. Use this when the user refers to content they can see in a workspace tab (e.g., 'make the summary shorter', 'change the tldr') and you need the CURRENT state to reason about what to modify. Returns the composed sections + values from the tab's widget data — NOT raw streaming chunks. Inputs: tabId (required); sectionName (optional, scope read to one section). Outputs: status discriminator (ok | not_found | section_missing), widgetType, sections map (section name → value), sectionCount, message. Read-only — this tool NEVER mutates tab state; for edits use update_workspace_tab. When the tab is not in the current workspace state OR the sectionName is missing, the response is a structured re-readable status — never an error. Architecture §6.5 / §11.1.",
+      "tags": null
+    },
+    {
+      "code": "CLOSE-WORKSPACE-TAB",
+      "id": "cc930271-0e71-f111-ab0e-7ced8ddc4a05",
+      "toolId": null,
+      "name": "SYS-Close Workspace Tab",
+      "handler": "CloseWorkspaceTabHandler",
+      "sideEffectClass": null,
+      "description": "Closes an open workspace tab in the user's current chat-session workspace. Use this when the user asks to close a tab, dismiss a panel, or clear something from their workspace. Pass the stable 'tabId' of the tab. Pinned tabs cannot be closed through this tool — the response will indicate the tab is pinned and the user must explicitly unpin it first. Closing a non-existent or already-closed tab returns success (idempotent). Cosmos durable rows for previously-pinned data are preserved when a tab is closed.",
+      "tags": null
+    },
+    {
       "code": "DATAVERSE-READ-QUERY",
       "id": "8631a3cd-b678-f111-ab0e-7ced8ddc4a05",
       "toolId": "dataverse.read_query",
@@ -1412,6 +1432,16 @@
       "handler": "SendWorkspaceArtifactHandler",
       "sideEffectClass": null,
       "description": "Open a tab in the user's workspace pane. PREFERRED USE — open a named workspace LAYOUT as a live tab: widgetType 'Workspace' with widgetData {\"kind\":\"Workspace\",\"layoutName\":\"<layout name>\"}. Use layoutName 'Compose' when the user asks to open the Compose editor or to start composing/drafting a document in the workspace; other layouts (e.g. 'Daily Briefing', 'Documents') open the same way. When opening the Compose layout ABOUT A SPECIFIC DOCUMENT, add widgetData.documentId (the sprk_document GUID, e.g. from a search result path tables/sprk_document/records/{guid}) — Compose then opens WITH that document loaded. Session-UPLOADED chat files cannot pre-seed Compose (they exist only as extracted text, not stored documents) — omit documentId for them; the tab opens empty and the tool result says so — relay it honestly. If the requested layout does not exist, the tool result lists the available layout names — relay them honestly. The tab opens immediately in the workspace pane and the tool result confirms it; only claim a tab was opened when this tool result says so. Legacy artifact variants (Summary, DocumentViewer, Dashboard, Table) record an artifact to workspace state but are NOT visible in the current workspace UI — avoid them unless explicitly instructed. Agent-created tabs default to visible-to-assistant.",
+      "tags": null
+    },
+    {
+      "code": "UPDATE-WORKSPACE-TAB",
+      "id": "806162a3-ec6d-f111-ab0e-7ced8ddc4cc6",
+      "toolId": null,
+      "name": "SYS-Update Workspace Tab",
+      "handler": "UpdateWorkspaceTabHandler",
+      "sideEffectClass": null,
+      "description": "Update an existing workspace tab's widget data. Use this when you have refined a previously dispatched artifact and the user should see the updated state on the same tab (instead of a new one). Conflict resolution: pass the 'expectedLastUserEditAt' timestamp you observed when you last read the tab from your system-prompt snapshot. If the user has edited the tab since then, this tool will REFUSE with a 'stale_read' status — you must re-read the workspace state in your next turn and re-attempt with the refreshed timestamp. User edits always win. Omit expectedLastUserEditAt only when the tab has never been user-edited (e.g., you just created it via send_workspace_artifact).",
       "tags": null
     },
     {

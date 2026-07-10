@@ -1,0 +1,73 @@
+{
+  "schema": "publish-size-baseline-v1",
+  "purpose": "Baseline ledger for the ADR-029 / NFR-01 BFF publish-size verification harness (Measure-BffPublishSize.ps1). Every BFF-touching R2 task appends an entry via -RecordBaseline before merge.",
+  "governing_thresholds": {
+    "hard_stop_mb": 60,
+    "architecture_review_cumulative_mb": 55,
+    "single_task_escalation_delta_mb": 5
+  },
+  "pdb_convention": "compressed_incl_pdb_mb is the canonical deploy-lineage figure (matches the actual zip Deploy-BffApi.ps1 ships, including the 4 PDBs). compressed_excl_pdb_mb is informational only (source-hygiene lineage). All threshold comparisons in this harness use compressed_incl_pdb_mb, matching ADR-029's 'Publish-Size Baseline Ratchet' table convention.",
+  "reconciliation_note": "Task 070 (this harness) reconciles two figures found in prior docs: (a) the project CLAUDE.md / task-070 POML reference to 'r1 G-P3-close ~46.8 MB' -- this corresponds to the r1 G-P0 project-start actual of 46.87 MB (notes/g-p0-evidence.md section 7 in spaarke-ai-architecture-redesign-r1), measured BEFORE r1's own P1-P3 capability growth; there is no separate G-P3-specific publish-size measurement -- r1 only measured publish size at G-P0 (project start) and G-P4 (project close). (b) ADR-029's authoritative current baseline as of r1's close (2026-07-08, task 055, gate G-P4, operator-accepted AMBER-then-CLOSED) is 49.63 MB incl. PDBs / 45.87 MB excl. This harness treats 49.63 MB as the correct 'prior' entry to diff R2 measurements against -- it is the most recent, most authoritative, gate-signed-off figure, and per ADR-029 'baseline reset to 49.63 MB so downstream diffs are honest.' The older 46.87 MB figure is retained below for lineage but is NOT the diff target.",
+  "history": [
+    {
+      "date": "2026-05-26",
+      "source": "sdap-bff-api-remediation-fix Phase 5 close (ADR-029 ratification)",
+      "compressed_incl_pdb_mb": 45.65,
+      "compressed_excl_pdb_mb": null,
+      "uncompressed_incl_pdb_mb": null,
+      "file_count": null,
+      "task_id": "n/a",
+      "notes": "ADR-029 post-remediation baseline (runtimes/ tree eliminated, sourcemaps excluded, RIDs pinned linux-x64)."
+    },
+    {
+      "date": "2026-07-05",
+      "source": "spaarke-ai-architecture-redesign-r1 G-P0 project-start actual (notes/g-p0-evidence.md section 7)",
+      "compressed_incl_pdb_mb": 46.87,
+      "compressed_excl_pdb_mb": null,
+      "uncompressed_incl_pdb_mb": null,
+      "file_count": null,
+      "task_id": "n/a",
+      "notes": "Accumulated master drift between 2026-05-26 and r1 project start (+1.22 MB); measured before any r1 project code landed. This is the figure task-070's POML approximates as 'r1 G-P3-close ~46.8 MB' -- see reconciliation_note above."
+    },
+    {
+      "date": "2026-07-08",
+      "source": "spaarke-ai-architecture-redesign-r1 task 055, gate G-P4 (project close, operator-accepted)",
+      "compressed_incl_pdb_mb": 49.63,
+      "compressed_excl_pdb_mb": 45.87,
+      "uncompressed_incl_pdb_mb": 143.75,
+      "file_count": 247,
+      "task_id": "r1-055",
+      "notes": "Authoritative baseline per ADR-029 'Publish-Size Baseline Ratchet' -- +3.98 MB vs 2026-05-26 baseline, of which +1.22 MB predates r1 (master drift) and the remainder is r1 P1-P3 net-new capability (agent turn loop, gate/elicitation machinery, email + work_product disposition, widget layer, eval suite, metering). Zero NuGet package additions; no new HIGH CVEs. Ceiling headroom 5.37 MB. G-P4 CLOSED 2026-07-08."
+    },
+    {
+      "date": "2026-07-10",
+      "source": "spaarke-ai-architecture-redesign-r2 task 070",
+      "task_id": "070",
+      "compressed_incl_pdb_mb": 46.59,
+      "compressed_excl_pdb_mb": 45.83,
+      "uncompressed_incl_pdb_mb": 140.67,
+      "file_count": 240,
+      "runtimes_file_count": 0,
+      "sourcemap_count": 0,
+      "delta_vs_prior_mb": -3.04,
+      "classification": "OK: within all ADR-029 / NFR-01 thresholds.",
+      "cve_check": "HIGH SEVERITY FOUND (1 line(s)) -- review before merge",
+      "notes": "Harness stand-up + R2 baseline record"
+    }
+  ],
+  "current": {
+    "date": "2026-07-10",
+    "source": "spaarke-ai-architecture-redesign-r2 task 070",
+    "task_id": "070",
+    "compressed_incl_pdb_mb": 46.59,
+    "compressed_excl_pdb_mb": 45.83,
+    "uncompressed_incl_pdb_mb": 140.67,
+    "file_count": 240,
+    "runtimes_file_count": 0,
+    "sourcemap_count": 0,
+    "delta_vs_prior_mb": -3.04,
+    "classification": "OK: within all ADR-029 / NFR-01 thresholds.",
+    "cve_check": "HIGH SEVERITY FOUND (1 line(s)) -- review before merge",
+    "notes": "Harness stand-up + R2 baseline record"
+  }
+}

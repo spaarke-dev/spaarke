@@ -100,6 +100,15 @@ public sealed record BoundInputs
     /// output over a pre-fingerprint snapshot would clobber the just-written fingerprint (ADR-040 append-only).
     /// </summary>
     public ChatSession? UpdatedSession { get; init; }
+
+    /// <summary>
+    /// The per-turn ContextEnvelope token-budget report (FR-B-05, task 054) — counts only (NFR-07). Covers
+    /// the stable-prefix fragment slices the Binder assembles (Environment/User/Business) plus the envelope
+    /// ceiling; the Conversation ledger tail carries no content in the envelope (ADR-040 references-only), so
+    /// its token count is 0 here (it is budget-gated where it is rendered, and by the breach-fails-eval gate).
+    /// A breach is surfaced (logged), never silently truncated.
+    /// </summary>
+    public ContextBudgetReport? BudgetReport { get; init; }
 }
 
 /// <summary>

@@ -1,7 +1,7 @@
 <task id="AIR2-072" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Cross-satellite seam-fork verification — core is the only modifier of Services/Ai/ internals</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>H — G-R2-D Hardening</phase>
     <gate>G-R2-D (hardening)</gate>
     <estimated-effort>0.5 day</estimated-effort>

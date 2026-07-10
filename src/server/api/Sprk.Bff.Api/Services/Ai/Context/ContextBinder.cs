@@ -134,6 +134,7 @@ public sealed class ContextBinder : IContextBinder
         var operand = ResolveOperand(request);
         var callerContactId = await ResolveCallerContactIdAsync(request, ct).ConfigureAwait(false);
         var envelope = await AssembleEnvelopeAsync(request, callerContactId, ct).ConfigureAwait(false);
+        var budgetReport = EvaluateAndLogBudget(request, envelope);
         var (fingerprint, updatedSession) = await WriteFingerprintAsync(request, envelope, ct).ConfigureAwait(false);
 
         return new BoundInputs
@@ -142,6 +143,7 @@ public sealed class ContextBinder : IContextBinder
             Operand = operand,
             Fingerprint = fingerprint,
             UpdatedSession = updatedSession,
+            BudgetReport = budgetReport,
         };
     }
 
@@ -486,6 +488,39 @@ public sealed class ContextBinder : IContextBinder
                 hostEntityType, hostEntityId);
             return Array.Empty<MemoryItemReference>();
         }
+    }
+
+    // ── Per-turn token-budget enforcement (task 054, FR-B-05) — evaluate the assembled envelope
+    //    against the binding EnvelopeBudget ceilings and EMIT per-slice counts as telemetry every turn
+    //    (identifiers/counts only, NFR-07). The Binder budgets the stable-prefix fragment slices it
+    //    assembles (Environment/User/Business) + the envelope ceiling; the Conversation ledger tail
+    //    carries NO content in the envelope (ADR-040 references-only), so it is 0 here and is gated where
+    //    it is rendered + by the breach-fails-eval merge gate. A breach is SURFACED (logged loud), never
+    //    silently truncated — a live turn is not failed on a budget breach (that would 500 a user), but
+    //    the golden-utterance eval gate turns the same breach into a hard pre-merge failure (FR-D-02). ──
+
+    private ContextBudgetReport EvaluateAndLogBudget(ContextBindingRequest request, ContextEnvelope envelope)
+    {
+        var report = EnvelopeBudget.Evaluate(envelope);
+
+        if (report.HasBreach)
+        {
+            // NFR-07: identifiers + counts only (the report's summary is content-free by construction).
+            _logger.LogWarning(
+                "[FR-B-05] ContextEnvelope token-budget BREACH (tenant={TenantId} session={SessionId} turn={Turn}): " +
+                "breached={BreachedSlices} budgets={BudgetSummary}. Surfaced, not truncated — the eval merge gate " +
+                "fails on this shape (FR-D-02).",
+                request.TenantId, request.SessionId, request.Turn,
+                string.Join(",", report.BreachedSlices), report.RenderSummary());
+        }
+        else
+        {
+            _logger.LogDebug(
+                "[FR-B-05] ContextEnvelope token budgets (tenant={TenantId} session={SessionId} turn={Turn}): {BudgetSummary}",
+                request.TenantId, request.SessionId, request.Turn, report.RenderSummary());
+        }
+
+        return report;
     }
 
     // ── Fingerprint writer (task-038 dark seam → live; ADR-040 store-before-render; NFR-07) ──────
