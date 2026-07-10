@@ -58,33 +58,33 @@ public class MemoryItemStoreTests
         string key = "Trial Strategy",
         string value = "Bifurcate liability and damages",
         MemoryFactType type = MemoryFactType.KeyFact) => new()
-    {
-        Version = MemoryItemContract.SchemaVersion,
-        Scope = MemoryScope.Record,
-        SubjectType = subjectType,
-        SubjectId = subjectId,
-        Fact = new MemoryFact { Type = type, Key = key, Value = value, ConfirmedByUser = true },
-        Source = MemoryOrigin.AiDerived,
-        BindingId = "BND-001",
-        LedgerRef = "BND-001@t3",
-        SessionId = "session-1",
-        TurnId = 3,
-        TrustLevel = "session-derived",
-        DeletionPolicy = "user-erasable",
-        RetentionClass = "tier-3-user-owned",
-    };
+        {
+            Version = MemoryItemContract.SchemaVersion,
+            Scope = MemoryScope.Record,
+            SubjectType = subjectType,
+            SubjectId = subjectId,
+            Fact = new MemoryFact { Type = type, Key = key, Value = value, ConfirmedByUser = true },
+            Source = MemoryOrigin.AiDerived,
+            BindingId = "BND-001",
+            LedgerRef = "BND-001@t3",
+            SessionId = "session-1",
+            TurnId = 3,
+            TrustLevel = "session-derived",
+            DeletionPolicy = "user-erasable",
+            RetentionClass = "tier-3-user-owned",
+        };
 
     private static MemoryItem BuildUserItem(
         string userId,
         string key = "Drafting Style",
         string value = "Plain-English, short sentences") => new()
-    {
-        Version = MemoryItemContract.SchemaVersion,
-        Scope = MemoryScope.User,
-        UserId = userId,
-        Fact = new MemoryFact { Type = MemoryFactType.KeyFact, Key = key, Value = value, ConfirmedByUser = true },
-        Source = MemoryOrigin.User,
-    };
+        {
+            Version = MemoryItemContract.SchemaVersion,
+            Scope = MemoryScope.User,
+            UserId = userId,
+            Fact = new MemoryFact { Type = MemoryFactType.KeyFact, Key = key, Value = value, ConfirmedByUser = true },
+            Source = MemoryOrigin.User,
+        };
 
     private static CosmosException NotFoundCosmosException()
         => new("Not Found", HttpStatusCode.NotFound, 0, string.Empty, 0);

@@ -79,9 +79,7 @@ describe('OutcomeCard', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /open the library/i }));
-    expect(onNextStep).toHaveBeenLastCalledWith(
-      expect.objectContaining({ actionKind: 'navigate' })
-    );
+    expect(onNextStep).toHaveBeenLastCalledWith(expect.objectContaining({ actionKind: 'navigate' }));
     expect(onNextStep.mock.calls[1][0].targetBindingId).toBeUndefined();
   });
 
