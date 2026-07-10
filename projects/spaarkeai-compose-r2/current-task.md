@@ -30,7 +30,15 @@
 
 **OWNER WAKE-UP QUEUE** (surface these when owner returns): live-env deploys (047 catalog → flips /healthz green, then 017/056/081); the 034 undo/replace scope decision (Full Path B vs replace-only — E-20 coded-workflow seam makes durable pure-undo feasible); the sandbox deploy of the getting-started vertical for the demo; any escalations logged during the night.
 
-**HEAD**: `9ab65aec4` (branch — tasks 100 + 102 + 104 + 101 landed). 103 running (agent) — LAST Phase-9 task. All state durable: register + Phase-9 POMLs (100✅/102✅/104✅/101✅◐/103🔄) + TASK-INDEX + this plan. Progress: **4 of 5 Phase-9 clusters landed** (100 create-on-save ✅, 102 memory-resume ✅, 104 three-pane ✅ [070 superseded], 101 dispatch ✅◐-047-pending); 103 (Word shuttle) running. **After 103 reconciles, the autonomous Phase-9 queue is COMPLETE** — every in-process-testable slice closed with a through-the-wire test; the only residue is the OWNER wake-up queue (deploys 047→017/056/081 + the 034 undo decision). At that point I will STOP and wait for the owner (no more independent autonomous work remains within the hard limits).
+**HEAD**: `ad5d0aed3` (branch, merged with master — 0 behind / 20 ahead). **PHASE-9 E2E REMEDIATION COMPLETE** — all 5 clusters landed + verified through the wire: 100 create-on-save ✅ (3/3), 102 memory-resume ✅ (5/5, linchpin), 104 three-pane ✅ (7/7 real-bus, 070 superseded), 101 dispatch ✅◐-047-pending (2.3+084/3 green; 2.2 activation deploy-gated), 103 Word-shuttle ✅ (4/4 poll path; webhook-delivery leg ◐-056-pending).
+
+**POST-103 SEQUENCE DONE (2026-07-10, owner-approved commit→merge-from-master→deploy):**
+- ✅ **Merge-from-master** — pulled 25 master commits (daily-briefing/set-regarding/daily-update/cleanGuid-barrel) into the branch. **Clean auto-merge, zero conflicts** — none touched the compose surface. NOT a master merge (master ← branch is still deferred until UAT green).
+- ✅ **Full consolidated gate GREEN**: BFF build 0 err · compose-surface band 468/468 · publish **45.24 MB compressed** (< 60 ceiling, −4.4 vs 49.63 baseline) · compose-components tsc clean + jest 79/79 · SpaarkeAi jest 410/410 (incl 104 forcing test) · CVE only pre-existing Kiota HIGH (no new).
+- ✅ **Staged deliverables** (owner-facing): `notes/UAT-tier1-getting-started.md` (Tier-1 UAT script — getting-started vertical, needs only BFF+code-page deploy, no 047/056) + `notes/HANDOFF-to-core-shared-surface-heads-up.md` (the 3 shared-surface touchpoints for redesign-r2; recommends master-as-channel, core-first order, and asks core to absorb the StoredSession contract).
+- Publish artifact ready at `deploy/api-publish/` (gitignored; Release, 45.24 MB compressed).
+
+**⛔ AUTONOMOUS WORK COMPLETE — HOLDING FOR OWNER.** No more independent work remains within the hard limits. **OWNER wake-up queue** (all owner/live-env): (1) **deploy** BFF (017) + SpaarkeAi code page to sandbox → run **Tier-1 UAT** (script staged); (2) **047** catalog deploy → Tier-2 (AI actions) + flips /healthz green; (3) **056** webhook KV config → Tier-3 (instant Word return); (4) **merge to master** after UAT (coordinate core-first per the handoff); (5) the **034 undo/replace scope** decision (still OPEN). Expect Tier-1 UAT to surface 1–3 real-env gaps (auth/container-resolution/CORS) — that is the point of deploying early.
 
 ---
 
