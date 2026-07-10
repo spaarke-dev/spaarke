@@ -3,7 +3,8 @@
     <title>AnchoredAnnotation Path-A deviation code-review sign-off</title>
     <phase>8 Wrap</phase>
     <gate>startable-now</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-note>ACCEPT 2026-07-10. All 5 Path-A claims verified against code (AnchoredAnnotation = sealed record in Models/Ai/Chat, not a MemoryItem; no memory.* path; not Context-Binder-retrieved; not in memory review/delete view; tenant+matter scoped via the session envelope). Implementation self-documents the boundary at IComposeService.cs:216-224; ADR-013 NetArchTest facade (081) independently enforces it. Report: notes/anchored-annotation-path-a-signoff.md. No core escalation needed (flagged as a shared surface in HANDOFF-to-core-shared-surface-heads-up.md).</completion-note>
     <rigor>MINIMAL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>

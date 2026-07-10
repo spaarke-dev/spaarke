@@ -64,9 +64,9 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 071 | FR-34 D-F3 UI ack-on-frame-id | 7 Coord | 🔴 | 070 | ⛔ | FULL | sonnet | high |
 | 072 | FR-35 Document Q&A over session-mounted document (stretch) | 7 Coord | 🟢 | none | 🔲 | STANDARD | sonnet | high |
 | 080 | R1 spec.md amendment (two Word-native non-goals → "shipped in R2") | 8 Wrap | 🟢 | none | ✅ | MINIMAL | sonnet | high |
-| 081 | Publish-size ≤60 MB + CVE scan + NetArchTest facade verification (NFR-01/02/05) | 8 Wrap | 🟢 | 025,050,052 | 🔲 | STANDARD | sonnet | high |
+| 081 | Publish-size ≤60 MB + CVE scan + NetArchTest facade verification (NFR-01/02/05) | 8 Wrap | 🟢 | 025,050,052 | ✅ (45.27 MB · no new CVE · facade 2/2) | STANDARD | sonnet | high |
 | 082 | Flagship gate G-R2-C — browser-verified full chain on spaarkedev1 | 8 Wrap | 🔴 | 016,033,042,046,047,014,055 | ⛔ | FULL | opus | high |
-| 083 | AnchoredAnnotation Path-A deviation code-review sign-off | 8 Wrap | 🟢 | 060 | 🔲 | MINIMAL | sonnet | high |
+| 083 | AnchoredAnnotation Path-A deviation code-review sign-off | 8 Wrap | 🟢 | 060 | ✅ ACCEPT (not a MemoryItem — 5/5 claims verified) | MINIMAL | sonnet | high |
 | 084 | Consumer-side vertical-slice seam test — compose dispatch E2E (ADR-043 B6 / O3) | 8 Wrap | 🟢 (E-20 landed) | 016,046 | ✅ via 101 (confirm at 090) | FULL | sonnet | high |
 | 090 | Project wrap-up (code-review, adr-check, repo-cleanup, /test-diet, lessons) | 8 Wrap | 🔴 | all | ⛔ | FULL | opus | high |
 
