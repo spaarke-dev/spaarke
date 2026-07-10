@@ -198,13 +198,11 @@ describe('useComposeToolbarActivation — activation (E2E DoD row 3)', () => {
 
   it('a fetch failure leaves buttons DISABLED — no throw, no error UI', async () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
-    const failing = jest
-      .fn()
-      .mockResolvedValue({
-        ok: false,
-        status: 500,
-        json: async () => ({}),
-      } as unknown as Response) as unknown as typeof fetch;
+    const failing = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+    } as unknown as Response) as unknown as typeof fetch;
 
     render(<ActivationHost editor={editor} fetchOverride={failing} />);
 

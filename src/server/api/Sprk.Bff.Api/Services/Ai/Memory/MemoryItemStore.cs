@@ -47,6 +47,16 @@ public sealed class MemoryItemStore : IMemoryItemStore
     /// <summary>Target maximum token count for the system prompt fragment (legacy value preserved).</summary>
     private const int MaxTokens = 500;
 
+    /// <summary>
+    /// Target maximum token count for the USER-scope prompt fragment (F-2 recall). Sits below the 300-token
+    /// EnvelopeBudget.User ceiling with the SAME headroom ratio the Record fragment keeps below its 600
+    /// ceiling (500/600 ≈ 300×0.83 ≈ 250) — so the assembled user fragment never blows the User slice budget.
+    /// </summary>
+    private const int MaxUserFragmentTokens = 250;
+
+    /// <summary>Heading for the User-scope recall fragment — clearly user-scoped, same "(from prior sessions)" convention as the Record heading.</summary>
+    private const string UserFragmentHeading = "### About You (from prior sessions)";
+
     /// <summary>Minimum confidence for unconfirmed facts to enter the prompt fragment (legacy value preserved).</summary>
     private const double MinUnconfirmedConfidence = 0.7;
 
@@ -274,6 +284,26 @@ public sealed class MemoryItemStore : IMemoryItemStore
         return BuildPromptFragment(items.Select(i => i.Fact).ToList(), subjectType);
     }
 
+    /// <inheritdoc/>
+    public async Task<string> ToUserPromptFragmentAsync(string userId, CancellationToken ct = default)
+    {
+        var items = await GetForUserAsync(userId, ct);
+        if (items.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        // Defense-in-depth mirror exclusion (F-2 / D3: the mirror-guard applies to user items at read
+        // exactly as it does at the Binder's record-reference projection). A user fact that mechanically
+        // mirrors a live Dataverse field is a stale duplicate — it never enters the recall fragment.
+        var facts = items
+            .Select(i => i.Fact)
+            .Where(f => !DataverseFieldMirrorGuard.IsDataverseFieldMirror(f))
+            .ToList();
+
+        return facts.Count == 0 ? string.Empty : BuildUserPromptFragment(facts);
+    }
+
     // =========================================================================
     // Internal helpers (internal for unit test access — legacy test pattern preserved)
     // =========================================================================
@@ -321,6 +351,25 @@ public sealed class MemoryItemStore : IMemoryItemStore
     /// generalized for other entity types.
     /// </summary>
     internal static string BuildPromptFragment(IReadOnlyList<MemoryFact> allFacts, string subjectType)
+        => BuildBudgetedFragment(allFacts, BuildFragmentHeading(subjectType), MaxTokens);
+
+    /// <summary>
+    /// Builds the USER-scope recall fragment (F-2 / D3) — REUSES the Record fragment's exact
+    /// confidence-filter → confidence-descending sort → budget-trim discipline
+    /// (<see cref="BuildBudgetedFragment"/>), differing ONLY in the clearly-user-scoped heading and the
+    /// tighter <see cref="MaxUserFragmentTokens"/> budget. Not forked — the shared core is one method.
+    /// </summary>
+    internal static string BuildUserPromptFragment(IReadOnlyList<MemoryFact> allFacts)
+        => BuildBudgetedFragment(allFacts, UserFragmentHeading, MaxUserFragmentTokens);
+
+    /// <summary>
+    /// The shared budgeted-fragment core (ported VERBATIM from the legacy render + trim loop): confidence
+    /// filter (unconfirmed &lt; 0.7 excluded) → confidence-descending sort → render under
+    /// <paramref name="heading"/> → drop the lowest-confidence fact until within <paramref name="maxTokens"/>.
+    /// The Record path passes <see cref="BuildFragmentHeading"/> + <see cref="MaxTokens"/> → byte-identical
+    /// to the pre-refactor output (pinned by the memory recall/determinism tests).
+    /// </summary>
+    private static string BuildBudgetedFragment(IReadOnlyList<MemoryFact> allFacts, string heading, int maxTokens)
     {
         var eligible = allFacts
             .Where(f => f.ConfirmedByUser || f.Confidence >= MinUnconfirmedConfidence)
@@ -338,10 +387,10 @@ public sealed class MemoryItemStore : IMemoryItemStore
         string fragment;
         while (true)
         {
-            fragment = RenderFragment(candidates, subjectType);
+            fragment = RenderFragment(candidates, heading);
 
             var estimatedTokens = fragment.Length / CharsPerToken;
-            if (estimatedTokens <= MaxTokens || candidates.Count <= 1)
+            if (estimatedTokens <= maxTokens || candidates.Count <= 1)
             {
                 break;
             }
@@ -367,10 +416,10 @@ public sealed class MemoryItemStore : IMemoryItemStore
         return $"### {display} Context (from prior sessions)";
     }
 
-    private static string RenderFragment(IReadOnlyList<MemoryFact> facts, string subjectType)
+    private static string RenderFragment(IReadOnlyList<MemoryFact> facts, string heading)
     {
         var sb = new StringBuilder();
-        sb.AppendLine(BuildFragmentHeading(subjectType));
+        sb.AppendLine(heading);
 
         AppendSection(sb, "**Parties**", facts, MemoryFactType.Party);
         AppendSection(sb, "**Key Dates**", facts, MemoryFactType.KeyDate);

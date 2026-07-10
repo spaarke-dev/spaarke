@@ -145,8 +145,13 @@ jobs:
         continue-on-error: true   # let classifier decide; don't abort here on test failures
         shell: pwsh
         run: |
+          # LogFilePrefix (NOT LogFileName): each test project writes its own
+          # uniquely-named TRX. A fixed LogFileName made every project in the
+          # solution OVERWRITE the same file, so the classifier only ever saw
+          # the last project's results — failures in the other test projects
+          # were invisible to CI (redesign-r2 e2e audit finding F-5, 2026-07-10).
           dotnet test -c ${{ matrix.configuration }} --no-build `
-            --logger "trx;LogFileName=pass1.trx" `
+            --logger "trx;LogFilePrefix=pass1" `
             --results-directory ./TestResults/pass1 `
             --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings
 
@@ -161,9 +166,10 @@ jobs:
         continue-on-error: true   # final verdict step decides; capture TRX either way
         shell: pwsh
         run: |
+          # LogFilePrefix for the same reason as pass 1 (audit finding F-5).
           dotnet test -c ${{ matrix.configuration }} --no-build `
             --filter "${{ steps.classify.outputs.retry_filter }}" `
-            --logger "trx;LogFileName=pass2.trx" `
+            --logger "trx;LogFilePrefix=pass2" `
             --results-directory ./TestResults/pass2
 
       - name: Final test verdict
@@ -176,14 +182,23 @@ jobs:
             Write-Host "Pass 1 clean — no retry was needed"
             exit 0
           }
-          if (-not (Test-Path ./TestResults/pass2/pass2.trx)) {
-            Write-Host "::error::Retry pass 2 ran but pass2.trx is missing — dotnet test likely crashed"
+          # Aggregate ALL pass-2 TRX files (one per test project under
+          # LogFilePrefix naming — audit finding F-5).
+          $trxFiles = @(Get-ChildItem -Path ./TestResults/pass2 -Filter "*.trx" -Recurse -ErrorAction SilentlyContinue)
+          if ($trxFiles.Count -eq 0) {
+            Write-Host "::error::Retry pass 2 ran but no TRX files were produced — dotnet test likely crashed"
             exit 1
           }
-          $xml = [xml](Get-Content ./TestResults/pass2/pass2.trx -Raw)
-          $nsm = New-Object System.Xml.XmlNamespaceManager $xml.NameTable
-          $nsm.AddNamespace("x", "http://microsoft.com/schemas/VisualStudio/TeamTest/2010")
-          $stillFailing = $xml.SelectNodes("//x:UnitTestResult[@outcome='Failed']", $nsm)
+          $nsUri = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
+          $stillFailing = @()
+          $passed = 0
+          foreach ($trx in $trxFiles) {
+            $xml = [xml](Get-Content $trx.FullName -Raw)
+            $nsm = New-Object System.Xml.XmlNamespaceManager $xml.NameTable
+            $nsm.AddNamespace("x", $nsUri)
+            $stillFailing += @($xml.SelectNodes("//x:UnitTestResult[@outcome='Failed']", $nsm))
+            $passed += $xml.SelectNodes("//x:UnitTestResult[@outcome='Passed']", $nsm).Count
+          }
           if ($stillFailing.Count -gt 0) {
             Write-Host "::error::Retry pass failed: $($stillFailing.Count) test(s) still failing after a second attempt — treating as real regression"
             $stillFailing | ForEach-Object {
@@ -191,7 +206,6 @@ jobs:
             }
             exit 1
           }
-          $passed = $xml.SelectNodes("//x:UnitTestResult[@outcome='Passed']", $nsm).Count
           Write-Host "Retry pass clean: $passed test(s) retried, all passed on second attempt"
 
       - name: Upload test results

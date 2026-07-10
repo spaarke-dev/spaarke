@@ -34,8 +34,10 @@ Run from the repo root (or any subdirectory — the script auto-detects the repo
 The harness prints a single copy-pasteable report line in this format (matches the CLAUDE.md section 10 citation convention):
 
 ```
-BFF Hygiene section 10 + NFR-01 verified: publish size = <X> MB (incl. PDBs; <Y> MB excl.), delta = <+/-Z> MB vs prior (<prior source>), CVE check: <summary>.
+BFF Hygiene section 10 + NFR-01 verified: publish size = <X> MB (incl. PDBs; <Y> MB excl.), delta = <+/-Z> MB vs prior (<prior source>), CVE check: <summary>; new-CVE verdict: <verdict>.
 ```
+
+The trailing `new-CVE verdict` segment (added 2026-07-10, audit F-10) states the result of diffing this scan's HIGH/CRITICAL findings against the prior baseline's recorded CVE set — see section 5a.
 
 Paste this line into:
 - The task's `current-task.md` / task notes section, AND
@@ -55,6 +57,24 @@ Paste this line into:
 | Otherwise | OK — report the figures, no escalation needed. |
 
 The harness prints all applicable classifications (a measurement can trigger more than one, e.g. both the cumulative-review threshold and the single-task delta).
+
+## 5a. CVE gating semantics (added 2026-07-10, audit F-10 — binding)
+
+Root CLAUDE.md section 10 bullet 5 requires **"no NEW HIGH-severity CVE"** per BFF-touching task. The harness enforces this against the baseline ledger, not as an informational side note:
+
+1. **Scan integrity.** The `dotnet list package --vulnerable --include-transitive` invocation is validated by exit code AND recognizable output (`dotnet list` exits 0 even when vulnerabilities are found, so output content is the primary signal). A failed or unrecognizable scan is reported as an explicit **`SCAN FAILED`** state and classifies as **ESCALATE** — it is never silently reported as clean.
+2. **Structured findings.** HIGH and CRITICAL rows are parsed into a `{package, version, severity, advisory}` set. This set is persisted as `cve_findings` in each `-RecordBaseline` entry (recorded as `null` — not an empty array — when the scan was skipped or failed, so a non-scan can never establish a "clean" baseline).
+3. **New-vs-pre-existing diff.** The current set is diffed against the most recent baseline entry carrying a non-null `cve_findings` set (`current` first, then history walked backwards):
+
+| Condition | Classification |
+|---|---|
+| CVE scan failed / output unrecognizable | **ESCALATE** — vulnerability state unknown; fix the scan and re-run before merge. |
+| HIGH/CRITICAL finding **not** in the prior baseline set | **HARD STOP** — new CVE (CLAUDE.md section 10 bullet 5). Do not merge until resolved or explicitly accepted + re-baselined. |
+| HIGH/CRITICAL findings found but prior baseline has no recorded `cve_findings` set | **ESCALATE** — cannot distinguish new vs pre-existing; review manually, then `-RecordBaseline` to establish the tracked set. |
+| HIGH/CRITICAL finding already in the prior baseline set | **WARN** — pre-existing accepted-risk CVE persists (tracked separately); not a merge blocker by itself, but it appears in the classification so it can never sit invisibly beside an "OK". |
+| No HIGH/CRITICAL findings | No CVE classification; verdict `no HIGH/CRITICAL CVEs`. |
+
+Pre-existing accepted-risk example: the Kiota `Microsoft.Kiota.Abstractions@1.21.2` HIGH (`GHSA-7j59-v9qr-6fq9`) recorded since task 070 — it WARNs on every run until the package is upgraded, at which point it drops out of the recorded set automatically on the next `-RecordBaseline`.
 
 ## 6. R2 baseline (recorded 2026-07-10, task 070)
 
@@ -92,9 +112,14 @@ The harness prints all applicable classifications (a measurement can trigger mor
   "delta_vs_prior_mb": 0.0,
   "classification": "...",
   "cve_check": "...",
+  "cve_findings": [ { "package": "...", "version": "...", "severity": "High|Critical", "advisory": "..." } ],
+  "cve_new_findings": [],
+  "cve_verdict": "...",
   "notes": "..."
 }
 ```
+
+`cve_findings` is the tracked HIGH/CRITICAL set that the next run diffs against (section 5a); `cve_new_findings` records which of those were NEW at the time of this entry; both are `null` when the scan was skipped or failed. Entries recorded before 2026-07-10 (audit F-10) lack these fields except the task-070 entry, whose set was hand-seeded from the documented pre-existing Kiota HIGH.
 
 `-RecordBaseline` appends a new entry and updates `current` automatically — do not hand-edit the ledger except to seed reconciliation history (as this task did for the r1 lineage).
 

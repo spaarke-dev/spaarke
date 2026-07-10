@@ -727,9 +727,7 @@ describe('dispatchConsumer suppressWorkspaceSectionBridge (task 112, Compose-sur
     });
     mockFetch.mockResolvedValueOnce(sseResponse(['{"type":"error","error":"boom","done":true}']));
 
-    await expect(dispatchConsumer(BINDING_ID, { streamId: 'compose-3' })).rejects.toThrow(
-      /stream reported an error/
-    );
+    await expect(dispatchConsumer(BINDING_ID, { streamId: 'compose-3' })).rejects.toThrow(/stream reported an error/);
     expect(events).toHaveLength(0);
   });
 

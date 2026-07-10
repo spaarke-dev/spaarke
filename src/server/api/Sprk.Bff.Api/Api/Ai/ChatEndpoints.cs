@@ -599,6 +599,10 @@ public static class ChatEndpoints
                 sseWriter,
                 latestUserMessage: effectiveMessage,
                 uploadedFiles: session.UploadedFiles,
+                // F-1/F-2/F-7 envelope-convergence (D1): forward the session ledger so the provider performs
+                // the ONE per-turn ContextEnvelope bind (fingerprint write, ADR-040) and consumes the bound
+                // envelope for the interactive prompt. The endpoint's separate bind below is retired.
+                ledgerOutputs: session.Outputs,
                 cancellationToken: cancellationToken);
 
             // Convert session history to AI framework messages for context
@@ -623,57 +627,17 @@ public static class ChatEndpoints
             }
             // === End finding-3 ledger context =========================================
 
-            // === AIR2-053 (FR-B-04) — interactive Context Binder convergence =============
-            // The interactive chat turn now assembles ONE ContextEnvelope per turn through the
-            // Context Binder — the SAME seam the dispatch path uses — so the six R1 prompt
-            // primitives are folded into one contract (no forbidden dual assembly path). The
-            // prompt strings above are still produced by the SAME ContextSliceProducers the
-            // envelope is built from, so the interactive prompt bytes are UNCHANGED; this bind
-            // makes the envelope + its context fingerprint (ADR-040 store-before-render, NFR-07
-            // ids/counts only) go live on chat. Envelope-truthfulness note: the Business fragment
-            // uses the id-only-or-provided-name shape (no lazy name fetch at bind time), while the
-            // rendered prompt may carry the lazily-fetched name variant — both are
-            // HostIdentityProducer outputs; the fingerprint is counts-only, so this recorded
-            // variance is NOT a prompt-bytes diff (the prompt is untouched).
-            //
-            // OPTIONAL resolution: IContextBinder is registered only in the compound-ON path
-            // (AnalysisServicesModule) — resolve via GetService and skip when null so compound-OFF
-            // environments are unaffected. Soft-fail: a bind failure NEVER fails the message turn.
-            var contextBinder = httpContext.RequestServices.GetService<IContextBinder>();
-            if (contextBinder is not null)
-            {
-                try
-                {
-                    var contextTurn =
-                        (session.Outputs is { Count: > 0 } ? session.Outputs.Max(o => o.Turn) : 0) + 1;
-                    await contextBinder.BindAsync(
-                        new ContextBindingRequest
-                        {
-                            HostEntityType = session.HostContext?.EntityType,
-                            HostEntityId = session.HostContext?.EntityId,
-                            HostEntityName = session.HostContext?.EntityName,
-                            ConversationTail = ConversationContextProducer.BuildConversationTail(session),
-                            TenantId = tenantId,
-                            SessionId = sessionId,
-                            Turn = contextTurn,
-                        },
-                        cancellationToken);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    // NFR-07 identifiers only. The envelope/fingerprint is telemetry-grade — a bind
-                    // failure must never take down the user's message turn.
-                    logger.LogWarning(ex,
-                        "AIR2-053: interactive Context Binder bind failed — continuing without envelope/fingerprint " +
-                        "for this turn (the message turn is never failed by context assembly). session={SessionId}",
-                        sessionId);
-                }
-            }
-            // === End AIR2-053 interactive bind ========================================
+            // === F-1/F-2/F-7 envelope-convergence (D1) — interactive Context Binder convergence =====
+            // The ONE per-turn ContextEnvelope bind now lives INSIDE the context provider
+            // (PlaybookChatContextProvider.GetContextAsync, invoked via SprkChatAgentFactory.CreateAgentAsync
+            // above), where it CONSUMES the bound envelope for the interactive prompt's host-identity
+            // (Business), user-memory (User, F-2 recall), and record-memory sections and RENDERS the
+            // environment date suffix from the same envelope — the direct producer-append sites retire on
+            // the live path. This relocation keeps the fingerprint write (ADR-040 store-before-render,
+            // NFR-07) exactly-once per turn; the earlier endpoint-side bind (which discarded the envelope)
+            // is deleted so the turn is never double-bound. Byte-identical for existing sections; the
+            // renderer-vs-legacy parity pins prove it before the legacy sites were made fallback-only.
+            // === End interactive bind relocation ======================================
 
             // === FR-P2-05 HARD CUTOVER (task 034) — legacy dispatch pre-passes DELETED ===
             // Before the cutover, three pre-passes ran here between agent creation and the

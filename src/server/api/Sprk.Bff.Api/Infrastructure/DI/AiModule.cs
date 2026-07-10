@@ -252,13 +252,6 @@ public static class AiModule
         // ADR-010: Concrete type, no interface (single implementation).
         services.AddScoped<PendingPlanManager>();
 
-        // FR-P2-06 (task 035): the playbook-embeddings write side — the FR-12 validation
-        // gate, the FR-13 canonical hash calculator, and the FR-13 nightly drift-detection
-        // IJobHandler — was DELETED
-        // with the dispatcher stack. The spaarke-playbook-embeddings index existed only to
-        // feed the dispatcher's vector match; the loop dispatches from projected Bindings
-        // (ADR-039), so nothing reads the index and nothing needs to write it.
-
         // IRecentlyDiscussedTracker — chat-routing-redesign-r1 task 091 (MVP-cut).
         // Redis-backed (via IDistributedCache) per-session recent-files cue layer; read by
         // future T2 manifest builder + prompt assembly to surface "you were just discussing X"

@@ -88,4 +88,15 @@ public interface IMemoryItemStore
     /// generalized heading. Returns <see cref="string.Empty"/> when no memory exists.
     /// </summary>
     Task<string> ToRecordPromptFragmentAsync(string subjectType, string subjectId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Serializes a user's memory into a concise system-prompt RECALL fragment (F-2 / D3). Mirrors
+    /// <see cref="ToRecordPromptFragmentAsync"/> — REUSES the same confidence-filter + budget-trim
+    /// formatting discipline — under a clearly user-scoped heading and a tighter budget consistent with
+    /// the 300-token User slice ceiling. A defense-in-depth Dataverse-field-mirror exclusion is applied at
+    /// read (the same discipline as the Record reference projection). Returns <see cref="string.Empty"/>
+    /// when the user has no eligible memory. The canonical <paramref name="userId"/> is the Dataverse
+    /// <c>systemuserid</c> (operator ruling 2026-07-09 (c)).
+    /// </summary>
+    Task<string> ToUserPromptFragmentAsync(string userId, CancellationToken ct = default);
 }

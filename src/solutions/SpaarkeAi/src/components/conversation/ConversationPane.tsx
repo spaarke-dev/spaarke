@@ -22,7 +22,12 @@ import { ChatRegular, ChatAddRegular } from "@fluentui/react-icons";
 import { PaneHeader, SprkChat, createConsumerDispatcher } from "@spaarke/ui-components";
 import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
-import type { IChatMessage, DispatchWorkspaceEvent, DispatchConsumerResult } from "@spaarke/ui-components";
+import type {
+  IChatMessage,
+  DispatchWorkspaceEvent,
+  DispatchConsumerResult,
+  INextStepChip,
+} from "@spaarke/ui-components";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
 // Compose three-pane coordination — ASSISTANT leg (task 104 / E2E-R5). Typed
@@ -374,6 +379,33 @@ export function ConversationPane(): React.JSX.Element {
     startNewSession();
   }, [clearChatSession, startNewSession]);
 
+  // ── OutcomeCard next-step chips (F-4, e2e-completion-audit 2026-07-10) ──────
+  // A completed side-effect's OutcomeCard renders DECLARED next-step chips
+  // (the Binding's `sprk_chiptransitions`, threaded C#→SSE→TS via SprkChat's
+  // `onNextStep`). Without this handler OutcomeCard disables every chip
+  // (OutcomeCard.tsx defensive `disabled={!onNextStep}`), so they ship
+  // visible-but-dead. Activate them by routing an `invoke_capability` chip's
+  // `targetBindingId` (a `sprk_playbookconsumer` Binding id) through the SAME
+  // shared dispatchConsumer path the Click-path strip uses — no new dispatch
+  // path (ADR-039: bindingId in, stream out; server resolves the Binding).
+  // `navigate` chips open their server-composed `targetUrl`; `dismiss` is a
+  // no-op. The dispatch's rendered output + re-armed strip come free via
+  // `chips.dispatchBinding`.
+  const { dispatchBinding } = chips;
+  const handleNextStep = React.useCallback(
+    (chip: INextStepChip): void => {
+      if (chip.actionKind === "invoke_capability" && chip.targetBindingId) {
+        dispatchBinding(chip.targetBindingId, { slots: undefined });
+        return;
+      }
+      if (chip.actionKind === "navigate" && chip.targetUrl && typeof window !== "undefined") {
+        window.open(chip.targetUrl, "_blank", "noopener,noreferrer");
+      }
+      // `dismiss` (or an invoke_capability chip with no Binding id) → no-op.
+    },
+    [dispatchBinding]
+  );
+
   // R7 12.3a: normalize restored SessionRestoreMessage[] → IChatMessage[].
   const restoredInitialMessages = React.useMemo<IChatMessage[] | undefined>(() => {
     if (!restoreCtx?.recentMessages || restoreCtx.recentMessages.length === 0) return undefined;
@@ -507,6 +539,10 @@ export function ConversationPane(): React.JSX.Element {
               onOpenLibraryModal={playbookOptions.handleOpenLibraryModal}
               onContextEvent={contextBridge.handleContextEvent}
               onCitations={docQaCitation.onCitations}
+              // F-4: activate OutcomeCard next-step chips — routes an
+              // invoke_capability chip's targetBindingId through the shared
+              // dispatchConsumer path (see handleNextStep above).
+              onNextStep={handleNextStep}
             />
             <HelpAffordance onClick={() => commands.setHelpPanelOpen(true)} />
             <CommandHelpPanel
