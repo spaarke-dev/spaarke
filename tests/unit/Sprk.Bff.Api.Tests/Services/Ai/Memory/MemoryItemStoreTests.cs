@@ -603,4 +603,29 @@ public class MemoryItemStoreTests
         roundTripped.RetentionClass.Should().Be("tier-3-user-owned");
         roundTripped.Version.Should().Be(MemoryItemContract.SchemaVersion);
     }
+
+    // =========================================================================
+    // (j) NEGATIVE (task 051, FR-B-08) — TrustLevel is INERT at the store write path
+    // =========================================================================
+
+    [Fact]
+    public async Task UpsertAsync_UntrustedTrustLevel_StillPersists_TrustLevelIsInert()
+    {
+        // Arrange — the WORST-CASE provenance value; enforcement is deferred to the governance
+        // project (FR-B-08), so the store must carry it verbatim and never deny on it.
+        var (sut, containerMock) = CreateSut();
+        var (doc, _, _) = ArrangeCreatePath(containerMock);
+        var item = BuildRecordItem("project", ProjectId) with { TrustLevel = "untrusted" };
+
+        // Act
+        var persisted = await sut.UpsertAsync(item, TenantId);
+
+        // Assert — write proceeded; value carried unmodified into the document and back out
+        doc().Should().NotBeNull("trustLevel participates in NO deny/reject path (inert field)");
+        doc()!.TrustLevel.Should().Be("untrusted");
+        persisted.TrustLevel.Should().Be("untrusted");
+        containerMock.Verify(c => c.UpsertItemAsync(
+            It.IsAny<MemoryItemDocument>(), It.IsAny<PartitionKey>(), It.IsAny<ItemRequestOptions>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
 }

@@ -9,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Progress** | **40 of 62 tasks** — Phase E closed; memory wave batch 1 (055/060/061/063) + **050** done; worktree MERGED with master `bdf23f11e` (daily-briefing r5 etc.) |
-| **Task** | 050 ✅ COMPLETE (committed `3cd5cc6a4`, then master merged in on top; 8060/0 full suite; publish 46.58 MB compressed) |
-| **Status** | Clean tree expected after checkpoint commit. Branch NOT yet pushed/merged to master since PR #608. |
-| **Next Action** | **TRANCHE M2** (below): run task 051 in MAIN session first (it SHRANK — see note), then dispatch the 5-agent parallel batch, then 053 main-session. All via task-execute. |
+| **Progress** | **41 of 62 tasks** — Phase E closed; memory wave 055/060/061/063 + 050 + **051** done; worktree MERGED with master `bdf23f11e` |
+| **Task** | 051 ✅ COMPLETE (SHRANK scope: test-only — MemoryItemEnvelopeTests + store inert-trust negative + notes/051-envelope-field-mapping.md; 134/134 memory suites; publish delta 0) |
+| **Status** | Committing 051 now. Branch NOT yet pushed/merged to master since PR #608. |
+| **Next Action** | **TRANCHE M2 step 2**: dispatch the 5-agent parallel batch (052 opus, 057 opus [dep 051 ✅], 062 sonnet, 064 sonnet, 017 sonnet) in ONE message, each via task-execute; then consolidate; then 053 main-session. |
 
 ### Critical Context (essential)
 - **Operator rulings 2026-07-09/10 (ALL EXECUTED into POMLs/spec — commits `a28206cfc`, `a70ab868b`)**: per-fact docs aligned MemoryItem v1; fresh container `memory-items` (/subjectId) NO migration (legacy `memory` container SHARED with pins+workspace-tabs — never retire); canonical userId = Dataverse systemuserid; upsert-by-(Type,Key) supersession; **053 converges the INTERACTIVE chat path onto the Binder — do not defer** (audit: 0/6 primitives folded; Binder dispatch-only; Business producer NET-NEW; OrchestratorPromptBuilder DEAD); **governance = MINIMAL** (052 rescoped: review/delete + record-auth read + erasure + retentionClass→Cosmos ttl only; sensitivity/deletionPolicy INERT); **cache stability = keep free determinism, NO cache-key machinery**; **NO mid-wave gate — continuous progression to 069 full-solution feedback**.
