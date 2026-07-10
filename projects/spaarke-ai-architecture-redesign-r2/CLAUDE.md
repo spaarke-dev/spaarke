@@ -24,6 +24,7 @@
 - [`notes/policy-v2-origin-classification-decision-tree.md`](notes/policy-v2-origin-classification-decision-tree.md) - Policy v2 + E-1..E-6
 - [`current-task.md`](current-task.md) - **Active task state** (context recovery)
 - [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) - Task tracker (created by task-create)
+- [`notes/publish-size-report-template.md`](notes/publish-size-report-template.md) - Publish-size harness workflow (task 070): run `scripts/Measure-BffPublishSize.ps1` per BFF-touching task; baseline ledger at `notes/publish-size-baseline.json`
 
 ### Project Metadata
 - **Project Name**: spaarke-ai-architecture-redesign-r2
