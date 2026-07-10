@@ -40,12 +40,15 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// identifiers-and-counts only; slice CONTENT is never logged.
 /// </para>
 /// <para>
-/// <b>Budgets are PLACEHOLDERS in v1</b>. Task 054 (FR-B-05) fixes the binding numbers against the
-/// FR-P0-02 measured baseline (<c>notes/prompt-assembly-baseline.md</c>), which found the a-priori
-/// D-M2 estimates understate reality (Environment measured ~111 vs ≤50; Business ~1,118 vs ≤1,200;
-/// Conversation structurally unbounded to ~8,000 vs ≤2,000). <see cref="PlaceholderBudgets"/> seeds
-/// values with headroom above those measurements and flags every slice budget
-/// <see cref="SliceMeta.BudgetIsProvisional"/> = true.
+/// <b>Budgets are BINDING as of task 054 (FR-B-05)</b>. <see cref="EnvelopeBudget"/> carries the
+/// per-slice ceilings ratified against the FR-P0-02 measured baseline
+/// (<c>notes/prompt-assembly-baseline.md</c>, reconciliation in <c>notes/054-budget-reconciliation.md</c>),
+/// which found the a-priori D-M2 estimates understated reality (Environment measured ~111 vs ≤50;
+/// Business ~1,118 vs ≤1,200; Conversation structurally unbounded to ~8,000 vs ≤2,000). The ratified
+/// values keep headroom above the measured floors and every budgeted slice now flags
+/// <see cref="SliceMeta.BudgetIsProvisional"/> = false. Enforcement is <see cref="EnvelopeBudget.Evaluate"/>
+/// (per-slice + ceiling); a breach is a HARD eval failure wired into the golden-utterance merge gate
+/// (FR-D-02) — the assembly never silently truncates to fit.
 /// </para>
 /// <para>
 /// <b>Tolerant reader</b>: additive-only evolution. Unknown extra slices/fields are ignored
@@ -155,14 +158,18 @@ public sealed record SliceMeta
     public required SliceStability Stability { get; init; }
 
     /// <summary>
-    /// Placeholder per-slice token budget. <b>v1 placeholder</b> — task 054 (FR-B-05) sets the binding
-    /// value against the FR-P0-02 measurement. Null means "no budget declared for this slice in r2"
+    /// Per-slice token budget (<see cref="EnvelopeBudget"/>). <b>Binding as of task 054 (FR-B-05)</b>,
+    /// ratified against the FR-P0-02 measurement. Null means "no budget declared for this slice in r2"
     /// (Organizational/Semantic interface-only).
     /// </summary>
     public int? BudgetTokens { get; init; }
 
-    /// <summary>Always <c>true</c> in v1: the budget is a placeholder pending task 054.</summary>
-    public bool BudgetIsProvisional { get; init; } = true;
+    /// <summary>
+    /// <c>false</c> for the budgeted slices once task 054 (FR-B-05) ratified the ceilings against the
+    /// FR-P0-02 measurement. Retained on the contract so a future re-opened budget can be flagged
+    /// provisional again without a schema change.
+    /// </summary>
+    public bool BudgetIsProvisional { get; init; }
 
     /// <summary>Estimated token count of the slice's assembled content (counts only, NFR-07). Zero for reference-only slices whose content lives in the ledger, not the envelope.</summary>
     public int EstimatedTokens { get; init; }
@@ -298,35 +305,147 @@ public sealed record SemanticSlice
 }
 
 /// <summary>
-/// <b>v1 PLACEHOLDER budgets.</b> Task 054 (FR-B-05) replaces these with binding values fixed against
-/// the FR-P0-02 measured baseline (<c>notes/prompt-assembly-baseline.md</c>). Seeded here with headroom
-/// ABOVE the measured reality so a walking-skeleton envelope never trips a placeholder ceiling that the
-/// real assembly already exceeds:
+/// <b>BINDING per-slice token budgets</b> (task AIR2-054 / FR-B-05), ratified against the FR-P0-02
+/// measured baseline (<c>notes/prompt-assembly-baseline.md</c>; reconciliation table
+/// <c>notes/054-budget-reconciliation.md</c>). The measurement CONFIRMED the walking-skeleton values
+/// carried the right headroom above the measured floors, so the integers are unchanged from the v1
+/// seed — what changes is their STATUS (provisional → binding) and that a breach is now a HARD eval
+/// failure via <see cref="Evaluate"/> (wired into the golden-utterance merge gate, FR-D-02):
 /// <list type="bullet">
-///   <item><description>Workspace/Environment measured ~111 (baseline §4 finding 1; a-priori ≤50 was written before the clock directive existed) → placeholder 150.</description></item>
-///   <item><description>Business measured ~1,118 and structurally at/over the ≤1,200 estimate (baseline §4 finding 2) → placeholder 1,500.</description></item>
-///   <item><description>Memory.Conversation structurally UNBOUNDED to ~8,000 (baseline §4 finding 3, the most consequential) vs ≤2,000 estimate → placeholder 2,000 with a standing note that task 054 must reconcile the structural ceiling, not just adopt this number.</description></item>
+///   <item><description><b>Environment</b> 150 — measured ~111 (baseline §4 finding 1; a-priori ≤50 predated the clock directive). Ratified with headroom over the measured every-turn floor.</description></item>
+///   <item><description><b>User</b> 300 — measured ~40; keeps the D-M2 ceiling for long dictated turns.</description></item>
+///   <item><description><b>Business</b> 1,500 — measured ~1,118 and structurally at/over ≤1,200: two unconditional directives (SideEffectHonesty 779 + compact-formatting 189 = 968) consume ~65% of 1,500 as a "protocol floor" BEFORE any playbook persona/knowledge/skills (baseline §4 finding 2). Raised from the ≤1,200 estimate so realistic playbook content fits above the floor.</description></item>
+///   <item><description><b>RecordMemory</b> 600 — measured 157 this fixture; kept (interface docs target 200–500 at higher fact density).</description></item>
+///   <item><description><b>Conversation</b> 2,000 — measured ~620–970 on a normal turn but structurally UNBOUNDED to ~8,000 (baseline §4 finding 3, the most consequential). The budget stays at the D-M2 estimate; the structural worst-case is now GATED by the eval (breach-fails-eval) rather than tightening the byte-verbatim R1 constants (053 froze <c>MaxContextOutputs</c>×<c>MaxContextPayloadChars</c>). See the reconciliation note for the path decision.</description></item>
+///   <item><description><b>EnvelopeCeiling</b> 4,200 — measured ~2,025–2,410 normal (~50–57% of ceiling). Kept as an INDEPENDENT bound tighter than the 4,550 sum-of-maxes (slices rarely max together).</description></item>
 /// </list>
 /// </summary>
-public static class PlaceholderBudgets
+public static class EnvelopeBudget
 {
-    /// <summary>User slice placeholder (D-M2 estimate ≤300; baseline measured ~40).</summary>
+    /// <summary>Workspace/Environment slice ceiling — headroom above measured ~111 (D-M2 estimate ≤50 understated).</summary>
+    public const int Environment = 150;
+
+    /// <summary>User slice ceiling (D-M2 estimate ≤300; baseline measured ~40).</summary>
     public const int User = 300;
 
-    /// <summary>Workspace/Environment placeholder — headroom above measured ~111 (D-M2 estimate ≤50 understated).</summary>
-    public const int Workspace = 150;
-
-    /// <summary>Business placeholder — headroom above measured ~1,118 (D-M2 estimate ≤1,200 at-ceiling).</summary>
+    /// <summary>Business slice ceiling — raised from ≤1,200 so playbook content fits above the ~968 unconditional-directive protocol floor (baseline §4 finding 2).</summary>
     public const int Business = 1500;
 
-    /// <summary>Record/User memory-items placeholder (D-M2 estimate ≤600).</summary>
-    public const int RecordMemoryItems = 600;
+    /// <summary>Record/User memory-items ceiling (D-M2 estimate ≤600).</summary>
+    public const int RecordMemory = 600;
 
-    /// <summary>Memory.Conversation ledger-tail placeholder (D-M2 estimate ≤2,000; NOTE structurally unbounded to ~8,000 — task 054 must reconcile).</summary>
-    public const int MemoryConversation = 2000;
+    /// <summary>Memory.Conversation ledger-tail ceiling (D-M2 estimate ≤2,000; structural worst-case ~8,000 is gated by the breach-fails-eval mechanism, not by tightening R1 constants).</summary>
+    public const int Conversation = 2000;
 
-    /// <summary>Envelope ceiling placeholder (D-M2 estimate ≤4,200).</summary>
+    /// <summary>Envelope ceiling (D-M2 estimate ≤4,200) — an independent bound, tighter than the sum of per-slice maxes.</summary>
     public const int EnvelopeCeiling = 4200;
+
+    /// <summary>chars/4 token heuristic — the codebase-wide budgeting convention (delegates to the shared estimator).</summary>
+    public static int EstimateTokens(string? fragment) => ContextEnvelopeReferenceProducer.EstimateTokens(fragment);
+
+    /// <summary>
+    /// Evaluates an assembled <paramref name="envelope"/> against the binding per-slice + ceiling budgets
+    /// (FR-B-05). The stable-prefix fragment slices (Environment/User/Business) are read from the envelope's
+    /// own <see cref="SliceMeta.EstimatedTokens"/> (chars/4 of the assembled fragment). The Conversation
+    /// ledger tail and Record-memory items carry NO content in the envelope (ADR-040 references-only), so
+    /// their rendered token counts are supplied by the caller that rendered them
+    /// (<paramref name="conversationTokens"/> / <paramref name="recordMemoryTokens"/>); absent → 0. The
+    /// returned <see cref="ContextBudgetReport"/> is counts-only (NFR-07) and NEVER truncates — a breach is
+    /// FLAGGED for the caller (telemetry in production; a hard eval failure in the merge gate).
+    /// </summary>
+    public static ContextBudgetReport Evaluate(
+        ContextEnvelope envelope,
+        int conversationTokens = 0,
+        int recordMemoryTokens = 0)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+
+        int Est(ContextSliceKind kind) => envelope.MetaFor(kind)?.EstimatedTokens ?? 0;
+
+        var envTokens = Est(ContextSliceKind.Workspace);
+        var userTokens = Est(ContextSliceKind.User);
+        var bizTokens = Est(ContextSliceKind.Business);
+
+        var lines = new List<SliceBudgetLine>(6)
+        {
+            new() { Slice = ContextBudgetSlice.Environment, BudgetTokens = Environment, ActualTokens = envTokens },
+            new() { Slice = ContextBudgetSlice.User, BudgetTokens = User, ActualTokens = userTokens },
+            new() { Slice = ContextBudgetSlice.Business, BudgetTokens = Business, ActualTokens = bizTokens },
+            new() { Slice = ContextBudgetSlice.RecordMemory, BudgetTokens = RecordMemory, ActualTokens = recordMemoryTokens },
+            new() { Slice = ContextBudgetSlice.Conversation, BudgetTokens = Conversation, ActualTokens = conversationTokens },
+        };
+
+        var total = envTokens + userTokens + bizTokens + recordMemoryTokens + conversationTokens;
+        lines.Add(new SliceBudgetLine { Slice = ContextBudgetSlice.Envelope, BudgetTokens = EnvelopeCeiling, ActualTokens = total });
+
+        return new ContextBudgetReport
+        {
+            Lines = lines,
+            TotalTokens = total,
+            HasBreach = lines.Any(l => l.Breached),
+        };
+    }
+}
+
+/// <summary>
+/// The FR-B-05 budget vocabulary. Maps the ContextEnvelope slices onto the named budgets: Environment is
+/// the Workspace slice; the Memory slice is split into its Conversation (ledger tail) and RecordMemory
+/// (items) budgets; <see cref="Envelope"/> is the whole-envelope ceiling.
+/// </summary>
+public enum ContextBudgetSlice
+{
+    Environment,
+    User,
+    Business,
+    RecordMemory,
+    Conversation,
+    Envelope,
+}
+
+/// <summary>One slice's budget line: the ceiling, the measured token count, and whether it breached. Counts only (NFR-07).</summary>
+public sealed record SliceBudgetLine
+{
+    /// <summary>Which budget this line covers.</summary>
+    public required ContextBudgetSlice Slice { get; init; }
+
+    /// <summary>The binding budget ceiling for the slice.</summary>
+    public required int BudgetTokens { get; init; }
+
+    /// <summary>The measured token count (chars/4) for the slice this turn.</summary>
+    public required int ActualTokens { get; init; }
+
+    /// <summary>True when the slice's measured tokens exceed its budget — the breach signal (never truncated to fit).</summary>
+    public bool Breached => ActualTokens > BudgetTokens;
+}
+
+/// <summary>
+/// The per-turn budget report (FR-B-05): one <see cref="SliceBudgetLine"/> per slice plus the envelope
+/// ceiling line. Carries identifiers/counts only (NFR-07) — deliberately no fragment/content member, so it
+/// is safe to log every turn. A breach is surfaced, never silently corrected: production logs it as
+/// telemetry; the golden-utterance eval gate turns a breach into a HARD test failure (FR-D-02).
+/// </summary>
+public sealed record ContextBudgetReport
+{
+    /// <summary>Per-slice budget lines plus the envelope-ceiling line.</summary>
+    public required IReadOnlyList<SliceBudgetLine> Lines { get; init; }
+
+    /// <summary>Sum of the per-slice measured tokens (the ceiling line's actual).</summary>
+    public required int TotalTokens { get; init; }
+
+    /// <summary>True when ANY per-slice budget OR the envelope ceiling breached.</summary>
+    public required bool HasBreach { get; init; }
+
+    /// <summary>The slices (and/or the envelope ceiling) that breached — identifiers only (NFR-07).</summary>
+    public IReadOnlyList<ContextBudgetSlice> BreachedSlices =>
+        Lines.Where(l => l.Breached).Select(l => l.Slice).ToList();
+
+    /// <summary>
+    /// Counts-only, content-free summary for per-turn telemetry (NFR-07): e.g.
+    /// <c>Environment=111/150 | Business=1300/1500 | Conversation=8000/2000! | Envelope=9700/4200!</c>.
+    /// A trailing <c>!</c> marks a breached line. Never carries slice content.
+    /// </summary>
+    public string RenderSummary() =>
+        string.Join(" | ", Lines.Select(l => $"{l.Slice}={l.ActualTokens}/{l.BudgetTokens}{(l.Breached ? "!" : string.Empty)}"));
 }
 
 /// <summary>
@@ -362,7 +481,8 @@ public static class ContextEnvelopeReferenceProducer
                 Meta = new SliceMeta
                 {
                     Stability = SliceStability.StablePrefix,
-                    BudgetTokens = PlaceholderBudgets.User,
+                    BudgetTokens = EnvelopeBudget.User,
+                    BudgetIsProvisional = false,
                     EstimatedTokens = EstimateTokens(userFragment),
                     ReferenceCount = callerContactId is null ? 0 : 1,
                     Present = userFragment is not null || callerContactId is not null,
@@ -375,7 +495,8 @@ public static class ContextEnvelopeReferenceProducer
                 Meta = new SliceMeta
                 {
                     Stability = SliceStability.StablePrefix,
-                    BudgetTokens = PlaceholderBudgets.Workspace,
+                    BudgetTokens = EnvelopeBudget.Environment,
+                    BudgetIsProvisional = false,
                     EstimatedTokens = EstimateTokens(workspaceFragment),
                     Present = workspaceFragment is not null,
                 },
@@ -386,7 +507,8 @@ public static class ContextEnvelopeReferenceProducer
                 Meta = new SliceMeta
                 {
                     Stability = SliceStability.StablePrefix,
-                    BudgetTokens = PlaceholderBudgets.Business,
+                    BudgetTokens = EnvelopeBudget.Business,
+                    BudgetIsProvisional = false,
                     EstimatedTokens = EstimateTokens(businessFragment),
                     Present = businessFragment is not null,
                 },
@@ -422,7 +544,8 @@ public static class ContextEnvelopeReferenceProducer
                 Meta = new SliceMeta
                 {
                     Stability = SliceStability.VolatileTail,
-                    BudgetTokens = PlaceholderBudgets.MemoryConversation,
+                    BudgetTokens = EnvelopeBudget.Conversation,
+                    BudgetIsProvisional = false,
                     EstimatedTokens = 0,
                     ReferenceCount = ledger.Count + items.Count,
                     Present = ledger.Count > 0 || items.Count > 0,
