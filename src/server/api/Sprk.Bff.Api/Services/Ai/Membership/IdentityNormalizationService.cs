@@ -136,12 +136,15 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
         var systemUserData = await systemUserTask.ConfigureAwait(false);
         var teamIds = await teamsTask.ConfigureAwait(false);
 
-        // ── Contact cross-ref (ADR-028) ─────────────────────────────────────
-        // Requires the AAD object id from the systemuser row; therefore
-        // depends on #1 completing. If AAD object id is unknown, ContactId
-        // stays null (path failed independently, others unaffected).
-        Guid? contactId = null;
-        if (systemUserData.AzureAdObjectId is { } aadOid)
+        // ── Contact resolution ──────────────────────────────────────────────
+        // PRIMARY (Spaarke model): the user's own sprk_primarycontact lookup → contact.
+        // This is authoritative and needs no cross-ref field on contact. Enables the
+        // Contact-typed membership descriptors (assignedAttorney / assignedParalegal /
+        // assignedToInternal|External) to match the acting user.
+        // FALLBACK (ADR-028): contact.azureactivedirectoryobjectid == user AAD oid, for
+        // environments that provision that field but not sprk_primarycontact.
+        Guid? contactId = systemUserData.PrimaryContactId;
+        if (contactId is null && systemUserData.AzureAdObjectId is { } aadOid)
         {
             contactId = await TryResolveContactIdAsync(aadOid, ct).ConfigureAwait(false);
         }
@@ -202,7 +205,12 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
                     "internalemailaddress",
                     "domainname",
                     "businessunitid",
-                    "azureactivedirectoryobjectid"
+                    "azureactivedirectoryobjectid",
+                    // Spaarke model (2026-07-09): the SystemUser→Contact link lives on the USER
+                    // record as sprk_primarycontact (lookup → contact). This is the authoritative
+                    // source for ContactId, avoiding the contact.azureactivedirectoryobjectid
+                    // cross-ref field that isn't provisioned in every environment.
+                    "sprk_primarycontact"
                 },
                 ct).ConfigureAwait(false);
 
@@ -211,8 +219,9 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
 
             var businessUnitId = GetEntityReferenceId(entity, "businessunitid");
             var aadOid = GetGuidLike(entity, "azureactivedirectoryobjectid");
+            var primaryContactId = GetEntityReferenceId(entity, "sprk_primarycontact");
 
-            return new SystemUserData(email, businessUnitId, aadOid);
+            return new SystemUserData(email, businessUnitId, aadOid, primaryContactId);
         }
         catch (OperationCanceledException)
         {
@@ -523,8 +532,9 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
     private readonly record struct SystemUserData(
         string? PrimaryEmail,
         Guid? BusinessUnitId,
-        Guid? AzureAdObjectId)
+        Guid? AzureAdObjectId,
+        Guid? PrimaryContactId)
     {
-        public static SystemUserData Empty { get; } = new(null, null, null);
+        public static SystemUserData Empty { get; } = new(null, null, null, null);
     }
 }

@@ -1199,6 +1199,22 @@ public record NarrativeBulletDto
     public string PrimaryEntityName { get; init; } = "";
 
     /// <summary>
+    /// R5 richer-rows (2026-07-09): the source record's own description/subject text.
+    /// Deterministic (source <c>Body</c>), never LLM-authored. Widget truncates for compact
+    /// display beneath the title. Empty when the record has no description.
+    /// </summary>
+    [JsonPropertyName("description")]
+    public string Description { get; init; } = "";
+
+    /// <summary>
+    /// R5 richer-rows (2026-07-09): ISO 8601 timestamp of the date that qualified this record
+    /// for the briefing (the source item's ModifiedOn). Widget renders as an "Updated {date}"
+    /// caption so the reader sees WHY the row is here. Empty when unknown.
+    /// </summary>
+    [JsonPropertyName("date")]
+    public string Date { get; init; } = "";
+
+    /// <summary>
     /// R7 W12 feedback items 2/3/4 (2026-07-01): per-bullet entity references
     /// for widget-side citation rendering. Each entry maps to a specific record
     /// referenced by this bullet. Ordered by narrative appearance when possible.

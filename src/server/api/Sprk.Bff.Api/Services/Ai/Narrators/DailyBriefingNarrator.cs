@@ -442,6 +442,13 @@ public class DailyBriefingNarrator : ICodedWorkflow
     {
         var itemIds = string.IsNullOrEmpty(item.Id) ? Array.Empty<string>() : new[] { item.Id };
 
+        // R5 richer-rows (2026-07-09): carry the record's own description + the date that
+        // qualified it for the briefing (ChannelItemDto.CreatedOn holds the source item's
+        // ModifiedOn — see DailyBriefingCollector.ToChannel). Both are deterministic source
+        // fields (never LLM-authored); the widget renders them under the title + as a caption.
+        var description = item.Body ?? string.Empty;
+        var date = item.CreatedOn ?? string.Empty;
+
         // Tier 1 — regarding record (matter/project link). Dominant case.
         if (!string.IsNullOrEmpty(item.RegardingId))
         {
@@ -452,6 +459,8 @@ public class DailyBriefingNarrator : ICodedWorkflow
                 PrimaryEntityType = item.RegardingEntityType ?? string.Empty,
                 PrimaryEntityId = item.RegardingId ?? string.Empty,
                 PrimaryEntityName = item.RegardingName ?? string.Empty,
+                Description = description,
+                Date = date,
             };
         }
 
@@ -467,6 +476,8 @@ public class DailyBriefingNarrator : ICodedWorkflow
                 PrimaryEntityName = !string.IsNullOrEmpty(item.Title)
                     ? item.Title
                     : (item.RegardingName ?? string.Empty),
+                Description = description,
+                Date = date,
             };
         }
 
@@ -475,6 +486,8 @@ public class DailyBriefingNarrator : ICodedWorkflow
         {
             Narrative = item.Title,
             ItemIds = itemIds,
+            Description = description,
+            Date = date,
         };
     }
 }

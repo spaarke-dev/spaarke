@@ -55,7 +55,7 @@ import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
 import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
-import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components';
+import { SendEmailDialog, type ISendEmailPayload, RichFilePreviewDialog } from '@spaarke/ui-components';
 import { extractEmailKey } from '@spaarke/ui-components/services';
 import { useBriefingRender, useInlineTodoCreate, useBriefingPreferences } from '../hooks';
 import { TOASTER_ID } from '../utils/toastUtils';
@@ -63,6 +63,7 @@ import { timeWindowToHours } from '../types/notifications';
 import type { IWebApi, NotificationCategory, NotificationItem } from '../types/notifications';
 import {
   emailBriefingToColleague,
+  getDocumentPreviewUrl,
   type ChannelNarrationResult,
   type NarrativeBulletResult,
   type HighPriorityItemResult,
@@ -539,6 +540,15 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
 
   const [emailDialog, setEmailDialog] = React.useState<EmailDialogState | null>(null);
 
+  // Operator UAT (2026-07-09, item D) — file-preview modal state. Set by a
+  // Documents-channel row's open-document icon / menu; drives the shared
+  // RichFilePreviewDialog below.
+  const [previewDoc, setPreviewDoc] = React.useState<{ documentId: string; documentName: string } | null>(null);
+  const handlePreviewDocument = React.useCallback((documentId: string, documentName: string) => {
+    if (!documentId) return;
+    setPreviewDoc({ documentId, documentName });
+  }, []);
+
   // Dataverse client URL for deep links (e.g. https://org.crm.dynamics.com).
   const clientUrl = React.useMemo<string>(() => {
     try {
@@ -736,9 +746,10 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
 
   // Deterministic KPI tiles (task 021 redesign). Every count is derived from the
   // already-deterministic render data — no LLM, no fabrication (FR-A4 posture).
-  // These are four INDEPENDENT lenses, not a total-and-subsets hierarchy:
+  // These are INDEPENDENT lenses, not a total-and-subsets hierarchy:
   //   Updates = the activity-feed bullet count (the sections below)
-  //   Overdue / New matters = subsets of that feed (the overdue / matters channels)
+  //   Overdue / Documents / Matters & Projects = subsets of that feed (the overdue,
+  //     documents, and matters+projects channels respectively)
   //   Critical = the SEPARATE high-priority flagged-records section (own data source,
   //     bypasses the narrator) — so it can legitimately exceed "Updates". It was
   //     labelled "Open items" before (2026-07-09 operator UAT): that implied a grand
@@ -753,17 +764,25 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // wrong non-zero — the accuracy-safe failure mode. Keep these keys in sync with the collector.
   const OVERDUE_CATEGORY_KEY = 'overdue-tasks';
   const MATTERS_CATEGORY_KEY = 'matters';
+  const PROJECTS_CATEGORY_KEY = 'projects';
+  const DOCUMENTS_CATEGORY_KEY = 'documents';
   const sumBulletsForCategory = (key: string): number =>
     filteredNarratives
       .filter(cn => cn.category?.toLowerCase() === key)
       .reduce((total, cn) => total + cn.bullets.length, 0);
   const overdueCount = sumBulletsForCategory(OVERDUE_CATEGORY_KEY);
-  const newMattersCount = sumBulletsForCategory(MATTERS_CATEGORY_KEY);
+  const documentsCount = sumBulletsForCategory(DOCUMENTS_CATEGORY_KEY);
+  // Operator UAT (2026-07-09): combine Matters + Projects into ONE tile — both are
+  // matter-like engagement records the attorney tracks together. Sum the two channel
+  // counts; a record can't appear in both (distinct entity types), so no double-count.
+  const mattersAndProjectsCount =
+    sumBulletsForCategory(MATTERS_CATEGORY_KEY) + sumBulletsForCategory(PROJECTS_CATEGORY_KEY);
   const statTiles: StatTile[] = [
     { label: 'Updates', value: totalVisibleBullets, tone: 'neutral' },
     { label: 'Overdue', value: overdueCount, tone: overdueCount > 0 ? 'danger' : 'neutral' },
     { label: 'Critical', value: highPriorityItems.length, tone: highPriorityItems.length > 0 ? 'warning' : 'neutral' },
-    { label: 'New matters', value: newMattersCount, tone: 'brand' },
+    { label: 'Documents', value: documentsCount, tone: 'neutral' },
+    { label: 'Matters & Projects', value: mattersAndProjectsCount, tone: 'brand' },
   ];
 
   return (
@@ -803,6 +822,8 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
             // R4 task 046+047 — single Open record path for both the
             // regarding-name link (FR-19) AND the overflow menu item (FR-18).
             onOpenRecord={handleOpenRecord}
+            // Item D (2026-07-09): file-preview modal for Documents rows.
+            onPreviewDocument={handlePreviewDocument}
           />
         </div>
         <CaughtUpFooter channelLabels={[]} />
@@ -826,6 +847,50 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           onSend={handleEmailSend}
           maxWidth="720px"
           height="70vh"
+        />
+      )}
+      {previewDoc && (
+        <RichFilePreviewDialog
+          open={true}
+          documentId={previewDoc.documentId}
+          documentName={previewDoc.documentName}
+          onClose={() => setPreviewDoc(null)}
+          // Same BFF endpoint the Semantic Search PCF uses — SPE preview embed URL.
+          fetchPreviewUrl={() => getDocumentPreviewUrl(previewDoc.documentId)}
+          // "Open file": open the SPE preview URL in a new tab (both modes).
+          onOpenFile={async () => {
+            const url = await getDocumentPreviewUrl(previewDoc.documentId);
+            if (url && typeof window !== 'undefined') window.open(url, '_blank', 'noopener');
+          }}
+          // "Open record": open the sprk_document record via the shared record-modal path.
+          onOpenRecord={() => handleOpenRecord('sprk_document', previewDoc.documentId)}
+          // "Email": reuse the per-item email draft flow, targeting the document.
+          onEmailDocument={() =>
+            handleEmailItem({
+              entityType: 'sprk_document',
+              entityId: previewDoc.documentId,
+              name: previewDoc.documentName,
+              kindLabel: 'Document',
+              highPriority: false,
+              monitor: false,
+            })
+          }
+          // "Copy link": copy a deep link to the document record.
+          onCopyLink={() => {
+            const link = buildRecordDeepLink(clientUrl, 'sprk_document', previewDoc.documentId);
+            if (link && typeof navigator !== 'undefined' && navigator.clipboard) {
+              navigator.clipboard.writeText(link).catch(() => {
+                /* clipboard denied — non-fatal */
+              });
+            }
+            dispatchToast(
+              <Toast>
+                <ToastTitle>Link copied</ToastTitle>
+                <ToastBody>A link to the document record was copied to your clipboard.</ToastBody>
+              </Toast>,
+              { intent: 'success', timeout: 3000 }
+            );
+          }}
         />
       )}
     </div>

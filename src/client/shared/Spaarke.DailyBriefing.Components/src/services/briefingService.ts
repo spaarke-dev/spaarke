@@ -183,6 +183,16 @@ export interface NarrativeBulletResult {
   primaryEntityType: string;
   primaryEntityId: string;
   primaryEntityName: string;
+  /**
+   * R5 richer-rows (2026-07-09): the record's own description/subject (deterministic source
+   * `Body`). Rendered truncated beneath the title. Optional for backward compatibility.
+   */
+  description?: string;
+  /**
+   * R5 richer-rows (2026-07-09): ISO 8601 date that qualified this record for the briefing
+   * (source ModifiedOn). Rendered as an "Updated {date}" caption. Optional.
+   */
+  date?: string;
 }
 
 /**
@@ -580,5 +590,29 @@ export async function emailBriefingToColleague(recipientEmail: string): Promise<
     }
     console.error('[DailyBriefing] briefing email-share failed:', err);
     return { status: 'error', message: error.message ?? 'Failed to email the briefing.' };
+  }
+}
+
+/**
+ * Fetch the SharePoint-Embedded preview embed URL for a document, for the shared
+ * `RichFilePreviewDialog` file-preview modal (operator UAT 2026-07-09, item D).
+ *
+ * Calls `GET /api/documents/{documentId}/preview-url` — the SAME BFF endpoint the
+ * Semantic Search PCF uses (see SemanticSearchApiService.getPreviewUrl). `documentId`
+ * is the `sprk_document` record GUID, which each Documents-channel briefing bullet
+ * carries as `itemIds[0]`. Returns null on any failure so the dialog shows its own
+ * inline error state rather than throwing.
+ */
+export async function getDocumentPreviewUrl(documentId: string): Promise<string | null> {
+  if (!documentId) return null;
+  try {
+    const response = await authenticatedFetch(`/api/documents/${encodeURIComponent(documentId)}/preview-url`, {
+      method: 'GET',
+    });
+    const data = (await response.json()) as { previewUrl?: string };
+    return data.previewUrl ?? null;
+  } catch (err: unknown) {
+    console.warn('[DailyBriefing] getDocumentPreviewUrl failed:', err);
+    return null;
   }
 }
