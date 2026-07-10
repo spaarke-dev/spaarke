@@ -4,10 +4,10 @@ namespace Sprk.Bff.Api.Services.Ai.Memory;
 /// Categorises a <see cref="MemoryFact"/> stored in matter memory.
 ///
 /// The type drives both the Cosmos DB schema discriminator and the section heading
-/// emitted by <see cref="IMatterMemoryService.ToSystemPromptFragmentAsync"/>.
+/// emitted by <see cref="IMemoryItemStore.ToRecordPromptFragmentAsync"/>.
 ///
 /// ADR-015 Tier 3: fact values are user-owned content; GDPR erasure via
-/// <see cref="IMatterMemoryService.ClearMemoryAsync"/> removes the entire document.
+/// <see cref="IMemoryItemStore.EraseSubjectAsync"/> removes every fact for the subject.
 /// </summary>
 public enum MemoryFactType
 {

@@ -1,7 +1,7 @@
 <task id="AIR2-050" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Memory Service — generalize MatterMemoryService→RecordMemory + User scope + NEW subject-partitioned container</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>M — G-R2-B Memory</phase>
     <gate>G-R2-B (memory)</gate>
     <estimated-effort>3 days</estimated-effort>

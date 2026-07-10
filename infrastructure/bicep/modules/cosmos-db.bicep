@@ -172,8 +172,11 @@ resource auditContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/cont
 
 // ============================================================================
 // CONTAINER: memory
-// Stores AI memory snapshots (user preferences, context, learned facts). TTL = 90 days.
-// Partition key: /tenantId — tenant isolation per ADR-015 governed data stores.
+// SHARED container: pinned-context rows + workspace-tab durable rows (+ legacy
+// matter-memory docs, retired by task AIR2-050 — left in place per the 2026-07-09
+// fresh-container ruling; generalized record/user memory lives in `memory-items`).
+// TTL = 90 days. Partition key: /tenantId — per ADR-015 governed data stores.
+// Do NOT retire or re-key this container: pins + workspace tabs depend on it.
 // ============================================================================
 
 resource memoryContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
@@ -188,6 +191,46 @@ resource memoryContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/con
         version: 2
       }
       defaultTtl: 7776000 // 90 days
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        includedPaths: [
+          { path: '/*' }
+        ]
+        excludedPaths: [
+          { path: '/"_etag"/?' }
+        ]
+      }
+    }
+  }
+}
+
+// ============================================================================
+// CONTAINER: memory-items  (task AIR2-050, FR-B-01 — ADR-042 candidate)
+// Generalized Record (entityType, entityId) + User (userId) structured AI memory,
+// one document PER FACT aligned to the MemoryItem v1 contract.
+// Partition key: /subjectId — partitioned by SUBJECT (entityId for record memory,
+// userId for user memory), deliberately NOT /tenantId: deployments are
+// customer-dedicated, so /tenantId would be a single hot logical partition against
+// the 20 GB cap. Cosmos partition keys cannot change in place — this is why a NEW
+// container exists instead of re-keying `memory` (which is also SHARED with
+// pinned-context + workspace-tab docs and stays as-is; its legacy matter docs are
+// left in place per the 2026-07-09 fresh-container ruling).
+// defaultTtl: -1 — enables PER-ITEM ttl (task 052 maps retentionClass → ttl) with
+// no container-wide expiry.
+// ============================================================================
+
+resource memoryItemsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'memory-items'
+  properties: {
+    resource: {
+      id: 'memory-items'
+      partitionKey: {
+        paths: ['/subjectId']
+        kind: 'Hash'
+        version: 2
+      }
+      defaultTtl: -1 // No container-wide expiry; enables per-item ttl (retentionClass → ttl at task 052)
       indexingPolicy: {
         indexingMode: 'consistent'
         includedPaths: [

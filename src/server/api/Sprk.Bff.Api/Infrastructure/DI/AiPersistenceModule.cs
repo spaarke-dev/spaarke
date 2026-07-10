@@ -88,13 +88,16 @@ public static class AiPersistenceModule
             databaseName: databaseName,
             logger: sp.GetRequiredService<ILogger<AuditLogService>>()));
 
-        // AIPU2-034: MatterMemoryService — per-matter structured AI memory (ADR-015 Tier 3, GDPR erasure supported).
-        // Scoped: CosmosClient is thread-safe singleton; MatterMemoryService reads ETag per request.
-        // Uses the same CosmosClient singleton and databaseName resolved above.
-        services.AddScoped<IMatterMemoryService>(sp => new MatterMemoryService(
+        // AIPU2-034 → AIR2-050: MemoryItemStore — generalized Record (entityType, entityId) + User
+        // (userId) structured AI memory over the NEW subject-partitioned `memory-items` container
+        // (ADR-015 Tier 3, GDPR erasure supported; FR-B-01). Replaces the retired matter-only
+        // MatterMemoryService; legacy `memory`-container docs are left in place (fresh-container
+        // ruling 2026-07-09 — that container is shared with pins + workspace tabs).
+        // Scoped: CosmosClient is thread-safe singleton; the store reads ETags per request.
+        services.AddScoped<IMemoryItemStore>(sp => new MemoryItemStore(
             cosmosClient: sp.GetRequiredService<CosmosClient>(),
             databaseName: databaseName,
-            logger: sp.GetRequiredService<ILogger<MatterMemoryService>>()));
+            logger: sp.GetRequiredService<ILogger<MemoryItemStore>>()));
 
         // AIPU2-035: PromptLibraryService — Personal + Team template CRUD (Cosmos DB prompts container).
         // Scoped: one instance per HTTP request; shares the singleton CosmosClient.

@@ -76,11 +76,13 @@ public class PlaybookChatContextProvider : IChatContextProvider
     private readonly IDocumentDataverseService _documentService;
     private readonly ILogger<PlaybookChatContextProvider> _logger;
 
-    // R6 Pillar 7 (task 068, D-C-21) — cross-session matter-memory activation. When the
-    // host context identifies a matter, the per-matter structured fragment is appended
-    // to the system prompt under the shared budget tracker. Registered unconditionally
-    // in AiPersistenceModule, so required (non-nullable) here.
-    private readonly IMatterMemoryService _matterMemoryService;
+    // R6 Pillar 7 (task 068, D-C-21) — cross-session record-memory activation, GENERALIZED
+    // by task 050 (FR-B-01): when the host context identifies ANY record (matter, project,
+    // invoice, ...), the per-record structured fragment is appended to the system prompt
+    // under the shared budget tracker. Reads the subject-partitioned IMemoryItemStore
+    // (matter-only IMatterMemoryService retired). Registered unconditionally in
+    // AiPersistenceModule, so required (non-nullable) here.
+    private readonly IMemoryItemStore _memoryItemStore;
 
     // R6 Pillar 7 (task 068, D-C-22) — shared 8K system-prompt budget tracker. Remains
     // nullable because the tracker registration is gated by the compound
@@ -113,7 +115,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
         IPlaybookService playbookService,
         IDocumentDataverseService documentService,
         ILogger<PlaybookChatContextProvider> logger,
-        IMatterMemoryService matterMemoryService,
+        IMemoryItemStore memoryItemStore,
         IPromptBudgetTracker? promptBudgetTracker = null,
         IGenericEntityService? entityService = null)
     {
@@ -121,7 +123,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
         _playbookService = playbookService;
         _documentService = documentService;
         _logger = logger;
-        _matterMemoryService = matterMemoryService;
+        _memoryItemStore = memoryItemStore;
         _promptBudgetTracker = promptBudgetTracker;
         _entityService = entityService;
     }
@@ -146,14 +148,14 @@ public class PlaybookChatContextProvider : IChatContextProvider
     /// <see cref="SprkChatAgentFactory"/>.
     /// </para>
     /// <para>
-    /// <b>FR-45 binding invariant</b>: this method MUST call
-    /// <see cref="IMatterMemoryService.ToSystemPromptFragmentAsync"/> via the
-    /// <see cref="AppendMatterMemoryAsync"/> helper for both the generic (no-playbook) and
+    /// <b>FR-45 binding invariant (generalized by task 050 / FR-B-01)</b>: this method MUST call
+    /// <see cref="IMemoryItemStore.ToRecordPromptFragmentAsync"/> via the
+    /// <see cref="AppendRecordMemoryAsync"/> helper for both the generic (no-playbook) and
     /// playbook paths. As of architecture §11.1 the invocation was at line 627; after the
     /// task-078 MVP XML-doc additions on 2026-06-23 the invocation site shifted to
-    /// <see cref="AppendMatterMemoryAsync"/>'s try-block (currently ~line 679, line number
-    /// is NOT load-bearing — the test asserts the call exists, not its position). Do NOT
-    /// regress this wiring — task 080 (binding regression test) enforces it.
+    /// <see cref="AppendRecordMemoryAsync"/>'s try-block (line number is NOT load-bearing —
+    /// the test asserts the call exists, not its position). Do NOT regress this wiring —
+    /// task 080 (binding regression test, retargeted by task 050) enforces it.
     /// </para>
     /// <para>
     /// <b>Future plug-in points (deferred — MVP Q5b cut)</b>:
@@ -266,11 +268,12 @@ public class PlaybookChatContextProvider : IChatContextProvider
             // EntityName fetch when client did not populate it but EntityType + EntityId are set.
             defaultPrompt = await AppendEntityEnrichmentAsync(defaultPrompt, hostContext, cancellationToken);
 
-            // 7. R6 task 068 (D-C-21 / FR-45) — append cross-session matter memory fragment
-            // when the host context identifies a matter and the IMatterMemoryService is wired.
-            // ADR-015: fragment may carry user-authored facts (parties / dates / analyses);
-            // it lives in the prompt by design, not in logs. Soft-fails to no-op.
-            defaultPrompt = await AppendMatterMemoryAsync(
+            // 7. R6 task 068 (D-C-21 / FR-45), generalized by task 050 (FR-B-01) — append the
+            // cross-session RECORD memory fragment when the host context identifies any record
+            // and the IMemoryItemStore is wired. ADR-015: fragment may carry user-authored facts
+            // (parties / dates / analyses); it lives in the prompt by design, not in logs.
+            // Soft-fails to no-op.
+            defaultPrompt = await AppendRecordMemoryAsync(
                 defaultPrompt, tenantId, hostContext, cancellationToken);
 
             // Still load document summary for inline context (skipped when documentId is null/empty)
@@ -378,10 +381,11 @@ public class PlaybookChatContextProvider : IChatContextProvider
         // EntityName fetch when client did not populate it but EntityType + EntityId are set.
         systemPrompt = await AppendEntityEnrichmentAsync(systemPrompt, hostContext, cancellationToken);
 
-        // 5b. R6 task 068 (D-C-21 / FR-45) — append cross-session matter memory fragment
-        // when the host context identifies a matter and the IMatterMemoryService is wired.
-        // Same soft-fail posture + budget gating as the generic-mode path.
-        systemPrompt = await AppendMatterMemoryAsync(
+        // 5b. R6 task 068 (D-C-21 / FR-45), generalized by task 050 (FR-B-01) — append the
+        // cross-session RECORD memory fragment when the host context identifies any record
+        // and the IMemoryItemStore is wired. Same soft-fail posture + budget gating as the
+        // generic-mode path.
+        systemPrompt = await AppendRecordMemoryAsync(
             systemPrompt, tenantId, hostContext, cancellationToken);
 
         // 6. Load document summary for inline context injection
@@ -826,75 +830,70 @@ public class PlaybookChatContextProvider : IChatContextProvider
     }
 
     /// <summary>
-    /// R6 Pillar 7 (task 068, D-C-21 / FR-45) — activates the existing production
-    /// <see cref="IMatterMemoryService"/> into the chat system-prompt assembly. When
-    /// the host context identifies a matter (EntityType == "matter") and the memory
-    /// service is wired (post-R6 environments), the per-matter structured fragment
-    /// (parties / key dates / prior analyses / key facts) is appended to the system
-    /// prompt so cross-session same-matter conversations are coherent.
+    /// R6 Pillar 7 (task 068, D-C-21 / FR-45), GENERALIZED by task 050 (FR-B-01) — appends the
+    /// cross-session RECORD memory fragment to the chat system-prompt assembly. When the host
+    /// context identifies ANY record (matter, project, invoice, work assignment, ...) and the
+    /// store is wired, the per-record structured fragment (parties / key dates / prior analyses /
+    /// key facts) is appended so cross-session same-record conversations are coherent. Matter
+    /// hosts render a byte-identical heading to the pre-generalization fragment.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Invariant</b>: this method does NOT modify
-    /// <see cref="MatterMemoryService"/>. The service's production code (Cosmos-backed
-    /// read + 500-token render budget + confidence filtering) is consumed unchanged.
+    /// <b>Invariant</b>: this method does NOT modify <see cref="IMemoryItemStore"/>. The store's
+    /// production code (Cosmos-backed subject-partitioned read + 500-token render budget +
+    /// confidence filtering, ported verbatim from the retired matter-only service) is consumed
+    /// unchanged.
     /// </para>
     /// <para>
     /// <b>Budget</b>: the rendered fragment is accounted via the shared
     /// <see cref="IPromptBudgetTracker"/> when present. The tracker emits truncation
-    /// telemetry on denial. The fragment itself is bounded to ~500 tokens by
-    /// <see cref="MatterMemoryService"/>; this method just contributes that token
-    /// cost to the shared 8K budget tracker on behalf of the matter-memory layer.
+    /// telemetry on denial. The fragment itself is bounded to ~500 tokens by the store;
+    /// this method just contributes that token cost to the shared 8K budget tracker on
+    /// behalf of the record-memory layer.
     /// </para>
     /// <para>
-    /// <b>ADR-015</b>: the fragment may contain user-authored matter facts (parties,
+    /// <b>ADR-015</b>: the fragment may contain user-authored record facts (parties,
     /// dates). It is part of the LLM prompt by design; it is NOT logged. This method
-    /// logs only (matterId, tenantId, fragmentLength) — deterministic identifiers and
-    /// counts only.
+    /// logs only (entityType, entityId, tenantId, fragmentLength) — deterministic
+    /// identifiers and counts only.
     /// </para>
     /// <para>
     /// <b>Soft failure</b>: any exception path (Cosmos outage, ETag conflict, etc.)
-    /// degrades to "no matter memory this turn"; the rest of the prompt assembly
+    /// degrades to "no record memory this turn"; the rest of the prompt assembly
     /// continues. Matches the soft-failure posture of the surrounding subsystems.
     /// </para>
     /// </remarks>
-    private async Task<string> AppendMatterMemoryAsync(
+    private async Task<string> AppendRecordMemoryAsync(
         string systemPrompt,
         string tenantId,
         ChatHostContext? hostContext,
         CancellationToken cancellationToken)
     {
-        // Guard: service not wired (legacy tests, pre-task-068 envs)
-        if (_matterMemoryService is null)
+        // Guard: store not wired (legacy tests, pre-task-068 envs)
+        if (_memoryItemStore is null)
         {
             return systemPrompt;
         }
 
-        // Guard: host context must identify a matter
+        // Guard: host context must identify a record — ANY entity type (task 050 generalization;
+        // the matter-only check was the FR-B-01 regression to remove).
         if (hostContext is null
             || string.IsNullOrWhiteSpace(hostContext.EntityType)
-            || string.IsNullOrWhiteSpace(hostContext.EntityId)
-            || !string.Equals(hostContext.EntityType, "matter", StringComparison.OrdinalIgnoreCase))
-        {
-            return systemPrompt;
-        }
-
-        // Guard: tenant required for Cosmos partition key
-        if (string.IsNullOrWhiteSpace(tenantId))
+            || string.IsNullOrWhiteSpace(hostContext.EntityId))
         {
             return systemPrompt;
         }
 
         try
         {
-            var fragment = await _matterMemoryService.ToSystemPromptFragmentAsync(
-                tenantId, hostContext.EntityId, cancellationToken);
+            var fragment = await _memoryItemStore.ToRecordPromptFragmentAsync(
+                hostContext.EntityType, hostContext.EntityId, cancellationToken);
 
             if (string.IsNullOrWhiteSpace(fragment))
             {
                 _logger.LogDebug(
-                    "R6 task 068: matter memory empty for matter={MatterId} tenant={TenantId}; no fragment appended",
-                    hostContext.EntityId, tenantId);
+                    "R6 task 068 / task 050: record memory empty for {EntityType}={EntityId} tenant={TenantId}; no fragment appended",
+                    hostContext.EntityType, hostContext.EntityId, tenantId);
                 return systemPrompt;
             }
 
@@ -904,14 +903,14 @@ public class PlaybookChatContextProvider : IChatContextProvider
             if (_promptBudgetTracker is not null)
             {
                 if (!_promptBudgetTracker.TryReserve(
-                        "matter-memory",
+                        "record-memory",
                         fragmentTokens,
                         sessionId: null,
                         tenantId: tenantId))
                 {
                     _logger.LogWarning(
-                        "R6 task 068: matter memory fragment denied by shared prompt budget tracker (requested={Tokens}, remaining={Remaining}, matter={MatterId}); skipping",
-                        fragmentTokens, _promptBudgetTracker.Remaining, hostContext.EntityId);
+                        "R6 task 068 / task 050: record memory fragment denied by shared prompt budget tracker (requested={Tokens}, remaining={Remaining}, {EntityType}={EntityId}); skipping",
+                        fragmentTokens, _promptBudgetTracker.Remaining, hostContext.EntityType, hostContext.EntityId);
                     return systemPrompt;
                 }
             }
@@ -921,15 +920,15 @@ public class PlaybookChatContextProvider : IChatContextProvider
                 if (currentTokenEstimate + fragmentTokens > MaxSystemPromptTokenBudget)
                 {
                     _logger.LogWarning(
-                        "R6 task 068: matter memory fragment would exceed system prompt budget ({Current} + {Fragment} > {Budget}); skipping",
+                        "R6 task 068 / task 050: record memory fragment would exceed system prompt budget ({Current} + {Fragment} > {Budget}); skipping",
                         currentTokenEstimate, fragmentTokens, MaxSystemPromptTokenBudget);
                     return systemPrompt;
                 }
             }
 
             _logger.LogInformation(
-                "R6 task 068: appended matter memory fragment to system prompt — matter={MatterId} tenant={TenantId} fragmentTokens={Tokens} fragmentLength={Length}",
-                hostContext.EntityId, tenantId, fragmentTokens, fragment.Length);
+                "R6 task 068 / task 050: appended record memory fragment to system prompt — {EntityType}={EntityId} tenant={TenantId} fragmentTokens={Tokens} fragmentLength={Length}",
+                hostContext.EntityType, hostContext.EntityId, tenantId, fragmentTokens, fragment.Length);
 
             return systemPrompt + "\n\n" + fragment;
         }
@@ -939,11 +938,11 @@ public class PlaybookChatContextProvider : IChatContextProvider
         }
         catch (Exception ex)
         {
-            // Soft failure — matter memory is enhancing, not required. Cross-session
+            // Soft failure — record memory is enhancing, not required. Cross-session
             // coherence degrades for this turn; the rest of the prompt assembly continues.
             _logger.LogWarning(ex,
-                "R6 task 068: failed to load matter memory for matter={MatterId} tenant={TenantId}; continuing without",
-                hostContext.EntityId, tenantId);
+                "R6 task 068 / task 050: failed to load record memory for {EntityType}={EntityId} tenant={TenantId}; continuing without",
+                hostContext.EntityType, hostContext.EntityId, tenantId);
             return systemPrompt;
         }
     }
