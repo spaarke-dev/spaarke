@@ -72,6 +72,23 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 
 **Totals**: 57 tasks (084 added 2026-07-09) — Task 045 rigor bumped STANDARD→FULL per CLAUDE.md §8 TEST-MODIFYING override.
 
+## Phase 9 — E2E Remediation (added 2026-07-09 after the 5-slice E2E audit)
+
+> **Source of truth**: [notes/e2e-gap-register.md](../notes/e2e-gap-register.md) — the 5-slice audit found the feature is built-in-halves + unit-green but E2E-inert on every create/write/coordinate path (~30 gaps, 5 clusters). These remediation tasks close the register cluster-by-cluster, each landing with a **non-waivable WebApplicationFactory through-the-wire slice test** (the anti-recurrence forcing function). Owner directive: **fix, do not defer.**
+
+| ID | Title | Cluster | Gate | Deps | Status | Rigor | Model | Effort |
+|----|-------|---------|------|------|--------|-------|-------|--------|
+| 100 | E2E-R1 getting-started vertical (upload/search→load→Save→sprk_document) | 1 create-on-save | 🟢 | 010-013,015 | 🔄 | FULL | opus | xhigh |
+| 101 | E2E-R2 AI-action activation (toolbar bindingId registration + 2 missing triggers + 084 HTTP-slice test) | 2 dispatch | 🟢 (code); 047 deploy owner-run | 016,046 | 🔲 | FULL | opus | high |
+| 102 | E2E-R3 memory-resume (Load sessionId/matterId + response fields + annotation save route + client + Cosmos) | 4 memory | 🟢 | 060,061,062 | 🔲 | FULL | opus | high |
+| 103 | E2E-R4 Word-shuttle wiring (client callers + subscription origin call + config + task 055 deterministic path) | 3 word | 🟡 | 050-054 | 🔲 | FULL | opus | high |
+| 104 | E2E-R5 three-pane coordination (real receivers on Context+Assistant panes + Flows 3/4/6 + typed discriminants) — supersedes/absorbs 070 | 5 three-pane | 🟢 | 030,031,046 | 🔲 | FULL | opus | high |
+
+**Remediation sequencing**: 100 (foundational, SOLO now) → 102 (BFF-heavy) + 104 (frontend) can parallelize (disjoint) → 101 code side (then 047 deploy owner-run) → 103. Each is SOLO-or-disjoint per file-overlap; 100/102/103 all touch ComposeEndpoints.cs so they serialize. The 084 HTTP-boundary compose-dispatch test folds into 101.
+
+### 🚩 False-green reconciliation (the ✅ marks these tasks carry OVERSTATE completeness)
+Per the audit, these ✅ tasks are **E2E-inert** and are re-scoped by the Phase-9 remediation above (their service/component halves are correct; the wires are missing): **013** (create-on-save → 100), **050/051/052/053/054** (Word shuttle → 103), **060/061** (memory → 102), **062** (cross-version → 102), **030/043/044** (AI-action triggers → 101), **070→104**. Treat their ✅ as "unit-complete, E2E-pending-remediation" until the matching Phase-9 task lands with its slice test.
+
 > **✅ E-20 LANDED ON MASTER 2026-07-09 (`c300ab12d`) — COMPOSE DISPATCH UNBLOCKED.** The Phase-E batch (E-20/E-12/E-30/E-42) merged. `DispositionRoutability` admits `Compose` (`Routable=true`, `IsAdmissible=IsRoutable`) and the admit-gate follows the registry — **the 422 is gone.** Our routing hand-patch was cleanly superseded (core owns the 3-list collapse; 408/408 dispatch+compose+summarize green). **FREEZE LIFTED** on `OutputRouter.cs`/`Binding.cs`. **NOW EXECUTABLE**: **016** (re-verify E2E through `/dispatch` — clear the false-green) → **042/033/046** → **034** (undo — supersession mechanism already in A0, NOT E-30-gated per core REPLY §2) → **047** (compose row) → **084** (seam test) → **082** (flagship). The 4 informational compose actions now dispatch E2E for real. History: E-20 was 422-gated until this merge (admit-gate `SessionDispatchOrchestrator.cs:229` had admitted only `Informational|WorkProduct`; our promotion fixed 2 of 3 lists, E-20 completed the collapse). Caught+fixed core's E-30 fixture drift on the way in (23 tests, commit `5f59cbc0b`); residual pre-existing `AuditLogService` full-suite flake noted.
 
 ## Parallel Execution Plan (startable 🟢 tracks)
