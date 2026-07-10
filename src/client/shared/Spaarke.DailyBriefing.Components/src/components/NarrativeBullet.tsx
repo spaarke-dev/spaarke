@@ -84,8 +84,6 @@ import {
   tokens,
   Text,
   Badge,
-  Button,
-  Tooltip,
   Menu,
   MenuTrigger,
   MenuButton,
@@ -132,11 +130,12 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
-  // R5 richer-rows: record description under the title, truncated to 2 lines.
+  // R5 richer-rows: record description under the title. Operator UAT (2026-07-09)
+  // asked for a single concatenated line — clamp to 1 line with ellipsis.
   description: {
     color: tokens.colorNeutralForeground2,
     display: '-webkit-box',
-    WebkitLineClamp: 2,
+    WebkitLineClamp: 1,
     WebkitBoxOrient: 'vertical' as const,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -569,20 +568,9 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
         )}
       </div>
       <div className={styles.actions}>
-        {/* Operator UAT (2026-07-09, item D): document rows show a visible
-             file-open icon that launches the shared file-preview modal. Only
-             rendered when this is a Documents-channel row (documentId supplied). */}
-        {canPreviewDocument && (
-          <Tooltip content="Open document" relationship="label">
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<DocumentRegular />}
-              aria-label="Open document"
-              onClick={handlePreviewDocument}
-            />
-          </Tooltip>
-        )}
+        {/* Operator UAT (2026-07-09): the standalone document-open icon was
+             removed as redundant — the file-preview modal is reached via the
+             "Open document" overflow-menu item below (Documents rows only). */}
         {/* Operator (2026-07-09): "Add to To Do" moved into the overflow menu —
              the row now shows only the three-dot menu trigger. The menu component
              is preserved for future tools per the R7 W12 task-134 note. */}
