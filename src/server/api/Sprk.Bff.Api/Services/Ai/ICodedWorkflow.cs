@@ -81,4 +81,12 @@ public sealed record CodedWorkflowContext
     /// behalf. Null when the workflow is not user-scoped.
     /// </summary>
     public Guid? UserId { get; init; }
+
+    /// <summary>
+    /// The acting user's email address, resolved from the caller's auth claims at the dispatch
+    /// seam (E-30). For workflows that address a NOTIFICATION email to the requesting user — the
+    /// recipient is server-resolved here, never taken from client-supplied args. Null when the
+    /// caller did not resolve it (e.g. non-user-scoped or non-chat entry paths).
+    /// </summary>
+    public string? ActingUserEmail { get; init; }
 }
