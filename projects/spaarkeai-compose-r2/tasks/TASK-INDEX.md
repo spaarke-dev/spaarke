@@ -13,14 +13,14 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | ID | Title | Phase | Gate | Deps | Status | Rigor | Model | Effort |
 |----|-------|-------|------|------|--------|-------|-------|--------|
 | 000 | Spike 0 — validate session-dispatch path (throwaway compose Binding) | 0 Spikes | 🟢 | none | ✅ | STANDARD | opus | high |
-| 001 | Spike 1 — Action row + structured OutputSchemaJson reliability | 0 Spikes | 🟢 | 000 | 🔲 | STANDARD | sonnet | high |
+| 001 | Spike 1 — Action row + structured OutputSchemaJson reliability | 0 Spikes | 🟢 | 000 | ✅ CLOSED (purpose satisfied — Phase 4 040-047 authored+deployed 5 real rows; pattern proven by live dispatch, throwaway note moot) | STANDARD | sonnet | high |
 | 002 | Spike 2 — edit validator match_mode + ambiguity errors | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 003 | Spike 3 — atomic edit batch + rollback | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 004 | Spike 4 — semantic appendix hallucination delta | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 005 | Spike 5 — Open XML write w:ins+w:comment → Word for Web | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 006 | Spike 6 — reverse round-trip (Word edit → webhook → read); tune re-anchor bands | 0 Spikes | 🟢 | 005 | ✅ | STANDARD | sonnet | high |
 | 007 | Spike 7 — SPE checkout vs Word-for-Web open collision UX | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
-| 008 | Spike 8 — docx-benchmark harness baseline | 0 Spikes | 🟢 | 005 | 🔲 | STANDARD | sonnet | high |
+| 008 | Spike 8 — docx-benchmark harness baseline | 0 Spikes | 🟢 | 005 | ⏭️ CLOSED-not-built (purpose overtaken — Word shuttle 050-054 shipped; blocks nothing; optional AGPL external regression harness = post-project nice-to-have, NFR-06 met by existing eval) | STANDARD | sonnet | high |
 | 010 | FR-01 wire 1a "Browse / open file" → transient mount | 1 Entry | 🟢 | 000 | ✅ | FULL | sonnet | high |
 | 011 | FR-02 wire 1a "Search for Document" → reuse 1c load path | 1 Entry | 🟢 | none | ✅ | FULL | sonnet | high |
 | 012 | FR-03 1b upload → transient mount (flip send_workspace_artifact + feed bytes) | 1 Entry | 🟢 | none | ✅ | FULL | opus | high |
@@ -39,7 +39,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 031 | FR-15 custom ProseMirror marks (insertion/deletion/commentAnchor) | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
 | 032 | FR-18 serial action queueing in ConversationPane | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
 | 033 | FR-16 pending track-change materialization from ledger (compose disposition) | 3 Inline | 🟢 | 031,016 | ✅ | FULL | opus | high |
-| 034 | FR-17 undo/replace via ledger supersession | 3 Inline | 🟢 | 033 | 🔲 | FULL | opus | high |
+| 034 | FR-17 undo/replace via ledger supersession | 3 Inline | 🟢 (unblocked: 033 ✅ + A0 supersession + E-20) | 033 | 🔄 in-flight (owner chose FULL undo+replace 2026-07-10) | FULL | opus | high |
 | 040 | FR-07 compose-explain-clause Action + Binding | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
 | 041 | FR-08 compose-compare-to-playbook Action + Binding | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
 | 042 | FR-09 compose-draft-alternative Action + Binding (compose disposition) | 4 Catalog | 🟢 | 001,016 | ✅ | FULL | opus | high |
