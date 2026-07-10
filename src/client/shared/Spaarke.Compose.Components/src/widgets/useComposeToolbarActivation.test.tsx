@@ -24,10 +24,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import type { Editor } from '@tiptap/react';
-import {
-  ComposeAiToolbar,
-  __resetComposeAiToolbarActionsForTests,
-} from './ComposeAiToolbar';
+import { ComposeAiToolbar, __resetComposeAiToolbarActionsForTests } from './ComposeAiToolbar';
 import { useComposeToolbarActivation } from './useComposeToolbarActivation';
 import type { DispatchPaneEvent } from '@spaarke/ai-widgets/events';
 import type { DispatchConsumer } from '@spaarke/ui-components';
@@ -74,9 +71,7 @@ function noopDispatch(): DispatchPaneEvent {
 }
 
 /** Builds a fake `fetch` returning the given capability list (ok:200). */
-function stubCapabilitiesFetch(
-  capabilities: Array<{ bindingId: string; consumerType: string }>
-): typeof fetch {
+function stubCapabilitiesFetch(capabilities: Array<{ bindingId: string; consumerType: string }>): typeof fetch {
   const response = {
     ok: true,
     status: 200,
@@ -137,7 +132,13 @@ describe('useComposeToolbarActivation — activation (E2E DoD row 3)', () => {
       { bindingId: 'guid-wholedoc-summarize', consumerType: 'compose-summarize' },
     ]);
 
-    render(<ActivationHost editor={editor} fetchOverride={fetchOverride} dispatchConsumerOverride={dispatchConsumerOverride} />);
+    render(
+      <ActivationHost
+        editor={editor}
+        fetchOverride={fetchOverride}
+        dispatchConsumerOverride={dispatchConsumerOverride}
+      />
+    );
 
     // The async fetch + registration lands AFTER first paint — the toolbar
     // re-renders via the module subscription and flips the button to enabled.
@@ -199,7 +200,11 @@ describe('useComposeToolbarActivation — activation (E2E DoD row 3)', () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
     const failing = jest
       .fn()
-      .mockResolvedValue({ ok: false, status: 500, json: async () => ({}) } as unknown as Response) as unknown as typeof fetch;
+      .mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: async () => ({}),
+      } as unknown as Response) as unknown as typeof fetch;
 
     render(<ActivationHost editor={editor} fetchOverride={failing} />);
 

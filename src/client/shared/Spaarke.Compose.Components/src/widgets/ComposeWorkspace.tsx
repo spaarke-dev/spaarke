@@ -72,9 +72,7 @@ import type { ComposeActionEnqueue } from './ComposeAiToolbar';
 // `@spaarke/ai-outputs` subpaths, which LegalWorkspace's standalone Rollup
 // cannot resolve). Matches the SpaarkeAi `useWorkspaceLayouts` adapter pattern
 // (documented in `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`).
-import {
-  type WorkspacePaneEvent,
-} from '@spaarke/ai-widgets/events';
+import { type WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 // Compose three-pane coordination — WORKSPACE leg (task 104 / E2E-R5). Typed
 // receivers for Flow 3 (compose_context_insert) + Flow 5 (compose_assistant_insert).
 import { useComposeWorkspaceReceivers } from './useComposeWorkspaceReceivers';
@@ -571,7 +569,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.status, state.documentRef?.speDriveItemId, bffBaseUrl, effectiveDriveId, tenantId, initialSessionId, matterId]);
+  }, [
+    state.status,
+    state.documentRef?.speDriveItemId,
+    bffBaseUrl,
+    effectiveDriveId,
+    tenantId,
+    initialSessionId,
+    matterId,
+  ]);
 
   // -------------------------------------------------------------------------
   // FR-29 (task 102, gap 4.3) — persist anchored annotations + defined-terms on MUTATION
@@ -656,7 +662,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // The hook surfaces a user-safe error; a push failure must not crash the editing session.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.documentRef?.speDriveItemId, state.etag, effectiveDriveId, tenantId, composeDocxAnnotations, pushAnnotations]);
+  }, [
+    state.documentRef?.speDriveItemId,
+    state.etag,
+    effectiveDriveId,
+    tenantId,
+    composeDocxAnnotations,
+    pushAnnotations,
+  ]);
 
   // gaps 3.4/3.5 — return-from-Word: on window focus (the user came back from Word), poll
   // check-changes; when the document changed, PULL the current native annotations (3.4) and
@@ -687,12 +700,24 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // Poll/reanchor failures are non-fatal — the editing session continues.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.status, state.documentRef?.speDriveItemId, effectiveDriveId, bffBaseUrl, tenantId, checkChanges, pullAnnotations, runReanchor, anchoredAnnotations]);
+  }, [
+    state.status,
+    state.documentRef?.speDriveItemId,
+    effectiveDriveId,
+    bffBaseUrl,
+    tenantId,
+    checkChanges,
+    pullAnnotations,
+    runReanchor,
+    anchoredAnnotations,
+  ]);
 
   React.useEffect(() => {
     if (state.status !== 'loaded') return;
     if (!state.documentRef?.speDriveItemId) return;
-    const onFocus = (): void => { void runReturnFromWordCheck(); };
+    const onFocus = (): void => {
+      void runReturnFromWordCheck();
+    };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [state.status, state.documentRef?.speDriveItemId, runReturnFromWordCheck]);
@@ -808,8 +833,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // no original bytes were retained) pays the regeneration cost via the EXISTING
       // `tipTapToDocxBytes` path — that path is otherwise unchanged.
       const editorIsDirty = editorRef.current.isDirty();
-      const bytes =
-        editorIsDirty || !state.docxBytes ? await editorRef.current.serialize() : state.docxBytes;
+      const bytes = editorIsDirty || !state.docxBytes ? await editorRef.current.serialize() : state.docxBytes;
 
       // FR-05 (task 100): the create-on-save route carries no id in the path (the draft has no
       // drive-item yet) and sends `containerId`; the replace route carries the SPE id + driveId.
@@ -911,7 +935,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const message = err instanceof Error ? err.message : String(err);
       dispatch({ kind: 'saveFailed', errorMessage: `Save failed: ${message}` });
     }
-  }, [state.status, state.documentRef, state.docxBytes, state.sessionId, bffBaseUrl, effectiveDriveId, tenantId, onCreateOnSaveComplete]);
+  }, [
+    state.status,
+    state.documentRef,
+    state.docxBytes,
+    state.sessionId,
+    bffBaseUrl,
+    effectiveDriveId,
+    tenantId,
+    onCreateOnSaveComplete,
+  ]);
 
   // Keyboard shortcut: Ctrl/Cmd+S → save.
   React.useEffect(() => {
@@ -1006,7 +1039,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   useComposeWorkspaceReceivers({
     // Flow 3 — Context → Workspace: insert the precedent/library clause into the
     // editor at cursor as a pending insertion (the editor's materialize seam).
-    onContextInsert: (event) => {
+    onContextInsert: event => {
       const html = event.contentHtml ?? '';
       if (!html) return;
       const clauseId = event.sourceClauseId ?? 'context-insert';
@@ -1019,7 +1052,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     // when a `ledgerRef` is present (ADR-040); else keep the R1 manual-confirm
     // staging path. Runtime contract preserved verbatim from the prior inline
     // receiver — only the (now-typed) event access + call site changed.
-    onAssistantInsert: (event) => {
+    onAssistantInsert: event => {
       if (event.ledgerRef) {
         void materializeComposeDraftFromLedger(event.ledgerRef);
         return;
@@ -1028,7 +1061,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     },
     // task 072 (FR-35 Doc Q&A stretch) — ephemeral highlight only; no document
     // mutation, no ledger entry, no-op if the editor isn't mounted yet.
-    onQaHighlight: (event) => {
+    onQaHighlight: event => {
       if (!event.qaSourceText) return;
       editorRef.current?.highlightCitedSpan(event.qaSourceText, event.qaSectionLabel);
     },
@@ -1356,7 +1389,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // gap 3.1 — only offer Push-to-Word for a persisted document (a transient draft has
               // no SPE drive-item to write native annotations into yet).
               onPushToWordRequested={
-                state.documentRef?.speDriveItemId ? () => { void handlePushToWord(); } : undefined
+                state.documentRef?.speDriveItemId
+                  ? () => {
+                      void handlePushToWord();
+                    }
+                  : undefined
               }
               canPushToWord={canPushToWord}
               isPushingToWord={isPushingToWord}
