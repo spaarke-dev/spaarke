@@ -46,6 +46,20 @@
 import * as React from 'react';
 import type { ComposeActionEnqueue } from '../widgets/ComposeAiToolbar';
 
+/**
+ * A Compose-direct / transient mount registration (spaarkeai-compose-r2 task 113 / UAT defect 4).
+ *
+ * When the user Browse-mounts a local file directly in Compose, its bytes are CLIENT-ONLY —
+ * invisible to the chat session, so "summarize this document" cannot see it. This handler lets the
+ * widget hand those bytes to the HOST (ConversationPane), which lands them as a `ChatSessionFile`
+ * via the EXISTING chat upload endpoint and marks the session's active document (POST
+ * `/api/compose/active-document`). Same non-bus, sibling-pane conduit rationale as the dispatcher
+ * above — bytes travel by a DIRECT function call (never a PaneEventBus payload; ADR-030 §MUST NOT /
+ * ADR-015 keep the bus content-free). Fire-and-forget from the widget's perspective.
+ */
+export type ComposeActiveDocumentRegistration =
+  (info: { docxBytes: ArrayBuffer; fileName?: string }) => void | Promise<void>;
+
 export interface ComposeActionBridgeValue {
   /**
    * Stable enqueue delegating to the currently-registered host dispatcher.
@@ -58,6 +72,17 @@ export interface ComposeActionBridgeValue {
   setDispatcher: (dispatcher: ComposeActionEnqueue | null) => void;
   /** True when a host dispatcher is currently registered. */
   hasDispatcher: boolean;
+
+  /**
+   * Stable delegate to the currently-registered host active-document handler (task 113). No-op
+   * (resolves) when no host handler is registered — the widget gates on
+   * {@link hasActiveDocumentHandler} via {@link useComposeActiveDocumentRegistration}.
+   */
+  registerActiveDocument: ComposeActiveDocumentRegistration;
+  /** Register (or clear, with `null`) the host's active-document handler. */
+  setActiveDocumentHandler: (handler: ComposeActiveDocumentRegistration | null) => void;
+  /** True when a host active-document handler is currently registered. */
+  hasActiveDocumentHandler: boolean;
 }
 
 export const ComposeActionBridgeContext = React.createContext<ComposeActionBridgeValue | null>(null);
@@ -83,18 +108,19 @@ export interface ComposeActionBridgeProviderProps {
  * workspace section re-renders and threads `enqueue` the moment the assistant
  * registers its queue).
  */
-export function ComposeActionBridgeProvider(
-  props: ComposeActionBridgeProviderProps
-): React.JSX.Element {
+export function ComposeActionBridgeProvider(props: ComposeActionBridgeProviderProps): React.JSX.Element {
   const dispatcherRef = React.useRef<ComposeActionEnqueue | null>(null);
   const [hasDispatcher, setHasDispatcher] = React.useState<boolean>(false);
+
+  const activeDocHandlerRef = React.useRef<ComposeActiveDocumentRegistration | null>(null);
+  const [hasActiveDocumentHandler, setHasActiveDocumentHandler] = React.useState<boolean>(false);
 
   const setDispatcher = React.useCallback((dispatcher: ComposeActionEnqueue | null): void => {
     dispatcherRef.current = dispatcher;
     setHasDispatcher(dispatcher !== null);
   }, []);
 
-  const enqueue = React.useCallback<ComposeActionEnqueue>((request) => {
+  const enqueue = React.useCallback<ComposeActionEnqueue>(request => {
     const dispatcher = dispatcherRef.current;
     if (!dispatcher) {
       return Promise.reject(
@@ -104,9 +130,32 @@ export function ComposeActionBridgeProvider(
     return dispatcher(request);
   }, []);
 
+  const setActiveDocumentHandler = React.useCallback(
+    (handler: ComposeActiveDocumentRegistration | null): void => {
+      activeDocHandlerRef.current = handler;
+      setHasActiveDocumentHandler(handler !== null);
+    },
+    []
+  );
+
+  const registerActiveDocument = React.useCallback<ComposeActiveDocumentRegistration>(info => {
+    const handler = activeDocHandlerRef.current;
+    // No host handler (e.g. standalone LegalWorkspace mount) → inert no-op, never rejects: the
+    // Compose Save path still works; only chat visibility of the direct upload is skipped.
+    if (!handler) return Promise.resolve();
+    return Promise.resolve(handler(info));
+  }, []);
+
   const value = React.useMemo<ComposeActionBridgeValue>(
-    () => ({ enqueue, setDispatcher, hasDispatcher }),
-    [enqueue, setDispatcher, hasDispatcher]
+    () => ({
+      enqueue,
+      setDispatcher,
+      hasDispatcher,
+      registerActiveDocument,
+      setActiveDocumentHandler,
+      hasActiveDocumentHandler,
+    }),
+    [enqueue, setDispatcher, hasDispatcher, registerActiveDocument, setActiveDocumentHandler, hasActiveDocumentHandler]
   );
 
   return React.createElement(ComposeActionBridgeContext.Provider, { value }, props.children);
@@ -127,4 +176,31 @@ export function useRegisterComposeActionDispatcher(dispatcher: ComposeActionEnqu
     setDispatcher(dispatcher);
     return () => setDispatcher(null);
   }, [setDispatcher, dispatcher]);
+}
+
+/**
+ * Host-side registration hook (task 113 / UAT defect 4). Call from the pane that owns the chat
+ * session (`ConversationPane`) to publish its active-document handler — the one that lands a
+ * Compose-direct upload's bytes as a `ChatSessionFile` and marks it active. Effect-scoped:
+ * re-registers on identity change, clears on unmount. No-op outside a
+ * {@link ComposeActionBridgeProvider}.
+ */
+export function useRegisterComposeActiveDocumentHandler(handler: ComposeActiveDocumentRegistration): void {
+  const bridge = useComposeActionBridge();
+  const setActiveDocumentHandler = bridge?.setActiveDocumentHandler;
+  React.useEffect(() => {
+    if (!setActiveDocumentHandler) return;
+    setActiveDocumentHandler(handler);
+    return () => setActiveDocumentHandler(null);
+  }, [setActiveDocumentHandler, handler]);
+}
+
+/**
+ * Widget-side consumer hook (task 113 / UAT defect 4). Returns the stable
+ * {@link ComposeActiveDocumentRegistration} delegate when a host handler is registered, else
+ * `null` (standalone mount / isolated test) — the widget gates on the null and skips registration.
+ */
+export function useComposeActiveDocumentRegistration(): ComposeActiveDocumentRegistration | null {
+  const bridge = useComposeActionBridge();
+  return bridge && bridge.hasActiveDocumentHandler ? bridge.registerActiveDocument : null;
 }

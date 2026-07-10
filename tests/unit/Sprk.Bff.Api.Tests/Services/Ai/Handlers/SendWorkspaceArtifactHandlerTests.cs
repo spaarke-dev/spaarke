@@ -6,9 +6,12 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Workspace;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Workspace;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
@@ -69,12 +72,22 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
             .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection(new List<Microsoft.Xrm.Sdk.Entity> { entity }));
     }
 
+    // task 113: real ChatSessionManager over an in-memory tenant cache — the handler reads the
+    // session-scoped ActiveDocument to resolve the Compose mount when the LLM sends no pointer.
+    // Empty by default (GetSessionAsync → null), so pre-existing tests keep their behavior; a test
+    // that needs an active document seeds one via SeedActiveDocumentAsync below.
+    private readonly ChatSessionManager _sessionManager = new(
+        new InMemoryTenantCache(),
+        Mock.Of<IChatDataverseRepository>(),
+        Mock.Of<ILogger<ChatSessionManager>>());
+
     private SendWorkspaceArtifactHandler CreateHandler() => new(
         _guidProvider.Object,
         _timeProvider,
         new WorkspaceLayoutService(_entityService.Object, CreateLogger<WorkspaceLayoutService>()),
         _dataverse.Object,
         _ackCoordinator.Object,
+        _sessionManager,
         CreateLogger<SendWorkspaceArtifactHandler>());
 
     private static AnalysisTool BuildArtifactTool() =>
@@ -469,8 +482,12 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
     }
 
     [Fact]
-    public void ValidateChat_WorkspaceKind_RequiresLayoutNameOrLayoutId()
+    public void ValidateChat_WorkspaceKind_MissingLayout_IsNowValid_DefaultsToComposeAtExecute()
     {
+        // task 113 (UAT defects 6/7): layoutName/layoutId are NO LONGER required at validation.
+        // A missing layout passes ValidateChat and the execute path defaults it to 'Compose'
+        // (proven end-to-end in the seam suite), so a literal-following model never has to
+        // synthesize a layout id. This supersedes the prior "layout required" contract.
         var handler = CreateHandler();
         const string argsJson =
             """{"widgetType":"Workspace","title":"Compose","widgetData":{"kind":"Workspace"}}""";
@@ -479,8 +496,8 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
 
         var result = handler.ValidateChat(ctx, tool);
 
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.Contains("layoutName", StringComparison.Ordinal));
+        result.IsValid.Should().BeTrue(
+            because: "R5 removed the hard layout requirement; the execute path defaults a missing layout to 'Compose'");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

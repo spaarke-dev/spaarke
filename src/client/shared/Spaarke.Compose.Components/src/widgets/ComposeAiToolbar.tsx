@@ -86,7 +86,24 @@
  * @see src/solutions/SpaarkeAi/src/components/conversation/useConsumerChips.tsx
  *      (the pattern this component mirrors for the dispatch call shape)
  * @see ./ComposeEditor.tsx ("AI TOOLBAR MOUNT" region — host wiring)
- * @see ./ComposeFormatToolbar.tsx (sibling BubbleMenu content; NOT an AI-action surface)
+ * @see ./ComposeFormatToolbar.tsx (the PERSISTENT top toolbar; unrelated surface)
+ *
+ * ---------------------------------------------------------------------------
+ * TASK 111 (UAT-R2, 2026-07-10) — layout fix + two mount paths: the
+ * selection-triggered BubbleMenu popup (unchanged mechanism) is now AI-ACTIONS
+ * ONLY (the sibling formatting Toolbar that used to live alongside this
+ * component in ComposeEditor's BubbleMenu was removed — see ComposeEditor.tsx
+ * "AI TOOLBAR MOUNT" region). This component owns its OWN single `<Toolbar>`
+ * (previously a Fragment of `<ToolbarDivider/>` + a second `<Toolbar>`, both
+ * mounted as siblings inside the host's flex row — the divider had no Toolbar
+ * context (collapsed/misaligned) and two Toolbars each imposed their own
+ * padding). The divider now lives INSIDE this single Toolbar (between the
+ * primary buttons and the overflow trigger) so it always has context. A new
+ * `forceVisible` prop lets ComposeEditor's right-click (context-menu) trigger
+ * render this toolbar even on a COLLAPSED selection (point-insertion) — see
+ * `forceVisible` doc below; `handleActionClick`'s existing collapsed-selection
+ * dispatch guard is UNCHANGED (a right-click with no selection still no-ops
+ * on click rather than dispatching).
  */
 
 import * as React from 'react';
@@ -348,6 +365,17 @@ export interface ComposeAiToolbarProps {
    * fetch/SSE/MSAL. Production hosts must NOT set this.
    */
   dispatchConsumerOverride?: DispatchConsumer;
+  /**
+   * Task 111 — bypasses the collapsed-selection render guard so the toolbar
+   * renders even with NO selection (a caret / point-insertion). Used by
+   * ComposeEditor's right-click (context-menu) trigger, which must open the
+   * toolbar at the click point regardless of whether text is selected. Does
+   * NOT affect `handleActionClick`'s dispatch guard — clicking an action on a
+   * collapsed selection still no-ops defensively (unchanged). Defaults to
+   * `false` (the selection-triggered BubbleMenu mount path, which keeps the
+   * original "renders nothing on collapsed selection" behavior).
+   */
+  forceVisible?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -355,10 +383,14 @@ export interface ComposeAiToolbarProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
+  // Task 111: the redundant `display: 'flex'` / `columnGap` override was
+  // dropped — Fluent's own `<Toolbar>` already applies its layout (fighting
+  // it caused double-spacing). `flexWrap` is an ADDITION (not a duplicate of
+  // Toolbar's own behavior): it lets the AI buttons wrap onto a second row
+  // instead of overflowing the popup width when the host (ComposeEditor's
+  // `styles.bubbleMenu`) width-caps the container.
   toolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    columnGap: tokens.spacingHorizontalXXS,
+    flexWrap: 'wrap',
   },
 });
 
@@ -376,6 +408,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
     actions,
     enqueueComposeAction,
     dispatchConsumerOverride,
+    forceVisible,
   } = props;
   const styles = useStyles();
 
@@ -473,64 +506,69 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   if (!editor) return null;
 
   const { from, to } = editor.state.selection;
-  if (from === to) return null; // NEGATIVE case — collapsed/empty selection shows no toolbar
+  // NEGATIVE case — collapsed/empty selection shows no toolbar, UNLESS the
+  // host force-opened it (task 111 right-click / point-insertion trigger).
+  if (from === to && !forceVisible) return null;
 
   const allActions = actions ?? getComposeAiToolbarActions();
   const primaryActions = allActions.filter(a => a.placement === 'primary');
   const overflowActions = allActions.filter(a => a.placement === 'overflow');
 
+  // Task 111 — SINGLE Toolbar (no wrapping Fragment, no orphaned top-level
+  // divider): the divider is a DIRECT CHILD of this Toolbar (between the
+  // primary buttons and the overflow trigger), so it always has Toolbar
+  // context (see file header "TASK 111" note).
   return (
-    <>
-      <ToolbarDivider />
-      <Toolbar size="small" className={styles.toolbar} aria-label="AI actions" data-testid="compose-ai-toolbar">
-        {primaryActions.map(action => (
-          <Tooltip key={action.id} content={action.tooltip} relationship="description" withArrow>
-            <ToolbarButton
-              appearance="subtle"
-              icon={actionIcon(action.id)}
-              disabled={!action.bindingId}
-              aria-label={action.label}
-              data-testid={`compose-ai-toolbar-${action.id}`}
-              onClick={() => handleActionClick(action)}
-            >
-              {action.label}
-            </ToolbarButton>
-          </Tooltip>
-        ))}
+    <Toolbar size="small" className={styles.toolbar} aria-label="AI actions" data-testid="compose-ai-toolbar">
+      {primaryActions.map(action => (
+        <Tooltip key={action.id} content={action.tooltip} relationship="description" withArrow>
+          <ToolbarButton
+            appearance="subtle"
+            icon={actionIcon(action.id)}
+            disabled={!action.bindingId}
+            aria-label={action.label}
+            data-testid={`compose-ai-toolbar-${action.id}`}
+            onClick={() => handleActionClick(action)}
+          >
+            {action.label}
+          </ToolbarButton>
+        </Tooltip>
+      ))}
 
-        <Menu positioning="below-end">
-          <MenuTrigger disableButtonEnhancement>
-            <ToolbarButton
-              appearance="subtle"
-              icon={<MoreHorizontal20Regular />}
-              aria-label="More actions"
-              data-testid="compose-ai-toolbar-more"
-            />
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              {overflowActions.length === 0 ? (
-                <MenuItem disabled data-testid="compose-ai-toolbar-more-empty">
-                  No additional actions yet
+      <ToolbarDivider />
+
+      <Menu positioning="below-end">
+        <MenuTrigger disableButtonEnhancement>
+          <ToolbarButton
+            appearance="subtle"
+            icon={<MoreHorizontal20Regular />}
+            aria-label="More actions"
+            data-testid="compose-ai-toolbar-more"
+          />
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            {overflowActions.length === 0 ? (
+              <MenuItem disabled data-testid="compose-ai-toolbar-more-empty">
+                No additional actions yet
+              </MenuItem>
+            ) : (
+              overflowActions.map(action => (
+                <MenuItem
+                  key={action.id}
+                  disabled={!action.bindingId}
+                  title={action.tooltip}
+                  data-testid={`compose-ai-toolbar-overflow-${action.id}`}
+                  onClick={() => handleActionClick(action)}
+                >
+                  {action.label}
                 </MenuItem>
-              ) : (
-                overflowActions.map(action => (
-                  <MenuItem
-                    key={action.id}
-                    disabled={!action.bindingId}
-                    title={action.tooltip}
-                    data-testid={`compose-ai-toolbar-overflow-${action.id}`}
-                    onClick={() => handleActionClick(action)}
-                  >
-                    {action.label}
-                  </MenuItem>
-                ))
-              )}
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-      </Toolbar>
-    </>
+              ))
+            )}
+          </MenuList>
+        </MenuPopover>
+      </Menu>
+    </Toolbar>
   );
 }
 

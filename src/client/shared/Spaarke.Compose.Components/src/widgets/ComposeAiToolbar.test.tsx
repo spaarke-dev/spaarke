@@ -82,6 +82,7 @@ function renderToolbar(
     editor: Editor | null;
     actions?: ReadonlyArray<ComposeAiToolbarAction>;
     dispatchConsumerOverride?: DispatchConsumer;
+    forceVisible?: boolean;
   },
   theme: typeof webLightTheme = webLightTheme
 ) {
@@ -95,6 +96,7 @@ function renderToolbar(
         dispatch={noopDispatch()}
         actions={ui.actions}
         dispatchConsumerOverride={ui.dispatchConsumerOverride}
+        forceVisible={ui.forceVisible}
       />
     </FluentProvider>
   );
@@ -162,6 +164,64 @@ describe('ComposeAiToolbar — render on selection', () => {
     expect(screen.getByTestId('compose-ai-toolbar-compose-explain-clause')).toBeDisabled();
     expect(screen.getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeDisabled();
     expect(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1b. Task 111 (UAT-R2 layout fix) — ONE Toolbar, divider in-context, no
+//     overflow, and `forceVisible` (right-click / point-insertion trigger).
+// ---------------------------------------------------------------------------
+
+describe('ComposeAiToolbar — task 111 layout fix (single Toolbar + divider context + no overflow)', () => {
+  it('renders exactly ONE Toolbar with the divider as a direct child (Toolbar context) — no orphaned top-level divider', () => {
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    renderToolbar({ editor });
+
+    const toolbars = screen.getAllByRole('toolbar');
+    expect(toolbars).toHaveLength(1);
+    const toolbar = toolbars[0];
+    expect(toolbar).toBe(screen.getByTestId('compose-ai-toolbar'));
+
+    const divider = toolbar.querySelector('[role="separator"]');
+    expect(divider).not.toBeNull();
+    // "In context" — the divider is a DESCENDANT of the Toolbar (not a sibling
+    // rendered outside it), so it inherits Toolbar's size/orientation context.
+    expect(toolbar.contains(divider)).toBe(true);
+  });
+
+  it('no overflow: the Toolbar wraps instead of clipping (real Griffel-injected CSS, not a class-name guess)', () => {
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    renderToolbar({ editor });
+    const toolbar = screen.getByTestId('compose-ai-toolbar');
+    expect(getComputedStyle(toolbar).flexWrap).toBe('wrap');
+  });
+
+  it('forceVisible renders the toolbar even on a COLLAPSED selection (task 111 right-click / point-insertion trigger)', () => {
+    const editor = createMockEditor({ from: 5, to: 5, text: '' });
+    renderToolbar({ editor, forceVisible: true });
+
+    expect(screen.getByTestId('compose-ai-toolbar')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-ai-toolbar-compose-explain-clause')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-ai-toolbar-more')).toBeInTheDocument();
+  });
+
+  it('forceVisible does NOT change the dispatch guard — clicking an action on a collapsed selection still no-ops', async () => {
+    const user = userEvent.setup();
+    const editor = createMockEditor({ from: 5, to: 5, text: '' });
+    const dispatchConsumerOverride = jest.fn();
+    renderToolbar({ editor, actions: WIRED_TEST_ACTIONS, forceVisible: true, dispatchConsumerOverride });
+
+    await user.click(screen.getByTestId('compose-ai-toolbar-compose-explain-clause'));
+
+    expect(dispatchConsumerOverride).not.toHaveBeenCalled();
+  });
+
+  it('without forceVisible (the selection-triggered BubbleMenu mount path), a collapsed selection still renders nothing — unchanged default behavior', () => {
+    const editor = createMockEditor({ from: 5, to: 5, text: '' });
+    renderToolbar({ editor }); // forceVisible omitted (defaults to false/undefined)
+    expect(screen.queryByTestId('compose-ai-toolbar')).not.toBeInTheDocument();
   });
 });
 

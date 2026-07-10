@@ -242,6 +242,122 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
             "create-on-save inherits RequireAuthorization() from the /api/compose group (ADR-008 + ADR-028)");
     }
+
+    // ── Task 110 (UAT-R1) — non-waivable E2E DoD ────────────────────────────────────────────────
+    // The Browse/open-local-file first Save legitimately has NO chat session — the client sends
+    // sessionId:"" (ComposeWorkspace.tsx `sessionId: state.sessionId`, unset on the Browse path).
+    // BEFORE task 110 this 400'd at ComposeEndpoints.cs:1312 (and would have thrown at
+    // ComposeService.SaveAsync/PromoteIfEphemeralAsync). This drives the EMPTY-sessionId body
+    // through the REAL create-on-save route and asserts 200 + the persisted sprk_document
+    // side-effect, and that NO ChatSession is rebound (the FR-07 rebind is skipped, not attempted).
+    // The WITH-session rebind-fires case is proven by
+    // UploadThenCreateOnSave_TransientDraft_PersistsNewDocumentAndSpeItemAndRebindsSession above.
+    [Fact]
+    public async Task CreateOnSave_WithEmptySessionId_Returns200AndPersistsDocumentWithoutRebind()
+    {
+        // ── Arrange ────────────────────────────────────────────────────────────────────────────
+        const string containerId = "b!container-bu-sessionless";
+        const string mintedSpeItemId = "spe-item-sessionless-001";
+        const string resolvedDriveId = "drive-sessionless-001";
+        const string sentinelDocId = "sentinel-doc-untouched";
+        var newDocumentId = Guid.NewGuid();
+
+        _fixture.ResetBoundaries();
+
+        string? resolvedContainerArg = null;
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((c, _) => resolvedContainerArg = c)
+            .ReturnsAsync(resolvedDriveId);
+        _fixture.SpeMock
+            .Setup(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: mintedSpeItemId,
+                Name: "draft.docx",
+                ParentId: null,
+                Size: DraftBytes.Length,
+                CreatedDateTime: DateTimeOffset.UtcNow,
+                LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"v1-etag\"",
+                IsFolder: false,
+                WebUrl: null,
+                DriveId: resolvedDriveId));
+
+        // Dataverse: no existing row → create fires. Capture the created entity for the persisted assertion.
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(),
+                It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+        Entity? createdEntity = null;
+        _fixture.DataverseMock
+            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
+            .ReturnsAsync(newDocumentId);
+
+        _fixture.IndexingMock
+            .Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        // Pre-create an UNRELATED real session bound to a sentinel DocumentId. The sessionless Save
+        // must NOT mutate it — proving no rebind was attempted on the empty-session path.
+        string unrelatedSessionId;
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
+            var session = await sessions.CreateSessionAsync(
+                ComposeCreateOnSaveFixture.TestTenantId, documentId: sentinelDocId);
+            unrelatedSessionId = session.SessionId;
+        }
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        // ── Act: create-on-save with EMPTY sessionId (the body the Browse client actually sends) ──
+        var response = await client.PostAsJsonAsync(
+            "/api/compose/documents/create-on-save",
+            new
+            {
+                containerId,
+                tenantId = ComposeCreateOnSaveFixture.TestTenantId,
+                sessionId = string.Empty,
+                content = DraftBytes,
+                displayName = "draft.docx",
+            });
+
+        // ── Assert: HTTP contract — 200, NOT the pre-110 400 ─────────────────────────────────────
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "a transient first Save with no chat session must succeed (task 110 — the sessionId guard is relaxed on the create-on-save path)");
+        var result = await response.Content.ReadFromJsonAsync<SaveComposeDocumentResponse>();
+        result.Should().NotBeNull();
+        result!.DocumentRecordId.Should().Be(newDocumentId, "a NEW sprk_document was created even without a session");
+        result.WasPromotedThisSave.Should().BeTrue("first Save of a transient draft creates the record (FR-06)");
+        result.DocumentSpeId.Should().Be(mintedSpeItemId, "the server returns the minted SPE id");
+
+        // ── Assert: persisted side-effect (the non-waivable E2E DoD — a service-only test misses this) ──
+        resolvedContainerArg.Should().Be(containerId, "the client-resolved BU container still flows through without a session");
+        _fixture.SpeMock.Verify(s => s.UploadSmallAsUserAsync(
+            It.IsAny<HttpContext>(), resolvedDriveId, It.IsAny<string>(),
+            It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once,
+            "a new SPE drive-item was minted in the resolved BU drive");
+        createdEntity.Should().NotBeNull("a new sprk_document row was persisted without a session (R5-E: file + record + index still required)");
+        createdEntity!.LogicalName.Should().Be("sprk_document");
+        createdEntity.GetAttributeValue<string>("sprk_graphitemid").Should().Be(mintedSpeItemId,
+            "the persisted document row points at the minted SPE drive-item");
+
+        // ── Assert: NO rebind attempted — the unrelated session's binding is untouched ────────────
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
+            var reloaded = await sessions.GetSessionAsync(
+                ComposeCreateOnSaveFixture.TestTenantId, unrelatedSessionId, CancellationToken.None);
+            reloaded.Should().NotBeNull();
+            reloaded!.DocumentId.Should().Be(sentinelDocId,
+                "the sessionless Save skips the FR-07 rebind entirely — no ChatSession is mutated");
+        }
+    }
 }
 
 /// <summary>

@@ -72,12 +72,15 @@ import type { ComposeActionEnqueue } from './ComposeAiToolbar';
 // `@spaarke/ai-outputs` subpaths, which LegalWorkspace's standalone Rollup
 // cannot resolve). Matches the SpaarkeAi `useWorkspaceLayouts` adapter pattern
 // (documented in `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`).
-import {
-  type WorkspacePaneEvent,
-} from '@spaarke/ai-widgets/events';
+import { type WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 // Compose three-pane coordination — WORKSPACE leg (task 104 / E2E-R5). Typed
 // receivers for Flow 3 (compose_context_insert) + Flow 5 (compose_assistant_insert).
 import { useComposeWorkspaceReceivers } from './useComposeWorkspaceReceivers';
+// task 113 (UAT defect 4): the host-injected active-document registrar. When present (SpaarkeAi
+// mount, under ComposeActionBridgeProvider), a Browse/direct transient mount is registered with the
+// active chat session so chat "summarize this document" + "edit in Compose" resolve it. Null on a
+// standalone LegalWorkspace mount (no bridge provider) → registration is skipped, Save still works.
+import { useComposeActiveDocumentRegistration } from '../context/composeActionBridge';
 import { authenticatedFetch } from '@spaarke/auth';
 // FR-02 (task 011): "Search for Document" opens the standard Dataverse lookup dialog
 // (Xrm.Utility.lookupObjects) scoped to `sprk_document`, then resolves the picked
@@ -571,7 +574,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.status, state.documentRef?.speDriveItemId, bffBaseUrl, effectiveDriveId, tenantId, initialSessionId, matterId]);
+  }, [
+    state.status,
+    state.documentRef?.speDriveItemId,
+    bffBaseUrl,
+    effectiveDriveId,
+    tenantId,
+    initialSessionId,
+    matterId,
+  ]);
 
   // -------------------------------------------------------------------------
   // FR-29 (task 102, gap 4.3) — persist anchored annotations + defined-terms on MUTATION
@@ -656,7 +667,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // The hook surfaces a user-safe error; a push failure must not crash the editing session.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.documentRef?.speDriveItemId, state.etag, effectiveDriveId, tenantId, composeDocxAnnotations, pushAnnotations]);
+  }, [
+    state.documentRef?.speDriveItemId,
+    state.etag,
+    effectiveDriveId,
+    tenantId,
+    composeDocxAnnotations,
+    pushAnnotations,
+  ]);
 
   // gaps 3.4/3.5 — return-from-Word: on window focus (the user came back from Word), poll
   // check-changes; when the document changed, PULL the current native annotations (3.4) and
@@ -687,12 +705,24 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // Poll/reanchor failures are non-fatal — the editing session continues.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.status, state.documentRef?.speDriveItemId, effectiveDriveId, bffBaseUrl, tenantId, checkChanges, pullAnnotations, runReanchor, anchoredAnnotations]);
+  }, [
+    state.status,
+    state.documentRef?.speDriveItemId,
+    effectiveDriveId,
+    bffBaseUrl,
+    tenantId,
+    checkChanges,
+    pullAnnotations,
+    runReanchor,
+    anchoredAnnotations,
+  ]);
 
   React.useEffect(() => {
     if (state.status !== 'loaded') return;
     if (!state.documentRef?.speDriveItemId) return;
-    const onFocus = (): void => { void runReturnFromWordCheck(); };
+    const onFocus = (): void => {
+      void runReturnFromWordCheck();
+    };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [state.status, state.documentRef?.speDriveItemId, runReturnFromWordCheck]);
@@ -808,8 +838,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // no original bytes were retained) pays the regeneration cost via the EXISTING
       // `tipTapToDocxBytes` path — that path is otherwise unchanged.
       const editorIsDirty = editorRef.current.isDirty();
-      const bytes =
-        editorIsDirty || !state.docxBytes ? await editorRef.current.serialize() : state.docxBytes;
+      const bytes = editorIsDirty || !state.docxBytes ? await editorRef.current.serialize() : state.docxBytes;
 
       // FR-05 (task 100): the create-on-save route carries no id in the path (the draft has no
       // drive-item yet) and sends `containerId`; the replace route carries the SPE id + driveId.
@@ -911,7 +940,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const message = err instanceof Error ? err.message : String(err);
       dispatch({ kind: 'saveFailed', errorMessage: `Save failed: ${message}` });
     }
-  }, [state.status, state.documentRef, state.docxBytes, state.sessionId, bffBaseUrl, effectiveDriveId, tenantId, onCreateOnSaveComplete]);
+  }, [
+    state.status,
+    state.documentRef,
+    state.docxBytes,
+    state.sessionId,
+    bffBaseUrl,
+    effectiveDriveId,
+    tenantId,
+    onCreateOnSaveComplete,
+  ]);
 
   // Keyboard shortcut: Ctrl/Cmd+S → save.
   React.useEffect(() => {
@@ -1006,7 +1044,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   useComposeWorkspaceReceivers({
     // Flow 3 — Context → Workspace: insert the precedent/library clause into the
     // editor at cursor as a pending insertion (the editor's materialize seam).
-    onContextInsert: (event) => {
+    onContextInsert: event => {
       const html = event.contentHtml ?? '';
       if (!html) return;
       const clauseId = event.sourceClauseId ?? 'context-insert';
@@ -1019,7 +1057,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     // when a `ledgerRef` is present (ADR-040); else keep the R1 manual-confirm
     // staging path. Runtime contract preserved verbatim from the prior inline
     // receiver — only the (now-typed) event access + call site changed.
-    onAssistantInsert: (event) => {
+    onAssistantInsert: event => {
       if (event.ledgerRef) {
         void materializeComposeDraftFromLedger(event.ledgerRef);
         return;
@@ -1028,7 +1066,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     },
     // task 072 (FR-35 Doc Q&A stretch) — ephemeral highlight only; no document
     // mutation, no ledger entry, no-op if the editor isn't mounted yet.
-    onQaHighlight: (event) => {
+    onQaHighlight: event => {
       if (!event.qaSourceText) return;
       editorRef.current?.highlightCitedSpan(event.qaSourceText, event.qaSectionLabel);
     },
@@ -1129,6 +1167,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // uses for Assistant-uploaded files (`mountTransient` reducer action). No
   // `sprk_document` is created and no BFF round-trip occurs (ADR-040) — persistence
   // happens on first Save (create-on-save, FR-05/task 013).
+  // task 113 (UAT defect 4): host-injected active-document registrar (null on standalone mounts).
+  // Held in a ref so the stable-`[]` Browse callback below can read the latest value without churn.
+  const registerActiveDocument = useComposeActiveDocumentRegistration();
+  const registerActiveDocumentRef = React.useRef(registerActiveDocument);
+  registerActiveDocumentRef.current = registerActiveDocument;
+
   const handleBrowseRequested = React.useCallback((): void => {
     onBrowseRequested?.();
     browseFileInputRef.current?.click();
@@ -1153,6 +1197,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
       // (create-on-save, task 013) is enabled immediately.
       setIsDirty(true);
+      // task 113 (UAT defect 4): register this Browse/direct mount with the active chat session so
+      // chat "summarize this document" + a later "edit in Compose" resolve THIS file. Fire-and-
+      // forget; the host lands the bytes as a ChatSessionFile + marks the active document. Null
+      // (no-op) on a standalone LegalWorkspace mount. Bytes travel by a direct function call — never
+      // the PaneEventBus (ADR-015 keeps the bus content-free).
+      void registerActiveDocumentRef.current?.({ docxBytes: result, fileName: file.name });
     };
     reader.onerror = () => {
       dispatch({
@@ -1356,7 +1406,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // gap 3.1 — only offer Push-to-Word for a persisted document (a transient draft has
               // no SPE drive-item to write native annotations into yet).
               onPushToWordRequested={
-                state.documentRef?.speDriveItemId ? () => { void handlePushToWord(); } : undefined
+                state.documentRef?.speDriveItemId
+                  ? () => {
+                      void handlePushToWord();
+                    }
+                  : undefined
               }
               canPushToWord={canPushToWord}
               isPushingToWord={isPushingToWord}
