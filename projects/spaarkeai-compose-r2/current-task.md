@@ -6,6 +6,34 @@
 
 ---
 
+## 🌙 AUTONOMOUS OVERNIGHT CONTINUATION PLAN (owner asleep 2026-07-09 — keep progressing)
+
+**Mandate**: work the Phase-9 E2E remediation queue autonomously. Source of truth = [notes/e2e-gap-register.md](../notes/e2e-gap-register.md). Definition-of-done = the binding rule in project [CLAUDE.md](../CLAUDE.md) "E2E Definition-of-Done" (through-the-wire WebApplicationFactory slice test — NON-WAIVABLE).
+
+**The queue + sequence** (author each POML from its register cluster JUST BEFORE launching, using [tasks/100-getting-started-vertical-e2e.poml](tasks/100-getting-started-vertical-e2e.poml) as the exemplar template):
+1. **100 getting-started vertical (Cluster 1)** — RUNNING (agent). On completion → reconcile (below).
+2. **102 memory-resume (Cluster 4)** — BFF-heavy (ComposeEndpoints + ComposeService + ChatSessionManager + StoredSession). Gaps 4.1-4.5.
+3. **104 three-pane coordination (Cluster 5)** — frontend (ContextPaneController + ConversationPane receivers + Flows 3/4/6 + typed discriminants). Gaps 5.1-5.2. **102 + 104 are toolchain/file-disjoint → can run in PARALLEL.**
+4. **101 AI-action activation code-side (Cluster 2)** — toolbar bindingId registration + 2 missing triggers + the 084 HTTP-boundary compose-dispatch test. (The 047 DEPLOY half is owner/live-env — queue it, do NOT run.)
+5. **103 Word-shuttle wiring (Cluster 3)** — client callers + EnsureSubscriptionAsync origin call + task 055 deterministic path. Touches ComposeEndpoints.cs → serialize after 100/102.
+
+**Per-task reconciliation procedure** (on each agent completion):
+- Verify: build + tests green AND the forcing-function slice test PRESENT + PASSING. If the slice test is absent/red → task is NOT done: SendMessage the agent back to add/fix it, do not mark ✅.
+- If green: mark ✅ in TASK-INDEX, remove any now-fixed DEF rows from defer-issues.md, run the consolidated build gate, `git commit` to the BRANCH, then author + launch the next task.
+- Keep current-task.md updated each cycle.
+
+**HARD LIMITS while owner sleeps (do NOT cross)**:
+- ❌ NO merge to master, NO push to master, NO deploy to spaarkedev1 / any live env (047/017/056 are owner/live-env — QUEUE them).
+- ❌ NO owner-only decisions: if a task hits a real contract divergence or a product-scope choice (like 034's undo scope, still OPEN) → STOP that task, document in its POML `<notes>` + current-task, move to the next INDEPENDENT task. Do NOT guess.
+- ❌ NO false-greens: unit-green ≠ done; the slice test is the gate.
+- ✅ OK: author POMLs, run remediation agents, fix wiring, write through-the-wire tests, commit to the branch (`work/spaarkeai-compose-r2`), keep the register/TASK-INDEX/current-task in sync.
+
+**OWNER WAKE-UP QUEUE** (surface these when owner returns): live-env deploys (047 catalog → flips /healthz green, then 017/056/081); the 034 undo/replace scope decision (Full Path B vs replace-only — E-20 coded-workflow seam makes durable pure-undo feasible); the sandbox deploy of the getting-started vertical for the demo; any escalations logged during the night.
+
+**HEAD**: `3b0a39224` (branch, clean). All state durable: register + Phase-9 POMLs + TASK-INDEX + this plan.
+
+---
+
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
