@@ -203,7 +203,7 @@ describe('DEF-09: ComposeWorkspace materializes the inline redline from the DOCU
 
     // It read compose-outputs from the DOCUMENT session — never the chat session.
     expect(composeOutputsReadUrls.length).toBeGreaterThan(0);
-    expect(composeOutputsReadUrls.some((u) => u.includes(`/sessions/${DOC_SESSION}/compose-outputs`))).toBe(true);
-    expect(composeOutputsReadUrls.every((u) => !u.includes(`/sessions/${CHAT_SESSION}/compose-outputs`))).toBe(true);
+    expect(composeOutputsReadUrls.some(u => u.includes(`/sessions/${DOC_SESSION}/compose-outputs`))).toBe(true);
+    expect(composeOutputsReadUrls.every(u => !u.includes(`/sessions/${CHAT_SESSION}/compose-outputs`))).toBe(true);
   });
 });

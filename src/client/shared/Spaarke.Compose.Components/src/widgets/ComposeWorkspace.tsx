@@ -1371,7 +1371,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     const draftSessionId = initialDraftRef.sessionId;
     if (!ledgerRef || !draftSessionId) return;
     if (!bffBaseUrl) {
-      dispatch({ kind: 'loadFailed', errorMessage: 'BFF base URL is not configured. Cannot open the drafted document.' });
+      dispatch({
+        kind: 'loadFailed',
+        errorMessage: 'BFF base URL is not configured. Cannot open the drafted document.',
+      });
       return;
     }
 
@@ -1401,7 +1404,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           key?: string;
           payload?: { body_html?: string; title?: string };
         }>;
-        const match = Array.isArray(outputs) ? outputs.find((o) => o?.key === ledgerRef) : undefined;
+        const match = Array.isArray(outputs) ? outputs.find(o => o?.key === ledgerRef) : undefined;
         const bodyHtml = match?.payload?.body_html;
         if (ac.signal.aborted) return;
         if (typeof bodyHtml !== 'string' || bodyHtml.length === 0) {

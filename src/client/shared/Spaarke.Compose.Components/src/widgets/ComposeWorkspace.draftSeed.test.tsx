@@ -112,8 +112,7 @@ beforeEach(() => {
 const renderAckSignals = () =>
   mockDispatchPaneEvent.mock.calls.filter(
     ([channel, event]) =>
-      channel === 'workspace' &&
-      (event as { type?: string } | undefined)?.type === 'compose_content_rendered'
+      channel === 'workspace' && (event as { type?: string } | undefined)?.type === 'compose_content_rendered'
   );
 
 describe('ComposeWorkspace — DEF-08 AI-drafted full-document seed', () => {
@@ -167,9 +166,7 @@ describe('ComposeWorkspace — DEF-08 AI-drafted full-document seed', () => {
     expect(editorProps.initialHtml).toBe('<p>Inline drafted letter body.</p>');
 
     // No compose-outputs fetch on the inline path.
-    const outputCalls = authenticatedFetchMock.mock.calls.filter(([u]) =>
-      String(u).includes('/compose-outputs')
-    );
+    const outputCalls = authenticatedFetchMock.mock.calls.filter(([u]) => String(u).includes('/compose-outputs'));
     expect(outputCalls).toHaveLength(0);
   });
 
@@ -182,9 +179,7 @@ describe('ComposeWorkspace — DEF-08 AI-drafted full-document seed', () => {
 
     renderWorkspace({ initialDraftRef: { ledgerRef: 'binding-1@t1', sessionId: 'sess-1' } });
 
-    await waitFor(() =>
-      expect(screen.getByTestId('compose-workspace-error-empty')).toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.getByTestId('compose-workspace-error-empty')).toBeInTheDocument());
     expect(screen.queryByTestId('compose-editor-stub')).not.toBeInTheDocument();
 
     // FR-34 D-F3 (task 071): the seed FAILED to render → NO content-render ack signal is
@@ -201,9 +196,7 @@ describe('ComposeWorkspace — DEF-08 AI-drafted full-document seed', () => {
     });
 
     await waitFor(() => expect(authenticatedFetchMock).toHaveBeenCalled());
-    const outputCalls = authenticatedFetchMock.mock.calls.filter(([u]) =>
-      String(u).includes('/compose-outputs')
-    );
+    const outputCalls = authenticatedFetchMock.mock.calls.filter(([u]) => String(u).includes('/compose-outputs'));
     // The stored-document Load path wins; the draft-seed effect must not fire its ledger fetch.
     expect(outputCalls).toHaveLength(0);
   });

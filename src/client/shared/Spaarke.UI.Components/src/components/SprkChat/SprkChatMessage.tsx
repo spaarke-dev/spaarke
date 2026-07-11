@@ -624,8 +624,7 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   // appear on AI response messages, not user messages").
   const showInsertButton = isAssistant && !isStreaming && !!message.content && !!onInsert;
   // DEF-08 Part B: "Open in Compose" — same gating as Insert, opt-in via onOpenInCompose.
-  const showOpenInComposeButton =
-    isAssistant && !isStreaming && !!message.content && !!onOpenInCompose;
+  const showOpenInComposeButton = isAssistant && !isStreaming && !!message.content && !!onOpenInCompose;
 
   return (
     <div className={containerClass} role="listitem" aria-label={`${message.role} message`}>
