@@ -18,6 +18,7 @@
     <constraint source="MODAL-DECISION-CRITERIA">Use the established wizard navigateTo webresource-dialog pattern (60%x70%), consistent with sprk_wizard_commands.js.</constraint>
     <constraint source="ADR-028">No auth code remains in VisualHost for the create flow (the page owns it).</constraint>
     <constraint source="design">Marshal entityType+entityId (+recordName) into the navigate data envelope; pass themeOption.</constraint>
+    <constraint source="ADR-044">The entityId is an Xrm-sourced GUID — normalize it with the shared `cleanGuid` (from the @spaarke/ui-components barrel) BEFORE placing it in the navigate envelope/URL. Do NOT hand-roll `.replace(/[{}]/g,'')`. This is the same class of bug (braced/registry-format GUID) that cleanGuid fixes.</constraint>
   </constraints>
   <knowledge>
     <files>

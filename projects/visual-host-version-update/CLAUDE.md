@@ -18,6 +18,7 @@ Decouple VisualHost from shared-lib source-consumption (Phase A: wizards → `na
 - **ADR-022** — PCF platform React (why the skew is types-only; navigateTo removes the constraint).
 - **ADR-028** — Spaarke Auth v2 (code-page auth; unchanged/reinforced).
 - **ADR-024** — Regarding (wizard-service resolution; unchanged).
+- **ADR-044** — Dataverse GUID Canonicalization (the `cleanGuid` ADR, merged from master). Use shared `cleanGuid` from the `@spaarke/ui-components` barrel at every Xrm-GUID boundary; never hand-roll. Applies to the VHVU-030 navigate envelope `entityId`.
 
 ## Key references
 - Launcher: `src/client/webresources/js/sprk_wizard_commands.js`

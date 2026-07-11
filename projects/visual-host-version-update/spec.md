@@ -73,6 +73,7 @@ VisualHost is the only PCF that consumes the shared library by bundling its raw 
 - **ADR-022** PCF Platform Libraries / React-16-safe — explains why the skew is types-only; navigateTo removes the constraint for the wizard path.
 - **ADR-028** Spaarke Auth v2 — code-page auth path; unchanged and reinforced.
 - **ADR-024** Regarding — wizard-service regarding resolution; unchanged.
+- **ADR-044** Dataverse GUID Canonicalization (merged from master 2026-07-10) — this is the `cleanGuid` ADR. MUST normalize any Xrm-sourced GUID to bare-lowercase at the boundary you own, via the shared `cleanGuid` from the `@spaarke/ui-components` barrel (PR #609) — never a hand-rolled normalizer. **Direct impact on VHVU-030**: the `entityId` marshaled into the navigateTo data envelope is Xrm-sourced and MUST be `cleanGuid`'d before it enters the URL/wizard state.
 
 ### MUST Rules
 - ✅ MUST route all token acquisition through `@spaarke/auth` (`initAuth`/`authenticatedFetch`/`useAuth`); MUST NOT instantiate `PublicClientApplication` or pass token props.
