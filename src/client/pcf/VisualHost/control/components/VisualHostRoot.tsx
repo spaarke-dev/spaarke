@@ -14,10 +14,6 @@ import {
   makeStyles,
   tokens,
   Text,
-  Dialog,
-  DialogSurface,
-  DialogBody,
-  DialogContent,
   Toast,
   ToastTitle,
   Toaster,
@@ -48,92 +44,71 @@ import {
 import { fetchAndAggregate, AggregationError } from '../services/DataAggregationService';
 import { parseFieldPivotConfig, fetchAndPivot } from '../services/FieldPivotService';
 import { executeClickAction, hasClickAction } from '../services/ClickActionHandler';
+import { getEffectiveDarkMode } from '../providers/ThemeProvider';
 
 // ---------------------------------------------------------------------------
-// "+" Create Wizard button (visual-host-create-button-r1 / task 012)
+// "+" Create Wizard button — navigateTo cutover (VHVU-030)
 // ---------------------------------------------------------------------------
-// Registry + shared-service imports use direct relative paths into the
-// shared library's `src/` — the SAME convention already used above for
-// `AiSummaryPopover`/`AppInsightsService` in this file. Visual Host does not
-// resolve these through the npm-published `@spaarke/ui-components` package
-// (see `ThemeProvider.ts` for the one deep-dist exception); it bundles the
-// shared-lib source directly, which is why `prebuild:prod` only needs to
-// keep that package's `dist/` fresh for the one deep import that uses it.
+// The "+" launches the wizard Code Pages (Create Event / Invoice / Report
+// Card) via `Xrm.Navigation.navigateTo` as a webresource dialog — the SAME
+// pattern `src/client/webresources/js/sprk_wizard_commands.js` uses for every
+// other ribbon-launched Create wizard. This REPLACES the previous inline
+// `React.lazy` embedding, which dragged the shared-lib wizard components (and
+// their `@spaarke/auth` / `@spaarke/sdap-client` transitive deps + the React
+// 18/19 types skew) into the PCF bundle. The Code Page owns auth (ADR-028);
+// the PCF only marshals the launch envelope.
+//
+// `resolveRecordDisplayNameFieldName` + `cleanGuid` are the ONLY shared-lib
+// imports the create flow still needs — both from `PolymorphicResolverService`,
+// which is presentational/config resolution (no auth, no MSAL; already imported
+// here pre-cutover). `cleanGuid` normalizes the Xrm-sourced GUID before it
+// enters the navigate envelope (ADR-044) — never hand-roll `.replace(/[{}]/g,'')`.
 import {
-  resolveWizard,
-  type WizardComponent,
-  type WizardHostProps,
-} from '../../../../shared/Spaarke.UI.Components/src/components/WizardRegistry/wizardRegistry';
-import type { AssociationResult } from '../../../../shared/Spaarke.UI.Components/src/components/AssociateToStep/types';
-import { createXrmDataService } from '../../../../shared/Spaarke.UI.Components/src/utils/adapters/xrmDataServiceAdapter';
-import { createXrmNavigationService } from '../../../../shared/Spaarke.UI.Components/src/utils/adapters/xrmNavigationServiceAdapter';
-import { resolveRecordDisplayNameFieldName } from '../../../../shared/Spaarke.UI.Components/src/services/PolymorphicResolverService';
-// `@spaarke/auth` has no direct-source-import precedent in Visual Host (it is
-// a standalone package, not part of the `Spaarke.UI.Components` tree) — this
-// is a first-time wiring, resolved via the npm `file:` dependency added to
-// this PCF's `package.json` (mirrors `CreateEventWizard/src/main.tsx` and
-// `SemanticSearchControl/package.json`). Only the TYPE is imported statically
-// (erased at compile time, zero bundle cost) — the runtime module is loaded
-// via dynamic `import()` inside `ensureCreateWizardAuthInitialized` below.
-// NOTE (verified empirically 2026-07-08): PCF's webpack config emits a
-// SINGLE `bundle.js` (no secondary chunk files), so this dynamic import does
-// NOT reduce the shipped byte count the way it would in a chunked web app —
-// `@azure/msal-browser` (~787 KiB) is still physically present in bundle.js
-// either way. The dynamic import is kept anyway because it (a) defers
-// executing `@spaarke/auth`'s module-init code until the first "+" click
-// rather than on every Visual Host mount, and (b) matches this file's other
-// lazy-on-first-use patterns (`wizardRegistry`'s `React.lazy()` wizards have
-// the same single-bundle characteristic). See task 012 completion notes for
-// the measured bundle-size delta.
-import type { AuthenticatedFetchFn } from '@spaarke/auth';
+  resolveRecordDisplayNameFieldName,
+  cleanGuid,
+} from '../../../../shared/Spaarke.UI.Components/src/services/PolymorphicResolverService';
 
-// ---------------------------------------------------------------------------
-// Lazy auth bootstrap — module-level singleton (task 012)
-// ---------------------------------------------------------------------------
-// Visual Host can render many chart visuals on one form; most never use the
-// "+" button. Initializing `@spaarke/auth` eagerly on every mount would pay
-// MSAL bootstrap cost (AND bundle cost — see the dynamic-import note above)
-// for visuals that never need it. Instead, auth is initialized lazily on the
-// FIRST "+" click across every VisualHost instance sharing this module
-// scope. Every PCF control placed on the same Dataverse form runs in the
-// same iframe/page (same JS module registry), so this module-level promise
-// correctly de-dupes initialization across multiple visuals/instances — the
-// second (and Nth) "+" click, on the same or a different Visual Host
-// instance, reuses the already-resolved promise instead of re-running
-// `initAuth` (or re-fetching the `@spaarke/auth` chunk).
-interface ICreateWizardAuthContext {
-  bffBaseUrl: string;
-  tenantId: string;
-  authenticatedFetch: AuthenticatedFetchFn;
-}
+// Maps the chart-def wizard key (or entity fallback) to the wizard Code Page
+// web-resource name opened via navigateTo. Kept LOCAL to Visual Host — NOT
+// imported from the shared `wizardRegistry` — so the cutover does not drag the
+// lazy-loaded wizard components (and their auth/sdap-client deps) back into the
+// bundle. Mirrors `resolveWizard`'s resolution order + `ENTITY_TO_WIZARD_KEY`
+// aliases (single source of truth is small enough to inline; see FR-03).
+const WIZARD_KEY_TO_PAGE: Readonly<Record<string, string>> = {
+  event: 'sprk_createeventwizard',
+  invoice: 'sprk_createinvoicewizard',
+  'report-card': 'sprk_createreportcardwizard',
+};
 
-let createWizardAuthPromise: Promise<ICreateWizardAuthContext> | null = null;
+const ENTITY_TO_WIZARD_KEY: Readonly<Record<string, string>> = {
+  sprk_event: 'event',
+  sprk_invoice: 'invoice',
+  sprk_reportcard: 'report-card',
+  sprk_kpiassessment: 'report-card',
+};
 
-function ensureCreateWizardAuthInitialized(): Promise<ICreateWizardAuthContext> {
-  if (!createWizardAuthPromise) {
-    createWizardAuthPromise = (async () => {
-      const auth = await import('@spaarke/auth');
-      const config = await auth.resolveRuntimeConfig();
-      await auth.initAuth({
-        clientId: config.msalClientId,
-        bffBaseUrl: config.bffBaseUrl,
-        bffApiScope: config.bffOAuthScope,
-        tenantId: config.tenantId || undefined,
-        proactiveRefresh: true,
-      });
-      return {
-        bffBaseUrl: config.bffBaseUrl,
-        tenantId: config.tenantId ?? '',
-        authenticatedFetch: auth.authenticatedFetch,
-      };
-    })().catch(err => {
-      // Reset the singleton on failure so the NEXT "+" click retries instead
-      // of being stuck with a permanently-rejected promise.
-      createWizardAuthPromise = null;
-      throw err;
-    });
+const SPRK_PREFIX = 'sprk_';
+
+/**
+ * Resolves the wizard Code Page web-resource name for the "+" button.
+ * Resolution order (parity with shared `resolveWizard`):
+ *   1. `createWizardKey` (`sprk_createwizardkey`) verbatim, if non-empty.
+ *   2. else `entityLogicalName` (`sprk_entitylogicalname`), normalized via the
+ *      alias map, else `sprk_`-prefix strip.
+ * Returns `null` when nothing maps → caller shows a toast (FR-03).
+ */
+function resolveWizardPage(
+  createWizardKey: string | null | undefined,
+  entityLogicalName: string | null | undefined
+): string | null {
+  const trimmedKey = createWizardKey?.trim();
+  let resolvedKey = trimmedKey ?? '';
+  if (!resolvedKey && entityLogicalName) {
+    const lower = entityLogicalName.trim().toLowerCase();
+    resolvedKey = ENTITY_TO_WIZARD_KEY[lower] ?? (lower.startsWith(SPRK_PREFIX) ? lower.slice(SPRK_PREFIX.length) : lower);
   }
-  return createWizardAuthPromise;
+  if (!resolvedKey) return null;
+  return WIZARD_KEY_TO_PAGE[resolvedKey] ?? null;
 }
 
 const useStyles = makeStyles({
@@ -223,44 +198,6 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     textAlign: 'center',
   },
-  // "+" Create Wizard dialog loading state (task 012) — shown while the lazy
-  // auth bootstrap and/or host-record-name resolution are in flight, and as
-  // the React.Suspense fallback while the wizard's code-split bundle loads.
-  createWizardLoading: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '160px',
-    padding: tokens.spacingVerticalXXL,
-  },
-  // "+" Create Wizard DialogSurface sizing (UAT fix, 2026-07-08; corrected same
-  // day after a second UAT pass). Wizards are mounted with `embedded={true}`
-  // (see WizardShellTypes.ts "embedded mode"), which skips the wizard's OWN
-  // internal Dialog/DialogSurface and relies entirely on the HOST's
-  // DialogSurface for sizing. Without an explicit size, Fluent v9's default
-  // DialogSurface falls back to a small, cramped size.
-  //
-  // First attempt matched Wizard/WizardShell.tsx's OWN internal default
-  // (95vw x 70vh) — WRONG reference point, confirmed too large against real
-  // UAT comparison (screenshot vs. "Create New Matter"). The actual
-  // repo-wide standard for ribbon-launched wizard dialogs is **60% x 70%**,
-  // explicitly documented in
-  // src/client/webresources/js/sprk_wizard_commands.js's `DIALOG_OPTIONS`
-  // constant: "standardized to 60% x 70% per UAT feedback E-03". Matching
-  // that (not WizardShell's internal default) makes the Visual Host "+"
-  // dialog look identical to every other Create wizard in the product.
-  //
-  // `maxWidth`/`height` are applied as inline style (not just this className)
-  // because Fluent v9's internal content-sizing can override a plain
-  // makeStyles maxWidth/height — same inline-style-bypass pattern
-  // Wizard/WizardShell.tsx itself uses.
-  createWizardDialogSurface: {
-    width: '100%',
-    display: 'flex',
-    flexDirection: 'column',
-    padding: '0px',
-    overflow: 'auto',
-  },
 });
 
 interface IVisualHostRootProps {
@@ -278,14 +215,11 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
   const [chartDefinition, setChartDefinition] = useState<IChartDefinition | null>(null);
   const [chartData, setChartData] = useState<IChartData | null>(null);
 
-  // "+" Create Wizard button state (visual-host-create-button-r1 / task 012)
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [ActiveWizardComponent, setActiveWizardComponent] = useState<WizardComponent | null>(null);
-  // `null` until `ensureCreateWizardAuthInitialized` resolves (see the "+"
-  // click handler below) — gates the wizard mount in the Dialog.
-  const [createAuthContext, setCreateAuthContext] = useState<ICreateWizardAuthContext | null>(null);
-  // `null` = not yet resolved (sentinel); '' = resolved but empty/unavailable.
-  const [hostRecordName, setHostRecordName] = useState<string | null>(null);
+  // "+" Create Wizard button (visual-host-create-button-r1 / task 012;
+  // navigateTo cutover VHVU-030). No wizard/auth state lives here anymore —
+  // the "+" click marshals a launch envelope and hands off to the wizard Code
+  // Page via navigateTo. Only the toaster (unregistered-wizard feedback,
+  // FR-03) remains.
   // Per-instance toaster ID — multiple Visual Host instances can be mounted
   // on the same form; a shared/fixed ID would let their toasts collide.
   const toasterId = useId('visualhost-toaster');
@@ -405,7 +339,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
    */
   const resolveHostRecordName = useCallback(async (): Promise<string> => {
     if (!contextEntityTypeName || !contextRecordId) return '';
-    const cleanId = contextRecordId.replace(/[{}]/g, '');
+    const cleanId = cleanGuid(contextRecordId); // ADR-044: normalize Xrm GUID
     try {
       const displayField = await resolveRecordDisplayNameFieldName(context.webAPI, contextEntityTypeName);
       if (displayField) {
@@ -421,58 +355,23 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     return '';
   }, [contextEntityTypeName, contextRecordId, context.webAPI]);
 
-  // Launch-context seed (design.md §5.5) — the host record the wizard was
-  // opened from. Recomputes when `hostRecordName` resolves (from `null` to
-  // its resolved value), which re-renders the mounted wizard with the final
-  // name — the wizard mount itself is gated on `hostRecordName !== null` (see
-  // `isCreateWizardReady` below) so this settles BEFORE the wizard first
-  // renders in the common case.
-  const hostAssociation: AssociationResult | null = React.useMemo(() => {
-    if (!contextEntityTypeName || !contextRecordId) return null;
-    return {
-      entityType: contextEntityTypeName,
-      recordId: contextRecordId.replace(/[{}]/g, ''),
-      recordName: hostRecordName ?? '',
-    };
-  }, [contextEntityTypeName, contextRecordId, hostRecordName]);
-
-  // Injected services for the create wizard — memoized once per instance
-  // (mirrors CreateEventWizard/src/main.tsx).
-  const createWizardDataService = React.useMemo(() => createXrmDataService(), []);
-  const createWizardNavigationService = React.useMemo(() => createXrmNavigationService(), []);
-
-  /**
-   * Resolves the SPE container ID for the current user's business unit.
-   * Copied verbatim (logic, not code-shared) from
-   * `src/solutions/CreateEventWizard/src/main.tsx:57-67` per task 012 —
-   * generic/user-BU-based, not Visual-Host-specific.
-   */
-  const resolveSpeContainerId = useCallback(async (): Promise<string> => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
-    if (!xrm?.WebApi?.retrieveRecord) throw new Error('Xrm.WebApi not available');
-    const userId = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, '');
-    const user = await xrm.WebApi.retrieveRecord('systemuser', userId, '?$select=_businessunitid_value');
-    const buId = user['_businessunitid_value'] as string;
-    if (!buId) throw new Error('Could not resolve business unit');
-    const bu = await xrm.WebApi.retrieveRecord('businessunit', buId, '?$select=sprk_containerid');
-    return (bu['sprk_containerid'] as string) || '';
-  }, []);
-
   /**
    * "+" button click handler — shared by both the CardChrome slot and the
-   * legacy toolbar path (design.md §5.2). Resolves the wizard via the
-   * registry; unknown key shows a toast (FR-03) instead of crashing. Kicks
-   * off the lazy auth bootstrap and host-record-name resolution the FIRST
-   * time it's needed (both are cached — see `ensureCreateWizardAuthInitialized`
-   * and the `hostRecordName !== null` sentinel check below).
+   * legacy toolbar path (design.md §5.2). Resolves the target wizard Code Page
+   * and opens it via `Xrm.Navigation.navigateTo` as a webresource dialog
+   * (60% × 70%, matching `sprk_wizard_commands.js`). An unregistered key shows
+   * a toast (FR-03) instead of navigating. The Code Page owns auth (ADR-028) —
+   * no MSAL/token wiring happens here.
    */
-  const handleCreateClick = useCallback(() => {
+  const handleCreateClick = useCallback(async () => {
     if (!chartDefinition) return;
 
-    const resolved = resolveWizard(chartDefinition.createWizardKey, chartDefinition.sprk_entitylogicalname ?? null);
+    const page = resolveWizardPage(
+      chartDefinition.createWizardKey,
+      chartDefinition.sprk_entitylogicalname ?? null
+    );
 
-    if (!resolved) {
+    if (!page) {
       const displayKey =
         chartDefinition.createWizardKey?.trim() || chartDefinition.sprk_entitylogicalname || '(unknown)';
       logger.warn('VisualHostRoot', `No create wizard registered for "${displayKey}"`);
@@ -485,48 +384,55 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       return;
     }
 
-    setActiveWizardComponent(() => resolved);
-    setIsCreateDialogOpen(true);
-
-    if (!createAuthContext) {
-      void ensureCreateWizardAuthInitialized()
-        .then(ctx => setCreateAuthContext(ctx))
-        .catch(err => {
-          logger.error('VisualHostRoot', 'Auth initialization failed for create wizard', err);
-          // Degrade gracefully (mirrors CreateEventWizard/main.tsx): the
-          // wizard still mounts; BFF-backed features (file upload, AI
-          // prefill) will fail with an unauthenticated request rather than
-          // leaving the dialog stuck on the loading spinner forever. Falls
-          // back to plain `fetch` (no bearer token) — the wizard's own
-          // BFF calls will surface a 401, same as any other auth failure.
-          setCreateAuthContext({
-            bffBaseUrl: '',
-            tenantId: '',
-            authenticatedFetch: (url: string, init?: RequestInit) => fetch(url, init),
-          });
-        });
+    // Resolve Xrm across frames — PCF controls run in an iframe; parent frame's
+    // Xrm is required for navigateTo (same resolution `handleExpandClick` uses).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = (window.parent as any)?.Xrm || (window as any).Xrm;
+    if (!xrm?.Navigation?.navigateTo) {
+      logger.warn('VisualHostRoot', 'Xrm.Navigation not available for create wizard');
+      dispatchToast(
+        <Toast>
+          <ToastTitle>Cannot open the create form — navigation is unavailable.</ToastTitle>
+        </Toast>,
+        { intent: 'error' }
+      );
+      return;
     }
 
-    if (hostRecordName === null) {
-      void resolveHostRecordName().then(name => setHostRecordName(name));
+    // Resolve the host record's display name first so the wizard can label its
+    // pinned parent (parity with sprk_wizard_commands.js, which awaits
+    // getParentEntityName before opening). Failure degrades to '' (the wizard
+    // still pins the parent by id) rather than blocking the launch.
+    const recordName = await resolveHostRecordName();
+
+    // Build the launch envelope. The entityId is an Xrm-sourced GUID → normalize
+    // with `cleanGuid` (ADR-044) BEFORE placing it in the navigate data string.
+    // `themeOption` mirrors the tolerant reader (VHVU-020); the Code Page also
+    // honors the MDA-wide `spaarke-theme` localStorage preference.
+    const themeOption = getEffectiveDarkMode(context) ? 'dark' : 'light';
+    const parts: string[] = [];
+    if (contextEntityTypeName) parts.push(`entityType=${encodeURIComponent(contextEntityTypeName)}`);
+    if (contextRecordId) parts.push(`entityId=${encodeURIComponent(cleanGuid(contextRecordId))}`);
+    if (recordName) parts.push(`recordName=${encodeURIComponent(recordName)}`);
+    parts.push(`themeOption=${themeOption}`);
+    const data = parts.join('&');
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pageInput: any = { pageType: 'webresource', webresourceName: page, data };
+    const navOptions = {
+      target: 2 as const,
+      position: 1 as const,
+      width: { value: 60, unit: '%' as const },
+      height: { value: 70, unit: '%' as const },
+    };
+
+    try {
+      await xrm.Navigation.navigateTo(pageInput, navOptions);
+    } catch (err) {
+      // navigateTo rejects on user-cancel too — log at info, no error toast.
+      logger.info('VisualHostRoot', 'Create wizard dialog closed/cancelled', err);
     }
-  }, [chartDefinition, createAuthContext, hostRecordName, resolveHostRecordName, dispatchToast]);
-
-  const handleCreateDialogClose = useCallback(() => {
-    setIsCreateDialogOpen(false);
-  }, []);
-
-  // Gates the wizard mount (vs. the loading Spinner) inside the Dialog.
-  const isCreateWizardReady = ActiveWizardComponent !== null && createAuthContext !== null && hostRecordName !== null;
-
-  // React 18/19 types-version drift workaround: see CardChrome.tsx for
-  // rationale. `ActiveWizardComponent` is a `LazyExoticComponent` typed
-  // against the shared lib's local @types/react@19, which is not directly
-  // assignable as a JSX component type under this file's @types/react@18.
-  // Cast through ComponentType to bridge — runtime behavior unchanged (still
-  // the same `React.lazy()`-produced component, so `React.Suspense` above
-  // still applies).
-  const RenderableWizardComponent = ActiveWizardComponent as unknown as React.ComponentType<WizardHostProps> | null;
+  }, [chartDefinition, context, contextEntityTypeName, contextRecordId, resolveHostRecordName, dispatchToast]);
 
   // FR-TEL-01: Initialize App Insights once on mount.
   // AppInsightsService.initialize() is idempotent — second + subsequent calls are no-ops,
@@ -1104,7 +1010,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
         ))}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.35 • 2026-07-10</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.36 • 2026-07-10</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>
@@ -1119,53 +1025,9 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
         )}
       </div>
 
-      {/* "+" Create Wizard dialog (visual-host-create-button-r1 / task 012).
-          Mounted once per Visual Host instance regardless of whether this
-          visual's chart-def has createWizardEnabled — the Dialog itself only
-          becomes visible when `isCreateDialogOpen` is set by a "+" click. */}
-      <Dialog
-        open={isCreateDialogOpen}
-        onOpenChange={(_ev, data) => {
-          if (!data.open) handleCreateDialogClose();
-        }}
-      >
-        <DialogSurface
-          className={styles.createWizardDialogSurface}
-          style={{ maxWidth: '60vw', height: '70vh', minHeight: '70vh' }}
-        >
-          {isCreateWizardReady && RenderableWizardComponent && createAuthContext ? (
-            <React.Suspense
-              fallback={
-                <DialogBody>
-                  <DialogContent className={styles.createWizardLoading}>
-                    <Spinner label="Loading wizard..." />
-                  </DialogContent>
-                </DialogBody>
-              }
-            >
-              <RenderableWizardComponent
-                open={isCreateDialogOpen}
-                onClose={handleCreateDialogClose}
-                dataService={createWizardDataService}
-                authenticatedFetch={createAuthContext.authenticatedFetch}
-                bffBaseUrl={createAuthContext.bffBaseUrl}
-                navigationService={createWizardNavigationService}
-                resolveSpeContainerId={resolveSpeContainerId}
-                tenantId={createAuthContext.tenantId}
-                embedded={true}
-                initialAssociation={hostAssociation ?? undefined}
-                lockAssociation={true}
-              />
-            </React.Suspense>
-          ) : (
-            <DialogBody>
-              <DialogContent className={styles.createWizardLoading}>
-                <Spinner label="Initializing..." />
-              </DialogContent>
-            </DialogBody>
-          )}
-        </DialogSurface>
-      </Dialog>
+      {/* "+" Create Wizard now launches via `Xrm.Navigation.navigateTo`
+          (VHVU-030) — the inline Dialog/React.lazy embedding was removed.
+          Only the toaster (unregistered-wizard feedback, FR-03) remains. */}
       <Toaster toasterId={toasterId} />
     </div>
   );

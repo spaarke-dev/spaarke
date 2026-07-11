@@ -1,7 +1,7 @@
 <task id="VHVU-030" project="VisualHost Decoupling & @spaarke/visuals Extraction">
   <metadata>
     <title>Cut over VisualHost "+" to navigateTo; delete inline embedding + casts</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>A3</phase>
     <estimated-effort>4 hours</estimated-effort>
     <tags>pcf, navigateto, decouple, react, auth</tags>

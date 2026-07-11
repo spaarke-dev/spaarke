@@ -23,7 +23,6 @@
     "build-storybook": "storybook build"
   },
   "dependencies": {
-    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
     "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"
   },
   "devDependencies": {
