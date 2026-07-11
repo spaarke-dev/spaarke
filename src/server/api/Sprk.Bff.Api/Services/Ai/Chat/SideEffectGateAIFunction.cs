@@ -147,16 +147,17 @@ public sealed class SideEffectGateAIFunction : AIFunction
     /// When supplied and it returns <c>true</c>, the invocation is evaluated as occurring on a turn
     /// whose PromptShield perimeter FAILED OPEN (timeout / 429 / 5xx), so gated WRITES (Tier ≥ 2)
     /// degrade to confirm-required while reads/drafts (Tier ≤ 1) stay fail-open (D-F0(b)). The REAL
-    /// producer is the per-turn <see cref="Safety.PromptShieldResult.FailedOpen"/> verdict computed in
-    /// <see cref="Middleware.SafetyPipelineMiddleware"/>. Production wires <c>null</c> TODAY, for a
-    /// precise reason: that middleware — the ONLY component that runs PromptShield and computes the
-    /// fail-open verdict — is not currently added by <c>SprkChatAgentFactory.WrapWithMiddleware</c>
-    /// (it was dropped from the live pipeline by the R1 dispatcher-deletion, commit 26fde1f68), so
-    /// no live per-turn perimeter verdict is produced at gate time. Activating that perimeter on the
-    /// chat hot path is a security-posture change (pre-LLM shielding + a hard-block leg + latency on
-    /// every turn) and is ESCALATED for human sign-off rather than wired silently here. Until then the
-    /// gate HONORS a real signal when one is threaded (proven by the anti-shim test) and honestly
-    /// stays unfired otherwise — the value flows from the probe and is NEVER hardcoded.
+    /// producer is the per-turn <see cref="Safety.PromptShieldResult.FailedOpen"/> verdict computed by
+    /// the pre-LLM perimeter. The F-8 follow-up wired that producer as
+    /// <see cref="Middleware.PromptShieldChatMiddleware"/> (the focused pre-LLM injection perimeter,
+    /// distinct from the two-phase <see cref="Middleware.SafetyPipelineMiddleware"/>), added OUTERMOST
+    /// by <c>SprkChatAgentFactory.WrapWithMiddleware</c> and threaded to this probe via a shared
+    /// per-turn <see cref="Middleware.SafetyPerimeterSignal"/> — but ONLY when
+    /// <c>AiSafety:PromptShield:ChatPipelineEnabled</c> is true. When the shield is disabled (the
+    /// default), the factory passes <c>null</c> here exactly as before (unfed overlay, byte-identical
+    /// to pre-F-8). Either way the gate HONORS a real signal when one is threaded (proven by the
+    /// anti-shim test) and honestly stays unfired otherwise — the value flows from the probe and is
+    /// NEVER hardcoded.
     /// </param>
     public SideEffectGateAIFunction(
         AIFunction inner,
