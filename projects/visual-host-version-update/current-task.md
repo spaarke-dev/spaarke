@@ -1,43 +1,44 @@
 # Current Task
 
-**Active task**: VHVU-031 — Deploy VisualHost + pages to dev; UAT "+" via navigateTo (dark+light)
-**Status**: ⏸ blocked on owner go (deploy + live Dataverse env)
-**Phase**: A3
-**Next action**: OWNER-GATED. Phase A is code-complete + build-verified. VHVU-031 (and 021 UAT, optional 004) need a live env + owner observation — not autonomous.
+**Active task**: VHVU-042 — Reconcile drifted duplication (one `VisualType`, one `EventDueDateCard`)
+**Status**: not-started
+**Phase**: B2
+**Next action**: Begin VHVU-042. Recommend fresh context (this session ran 030 + 040 + 041 — big).
 
 ### Quick Recovery
 | Field | Value |
 |---|---|
-| Done | A0 (001-003) + A1 (010-012) + A2 (020) + **A3 code (030)** — 8 tasks + master merge, all committed |
-| Next code work | **Phase B** (040-070): scaffold `@spaarke/visuals`, move visuals, reconcile dup, refactor self-fetch, repoint, ADR-012 amendment |
-| Gates awaiting owner | VHVU-004 (optional dev deploy), VHVU-021 + VHVU-031 (UAT — need deploy + live env) |
+| Done | Phase A (001–030) + B1 (040 scaffold) + **B2 move (041)** — all committed + build-verified |
+| Next | **VHVU-042** reconcile dup → 050 (xhigh self-fetch refactor) → 060 (repoint+verify) → 070 (ADR-012 amend) |
+| Gates awaiting owner | 004 (opt deploy), 021 + 031 + 061 (UAT — need deploy + live env) |
 
-### VHVU-030 outcome (2026-07-10) — COMPLETE
-- "+" cut over to `Xrm.Navigation.navigateTo` (webresource dialog 60%×70%, mirrors `sprk_wizard_commands.js`). Local `resolveWizardPage` maps key/entity → `sprk_createeventwizard`/`sprk_createinvoicewizard`/`sprk_createreportcardwizard`; unregistered → toast (FR-03).
-- Envelope: `entityType`, `entityId` (`cleanGuid` per ADR-044), `recordName` (awaited), `themeOption`. No auth/token wiring in the PCF anymore (page owns auth, ADR-028) — **auth surface REDUCED**.
-- DELETED: inline Dialog + React.lazy mount, `ensureCreateWizardAuthInitialized` lazy `@spaarke/auth` bootstrap, `ICreateWizardAuthContext`, all wizard state, hostAssociation, injected services, resolveSpeContainerId, the wizard React-skew cast, wizard/adapter/AssociateToStep-type imports, 4 Dialog fluentui imports, 2 wizard styles. Removed `@spaarke/auth` from VisualHost `package.json`. Net **−139 lines** in VisualHostRoot.tsx.
-- **Build green** (`build:prod`), bundle **746 KiB** (down from >1.5 MiB — msal/wizard code gone). Verified in bundle: `PublicClientApplication`=0, `BrowserAuthError`=0, `resolveRuntimeConfig`=0, `SdapClient`=0; `cleanGuid` body (`trim().toLowerCase()`)=1; footer `v1.4.36`=1.
-- Version bumped 1.4.35 → **1.4.36** (all 5 locations).
-- Step 9.5 code-review: **CLEAN** (7/7 PASS, one informational async-onClick nit).
+### VHVU-041 outcome (2026-07-10) — COMPLETE + VERIFIED
+- Moved 13 presentational components + 7 utils + all viz types into `@spaarke/visuals` (git renames). `TrendDirection` inverted into the types barrel (TrendCard re-exports; trendAnalysis imports from `../types`).
+- **Directional deviation**: ChartRenderer + the 3 self-fetch visuals (CalendarVisual, DueDateCard, DueDateCardList) STAY in the PCF — ChartRenderer is a host dispatcher consuming webAPI + the trio; moving it would breach NFR-05. Moves in 050/060 after the self-fetch visuals go props-in.
+- VisualHost repointed via relative src paths (safe: package is presentational-only, zero internal deps). 3 pervasive utils (logger/cardConfigResolver/trendAnalysis) kept as thin re-export shims at old PCF paths — VHVU-060 finishes the repoint. `@spaarke/visuals` declared as `file:` dep.
+- **Verified**: package `tsc --noEmit` green + zero host-coupling; VisualHost `build:prod` green, bundle **761 KiB**, leak-free (PublicClientApplication/SdapClient=0), cleanGuid intact, footer v1.4.36. **ZERO new skew-casts** on the 13 moved components (the @types/react@18 pin worked).
 
-**Two documented deviations (both honest, not regressions):**
-1. Only 1 of 3 casts deletable (wizard cast). The 2 `AiSummaryPopover` casts persist — empirically confirmed (removing them → TS2786) because `AiSummaryPopover` is still imported from shared-lib `src` (React 18/19 skew), independent of the wizard leak. They retire in **Phase B** when the visual moves to `@spaarke/visuals`.
-2. `themeOption` in the navigate envelope is forward-compat; theme actually resolves via the MDA-wide `spaarke-theme` localStorage (same as all other navigateTo wizards). `detectDarkModeFromUrl` reads top-level `flags`, not the `data` envelope — so the envelope value is inert today but harmless. localStorage covers the real case.
+### KEY DECISION — @types/react@18 pin on @spaarke/visuals (VHVU-040 fix, commit 41f64bb9b)
+React 18's `ReactNode` ⊂ React 19's, so an @18-typed component is consumable by BOTH the R18 PCF and future R19 code pages with NO TS2786 JSX skew. Typing @19 would reproduce the AiSummaryPopover cast problem ×13. This is why the extraction needed zero casts. **Keep @spaarke/visuals at @types/react@18.**
 
-### Completed A0–A2 (2026-07-10)
-- VHVU-001/002/003 ✅ (build harden, packaging hygiene, v-bump); merged origin/master.
-- VHVU-010/011/012 ✅ (shared `useWizardPageBootstrap` factory + Event/Invoice/Report Card code pages).
-- VHVU-020 ✅ (initialAssociation/lockAssociation + themeOption token normalization across 3 pages).
-- VHVU-004 ⏸ optional (owner-gated interim deploy — superseded by 031 redeploy).
+### VHVU-042 starting notes (next task)
+- Reconcile the two drifts the design flagged:
+  1. **`VisualType`** — canonical now in `@spaarke/visuals/src/types`. Check `src/client/pcf/VisualHost/control/types/index.ts` (is it a re-export shim or still a full duplicate?) AND any `VisualType` copy in `@spaarke/ui-components`. Collapse to ONE canonical (the @spaarke/visuals one) with re-export shims where needed.
+  2. **`EventDueDateCard`** — moved to @spaarke/visuals in 041; a duplicate reportedly also lives in `@spaarke/ui-components`. Confirm + collapse to the @spaarke/visuals one.
+- Grep both shared packages + the PCF for the duplicate symbols; verify `build:prod` + both packages' `tsc` stay green after collapsing.
+
+### KNOWN FOLLOW-UP (VHVU-090 / test-diet)
+6 moved-component test files (BarChart/DonutChart/LineChart/MetricCard/MiniTable/StatusDistributionBar `.test.tsx`) were repointed to the package path but have a **pre-existing** `@testing-library/react` TS2305 (no `screen`/`fireEvent` export) affecting moved + stayed tests alike. Re-home them into @spaarke/visuals with its own jest harness at test-diet.
 
 ## Progress
-- [x] A0–A2 committed
-- [x] A3 code (030) committed
-- [ ] A3 deploy/UAT (031) — owner-gated
-- [ ] Phase B (040–070)
-- [ ] Wrap-up (090)
+- [x] Phase A (001–030) committed
+- [x] B1 040 scaffold + @18 fix
+- [x] B2 041 move committed (c1ec5f8a7)
+- [ ] 042 reconcile → 050 (xhigh) → 060 repoint → 070 ADR-012 amend (.claude/ main-session-only)
+- [ ] Deploy/UAT (031/061) — owner-gated
+- [ ] 090 wrap-up (+ test-diet)
 
 ## Notes
-- Deploy/UAT tasks (004/021/031/061) are outward-facing → require owner go + live env.
-- `.claude/` write boundary: VHVU-070 (ADR-012 amendment) is main-session only.
-- Phase B is the next autonomous-eligible block (all code, no deploy until 061).
+- Deploy/UAT tasks are outward-facing → owner go + live env.
+- VHVU-070 (ADR-012 amendment) is `.claude/` main-session-only — never a sub-agent.
+- Session commits: fda8c31e3 (030), 77899bac1 + 41f64bb9b (040), c1ec5f8a7 (041). Branch ahead of origin/master.
