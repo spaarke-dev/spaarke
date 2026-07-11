@@ -7,9 +7,12 @@
 import * as React from 'react';
 import { Card, Text, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
 import { ArrowUpRegular, ArrowDownRegular, SubtractRegular } from '@fluentui/react-icons';
-import type { DrillInteraction } from '../types';
+import type { DrillInteraction, TrendDirection } from '../types';
 
-export type TrendDirection = 'up' | 'down' | 'flat';
+// Re-exported for backward compatibility: `TrendDirection` now lives in the
+// package `types` barrel (VHVU-041 dependency inversion). Consumers that
+// imported it from TrendCard continue to work.
+export type { TrendDirection };
 
 export interface ITrendCardProps {
   /** Area name displayed as card label */

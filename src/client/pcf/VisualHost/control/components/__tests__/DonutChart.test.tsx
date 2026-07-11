@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { render, screen } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
-import { DonutChart } from '../DonutChart';
+import { DonutChart } from '../../../../../shared/Spaarke.Visuals/src/components/DonutChart';
 import type { IAggregatedDataPoint } from '../../types';
 
 const renderWithTheme = (component: React.ReactElement, theme = webLightTheme) => {

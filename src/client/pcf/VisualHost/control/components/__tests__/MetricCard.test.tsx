@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
-import { MetricCard } from '../MetricCard';
+import { MetricCard } from '../../../../../shared/Spaarke.Visuals/src/components/MetricCard';
 
 const renderWithTheme = (component: React.ReactElement, theme = webLightTheme) => {
   return render(<FluentProvider theme={theme}>{component}</FluentProvider>);

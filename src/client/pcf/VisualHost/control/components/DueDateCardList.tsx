@@ -7,7 +7,7 @@
 import * as React from 'react';
 import { useState, useEffect, useCallback } from 'react';
 import { Spinner, makeStyles, tokens, Text, Link, MessageBar, MessageBarBody } from '@fluentui/react-components';
-import { EventDueDateCard, type IEventDueDateCardProps } from './EventDueDateCard';
+import { EventDueDateCard, type IEventDueDateCardProps } from '../../../../shared/Spaarke.Visuals/src/components/EventDueDateCard';
 import { ChevronRight20Regular } from '@fluentui/react-icons';
 import type { IChartDefinition } from '../types';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';

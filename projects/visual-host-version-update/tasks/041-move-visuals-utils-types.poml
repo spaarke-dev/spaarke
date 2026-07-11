@@ -1,7 +1,7 @@
 <task id="VHVU-041" project="VisualHost Decoupling & @spaarke/visuals Extraction">
   <metadata>
     <title>Move 15 presentational visuals + 7 utils + viz types into @spaarke/visuals</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>B2</phase>
     <estimated-effort>1 day</estimated-effort>
     <tags>shared-lib, extraction, visuals</tags>

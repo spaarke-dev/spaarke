@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
-import { StatusDistributionBar, IStatusSegment } from '../StatusDistributionBar';
+import { StatusDistributionBar, IStatusSegment } from '../../../../../shared/Spaarke.Visuals/src/components/StatusDistributionBar';
 
 const renderWithTheme = (component: React.ReactElement, theme = webLightTheme) => {
   return render(<FluentProvider theme={theme}>{component}</FluentProvider>);

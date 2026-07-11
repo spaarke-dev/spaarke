@@ -34,7 +34,7 @@ import { IInputs } from '../generated/ManifestTypes';
 import { IChartDefinition, IChartData, DrillInteraction } from '../types';
 import { ChartRenderer } from './ChartRenderer';
 import { CardChrome } from './CardChrome';
-import type { MatrixJustification } from './MetricCardMatrix';
+import type { MatrixJustification } from '../../../../shared/Spaarke.Visuals/src/components/MetricCardMatrix';
 import { logger } from '../utils/logger';
 import {
   loadChartDefinition as loadChartDefinitionFromDataverse,
