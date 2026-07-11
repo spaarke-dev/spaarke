@@ -199,6 +199,26 @@
       "toolDescription": "Propose an alternative rewrite of this clause, grounded in matter/firm playbook and precedent context where available. Produces a pending track-change (a structured edit — replacement text plus rationale and sources) the attorney can accept, replace, or undo; it does not persist the edit until accepted."
     },
     {
+      "$comment": "spaarkeai-compose-r2 DEF-08 (Part A) — Click/text-path Binding for compose-draft-document. DECLARES the core `compose` disposition: disposition 100000006 VERIFIED against Binding.cs BindingDisposition.Compose (E-20 landed: DispositionRoutability admits + routes `compose` end-to-end; the OutputRouter pass-through stores the SessionOutput before render, ADR-040). UNLIKE compose-draft-alternative (an EDIT payload: target_text/new_text), this Action emits a FULL-DOCUMENT payload (title/body_html/document_kind/cited_refs); SendWorkspaceArtifactHandler resolves the recent full-document compose output (detected by body_html) and seeds the opened Compose tab with a ledgerRef (ADR-015: identifier on the SSE frame, never content). risk 100000000 = BindingRisk.None (the drafted document opens in an editable tab the attorney revises and Saves — the editor IS the review surface; no confirmation turn), captureMode 100000000 = LoopElicitation. surfaces=assistant,workspace: selectable in the Assistant chat loop for drafting intents AND (workspace) the document materializes in the workspace pane. Read-through the shipped session-dispatch seam — ZERO new BFF routes. §11 justification vs draft-correspondence in infra/dataverse/actions/compose-draft-document.action.json. actionCode/name carry NO version suffix (owner hygiene).",
+      "consumerType": "compose-draft-document",
+      "consumerCode": "default",
+      "environment": "*",
+      "name": "Compose — Draft Document",
+      "priority": 500,
+      "enabled": true,
+      "playbookName": null,
+      "actionCode": "compose-draft-document",
+      "ucid": null,
+      "disposition": 100000006,
+      "risk": 100000000,
+      "captureMode": 100000000,
+      "surfaces": "assistant,workspace",
+      "chipTransitions": null,
+      "onEventBindings": null,
+      "matchConditions": null,
+      "toolDescription": "Draft a complete document to open in the Compose editor. Use when the user asks to draft, write, or compose a letter, memo, response, notice, or other DOCUMENT they want to work on and revise in the editor (e.g. 'write a letter to the client about these findings', 'draft a memo responding to this notice', 'open this as a document'). Produces a full drafting-ready document (title + body) grounded in the session's files and prior conversation outputs, opened in a Compose editor tab the user can edit and save — it does NOT send anything and does NOT create a record until the user saves. This is DIFFERENT from draft-correspondence: use draft-correspondence when the user wants to draft an email/letter to SEND via email; use this capability when the user wants a document to WORK ON in the Compose editor. Optional arg: request (the drafting instruction, defaults to the user's message)."
+    },
+    {
       "consumerType": "create-task",
       "consumerCode": "default",
       "environment": "*",

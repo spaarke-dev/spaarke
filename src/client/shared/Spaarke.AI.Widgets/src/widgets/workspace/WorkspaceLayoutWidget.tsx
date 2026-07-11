@@ -96,6 +96,25 @@ export interface WorkspaceLayoutWidgetData {
       /** Display file name for UI labelling. */
       fileName?: string | null;
     };
+    /**
+     * DEF-08 AI-drafted full-document seed. Present when the chat opened Compose to materialize a
+     * drafted document — `SendWorkspaceArtifactHandler` puts `compose.draft.{ledgerRef,sessionId}`
+     * (Part A, resolved from the session ledger) on the `workspace_open_tab` frame; the "Open in
+     * Compose" per-message affordance uses `compose.draft.html` (Part B, inline). The host renderer
+     * translates it into `ComposeLaunchContext.draft`; Compose materializes the body as a transient
+     * working draft (create-on-save). Forwarded opaquely (this package must NOT depend on
+     * `@spaarke/compose-components`).
+     */
+    draft?: {
+      /** Part A: `{bindingId}@t{n}` ledger key of the full-document compose output. */
+      ledgerRef?: string;
+      /** Part A: chat session id to resolve the ledger output from. */
+      sessionId?: string;
+      /** Part B: the drafted body as semantic HTML, supplied inline. */
+      html?: string;
+      /** Display file name for UI labelling. */
+      fileName?: string | null;
+    };
   };
 }
 

@@ -336,6 +336,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // G-P2 round-1 finding 2 (2026-07-06) — Insert affordance is opt-in per host;
   // only hosts with an insert target (AnalysisWorkspace editor) enable it.
   enableInsertToEditor = false,
+  onOpenInCompose,
   documents = [],
   playbooks = [],
   predefinedPrompts = [],
@@ -2430,6 +2431,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             ...(enableInsertToEditor &&
               msg.role === 'Assistant' && {
                 onInsert: handleInsert,
+              }),
+            // DEF-08 Part B: "Open in Compose" on completed assistant messages — prop-gated the
+            // same way as onInsert. Only hosts that provide onOpenInCompose (SpaarkeAi's
+            // ConversationPane) render the affordance; others don't.
+            ...(onOpenInCompose &&
+              msg.role === 'Assistant' && {
+                onOpenInCompose,
               }),
             ...(isPlanPreview && {
               onProceed: () => handlePlanProceed(index),

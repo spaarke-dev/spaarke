@@ -774,8 +774,64 @@ export function WorkspacePane(): React.JSX.Element {
       const displayName =
         event.displayName ?? meta?.displayName ?? widgetType;
 
+      // ── DEF-08 single-tab reuse ────────────────────────────────────────────
+      // A Compose-editor open (a compose-SEEDED workspace layout tab — a chat
+      // "open as a document" draft, an "Open in Compose" affordance, or a
+      // stored/upload compose open) must REUSE the single existing Compose tab
+      // rather than mint a NEW (often blank) one on every open. This fixes the
+      // accumulated-blank-Compose-tabs side effect: repeated opens ACTIVATE the
+      // one Compose tab (refreshing its seed) instead of stacking duplicates.
+      // Match an existing "workspace" tab by layoutId. Non-compose widget opens
+      // are unaffected (they still addTab as before).
+      const composeOpen = widgetData as
+        | { compose?: unknown; layoutId?: string; layoutName?: string }
+        | null;
+      const isComposeLayoutOpen =
+        widgetType === "workspace" &&
+        composeOpen != null &&
+        (composeOpen.compose != null || composeOpen.layoutName === "Compose");
+      // Part B dispatches by layout NAME only (no fetch in the Assistant pane) — resolve the id
+      // from the layouts list this pane already holds so the tab renders + reuse can match by id.
+      let composeLayoutId = composeOpen?.layoutId;
+      if (isComposeLayoutOpen && (!composeLayoutId || composeLayoutId.length === 0) && composeOpen?.layoutName) {
+        composeLayoutId = layouts.find((l) => l.name === composeOpen.layoutName)?.id;
+      }
+      // Ensure the widgetData carries the resolved layoutId so the Compose layout renders.
+      const composeWidgetData =
+        isComposeLayoutOpen && composeLayoutId && composeOpen && composeOpen.layoutId !== composeLayoutId
+          ? { ...(widgetData as Record<string, unknown>), layoutId: composeLayoutId }
+          : widgetData;
+      if (isComposeLayoutOpen && typeof composeLayoutId === "string" && composeLayoutId.length > 0) {
+        const existingComposeTab = manager.getSnapshot().tabs.find((t) => {
+          if (t.widgetType !== "workspace") return false;
+          const d = t.widgetData as { layoutId?: string } | null;
+          return d?.layoutId === composeLayoutId;
+        });
+        if (existingComposeTab) {
+          // Refresh the seed (a fresh draft picks up if the editor hadn't loaded
+          // yet; a loaded editor's draft effect status-gate prevents clobbering
+          // unsaved edits) and activate the single tab.
+          manager.updateTab(existingComposeTab.id, composeWidgetData);
+          manager.setActiveTab(existingComposeTab.id);
+          syncState();
+          if (event.frameId) {
+            sendUiActionAck(event.frameId);
+          }
+          window.setTimeout(() => {
+            dispatch("workspace", {
+              type: "tab_change",
+              tabId: existingComposeTab.id,
+              widgetType: existingComposeTab.widgetType,
+              widgetData: composeWidgetData,
+            });
+          }, 0);
+          return;
+        }
+      }
+
       // Add the tab — this enforces MAX_WORKSPACE_TABS eviction internally.
-      const tabId = manager.addTab(widgetType, widgetData, displayName);
+      // (Compose opens carry the resolved layoutId so the layout renders.)
+      const tabId = manager.addTab(widgetType, composeWidgetData, displayName);
       syncState();
 
       // D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): the tab is NOW

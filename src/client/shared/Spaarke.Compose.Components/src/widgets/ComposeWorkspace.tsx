@@ -111,6 +111,7 @@ import { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHear
 import type {
   ComposeDocumentRef,
   ComposeUploadRef,
+  ComposeDraftSeedRef,
   ComposeAssistantToWorkspaceFlow,
   AnchoredAnnotation,
   DefinedTerm,
@@ -215,6 +216,17 @@ export interface ComposeWorkspaceProps {
    * with `initialDocumentRef` — an upload has no SPE pointer.
    */
   initialUploadRef?: ComposeUploadRef | null;
+
+  /**
+   * DEF-08: optional AI-drafted full-document SEED. When supplied (and no `initialDocumentRef` /
+   * `initialUploadRef`), the workspace materializes the drafted document into the editor as a
+   * TRANSIENT working draft (create-on-save on first Save). Two shapes (see {@link ComposeDraftSeedRef}):
+   *  - Part A `{ ledgerRef, sessionId }` — resolve the body from
+   *    `GET /api/ai/chat/sessions/{sessionId}/compose-outputs` (the `compose-draft-document` output).
+   *  - Part B `{ html }` — the drafted body supplied inline ("Open in Compose" affordance).
+   * Mutually exclusive with `initialDocumentRef` and `initialUploadRef`.
+   */
+  initialDraftRef?: ComposeDraftSeedRef | null;
 
   /** Optional initial ChatSession id (correlation). */
   initialSessionId?: string;
@@ -344,6 +356,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const {
     initialDocumentRef,
     initialUploadRef,
+    initialDraftRef,
     initialSessionId,
     matterId,
     bffBaseUrl,
@@ -1297,6 +1310,103 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, [initialUploadRef?.sessionFileId, initialUploadRef?.sessionId, bffBaseUrl]);
 
   // -------------------------------------------------------------------------
+  // DEF-08: AI-drafted full-document seed mount
+  // -------------------------------------------------------------------------
+  // When launched with a draft seed (and no stored-doc / upload), materialize the drafted
+  // document BODY into the editor as a TRANSIENT working draft (create-on-save on first Save — the
+  // same lifecycle as an upload mount). Two provenance shapes:
+  //   - Part B: `initialDraftRef.html` (inline, "Open in Compose" affordance) — mount directly.
+  //   - Part A: `initialDraftRef.{ledgerRef,sessionId}` — resolve the body from the session ledger
+  //     via GET /compose-outputs (ADR-040 render-follows-store; the content lives in the ledger,
+  //     the seed carried only an identifier — ADR-015). Mutually exclusive with the stored-doc /
+  //     upload paths.
+  React.useEffect(() => {
+    if (!initialDraftRef) return;
+    if (initialDocumentRef || initialUploadRef) return; // stored-doc / upload win (mutually exclusive)
+    if (state.status !== 'empty' && state.status !== 'error') return;
+
+    // Part B: inline html — mount directly, no fetch.
+    if (typeof initialDraftRef.html === 'string' && initialDraftRef.html.length > 0) {
+      setSearchResolvedDriveId(null);
+      dispatch({
+        kind: 'mountDraftHtml',
+        html: initialDraftRef.html,
+        fileName: initialDraftRef.fileName,
+        containerId: containerIdRef.current,
+      });
+      setIsDirty(true);
+      return;
+    }
+
+    // Part A: resolve the drafted body from the session ledger by ledgerRef.
+    const ledgerRef = initialDraftRef.ledgerRef;
+    const draftSessionId = initialDraftRef.sessionId;
+    if (!ledgerRef || !draftSessionId) return;
+    if (!bffBaseUrl) {
+      dispatch({ kind: 'loadFailed', errorMessage: 'BFF base URL is not configured. Cannot open the drafted document.' });
+      return;
+    }
+
+    const ac = new AbortController();
+    // Enter the loading spinner WITHOUT a documentRef (reuses the upload-mount transition) so the
+    // stored-document Load effect stays inert — this effect owns the mount.
+    dispatch({ kind: 'requestUploadMount', sessionId: draftSessionId });
+
+    (async () => {
+      try {
+        const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(draftSessionId)}/compose-outputs`;
+        const response = await authenticatedFetch(url, { method: 'GET', signal: ac.signal });
+        if (!response.ok) {
+          dispatch({
+            kind: 'loadFailed',
+            errorMessage:
+              response.status === 404
+                ? 'The drafted document is no longer available (the session may have expired). Try drafting it again.'
+                : `Failed to load the drafted document (HTTP ${response.status}).`,
+          });
+          return;
+        }
+
+        // GET /compose-outputs → ComposeLedgerOutputDto[]: { key, bindingId, turn, disposition, payload }.
+        // The nested `payload` is passed through opaquely (snake_case body_html preserved).
+        const outputs = (await response.json()) as Array<{
+          key?: string;
+          payload?: { body_html?: string; title?: string };
+        }>;
+        const match = Array.isArray(outputs) ? outputs.find((o) => o?.key === ledgerRef) : undefined;
+        const bodyHtml = match?.payload?.body_html;
+        if (ac.signal.aborted) return;
+        if (typeof bodyHtml !== 'string' || bodyHtml.length === 0) {
+          dispatch({
+            kind: 'loadFailed',
+            errorMessage: 'The drafted document could not be found in this session. Try drafting it again.',
+          });
+          return;
+        }
+
+        // A draft mount has no SPE drive — clear any stale Search-resolved drive id.
+        setSearchResolvedDriveId(null);
+        dispatch({
+          kind: 'mountDraftHtml',
+          html: bodyHtml,
+          fileName: match?.payload?.title,
+          containerId: containerIdRef.current,
+        });
+        // A freshly-seeded draft is unsaved by definition — mark dirty so Save (create-on-save) is
+        // enabled immediately.
+        setIsDirty(true);
+      } catch (err) {
+        if (ac.signal.aborted) return;
+        const message = err instanceof Error ? err.message : String(err);
+        dispatch({ kind: 'loadFailed', errorMessage: `Failed to load the drafted document: ${message}` });
+      }
+    })();
+
+    return () => ac.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDraftRef?.ledgerRef, initialDraftRef?.sessionId, initialDraftRef?.html, bffBaseUrl]);
+
+  // -------------------------------------------------------------------------
   // Editor doc-ref shape (shared lib has its own narrower interface)
   // -------------------------------------------------------------------------
   const editorDocRef: ComposeEditorDocumentRef | undefined = state.documentRef
@@ -1455,6 +1565,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             <ComposeEditor
               ref={editorRef}
               docxBytes={state.docxBytes}
+              initialHtml={state.seedHtml}
               documentRef={editorDocRef}
               bffBaseUrl={bffBaseUrl}
               sessionId={state.sessionId}

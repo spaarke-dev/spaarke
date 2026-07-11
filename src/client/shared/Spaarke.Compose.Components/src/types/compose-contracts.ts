@@ -254,6 +254,36 @@ export interface ComposeUploadRef {
 }
 
 /**
+ * Pointer to an AI-DRAFTED full document to SEED the editor with (spaarkeai-compose-r2 DEF-08).
+ * Distinct from {@link ComposeDocumentRef} (a stored SPE document) and {@link ComposeUploadRef}
+ * (a retained upload): a draft seed carries the drafted document BODY (as semantic HTML), which
+ * mounts into the editor as a TRANSIENT working draft (create-on-save on first Save — the same
+ * lifecycle as an upload mount). No SPE pointer, no `sprk_document` record until Save.
+ *
+ * Two provenance shapes (mutually exclusive):
+ *  - **Part A (server-resolved)**: `{ ledgerRef, sessionId }` — the addressable `{bindingId}@t{n}`
+ *    key of a `compose`-disposition full-document output (a `compose-draft-document` capability
+ *    result) in the session ledger. The workspace resolves the body via
+ *    `GET /api/ai/chat/sessions/{sessionId}/compose-outputs` (ADR-040 render-follows-store; the
+ *    seed frame carries an identifier, never content — ADR-015).
+ *  - **Part B (client-direct)**: `{ html }` — the drafted body supplied inline by the client
+ *    ("Open in Compose" per-message affordance). Bypasses the ledger fetch.
+ *
+ * Privacy: `ledgerRef`/`sessionId` are identifiers (Tier 1 safe). `html` is Tier-3 draft content —
+ * carried client-side only (never on an SSE frame / PaneEventBus payload; ADR-015).
+ */
+export interface ComposeDraftSeedRef {
+  /** Part A: the `{bindingId}@t{n}` ledger key of the full-document compose output to seed from. */
+  ledgerRef?: string;
+  /** Part A: the chat session id to resolve the ledger output from (GET compose-outputs). */
+  sessionId?: string;
+  /** Part B: the drafted document body as semantic HTML, supplied inline (client-direct). */
+  html?: string;
+  /** Optional human-readable file name for the transient draft (UI labelling / Save default). */
+  fileName?: string;
+}
+
+/**
  * Editor selection span — anchors a region of the open document.
  *
  * Per design.md §14 row 2: this is TRANSIENT payload-only state. Subscribers

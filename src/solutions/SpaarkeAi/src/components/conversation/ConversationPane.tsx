@@ -34,6 +34,7 @@ import { WelcomePanel } from "../WelcomePanel";
 // receivers for Flow 2 (compose_selection_offer) + Flow 4 (compose_context_offer).
 import { ComposeAssistantCoordination } from "./ComposeAssistantCoordination";
 import { useShellStage, useRestoreContext, usePaneCollapseContext } from "../shell/ThreePaneShell";
+import { assistantTextToDraftHtml } from "./assistantDraftHtml";
 import { HistoryMenu } from "./HistoryOverlay";
 import { CommandHelpPanel } from "./CommandHelpPanel";
 import { HelpAffordance } from "./HelpAffordance";
@@ -117,6 +118,29 @@ export function ConversationPane(): React.JSX.Element {
   const restoreCtx = useRestoreContext();
   const paneCollapse = usePaneCollapseContext();
   const dispatch = useDispatchPaneEvent();
+
+  // DEF-08 Part B: the "Open in Compose" per-message affordance opens a (reused) Compose editor tab
+  // SEEDED with the assistant message's text as an editable draft. Dispatches by layout NAME only —
+  // the WorkspacePane widget_load handler resolves the Compose layout id (it already has the
+  // layouts list) and REUSES the single Compose tab. This avoids a layouts fetch in the Assistant
+  // pane. The drafted body rides inline as `compose.draft.html` (client-direct); the host renderer
+  // threads it into ComposeLaunchContext → ComposeWorkspace mounts it as an editable transient draft
+  // (create-on-save) — the SAME open-and-seed seam as Part A.
+  const handleOpenInCompose = React.useCallback(
+    (content: string): void => {
+      if (!content) return;
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: "workspace",
+        widgetData: {
+          layoutName: "Compose",
+          compose: { draft: { html: assistantTextToDraftHtml(content) } },
+        },
+        displayName: "Compose",
+      } as WorkspacePaneEvent);
+    },
+    [dispatch]
+  );
 
   // Session-id getter for the dispatch/event seams (stable across renders).
   const chatSessionIdRef = React.useRef<string | null>(chatSessionId);
@@ -623,6 +647,9 @@ export function ConversationPane(): React.JSX.Element {
               onOpenLibraryModal={playbookOptions.handleOpenLibraryModal}
               onContextEvent={contextBridge.handleContextEvent}
               onCitations={docQaCitation.onCitations}
+              // DEF-08 Part B: "Open in Compose" per-message affordance (opt-in; opens+seeds a
+              // reused Compose draft tab with the message text).
+              onOpenInCompose={handleOpenInCompose}
               // F-4: activate OutcomeCard next-step chips — routes an
               // invoke_capability chip's targetBindingId through the shared
               // dispatchConsumer path (see handleNextStep above).

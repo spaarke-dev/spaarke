@@ -195,6 +195,9 @@ const ComposeSectionMount: React.FC<ComposeSectionMountProps> = ({ bffBaseUrl })
     // Assistant-uploaded file (ComposeLaunchContext.upload). Null on the stored-document /
     // picker paths.
     initialUploadRef: composeLaunch?.upload ?? null,
+    // DEF-08: AI-drafted full-document seed (Part A ledgerRef / Part B inline html) from a chat
+    // drafting intent or the "Open in Compose" affordance. Null on all non-draft paths.
+    initialDraftRef: composeLaunch?.draft ?? null,
     initialSessionId: "",
     // FR-13 (task 046): thread the Assistant queue ONLY when registered — else
     // omit so ComposeAiToolbar falls back to its own dispatcher (standalone).
