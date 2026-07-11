@@ -52,22 +52,65 @@
       "delta_vs_prior_mb": -3.04,
       "classification": "OK: within all ADR-029 / NFR-01 thresholds.",
       "cve_check": "HIGH SEVERITY FOUND (1 line(s)) -- review before merge",
-      "notes": "Harness stand-up + R2 baseline record"
+      "cve_findings": [
+        {
+          "package": "Microsoft.Kiota.Abstractions",
+          "version": "1.21.2",
+          "severity": "High",
+          "advisory": "https://github.com/advisories/GHSA-7j59-v9qr-6fq9"
+        }
+      ],
+      "notes": "Harness stand-up + R2 baseline record. cve_findings set hand-seeded 2026-07-10 (audit F-10) from the documented pre-existing accepted-risk Kiota HIGH so the new-CVE diff has a prior set to compare against."
+    },
+    {
+      "date": "2026-07-10",
+      "source": "spaarke-ai-architecture-redesign-r2 task audit-F-10",
+      "task_id": "audit-F-10",
+      "compressed_incl_pdb_mb": 46.59,
+      "compressed_excl_pdb_mb": 45.83,
+      "uncompressed_incl_pdb_mb": 140.65,
+      "file_count": 240,
+      "runtimes_file_count": 0,
+      "sourcemap_count": 0,
+      "delta_vs_prior_mb": 0.0,
+      "classification": "OK: within all ADR-029 / NFR-01 size thresholds. | WARN: 1 pre-existing HIGH/CRITICAL CVE(s) persist (Microsoft.Kiota.Abstractions@1.21.2 [High]) -- accepted-risk, tracked in baseline; not a merge blocker by itself.",
+      "cve_check": "HIGH/CRITICAL FOUND (1): Microsoft.Kiota.Abstractions@1.21.2 [High]",
+      "cve_findings": [
+        {
+          "package": "Microsoft.Kiota.Abstractions",
+          "version": "1.21.2",
+          "severity": "High",
+          "advisory": "https://github.com/advisories/GHSA-7j59-v9qr-6fq9"
+        }
+      ],
+      "cve_new_findings": [],
+      "cve_verdict": "no NEW HIGH/CRITICAL CVEs (1 pre-existing persist)",
+      "notes": "Audit F-10: CVE gating fix (scan-failure ESCALATE + new-vs-pre-existing baseline diff); measures the fresh publish from the same session"
     }
   ],
   "current": {
     "date": "2026-07-10",
-    "source": "spaarke-ai-architecture-redesign-r2 task 070",
-    "task_id": "070",
+    "source": "spaarke-ai-architecture-redesign-r2 task audit-F-10",
+    "task_id": "audit-F-10",
     "compressed_incl_pdb_mb": 46.59,
     "compressed_excl_pdb_mb": 45.83,
-    "uncompressed_incl_pdb_mb": 140.67,
+    "uncompressed_incl_pdb_mb": 140.65,
     "file_count": 240,
     "runtimes_file_count": 0,
     "sourcemap_count": 0,
-    "delta_vs_prior_mb": -3.04,
-    "classification": "OK: within all ADR-029 / NFR-01 thresholds.",
-    "cve_check": "HIGH SEVERITY FOUND (1 line(s)) -- review before merge",
-    "notes": "Harness stand-up + R2 baseline record"
+    "delta_vs_prior_mb": 0.0,
+    "classification": "OK: within all ADR-029 / NFR-01 size thresholds. | WARN: 1 pre-existing HIGH/CRITICAL CVE(s) persist (Microsoft.Kiota.Abstractions@1.21.2 [High]) -- accepted-risk, tracked in baseline; not a merge blocker by itself.",
+    "cve_check": "HIGH/CRITICAL FOUND (1): Microsoft.Kiota.Abstractions@1.21.2 [High]",
+    "cve_findings": [
+      {
+        "package": "Microsoft.Kiota.Abstractions",
+        "version": "1.21.2",
+        "severity": "High",
+        "advisory": "https://github.com/advisories/GHSA-7j59-v9qr-6fq9"
+      }
+    ],
+    "cve_new_findings": [],
+    "cve_verdict": "no NEW HIGH/CRITICAL CVEs (1 pre-existing persist)",
+    "notes": "Audit F-10: CVE gating fix (scan-failure ESCALATE + new-vs-pre-existing baseline diff); measures the fresh publish from the same session"
   }
 }

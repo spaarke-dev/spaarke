@@ -22,7 +22,12 @@ import { ChatRegular, ChatAddRegular } from "@fluentui/react-icons";
 import { PaneHeader, SprkChat, createConsumerDispatcher } from "@spaarke/ui-components";
 import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
-import type { IChatMessage, DispatchWorkspaceEvent, DispatchConsumerResult } from "@spaarke/ui-components";
+import type {
+  IChatMessage,
+  DispatchWorkspaceEvent,
+  DispatchConsumerResult,
+  INextStepChip,
+} from "@spaarke/ui-components";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
 // Compose three-pane coordination — ASSISTANT leg (task 104 / E2E-R5). Typed
@@ -47,9 +52,16 @@ import { useSerialActionQueue, type ComposeActionRequest } from "./useSerialActi
 // barrel) so this Assistant-pane module does NOT transitively pull the TipTap
 // editor widgets — mirrors ComposeEditor/ComposeWorkspace's `@spaarke/ai-widgets/events`
 // deep-import rationale. Resolves in both Vite (alias → src dir) and jest.
-import { useRegisterComposeActionDispatcher } from "@spaarke/compose-components/context/composeActionBridge";
+import {
+  useRegisterComposeActionDispatcher,
+  useRegisterComposeActiveDocumentHandler,
+} from "@spaarke/compose-components/context/composeActionBridge";
 import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./composeApplyLeg";
+// FR-17 undo/replace (task 034) — the durable ledger-supersession hook + its Assistant affordance.
+import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession";
+import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-components/types/compose-contracts";
 import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
+import { formatComposeActionResultMarkdown } from "./composeResultFormat";
 import { makeLocalAssistantMessage } from "./summarizeRouting";
 import {
   AuthLoadingState,
@@ -154,6 +166,19 @@ export function ConversationPane(): React.JSX.Element {
         getSessionId,
         getAccessToken,
         publishPaneEvent: (channel, event: DispatchWorkspaceEvent) => dispatch(channel, event as WorkspacePaneEvent),
+        // UAT-R3 defect #3c (task 112): the Compose editor tab has NO renderer
+        // subscribed to the `workspace`-channel section-reveal bridge
+        // (`useComposeWorkspaceReceivers` only reacts to `compose_context_insert`
+        // / `compose_assistant_insert` / `compose_qa_highlight`) — those events
+        // were dead output ("nothing else happens"), and awaiting their paced
+        // reveal needlessly delayed this Promise for a renderer nobody mounts.
+        // Suppressed HERE ONLY (this dispatcher instance, scoped to the Compose
+        // surface) — `useConsumerChips`'s own `createConsumerDispatcher` call
+        // is untouched, so the general Assistant/chip surface keeps rendering
+        // dispatched results into the WorkspacePane exactly as before
+        // (ADR-030: additive, default-false option; shared contract for other
+        // surfaces unchanged).
+        suppressWorkspaceSectionBridge: true,
       }),
     [bffBaseUrl, getSessionId, getAccessToken, dispatch]
   );
@@ -171,40 +196,83 @@ export function ConversationPane(): React.JSX.Element {
   // Uses the ledger READ endpoint (no new route) + an EXISTING discriminant
   // (zero new PaneEventBus discriminants — ADR-030).
   const emitComposeApplyLeg = React.useCallback(
-    async (bindingId: string): Promise<void> => {
+    async (bindingId: string): Promise<string | null> => {
       const sessionId = getSessionId();
-      if (!sessionId || !bffBaseUrl) return;
+      if (!sessionId || !bffBaseUrl) return null;
       try {
         const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/compose-outputs`;
         const response = await authenticatedFetch(url, { method: "GET" });
-        if (!response.ok) return; // 404 = no compose outputs yet — nothing to apply
+        if (!response.ok) return null; // 404 = no compose outputs yet — nothing to apply
         const outputs = (await response.json()) as unknown;
         const ledgerRef = resolveCurrentComposeLedgerRef(outputs, bindingId);
-        if (!ledgerRef) return; // not a compose-writing action (e.g. explain/compare)
+        if (!ledgerRef) return null; // not a compose-writing action (e.g. explain/compare)
         // Flow 5 emit — `compose_assistant_insert` is now a TYPED discriminant on
         // the `workspace` channel (task 104), so the built event is assignable
         // directly with no cast (was `as unknown as WorkspacePaneEvent`).
         dispatch("workspace", buildComposeApplyEvent(ledgerRef, bindingId, sessionId));
+        // Return the applied compose ledger key so the FR-17 undo/replace affordance (task 034)
+        // can target THIS edit for a durable supersession.
+        return ledgerRef;
       } catch {
         // Non-fatal: the compose SSE frame + ComposeWorkspace refresh-materialize
         // path (ADR-040) still recover the drafted content on next load.
+        return null;
       }
     },
     [getSessionId, bffBaseUrl, authenticatedFetch, dispatch]
   );
 
+  // ── FR-17 undo/replace via ledger supersession (task 034) ────────────────
+  // "undo that" / "try another approach" retract the last AI-applied redline as a DURABLE ledger
+  // supersession (a new superseding `compose` SessionOutput), never a client DOM undo (ADR-040). The
+  // hook re-materializes via the SAME Flow-5 apply signal above (references the ledger entry, not the
+  // payload — ADR-030) + task 033's usePendingRedline. `dispatchApply` wraps the workspace-channel
+  // dispatch so the hook stays decoupled from the bus.
+  const dispatchApply = React.useCallback(
+    (event: ComposeAssistantToWorkspaceFlow) => dispatch("workspace", event as WorkspacePaneEvent),
+    [dispatch]
+  );
+  const supersession = useEditSupersession({ bffBaseUrl, getSessionId, authenticatedFetch, dispatchApply });
+  // Destructure the memoized callbacks so downstream useCallbacks depend on stable identities.
+  const { trackAppliedEdit, undo: undoEdit, tryAnother: tryAnotherEdit } = supersession;
+
   const dispatchComposeAction = React.useCallback(
     (request: ComposeActionRequest): Promise<DispatchConsumerResult> =>
       actionQueue.enqueue(request).then((dispatched) => {
         if (dispatched.result !== undefined && dispatched.result !== null) {
-          injection.enqueue(makeLocalAssistantMessage(formatEventOutputMarkdown(dispatched.result)));
+          // UAT-R3 defect #3b (task 112): try the 5 Compose action shapes
+          // first (grounded prose); fall back to the general Event-path
+          // formatter (which still degrades genuinely unknown shapes to the
+          // ```json``` fence — that last-resort branch is preserved verbatim).
+          const formatted =
+            formatComposeActionResultMarkdown(dispatched.result) ?? formatEventOutputMarkdown(dispatched.result);
+          injection.enqueue(makeLocalAssistantMessage(formatted));
         }
         // Draft-alternative apply leg (Flow 5) — references the ledger entry, never the payload.
-        void emitComposeApplyLeg(request.bindingId);
+        // Capture the applied compose ledger key so the FR-17 undo/replace affordance targets THIS
+        // edit (task 034). Informational actions resolve no compose output → no track → no affordance.
+        void emitComposeApplyLeg(request.bindingId).then((ledgerRef) => {
+          if (ledgerRef) {
+            trackAppliedEdit({ ledgerRef, bindingId: request.bindingId, request });
+          }
+        });
         return dispatched;
       }),
-    [actionQueue, injection, emitComposeApplyLeg]
+    // Depend on the memoized `trackAppliedEdit` (stable), not the whole `supersession` object (new
+    // identity each render) — keeps dispatchComposeAction stable so the bridge registration + serial
+    // queue don't re-register every render.
+    [actionQueue, injection, emitComposeApplyLeg, trackAppliedEdit]
   );
+
+  // FR-17 affordance handlers (task 034). "Try another approach" passes the CURRENT
+  // dispatchComposeAction so the fresh Draft-Alternative re-runs through the serial queue + apply leg
+  // (which re-materializes + re-tracks the new edit); passing it at call time avoids a definition cycle.
+  const handleUndoEdit = React.useCallback(() => {
+    void undoEdit();
+  }, [undoEdit]);
+  const handleReplaceEdit = React.useCallback(() => {
+    void tryAnotherEdit(dispatchComposeAction);
+  }, [tryAnotherEdit, dispatchComposeAction]);
 
   // FR-13 Step 1: publish `dispatchComposeAction` into the cross-pane Compose
   // action bridge so the inline AI toolbar (workspace pane, ComposeAiToolbar's
@@ -213,6 +281,50 @@ export function ConversationPane(): React.JSX.Element {
   // (Spike 0 / design §7.2). No-op when rendered outside a bridge provider
   // (e.g. isolated tests / standalone LegalWorkspace mount).
   useRegisterComposeActionDispatcher(dispatchComposeAction);
+
+  // task 113 (UAT defect 4): host-side registration of a Compose-direct (Browse) mount with the
+  // active chat session. ComposeWorkspace hands us the mounted file's bytes by a DIRECT call (not
+  // the PaneEventBus — ADR-015 keeps the bus content-free); we (1) land them as a ChatSessionFile
+  // via the EXISTING chat upload endpoint so chat "summarize this document" sees them (no parallel
+  // byte pipeline — CLAUDE.md §11), then (2) mark it the session's active document (POST
+  // /api/compose/active-document) so a later "edit in Compose" mounts THIS file, not a stale one.
+  // `@spaarke/auth` fetch (ADR-028). Fully soft-fail: on failure only chat-visibility is lost; the
+  // Compose Save path is unaffected. No-op outside the bridge provider (standalone LegalWorkspace).
+  const registerComposeActiveDocument = React.useCallback(
+    async ({ docxBytes, fileName }: { docxBytes: ArrayBuffer; fileName?: string }): Promise<void> => {
+      const sessionId = getSessionId();
+      if (!sessionId || !bffBaseUrl) return;
+      try {
+        const name = fileName ?? "compose-document.docx";
+        const form = new FormData();
+        form.append(
+          "file",
+          new Blob([docxBytes], {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          }),
+          name
+        );
+        form.append("filename", name);
+        const uploadResp = await authenticatedFetch(
+          `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents`,
+          { method: "POST", body: form }
+        );
+        if (!uploadResp.ok) return;
+        const uploaded = (await uploadResp.json()) as { documentId?: string };
+        const sessionFileId = uploaded?.documentId;
+        if (!sessionFileId) return;
+        await authenticatedFetch(`${bffBaseUrl}/api/compose/active-document`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, sessionFileId, source: "compose-direct", fileName: name }),
+        });
+      } catch {
+        // Non-fatal: the direct upload just won't be chat-visible; the Compose Save path is unaffected.
+      }
+    },
+    [getSessionId, bffBaseUrl, authenticatedFetch]
+  );
+  useRegisterComposeActiveDocumentHandler(registerComposeActiveDocument);
   // ADR-015: structural signal only (queue depth + in-flight correlation id —
   // never the action's bindingId/args/content). Also keeps `dispatchComposeAction`
   // + queue state live/observable ahead of the task-030 toolbar hand-off.
@@ -307,6 +419,33 @@ export function ConversationPane(): React.JSX.Element {
     startNewSession();
   }, [clearChatSession, startNewSession]);
 
+  // ── OutcomeCard next-step chips (F-4, e2e-completion-audit 2026-07-10) ──────
+  // A completed side-effect's OutcomeCard renders DECLARED next-step chips
+  // (the Binding's `sprk_chiptransitions`, threaded C#→SSE→TS via SprkChat's
+  // `onNextStep`). Without this handler OutcomeCard disables every chip
+  // (OutcomeCard.tsx defensive `disabled={!onNextStep}`), so they ship
+  // visible-but-dead. Activate them by routing an `invoke_capability` chip's
+  // `targetBindingId` (a `sprk_playbookconsumer` Binding id) through the SAME
+  // shared dispatchConsumer path the Click-path strip uses — no new dispatch
+  // path (ADR-039: bindingId in, stream out; server resolves the Binding).
+  // `navigate` chips open their server-composed `targetUrl`; `dismiss` is a
+  // no-op. The dispatch's rendered output + re-armed strip come free via
+  // `chips.dispatchBinding`.
+  const { dispatchBinding } = chips;
+  const handleNextStep = React.useCallback(
+    (chip: INextStepChip): void => {
+      if (chip.actionKind === "invoke_capability" && chip.targetBindingId) {
+        dispatchBinding(chip.targetBindingId, { slots: undefined });
+        return;
+      }
+      if (chip.actionKind === "navigate" && chip.targetUrl && typeof window !== "undefined") {
+        window.open(chip.targetUrl, "_blank", "noopener,noreferrer");
+      }
+      // `dismiss` (or an invoke_capability chip with no Binding id) → no-op.
+    },
+    [dispatchBinding]
+  );
+
   // R7 12.3a: normalize restored SessionRestoreMessage[] → IChatMessage[].
   const restoredInitialMessages = React.useMemo<IChatMessage[] | undefined>(() => {
     if (!restoreCtx?.recentMessages || restoreCtx.recentMessages.length === 0) return undefined;
@@ -394,6 +533,17 @@ export function ConversationPane(): React.JSX.Element {
               Renders nothing until a compose flow fires (task 104). */}
           <ComposeAssistantCoordination />
 
+          {/* FR-17 undo/replace affordance (task 034) — appears after an AI redline is applied;
+              both intents route to durable ledger supersessions (never a DOM undo). */}
+          <EditSupersessionBar
+            lastEdit={supersession.lastEdit}
+            busy={supersession.busy}
+            error={supersession.error}
+            onUndo={handleUndoEdit}
+            onTryAnother={handleReplaceEdit}
+            onDismissError={supersession.clearError}
+          />
+
           {selection.selectionChip !== null && (
             <RefinementChipBar
               chip={selection.selectionChip}
@@ -440,6 +590,10 @@ export function ConversationPane(): React.JSX.Element {
               onOpenLibraryModal={playbookOptions.handleOpenLibraryModal}
               onContextEvent={contextBridge.handleContextEvent}
               onCitations={docQaCitation.onCitations}
+              // F-4: activate OutcomeCard next-step chips — routes an
+              // invoke_capability chip's targetBindingId through the shared
+              // dispatchConsumer path (see handleNextStep above).
+              onNextStep={handleNextStep}
             />
             <HelpAffordance onClick={() => commands.setHelpPanelOpen(true)} />
             <CommandHelpPanel

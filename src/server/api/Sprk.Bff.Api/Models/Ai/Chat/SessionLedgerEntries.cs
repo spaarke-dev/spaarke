@@ -188,6 +188,32 @@ public sealed record ComposeLedgerOutputDto(
     JsonElement Payload);
 
 /// <summary>
+/// Request body for the FR-17 undo/replace supersession seam
+/// (<c>POST /api/ai/chat/sessions/{sessionId}/compose-outputs/supersede</c> —
+/// spaarkeai-compose-r2 task 034). Carries the addressable <c>{bindingId}@t{n}</c> key of the
+/// prior compose output to retract; the server appends a NEW superseding <c>compose</c>
+/// <see cref="SessionOutput"/> (ADR-040 "corrections are new entries referencing the superseded
+/// key") so the retraction is ledger-durable, NOT a client-only DOM undo (HANDOFF §1 item 5).
+/// </summary>
+public sealed record ComposeSupersedeRequest(string SupersedesRef);
+
+/// <summary>
+/// Response for the FR-17 supersession seam. <see cref="Key"/> is the addressable key the client
+/// re-materializes the CURRENT ledger state from (the newly-written retraction entry on
+/// <see cref="OutcomeSuperseded"/>; the existing head on <see cref="OutcomeNoop"/> — an already-
+/// superseded ref is an idempotent no-op). <see cref="SupersedesRef"/> echoes the retracted key
+/// for provenance.
+/// </summary>
+public sealed record ComposeSupersedeResponse(string Key, string SupersedesRef, string Outcome)
+{
+    /// <summary>A new superseding compose output was written to the ledger.</summary>
+    public const string OutcomeSuperseded = "superseded";
+
+    /// <summary>The referenced entry was already superseded (or is itself a retraction) — idempotent no-op.</summary>
+    public const string OutcomeNoop = "noop";
+}
+
+/// <summary>
 /// A replayable audit record of one text-turn's tool-call chain (ADR-040 ToolChain entry).
 ///
 /// NFR-07 / ADR-015 BINDING: carries identifiers, filters, counts, durations, and

@@ -74,6 +74,23 @@
 | 079 | **G-R2-D verification (CI + publish-size + seam-fork)** ✅ 2026-07-10 **PASS** (main session; eval gate SUCCESS on PR #624 [+ 071 family audit: all 6 in-scope families joined]; publish 46.57 MB ≤60 + below r1 close [070 harness]; seam-fork clean w/ negative-control probe [072]; 073-076 closed w/ evidence notes; the one CI red = pre-existing env defect #621, not a gate dimension, tracked not swallowed; record notes/079-g-r2-d-gate-record.md) | ✅ | sonnet | ❌ | Wave H | **GATE** |
 | 090 | Project wrap-up (/test-diet + /defer) | 🔲 | sonnet | ❌ | ALL | close |
 
+### Remediation wave (post-E2E-audit, 2026-07-10 — operator-directed: audit findings F-1..F-4 + F-7..F-11 are r2 deliverables, no deferral; report `notes/e2e-completion-audit-2026-07-10.md`)
+
+| # | Finding | Status | Summary |
+|---|---|---|---|
+| R-F1 | Interactive envelope render (053 completion) | ✅ | Bind relocated into PlaybookChatContextProvider (one bind/turn); envelope consumed via ContextEnvelopeRenderer on interactive; legacy appends retired from binder-present path (kept as parity-pinned no-binder fallback); BusinessSliceDeterminismContractTests UNEDITED green; design `notes/f1-f2-f7-envelope-convergence-design.md` |
+| R-F2 | User-memory recall | ✅ | `ToUserPromptFragmentAsync` (shared budgeted core, mirror-guarded, 250-token cap under 300 budget) + `ICallerSystemUserResolver` (oid→systemuserid) + User.Fragment rendered in stable-prefix; +2 user-recall eval cases (GoldenUtteranceEval trait); zero-memory → byte-identical pin |
+| R-F3 | Job-aware completion live wiring | ✅ | `ComposeForRoutedOutput` detects embedded `completionState` → `ComposeJobAware` (aggregate-derived status, NFR-12 live at the router choke-point); 3 seam tests; RESIDUAL: no production capability emits job states through the router yet (Compose returns them on its own REST path) — filing candidate + compose-r2 handoff |
+| R-F4 | Next-step chips activation | ✅ | ConversationPane wires `onNextStep` → existing consumer-dispatch core (hoisted `dispatchBinding`); 4 host tests |
+| R-F5 | CI TRX-overwrite (systemic) | ✅ `fe1d1cfab` | LogFilePrefix per-project TRX + multi-TRX pass-2 verdict; classifier now sees ALL projects |
+| R-F6 | Pre-existing deterministic failures | ✅ | Canvas guard deleted (dead, subject removed r1) `485f6a65a`; StableId Consumer06/07 retargeted to Binding-table contract; ExecuteAnalysis ×2 = TEST DEBT (UAC filter genuinely applied — no security bug; PartialStorage = retired contract, test deleted per ADR-038); **#621 root-caused: fixture artifact, NOT env defect** (mock returned session after archive; production 404 mappings correct) — recommend close |
+| R-F7 | Live budget measurement | ✅ | Real conversation/record-memory token counts into `EnvelopeBudget.Evaluate` (same estimator as eval tests); warn-never-500 pinned via logger capture |
+| R-F8 | Gate ambiguity/content-safety signal | ✅ (+🔔) | `SafetyPerimeterDegraded` probe wired + anti-shim tests (degraded+tier-2→ConfirmDialog; tier-1 stays fail-open); ContentSafetyFlagged honestly unfed (injection = hard block upstream, no flag-and-proceed verdict exists). **🔔 ESCALATION: `SafetyPipelineMiddleware` (PromptShield scan) NOT wired into live chat since r1 `26fde1f68` — probe has no live producer; operator decision pending (re-activate in-wave vs security project); trace `notes/044-signal-flow-trace.md`** |
+| R-F9 | EntityInfoWidget TZ guard | ✅ | Hermetic America/New_York-pinned test, revert-PROVEN (fix removed → fails); sanity assertion against toothless-on-UTC |
+| R-F10 | Publish harness CVE gate | ✅ | Scan-failure→ESCALATE (never silently clean); new-vs-pre-existing HIGH/CRITICAL diff vs baseline (new→HARD STOP, pre-existing→WARN); negative-controls proven |
+| R-F11 | Minor tail | ✅ | AuditLog flake ROOT-FIXED (fire-and-forget vs ThreadPool saturation; TCS-on-mock-callback replaces banned Task.Delay — closes #618); stale gate comment rewritten; dead AiModule comment removed |
+| R-ADR | ArchTest violations (5, all pre-r2 debt) | ✅ 3 fixed / 2 handoff | #2 IHttpClientFactory migration; #4 Options rule record-exclusion + negative control; #5 EndpointResponseCache path-A exemption (test + ADR-009 doc). ADR-007 Graph isolation + ADR-010 interface ceiling → paste-ready charters `notes/adr-archtest-handoff-charters.md` (CI/hygiene project) |
+
 ---
 
 ## Parallel Execution Groups

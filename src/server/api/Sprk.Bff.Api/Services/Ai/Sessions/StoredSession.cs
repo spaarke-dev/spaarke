@@ -205,4 +205,17 @@ public class StoredSession
     /// <summary>R2 defined-terms tracking (design.md §8 / spec FR-11) — session-scoped detected terms.</summary>
     [JsonPropertyName("definedTermsTracking")]
     public List<DefinedTerm> DefinedTermsTracking { get; set; } = [];
+
+    /// <summary>
+    /// R2 session-scoped active-document pointer (spaarkeai-compose-r2 task 113) — the "which
+    /// document is the user acting on?" fact for the chat↔Compose bridge. Stored as the domain
+    /// record directly (same reuse rationale as <see cref="AnchoredAnnotations"/> — no parallel
+    /// Stored* shape where the record round-trips cleanly, Component Justification §11). Null when
+    /// no document is active or the Cosmos document pre-dates this field (additive per ADR-015;
+    /// partition key unchanged). Carried through the warm tier so the active document is NOT
+    /// dropped on a Redis eviction / cold restore (the ADR-040 document-reference-survival MUST).
+    /// Tier 3 user-owned / GDPR-erased with the session document.
+    /// </summary>
+    [JsonPropertyName("activeDocument")]
+    public ActiveDocumentIdentity? ActiveDocument { get; set; }
 }

@@ -743,6 +743,16 @@ public static class AnalysisServicesModule
                            Sprk.Bff.Api.Services.Ai.Context.CallerContactResolver>();
         Console.WriteLine("✓ ICallerContactResolver registered (task 055 FR-B-06; claims→contact, feeds ContextEnvelope User slice)");
 
+        // ICallerSystemUserResolver — deterministic claims→Dataverse-systemuser resolver (F-2 user-memory
+        // recall). Keys the User slice's user-memory RECALL fragment (systemuserid, operator ruling
+        // 2026-07-09 (c)). Mirrors ICallerContactResolver exactly (same IDataverseService facade, same
+        // one-hop oid cross-reference) and is consumed ONLY by ContextBinder in THIS compound-ON block —
+        // same transitively-conditional rationale as ICallerContactResolver; ContextBinder also
+        // self-defaults to NullCallerSystemUserResolver internally, so omitting it stays safe.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver,
+                           Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
+        Console.WriteLine("✓ ICallerSystemUserResolver registered (F-2 user-memory recall; claims→systemuser, keys the User slice recall fragment)");
+
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.IContextBinder,
                            Sprk.Bff.Api.Services.Ai.Context.ContextBinder>();
         Console.WriteLine("✓ ContextBinder registered (ADR-043 E-10 input-resolution seam; ContextEnvelope + operand; task-038 fingerprint writer)");

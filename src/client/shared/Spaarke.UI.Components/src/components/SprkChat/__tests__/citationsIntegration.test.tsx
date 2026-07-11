@@ -365,7 +365,10 @@ describe('SprkChat - Citations Integration', () => {
       expect(nativeTextarea).not.toBeDisabled();
     });
 
-    const sseEvents = [{ type: 'token', content: 'A plain, uncited answer.' }, { type: 'done', content: null }];
+    const sseEvents = [
+      { type: 'token', content: 'A plain, uncited answer.' },
+      { type: 'done', content: null },
+    ];
     pendingSseResponses.push(createSseStreamResponse(sseEvents));
 
     const textarea = screen.getByTestId('chat-input-textarea');

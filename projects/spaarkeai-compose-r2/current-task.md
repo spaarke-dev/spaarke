@@ -1,8 +1,46 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-09 (by context-handoff — PRE-COMPACT; working tree CLEAN, all committed, no agents running; branch 1 ahead of origin/master = tracking commit `17bdc8d09`)
+> **Last Updated**: 2026-07-10 (by context-handoff — POST merge-to-master + coordinated redeploy; working tree CLEAN, all committed + pushed, no agents running; HEAD `c67b130ea`, branch 4 ahead / 0 behind master)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+
+---
+
+## Quick Recovery (READ THIS FIRST) — 2026-07-10 (Phase 9b UAT remediation)
+
+| Field | Value |
+|-------|-------|
+| **Project** | spaarkeai-compose-r2 — AI-native legal drafting workspace |
+| **Milestone** | Owner smoke test (2026-07-10) found 7 real defects (the earlier "AI complete E2E" was unit-green/user-broken). **Phase 9b UAT remediation COMPLETE + DEPLOYED**: 110/111/112/113 fixes + 114 deploy; merged to master (PR #627, master `69255dd4f`); BFF + SpaarkeAi live on spaarkedev1. |
+| **Status** | 110 ✅ · 112 ✅ · 111 ✅ · 113 ✅ · 114 ✅ deployed (BFF 46.59 MB hash-verified+healthy; `sprk_spaarkeai` published; `/api/compose/active-document` route live). Owner also confirmed Search-for-Document (011) works. |
+| **Next Action** | **Owner re-UAT** via `notes/UAT-r2-reuat-checklist.md` — re-test all 7 items (allow ≤5 min for BFF cache; bounce BFF once if a fix seems inactive >5 min). Then remaining OPEN: task **034** (undo/replace scope decision), 056 webhook, 082 flagship, core-gated 063/064/071, then 090 wrap-up. |
+
+### Phase 9b remediation (this session) — see `notes/uat-r2-defect-triage-2026-07-10.md`
+- Root-caused the 7 UAT items → 5 themes via 3 parallel investigations. Owner chose the **unified active-document identity** for R4. conflict-check: shared handler/session co-owned with redesign-r2, **no live overlap**.
+- 110 (server: sessionId optional on transient-create) · 111 (client: AI-only inline popup + right-click/point trigger + B/I/U/S/Link ported to top toolbar) · 112 (client: per-action prose formatter + workspace-channel suppress) · 113 (BFF+client: additive session-scoped `ActiveDocument` on ChatSession; server-side mount resolution + `layoutName='Compose'` default; Compose uploads register with the chat session).
+- 113 out-of-list edits (justified): `StoredSession.cs`/`ChatSessionManager.cs` (warm-tier restore of ActiveDocument, ADR-040), `composeActionBridge.ts` (cross-pane seam vs frozen mount plumbing). ADR-013 register-endpoint warning accepted **Path A**. `OutputRouter.cs`/`Binding.cs` untouched.
+
+### Prior milestone (still true)
+- Merged to master (PR **#626**, master `14dd8ee3c`) + BFF & code page deployed. Phase-9 E2E remediation (100-104), 048/055/072/081/083 all landed. AI catalog deployed (5 actions + 5 bindings + Compose disposition 100000006).
+
+### What's DONE (this session — all committed on master via #626)
+- **Phase-9 E2E remediation COMPLETE**: 100 create-on-save, 102 memory-resume, 104 three-pane, 101 dispatch, 103 Word-shuttle — each with a WebApplicationFactory/real-bus forcing test.
+- **055** deterministic push/save · **048** AI-toolbar activation wiring · **072** Doc Q&A (✅◐ live-answer deploy-pending) · **081** NFR verify · **083** Path-A sign-off.
+- **AI catalog DEPLOYED** to spaarkedev1: 5 `sprk_analysisaction` + 5 `sprk_playbookconsumer` rows + **added Compose disposition optionset value 100000006** (was missing). Fixed 2 drifted deploy scripts (`Seed-PlaybookConsumers.ps1` `sprk_Action` casing; documented `Deploy-AnalysisAction.ps1` staleness).
+- **Merged to master + coordinated re-merge** of core PRs #622/#624/#625 (clean; heads-ups verified zero compose impact). **Redeployed BFF + code page**; `/healthz` Healthy; AI routes 401 (live).
+
+### Files/handoffs of note
+- `notes/HANDOFF-to-core-deploy-done-flip-rows-2026-07-10.md` — **instructions given to redesign-r2** (flip 3 retired `sprk_analysistool` rows; deploy done, flip at convenience).
+- `notes/HANDOFF-from-core-deploy-coordination-2026-07-10.md` — core's plan (we own deploy; core flips rows).
+- `notes/catalog-deploy-tooling-debt-and-resume.md` — the 3 deploy-script drift findings + optionset fix.
+- `notes/e2e-gap-register.md` — the original 5-slice audit (source of truth for Phase-9).
+
+### Critical context / OPEN items (for whoever continues)
+1. **Owner smoke test pending** — is the AI toolbar actually enabled + does Explain dispatch on the live env? If buttons stay disabled >5 min, bounce the BFF App Service (forces fresh 5-min catalog cache read).
+2. **Core action pending** — redesign-r2 to deactivate 3 retired rows (coordinated, non-urgent; /healthz already Healthy).
+3. **OWNER DECISION still open — task 034** (FR-17 undo/replace scope: full durable-retract Path B vs replace-only). The one remaining non-deploy FEATURE; mechanism (E-30 coded-workflow seam + 033 ledger supersession) is in place — buildable once owner picks scope. Core confirmed 034 is NOT E-30-gated (see `REPLY-to-compose-r2-e20-e30-forkc.md` §2).
+4. **Remaining gated**: 056 (webhook KV config → instant Word return), 082 (flagship browser gate), core-blocked 063/064/071, then 090 wrap-up.
+5. **Shared-env**: #621 (session-cleanup GET-after-DELETE 500) is a shared pre-existing flake — do NOT diagnose as compose's.
 
 ---
 
@@ -56,6 +94,7 @@
 Owner caught that deployed Compose only loads files — no AI function is usable. Root cause = THREE linked gaps: (1) 047 catalog not deployed; (2) the 5 compose bindings declared `sprk_surfaces` as result-destinations (assistant/context/workspace) not trigger-placement, so `capability-discovery?surface=compose` returned nothing; (3) NO activation wiring — `registerComposeAiToolbarAction` called only in a test.
 - ✅ **Gap 2 FIXED** (`fb...`/mirror) — additively added `compose` to the 5 bindings' surfaces in `infra/dataverse/sprk_playbookconsumer-rows.json`.
 - ✅ **Gap 3 FIXED — task 048** (`83dfd3067`) — `useComposeToolbarActivation` hook fetches `/api/ai/capabilities?surface=compose` on Compose mount → registers each bindingId onto the matching toolbar action (id===consumerType); wired at `composeEditor.registration.ts` (covers SpaarkeAi + LegalWorkspace); module-subscription re-render; 3/3 real-render forcing test; jest 82/82; Step 9.5 clean. **Closes 101 gap 2.2 code-side.**
+- ✅ **MERGED TO MASTER (PR #626, master `14dd8ee3c`) + REDEPLOYED (both projects live) 2026-07-10**. Coordinated with core: re-merged core PRs #622/#624/#625 (clean, heads-ups verified zero compose impact), merged compose→master, redeployed BFF + code page from the merged state. `/healthz` Healthy; compose AI routes live. **⏳ ACTION ON CORE**: deactivate the 3 retired `sprk_analysistool` rows (their `notes/075-legacy-workspace-tools-verdict.md`) — deploy done, flip at convenience. Handoff: `notes/HANDOFF-to-core-deploy-done-flip-rows-2026-07-10.md`.
 - ✅ **AI ACTIVATION DEPLOYED 2026-07-10 (freeze lifted)** — the "Compose has no AI" gap is CLOSED end-to-end. 5 actions + 5 bindings deployed (direct API, working around both drifted scripts); found+fixed a schema gap (added the Compose disposition optionset value 100000006 via InsertOptionValue); code page redeployed (048 activation wiring + 072 Q&A). **PENDING: owner UI smoke test** — open Compose → select clause → buttons enabled → click Explain → dispatches (allow ≤5 min for the BFF 5-min catalog cache TTL). Details: `notes/catalog-deploy-tooling-debt-and-resume.md`. 047 → ✅, 101 gap 2.2 → fully closed, 048 → ✅.
 - 🧊 **(historical) DEPLOY FREEZE 2026-07-10** — was lifted; the resume above completed.
 - ◐ **Gap 1 PARTIALLY DEPLOYED (then frozen)**: the **5 `sprk_analysisaction` rows ARE deployed** to spaarkedev1 (direct API upsert via scratchpad/deploy-compose-actions.ps1 — the mirror↔`Deploy-AnalysisAction.ps1` drift was a phantom: the real schema has NO action-type field, just actioncode/name/description/systemprompt/outputschemajson/temperature/inputschema; ids captured in git log). The **5 bindings are NOT deployed** — `Seed-PlaybookConsumers.ps1` is ALSO drifted (400 on 22/23 rows; 400=rejected so NO damage, existing rows intact, only insights-search no-op re-upserted). **RESUME PLAN (after freeze)**: bindings via a DIRECT API POST to sprk_playbookconsumer (schema now known: sprk_consumertype/consumercode/environment/name/priority/enabled/disposition/risk/capturemode/surfaces/tooldescription + `sprk_Action@odata.bind` lookup to the new action ids + resolve actionCode) — work around the drifted seed like I did the actions. Then verify capability-discovery?surface=compose returns 5 → redeploy code page (048 wiring) → user can click Explain/Draft/Compare. State: 5 orphan actions on dev (harmless, no binding routes to them yet).

@@ -102,6 +102,14 @@ public sealed class ActionRunner : IActionRunner
         }
 
         var prompt = BuildPrompt(action.SystemPrompt, inputs.Operand);
+        // D6 / PE-D8(b) (F-1/F-2/F-7 envelope-convergence task): render the bound envelope's grounding
+        // context into the dispatched capability's prompt — the SAME BoundInputs the dispatch path already
+        // binds (no second bind). Deterministic position: the stable-prefix additions (User + Business,
+        // now incl. user memory per D3) then the host record-memory fragment, ABOVE the instruction +
+        // operand section. A dispatch with NO host/memory renders every part empty → the prompt is
+        // byte-IDENTICAL to pre-change (the seam regression pin); dispatch prompts carry no date suffix
+        // today, so none is added (match what exists, don't invent).
+        prompt = ComposeGroundingContext(prompt, inputs);
         var jsonSchema = BinaryData.FromString(action.OutputSchemaJson);
         var schemaName = SanitizeSchemaName(action.Name);
         var temperature = (float?)action.Temperature;
@@ -149,6 +157,32 @@ public sealed class ActionRunner : IActionRunner
     ///   instruction sections / the flat prompt, with no operand section.</item>
     /// </list>
     /// </summary>
+    /// <summary>
+    /// D6 / PE-D8(b): prepends the bound envelope's rendered grounding context to the executor prompt —
+    /// the stable-prefix additions (<see cref="ContextEnvelopeRenderer.RenderStablePrefixAdditions"/>: User
+    /// + Business fragments) then the host record-memory prompt fragment (<see cref="BoundInputs.RecordMemoryFragment"/>).
+    /// Byte-IDENTICAL when both are empty (returns <paramref name="prompt"/> unchanged) — the no-host/no-memory
+    /// dispatch regression pin, and the non-regression guarantee for the pre-E-10 document overload (which
+    /// binds an empty envelope with no record memory). NFR-07: this composes prompt text only; it logs nothing.
+    /// </summary>
+    private static string ComposeGroundingContext(string prompt, BoundInputs inputs)
+    {
+        var parts = new List<string>(2);
+
+        var stablePrefix = ContextEnvelopeRenderer.RenderStablePrefixAdditions(inputs.Context);
+        if (!string.IsNullOrEmpty(stablePrefix))
+        {
+            parts.Add(stablePrefix);
+        }
+
+        if (!string.IsNullOrEmpty(inputs.RecordMemoryFragment))
+        {
+            parts.Add(inputs.RecordMemoryFragment!);
+        }
+
+        return parts.Count == 0 ? prompt : string.Join("\n\n", parts) + "\n\n" + prompt;
+    }
+
     private string BuildPrompt(string systemPrompt, ResolvedOperand operand) => operand.Channel switch
     {
         OperandChannel.Document => BuildDocumentPrompt(systemPrompt, RequireDocument(operand)),

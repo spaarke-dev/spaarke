@@ -311,6 +311,7 @@ public class SprkChatAgentFactory
         string? latestUserMessage = null,
         IReadOnlyList<string>? previousTurnToolNames = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
+        IReadOnlyList<SessionOutput>? ledgerOutputs = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -326,6 +327,9 @@ public class SprkChatAgentFactory
         // Load playbook context (system prompt, document summary, metadata).
         // R5 task 033: forward uploadedFiles so the provider surfaces them on the
         // returned ChatContext.UploadedFiles for the manifest-suffix step below.
+        // F-1/F-2/F-7 envelope-convergence (D1): forward the session id + ledger outputs so the provider
+        // performs the ONE per-turn ContextEnvelope bind (fingerprint write) and consumes the bound envelope
+        // for host-identity / user-memory / record-memory. The endpoint's separate bind is retired.
         var context = await contextProvider.GetContextAsync(
             documentId,
             tenantId,
@@ -333,6 +337,8 @@ public class SprkChatAgentFactory
             hostContext,
             additionalDocumentIds,
             uploadedFiles,
+            sessionId,
+            ledgerOutputs,
             cancellationToken);
 
         // === Document context injection (R2-011, R2-012) ===
@@ -662,21 +668,35 @@ public class SprkChatAgentFactory
         // === FR-P2-02 — the ONE confirmation gate at the loop's tool-invocation boundary =
         // Every projected typed-handler tool whose catalog row DECLARES a side-effecting
         // class (write / communicate per PendingPlanManager.RequiresConfirmation — ADR-039:
-        // by declaration, never tool-name lists) is wrapped in SideEffectGateAIFunction:
-        // when the LLM invokes it, the invocation SUSPENDS into the unified pending store
-        // (ledger Gate marker BEFORE any render, ADR-040) instead of executing. This is the
-        // NFR-03 last line — adversarial instructions in uploaded-document text or tool
-        // results can at worst produce a suspended, user-visible confirmation, never an
-        // executed side effect. Landed by task 037 (FR-P2-08) after the eval suite's
-        // injection family exposed that the interim pre-pass gate deleted in task 034 had
-        // no loop-native replacement for typed-handler tools. NFR-04: the wrapper preserves
-        // name/description/schema verbatim, so the projected block is byte-identical.
+        // by declaration, never tool-name lists) is wrapped in SideEffectGateAIFunction.
+        // When the LLM invokes a wrapped tool, the wrapper does NOT unconditionally suspend
+        // (that was the pre-task-044 semantics). Instead it consults the ConfirmationPolicyEngine
+        // via SideEffectGateAIFunction.EvaluatePolicy → the deterministic ConfirmationPolicyEngine
+        // (the single live decider) — which, from the catalog/Binding risk data, returns one
+        // GateOutcome: Execute / ExecuteWithUndo (auto-execute a tier-1/reversible side effect,
+        // e.g. memory.write), Elicit (ask for missing args), ConfirmDialog (suspend into the
+        // unified pending store — ledger Gate marker BEFORE any render, ADR-040 — for a
+        // user-visible confirmation), or HonestBlock (fail-closed). This is the NFR-03 last line —
+        // adversarial instructions in uploaded-document text or tool results can at worst be
+        // routed to a suspended, user-visible confirmation or blocked, never silently executing
+        // a high-risk side effect the policy would gate. Gate landed by task 037
+        // (FR-P2-08); the always-suspend outcome was replaced by the policy-engine decision in
+        // task 044. NFR-04: the wrapper preserves name/description/schema verbatim, so the
+        // projected block is byte-identical.
         for (var i = 0; i < tools.Count; i++)
         {
             if (tools[i] is ToolHandlerToAIFunctionAdapter adapter
                 && adapter.Tool.SideEffectClass is { } declaredClass
                 && PendingPlanManager.RequiresConfirmation(declaredClass))
             {
+                // dispatchUncertaintyProbe + safetyPerimeterDegradedProbe are left null (their
+                // defaults): the gate HONORS a real signal when one is threaded, but no live producer
+                // reaches this gate today. Ambiguity is covered by layer 1 (the agent asking). The
+                // real safety-perimeter fail-open verdict lives in SafetyPipelineMiddleware, which is
+                // NOT wired into WrapWithMiddleware on the live chat path (dropped by the R1
+                // dispatcher-deletion, commit 26fde1f68) — activating that perimeter is a
+                // security-posture change escalated for sign-off (F-8), so the probe stays null and
+                // the overlay honestly stays unfired here rather than being hardcoded.
                 tools[i] = new SideEffectGateAIFunction(
                     adapter, declaredClass, _serviceProvider, tenantId, sessionId, _logger, sseWriter);
             }
@@ -866,13 +886,18 @@ public class SprkChatAgentFactory
         // available server-side (JWT claims carry no tz), so the line is UTC + an explicit
         // near-midnight ambiguity instruction.
         var timeProvider = scope.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
+        // F-1 envelope-convergence (D1): when the provider bound a per-turn envelope, RENDER the
+        // environment (current-date) SUFFIX from that envelope's Workspace slice via the renderer — the
+        // interactive prompt now CONSUMES the envelope for the date instead of calling the producer here.
+        // Byte-identical: RenderEnvironmentSuffix returns the Workspace fragment, itself produced by the
+        // SAME EnvironmentFactsProducer at bind time (day-granular, so stable across the sub-second gap).
+        // Falls back to the direct producer call on the no-binder path (compound-OFF / legacy tests).
+        var dateSuffix = context.BoundEnvelope is not null
+            ? Context.ContextEnvelopeRenderer.RenderEnvironmentSuffix(context.BoundEnvelope)
+            : Context.EnvironmentFactsProducer.BuildCurrentDateDirective(timeProvider.GetUtcNow());
         context = context with
         {
-            // Task 053 (FR-B-04): the current-date directive is now produced by the SHARED
-            // EnvironmentFactsProducer (ContextSliceProducers) — the ONE source the Context Binder's
-            // Workspace slice also uses. Byte-identical to the R1 factory-local build.
-            SystemPrompt = context.SystemPrompt +
-                Context.EnvironmentFactsProducer.BuildCurrentDateDirective(timeProvider.GetUtcNow()),
+            SystemPrompt = context.SystemPrompt + dateSuffix,
         };
         // === End R5-A date context =======================================================
 

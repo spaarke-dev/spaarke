@@ -143,10 +143,7 @@ export {
   useComposeActionBridge,
   useRegisterComposeActionDispatcher,
 } from './context/composeActionBridge';
-export type {
-  ComposeActionBridgeValue,
-  ComposeActionBridgeProviderProps,
-} from './context/composeActionBridge';
+export type { ComposeActionBridgeValue, ComposeActionBridgeProviderProps } from './context/composeActionBridge';
 
 // -------------------------------------------------------------------------
 // Data contracts (Phase 4 task 041 — promoted from SpaarkeAi in task 091)

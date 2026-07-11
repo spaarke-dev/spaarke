@@ -71,7 +71,11 @@ describe('anchoredAnnotationsToDocxAnnotations (gap 3.1 mapping)', () => {
     ]);
 
     expect(result).toHaveLength(3);
-    expect(result[0]).toMatchObject({ kind: DocxTrackChangeKind.Comment, commentText: 'please revise', targetText: 'the target clause' });
+    expect(result[0]).toMatchObject({
+      kind: DocxTrackChangeKind.Comment,
+      commentText: 'please revise',
+      targetText: 'the target clause',
+    });
     expect(result[1]).toMatchObject({ kind: DocxTrackChangeKind.Insertion, newText: 'inserted text' });
     expect(result[2]).toMatchObject({ kind: DocxTrackChangeKind.Deletion, targetText: 'the target clause' });
   });
@@ -97,7 +101,9 @@ describe('anchoredAnnotationsToPriorAnchors (gap 3.5 mapping)', () => {
 describe('useComposePushAnnotations (gap 3.1)', () => {
   it('POSTs push-annotations with driveId/tenantId/ifMatch/annotations', async () => {
     const fetchMock = okJson({});
-    const { result } = renderHook(() => useComposePushAnnotations({ bffBaseUrl: 'https://bff', fetchOverride: fetchMock }));
+    const { result } = renderHook(() =>
+      useComposePushAnnotations({ bffBaseUrl: 'https://bff', fetchOverride: fetchMock })
+    );
 
     await act(async () => {
       await result.current.push({
@@ -105,7 +111,15 @@ describe('useComposePushAnnotations (gap 3.1)', () => {
         driveId: 'b!drive-1',
         tenantId: 't1',
         ifMatch: '"etag-1"',
-        annotations: [{ kind: DocxTrackChangeKind.Comment, targetText: 'x', commentText: 'y', author: 'A', date: '2026-07-10T00:00:00Z' }],
+        annotations: [
+          {
+            kind: DocxTrackChangeKind.Comment,
+            targetText: 'x',
+            commentText: 'y',
+            author: 'A',
+            date: '2026-07-10T00:00:00Z',
+          },
+        ],
       });
     });
 
@@ -121,8 +135,16 @@ describe('useComposePushAnnotations (gap 3.1)', () => {
 
 describe('useComposeCheckChanges (poll half of gap 3.5)', () => {
   it('POSTs check-changes with the containerId and returns the changed flag', async () => {
-    const fetchMock = okJson({ documentSpeId: 'spe-1', containerId: 'b!drive-1', changed: true, deleted: false, correlationId: 'c' });
-    const { result } = renderHook(() => useComposeCheckChanges({ bffBaseUrl: 'https://bff', fetchOverride: fetchMock }));
+    const fetchMock = okJson({
+      documentSpeId: 'spe-1',
+      containerId: 'b!drive-1',
+      changed: true,
+      deleted: false,
+      correlationId: 'c',
+    });
+    const { result } = renderHook(() =>
+      useComposeCheckChanges({ bffBaseUrl: 'https://bff', fetchOverride: fetchMock })
+    );
 
     let changed = false;
     await act(async () => {
@@ -142,7 +164,9 @@ describe('useComposeCheckChanges (poll half of gap 3.5)', () => {
 describe('useComposePullAnnotations (gap 3.4)', () => {
   it('POSTs pull-annotations and returns comments + revisions', async () => {
     const fetchMock = okJson({ documentSpeId: 'spe-1', comments: [{}], revisions: [{}, {}], correlationId: 'c' });
-    const { result } = renderHook(() => useComposePullAnnotations({ bffBaseUrl: 'https://bff', fetchOverride: fetchMock }));
+    const { result } = renderHook(() =>
+      useComposePullAnnotations({ bffBaseUrl: 'https://bff', fetchOverride: fetchMock })
+    );
 
     let count = 0;
     await act(async () => {
@@ -175,7 +199,12 @@ describe('ComposeToolbar — Push to Word action (gap 3.1)', () => {
 
   it('disables the button when there is nothing to push', () => {
     renderTb(
-      <ComposeToolbar documentId="spe-1" bffBaseUrl="https://bff" onPushToWordRequested={jest.fn()} canPushToWord={false} />
+      <ComposeToolbar
+        documentId="spe-1"
+        bffBaseUrl="https://bff"
+        onPushToWordRequested={jest.fn()}
+        canPushToWord={false}
+      />
     );
     expect(screen.getByTestId('compose-toolbar-push-to-word')).toBeDisabled();
   });
