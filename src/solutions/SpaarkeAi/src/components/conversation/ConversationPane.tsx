@@ -85,6 +85,16 @@ export {
 } from "./summarizeRouting";
 export type { SummarizeRouteDecision, SummarizeIntentInputs } from "./summarizeRouting";
 
+/**
+ * DEF-09: the CONFIRMATION-only Assistant line for a compose EDIT action. The
+ * alternative itself materializes as an inline redline IN the Compose document
+ * (accept/reject there) — the Assistant must NOT restate the proposed text (that
+ * would duplicate the redline and reintroduce the "renders as a chat message, not
+ * a redline" defect). Informational compose actions keep their full grounded prose.
+ */
+export const COMPOSE_EDIT_CONFIRMATION =
+  'Drafted an alternative — see the pending redline in the document; accept or reject it there.';
+
 export function ConversationPane(): React.JSX.Element {
   const styles = useConversationPaneLayoutStyles();
 
@@ -196,8 +206,13 @@ export function ConversationPane(): React.JSX.Element {
   // Uses the ledger READ endpoint (no new route) + an EXISTING discriminant
   // (zero new PaneEventBus discriminants — ADR-030).
   const emitComposeApplyLeg = React.useCallback(
-    async (bindingId: string): Promise<string | null> => {
-      const sessionId = getSessionId();
+    async (bindingId: string, sessionIdOverride?: string): Promise<string | null> => {
+      // DEF-09: for a compose EDIT action the ledger write landed in the editor's
+      // DOCUMENT session, so the apply-leg READ + the Flow-5 event MUST use that same
+      // session (not the chat session) — otherwise the ledgerRef resolves to null and
+      // no inline redline appears. Informational actions omit it (chat session; they
+      // resolve no compose output anyway → null → no emit).
+      const sessionId = sessionIdOverride ?? getSessionId();
       if (!sessionId || !bffBaseUrl) return null;
       try {
         const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/compose-outputs`;
@@ -237,12 +252,28 @@ export function ConversationPane(): React.JSX.Element {
   const { trackAppliedEdit, undo: undoEdit, tryAnother: tryAnotherEdit } = supersession;
 
   const dispatchComposeAction = React.useCallback(
-    (request: ComposeActionRequest): Promise<DispatchConsumerResult> =>
-      actionQueue.enqueue(request).then((dispatched) => {
-        if (dispatched.result !== undefined && dispatched.result !== null) {
-          // UAT-R3 defect #3b (task 112): try the 5 Compose action shapes
-          // first (grounded prose); fall back to the general Event-path
-          // formatter (which still degrades genuinely unknown shapes to the
+    (request: ComposeActionRequest): Promise<DispatchConsumerResult> => {
+      // DEF-09: an editor-materializing compose EDIT action (Draft alternative) carries
+      // the Compose editor's DOCUMENT session id. Route the dispatch to THAT session
+      // (via args.sessionIdOverride) so the `compose` SessionOutput lands where
+      // ComposeWorkspace reads compose-outputs to materialize the inline redline — the
+      // WRITE and the redline-materialize READ must coincide. Informational actions omit
+      // it (chat session dispatch + Assistant-rendered prose), unchanged.
+      const documentSessionId = request.documentSessionId;
+      const isEditAction = typeof documentSessionId === 'string' && documentSessionId.length > 0;
+      const enqueueRequest: ComposeActionRequest = isEditAction
+        ? { ...request, args: { ...(request.args ?? {}), sessionIdOverride: documentSessionId } }
+        : request;
+
+      return actionQueue.enqueue(enqueueRequest).then((dispatched) => {
+        if (isEditAction) {
+          // DEF-09: confirmation ONLY — the alternative is the inline redline in the
+          // document, not a chat message. Do NOT restate the proposed text here.
+          injection.enqueue(makeLocalAssistantMessage(COMPOSE_EDIT_CONFIRMATION));
+        } else if (dispatched.result !== undefined && dispatched.result !== null) {
+          // UAT-R3 defect #3b (task 112): INFORMATIONAL actions render full grounded
+          // prose. Try the 5 Compose action shapes first; fall back to the general
+          // Event-path formatter (which still degrades genuinely unknown shapes to the
           // ```json``` fence — that last-resort branch is preserved verbatim).
           const formatted =
             formatComposeActionResultMarkdown(dispatched.result) ?? formatEventOutputMarkdown(dispatched.result);
@@ -250,14 +281,16 @@ export function ConversationPane(): React.JSX.Element {
         }
         // Draft-alternative apply leg (Flow 5) — references the ledger entry, never the payload.
         // Capture the applied compose ledger key so the FR-17 undo/replace affordance targets THIS
-        // edit (task 034). Informational actions resolve no compose output → no track → no affordance.
-        void emitComposeApplyLeg(request.bindingId).then((ledgerRef) => {
+        // edit (task 034). Reads the DOCUMENT session for an edit action (DEF-09) so the ledgerRef
+        // resolves. Informational actions resolve no compose output → no track → no affordance.
+        void emitComposeApplyLeg(request.bindingId, documentSessionId).then((ledgerRef) => {
           if (ledgerRef) {
-            trackAppliedEdit({ ledgerRef, bindingId: request.bindingId, request });
+            trackAppliedEdit({ ledgerRef, bindingId: request.bindingId, request, sessionId: documentSessionId });
           }
         });
         return dispatched;
-      }),
+      });
+    },
     // Depend on the memoized `trackAppliedEdit` (stable), not the whole `supersession` object (new
     // identity each render) — keeps dispatchComposeAction stable so the bridge registration + serial
     // queue don't re-register every render.

@@ -156,6 +156,17 @@ export type ComposeActionEnqueue = (request: {
   bindingId: string;
   /** Forwarded verbatim to `dispatchConsumer` as its second argument. */
   args?: DispatchConsumerArgs;
+  /**
+   * DEF-09: the editor's DOCUMENT session id, set ONLY for editor-materializing
+   * compose EDIT actions (`materializesInEditor`). Its presence tells the host
+   * (ConversationPane) to (a) route this dispatch to the DOCUMENT session — so its
+   * `compose` SessionOutput lands where `ComposeWorkspace` reads `compose-outputs`
+   * to materialize the inline redline — and (b) emit a CONFIRMATION-only Assistant
+   * line instead of the full proposed-text prose. Absent for informational actions
+   * (explain/compare/defined-terms/summarize-changes), which keep chat-session
+   * dispatch + Assistant-rendered prose.
+   */
+  documentSessionId?: string;
 }) => Promise<DispatchConsumerResult>;
 
 // ---------------------------------------------------------------------------
@@ -192,6 +203,17 @@ export interface ComposeAiToolbarAction {
   readonly bindingId: string;
   /** `'primary'` renders as an always-visible button; `'overflow'` lands in "More actions…". */
   readonly placement: 'primary' | 'overflow';
+  /**
+   * DEF-09: `true` for a compose-DISPOSITION EDIT action whose result materializes
+   * as an inline redline IN the Compose document (Draft alternative today; a future
+   * clause-insertion action later). Drives two host behaviors when routed through the
+   * Assistant queue: the dispatch targets the editor's DOCUMENT session (so the write
+   * and the redline-materialize read coincide), and the Assistant shows a CONFIRMATION
+   * only — never the proposed-text prose (that lives in the redline). Omitted/false for
+   * the four INFORMATIONAL actions (explain/compare/summarize-changes/defined-terms),
+   * which keep chat-session dispatch + Assistant-rendered prose.
+   */
+  readonly materializesInEditor?: boolean;
 }
 
 /**
@@ -254,6 +276,9 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     tooltip: DRAFT_TOOLTIP,
     bindingId: '',
     placement: 'primary',
+    // DEF-09: the ONLY compose-disposition EDIT action — its alternative renders as an
+    // inline redline in the document, so route to the DOCUMENT session + confirm-only.
+    materializesInEditor: true,
   },
   {
     // gap 2.3 — the return-from-Word summarization trigger (FR-10). Overflow
@@ -495,7 +520,17 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
       // dispatcher (standalone mount, no concurrent queue to coordinate with).
       if (enqueueComposeAction) {
         const requestId = `${action.id}#${(clickSeqRef.current += 1)}`;
-        void enqueueComposeAction({ id: requestId, bindingId: action.bindingId, args }).catch(swallow);
+        // DEF-09: for a compose-disposition EDIT action, thread the editor's DOCUMENT
+        // session so the host routes the dispatch there (write ⇄ redline-read coincide)
+        // and shows a confirmation-only line. Informational actions omit it (chat session
+        // + Assistant prose). The standalone `dispatchConsumer` fallback below already
+        // targets the document session via its own `getSessionId: () => sessionId`.
+        void enqueueComposeAction({
+          id: requestId,
+          bindingId: action.bindingId,
+          args,
+          ...(action.materializesInEditor ? { documentSessionId: sessionId } : {}),
+        }).catch(swallow);
       } else {
         void dispatchConsumer(action.bindingId, args).catch(swallow);
       }
