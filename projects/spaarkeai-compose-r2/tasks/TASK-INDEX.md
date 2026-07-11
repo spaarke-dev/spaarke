@@ -13,14 +13,14 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | ID | Title | Phase | Gate | Deps | Status | Rigor | Model | Effort |
 |----|-------|-------|------|------|--------|-------|-------|--------|
 | 000 | Spike 0 — validate session-dispatch path (throwaway compose Binding) | 0 Spikes | 🟢 | none | ✅ | STANDARD | opus | high |
-| 001 | Spike 1 — Action row + structured OutputSchemaJson reliability | 0 Spikes | 🟢 | 000 | 🔲 | STANDARD | sonnet | high |
+| 001 | Spike 1 — Action row + structured OutputSchemaJson reliability | 0 Spikes | 🟢 | 000 | ✅ CLOSED (purpose satisfied — Phase 4 040-047 authored+deployed 5 real rows; pattern proven by live dispatch, throwaway note moot) | STANDARD | sonnet | high |
 | 002 | Spike 2 — edit validator match_mode + ambiguity errors | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 003 | Spike 3 — atomic edit batch + rollback | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 004 | Spike 4 — semantic appendix hallucination delta | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 005 | Spike 5 — Open XML write w:ins+w:comment → Word for Web | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
 | 006 | Spike 6 — reverse round-trip (Word edit → webhook → read); tune re-anchor bands | 0 Spikes | 🟢 | 005 | ✅ | STANDARD | sonnet | high |
 | 007 | Spike 7 — SPE checkout vs Word-for-Web open collision UX | 0 Spikes | 🟢 | none | ✅ | STANDARD | sonnet | high |
-| 008 | Spike 8 — docx-benchmark harness baseline | 0 Spikes | 🟢 | 005 | 🔲 | STANDARD | sonnet | high |
+| 008 | Spike 8 — docx-benchmark harness baseline | 0 Spikes | 🟢 | 005 | ⏭️ CLOSED-not-built (purpose overtaken — Word shuttle 050-054 shipped; blocks nothing; optional AGPL external regression harness = post-project nice-to-have, NFR-06 met by existing eval) | STANDARD | sonnet | high |
 | 010 | FR-01 wire 1a "Browse / open file" → transient mount | 1 Entry | 🟢 | 000 | ✅ | FULL | sonnet | high |
 | 011 | FR-02 wire 1a "Search for Document" → reuse 1c load path | 1 Entry | 🟢 | none | ✅ | FULL | sonnet | high |
 | 012 | FR-03 1b upload → transient mount (flip send_workspace_artifact + feed bytes) | 1 Entry | 🟢 | none | ✅ | FULL | opus | high |
@@ -39,7 +39,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 031 | FR-15 custom ProseMirror marks (insertion/deletion/commentAnchor) | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
 | 032 | FR-18 serial action queueing in ConversationPane | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
 | 033 | FR-16 pending track-change materialization from ledger (compose disposition) | 3 Inline | 🟢 | 031,016 | ✅ | FULL | opus | high |
-| 034 | FR-17 undo/replace via ledger supersession | 3 Inline | 🟢 | 033 | 🔲 | FULL | opus | high |
+| 034 | FR-17 undo/replace via ledger supersession | 3 Inline | 🟢 | 033 | ✅ FULL undo+replace (WAF 5/5 durable supersede endpoint; RTL 4/4 real-bus/TipTap; 0 ADR viol; OutputRouter/Binding untouched; 45.26 MB) | FULL | opus | high |
 | 040 | FR-07 compose-explain-clause Action + Binding | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
 | 041 | FR-08 compose-compare-to-playbook Action + Binding | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
 | 042 | FR-09 compose-draft-alternative Action + Binding (compose disposition) | 4 Catalog | 🟢 | 001,016 | ✅ | FULL | opus | high |
@@ -59,7 +59,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 060 | FR-29 anchored annotations in Compose session payload (doc-adjacent) | 6 Memory | 🟢 | none | ✅◐ | FULL | sonnet | high |
 | 061 | FR-31 action history via ledger queries (no duplicate structure) | 6 Memory | 🟢 | none | ✅ | FULL | sonnet | high |
 | 062 | FR-33 compaction over ledger + cross-version persistence (DocumentId+MatterId) | 6 Memory | 🟢 | 061 | ✅ | STANDARD | sonnet | high |
-| 063 | FR-30 workspace-scope MemoryItems via gated memory.write | 6 Memory | 🔴 | none | ⛔ | FULL | sonnet | high |
+| 063 | FR-30 workspace-scope MemoryItems via gated memory.write | 6 Memory | 🔴 core-blocked | none | ⛔ BLOCKED-ON-CORE (§6.5, 2026-07-10): core's memory.write (057) is chat-only + untrusted-origin gate deferred; needs a dispatched-action/gated capture facade + the gate. Correct end-state, NOT ledger. Handoff [#629](https://github.com/spaarke-dev/spaarke/issues/629). Compose side ready on delivery. | FULL | sonnet | high |
 | 064 | FR-32 Context-pane provenance + D-F4 trace hosting | 6 Memory | 🔴 | none | ⛔ | FULL | sonnet | high |
 | 070 | FR-34 activate six coordinated flows (PaneEventBus choreography) | 7 Coord | 🟡 | 030,031 | ⭐ SUPERSEDED by 104 | FULL | opus | high |
 | 071 | FR-34 D-F3 UI ack-on-frame-id | 7 Coord | 🔴 | 070 | ⛔ | FULL | sonnet | high |
@@ -102,7 +102,8 @@ Per the audit, these ✅ tasks are **E2E-inert** and are re-scoped by the Phase-
 | 111 | inline AI popup: AI-only + right-click/point trigger; B/I/U/S/Link ported to top toolbar | R2 (#3a; owner refine 2026-07-10) | client | 🟢 | none | ✅ (108/108; AI-only bubble; right-click+dedupe; formatting→top toolbar) | FULL | sonnet | high |
 | 112 | AI action result → per-action prose (not raw JSON) | R3 (#3b/#3c) | client | 🟢 | none | ✅ (real-bus 4/4; workspace-bridge suppressed; shape-keyed) | FULL | sonnet | high |
 | 113 | session-scoped active-document identity bridge + Compose layout default | R4+R5 (#4/#5/#6/#7) | BFF+client (**shared**) | 🟢 | 110,112 | ✅ (3 E2E DoD WAF+bus pass; 404/404; additive ChatSession; 45.26 MB; ADR-013 Path-A accepted) | FULL | opus | xhigh |
-| 114 | re-merge + deploy BFF/SpaarkeAi + §10 verify + owner re-UAT | — | deploy | 🟢 | 110,111,112,113 | 🔲 | STANDARD | sonnet | high |
+| 114 | re-merge + deploy BFF/SpaarkeAi + §10 verify + owner re-UAT | — | deploy | 🟢 | 110,111,112,113 | ✅ deployed 2026-07-10 (BFF 46.59 MB hash-verified+healthy; sprk_spaarkeai published; merged master PR #627 `69255dd4f`); re-UAT found dispatch wire-loss → 115 | STANDARD | sonnet | high |
+| 115 | dispatch wire-loss fix — un-coerce compose action output on the wire (SessionDispatchOrchestrator/AnalysisChunk) | R3-followup (owner re-UAT: all inline actions returned empty DocumentAnalysisResult JSON) | BFF (**core seam**) | 🟢 | 112 | ✅ (server root cause: DeserializeResultChunk coerced ALL results to DocumentAnalysisResult, dropping compose fields; discriminator now passes compose shapes through, preserves summarize; **WIRE-body** tests assert explanation/keyConcepts survive; 112 renders prose end-to-end; OutputRouter/Binding untouched; 45.26 MB) | FULL | opus | xhigh |
 
 **Sequencing**: **W-UAT1** (parallel, disjoint files): 110 (BFF: ComposeEndpoints/ComposeService) · 111 (client: ComposeAiToolbar/ComposeEditor) · 112 (client: ConversationPane/formatter). → **W-UAT2** (solo): 113 (unified bridge; touches ComposeEndpoints.cs [110] + ConversationPane.tsx [112] + co-owned SendWorkspaceArtifactHandler.cs/ChatSession.cs). → **W-UAT3** (solo): 114 deploy. **FROZEN guard**: 113 must NOT edit OutputRouter.cs/Binding.cs (clear now that E-20 landed, but no need — the bridge doesn't touch dispatch routing).
 

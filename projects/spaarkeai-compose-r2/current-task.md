@@ -11,9 +11,9 @@
 | Field | Value |
 |-------|-------|
 | **Project** | spaarkeai-compose-r2 — AI-native legal drafting workspace |
-| **Milestone** | Owner smoke test (2026-07-10) found 7 real defects (the earlier "AI complete E2E" was unit-green/user-broken). **Phase 9b UAT remediation: 4 fix tasks (110/111/112/113) DONE + committed on branch** with through-the-wire tests. Deploy (114) pending owner go-ahead. |
-| **Status** | 110 Save-400 ✅ `e13029fc8` · 112 AI-result-prose ✅ `73a268760` · 111 AI-only-bubble+right-click+formatting-to-top-toolbar ✅ `76eb86872` · 113 active-document-bridge (chat↔Compose #4/5/6/7) ✅ `bd18321d1`. Build gate green (BFF 0 err; shared libs clean; SpaarkeAi vite prod ✓). NOT yet deployed. |
-| **Next Action** | **Task 114 deploy — awaiting owner go-ahead** (bounces shared spaarkedev1 the owner is UAT-ing; needs redesign-r2 heads-up). Sequence: re-merge master → `Deploy-BffApi.ps1` (hash+health) → clear Vite cache + `Deploy-SpaarkeAi.ps1` → §10 verify → owner re-UAT via `notes/UAT-r2-reuat-checklist.md`. |
+| **Milestone** | Owner smoke test (2026-07-10) found 7 real defects (the earlier "AI complete E2E" was unit-green/user-broken). **Phase 9b UAT remediation COMPLETE + DEPLOYED**: 110/111/112/113 fixes + 114 deploy; merged to master (PR #627, master `69255dd4f`); BFF + SpaarkeAi live on spaarkedev1. |
+| **Status** | 110 ✅ · 112 ✅ · 111 ✅ · 113 ✅ · 114 ✅ deployed (BFF 46.59 MB hash-verified+healthy; `sprk_spaarkeai` published; `/api/compose/active-document` route live). Owner also confirmed Search-for-Document (011) works. |
+| **Next Action** | **Owner re-UAT** via `notes/UAT-r2-reuat-checklist.md` — re-test all 7 items (allow ≤5 min for BFF cache; bounce BFF once if a fix seems inactive >5 min). Then remaining OPEN: task **034** (undo/replace scope decision), 056 webhook, 082 flagship, core-gated 063/064/071, then 090 wrap-up. |
 
 ### Phase 9b remediation (this session) — see `notes/uat-r2-defect-triage-2026-07-10.md`
 - Root-caused the 7 UAT items → 5 themes via 3 parallel investigations. Owner chose the **unified active-document identity** for R4. conflict-check: shared handler/session co-owned with redesign-r2, **no live overlap**.

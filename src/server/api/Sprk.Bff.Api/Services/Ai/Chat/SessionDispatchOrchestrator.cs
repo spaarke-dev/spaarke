@@ -752,23 +752,52 @@ public class SessionDispatchOrchestrator
     }
 
     /// <summary>
-    /// Deserialize the STORED ledger payload into the terminal chunk. Payloads matching
-    /// the <see cref="DocumentAnalysisResult"/> shape surface as the structured
-    /// <see cref="AnalysisChunk.Completed(DocumentAnalysisResult)"/> (the client
-    /// synthesizes per-field workspace deltas from <c>result</c>); anything else
-    /// degrades to a text completion — the client always sees a terminal
-    /// <c>complete</c> chunk, never a silent EOF. Same wire semantics as
-    /// the pre-044 summarize shell so there is ONE AnalysisChunk vocabulary.
+    /// Deserialize the STORED ledger payload into the terminal chunk. The discriminator is
+    /// summarize-preserving AND compose-lossless (spaarkeai-compose-r2 UAT wire-loss fix):
+    /// <list type="bullet">
+    ///   <item>A JSON object carrying the <see cref="DocumentAnalysisResult"/> SIGNATURE
+    ///     (<c>tldr</c> / <c>entities</c> / <c>keywords</c> — fields present in NO compose
+    ///     output schema) is the summarize / document-analysis case: it is coerced to the
+    ///     typed <see cref="DocumentAnalysisResult"/> via
+    ///     <see cref="AnalysisChunk.Completed(DocumentAnalysisResult)"/> so the wire shape is
+    ///     BYTE-IDENTICAL to the shipped summarize contract (DAR defaults + top-level
+    ///     <c>summary</c>). The section-keyed client bridge (dispatchConsumer.ts) is unchanged.</item>
+    ///   <item>ANY OTHER JSON object (compose actions — <c>explanation</c>/<c>keyConcepts</c>,
+    ///     <c>matches</c>/<c>overallRisk</c>, <c>changes</c>, ... — or any future non-DAR
+    ///     disposition) is passed THROUGH verbatim via <see cref="AnalysisChunk.CompletedRaw"/>,
+    ///     so its fields survive on the wire at <c>result</c> for the client's shape-detecting
+    ///     formatter (composeResultFormat.ts). BEFORE this fix every such payload was coerced to
+    ///     DocumentAnalysisResult, and System.Text.Json silently dropped its unknown properties →
+    ///     the client received an EMPTY DAR blob instead of prose.</item>
+    ///   <item>A non-object payload (array/scalar) or unparseable content degrades to a text
+    ///     completion — the client always sees a terminal <c>complete</c> chunk, never a silent EOF.</item>
+    /// </list>
     /// </summary>
     private static AnalysisChunk DeserializeResultChunk(string jsonContent)
     {
         try
         {
-            var doc = JsonSerializer.Deserialize<DocumentAnalysisResult>(jsonContent);
-            if (doc is not null)
+            using var doc = JsonDocument.Parse(jsonContent);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object)
             {
-                doc.ParsedSuccessfully = true;
-                return AnalysisChunk.Completed(doc);
+                if (IsDocumentAnalysisShape(root))
+                {
+                    // Summarize / document-analysis consumer: coerce to the typed DAR so the wire
+                    // shape (incl. DAR defaults + the top-level `summary`) is unchanged. The payload
+                    // already IS the DAR shape, so this round-trips losslessly (non-regression).
+                    var dar = JsonSerializer.Deserialize<DocumentAnalysisResult>(jsonContent);
+                    if (dar is not null)
+                    {
+                        dar.ParsedSuccessfully = true;
+                        return AnalysisChunk.Completed(dar);
+                    }
+                }
+
+                // Compose / other capability output: pass the payload THROUGH verbatim (clone so it
+                // outlives this JsonDocument's using-scope). The compose fields reach the client at
+                // `result` intact — the coercion that stripped them is gone.
+                return AnalysisChunk.CompletedRaw(root.Clone());
             }
         }
         catch (JsonException)
@@ -778,6 +807,21 @@ public class SessionDispatchOrchestrator
         }
         return AnalysisChunk.Completed(jsonContent);
     }
+
+    /// <summary>
+    /// Whether a terminal ledger payload object carries the <see cref="DocumentAnalysisResult"/>
+    /// SIGNATURE — i.e. at least one of <c>tldr</c> / <c>entities</c> / <c>keywords</c>. These three
+    /// fields are unique to the summarize / document-analysis output schema and appear in NONE of the
+    /// five compose output schemas (compose-explain-clause, compose-compare-to-playbook,
+    /// compose-draft-alternative, compose-summarize-word-changes, compose-defined-terms), so this is
+    /// an unambiguous discriminator. Deliberately does NOT key on <c>summary</c> alone: the
+    /// compose-summarize-word-changes schema also has a <c>summary</c> field, and treating that as DAR
+    /// would strip its <c>changes[]</c> — the very wire-loss this fix removes.
+    /// </summary>
+    private static bool IsDocumentAnalysisShape(JsonElement root) =>
+        root.TryGetProperty("tldr", out _)
+        || root.TryGetProperty("entities", out _)
+        || root.TryGetProperty("keywords", out _);
 
     /// <summary>
     /// Tolerant extraction of the P1 <c>fileIds</c> arg (string array). Missing /
