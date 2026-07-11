@@ -31,12 +31,13 @@
   <steps>
     <step id="1">Update version to 1.4.35 in: ControlManifest.Input.xml (version + description), VisualHostRoot.tsx footer (with build date), Solution/solution.xml Version, Solution/Controls/.../ControlManifest.xml, Solution/pack.ps1.</step>
     <step id="2">Run `npm run build:prod`; confirm `[build] Succeeded` and bundle size ≈1.27 MiB (per NFR-01).</step>
-    <step id="3">Grep the shipped bundle for `cleanGuid` to confirm the fix is included.</step>
+    <step id="3">Confirm the cleanGuid fix is in the shipped bundle using the normalizer BODY, not the identifier: `grep -oc 'trim().toLowerCase()' out/controls/control/bundle.js` (expect >=1). Do NOT grep for the literal `cleanGuid` — it is minification-mangled and false-negatives (this is how the 5 code-page deploys were confirmed, per the PR #603/#609 author).</step>
   </steps>
   <acceptance-criteria>
     <criterion>All 5 version locations read 1.4.35.</criterion>
     <criterion>`build:prod` green; bundle within tolerance of 1.27 MiB.</criterion>
-    <criterion>`cleanGuid` present in shipped bundle.</criterion>
+    <criterion>Normalizer body `trim().toLowerCase()` present in shipped bundle (reliable cleanGuid signal).</criterion>
+    <criterion>cleanGuid consumed via the @spaarke/ui-components dependency (barrel, PR #609) — NOT re-implemented in VisualHost.</criterion>
     <criterion>Footer renders `v1.4.35`.</criterion>
   </acceptance-criteria>
 </task>

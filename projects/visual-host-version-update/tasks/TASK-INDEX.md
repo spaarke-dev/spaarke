@@ -6,7 +6,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ complete · ⛔
 
 | ID | Title | Phase | Rigor | Model/Effort | Deps | Status |
 |----|-------|-------|-------|--------------|------|--------|
-| VHVU-001 | Harden shared-package build + declare `@spaarke/auth` on ui-components | A0 | FULL | sonnet/high | — | 🔲 |
+| VHVU-001 | Harden shared-package build + declare `@spaarke/auth` on ui-components | A0 | FULL | sonnet/high | — | ✅ |
 | VHVU-002 | Shared-lib packaging hygiene (`.tgz` + `files` allow-list + storybook-static) | A0 | STANDARD | sonnet/high | 001 | 🔲 |
 | VHVU-003 | Bump VisualHost v1.4.35 (5 locations) + rebuild + confirm `cleanGuid` | A0 | FULL | sonnet/high | 001 | 🔲 |
 | VHVU-004 | Deploy v1.4.35 to dev + UAT braced-GUID create | A0 | FULL | sonnet/high | 002,003 | 🔲 |

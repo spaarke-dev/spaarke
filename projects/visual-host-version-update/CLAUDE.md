@@ -31,3 +31,4 @@ Decouple VisualHost from shared-lib source-consumption (Phase A: wizards → `na
 - `themeOption` token mismatch: `applyMdaTheme` writes `darkmode`, `detectDarkModeFromUrl` matches `dark` — normalize in A2.
 - Only `CreateEventWizard` has a code page; Invoice + Report Card must be built (A1).
 - `EventDueDateCard` is duplicated in VisualHost + shared lib — reconcile in B2.
+- **cleanGuid (PR #603/#609)**: it's a merged shared component in `@spaarke/ui-components` — consume via the dependency, never re-implement. VisualHost imports it only transitively (wizard services → barrel). **Verify it's in a build:prod bundle with `grep -oc 'trim().toLowerCase()'` (the normalizer body), NOT `grep cleanGuid`** — the identifier is minification-mangled and false-negatives. This is how the 5 code-page deploys were confirmed.

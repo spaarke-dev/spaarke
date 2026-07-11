@@ -1,9 +1,14 @@
 # Current Task
 
-**Active task**: none (project initialized — awaiting go on task 001)
+**Active task**: VHVU-002 — Shared-lib packaging hygiene (.tgz + files allow-list + storybook-static)
 **Status**: not-started
-**Phase**: A — Wizard launch via navigateTo
-**Next action**: execute task 001 (A0 — harden build + declare `@spaarke/auth` on shared lib)
+**Phase**: A0
+**Next action**: Begin Step 1 of task 002
+
+### Last completed: VHVU-001 ✅ (2026-07-10)
+- Declared `@spaarke/auth` on `@spaarke/ui-components`; extended `ensure-dist-fresh.js` to freshen sibling dists (sdap-client, auth).
+- Verified deterministic clean-chain green build; cleanGuid confirmed via `trim().toLowerCase()` grep.
+- Modified: `Spaarke.UI.Components/package.json`, `Spaarke.UI.Components/scripts/ensure-dist-fresh.js` (+ lockfile).
 
 ## Progress
 - [x] design.md, spec.md authored + reviewed

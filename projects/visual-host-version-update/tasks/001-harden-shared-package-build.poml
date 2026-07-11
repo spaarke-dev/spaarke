@@ -1,7 +1,7 @@
 <task id="VHVU-001" project="VisualHost Decoupling & @spaarke/visuals Extraction">
   <metadata>
     <title>Harden shared-package build + declare @spaarke/auth on ui-components</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>A0</phase>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>pcf, shared-lib, build, auth</tags>
@@ -35,13 +35,16 @@
     <step id="2">Ensure `@spaarke/sdap-client` and `@spaarke/auth` `dist` are built. Extend the `ensure-dist-fresh` prebuild pattern (or add a sibling prebuild step) so these two packages' `dist` are kept fresh for consumers that bundle shared-lib src — mirroring how ui-components' own dist is kept fresh.</step>
     <step id="3">Confirm `@spaarke/ui-components` is repointed to the directory dependency in VisualHost (already done in commit 1c319c66e — verify).</step>
     <step id="4">From a clean state (`rm -rf` VisualHost node_modules or a fresh worktree), run `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build:prod` and confirm `[build] Succeeded` with no `TS2307`/`Cannot find module` errors.</step>
-    <step id="5">Confirm the shipped bundle contains the cleanGuid normalization (grep `out/controls/control/bundle.js`).</step>
+    <step id="5">Confirm the shipped bundle contains the cleanGuid normalization via its BODY: `grep -oc 'trim().toLowerCase()' out/controls/control/bundle.js` (>=1). Do NOT grep the literal `cleanGuid` identifier (minification-mangled → false-negative), per the PR #603/#609 author.</step>
   </steps>
   <acceptance-criteria>
     <criterion>`@spaarke/auth` is declared in `@spaarke/ui-components` package.json.</criterion>
     <criterion>`@spaarke/sdap-client` + `@spaarke/auth` dist build is automated (not a manual step).</criterion>
     <criterion>Clean-worktree `build:prod` is green with no undeclared-module errors.</criterion>
-    <criterion>`cleanGuid` present in the shipped bundle.</criterion>
+    <criterion>Normalizer body `trim().toLowerCase()` present in shipped bundle (reliable cleanGuid signal; consumed via the ui-components dependency, not re-implemented).</criterion>
     <criterion>No band-aid deps added to VisualHost's own package.json for the wizard chain.</criterion>
   </acceptance-criteria>
+  <notes>
+    Completed 2026-07-10. Fix: (1) declared `@spaarke/auth` (file:../Spaarke.Auth) on @spaarke/ui-components — it was used (SprkChat/LookupField) but never declared; (2) extended `scripts/ensure-dist-fresh.js` to freshen the sibling dists (@spaarke/sdap-client, @spaarke/auth) before ui-components, since consumers bundling ui-components src resolve those bare specifiers against ui-components' node_modules and need their tsc dist present. Verified deterministically: wiped both sibling dists + VisualHost out/, ran build:prod — the prebuild auto-rebuilt both sibling dists and `[build] Succeeded`. cleanGuid confirmed via `grep -oc 'trim().toLowerCase()'` (=1). No band-aid deps on VisualHost. Sibling dists are gitignored; the durable committed changes are the package.json dep + the build script.
+  </notes>
 </task>
