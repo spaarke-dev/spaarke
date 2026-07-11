@@ -1,7 +1,7 @@
 <task id="VHVU-010" project="VisualHost Decoupling & @spaarke/visuals Extraction">
   <metadata>
     <title>Add shared bootstrapWizardPage() factory + adopt in Event page</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>A1</phase>
     <estimated-effort>3 hours</estimated-effort>
     <tags>code-page, auth, factory, react</tags>
