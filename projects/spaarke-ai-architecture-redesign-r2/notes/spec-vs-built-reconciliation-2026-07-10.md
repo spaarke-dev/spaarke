@@ -22,10 +22,9 @@
 | **J2. PromptShield activation** | NFR-03 (live content-safety), FR-A1-03 overlay input | Middleware built default-OFF (`51a490a60`); unfed probe | Merge shield PR + BFF deploy + spaarkedev1 activation (setting + ContentSafety endpoint + MI "Cognitive Services User" role). Already planned post-joint-deploy. |
 | **J3. Create-matter live seed** | FR-A1-13 | Authored, inert (contract tripwire asserts NOT-yet-live) | DEF-003 7-step seed (Binding/Action rows + `ConsumerTypes.CreateMatter` + GU-065/066/067 flip). Planned at gate 049. |
 
-## NEW decision surfaced by reconciliation — FR-B-03 memory review/delete UI
+## FR-B-03 memory review/delete UI — RESOLVED: AGREE-OUT (operator 2026-07-10)
 
-FR-B-03 text: "user-**visible** review/delete surface." FR-B-08's control model: for AI-initiated **silent** memory writes, **user review/delete IS the safety control**. Delivered = 4 BFF endpoints only; **zero SpaarkeAi client consumer** (grep-confirmed). Under the gate rule "a passing curl never satisfies a gate," the 069 "user can see + delete any memory" scenario is **not browser-provable today** — and more substantively, the *only user-facing control over automatic memory* is currently inaccessible to a real user.
-→ **Decision needed**: build a thin client review/delete UI in r2 (recommended — it's the functional control, not polish), or agree-out that API-only satisfies "user-visible surface."
+FR-B-03 text: "user-**visible** review/delete surface." Delivered = 4 BFF endpoints only; zero SpaarkeAi client consumer. **Operator decision: AGREE-OUT — API-only satisfies r2; a client UI is a follow-on.** 069 exercises review/delete via API (documented exception to the "curl ≠ gate" rule, operator-signed). Recorded as an explicit agreed-out shortfall: the primary user control over automatic memory ships without an in-product surface in r2.
 
 ## Minor / measurement
 - **NFR-14 latency** not re-measured in r2 (rides r1 posture; R-F1/R-F7 added per-turn envelope bind+render+token counting). → measure once on spaarkedev1 during UAT, or agree-out.
