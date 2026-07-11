@@ -23,6 +23,8 @@ import { createXrmDataService } from './adapters/xrmDataServiceAdapter';
 import { createXrmUploadService } from './adapters/xrmUploadServiceAdapter';
 import { createXrmNavigationService } from './adapters/xrmNavigationServiceAdapter';
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from '@spaarke/auth';
+import { cleanGuid } from '../services/PolymorphicResolverService';
+import type { AssociationResult } from '../components/AssociateToStep/types';
 
 export interface IWizardPageBootstrap {
   /** Resolved Fluent theme (light/dark) for the page's FluentProvider. */
@@ -44,6 +46,17 @@ export interface IWizardPageBootstrap {
   resolveSpeContainerId: () => Promise<string>;
   /** Closes the host `navigateTo` dialog, signalling success so the form refreshes. */
   closeDialog: () => void;
+  /**
+   * Pre-filled regarding association built from the launch envelope
+   * (`entityType`+`entityId`), when the page was opened from a host record
+   * (e.g. VisualHost's "+"). `undefined` when opened standalone.
+   */
+  initialAssociation?: AssociationResult;
+  /**
+   * `true` when `initialAssociation` is present — hides the Associate-To step
+   * and pins the host record as the parent (per CreateRecordWizard config).
+   */
+  lockAssociation: boolean;
 }
 
 /**
@@ -98,6 +111,18 @@ export function useWizardPageBootstrap(logPrefix: string): IWizardPageBootstrap 
     navigationService.closeDialog({ confirmed: true });
   }, [navigationService]);
 
+  // Build the pre-filled association from the launch envelope. The entityId is
+  // an Xrm-sourced GUID, so normalize it with cleanGuid at ingestion (ADR-044 —
+  // bare + lowercase; no-op on already-canonical input) so no braced/registry-
+  // format GUID propagates into the wizard's create payloads.
+  const initialAssociation = React.useMemo<AssociationResult | undefined>(() => {
+    const entityType = params.entityType;
+    const entityId = params.entityId;
+    if (!entityType || !entityId) return undefined;
+    return { entityType, recordId: cleanGuid(entityId), recordName: params.recordName ?? '' };
+  }, [params]);
+  const lockAssociation = initialAssociation !== undefined;
+
   const resolveSpeContainerId = React.useCallback(async (): Promise<string> => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
@@ -122,5 +147,7 @@ export function useWizardPageBootstrap(logPrefix: string): IWizardPageBootstrap 
     authenticatedFetch,
     resolveSpeContainerId,
     closeDialog,
+    initialAssociation,
+    lockAssociation,
   };
 }

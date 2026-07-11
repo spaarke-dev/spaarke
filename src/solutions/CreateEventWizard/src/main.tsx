@@ -30,6 +30,8 @@ function App() {
         bffBaseUrl={b.bffBaseUrl}
         resolveSpeContainerId={b.resolveSpeContainerId}
         tenantId={b.tenantId}
+        initialAssociation={b.initialAssociation}
+        lockAssociation={b.lockAssociation}
       />
     </FluentProvider>
   );

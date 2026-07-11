@@ -27,6 +27,8 @@ function App() {
         embedded={true}
         authenticatedFetch={b.authenticatedFetch}
         bffBaseUrl={b.bffBaseUrl}
+        initialAssociation={b.initialAssociation}
+        lockAssociation={b.lockAssociation}
       />
     </FluentProvider>
   );

@@ -1,7 +1,7 @@
 <task id="VHVU-020" project="VisualHost Decoupling & @spaarke/visuals Extraction">
   <metadata>
     <title>Wire initialAssociation/lockAssociation + themeOption in 3 wizard pages</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>A2</phase>
     <estimated-effort>3 hours</estimated-effort>
     <tags>code-page, regarding, theme, wizard</tags>
