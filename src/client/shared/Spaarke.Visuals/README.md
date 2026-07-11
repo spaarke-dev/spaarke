@@ -25,6 +25,10 @@ src/
 
 `main`/`types` point at `src/index.ts`; consumers import the TypeScript source directly (`"build": "tsc --noEmit"`), same as the other shared sibling packages.
 
+### Why `@types/react@18` (not 19)
+
+Dev-typed against **React 18** on purpose. React 18's `ReactNode` is a subset of React 19's (`19` *added* `Promise<ReactNode>` to the union), so an `@18`-typed component is assignable into **both** an `@18` host (the VisualHost PCF platform-library React) **and** an `@19` host (future code pages) with no JSX types skew. Typing against `@19` instead would reproduce the `TS2786: cannot be used as a JSX component` error in the R18 PCF — the exact skew this whole decoupling project exists to eliminate (see the retained `AiSummaryPopover` casts, which stem from `@spaarke/ui-components` being `@19`-typed). `@18` is the forward-compatible lower bound; the `peerDependencies` still accept React 16–19 at runtime.
+
 ## Consumers
 
 - `src/client/pcf/VisualHost/` — repointed in VHVU-060.
