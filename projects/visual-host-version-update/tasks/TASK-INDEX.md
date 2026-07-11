@@ -16,7 +16,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ complete · ⛔
 | VHVU-020 | Wire `initialAssociation`/`lockAssociation` + `themeOption` in 3 pages | A2 | FULL | sonnet/high | 011,012 | ✅ |
 | VHVU-021 | Verify regarding-resolver + field-mapping parity from "+" · **UAT-gated (needs deploy)** | A2 | FULL | sonnet/high | 020 | ⏸ UAT |
 | VHVU-030 | Cut over VisualHost "+" to `navigateTo`; delete inline embedding + casts | A3 | FULL | sonnet/high | 020 | ✅ |
-| VHVU-031 | Deploy VisualHost + pages to dev; UAT "+" via navigateTo (dark+light) | A3 | FULL | sonnet/high | 030,021 | 🔲 |
+| VHVU-031 | Deploy VisualHost + pages to dev; UAT "+" via navigateTo (dark+light) | A3 | FULL | sonnet/high | 030,021 | 🚀 deployed to DEV1 2026-07-11 · ⏸ awaiting owner UAT |
 | VHVU-040 | Scaffold `@spaarke/visuals` sibling package | B1 | FULL | sonnet/high | 031 | ✅ |
 | VHVU-041 | Move 15 visuals + 7 utils + viz types into package | B2 | FULL | sonnet/high | 040 | ✅ |
 | VHVU-042 | Reconcile drifted duplication (one `VisualType`, one `EventDueDateCard`) | B2 | FULL | sonnet/high | 041 | 🔲 |
