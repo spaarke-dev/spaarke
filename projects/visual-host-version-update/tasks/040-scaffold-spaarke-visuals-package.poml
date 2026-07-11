@@ -1,7 +1,7 @@
 <task id="VHVU-040" project="VisualHost Decoupling & @spaarke/visuals Extraction">
   <metadata>
     <title>Scaffold @spaarke/visuals sibling package</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>B1</phase>
     <estimated-effort>2 hours</estimated-effort>
     <tags>shared-lib, package, scaffold</tags>
