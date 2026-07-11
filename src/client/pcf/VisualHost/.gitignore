@@ -2,6 +2,7 @@
 out/
 bin/
 obj/
+storybook-static/
 
 # Dependencies
 node_modules/

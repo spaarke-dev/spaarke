@@ -1,14 +1,16 @@
 # Current Task
 
-**Active task**: VHVU-002 — Shared-lib packaging hygiene (.tgz + files allow-list + storybook-static)
+**Active task**: VHVU-010 — Add shared `bootstrapWizardPage()` factory + adopt in Event page (Phase A1)
 **Status**: not-started
-**Phase**: A0
-**Next action**: Begin Step 1 of task 002
+**Phase**: A1
+**Next action**: Begin task 010 (A0 complete; VHVU-004 is optional/owner-gated, off critical path)
 
-### Last completed: VHVU-001 ✅ (2026-07-10)
-- Declared `@spaarke/auth` on `@spaarke/ui-components`; extended `ensure-dist-fresh.js` to freshen sibling dists (sdap-client, auth).
-- Verified deterministic clean-chain green build; cleanGuid confirmed via `trim().toLowerCase()` grep.
-- Modified: `Spaarke.UI.Components/package.json`, `Spaarke.UI.Components/scripts/ensure-dist-fresh.js` (+ lockfile).
+### Completed A0 (2026-07-10)
+- **VHVU-001 ✅** — declared `@spaarke/auth` on ui-components; extended `ensure-dist-fresh.js` for sibling dists. Deterministic green build.
+- **VHVU-002 ✅** — removed 2 `.tgz` artifacts + `files:["dist"]` allow-list (npm-pack validated); removed committed `storybook-static/` (92 files) + gitignored.
+- **VHVU-003 ✅** — bumped v1.4.35 (5 locations); build green; v1.4.35 + `trim().toLowerCase()` both confirmed in bundle.
+- **VHVU-004 ⏸ optional** — dev deploy decoupled (owner call); 010 now depends on 003.
+- Merged origin/master (0 behind); ADR-044 folded in.
 
 ## Progress
 - [x] design.md, spec.md authored + reviewed

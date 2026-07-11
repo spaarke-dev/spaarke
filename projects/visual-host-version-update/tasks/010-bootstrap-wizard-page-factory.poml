@@ -7,7 +7,7 @@
     <tags>code-page, auth, factory, react</tags>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
-    <dependencies>VHVU-004</dependencies>
+    <dependencies>VHVU-003</dependencies>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
   </metadata>

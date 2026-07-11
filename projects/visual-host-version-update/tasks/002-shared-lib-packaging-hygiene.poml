@@ -1,7 +1,7 @@
 <task id="VHVU-002" project="VisualHost Decoupling & @spaarke/visuals Extraction">
   <metadata>
     <title>Shared-lib packaging hygiene (.tgz removal + files allow-list + storybook-static)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>A0</phase>
     <estimated-effort>1 hour</estimated-effort>
     <tags>hygiene, shared-lib, git</tags>
@@ -36,4 +36,5 @@
     <criterion>VisualHost storybook-static/ removed + gitignored.</criterion>
     <criterion>Solution bundle.js retained.</criterion>
   </acceptance-criteria>
+  <notes>Completed 2026-07-10. git rm'd spaarke-ui-components-1.0.0.tgz + 2.0.0.tgz; added `files:["dist"]` to ui-components package.json (npm pack --dry-run confirmed only dist/ entries, no coverage/.storybook/storybook-static); git rm -r VisualHost/storybook-static (92 files) + added `storybook-static/` to VisualHost/.gitignore. Solution bundle.js retained (repo convention).</notes>
 </task>

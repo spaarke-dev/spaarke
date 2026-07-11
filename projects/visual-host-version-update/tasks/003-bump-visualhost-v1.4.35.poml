@@ -1,7 +1,7 @@
 <task id="VHVU-003" project="VisualHost Decoupling & @spaarke/visuals Extraction">
   <metadata>
     <title>Bump VisualHost to v1.4.35 (5 locations) + rebuild + confirm cleanGuid</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>A0</phase>
     <estimated-effort>1 hour</estimated-effort>
     <tags>pcf, version, build</tags>
@@ -40,4 +40,5 @@
     <criterion>cleanGuid consumed via the @spaarke/ui-components dependency (barrel, PR #609) — NOT re-implemented in VisualHost.</criterion>
     <criterion>Footer renders `v1.4.35`.</criterion>
   </acceptance-criteria>
+  <notes>Completed 2026-07-10. Bumped 1.4.34→1.4.35 in all 5 locations (ControlManifest.Input.xml version + description, VisualHostRoot footer `v1.4.35 • 2026-07-10`, Solution/solution.xml, Solution/Controls/.../ControlManifest.xml, pack.ps1). build:prod green; bundle contains `v1.4.35` and the `trim().toLowerCase()` normalizer (reliable cleanGuid signal). cleanGuid consumed transitively via wizard services (barrel) — not re-implemented in VisualHost.</notes>
 </task>

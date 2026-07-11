@@ -10,8 +10,9 @@
     <dependencies>VHVU-002,VHVU-003</dependencies>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
+    <optional>true</optional>
   </metadata>
-  <prompt>Ship the cleanGuid fix to dev and verify the original bug is resolved. This is the first shippable milestone; get owner sign-off before proceeding to Phase A1. Deployment is outward-facing — confirm target + gates before importing.</prompt>
+  <prompt>OPTIONAL / OWNER-GATED — NOT critical path (decoupled 2026-07-10 per owner). Ships the cleanGuid fix to dev via the INTERIM inline-wizard v1.4.35 build. Downstream tasks (A1-B) build on code state, not on this deploy, so nothing waits on it — 010 depends on 003 (code ready), not on 004. Note the interim inline model is REPLACED by A3 (VHVU-030/031 navigateTo cutover), and 031 redeploys VisualHost; cleanGuid reaches users via 031 regardless. Run 004 ONLY if the owner wants the GUID fix in dev now, ahead of the navigateTo cutover. Deployment is outward-facing — confirm target + gates before importing.</prompt>
   <role>PCF deployment engineer</role>
   <goal>VisualHost v1.4.35 deployed to dev; the native-picker (braced-GUID) create path for Event/Invoice/Report Card via the "+" no longer 400s with `Error in query syntax`.</goal>
   <constraints>

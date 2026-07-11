@@ -7,10 +7,10 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ complete · ⛔
 | ID | Title | Phase | Rigor | Model/Effort | Deps | Status |
 |----|-------|-------|-------|--------------|------|--------|
 | VHVU-001 | Harden shared-package build + declare `@spaarke/auth` on ui-components | A0 | FULL | sonnet/high | — | ✅ |
-| VHVU-002 | Shared-lib packaging hygiene (`.tgz` + `files` allow-list + storybook-static) | A0 | STANDARD | sonnet/high | 001 | 🔲 |
-| VHVU-003 | Bump VisualHost v1.4.35 (5 locations) + rebuild + confirm `cleanGuid` | A0 | FULL | sonnet/high | 001 | 🔲 |
-| VHVU-004 | Deploy v1.4.35 to dev + UAT braced-GUID create | A0 | FULL | sonnet/high | 002,003 | 🔲 |
-| VHVU-010 | Add shared `bootstrapWizardPage()` factory + adopt in Event page | A1 | FULL | sonnet/high | 004 | 🔲 |
+| VHVU-002 | Shared-lib packaging hygiene (`.tgz` + `files` allow-list + storybook-static) | A0 | STANDARD | sonnet/high | 001 | ✅ |
+| VHVU-003 | Bump VisualHost v1.4.35 (5 locations) + rebuild + confirm `cleanGuid` | A0 | FULL | sonnet/high | 001 | ✅ |
+| VHVU-004 | Deploy v1.4.35 to dev + UAT braced-GUID create · **OPTIONAL / owner-gated (not critical path)** | A0 | FULL | sonnet/high | 002,003 | ⏸ optional |
+| VHVU-010 | Add shared `bootstrapWizardPage()` factory + adopt in Event page | A1 | FULL | sonnet/high | 003 | 🔲 |
 | VHVU-011 | Build Invoice wizard code page | A1 | FULL | sonnet/high | 010 | 🔲 |
 | VHVU-012 | Build Report Card wizard code page | A1 | FULL | sonnet/high | 010 | 🔲 |
 | VHVU-020 | Wire `initialAssociation`/`lockAssociation` + `themeOption` in 3 pages | A2 | FULL | sonnet/high | 011,012 | 🔲 |
@@ -35,10 +35,11 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ complete · ⛔
 All other tasks are sequential (build-chain dependencies).
 
 ## Critical Path
-001 → 003 → 004 → 010 → {011,012} → 020 → 030 → 031 → 040 → 041 → {042,050} → 060 → 070 → 090
+001 → 003 → 010 → {011,012} → 020 → 030 → 031 → 040 → 041 → {042,050} → 060 → 070 → 090
+(VHVU-004 is OFF the critical path — optional/owner-gated interim deploy.)
 
 ## Sequencing notes
-- **VHVU-004 is the first shippable milestone** (`cleanGuid` to dev). Ship + UAT before A1.
+- **VHVU-004 is OPTIONAL / owner-gated** (decoupled 2026-07-10). It ships `cleanGuid` to dev via the interim inline build, but A3 (030/031 navigateTo cutover) supersedes that model and 031 redeploys VisualHost — so `cleanGuid` reaches users via 031 regardless. Run 004 only for an early dev deploy of the fix; nothing downstream waits on it (010 depends on 003).
 - **`.claude/` write boundary**: VHVU-070 (ADR-012 amendment) is main-session only — never dispatch to a parallel sub-agent.
 - **Deploy gates**: 004, 031, 061 — verify before proceeding.
 - **Shared-surface**: 001, 002, 040–042 touch shared packages — coordinate with PR #508.
