@@ -1,7 +1,7 @@
 <task id="VHVU-012" project="VisualHost Decoupling & @spaarke/visuals Extraction">
   <metadata>
     <title>Build Report Card wizard code page</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>A1</phase>
     <estimated-effort>3 hours</estimated-effort>
     <tags>code-page, wizard, react, report-card</tags>

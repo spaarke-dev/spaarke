@@ -43,6 +43,8 @@ $webResources = @(
     @{ Name = 'sprk_creatematterwizard';             DisplayName = 'Create New Matter';              Type = 1; Path = 'src\solutions\CreateMatterWizard\dist\index.html' }
     @{ Name = 'sprk_createprojectwizard';            DisplayName = 'Create New Project';             Type = 1; Path = 'src\solutions\CreateProjectWizard\dist\index.html' }
     @{ Name = 'sprk_createeventwizard';              DisplayName = 'Create New Event';               Type = 1; Path = 'src\solutions\CreateEventWizard\dist\index.html' }
+    @{ Name = 'sprk_createinvoicewizard';            DisplayName = 'Create Invoice';                 Type = 1; Path = 'src\solutions\CreateInvoiceWizard\dist\index.html' }
+    @{ Name = 'sprk_createreportcardwizard';         DisplayName = 'Create Report Card';             Type = 1; Path = 'src\solutions\CreateReportCardWizard\dist\index.html' }
     @{ Name = 'sprk_createtodowizard';               DisplayName = 'Create New To Do';               Type = 1; Path = 'src\solutions\CreateTodoWizard\dist\index.html' }
     @{ Name = 'sprk_createworkassignmentwizard';     DisplayName = 'Create Work Assignment';         Type = 1; Path = 'src\solutions\CreateWorkAssignmentWizard\dist\index.html' }
     @{ Name = 'sprk_summarizefileswizard';           DisplayName = 'Summarize Files';                Type = 1; Path = 'src\solutions\SummarizeFilesWizard\dist\index.html' }
