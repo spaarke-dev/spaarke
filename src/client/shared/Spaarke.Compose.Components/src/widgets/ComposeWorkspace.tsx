@@ -1140,6 +1140,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     if (lookupResults.length === 0) return; // user dismissed the lookup — empty state unchanged
     const picked = lookupResults[0];
 
+    // DEF-02: a new Search pick supersedes any prior Search-resolved drive id. Clear it up
+    // front so a resolution that FAILS below (retrieveRecord throws, or a half-provisioned
+    // record with no SPE drive pointer) leaves NO stale override — otherwise `effectiveDriveId`
+    // would keep the PREVIOUS pick's drive and a later Save/Load could key off the WRONG drive.
+    // A successful resolution re-sets the correct drive at the bottom of this handler.
+    setSearchResolvedDriveId(null);
+
     let record: Record<string, unknown>;
     try {
       const dataService = createXrmDataService();
