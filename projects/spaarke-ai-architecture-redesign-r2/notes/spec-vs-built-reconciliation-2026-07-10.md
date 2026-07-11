@@ -7,8 +7,9 @@
 ## Headline
 - **65 of 65 requirements accounted for.** No fabricated completions (adversarial audit).
 - **DELIVERED: 58** (FR-P0 ×4, FR-A0 ×8, FR-A ×2, FR-A1 ×11 of 14, FR-B ×11 of 16, FR-D ×7, NFR ×11 of 14).
-- **PARTIAL — must close for end-to-end (operator: pull in): 3** → FR-A1-07/NFR-09/NFR-12 (job-aware live producer), NFR-03 (shield activation), FR-A1-13 (create-matter live seed).
-- **PARTIAL — NEW decision needed: 1** → FR-B-03 memory review/delete has NO client UI (spec says "user-VISIBLE"; gate rule says curl ≠ gate).
+- **PARTIAL — must close for end-to-end: 2** → NFR-03 (shield activation = J2), FR-A1-13 (create-matter live seed = J3).
+- **FR-A1-07 / NFR-09 / NFR-12 (job-aware)** — RESOLVED: invariant delivered + live-enforced on the real path (Compose create-on-save); chat-OutcomeCard rendering agreed-out (no async-doc chat capability exists; no user exposure). Operator-signed 2026-07-10.
+- **FR-B-03 (memory review/delete UI)** — RESOLVED: agree-out, API-only sufficient. Operator-signed 2026-07-10.
 - **DEFERRED-BY-SPEC / agreed-out: 6 groups** (see bottom).
 - **Gate-pending (code-complete, awaiting operator browser run): ADR-041 (FR-A1-14) @ 049, ADR-042 (FR-B-16) @ 069.**
 
@@ -18,7 +19,7 @@
 
 | Item | FRs closed | Status | Work |
 |---|---|---|---|
-| **J1. Job-aware live producer** | FR-A1-07, NFR-09 (async half), NFR-12 | Router leg live (R-F3) but no capability emits job states through it | Wire the real chat doc-upload/create→indexing path's OutcomeCard through `ComposeForRoutedOutput`→`ComposeJobAware` so "indexing…" shows honestly. **Operator: YES, pull in.** |
+| ~~J1. Job-aware live producer~~ | FR-A1-07, NFR-09 (async half), NFR-12 | **RESOLVED — invariant already delivered; card surface agreed-out (operator 2026-07-10)** | Investigation (agent, zero code changed) found the premise doesn't hold: chat doc-upload is **synchronous by design** (SPE OBO model — no async window, "ready" is honest), and NFR-12 ingestion-parity is **ALREADY live-enforced** on the real create-with-indexing path (`ComposeService.SaveAsync` create-on-save: `IsInterimCreateOnSaveSuccess` — a record with no SPE file or no index is NEVER a success; returns real `JobAwareCompletionState`). No chat capability does async document creation, so a chat-surface job-aware **OutcomeCard** has no honest producer — building one would be an unused-seam shim (forbidden) or a net-new async-doc chat feature (scope expansion). **Operator: the live protection is sufficient; no user interaction in r2 can see a falsely-premature "done."** The invariant is DELIVERED + functioning; the chat-OutcomeCard rendering layer is a published seam awaiting a future async-doc chat capability. Detail in agent STOP report (this session). |
 | **J2. PromptShield activation** | NFR-03 (live content-safety), FR-A1-03 overlay input | Middleware built default-OFF (`51a490a60`); unfed probe | Merge shield PR + BFF deploy + spaarkedev1 activation (setting + ContentSafety endpoint + MI "Cognitive Services User" role). Already planned post-joint-deploy. |
 | **J3. Create-matter live seed** | FR-A1-13 | Authored, inert (contract tripwire asserts NOT-yet-live) | DEF-003 7-step seed (Binding/Action rows + `ConsumerTypes.CreateMatter` + GU-065/066/067 flip). Planned at gate 049. |
 
