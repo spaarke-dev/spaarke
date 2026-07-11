@@ -1355,6 +1355,119 @@
       "expected": { "outcomeClass": "dispatch", "consumerType": "compose-defined-terms", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "compose-defined-terms", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 task 047 (deploy)" }
+    },
+    {
+      "caseId": "GU-118",
+      "family": "compose-draft-document",
+      "ucId": "UC-G-2",
+      "channel": "text",
+      "notes": "DEF-08 Part A: a document-drafting intent in chat routes to compose-draft-document (Compose disposition), which seeds a Compose editor tab — NOT draft-correspondence (email-to-send, inline prose). The distinguishing signal is 'a document to work on/open in the editor'.",
+      "utterance": "write a letter to the client about these findings and open it as a document",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-document", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "compose-draft-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-08 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-119",
+      "family": "compose-draft-document",
+      "ucId": "UC-G-2",
+      "channel": "text",
+      "utterance": "draft a memo summarizing the NDA review to work on in the editor",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-document", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "compose-draft-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-08 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-120",
+      "family": "compose-draft-document",
+      "ucId": "UC-G-2",
+      "channel": "text",
+      "utterance": "compose a response to the termination notice as a document I can edit",
+      "context": { "surface": "record-form-chat", "recordType": "sprk_matter" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-document", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "compose-draft-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-08 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-121",
+      "family": "compose-draft-document",
+      "ucId": "UC-G-2",
+      "channel": "text",
+      "utterance": "open this as a document so I can revise it",
+      "notes": "The DEF-08 'open this as a document' follow-up after a prior draft turn — routes to compose-draft-document so the draft materializes in a Compose editor tab, not a blank one.",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-document", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "compose-draft-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-08 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-122",
+      "family": "compose-draft-document",
+      "ucId": "UC-G-2",
+      "channel": "text",
+      "utterance": "draft an engagement letter for this matter and let me edit it in Compose",
+      "context": { "surface": "record-form-chat", "recordType": "sprk_matter" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-document", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "compose-draft-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-08 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-123",
+      "family": "compose-draft-document-dispatch",
+      "ucId": "UC-G-2",
+      "channel": "click",
+      "notes": "DEF-08 Part B: the 'Open in Compose' per-message affordance / the send_workspace_artifact draft-seed open — the dispatch (Click) leg of the compose-draft-document family.",
+      "utterance": "[Open in Compose] affordance on an assistant-drafted letter message",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-document", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "compose-draft-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-08 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-124",
+      "family": "compose-draft-document-dispatch",
+      "ucId": "UC-G-2",
+      "channel": "click",
+      "utterance": "[Open in Compose] affordance re-clicked — reuses the existing single Compose draft tab (no duplicate)",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-document", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "compose-draft-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-08 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-125",
+      "family": "compose-draft-document-dispatch",
+      "ucId": "UC-G-2",
+      "channel": "click",
+      "utterance": "chat 'write a letter' → 'open as a document' opens a Compose tab SEEDED with the drafted content",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-document", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "compose-draft-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-08 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-126",
+      "family": "compose-draft-document-dispatch",
+      "ucId": "UC-G-2",
+      "channel": "click",
+      "utterance": "[Open in Compose] on a drafted memo grounded in an uploaded contract",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-document", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "compose-draft-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-08 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-127",
+      "family": "compose-draft-document-dispatch",
+      "ucId": "UC-G-2",
+      "channel": "click",
+      "utterance": "[Open in Compose] on a matter-hosted assistant draft response",
+      "context": { "surface": "record-form-chat", "recordType": "sprk_matter" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "compose-draft-document", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "compose-draft-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-08 (catalog deploy)" }
     }
   ]
 }

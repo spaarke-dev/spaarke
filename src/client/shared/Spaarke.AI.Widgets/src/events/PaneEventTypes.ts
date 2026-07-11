@@ -308,7 +308,25 @@ export interface WorkspacePaneEvent {
     //    asks the Workspace pane to ephemerally highlight the cited source
     //    span. Additive discriminant; see the qaSourceText/qaSectionLabel
     //    field block below.
-    | 'compose_qa_highlight';
+    | 'compose_qa_highlight'
+    // ── Compose D-F3 content-render ack signal (spaarkeai-compose-r2 task 071,
+    //    FR-34) ── Workspace(ComposeWorkspace) → Workspace(WorkspacePane). The
+    //    honest-UI-ack refinement for CONTENT-bearing Compose opens: a
+    //    `workspace_open_tab` frame that carries a full-document draft SEED
+    //    (`widgetData.compose.draft.{ledgerRef,sessionId}`, DEF-08) must NOT ack
+    //    the server the instant the TAB SHELL opens — the tab opening is not the
+    //    content rendering. ComposeWorkspace emits this signal ONLY after the
+    //    seeded draft has actually materialized in the editor (the seed effect
+    //    resolved + the editor mounted the populated content). WorkspacePane, which
+    //    deferred the ack for that frame, correlates this signal by `ledgerRef` and
+    //    only THEN POSTs the D-F3 ack referencing the server frame id. If the seed
+    //    FAILS to render (ledger miss / fetch error → the Compose error state),
+    //    this signal never fires → no ack → the server's `WaitForAckAsync` times out
+    //    → the tool result fails HONESTLY (never a fabricated "I pasted the draft").
+    //    Reuses the existing `ledgerRef` + `sessionId` fields (identifiers only,
+    //    Tier-1 safe — ADR-015); additive discriminant (ADR-030), no new channel,
+    //    no `any`. See ComposeWorkspace.tsx (emitter) + WorkspacePane.tsx (ack site).
+    | 'compose_content_rendered';
 
   /** Identifies the widget kind (e.g. `"document-summary"`, `"clause-list"`). */
   widgetType?: string;

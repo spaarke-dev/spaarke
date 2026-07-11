@@ -294,6 +294,20 @@ export interface DispatchConsumerArgs {
    * against the Action's `sprk_inputschema` — the client never interprets.
    */
   readonly slots?: Record<string, unknown>;
+  /**
+   * Per-dispatch session-id override (spaarkeai-compose-r2 DEF-09). When present,
+   * this dispatch targets THIS session (`/api/ai/chat/sessions/{sessionIdOverride}
+   * /dispatch`) instead of the dispatcher's bound `getSessionId()`. Additive +
+   * default-undefined: every existing caller omits it and keeps its bound-session
+   * behavior unchanged. The Compose inline toolbar sets it to the editor's DOCUMENT
+   * session so a compose-disposition EDIT dispatch writes its `SessionOutput` into
+   * the SAME session `ComposeWorkspace` reads `compose-outputs` from — otherwise the
+   * write (chat session) and the materialize read (document session) diverge and the
+   * inline redline never appears. This is WHICH session-ledger the dispatch writes
+   * to (already part of the endpoint URL) — NOT routing (bindingId remains the sole
+   * binding-resolution datum; ADR-039).
+   */
+  readonly sessionIdOverride?: string;
   /** Whether the invoked capability requires session attachments (from the chip). */
   readonly requiresAttachments?: boolean;
   /** Current session attachment count — input to the empty-attachments guard. */
@@ -425,7 +439,11 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
       throw new DispatchPreconditionError('binding-id-required', 'dispatchConsumer: bindingId is required');
     }
 
-    const sessionId = getSessionId();
+    // DEF-09: a per-dispatch `sessionIdOverride` wins over the bound getSessionId()
+    // so a Compose edit dispatch can target the editor's DOCUMENT session (see
+    // DispatchConsumerArgs.sessionIdOverride). Falls back to the bound session for
+    // every other caller (chips, wizards) — additive, default-undefined.
+    const sessionId = args?.sessionIdOverride ?? getSessionId();
     if (!sessionId) {
       throw new DispatchPreconditionError('no-session', 'dispatchConsumer: no active chat session');
     }

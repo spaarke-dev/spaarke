@@ -39,14 +39,20 @@
 
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Workspace;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
@@ -410,5 +416,187 @@ public sealed class ComposeDispatchEndpointContractTests : IClassFixture<Dispatc
             "a DocumentAnalysisResult-shaped payload is STILL coerced to the typed DAR on the wire " +
             "(byte-identical summarize contract) — the fix's discriminator is summarize-preserving");
         body.Should().Contain("\"entities\":", "the DAR `entities` field is present on the summarize wire shape");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 6. DEF-08 THE WIRE-BODY anti-recurrence proof (the 115 lesson): drive the
+    //    FULL vertical slice through-the-wire — dispatch compose-draft-document
+    //    through the REAL /dispatch route so a full-document `compose` output lands
+    //    in the session ledger, THEN run the REAL SendWorkspaceArtifactHandler and
+    //    assert the open-workspace-tab SSE frame's widgetData carries the draft
+    //    SEED (compose.draft.ledgerRef pointing at that ledger entry) — NOT an
+    //    empty widgetData. This asserts the WIRE body the client materializes from,
+    //    not the stored-ledger shortcut: a blank widgetData here is exactly the
+    //    DEF-08 blank-Compose-tab defect.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // The full-document body the compose-draft-document executor emits. A distinctive
+    // marker so we can prove the ledger entry (and therefore the seed) is THIS draft.
+    private const string DraftBodyHtml =
+        "<h1>Re: Acme NDA</h1><p>Dear Client, based on our review of the mutual NDA, the confidentiality term runs five years.</p>";
+
+    /// <summary>Seeds the compose-draft-document Binding (Compose disposition) + a full-document
+    /// Action at the routing module boundary, and arms the LLM stub to emit a full-document payload
+    /// (title + body_html + document_kind + cited_refs). The executor runs off the session-file
+    /// (`## Document`) path — the way document drafting grounds in the session material in
+    /// production (drafting has no structured `selectionText`/`documentText` operand; `request` is
+    /// not in ContextBinder's closed operand vocabulary, so the file path provides the grounding).</summary>
+    private void SeedComposeDraftDocumentBinding()
+    {
+        _fx.Reset();
+        // One session file so the executor's `## Document` path resolves (the default TextSourceMock
+        // from ConfigureDefaults returns extracted text) — mirrors the summarize non-regression test.
+        _fx.Sessions.Session = new ChatSession(
+            SessionId: TestSessionId,
+            TenantId: "00000000-0000-0000-0000-000000000abc",
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>(),
+            HostContext: null,
+            AdditionalDocumentIds: null,
+            UploadedFiles: new[]
+            {
+                new ChatSessionFile(
+                    FileId: "file-nda", FileName: "nda-acme.pdf", ContentType: "application/pdf",
+                    SizeBytes: 2048, SearchDocumentIdsCsv: "doc-file-nda-1", UploadedAt: DateTimeOffset.UtcNow),
+            });
+
+        _fx.ConsumerRoutingMock
+            .Setup(c => c.GetBindingByIdAsync(ComposeBindingId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Binding
+            {
+                BindingId = ComposeBindingId,
+                ConsumerType = ConsumerTypes.ComposeDraftDocument,
+                ConsumerCode = "default",
+                Environment = "*",
+                ActionId = ComposeActionId,
+                ActionKind = ActionKind.Prompted,
+                Disposition = BindingDisposition.Compose,
+            });
+
+        _fx.ScopeResolverMock
+            .Setup(s => s.GetActionAsync(ComposeActionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisAction
+            {
+                Id = ComposeActionId,
+                Name = "Compose — Draft Document",
+                SystemPrompt =
+                    """{"$schema":"https://spaarke.com/schemas/prompt/v1","instruction":{"role":"You are the Spaarke Compose document drafter.","task":"Draft a full document from the request in the ## Input section."},"output":{"fields":[{"name":"body_html","type":"string","description":"full document HTML"}],"structuredOutput":true}}""",
+                OutputSchemaJson =
+                    """{"type":"object","additionalProperties":false,"required":["title","body_html","document_kind","cited_refs"],"properties":{"title":{"type":"string"},"body_html":{"type":"string"},"document_kind":{"type":"string","enum":["letter","memo","response","notice","agreement","general"]},"cited_refs":{"type":"array","items":{"type":"string"}}}}""",
+                Temperature = 0.4m,
+            });
+
+        _fx.OpenAi.RawJsonToReturn =
+            $$"""{"title":"Client Letter — Acme NDA","body_html":"{{DraftBodyHtml}}","document_kind":"letter","cited_refs":["nda-acme.pdf"]}""";
+    }
+
+    /// <summary>Builds a SendWorkspaceArtifactHandler over the SAME session store the dispatch wrote
+    /// to, with an Acked ack coordinator + a seeded "Compose" layout. IDataverseUserClient is a bare
+    /// mock — the draft-seed path never touches Dataverse.</summary>
+    private static SendWorkspaceArtifactHandler BuildWorkspaceArtifactHandler(
+        ChatSessionManager sessionManager, Guid tabGuid)
+    {
+        var guidProvider = new Mock<IGuidProvider>();
+        guidProvider.Setup(g => g.NewGuid()).Returns(tabGuid);
+
+        var ack = new Mock<IUiActionAckCoordinator>();
+        ack.Setup(a => a.WaitForAckAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(UiActionAckOutcome.Acknowledged);
+
+        // A "Compose" system layout so the layout resolves by name.
+        var composeLayoutId = Guid.Parse("c09d26be-e173-f111-ab0e-7ced8ddc4a05");
+        var layoutEntity = new Microsoft.Xrm.Sdk.Entity("sprk_workspacelayout", composeLayoutId);
+        layoutEntity["sprk_workspacelayoutid"] = composeLayoutId;
+        layoutEntity["sprk_name"] = "Compose";
+        layoutEntity["sprk_issystem"] = true;
+        var entityService = new Mock<IGenericEntityService>();
+        entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection(
+                new List<Microsoft.Xrm.Sdk.Entity> { layoutEntity }));
+
+        return new SendWorkspaceArtifactHandler(
+            guidProvider.Object,
+            TimeProvider.System,
+            new WorkspaceLayoutService(entityService.Object, Mock.Of<ILogger<WorkspaceLayoutService>>()),
+            Mock.Of<Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.IDataverseUserClient>(),
+            ack.Object,
+            sessionManager,
+            Mock.Of<ILogger<SendWorkspaceArtifactHandler>>());
+    }
+
+    [Fact]
+    public async Task Post_ComposeDraftDocument_DispatchStoresFullDocument_ThenSendWorkspaceArtifactSeedsTabWidgetDataWithLedgerRef()
+    {
+        // ── HALF 1: dispatch compose-draft-document through the REAL /dispatch route. ──
+        SeedComposeDraftDocumentBinding();
+        var client = _fx.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/dispatch",
+            new { bindingId = ComposeBindingId.ToString(), args = new { request = "write a client letter about the Acme NDA and open it as a document" } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "compose-draft-document dispatches end-to-end through the REAL /dispatch route (E-20 admits `compose`)");
+
+        // The output landed in the ledger as a `compose` SessionOutput carrying the FULL-DOCUMENT
+        // body (ADR-040 store-before-render). This is the "output lands in the ledger" half.
+        _fx.Router.LastRouted.Should().NotBeNull("the ADR-040 ledger write ran");
+        _fx.Router.LastRouted!.Entry.Disposition.Should().Be("compose",
+            "the stored SessionOutput carries the `compose` disposition");
+        var ledgerKey = _fx.Router.LastRouted!.Entry.Key;
+        ledgerKey.Should().Be($"{ComposeBindingId}@t1");
+        _fx.Router.LastRouted!.Entry.Payload.TryGetProperty("body_html", out var storedBody).Should().BeTrue(
+            "the stored compose output is a FULL-DOCUMENT draft (body_html), not an edit payload");
+        storedBody.GetString().Should().Contain("confidentiality term runs five years");
+
+        // ── HALF 2: bridge the routed session (the persisted ledger state — in production Redis/
+        //    Cosmos; here the mock cache doesn't write back to the fixture's Session property) into
+        //    the store the handler reads, then run the REAL SendWorkspaceArtifactHandler. ──
+        _fx.Sessions.Session = _fx.Router.LastRouted!.Session;
+
+        var tabGuid = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var handler = BuildWorkspaceArtifactHandler(_fx.Sessions, tabGuid);
+
+        var emitted = new List<Sprk.Bff.Api.Api.Ai.ChatSseEvent>();
+        var ctx = new ChatInvocationContext
+        {
+            ChatSessionId = Guid.Parse(TestSessionId),
+            TenantId = "00000000-0000-0000-0000-000000000abc",
+            // A plain "open Compose" tool call — NO documentId, NO sessionFileId. The handler must
+            // resolve the seed from the session ledger's full-document compose output.
+            ToolArgumentsJson =
+                """{"widgetType":"Workspace","title":"Client Letter — Acme NDA","widgetData":{"kind":"Workspace","layoutName":"Compose"}}""",
+            SseWriter = (evt, _) => { emitted.Add(evt); return Task.CompletedTask; },
+        };
+        var tool = new AnalysisTool { Id = Guid.NewGuid(), Name = "Send Workspace Artifact", Type = ToolType.Custom };
+
+        var result = await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
+
+        result.Success.Should().BeTrue("the tab opened (ack acknowledged)");
+
+        // THE 115 assertion: the open-workspace-tab SSE frame's widgetData carries the draft SEED
+        // (compose.draft.ledgerRef == the dispatched ledger key) ON THE WIRE — NOT an empty
+        // widgetData. This is the through-the-wire proof that the chat draft reaches the Compose tab.
+        var dto = emitted.Should().ContainSingle().Subject.Data
+            .Should().BeOfType<Sprk.Bff.Api.Services.Ai.Telemetry.ContextSseEventDto>().Subject;
+        dto.ContextWidgetDataJson.Should().NotBeNullOrEmpty();
+        using var widgetData = JsonDocument.Parse(dto.ContextWidgetDataJson!);
+        widgetData.RootElement.TryGetProperty("compose", out var compose).Should().BeTrue(
+            "the widgetData MUST carry a compose seed — a bare {layoutId,layoutName} is the DEF-08 blank-tab defect");
+        compose.TryGetProperty("draft", out var draft).Should().BeTrue("the seed is a full-document draft seed");
+        draft.GetProperty("ledgerRef").GetString().Should().Be(ledgerKey,
+            "the SEED on the wire references the dispatched full-document compose output by its ledger key " +
+            "(ADR-040/ADR-015: identifier on the frame, content resolved from the ledger)");
+        draft.GetProperty("sessionId").GetString().Should().Be(Guid.Parse(TestSessionId).ToString("D"));
+
+        // ADR-015: no drafted body content rides the SSE frame — only the identifier.
+        dto.ContextWidgetDataJson!.Should().NotContain("confidentiality term runs five years",
+            "the drafted body MUST NOT ride the SSE frame (ADR-015) — the client resolves it from the ledger");
     }
 }

@@ -239,6 +239,17 @@ export interface ComposeEditorProps {
   docxBytes: ArrayBuffer | null;
 
   /**
+   * DEF-08: seed HTML for an AI-drafted full document. When present (and `docxBytes` is null),
+   * the editor sets its content DIRECTLY from this HTML instead of decoding DOCX — the drafting
+   * body already IS the editor content (no docx round-trip). Rendered once on mount as a
+   * TRANSIENT working draft (reported dirty so create-on-save first Save is reachable), then the
+   * editor owns subsequent edits. Mutually exclusive with `docxBytes` (a draft seed sets
+   * `docxBytes` null). Save serializes the editor content via `tipTapToDocxBytes` exactly as for a
+   * docx mount.
+   */
+  initialHtml?: string | null;
+
+  /**
    * Document pointer used by PaneEventBus events + heartbeat endpoint URL.
    * Required when `docxBytes` is non-null (and heartbeat must run); optional
    * when the editor is mounted with no document.
@@ -672,6 +683,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
   function ComposeEditor(props, ref) {
     const {
       docxBytes,
+      initialHtml,
       documentRef,
       bffBaseUrl,
       sessionId = '',
@@ -776,6 +788,17 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     React.useEffect(() => {
       if (!editor) return;
       if (!docxBytes) {
+        // DEF-08: an AI-drafted full-document seed sets the editor content DIRECTLY from HTML
+        // (no docx decode) — the draft body IS the editor content. A draft is a transient working
+        // draft (never yet saved), so report dirty=true to the workspace (create-on-save first Save
+        // must be reachable), while the editor's OWN dirtyRef stays clean (an untouched seed still
+        // Saves the pristine draft). Mirrors the transient-mount dirty semantics below.
+        if (initialHtml && initialHtml.length > 0) {
+          editor.commands.setContent(initialHtml);
+          dirtyRef.current = false;
+          onDirtyChange?.(true);
+          return;
+        }
         // Reset to empty paragraph if cleared.
         editor.commands.setContent('<p></p>');
         dirtyRef.current = false;
@@ -824,7 +847,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // user's edits by re-importing the original mount bytes. The captured value is correct
       // because `mountTransient` sets docxBytes + documentRef atomically in one render.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [editor, docxBytes, onDirtyChange, onImportWarnings]);
+    }, [editor, docxBytes, initialHtml, onDirtyChange, onImportWarnings]);
 
     // ----- Selection dispatch (heartbeat hoisted to ComposeWorkspace) -----
     useSelectionEventDispatch(editor, documentRef, sessionId, dispatch);

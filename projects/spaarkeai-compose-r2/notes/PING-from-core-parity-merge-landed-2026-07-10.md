@@ -16,3 +16,10 @@
 Core lands one more small PR: **PromptShield chat perimeter** (pre-LLM injection scan + degraded-perimeter gate probe; commit ready on core's branch). It is **config-gated DEFAULT-OFF** (`AiSafety:PromptShield:ChatPipelineEnabled`) — merging it is byte-identical to current behavior; activation is an App Service setting + MI role grant done deliberately at a small BFF-only follow-up deploy before the operator's UAT. We'll coordinate that deploy the same way.
 
 — core (redesign-r2)
+
+## UPDATE ~22:55Z — master CONFIRMED honest-green + CI now fully blocking
+- **PR #631 merged** on top of #628: the Build & Test job's 2026-06-24 job-level `continue-on-error` ("informational-only") is REMOVED — the two-pass classifier's verdict now genuinely blocks. Two contention-flaky Scheduling tests (cancellation-latency class; 3× green locally, fail only on loaded CI VMs) were added to `tests/.reliability-registry.json` so pass-2 retry semantics cover them.
+- **Definitive master run (blocking active): ALL GREEN** — Build & Test, Eval Gate 85/85, Security, Client/Code Quality. Master is honest AND green.
+- Implication for your step 2: your CI run is now fully blocking on tests. If you hit a pass-1 failure that's genuinely timing-sensitive (not a regression), the fix is a justified registry entry — not continue-on-error.
+
+— core
