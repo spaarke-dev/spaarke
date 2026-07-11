@@ -683,22 +683,34 @@ public class SprkChatAgentFactory
         // (FR-P2-08); the always-suspend outcome was replaced by the policy-engine decision in
         // task 044. NFR-04: the wrapper preserves name/description/schema verbatim, so the
         // projected block is byte-identical.
+        // === F-8 — safety-perimeter producer activation (audit finding F-8 follow-up) ==========
+        // The PromptShield fail-open verdict is the gate's overlay-2 (SafetyPerimeterDegraded) signal.
+        // Its PRODUCER — PromptShieldChatMiddleware — is wired onto the live pipeline (below, outermost)
+        // ONLY when AiSafety:PromptShield:ChatPipelineEnabled=true (default false = byte-identical to
+        // pre-F-8). When enabled we create ONE per-turn signal holder shared between the gate wrap-sites
+        // (readers, via the overlay-2 probe) and the shield middleware (the writer). When disabled the
+        // holder stays null and the gate probe stays null exactly as before this task — no scan, no
+        // block, unfed overlay.
+        var promptShieldChatEnabled =
+            PromptShieldChatMiddleware.IsChatPipelineEnabled(_serviceProvider.GetService<IConfiguration>());
+        var safetyPerimeterSignal = promptShieldChatEnabled ? new SafetyPerimeterSignal() : null;
+
         for (var i = 0; i < tools.Count; i++)
         {
             if (tools[i] is ToolHandlerToAIFunctionAdapter adapter
                 && adapter.Tool.SideEffectClass is { } declaredClass
                 && PendingPlanManager.RequiresConfirmation(declaredClass))
             {
-                // dispatchUncertaintyProbe + safetyPerimeterDegradedProbe are left null (their
-                // defaults): the gate HONORS a real signal when one is threaded, but no live producer
-                // reaches this gate today. Ambiguity is covered by layer 1 (the agent asking). The
-                // real safety-perimeter fail-open verdict lives in SafetyPipelineMiddleware, which is
-                // NOT wired into WrapWithMiddleware on the live chat path (dropped by the R1
-                // dispatcher-deletion, commit 26fde1f68) — activating that perimeter is a
-                // security-posture change escalated for sign-off (F-8), so the probe stays null and
-                // the overlay honestly stays unfired here rather than being hardcoded.
+                // dispatchUncertaintyProbe stays null (no live routing-confidence producer reaches this
+                // gate; ambiguity is covered by layer 1 — the agent asking). safetyPerimeterDegradedProbe
+                // now reads THIS turn's PromptShield fail-open verdict from the shared signal when the
+                // shield is enabled; otherwise it stays null (unfed overlay, byte-identical to pre-F-8).
+                // The value flows from the probe — never hardcoded (the anti-shim gate tests fail if it were).
                 tools[i] = new SideEffectGateAIFunction(
-                    adapter, declaredClass, _serviceProvider, tenantId, sessionId, _logger, sseWriter);
+                    adapter, declaredClass, _serviceProvider, tenantId, sessionId, _logger, sseWriter,
+                    safetyPerimeterDegradedProbe: safetyPerimeterSignal is null
+                        ? null
+                        : () => safetyPerimeterSignal.Degraded);
             }
         }
 
@@ -926,11 +938,10 @@ public class SprkChatAgentFactory
             agentLogger,
             turnContract);
 
-        // === Middleware pipeline (AIPL-057, AIPU-072) ===
-        // Wrap order: ContentSafety (innermost) -> CostControl -> Telemetry -> Routing (outermost).
-        // The outermost middleware (Routing) executes first on each call and decides which backend
-        // handles the request before the inner pipeline ever sees the message.
-        agent = WrapWithMiddleware(agent, tenantId);
+        // === Middleware pipeline (AIPL-057, AIPU-072; F-8 shield outermost) ===
+        // Wrap order: ContentSafety (innermost) -> CostControl -> Telemetry -> Routing -> PromptShield
+        // (outermost, F-8, only when enabled). The outermost middleware executes first on each call.
+        agent = WrapWithMiddleware(agent, tenantId, sessionId, safetyPerimeterSignal);
 
         return agent;
     }
@@ -953,7 +964,15 @@ public class SprkChatAgentFactory
     /// </summary>
     /// <param name="agent">The inner agent to wrap.</param>
     /// <param name="tenantId">Tenant ID for Agent Service thread scoping (ADR-014).</param>
-    private ISprkChatAgent WrapWithMiddleware(ISprkChatAgent agent, string tenantId)
+    /// <param name="sessionId">Chat session id (F-8 shield logging correlation).</param>
+    /// <param name="safetyPerimeterSignal">
+    /// F-8: the shared per-turn safety-perimeter holder written by <see cref="PromptShieldChatMiddleware"/>
+    /// and read by the gate's overlay-2 probe. Non-null ONLY when the shield is enabled by config
+    /// (<see cref="PromptShieldChatMiddleware.ChatPipelineEnabledConfigKey"/>). When null the shield is
+    /// NOT added — the pipeline is byte-identical to pre-F-8.
+    /// </param>
+    private ISprkChatAgent WrapWithMiddleware(
+        ISprkChatAgent agent, string tenantId, string sessionId, SafetyPerimeterSignal? safetyPerimeterSignal)
     {
         // 1. Content safety (innermost — filters before other middleware processes tokens)
         agent = new AgentContentSafetyMiddleware(
@@ -985,6 +1004,22 @@ public class SprkChatAgentFactory
                 agentServiceOptions,
                 _logger,
                 tenantId);
+        }
+
+        // 5. PromptShield (OUTERMOST, F-8) — pre-LLM injection perimeter + per-turn fail-open signal.
+        // Added ONLY when the shield is enabled by config (safetyPerimeterSignal non-null). Placed
+        // outermost so the user turn is scanned (and the overlay-2 signal is set) BEFORE routing chooses
+        // a backend and before the inner tool loop runs. Captive-dependency-safe: the middleware captures
+        // the ROOT provider and resolves the Scoped IPromptShieldService from a fresh per-turn scope.
+        // ADR-010: factory-instantiated, no additional DI registration.
+        if (safetyPerimeterSignal is not null)
+        {
+            agent = new PromptShieldChatMiddleware(
+                agent,
+                _serviceProvider,
+                safetyPerimeterSignal,
+                sessionId,
+                _logger);
         }
 
         return agent;
