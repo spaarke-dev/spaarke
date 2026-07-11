@@ -1,9 +1,24 @@
 # Current Task
 
-**Active task**: VHVU-010 — Add shared `bootstrapWizardPage()` factory + adopt in Event page (Phase A1)
+**Active task**: VHVU-030 — Cut over VisualHost "+" to navigateTo; delete inline embedding + casts (Phase A3)
 **Status**: not-started
-**Phase**: A1
-**Next action**: Begin task 010 (A0 complete; VHVU-004 is optional/owner-gated, off critical path)
+**Phase**: A3
+**Next action**: Begin VHVU-030 — the big cutover (heavy edits to VisualHostRoot.tsx, ~1172 lines). Recommend fresh context.
+
+### Quick Recovery
+| Field | Value |
+|---|---|
+| Done | A0 (001-003) + A1 (010-012) + A2 (020) — 7 tasks + master merge, all committed |
+| Next | **VHVU-030** navigateTo cutover (the decoupling task — removes leak + React casts) |
+| Gates awaiting owner | VHVU-004 (optional dev deploy), VHVU-021 + VHVU-031 (UAT, need deploy) |
+| Then | Phase B (040-070) `@spaarke/visuals` extraction + ADR-012 amendment; 090 wrap-up |
+
+### VHVU-030 starting notes (for whoever picks it up)
+- Edit `src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx`: replace the inline `React.lazy` wizard Dialog mount with `Xrm.Navigation.navigateTo` (webresource dialog 60%×70%, mirror `src/client/webresources/js/sprk_wizard_commands.js`).
+- Resolve target page from wizard key: event→`sprk_createeventwizard`, invoice→`sprk_createinvoicewizard`, report-card→`sprk_createreportcardwizard`.
+- Build the `data` envelope: `entityType`, `entityId` (**cleanGuid it — ADR-044**), `recordName`, `themeOption=dark|light` (matches the tolerant reader from VHVU-020). bffBaseUrl also as the pages expect.
+- DELETE: inline embedding, `ensureCreateWizardAuthInitialized()` lazy `@spaarke/auth` bootstrap, the 3 `as unknown as React.ComponentType` casts (CardChrome + VisualHostRoot ×2), and the now-unused shared-lib-`src` wizard imports (wizardRegistry, adapters, AssociateToStep types).
+- Verify: `@spaarke/sdap-client` + `@spaarke/auth` gone from VisualHost's build graph; `build:prod` green; bundle size DROPS (msal/wizard code removed).
 
 ### Completed A0 (2026-07-10)
 - **VHVU-001 ✅** — declared `@spaarke/auth` on ui-components; extended `ensure-dist-fresh.js` for sibling dists. Deterministic green build.

@@ -10,11 +10,11 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ complete · ⛔
 | VHVU-002 | Shared-lib packaging hygiene (`.tgz` + `files` allow-list + storybook-static) | A0 | STANDARD | sonnet/high | 001 | ✅ |
 | VHVU-003 | Bump VisualHost v1.4.35 (5 locations) + rebuild + confirm `cleanGuid` | A0 | FULL | sonnet/high | 001 | ✅ |
 | VHVU-004 | Deploy v1.4.35 to dev + UAT braced-GUID create · **OPTIONAL / owner-gated (not critical path)** | A0 | FULL | sonnet/high | 002,003 | ⏸ optional |
-| VHVU-010 | Add shared `bootstrapWizardPage()` factory + adopt in Event page | A1 | FULL | sonnet/high | 003 | 🔲 |
-| VHVU-011 | Build Invoice wizard code page | A1 | FULL | sonnet/high | 010 | 🔲 |
-| VHVU-012 | Build Report Card wizard code page | A1 | FULL | sonnet/high | 010 | 🔲 |
-| VHVU-020 | Wire `initialAssociation`/`lockAssociation` + `themeOption` in 3 pages | A2 | FULL | sonnet/high | 011,012 | 🔲 |
-| VHVU-021 | Verify regarding-resolver + field-mapping parity from "+" | A2 | FULL | sonnet/high | 020 | 🔲 |
+| VHVU-010 | Add shared `bootstrapWizardPage()` factory + adopt in Event page | A1 | FULL | sonnet/high | 003 | ✅ |
+| VHVU-011 | Build Invoice wizard code page | A1 | FULL | sonnet/high | 010 | ✅ |
+| VHVU-012 | Build Report Card wizard code page | A1 | FULL | sonnet/high | 010 | ✅ |
+| VHVU-020 | Wire `initialAssociation`/`lockAssociation` + `themeOption` in 3 pages | A2 | FULL | sonnet/high | 011,012 | ✅ |
+| VHVU-021 | Verify regarding-resolver + field-mapping parity from "+" · **UAT-gated (needs deploy)** | A2 | FULL | sonnet/high | 020 | ⏸ UAT |
 | VHVU-030 | Cut over VisualHost "+" to `navigateTo`; delete inline embedding + casts | A3 | FULL | sonnet/high | 020 | 🔲 |
 | VHVU-031 | Deploy VisualHost + pages to dev; UAT "+" via navigateTo (dark+light) | A3 | FULL | sonnet/high | 030,021 | 🔲 |
 | VHVU-040 | Scaffold `@spaarke/visuals` sibling package | B1 | FULL | sonnet/high | 031 | 🔲 |
