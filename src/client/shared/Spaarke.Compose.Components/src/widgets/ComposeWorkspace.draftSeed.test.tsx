@@ -39,10 +39,13 @@ jest.mock('@spaarke/auth', () => ({
   }),
 }));
 
+// FR-34 D-F3 (task 071): capture the render-ack signal ComposeWorkspace emits once the
+// seeded draft actually renders. Prefixed `mock*` so the jest.mock factory may close over it.
+const mockDispatchPaneEvent = jest.fn();
 jest.mock(
   '@spaarke/ai-widgets/events',
   () => ({
-    useDispatchPaneEvent: () => jest.fn(),
+    useDispatchPaneEvent: () => mockDispatchPaneEvent,
     usePaneEvent: () => undefined,
   }),
   { virtual: true }
@@ -102,7 +105,16 @@ beforeEach(() => {
   authenticatedFetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => [] });
   editorProps.docxBytes = undefined;
   editorProps.initialHtml = undefined;
+  mockDispatchPaneEvent.mockClear();
 });
+
+/** All `compose_content_rendered` render-ack signals emitted (FR-34 D-F3, task 071). */
+const renderAckSignals = () =>
+  mockDispatchPaneEvent.mock.calls.filter(
+    ([channel, event]) =>
+      channel === 'workspace' &&
+      (event as { type?: string } | undefined)?.type === 'compose_content_rendered'
+  );
 
 describe('ComposeWorkspace — DEF-08 AI-drafted full-document seed', () => {
   it('Part A: resolves the drafted body from the ledger and mounts the editor POPULATED (not blank)', async () => {
@@ -135,6 +147,16 @@ describe('ComposeWorkspace — DEF-08 AI-drafted full-document seed', () => {
       String(u).includes('/api/ai/chat/sessions/sess-1/compose-outputs')
     );
     expect(outputCalls.length).toBeGreaterThanOrEqual(1);
+
+    // FR-34 D-F3 (task 071): once the seeded draft has rendered (editor populated), the
+    // content-render ack signal is emitted — correlated by ledgerRef — so WorkspacePane's
+    // deferred ack fires. This is the honest "content is on screen" moment.
+    await waitFor(() => expect(renderAckSignals().length).toBeGreaterThan(0));
+    expect(renderAckSignals()[0][1]).toEqual({
+      type: 'compose_content_rendered',
+      ledgerRef: 'binding-1@t1',
+      sessionId: 'sess-1',
+    });
   });
 
   it('Part B: mounts the inline-html draft directly with NO ledger fetch', async () => {
@@ -164,6 +186,11 @@ describe('ComposeWorkspace — DEF-08 AI-drafted full-document seed', () => {
       expect(screen.getByTestId('compose-workspace-error-empty')).toBeInTheDocument()
     );
     expect(screen.queryByTestId('compose-editor-stub')).not.toBeInTheDocument();
+
+    // FR-34 D-F3 (task 071): the seed FAILED to render → NO content-render ack signal is
+    // emitted → WorkspacePane never acks → the server's WaitForAckAsync times out (honest
+    // failure). A false ack here would be the R2-D fabrication this task closes.
+    expect(renderAckSignals()).toHaveLength(0);
   });
 
   it('yields to a stored-document ref (mutually exclusive — draft seed does not fetch)', async () => {

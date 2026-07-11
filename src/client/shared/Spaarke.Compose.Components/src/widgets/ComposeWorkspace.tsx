@@ -72,7 +72,7 @@ import type { ComposeActionEnqueue } from './ComposeAiToolbar';
 // `@spaarke/ai-outputs` subpaths, which LegalWorkspace's standalone Rollup
 // cannot resolve). Matches the SpaarkeAi `useWorkspaceLayouts` adapter pattern
 // (documented in `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`).
-import { type WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
+import { useDispatchPaneEvent, type WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 // Compose three-pane coordination — WORKSPACE leg (task 104 / E2E-R5). Typed
 // receivers for Flow 3 (compose_context_insert) + Flow 5 (compose_assistant_insert).
 import { useComposeWorkspaceReceivers } from './useComposeWorkspaceReceivers';
@@ -385,6 +385,27 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   // Imperative editor ref for save (TipTap → DOCX bytes).
   const editorRef = React.useRef<ComposeEditorHandle | null>(null);
+
+  // -------------------------------------------------------------------------
+  // FR-34 D-F3 honest content-render ack (task 071)
+  // -------------------------------------------------------------------------
+  // A chat-opened Compose tab that carries a full-document draft SEED (DEF-08
+  // Part A: `initialDraftRef.{ledgerRef,sessionId}`) rides a server
+  // `workspace_open_tab` frame whose tool result is WAITING on a client ack
+  // (SendWorkspaceArtifactHandler.WaitForAckAsync). WorkspacePane DEFERS that ack
+  // for a seeded frame — the tab SHELL opening is not the content rendering — and
+  // fires it only when this render signal arrives. We emit the signal ONLY after
+  // the seed has actually materialized in the editor (`mountDraftHtml` → status
+  // 'loaded' + non-null `seedHtml`), correlated back to the waiting frame by
+  // `ledgerRef`. On a seed FAILURE (ledger miss / fetch error → the 'error' state)
+  // the signal NEVER fires → the server's WaitForAckAsync times out → the tool
+  // result fails HONESTLY (never a fabricated "the draft is in the editor").
+  // No content on the bus (ADR-015 identifiers-only); additive discriminant,
+  // typed, no `any` (ADR-030). Only Part A (a real ledgerRef → a real server ack)
+  // arms this; Part B inline-html "Open in Compose" is a client affordance with no
+  // ack-gated server frame, so it never arms the signal.
+  const dispatchPaneEvent = useDispatchPaneEvent();
+  const pendingDraftRenderSignalRef = React.useRef<{ ledgerRef: string; sessionId?: string } | null>(null);
 
   // FR-01 (task 010): hidden native file input backing "Browse / open file". Triggered
   // programmatically from handleBrowseRequested; see the input element rendered below.
@@ -1386,6 +1407,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
         // A draft mount has no SPE drive — clear any stale Search-resolved drive id.
         setSearchResolvedDriveId(null);
+        // FR-34 D-F3 (task 071): arm the render-ack signal BEFORE the state flips to 'loaded'
+        // so the watcher effect below emits `compose_content_rendered` the instant the seeded
+        // editor renders (never on a mere tab-shell open). Correlated to the waiting server frame
+        // by ledgerRef. A failure path above already returned via loadFailed WITHOUT arming this —
+        // so a seed that never renders never acks (honest timeout).
+        pendingDraftRenderSignalRef.current = { ledgerRef, sessionId: draftSessionId };
         dispatch({
           kind: 'mountDraftHtml',
           html: bodyHtml,
@@ -1405,6 +1432,29 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialDraftRef?.ledgerRef, initialDraftRef?.sessionId, initialDraftRef?.html, bffBaseUrl]);
+
+  // -------------------------------------------------------------------------
+  // FR-34 D-F3 (task 071) — emit the content-render ack signal once the seeded
+  // draft actually renders in the editor
+  // -------------------------------------------------------------------------
+  // Fires ONLY when a Part-A draft seed reached the 'loaded' state with populated
+  // `seedHtml` (the editor is rendered with the drafted body — see the render
+  // branch: showEditor mounts <ComposeEditor initialHtml={state.seedHtml} />). This
+  // is the honest "content is on screen" moment WorkspacePane's deferred ack waits
+  // for — NOT the tab-shell open. One-shot per seed (the ref is cleared on emit);
+  // a seed that failed to render left the ref null (loadFailed returned early) so
+  // nothing is emitted and the server ack times out honestly.
+  React.useEffect(() => {
+    const signal = pendingDraftRenderSignalRef.current;
+    if (!signal) return;
+    if (state.status !== 'loaded' || state.seedHtml === null) return;
+    pendingDraftRenderSignalRef.current = null;
+    dispatchPaneEvent('workspace', {
+      type: 'compose_content_rendered',
+      ledgerRef: signal.ledgerRef,
+      sessionId: signal.sessionId,
+    });
+  }, [state.status, state.seedHtml, dispatchPaneEvent]);
 
   // -------------------------------------------------------------------------
   // Editor doc-ref shape (shared lib has its own narrower interface)
