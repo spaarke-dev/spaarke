@@ -37,3 +37,12 @@ After step 4, Compose surfaces AI end-to-end for a user (closes 101 gap 2.2 full
 - ✅ **Code page redeployed** (`sprk_spaarkeai`, bundle carries task-048 activation wiring + task-072 Q&A; verified `api/ai/capabilities` + `compose_qa_highlight` in the built HTML).
 - **BFF catalog cache = 5-min IMemoryCache TTL** → the deployed BFF serves the 5 compose capabilities on the next read; no restart needed.
 - **Owner smoke test (definitive proof)**: open Compose → select a clause → the AI toolbar buttons (Explain / Compare / Draft / + overflow) should be ENABLED → click Explain → dispatches via the 046 seam and streams a schema-valid answer. (Give the BFF cache up to 5 min after the binding deploy.)
+
+---
+
+## RESOLVED 2026-07-12 (round-3 deploy) — DEF-11 compose-revise-document SEEDED
+
+- ✅ **1 Action + 1 Binding** seeded to spaarkedev1 via direct Web API — **Action `44b1eb8f-367e-f111-ab0e-7ced8ddc4a05`** + **Binding `b11aaf8b-367e-f111-ab0e-70a8a590c51c`** (disposition 100000006 Compose; surfaces `assistant,compose`; enabled; link verified). NO version suffix.
+- **Seed script PERSISTED** (was reconstructed twice from the ephemeral session scratchpad — now checked in): [`../scripts/seed-compose-revise-document.ps1`](../scripts/seed-compose-revise-document.ps1). Self-locating repo root; idempotent (skips existing rows); reads mirror-first sources under `infra/dataverse/`; matches the live sibling `compose-draft-alternative` field posture. **Empirical-repro finding baked in**: `sprk_inputschema` stores the WHOLE input mirror file (root keys `$comment/actionCode/environment/inputSchema`), while `sprk_outputschemajson` stores the BARE schema (the `.outputSchema` node of `action.json`, root keys `$schema/type/additionalProperties/required/…/properties` — NOT the output mirror, which adds `$id`/`title`). Lookup nav prop is **`sprk_Action`** (capital), confirmed by `_sprk_action_value`.
+- **Tooling-debt #1/#2 still open** (shared seeders remain drifted) — this persisted per-capability script is the working path until they're rewritten.
+- BFF (46.61 MB, hash-verified, /healthz Healthy) + code page `sprk_spaarkeai` (4940 KB, clean vite build) also deployed same day. BFF 5-min IMemoryCache TTL serves the new capability on next read.
