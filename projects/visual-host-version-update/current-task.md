@@ -1,9 +1,19 @@
 # Current Task
 
-**Active task**: VHVU-042 — Reconcile drifted duplication (one `VisualType`, one `EventDueDateCard`)
+**Active task**: VHVU-050 — Refactor 3 self-fetch visuals to props-in + split ViewDataService (**xhigh**)
 **Status**: not-started
-**Phase**: B2
-**Next action**: Begin VHVU-042. Recommend fresh context (this session ran 030 + 040 + 041 — big).
+**Phase**: B3
+**Next action**: Begin VHVU-050 — the riskiest remaining task (xhigh). **Strongly recommend fresh context.** It changes runtime data-fetching for Calendar/DueDate visuals that currently work + passed UAT.
+
+### VHVU-050 starting notes
+- The 3 self-fetch visuals (`CalendarVisual`, `DueDateCard`, `DueDateCardList`) currently fetch their own data via `context.webAPI` (the "self-managed" data mode). Refactor them to **presentational props-in**: extract each fetch into a host service (split `ViewDataService`), have `ChartRenderer`/`VisualHostRoot` do the fetch and pass `IChartData`/event arrays down as props.
+- This is the enabler that lets `ChartRenderer` + these 3 visuals finally move to `@spaarke/visuals` (deferred from 041 because they were webAPI-coupled). After 050, 060 does the repoint (incl. moving ChartRenderer + closing the 3 util shims).
+- **Risk**: these visuals work + passed UAT. Getting the fetch-extraction wrong breaks Calendar/DueDate cards. Verify with build:prod AND re-UAT those specific visuals before/at 061.
+- Files: `control/components/{CalendarVisual,DueDateCard,DueDateCardList}.tsx`, `control/services/ViewDataService.ts`, `ChartRenderer.tsx` (dispatch), `VisualHostRoot.tsx` (fetch orchestration).
+
+### Deployed state (stable — no redeploy needed for 042)
+- **v1.4.36 is live on SPAARKE DEV 1** (code pages + PCF), **UAT PASSED** (version, dark mode, "+" flow, visuals all confirmed by owner 2026-07-12).
+- 042 only deleted DEAD ui-components code (not in VisualHost's graph) → the deployed bundle is behaviorally unchanged; no redeploy required.
 
 ### Quick Recovery
 | Field | Value |
