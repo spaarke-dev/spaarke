@@ -28,8 +28,14 @@ Owner UAT on the deployed combined surface. **Validated LIVE: DEF-09 inline redl
 | DEF-15 | "Document opened with N simplification(s)" warning is not dismissible | UX | Add an ×/close or remove; distracting. |
 | DEF-16 | Compose edit toolbar not pinned during scroll | UX | Sticky toolbar so tools stay available. |
 | DEF-17 | Bubble menu renders on two lines; should be one-line control | UX bug | Layout fix (screenshot). |
-| DEF-18 | Add some non-AI functions to the highlight/bubble menu | UX | Confirm set (bold/italic/link on selection?). |
+| DEF-18 | Add some non-AI functions to the highlight/bubble menu | UX | ⏸️ **DEFERRED by owner (2026-07-12).** Root need was a spell-check fix — the browser handles it natively (squiggle + click-to-fix), and with DEF-16's pinned toolbar the Tiptap formatting controls are always in reach. No formatting duplicated into the bubble. The DEF-17 overflow "⋯" seam remains if we revisit. |
 | DEF-19 | Chat session is not context-scoped — single global `localStorage` key shows the Document's session on the home page | bug | **= core's DEF-UAT-2 (2026-07-12 handoff).** `AiSessionProvider` persists `sprk_ai2_chatSessionId` as ONE global key, not namespaced by host context, so every mount restores the same last session. Fix: key the persisted session by host context (`entityType:entityId`; distinct key for the unbound home) so each context starts/loads its own session and prior ones are addressable from History. On my `AiSessionProvider`/two-session surface. |
+
+### DEFERRED by owner (2026-07-12) — checkout-model change
+
+**Owner decision:** since the Dataverse checkout has **no impact on AI functionality** (investigation-confirmed: not load-bearing for any dispatch/compose/redline/Q&A path — advisory Compose-vs-Compose lock + unsurfaced `sprk_fileversion` version rows), the **checkout-removal is deferred to a future decision**. Current model kept as-is.
+- **Shipped now (NOT deferred):** DEF-14 friendly Save-lock error (423/412 with actionable copy) — the user-facing fix.
+- **Rides with the deferral:** (a) the **If-Match Save concurrency fix** (silent lost-update hole on the blind full-document PUT — narrow risk while the advisory checkout stays), (b) disabling Compose checkout-on-open, (c) disabling the MDA Check-Out/In/Discard ribbon buttons (shared surface), (d) delete-guard replacement + retiring `sprk_fileversion`. Full analysis: checkout-model investigation (2026-07-12) + `notes/spikes/spike-7-checkout-collision.md`.
 
 ## Cross-project dependencies (owned elsewhere, tracked here — NOT a compose-r2 deferral)
 

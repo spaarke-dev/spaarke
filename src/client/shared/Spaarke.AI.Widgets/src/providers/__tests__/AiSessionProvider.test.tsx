@@ -28,7 +28,7 @@ import { render, renderHook } from '@testing-library/react';
 
 import { PaneEventBus } from '../../events/PaneEventBus';
 import { PaneEventBusProvider } from '../../events/PaneEventBusContext';
-import { AiSessionProvider } from '../AiSessionProvider';
+import { AiSessionProvider, chatSessionKeyForContext } from '../AiSessionProvider';
 import { useAiSession } from '../useAiSession';
 import type { AiSessionContextValue } from '../AiSessionProvider';
 import type { WorkspacePaneEvent, ContextPaneEvent, SafetyPaneEvent } from '../../events/PaneEventTypes';
@@ -644,5 +644,124 @@ describe('AiSessionProvider — auth surface (function-based contract)', () => {
     const { result } = renderSession(bus);
 
     expect(result.current.entityContext).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DEF-19 (DEF-UAT-2, 2026-07-12) — context-scoped chat session key
+//
+// The persisted chat session id must be namespaced by host context so a
+// Document launch and the unbound home resolve to DIFFERENT sessions (a doc
+// conversation must NOT bleed onto the home page), and re-mounting a context
+// restores ITS session rather than the last global one.
+// ---------------------------------------------------------------------------
+
+describe('AiSessionProvider — DEF-19 context-scoped session key', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  const DOC_CTX = {
+    entityType: 'sprk_document' as const,
+    entityId: 'DOC-GUID-1',
+  };
+  const DOC_KEY = 'sprk_ai2_chatSessionId__sprk_document:doc-guid-1';
+
+  it('chatSessionKeyForContext maps the unbound home and a bound context to DIFFERENT keys', () => {
+    // Unbound home keeps the legacy base key (back-compat + R4 migration).
+    expect(chatSessionKeyForContext(null)).toBe('sprk_ai2_chatSessionId');
+    expect(chatSessionKeyForContext(undefined)).toBe('sprk_ai2_chatSessionId');
+
+    // A bound host context is a distinct, case-normalized key.
+    expect(chatSessionKeyForContext(DOC_CTX)).toBe(DOC_KEY);
+
+    // Home and a document context are never the same key.
+    expect(chatSessionKeyForContext(null)).not.toBe(chatSessionKeyForContext(DOC_CTX));
+    // Two different documents get two different keys.
+    expect(
+      chatSessionKeyForContext({ entityType: 'sprk_document', entityId: 'A' })
+    ).not.toBe(chatSessionKeyForContext({ entityType: 'sprk_document', entityId: 'B' }));
+  });
+
+  it('a Document launch persists under its own key and does NOT write the global/home key', () => {
+    const bus = new PaneEventBus();
+    const { result } = renderHook(() => useAiSession(), {
+      wrapper: makeWrapper(bus, { entityContext: DOC_CTX }),
+    });
+
+    act(() => {
+      result.current.setChatSessionId('doc-session-1');
+    });
+
+    // The document's session persists under its namespaced key...
+    expect(localStorage.getItem(DOC_KEY)).toBe('doc-session-1');
+    // ...and the unbound-home/global key is NOT written (no cross-context bleed).
+    expect(localStorage.getItem('sprk_ai2_chatSessionId')).toBeNull();
+  });
+
+  it('the unbound home does NOT restore a Document launch session (the reported bleed is fixed)', () => {
+    // Seed a document session under its namespaced key.
+    localStorage.setItem(DOC_KEY, 'doc-session-1');
+
+    // The unbound home mounts fresh — it must see NULL, not the document's session.
+    const bus = new PaneEventBus();
+    const { result } = renderHook(() => useAiSession(), {
+      wrapper: makeWrapper(bus, { entityContext: null }),
+    });
+
+    expect(result.current.chatSessionId).toBeNull();
+  });
+
+  it('re-mounting a context restores ITS session, not the last global one', () => {
+    // Two contexts each persisted their own session under their own keys.
+    localStorage.setItem(DOC_KEY, 'doc-1-session');
+    localStorage.setItem('sprk_ai2_chatSessionId', 'home-session'); // unbound home
+
+    // Re-mount the document context → restores the document's session.
+    const busDoc = new PaneEventBus();
+    const { result: docResult } = renderHook(() => useAiSession(), {
+      wrapper: makeWrapper(busDoc, { entityContext: DOC_CTX }),
+    });
+    expect(docResult.current.chatSessionId).toBe('doc-1-session');
+
+    // Re-mount the unbound home → restores the home session (not the doc's).
+    const busHome = new PaneEventBus();
+    const { result: homeResult } = renderHook(() => useAiSession(), {
+      wrapper: makeWrapper(busHome, { entityContext: null }),
+    });
+    expect(homeResult.current.chatSessionId).toBe('home-session');
+  });
+
+  it('switching host context in place loads the target context session (no bleed across the switch)', () => {
+    // Home session pre-exists; the document context has its own session.
+    localStorage.setItem('sprk_ai2_chatSessionId', 'home-session');
+    localStorage.setItem(DOC_KEY, 'doc-1-session');
+
+    const bus = new PaneEventBus();
+    const seen: Array<string | null> = [];
+    function Probe(): null {
+      const { chatSessionId } = useAiSession();
+      seen.push(chatSessionId);
+      return null;
+    }
+
+    const tree = (entityContext: typeof DOC_CTX | null): React.JSX.Element => (
+      <PaneEventBusProvider bus={bus}>
+        <AiSessionProvider bffBaseUrl="https://spe-api-dev.example.com" entityContext={entityContext}>
+          <Probe />
+        </AiSessionProvider>
+      </PaneEventBusProvider>
+    );
+
+    // Mounted on the document context → its session.
+    const { rerender } = render(tree(DOC_CTX));
+    expect(seen[seen.length - 1]).toBe('doc-1-session');
+
+    // Navigate to the unbound home in place → loads the HOME session, not the doc's.
+    act(() => {
+      rerender(tree(null));
+    });
+    expect(seen[seen.length - 1]).toBe('home-session');
   });
 });

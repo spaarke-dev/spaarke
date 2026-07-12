@@ -76,6 +76,36 @@ export const AI_SESSION_CHAT_SESSION_KEY = `${SESSION_KEY_PREFIX}chatSessionId`;
 /** localStorage key for the active playbook ID (was sessionStorage pre-R4 task 031) */
 export const AI_SESSION_PLAYBOOK_KEY = `${SESSION_KEY_PREFIX}playbookId`;
 
+/**
+ * DEF-19 (DEF-UAT-2, 2026-07-12): derive the per-host-context localStorage key for the
+ * persisted chat session id.
+ *
+ * Before this, the chat session id lived under a SINGLE global key
+ * (`AI_SESSION_CHAT_SESSION_KEY`), so every mount — a `sprk_document` launch, a matter,
+ * or the unbound home — restored the SAME last session. A document conversation therefore
+ * bled onto the home page after navigating away (the reported symptom).
+ *
+ * Scheme:
+ *   - Unbound home (no host entity): the base key `sprk_ai2_chatSessionId`, UNCHANGED — so a
+ *     pre-DEF-19 home session, and the R4 sessionStorage→localStorage migration, both survive.
+ *   - A bound host context: `sprk_ai2_chatSessionId__{entityType}:{entityId}` (lower-cased) — a
+ *     DISTINCT key per (entityType, entityId). Each context loads/persists ITS own session, and
+ *     prior sessions stay addressable (History) instead of being clobbered by the last one.
+ *
+ * Deterministic + case-normalized so a GUID or logical name that differs only by case resolves
+ * to one key (Dataverse GUIDs / logical names are case-insensitive).
+ */
+export function chatSessionKeyForContext(
+  entityContext: EntityContext | null | undefined
+): string {
+  const entityType = entityContext?.entityType;
+  const entityId = entityContext?.entityId;
+  if (entityType && entityId) {
+    return `${AI_SESSION_CHAT_SESSION_KEY}__${entityType.toLowerCase()}:${entityId.toLowerCase()}`;
+  }
+  return AI_SESSION_CHAT_SESSION_KEY;
+}
+
 // ---------------------------------------------------------------------------
 // Context mapping type (from BFF GET /api/ai/chat/context-mappings/standalone)
 // ---------------------------------------------------------------------------
@@ -407,21 +437,46 @@ export function AiSessionProvider({
   }, [bffBaseUrl, entityContext, isAuthenticated]);
 
   // ── Chat Session State (persisted to localStorage — R4 task 031) ───────
+  // DEF-19 (DEF-UAT-2): the persisted key is namespaced by host context so each
+  // context (a sprk_document launch, a matter, the unbound home) loads/persists its
+  // OWN session — never the last global one (the cross-context bleed). Recomputed
+  // when the host context (entityType/entityId) changes.
+  const chatSessionKey = useMemo(
+    () => chatSessionKeyForContext(entityContext),
+    // entityContext identity churns per render; only the key inputs matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [entityContext?.entityType, entityContext?.entityId]
+  );
+
   // Initial state seeded via readSession() which performs the one-shot
   // sessionStorage → localStorage migration on first localStorage-aware load.
   const [chatSessionId, setChatSessionIdState] = useState<string | null>(() =>
-    readSession(AI_SESSION_CHAT_SESSION_KEY)
+    readSession(chatSessionKey)
   );
 
-  const setChatSessionId = useCallback((sessionId: string): void => {
-    setChatSessionIdState(sessionId);
-    writeSession(AI_SESSION_CHAT_SESSION_KEY, sessionId);
-  }, []);
+  // DEF-19: when the host context changes (e.g. navigating from a Document to the
+  // unbound home), load THAT context's persisted session — never carry the previous
+  // context's session across the switch (the reported bleed). The ref tracks the
+  // key the current state was loaded for, so this only re-reads on a real change.
+  const activeChatSessionKeyRef = useRef<string>(chatSessionKey);
+  useEffect(() => {
+    if (activeChatSessionKeyRef.current === chatSessionKey) return;
+    activeChatSessionKeyRef.current = chatSessionKey;
+    setChatSessionIdState(readSession(chatSessionKey));
+  }, [chatSessionKey]);
+
+  const setChatSessionId = useCallback(
+    (sessionId: string): void => {
+      setChatSessionIdState(sessionId);
+      writeSession(chatSessionKey, sessionId);
+    },
+    [chatSessionKey]
+  );
 
   const clearChatSession = useCallback((): void => {
     setChatSessionIdState(null);
-    removeSession(AI_SESSION_CHAT_SESSION_KEY);
-  }, []);
+    removeSession(chatSessionKey);
+  }, [chatSessionKey]);
 
   // ── Playbook State (persisted to localStorage — R4 task 031) ───────────
   const [playbookId, setPlaybookIdState] = useState<string | undefined>(

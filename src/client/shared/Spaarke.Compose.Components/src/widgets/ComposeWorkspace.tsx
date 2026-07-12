@@ -1255,6 +1255,48 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, []);
 
   // -------------------------------------------------------------------------
+  // DEF-10 (DEF-UAT-1 part 2, 2026-07-12) — share the loaded HOST document's
+  // TEXT with the Assistant's chat session
+  // -------------------------------------------------------------------------
+  // A host `sprk_document` opened in Compose ("Open in Compose") loads its DOCX
+  // bytes via the stored-document Load effect above — but, unlike a Browse mount
+  // (handleBrowseFileSelected) or a chat upload, those bytes never reached the
+  // CHAT session. So the Assistant answered "no document uploaded in this session"
+  // to "summarize this document": the two-session split (document session ≠ chat
+  // session). This effect closes that gap by REUSING the EXACT same host registrar
+  // the Browse path uses (ConversationPane.registerComposeActiveDocument → the
+  // EXISTING chat upload endpoint → a ChatSessionFile carrying ExtractedText →
+  // SessionFileTextSource / the session-files RAG index). NO new BFF endpoint and
+  // NO parallel context path (§11): the loaded bytes we already hold are handed to
+  // the same conduit a Browse mount uses.
+  //
+  // "Visible to assistant" is DEFAULT ON for a host document (owner decision
+  // 2026-07-12): it is auto-registered on load — no toggle required, and toggling
+  // the workspace-tab flag is no longer the (inert) path to doc visibility.
+  //
+  // Fires ONCE per stored SPE document (ref-guarded by speDriveItemId). Transient
+  // Browse / upload / draft mounts are EXCLUDED: a Browse mount already registers
+  // itself (above), and upload / draft mounts are chat-native (an upload IS a
+  // ChatSessionFile; a draft lives in the session ledger). No-op (null registrar)
+  // on a standalone LegalWorkspace mount with no bridge provider — Save is unaffected.
+  const sharedActiveDocumentKeyRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (state.status !== 'loaded') return;
+    const speDriveItemId = state.documentRef?.speDriveItemId;
+    // Only a STORED host document has a real SPE drive-item id; transient mounts set it to ''.
+    if (!speDriveItemId) return;
+    if (!state.docxBytes) return;
+    if (sharedActiveDocumentKeyRef.current === speDriveItemId) return; // once per stored document
+    sharedActiveDocumentKeyRef.current = speDriveItemId;
+    void registerActiveDocumentRef.current?.({
+      docxBytes: state.docxBytes,
+      fileName: state.documentRef?.fileName,
+    });
+    // registerActiveDocumentRef is a stable ref; excluded from deps intentionally.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.status, state.documentRef?.speDriveItemId, state.docxBytes]);
+
+  // -------------------------------------------------------------------------
   // FR-03 (task 012) — transient upload-mount
   // -------------------------------------------------------------------------
   // When launched from a chat "open in Compose" on an Assistant-UPLOADED file,
