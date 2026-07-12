@@ -16,7 +16,10 @@
  */
 
 export * from './BarChart';
+export * from './CalendarVisual';
 export * from './DonutChart';
+export * from './DueDateCard';
+export * from './DueDateCardList';
 export * from './ErrorBoundary';
 export * from './EventDueDateCard';
 export * from './GaugeVisual';

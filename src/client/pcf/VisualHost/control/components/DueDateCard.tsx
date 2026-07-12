@@ -1,13 +1,17 @@
 /**
- * DueDateCard Visual Component
- * Renders a single EventDueDateCard for an event bound via lookup field.
- * Fetches event data from Dataverse and maps to shared component props.
+ * DueDateCard container (PCF-side)
+ * Fetches a single event from Dataverse, maps it to EventDueDateCard props,
+ * and renders the pure @spaarke/visuals `DueDateCard`. Owns record navigation.
+ *
+ * VHVU-050 — data flow inverted: the presentational component (in
+ * @spaarke/visuals) no longer touches webApi/FetchXML. ChartRenderer still
+ * imports `DueDateCardVisual` from here, unchanged.
  */
 
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { Spinner, makeStyles, tokens, Text, MessageBar, MessageBarBody } from '@fluentui/react-components';
-import { EventDueDateCard, type IEventDueDateCardProps } from '../../../../shared/Spaarke.Visuals/src/components/EventDueDateCard';
+import { DueDateCard } from '../../../../shared/Spaarke.Visuals/src/components/DueDateCard';
+import type { IEventDueDateCardProps } from '../../../../shared/Spaarke.Visuals/src/components/EventDueDateCard';
 import type { IChartDefinition } from '../types';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';
 import { substituteParameters } from '../services/ViewDataService';
@@ -19,24 +23,6 @@ export interface IDueDateCardVisualProps {
   contextRecordId?: string;
   onClickAction?: (recordId: string, entityName?: string, recordData?: Record<string, unknown>) => void;
 }
-
-const useStyles = makeStyles({
-  container: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-    minHeight: '80px',
-    // v1.4.12 — visual <body> top padding so the chart content sits below
-    // CardChrome's header with consistent breathing room (per UAT).
-    paddingTop: '20px',
-  },
-  empty: {
-    color: tokens.colorNeutralForeground3,
-    textAlign: 'center',
-    padding: tokens.spacingVerticalM,
-  },
-});
 
 /**
  * Calculate days until due date from today
@@ -108,7 +94,6 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
   contextRecordId,
   onClickAction,
 }) => {
-  const styles = useStyles();
   const [cardProps, setCardProps] = useState<IEventDueDateCardProps | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -116,6 +101,7 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
 
   useEffect(() => {
     fetchEventData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartDefinition, contextRecordId]);
 
   const fetchEventData = async () => {
@@ -205,31 +191,13 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
     }
   };
 
-  if (loading) {
-    return (
-      <div className={styles.container}>
-        <Spinner size="small" label="Loading event..." />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <MessageBar intent="error">
-        <MessageBarBody>{error}</MessageBarBody>
-      </MessageBar>
-    );
-  }
-
-  if (!cardProps) {
-    return (
-      <div className={styles.empty}>
-        <Text size={200}>No event data available</Text>
-      </div>
-    );
-  }
-
   return (
-    <EventDueDateCard {...cardProps} onClick={onClickAction ? handleClick : undefined} isNavigating={isNavigating} />
+    <DueDateCard
+      cardProps={cardProps}
+      loading={loading}
+      error={error}
+      onCardClick={onClickAction ? handleClick : undefined}
+      isNavigating={isNavigating}
+    />
   );
 };

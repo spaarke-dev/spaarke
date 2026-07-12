@@ -1,14 +1,18 @@
 /**
- * DueDateCardList Visual Component
- * Renders a list of EventDueDateCards driven by a Dataverse view.
- * Supports context filtering and "View List" navigation.
+ * DueDateCardList container (PCF-side)
+ * Fetches a Dataverse view of events, maps to EventDueDateCard props, owns
+ * record navigation (window.Xrm), and renders the pure @spaarke/visuals
+ * `DueDateCardList`.
+ *
+ * VHVU-050 — data flow inverted: the presentational component (in
+ * @spaarke/visuals) no longer touches webApi / window.Xrm / FetchXML.
+ * ChartRenderer still imports `DueDateCardListVisual` from here, unchanged.
  */
 
 import * as React from 'react';
 import { useState, useEffect, useCallback } from 'react';
-import { Spinner, makeStyles, tokens, Text, Link, MessageBar, MessageBarBody } from '@fluentui/react-components';
-import { EventDueDateCard, type IEventDueDateCardProps } from '../../../../shared/Spaarke.Visuals/src/components/EventDueDateCard';
-import { ChevronRight20Regular } from '@fluentui/react-icons';
+import { DueDateCardList } from '../../../../shared/Spaarke.Visuals/src/components/DueDateCardList';
+import type { IEventDueDateCardProps } from '../../../../shared/Spaarke.Visuals/src/components/EventDueDateCard';
 import type { IChartDefinition } from '../types';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';
 import { resolveQuery, injectContextFilter, type ISubstitutionParams } from '../services/ViewDataService';
@@ -22,41 +26,6 @@ export interface IDueDateCardListVisualProps {
   onViewListClick?: () => void;
   fetchXmlOverride?: string;
 }
-
-const useStyles = makeStyles({
-  container: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '100%',
-    gap: tokens.spacingVerticalS,
-    // v1.4.12 — visual <body> top padding so the list of cards sits below
-    // CardChrome's header with consistent breathing room (per UAT).
-    paddingTop: '20px',
-  },
-  cardList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-  },
-  viewListLink: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: tokens.spacingHorizontalXS,
-    padding: tokens.spacingVerticalXS,
-  },
-  loading: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '100px',
-  },
-  empty: {
-    color: tokens.colorNeutralForeground3,
-    textAlign: 'center',
-    padding: tokens.spacingVerticalL,
-  },
-});
 
 /**
  * Calculate days until due date from today
@@ -136,7 +105,6 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
   onViewListClick,
   fetchXmlOverride,
 }) => {
-  const styles = useStyles();
   const [cards, setCards] = useState<IEventDueDateCardProps[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -147,6 +115,7 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
 
   useEffect(() => {
     fetchEvents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartDefinition, contextRecordId]);
 
   const fetchEvents = async () => {
@@ -260,50 +229,15 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
     [navigatingId, chartDefinition, onClickAction, cards]
   );
 
-  if (loading) {
-    return (
-      <div className={styles.loading}>
-        <Spinner size="small" label="Loading events..." />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <MessageBar intent="error">
-        <MessageBarBody>{error}</MessageBarBody>
-      </MessageBar>
-    );
-  }
-
-  if (cards.length === 0) {
-    return (
-      <div className={styles.empty}>
-        <Text size={200}>No upcoming events</Text>
-      </div>
-    );
-  }
-
   return (
-    <div className={styles.container}>
-      <div className={styles.cardList}>
-        {cards.map(card => (
-          <EventDueDateCard
-            key={card.eventId}
-            {...card}
-            onClick={handleCardClick}
-            isNavigating={navigatingId === card.eventId}
-          />
-        ))}
-      </div>
-
-      {showViewListLink && (
-        <div className={styles.viewListLink}>
-          <Link onClick={onViewListClick}>
-            View All <ChevronRight20Regular />
-          </Link>
-        </div>
-      )}
-    </div>
+    <DueDateCardList
+      cards={cards}
+      loading={loading}
+      error={error}
+      navigatingId={navigatingId}
+      onCardClick={handleCardClick}
+      showViewListLink={showViewListLink}
+      onViewListClick={onViewListClick}
+    />
   );
 };

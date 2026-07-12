@@ -1,7 +1,7 @@
 <task id="VHVU-050" project="VisualHost Decoupling & @spaarke/visuals Extraction">
   <metadata>
     <title>Refactor 3 self-fetch visuals to props-in + split ViewDataService</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>B3</phase>
     <estimated-effort>1-1.5 days</estimated-effort>
     <tags>refactor, visuals, dataverse, pcf</tags>
