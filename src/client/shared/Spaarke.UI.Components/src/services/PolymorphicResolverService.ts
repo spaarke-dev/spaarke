@@ -441,9 +441,11 @@ export function findNavProp(
  * (Event / Invoice / Project / WorkAssignment / ReportCard / Todo), each of
  * which previously kept an identical private copy of this cache + discovery fn.
  *
- * NOTE: `matterService` intentionally retains its OWN map-form cache + discovery
- * (a different `Record<string,string>` return shape that feeds its create-payload
- * path); its convergence onto this function is deferred to a follow-up task.
+ * `matterService` also consumes this function — it resolves nav-props BY COLUMN
+ * name (not by referenced entity), so it derives a `Record<columnName, navProp>`
+ * map from these entries via {@link toNavPropMap}. That convergence (task 016)
+ * replaced matter's former private map-form discovery; the derived map is
+ * byte-identical to the old one, so matter's create payload is unchanged.
  * See `projects/set-regarding-and-field-mapping-resolver-r2/notes/task-011-BLOCKED.md`.
  */
 const _navPropCache: Record<string, INavPropEntry[]> = {};
@@ -507,6 +509,31 @@ export async function discoverNavProps(
     console.warn(`[PolymorphicResolver] Nav-prop discovery error for ${entityLogicalName}:`, err);
     return [];
   }
+}
+
+/**
+ * Derive a `columnLogicalName → navPropName` map from discovered nav-prop
+ * entries — the shape `matterService` consumes to resolve lookups BY COLUMN
+ * name in its create-payload path (`map[col] ?? col`).
+ *
+ * This is the adapter that lets matter reuse the single shared
+ * {@link discoverNavProps} while keeping its column-keyed resolution contract.
+ * It reproduces the exact map matter's former private discovery built
+ * (`map[ReferencingAttribute] = ReferencingEntityNavigationPropertyName`),
+ * INCLUDING last-write-wins when two relationships share a `columnName` —
+ * iteration order over `entries` matches the metadata response order, so the
+ * emitted `@odata.bind` keys/values are byte-identical to the pre-convergence
+ * output (task 016).
+ *
+ * @param entries  Result of {@link discoverNavProps}
+ * @returns        `Record<columnName, navPropName>`
+ */
+export function toNavPropMap(entries: INavPropEntry[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const e of entries) {
+    map[e.columnName] = e.navPropName;
+  }
+  return map;
 }
 
 /**
