@@ -80,7 +80,10 @@ import { useComposeWorkspaceReceivers } from './useComposeWorkspaceReceivers';
 // mount, under ComposeActionBridgeProvider), a Browse/direct transient mount is registered with the
 // active chat session so chat "summarize this document" + "edit in Compose" resolve it. Null on a
 // standalone LegalWorkspace mount (no bridge provider) → registration is skipped, Save still works.
-import { useComposeActiveDocumentRegistration } from '../context/composeActionBridge';
+import {
+  useComposeActiveDocumentRegistration,
+  useRegisterComposeRedlineAcceptHandler,
+} from '../context/composeActionBridge';
 import { authenticatedFetch } from '@spaarke/auth';
 // FR-02 (task 011): "Search for Document" opens the standard Dataverse lookup dialog
 // (Xrm.Utility.lookupObjects) scoped to `sprk_document`, then resolves the picked
@@ -1006,6 +1009,33 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // `targetLedgerRef` selects a specific stored output ({bindingId}@t{n}); when omitted, the
   // CURRENT (highest-turn) compose output for the session is materialized — the refresh-durable
   // and supersession/undo-replace resolution (FR-17 foundation).
+  // DEF-13 — turn an AI edit's rationale into an anchored COMMENT annotation (see the call site in
+  // materializeComposeDraftFromLedger for the full pipeline rationale). Pure state update; dedups by
+  // the ledger key's derived annotation id so re-materialize (refresh/duplicate signal) is idempotent.
+  const registerAiEditReasonComment = React.useCallback(
+    (payload: ComposeDraftPayload, provenance: { ledgerRef: string; bindingId: string }): void => {
+      const rationale = payload?.rationale?.trim();
+      const targetText = payload?.target_text?.trim();
+      if (!rationale || !targetText) return; // no reason, or no span to anchor a comment to
+      const annotationId = `ai-edit-reason:${provenance.ledgerRef}`;
+      setAnchoredAnnotations(prev => {
+        if (prev.some(a => a.id === annotationId)) return prev; // idempotent
+        const comment: AnchoredAnnotation = {
+          id: annotationId,
+          type: 'comment',
+          anchor: { textPattern: targetText, paragraphHint: -1, spanId: provenance.ledgerRef },
+          body: rationale,
+          author: 'Spaarke Assistant',
+          timestamp: new Date().toISOString(),
+          source: 'ai',
+          provenance: { bindingId: provenance.bindingId, ledgerRef: provenance.ledgerRef },
+        };
+        return [...prev, comment];
+      });
+    },
+    []
+  );
+
   const materializeComposeDraftFromLedger = React.useCallback(
     async (targetLedgerRef?: string): Promise<void> => {
       if (state.status !== 'loaded') return;
@@ -1053,12 +1083,25 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         });
         setLastMaterializedKey(target.key);
         setComposeDraftError(null);
+
+        // DEF-13 — register the AI edit's REASON as an anchored COMMENT annotation on the change.
+        // The rationale becomes a real Word `w:comment` on Save/Push: it flows through the EXISTING
+        // annotations pipeline — `anchoredAnnotations` (persisted by the gap-4.3 effect) →
+        // `anchoredAnnotationsToDocxAnnotations` → PushAnnotations → `DocxAnnotationWriter` (which
+        // already emits `w:comment` anchored to `targetText`). No parallel machinery. Anchored to the
+        // edit's `target_text` (the redline range); skipped for an insertion-style draft with no
+        // target (no span to anchor a comment to) or an empty rationale. Deduped by the ledger key so
+        // a refresh/duplicate materialize never appends a second copy.
+        registerAiEditReasonComment(target.payload, {
+          ledgerRef: target.key,
+          bindingId: target.bindingId,
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         setComposeDraftError(`Failed to insert drafted content: ${message}`);
       }
     },
-    [state.status, state.sessionId, bffBaseUrl, lastMaterializedKey]
+    [state.status, state.sessionId, bffBaseUrl, lastMaterializedKey, registerAiEditReasonComment]
   );
 
   // -------------------------------------------------------------------------
@@ -1105,6 +1148,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       editorRef.current?.highlightCitedSpan(event.qaSourceText, event.qaSectionLabel);
     },
   });
+
+  // DEF-12 — publish the editor's redline-accept into the cross-pane bridge so the Assistant
+  // confirmation message's "Accept" control (the AI↔user interaction surface) commits the redline
+  // through the EXISTING `usePendingRedline.accept` (via the editor handle). No-op outside the bridge
+  // provider (standalone LegalWorkspace mount). Reject/Try-another do NOT route here — they are the
+  // Assistant's durable ledger supersessions.
+  const handleBridgeAcceptRedline = React.useCallback((ledgerRef: string): void => {
+    editorRef.current?.acceptPendingRedline(ledgerRef);
+  }, []);
+  useRegisterComposeRedlineAcceptHandler(handleBridgeAcceptRedline);
 
   // FR-04 refresh-durability (task 016): on (re)load of a session, re-materialize the CURRENT
   // compose draft from the ledger so a page refresh restores the drafted content — materialized

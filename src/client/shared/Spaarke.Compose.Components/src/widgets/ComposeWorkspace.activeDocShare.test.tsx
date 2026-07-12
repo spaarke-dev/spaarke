@@ -59,6 +59,8 @@ jest.mock(
 const registerActiveDocumentSpy = jest.fn();
 jest.mock('../context/composeActionBridge', () => ({
   useComposeActiveDocumentRegistration: () => registerActiveDocumentSpy,
+  // DEF-12: ComposeWorkspace now also registers a redline-accept handler; stub it as a no-op here.
+  useRegisterComposeRedlineAcceptHandler: () => undefined,
 }));
 
 // ── Heavy workspace hooks — inert doubles ───────────────────────────────────

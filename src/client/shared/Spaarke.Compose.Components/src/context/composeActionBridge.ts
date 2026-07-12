@@ -62,6 +62,18 @@ export type ComposeActiveDocumentRegistration = (info: {
   fileName?: string;
 }) => void | Promise<void>;
 
+/**
+ * ACCEPT a pending Compose redline (spaarkeai-compose-r2 DEF-12). The Accept control now lives on the
+ * Assistant confirmation message (the AI↔user interaction surface), but the redline + its accept LOGIC
+ * (`usePendingRedline.accept`) live in the WORKSPACE editor. This conduit lets the Assistant reach the
+ * editor's accept WITHOUT a PaneEventBus discriminant (same non-bus, sibling-pane rationale as the
+ * dispatcher + active-document conduits above) — the editor commits the tracked change addressed by
+ * `ledgerRef`. Reject / Try-another do NOT use this conduit: they are durable ledger supersessions
+ * owned by the Assistant's `useEditSupersession`, which re-materialize via the existing Flow-5 signal.
+ * No-op (resolves) when no host handler is registered (standalone LegalWorkspace mount / isolated test).
+ */
+export type ComposeRedlineAccept = (ledgerRef: string) => void;
+
 export interface ComposeActionBridgeValue {
   /**
    * Stable enqueue delegating to the currently-registered host dispatcher.
@@ -85,6 +97,17 @@ export interface ComposeActionBridgeValue {
   setActiveDocumentHandler: (handler: ComposeActiveDocumentRegistration | null) => void;
   /** True when a host active-document handler is currently registered. */
   hasActiveDocumentHandler: boolean;
+
+  /**
+   * Stable delegate to the currently-registered editor redline-accept handler (DEF-12). No-op when
+   * none is registered — the Assistant gates on {@link hasRedlineAcceptHandler} via
+   * {@link useComposeRedlineAccept}.
+   */
+  acceptRedline: ComposeRedlineAccept;
+  /** Register (or clear, with `null`) the editor's redline-accept handler (workspace-side). */
+  setRedlineAcceptHandler: (handler: ComposeRedlineAccept | null) => void;
+  /** True when an editor redline-accept handler is currently registered. */
+  hasRedlineAcceptHandler: boolean;
 }
 
 export const ComposeActionBridgeContext = React.createContext<ComposeActionBridgeValue | null>(null);
@@ -117,6 +140,9 @@ export function ComposeActionBridgeProvider(props: ComposeActionBridgeProviderPr
   const activeDocHandlerRef = React.useRef<ComposeActiveDocumentRegistration | null>(null);
   const [hasActiveDocumentHandler, setHasActiveDocumentHandler] = React.useState<boolean>(false);
 
+  const redlineAcceptRef = React.useRef<ComposeRedlineAccept | null>(null);
+  const [hasRedlineAcceptHandler, setHasRedlineAcceptHandler] = React.useState<boolean>(false);
+
   const setDispatcher = React.useCallback((dispatcher: ComposeActionEnqueue | null): void => {
     dispatcherRef.current = dispatcher;
     setHasDispatcher(dispatcher !== null);
@@ -145,6 +171,17 @@ export function ComposeActionBridgeProvider(props: ComposeActionBridgeProviderPr
     return Promise.resolve(handler(info));
   }, []);
 
+  const setRedlineAcceptHandler = React.useCallback((handler: ComposeRedlineAccept | null): void => {
+    redlineAcceptRef.current = handler;
+    setHasRedlineAcceptHandler(handler !== null);
+  }, []);
+
+  const acceptRedline = React.useCallback<ComposeRedlineAccept>(ledgerRef => {
+    // No editor handler (e.g. standalone mount) → inert no-op; the Assistant gates on
+    // hasRedlineAcceptHandler and only shows Accept when a live editor is registered.
+    redlineAcceptRef.current?.(ledgerRef);
+  }, []);
+
   const value = React.useMemo<ComposeActionBridgeValue>(
     () => ({
       enqueue,
@@ -153,8 +190,21 @@ export function ComposeActionBridgeProvider(props: ComposeActionBridgeProviderPr
       registerActiveDocument,
       setActiveDocumentHandler,
       hasActiveDocumentHandler,
+      acceptRedline,
+      setRedlineAcceptHandler,
+      hasRedlineAcceptHandler,
     }),
-    [enqueue, setDispatcher, hasDispatcher, registerActiveDocument, setActiveDocumentHandler, hasActiveDocumentHandler]
+    [
+      enqueue,
+      setDispatcher,
+      hasDispatcher,
+      registerActiveDocument,
+      setActiveDocumentHandler,
+      hasActiveDocumentHandler,
+      acceptRedline,
+      setRedlineAcceptHandler,
+      hasRedlineAcceptHandler,
+    ]
   );
 
   return React.createElement(ComposeActionBridgeContext.Provider, { value }, props.children);
@@ -202,4 +252,30 @@ export function useRegisterComposeActiveDocumentHandler(handler: ComposeActiveDo
 export function useComposeActiveDocumentRegistration(): ComposeActiveDocumentRegistration | null {
   const bridge = useComposeActionBridge();
   return bridge && bridge.hasActiveDocumentHandler ? bridge.registerActiveDocument : null;
+}
+
+/**
+ * Workspace-side registration hook (DEF-12). Call from the pane that owns the editor (ComposeWorkspace)
+ * to publish its redline-accept handler — the one that commits the pending redline addressed by
+ * `ledgerRef` via `usePendingRedline.accept`. Effect-scoped: re-registers on identity change, clears on
+ * unmount. No-op outside a {@link ComposeActionBridgeProvider}.
+ */
+export function useRegisterComposeRedlineAcceptHandler(handler: ComposeRedlineAccept): void {
+  const bridge = useComposeActionBridge();
+  const setRedlineAcceptHandler = bridge?.setRedlineAcceptHandler;
+  React.useEffect(() => {
+    if (!setRedlineAcceptHandler) return;
+    setRedlineAcceptHandler(handler);
+    return () => setRedlineAcceptHandler(null);
+  }, [setRedlineAcceptHandler, handler]);
+}
+
+/**
+ * Assistant-side consumer hook (DEF-12). Returns the stable {@link ComposeRedlineAccept} delegate when
+ * an editor handler is registered, else `null` (standalone mount / isolated test) — the Assistant gates
+ * on the null to decide whether the per-message Accept control can reach a live editor.
+ */
+export function useComposeRedlineAccept(): ComposeRedlineAccept | null {
+  const bridge = useComposeActionBridge();
+  return bridge && bridge.hasRedlineAcceptHandler ? bridge.acceptRedline : null;
 }

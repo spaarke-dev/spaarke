@@ -360,6 +360,23 @@ export interface ComposeEditorHandle {
   materializePendingRedline(draft: ComposeDraftPayload, provenance: ComposeDraftProvenance): MaterializeStatus;
 
   /**
+   * DEF-12 — commit the pending redline addressed by `ledgerRef` (delegates to
+   * `usePendingRedline.accept`): keep the inserted alternative as normal text, remove the struck
+   * original. Called by the WORKSPACE's redline-accept bridge handler when the user clicks Accept on
+   * the Assistant confirmation message (the Accept control moved to the Assistant; the accept LOGIC
+   * stays here). Also invoked by the in-document per-change on-click affordance. No-op if unmounted.
+   */
+  acceptPendingRedline(ledgerRef: string): void;
+
+  /**
+   * DEF-12 — revert the pending redline addressed by `ledgerRef` in the DOCUMENT
+   * (`usePendingRedline.reject`): restore the struck original, drop the insertion. This is the
+   * in-document per-change granularity affordance; the Assistant's "Reject" is instead a durable
+   * ledger supersession (useEditSupersession.undo). No-op if unmounted.
+   */
+  rejectPendingRedline(ledgerRef: string): void;
+
+  /**
    * FR-35 Doc Q&A ephemeral highlight (spaarkeai-compose-r2 task 072, stretch).
    * Resolve `sourceText` (the cited excerpt from a grounded Text-path answer)
    * against the CURRENT document and, on a unique match, render a TRANSIENT
@@ -493,21 +510,9 @@ const useStyles = makeStyles({
     position: 'fixed',
     zIndex: 1000,
   },
-  // R2 pending-redline accept/reject affordances (task 033, FR-16). Semantic tokens only
-  // (ADR-021 dark-mode-correct) — no hardcoded hex.
-  redlineControls: {
-    display: 'flex',
-    flexDirection: 'column',
-    rowGap: tokens.spacingVerticalXXS,
-    padding: tokens.spacingHorizontalS,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  redlineItem: {
-    display: 'flex',
-    alignItems: 'center',
-    columnGap: tokens.spacingHorizontalS,
-  },
+  // DEF-12 — label inside the per-change on-click accept/reject popover (task 033/FR-16 rationale
+  // shown truncated, Tier-3-safe). Semantic tokens only (ADR-021 dark-mode-correct). The former
+  // fixed `redlineControls`/`redlineItem` bar styles were removed with the bar itself.
   redlineLabel: {
     flex: 1,
     minWidth: 0,
@@ -716,6 +721,20 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const [contextMenuAnchor, setContextMenuAnchor] = React.useState<{ x: number; y: number } | null>(null);
     const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
 
+    // ----- DEF-12 — per-change on-click accept/reject affordance ------------
+    // The cramped fixed `compose-redline-controls` bar (scroll-hidden, no reason-wrap) was REMOVED
+    // as the primary control — that role moved to the Assistant confirmation message. Per-change
+    // granularity stays: clicking a redline span (`<span data-compose-mark data-ledger-ref>`, the
+    // FR-15 marks) opens a small popover at the click point with Accept / Reject for THAT change,
+    // wired to the same `usePendingRedline.accept/reject` handlers the bar used. The visual redline
+    // marks themselves are untouched.
+    const [redlineClickAnchor, setRedlineClickAnchor] = React.useState<{
+      x: number;
+      y: number;
+      ledgerRef: string;
+    } | null>(null);
+    const redlinePopoverRef = React.useRef<HTMLDivElement | null>(null);
+
     // Dismiss the context-menu popup on an outside click or Escape. Mirrors
     // the standard "click-away" pattern; the BubbleMenu's own dismissal
     // (blur/click-outside) is unaffected — this effect only governs the
@@ -737,6 +756,26 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         document.removeEventListener('keydown', handleKeyDown);
       };
     }, [contextMenuAnchor]);
+
+    // DEF-12 — dismiss the per-change redline popover on an outside click / Escape (mirrors the
+    // context-menu dismissal above; the two popups never coexist meaningfully).
+    React.useEffect(() => {
+      if (!redlineClickAnchor) return;
+      const handlePointerDown = (event: MouseEvent): void => {
+        if (redlinePopoverRef.current && !redlinePopoverRef.current.contains(event.target as Node)) {
+          setRedlineClickAnchor(null);
+        }
+      };
+      const handleKeyDown = (event: KeyboardEvent): void => {
+        if (event.key === 'Escape') setRedlineClickAnchor(null);
+      };
+      document.addEventListener('mousedown', handlePointerDown);
+      document.addEventListener('keydown', handleKeyDown);
+      return () => {
+        document.removeEventListener('mousedown', handlePointerDown);
+        document.removeEventListener('keydown', handleKeyDown);
+      };
+    }, [redlineClickAnchor]);
 
     // ----- TipTap editor instance -----------------------------------------
     const editor = useEditor({
@@ -777,6 +816,21 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               setContextMenuAnchor({ x: event.clientX, y: event.clientY });
             }
             return true;
+          },
+          // DEF-12 — per-change on-click accept/reject. A left-click that lands on a redline mark
+          // span (identified by its `data-ledger-ref` provenance attribute) opens the small
+          // accept/reject popover for THAT change. Clicks elsewhere fall through unchanged (normal
+          // caret placement / editing). Read the ledgerRef off the DOM target's nearest mark span —
+          // the most robust way to map a click to a specific pending redline.
+          click: (_view, event) => {
+            const target = event.target as HTMLElement | null;
+            const span = target?.closest?.('[data-compose-mark][data-ledger-ref]') as HTMLElement | null;
+            const ledgerRef = span?.getAttribute('data-ledger-ref') ?? '';
+            if (ledgerRef) {
+              setRedlineClickAnchor({ x: event.clientX, y: event.clientY, ledgerRef });
+            }
+            // Return false: never swallow the click — the caret still moves and normal editing works.
+            return false;
           },
         },
       },
@@ -896,6 +950,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           redline.materialize(draft, provenance);
         },
         materializePendingRedline: (draft, provenance) => redline.materialize(draft, provenance),
+        acceptPendingRedline: (ledgerRef) => redline.accept(ledgerRef),
+        rejectPendingRedline: (ledgerRef) => redline.reject(ledgerRef),
         highlightCitedSpan: (sourceText, sectionLabel) => qaHighlight.highlight(sourceText, sectionLabel),
         clearCitedHighlight: () => qaHighlight.clear(),
       }),
@@ -1012,40 +1068,61 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             />
           </div>
         ) : null}
-        {redline.pending.length > 0 ? (
-          <div
-            className={styles.redlineControls}
-            role="group"
-            aria-label="Pending suggested edits"
-            data-testid="compose-redline-controls"
-          >
-            {redline.pending.map(p => (
-              <div key={p.ledgerRef} className={styles.redlineItem} data-testid={`compose-redline-${p.ledgerRef}`}>
-                <Text size={200} className={styles.redlineLabel} title={p.rationale ?? undefined}>
-                  {redlineLabelText(p.rationale, p.ledgerRef)}
-                </Text>
-                <Button
-                  size="small"
-                  appearance="primary"
-                  icon={<Checkmark16Regular />}
-                  onClick={() => redline.accept(p.ledgerRef)}
-                  data-testid={`compose-redline-accept-${p.ledgerRef}`}
+        {/* ===================================================================
+            DEF-12 — per-change on-click accept/reject POPOVER. Replaces the
+            removed fixed `compose-redline-controls` bar (the primary control is
+            now the Assistant confirmation message). Opens at the click point on
+            a redline span; Accept/Reject route to the SAME
+            usePendingRedline.accept/reject handlers, scoped to the clicked
+            change's ledgerRef. Reuses `styles.bubbleMenu`'s dark-mode-correct
+            treatment (semantic tokens; ADR-021).
+            =================================================================== */}
+        {redlineClickAnchor
+          ? (() => {
+              const clicked = redline.pending.find(p => p.ledgerRef === redlineClickAnchor.ledgerRef);
+              return (
+                <div
+                  ref={redlinePopoverRef}
+                  className={mergeClasses(styles.bubbleMenu, styles.contextMenuPopup)}
+                  style={{ left: redlineClickAnchor.x, top: redlineClickAnchor.y }}
+                  role="group"
+                  aria-label="Accept or reject this suggested edit"
+                  data-testid="compose-redline-onclick"
+                  data-ledger-ref={redlineClickAnchor.ledgerRef}
                 >
-                  Accept
-                </Button>
-                <Button
-                  size="small"
-                  appearance="subtle"
-                  icon={<Dismiss16Regular />}
-                  onClick={() => redline.reject(p.ledgerRef)}
-                  data-testid={`compose-redline-reject-${p.ledgerRef}`}
-                >
-                  Reject
-                </Button>
-              </div>
-            ))}
-          </div>
-        ) : null}
+                  {clicked?.rationale ? (
+                    <Text size={200} className={styles.redlineLabel} title={clicked.rationale}>
+                      {redlineLabelText(clicked.rationale, clicked.ledgerRef)}
+                    </Text>
+                  ) : null}
+                  <Button
+                    size="small"
+                    appearance="primary"
+                    icon={<Checkmark16Regular />}
+                    onClick={() => {
+                      redline.accept(redlineClickAnchor.ledgerRef);
+                      setRedlineClickAnchor(null);
+                    }}
+                    data-testid={`compose-redline-accept-${redlineClickAnchor.ledgerRef}`}
+                  >
+                    Accept
+                  </Button>
+                  <Button
+                    size="small"
+                    appearance="subtle"
+                    icon={<Dismiss16Regular />}
+                    onClick={() => {
+                      redline.reject(redlineClickAnchor.ledgerRef);
+                      setRedlineClickAnchor(null);
+                    }}
+                    data-testid={`compose-redline-reject-${redlineClickAnchor.ledgerRef}`}
+                  >
+                    Reject
+                  </Button>
+                </div>
+              );
+            })()
+          : null}
         {isImporting ? (
           <div className={styles.loadingState} role="status" aria-live="polite">
             <Spinner size="small" />

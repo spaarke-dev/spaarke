@@ -6,8 +6,16 @@
  * file proves the compose EDIT dispatch WRITES its `compose` SessionOutput into the
  * DOCUMENT session (not the chat session). THIS file proves the other half of the
  * slice: `ComposeWorkspace` READS `compose-outputs` from its DOCUMENT session and the
- * inline `compose-redline-controls` (accept/reject) render from that stored ledger
- * entry — which is exactly what the owner-reported defect was missing.
+ * inline redline MARK materializes from that stored ledger entry — which is exactly
+ * what the owner-reported defect was missing.
+ *
+ * DEF-12 UPDATE: the cramped fixed `compose-redline-controls` bar was REMOVED as the
+ * primary control (that role moved to the Assistant confirmation message). This test now
+ * asserts the two things the new design KEEPS in the document: (1) the visual redline
+ * MARK (insertion/deletion span carrying the ledgerRef) still materializes, and (2)
+ * per-change granularity survives — clicking the redline span opens the on-click
+ * accept/reject popover (`compose-redline-onclick`) for THAT change. It also asserts the
+ * removed primary bar is gone.
  *
  * Split rationale (honest, not a false-green shortcut): TipTap mounts only in this
  * `@spaarke/compose-components` jest env, and `ConversationPane` (which owns the
@@ -25,7 +33,7 @@
 import * as React from 'react';
 import * as fs from 'fs';
 import * as path from 'path';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets/events';
 
@@ -168,8 +176,8 @@ beforeEach(() => {
   composeOutputsReadUrls.length = 0;
 });
 
-describe('DEF-09: ComposeWorkspace materializes the inline redline from the DOCUMENT session ledger', () => {
-  it('reads compose-outputs from the document session and renders compose-redline-controls (accept/reject)', async () => {
+describe('DEF-09/DEF-12: ComposeWorkspace materializes the redline mark + per-change on-click from the DOCUMENT session ledger', () => {
+  it('reads compose-outputs from the document session, materializes the redline MARK, keeps per-change on-click, and drops the primary bar', async () => {
     const bus = new PaneEventBus();
     renderWorkspace(bus);
 
@@ -195,9 +203,32 @@ describe('DEF-09: ComposeWorkspace materializes the inline redline from the DOCU
       });
     });
 
-    // The inline redline + accept/reject affordance render (the defect: these never appeared).
-    const controls = await screen.findByTestId('compose-redline-controls', undefined, { timeout: 5000 });
-    expect(controls).toBeInTheDocument();
+    // (1) The visual redline MARK materializes in the document (the defect: it never appeared).
+    // The pure insertion renders a `<span data-compose-mark="insertion" data-ledger-ref>` carrying
+    // the ledgerRef provenance + the drafted text. This is what STAYS under DEF-12.
+    const markSpan = await waitFor(
+      () => {
+        const el = document.querySelector<HTMLElement>(
+          `[data-compose-mark="insertion"][data-ledger-ref="${LEDGER_REF}"]`
+        );
+        if (!el) throw new Error('insertion redline mark not yet materialized');
+        return el;
+      },
+      { timeout: 5000 }
+    );
+    expect(markSpan.textContent).toContain(NEW_TEXT);
+
+    // (2) DEF-12 — the cramped fixed primary bar is GONE.
+    expect(screen.queryByTestId('compose-redline-controls')).toBeNull();
+
+    // (3) DEF-12 — per-change granularity survives: clicking the redline span opens the on-click
+    // accept/reject popover for THAT change (routes to the same usePendingRedline.accept/reject).
+    act(() => {
+      fireEvent.click(markSpan);
+    });
+    const onClickPopover = await screen.findByTestId('compose-redline-onclick', undefined, { timeout: 5000 });
+    expect(onClickPopover).toBeInTheDocument();
+    expect(onClickPopover.getAttribute('data-ledger-ref')).toBe(LEDGER_REF);
     expect(screen.getByTestId(`compose-redline-accept-${LEDGER_REF}`)).toBeInTheDocument();
     expect(screen.getByTestId(`compose-redline-reject-${LEDGER_REF}`)).toBeInTheDocument();
 

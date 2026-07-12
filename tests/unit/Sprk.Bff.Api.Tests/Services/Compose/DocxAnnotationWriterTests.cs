@@ -293,6 +293,56 @@ public class DocxAnnotationWriterTests
         act.Should().Throw<ArgumentException>();
     }
 
+    // -- DEF-13: AI edit REASON → anchored w:comment on the change (real OOXML wire assertion) ----
+
+    [Fact]
+    public void Annotate_WithAiEditReasonComment_WritesAnchoredWCommentOnTheChangedSpan()
+    {
+        // DEF-13: the AI's edit rationale is registered as a Compose comment annotation anchored to
+        // the edit's target_text (ComposeWorkspace.registerAiEditReasonComment), then mapped to a
+        // Comment DocxAnnotation (anchoredAnnotationsToDocxAnnotations) and materialized here. This
+        // proves — through the REAL DOCX write path, asserting the SAVED OOXML (no mock) — that the
+        // reason lands as a native w:comment whose anchor spans the changed text and whose body is the
+        // rationale, so it shows for collaboration and persists into the .docx on Save.
+        var source = CreateDocx("The Supplier shall indemnify the Customer under the prior clause today.");
+        var aiReason = new DocxAnnotation
+        {
+            Kind = TrackChangeKind.Comment,
+            TargetText = "the prior clause",
+            CommentText = "This alternative improves clarity by removing the liability cap ambiguity.",
+            Author = "Spaarke Assistant",
+            Date = When,
+        };
+
+        var result = _sut.Annotate(source, new[] { aiReason });
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(result), false);
+        var body = doc.MainDocumentPart!.Document!.Body!;
+
+        // The reason is a native w:comment carrying the rationale + AI attribution.
+        var comment = doc.MainDocumentPart!.WordprocessingCommentsPart!.Comments!.Elements<Comment>().Single();
+        comment.Author!.Value.Should().Be("Spaarke Assistant");
+        comment.InnerText.Should().Be("This alternative improves clarity by removing the liability cap ambiguity.");
+
+        // The comment is ANCHORED to the changed span — commentRangeStart/End + reference share the id.
+        var rangeStart = body.Descendants<CommentRangeStart>().Single();
+        rangeStart.Id!.Value.Should().Be(comment.Id!.Value);
+        body.Descendants<CommentRangeEnd>().Single().Id!.Value.Should().Be(comment.Id.Value);
+        body.Descendants<CommentReference>().Single().Id!.Value.Should().Be(comment.Id.Value);
+
+        // The anchor brackets exactly the target text ("the prior clause"), not the whole paragraph.
+        var runsText = body.Elements<Paragraph>().Single().Elements<Run>()
+            .Select(r => r.GetFirstChild<Text>()?.Text ?? string.Empty).ToList();
+        var startIdx = body.Elements<Paragraph>().Single().ChildElements.ToList()
+            .FindIndex(e => e is CommentRangeStart);
+        var endIdx = body.Elements<Paragraph>().Single().ChildElements.ToList()
+            .FindIndex(e => e is CommentRangeEnd);
+        (startIdx >= 0 && endIdx > startIdx).Should().BeTrue("the comment range brackets the anchored text");
+
+        // Schema-valid per Spike 5 (0 validator errors).
+        AssertNoValidationErrors(doc);
+    }
+
     // -- Helpers ---------------------------------------------------------------------------------
 
     private static byte[] CreateDocx(params string[] paragraphs)

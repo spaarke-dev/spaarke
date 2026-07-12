@@ -107,6 +107,22 @@ export interface IChatMessageMetadata {
    * Only meaningful when responseType === 'plan_preview'.
    */
   plan?: IChatMessagePlanStep[];
+
+  /**
+   * spaarkeai-compose-r2 DEF-12 — marks this Assistant message as the CONFIRMATION for an
+   * applied Compose AI edit (a pending redline in the document). When present, the message
+   * renders the per-message Accept / Reject / Try-another controls (in place of the removed
+   * in-editor `compose-redline-controls` bar) — but ONLY while this edit is still the live
+   * pending one (SprkChat gates on `activeComposeEditLedgerRef` matching `ledgerRef`). The
+   * message body stays summary-only; the reasoning lives in the Context Execution Trace, and
+   * the proposed text is the redline in the document — neither is dumped here.
+   */
+  composeEdit?: {
+    /** Addressable ledger key `{bindingId}@t{n}` of the applied compose output (the control target). */
+    ledgerRef: string;
+    /** `sprk_playbookconsumer` Binding id that produced the edit. */
+    bindingId: string;
+  };
 }
 
 /** A single chat message, matching ChatSessionMessageInfo from the history endpoint. */
@@ -843,6 +859,26 @@ export interface ISprkChatProps {
    * @param content - the assistant message text to seed the Compose draft with.
    */
   onOpenInCompose?: (content: string) => void;
+  /**
+   * spaarkeai-compose-r2 DEF-12 — per-message Compose-edit controls. When the host provides these,
+   * an Assistant message carrying `metadata.composeEdit` renders Accept / Reject / Try-another
+   * controls (the Assistant becomes the AI↔user interaction surface; the cramped in-editor bar is
+   * removed). Each callback receives the message's `ledgerRef` + `bindingId` so the host routes it
+   * to the EXISTING handlers: Accept → `usePendingRedline.accept` (via the compose bridge), Reject →
+   * `useEditSupersession.undo` (ledger retraction), Try-another → `useEditSupersession.tryAnother`.
+   * The controls render ONLY on the message whose `ledgerRef` equals {@link activeComposeEditLedgerRef}
+   * (the live pending edit); once accepted/rejected the host clears it and the controls disappear.
+   */
+  onComposeEditAccept?: (ledgerRef: string, bindingId: string) => void;
+  onComposeEditReject?: (ledgerRef: string, bindingId: string) => void;
+  onComposeEditTryAnother?: (ledgerRef: string, bindingId: string) => void;
+  /**
+   * spaarkeai-compose-r2 DEF-12 — the `ledgerRef` of the currently-live pending Compose edit (or
+   * null when none). Only the confirmation message whose `metadata.composeEdit.ledgerRef` matches
+   * this value shows its Accept/Reject/Try-another controls; stale confirmations (superseded edits)
+   * render inert. Driven by the host's `useEditSupersession.lastEdit`.
+   */
+  activeComposeEditLedgerRef?: string | null;
   /** Available documents for context switching */
   documents?: IDocumentOption[];
   /** Available playbooks for context switching */

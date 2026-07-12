@@ -20,7 +20,13 @@
 
 import * as React from 'react';
 import { makeStyles, shorthands, tokens, mergeClasses, Text, Spinner, Button } from '@fluentui/react-components';
-import { ArrowExportRegular, DocumentEditRegular } from '@fluentui/react-icons';
+import {
+  ArrowExportRegular,
+  DocumentEditRegular,
+  CheckmarkRegular,
+  DismissRegular,
+  ArrowSyncRegular,
+} from '@fluentui/react-icons';
 import { ISprkChatMessageProps, ICitation, IDocumentStatusChatMessage } from './types';
 import { CitationMarker } from './SprkChatCitationPopover';
 import { SprkChatMessageRenderer } from './SprkChatMessageRenderer';
@@ -372,6 +378,22 @@ export interface ISprkChatMessageExtendedProps extends ISprkChatMessageProps {
    * `metadata.responseType === 'outcome_card'`); chips render disabled when omitted.
    */
   onNextStep?: (chip: INextStepChip) => void;
+
+  /**
+   * spaarkeai-compose-r2 DEF-12 — per-message Compose-edit controls. Rendered ONLY on an Assistant
+   * message carrying `metadata.composeEdit` while {@link composeEditActive} is true. Each callback
+   * receives the message's `ledgerRef` + `bindingId`; the host wires them to the existing redline
+   * handlers (Accept → usePendingRedline.accept, Reject → useEditSupersession.undo, Try-another →
+   * useEditSupersession.tryAnother). Omitting a callback renders that control disabled.
+   */
+  onComposeEditAccept?: (ledgerRef: string, bindingId: string) => void;
+  onComposeEditReject?: (ledgerRef: string, bindingId: string) => void;
+  onComposeEditTryAnother?: (ledgerRef: string, bindingId: string) => void;
+  /**
+   * DEF-12 — whether this message's compose edit is still the live pending one. False (stale /
+   * superseded / accepted) suppresses the controls so old confirmations don't show dead buttons.
+   */
+  composeEditActive?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -443,6 +465,11 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   onOpenLibraryModal,
   // spaarke-ai-architecture-redesign-r2 task 062
   onNextStep,
+  // spaarkeai-compose-r2 DEF-12
+  onComposeEditAccept,
+  onComposeEditReject,
+  onComposeEditTryAnother,
+  composeEditActive,
 }) => {
   const styles = useStyles();
   const isUser = message.role === 'User';
@@ -481,6 +508,53 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
 
   const responseType = message.metadata?.responseType;
   const isStructured = isAssistant && responseType != null && responseType !== '';
+
+  // ── DEF-12: per-message Compose-edit controls (Accept / Reject / Try-another) ──────────────
+  // Attached to the CONFIRMATION message for an applied Compose AI edit (the Assistant is the AI↔user
+  // interaction surface — Word Copilot parity; the cramped in-editor bar is gone). Rendered ONLY while
+  // this edit is the live pending one (`composeEditActive`). Because the confirmation carries
+  // `responseType: 'markdown'` it renders through the structured branch, so the controls node is shared
+  // into BOTH the structured-markdown branch and the plain-text branch below.
+  const composeEdit = isAssistant && !isStreaming ? message.metadata?.composeEdit : undefined;
+  const showComposeEditControls = !!composeEdit && composeEditActive === true;
+  const composeEditControlsNode =
+    showComposeEditControls && composeEdit ? (
+      <div className={styles.messageActions} role="group" aria-label="Accept, reject, or replace the AI edit">
+        <Button
+          appearance="primary"
+          size="small"
+          icon={React.createElement(CheckmarkRegular)}
+          disabled={!onComposeEditAccept}
+          onClick={() => onComposeEditAccept?.(composeEdit.ledgerRef, composeEdit.bindingId)}
+          data-testid="compose-edit-accept"
+          title="Accept the tracked change in the document"
+        >
+          Accept
+        </Button>
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={React.createElement(DismissRegular)}
+          disabled={!onComposeEditReject}
+          onClick={() => onComposeEditReject?.(composeEdit.ledgerRef, composeEdit.bindingId)}
+          data-testid="compose-edit-reject"
+          title="Reject the change (removes the redline)"
+        >
+          Reject
+        </Button>
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={React.createElement(ArrowSyncRegular)}
+          disabled={!onComposeEditTryAnother}
+          onClick={() => onComposeEditTryAnother?.(composeEdit.ledgerRef, composeEdit.bindingId)}
+          data-testid="compose-edit-try-another"
+          title="Discard this and draft a different alternative"
+        >
+          Try another
+        </Button>
+      </div>
+    ) : null;
 
   // ── Document status rendering (FR-14: Save to matter files) ────────────────
   // When the message carries document_status metadata, render SprkChatDocumentStatus
@@ -594,6 +668,8 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
           // when responseType === 'outcome_card'.
           onNextStep={onNextStep}
         />
+        {/* DEF-12: compose-edit confirmation controls (responseType 'markdown' renders here). */}
+        {composeEditControlsNode}
         {/*
          * chat-routing-redesign-r1 task 117b: suppress the Insert button on
          * `playbook_options` cards — they have no free-text body to insert into
@@ -644,6 +720,9 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
       {message.timestamp && !isStreaming && (
         <span className={timestampClass}>{formatTimestamp(message.timestamp)}</span>
       )}
+
+      {/* DEF-12: compose-edit confirmation controls (plain-text branch — when responseType is absent). */}
+      {composeEditControlsNode}
 
       {(showInsertButton || showOpenInComposeButton) && (
         <div className={styles.messageActions}>

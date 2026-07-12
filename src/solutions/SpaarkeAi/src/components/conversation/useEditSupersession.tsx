@@ -93,6 +93,13 @@ export interface UseEditSupersessionResult {
   readonly lastEdit: AppliedComposeEdit | null;
   /** Record that a compose edit was just applied — ConversationPane calls this from its apply leg. */
   readonly trackAppliedEdit: (edit: AppliedComposeEdit) => void;
+  /**
+   * DEF-12 — clear the tracked edit WITHOUT a ledger write. Called after an ACCEPT (the redline was
+   * committed in the document via usePendingRedline.accept, so there is nothing to retract) so the
+   * per-message controls stop rendering (`lastEdit` → null). Undo/Try-another still perform their
+   * durable ledger supersessions; this is the accept-path counterpart that just drops the target.
+   */
+  readonly clearTrackedEdit: () => void;
   /** "undo that" — retract the last edit as a durable ledger supersession, then re-materialize. */
   readonly undo: () => Promise<void>;
   /**
@@ -132,6 +139,11 @@ export function useEditSupersession(deps: UseEditSupersessionDeps): UseEditSuper
 
   const trackAppliedEdit = React.useCallback((edit: AppliedComposeEdit) => {
     setLastEdit(edit);
+    setError(null);
+  }, []);
+
+  const clearTrackedEdit = React.useCallback(() => {
+    setLastEdit(null);
     setError(null);
   }, []);
 
@@ -221,7 +233,7 @@ export function useEditSupersession(deps: UseEditSupersessionDeps): UseEditSuper
     [lastEdit, getSessionId, supersede, dispatchApply]
   );
 
-  return { lastEdit, trackAppliedEdit, undo, tryAnother, busy, error, clearError };
+  return { lastEdit, trackAppliedEdit, clearTrackedEdit, undo, tryAnother, busy, error, clearError };
 }
 
 // ---------------------------------------------------------------------------

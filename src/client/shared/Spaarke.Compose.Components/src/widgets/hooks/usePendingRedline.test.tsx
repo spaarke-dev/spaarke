@@ -12,7 +12,7 @@
  *     hook, in dark theme (ADR-021).
  */
 import * as React from 'react';
-import { render, screen, act, waitFor } from '@testing-library/react';
+import { render, screen, act, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderHook } from '@testing-library/react';
 import { FluentProvider, webDarkTheme } from '@fluentui/react-components';
@@ -306,7 +306,7 @@ describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => 
     return ref;
   }
 
-  it('renders accept/reject controls after a draft is materialized, and reject clears them', async () => {
+  it('DEF-12: per-change on-click popover (not the removed bar) accepts/rejects a materialized redline', async () => {
     const ref = renderEditor();
     await screen.findByRole('region'); // editor mounted (loading branch gone)
 
@@ -314,13 +314,26 @@ describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => 
       ref.current!.materializePendingRedline({ new_text: 'A suggested paragraph.' }, PROV);
     });
 
-    const controls = await screen.findByTestId('compose-redline-controls');
-    expect(controls).toBeInTheDocument();
-    const acceptBtn = screen.getByTestId('compose-redline-accept-b1@t1');
-    expect(acceptBtn).toBeInTheDocument();
+    // DEF-12: the fixed primary bar is GONE — the redline is the in-document mark span.
+    const markSpan = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-compose-mark="insertion"][data-ledger-ref="b1@t1"]');
+      if (!el) throw new Error('insertion mark not materialized');
+      return el;
+    });
+    expect(screen.queryByTestId('compose-redline-controls')).not.toBeInTheDocument();
 
+    // Clicking the redline span opens the per-change on-click accept/reject popover for THAT change.
+    act(() => {
+      fireEvent.click(markSpan);
+    });
+    const popover = await screen.findByTestId('compose-redline-onclick');
+    expect(popover).toBeInTheDocument();
+    expect(screen.getByTestId('compose-redline-accept-b1@t1')).toBeInTheDocument();
+
+    // Reject removes the redline mark and closes the popover (usePendingRedline.reject).
     await userEvent.click(screen.getByTestId('compose-redline-reject-b1@t1'));
-    await waitFor(() => expect(screen.queryByTestId('compose-redline-controls')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId('compose-redline-onclick')).not.toBeInTheDocument());
+    expect(document.querySelector('[data-compose-mark="insertion"][data-ledger-ref="b1@t1"]')).toBeNull();
   });
 
   it('surfaces the unresolved-target banner (do-not-guess) when target_text is absent from the doc', async () => {

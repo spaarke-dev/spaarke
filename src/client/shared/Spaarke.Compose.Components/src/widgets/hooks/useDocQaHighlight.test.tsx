@@ -168,9 +168,14 @@ describe('ComposeEditor Doc Q&A highlight banner (ADR-021 dark mode)', () => {
       );
     });
 
-    const acceptBtn = await screen.findByTestId('compose-redline-accept-b1@t1');
-    await userEvent.click(acceptBtn);
-    await waitFor(() => expect(screen.queryByTestId('compose-redline-controls')).not.toBeInTheDocument());
+    // DEF-12: the fixed accept/reject bar was removed; commit the redline via the imperative handle
+    // (the same usePendingRedline.accept the Assistant control + on-click popover route to).
+    act(() => {
+      ref.current!.acceptPendingRedline('b1@t1');
+    });
+    await waitFor(() =>
+      expect(document.querySelector('[data-compose-mark="insertion"][data-ledger-ref="b1@t1"]')).toBeNull()
+    );
 
     let status: string | undefined;
     act(() => {

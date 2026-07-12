@@ -56,6 +56,7 @@ import { useSerialActionQueue, type ComposeActionRequest } from "./useSerialActi
 import {
   useRegisterComposeActionDispatcher,
   useRegisterComposeActiveDocumentHandler,
+  useComposeRedlineAccept,
 } from "@spaarke/compose-components/context/composeActionBridge";
 import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./composeApplyLeg";
 // FR-17 undo/replace (task 034) — the durable ledger-supersession hook + its Assistant affordance.
@@ -63,7 +64,7 @@ import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession"
 import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-components/types/compose-contracts";
 import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
 import { formatComposeActionResultMarkdown } from "./composeResultFormat";
-import { makeLocalAssistantMessage } from "./summarizeRouting";
+import { makeLocalAssistantMessage, makeComposeEditControlsMessage } from "./summarizeRouting";
 import {
   AuthLoadingState,
   PlaybookHeaderStrip,
@@ -83,18 +84,21 @@ export {
   buildFileConfirmationMessage,
   buildMultiFileSummarizeInterjection,
   makeLocalAssistantMessage,
+  makeComposeEditControlsMessage,
 } from "./summarizeRouting";
 export type { SummarizeRouteDecision, SummarizeIntentInputs } from "./summarizeRouting";
 
 /**
- * DEF-09: the CONFIRMATION-only Assistant line for a compose EDIT action. The
- * alternative itself materializes as an inline redline IN the Compose document
- * (accept/reject there) — the Assistant must NOT restate the proposed text (that
- * would duplicate the redline and reintroduce the "renders as a chat message, not
- * a redline" defect). Informational compose actions keep their full grounded prose.
+ * DEF-09 / DEF-12: the SUMMARY-ONLY confirmation line for a compose EDIT action. The alternative
+ * materializes as an inline redline IN the Compose document; the Assistant must NOT restate the
+ * proposed text (that would duplicate the redline and reintroduce the "renders as a chat message,
+ * not a redline" defect) NOR the reasoning (which lives in the Context Execution Trace). DEF-12
+ * attaches the Accept / Reject / Try-another controls to THIS message (the Assistant is the AI↔user
+ * interaction surface — Word Copilot parity), so the copy no longer says "accept or reject it there".
+ * Informational compose actions keep their full grounded prose.
  */
 export const COMPOSE_EDIT_CONFIRMATION =
-  'Drafted an alternative — see the pending redline in the document; accept or reject it there.';
+  'I revised the selected text — review the tracked change in the document, then accept, reject, or try another.';
 
 export function ConversationPane(): React.JSX.Element {
   const styles = useConversationPaneLayoutStyles();
@@ -273,7 +277,12 @@ export function ConversationPane(): React.JSX.Element {
   );
   const supersession = useEditSupersession({ bffBaseUrl, getSessionId, authenticatedFetch, dispatchApply });
   // Destructure the memoized callbacks so downstream useCallbacks depend on stable identities.
-  const { trackAppliedEdit, undo: undoEdit, tryAnother: tryAnotherEdit } = supersession;
+  const { trackAppliedEdit, clearTrackedEdit, undo: undoEdit, tryAnother: tryAnotherEdit } = supersession;
+
+  // DEF-12 — the editor's redline-accept, published by ComposeWorkspace into the cross-pane bridge.
+  // Null when no live editor is registered (standalone mount / no Compose tab open). The Assistant's
+  // per-message "Accept" routes through this to the EXISTING `usePendingRedline.accept` in the editor.
+  const acceptRedlineViaBridge = useComposeRedlineAccept();
 
   const dispatchComposeAction = React.useCallback(
     (request: ComposeActionRequest): Promise<DispatchConsumerResult> => {
@@ -290,11 +299,7 @@ export function ConversationPane(): React.JSX.Element {
         : request;
 
       return actionQueue.enqueue(enqueueRequest).then((dispatched) => {
-        if (isEditAction) {
-          // DEF-09: confirmation ONLY — the alternative is the inline redline in the
-          // document, not a chat message. Do NOT restate the proposed text here.
-          injection.enqueue(makeLocalAssistantMessage(COMPOSE_EDIT_CONFIRMATION));
-        } else if (dispatched.result !== undefined && dispatched.result !== null) {
+        if (!isEditAction && dispatched.result !== undefined && dispatched.result !== null) {
           // UAT-R3 defect #3b (task 112): INFORMATIONAL actions render full grounded
           // prose. Try the 5 Compose action shapes first; fall back to the general
           // Event-path formatter (which still degrades genuinely unknown shapes to the
@@ -308,6 +313,21 @@ export function ConversationPane(): React.JSX.Element {
         // edit (task 034). Reads the DOCUMENT session for an edit action (DEF-09) so the ledgerRef
         // resolves. Informational actions resolve no compose output → no track → no affordance.
         void emitComposeApplyLeg(request.bindingId, documentSessionId).then((ledgerRef) => {
+          if (isEditAction) {
+            // DEF-09 + DEF-12: SUMMARY-ONLY confirmation — the alternative is the inline redline in
+            // the document, not a chat message. DEF-12 attaches the Accept/Reject/Try-another controls
+            // to THIS message via `composeEdit` metadata (ledgerRef), so it must be injected AFTER the
+            // apply leg resolves the ledgerRef. If (defensively) the ledger didn't resolve, fall back
+            // to a plain confirmation (no controls — there is no addressable edit to act on).
+            injection.enqueue(
+              ledgerRef
+                ? makeComposeEditControlsMessage(COMPOSE_EDIT_CONFIRMATION, {
+                    ledgerRef,
+                    bindingId: request.bindingId,
+                  })
+                : makeLocalAssistantMessage(COMPOSE_EDIT_CONFIRMATION)
+            );
+          }
           if (ledgerRef) {
             trackAppliedEdit({ ledgerRef, bindingId: request.bindingId, request, sessionId: documentSessionId });
           }
@@ -330,6 +350,20 @@ export function ConversationPane(): React.JSX.Element {
   const handleReplaceEdit = React.useCallback(() => {
     void tryAnotherEdit(dispatchComposeAction);
   }, [tryAnotherEdit, dispatchComposeAction]);
+
+  // DEF-12 — Accept control on the Assistant confirmation message. Routes to the EXISTING editor
+  // accept (`usePendingRedline.accept`) via the compose bridge, then clears the tracked edit so the
+  // controls disappear (the redline is now committed — nothing to retract). Reject and Try-another
+  // reuse the shipped `handleUndoEdit` / `handleReplaceEdit` (useEditSupersession.undo / tryAnother),
+  // which operate on the tracked `lastEdit` — the live edit whose ledgerRef this message carries
+  // (SprkChat only renders the controls on that message). No parallel accept/reject logic.
+  const handleAcceptComposeEdit = React.useCallback(
+    (ledgerRef: string) => {
+      acceptRedlineViaBridge?.(ledgerRef);
+      clearTrackedEdit();
+    },
+    [acceptRedlineViaBridge, clearTrackedEdit]
+  );
 
   // FR-13 Step 1: publish `dispatchComposeAction` into the cross-pane Compose
   // action bridge so the inline AI toolbar (workspace pane, ComposeAiToolbar's
@@ -590,10 +624,13 @@ export function ConversationPane(): React.JSX.Element {
               Renders nothing until a compose flow fires (task 104). */}
           <ComposeAssistantCoordination />
 
-          {/* FR-17 undo/replace affordance (task 034) — appears after an AI redline is applied;
-              both intents route to durable ledger supersessions (never a DOM undo). */}
+          {/* FR-17 undo/replace (task 034) → DEF-12: the Undo/Try-another BUTTONS moved onto the
+              Assistant confirmation message (the AI↔user interaction surface). This bar is kept
+              ERROR-ONLY — passing `lastEdit={null}` suppresses its action buttons while still
+              surfacing a failed-supersession MessageBar. Both accept/undo/tryAnother intents still
+              route to durable ledger supersessions (never a DOM undo). */}
           <EditSupersessionBar
-            lastEdit={supersession.lastEdit}
+            lastEdit={null}
             busy={supersession.busy}
             error={supersession.error}
             onUndo={handleUndoEdit}
@@ -650,6 +687,13 @@ export function ConversationPane(): React.JSX.Element {
               // DEF-08 Part B: "Open in Compose" per-message affordance (opt-in; opens+seeds a
               // reused Compose draft tab with the message text).
               onOpenInCompose={handleOpenInCompose}
+              // DEF-12: per-message Accept / Reject / Try-another controls on the compose-edit
+              // confirmation message. Wired to the EXISTING handlers; SprkChat renders them only on
+              // the message whose composeEdit.ledgerRef === activeComposeEditLedgerRef (the live edit).
+              onComposeEditAccept={handleAcceptComposeEdit}
+              onComposeEditReject={handleUndoEdit}
+              onComposeEditTryAnother={handleReplaceEdit}
+              activeComposeEditLedgerRef={supersession.lastEdit?.ledgerRef ?? null}
               // F-4: activate OutcomeCard next-step chips — routes an
               // invoke_capability chip's targetBindingId through the shared
               // dispatchConsumer path (see handleNextStep above).

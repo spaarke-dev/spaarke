@@ -337,6 +337,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // only hosts with an insert target (AnalysisWorkspace editor) enable it.
   enableInsertToEditor = false,
   onOpenInCompose,
+  // spaarkeai-compose-r2 DEF-12 — per-message Compose-edit controls + the live-edit gate.
+  onComposeEditAccept,
+  onComposeEditReject,
+  onComposeEditTryAnother,
+  activeComposeEditLedgerRef,
   documents = [],
   playbooks = [],
   predefinedPrompts = [],
@@ -2467,6 +2472,17 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             ...(isOutcomeCard && {
               onNextStep,
             }),
+            // DEF-12: wire the per-message Compose-edit controls when this Assistant message carries
+            // composeEdit metadata. `composeEditActive` gates the render to the LIVE pending edit only
+            // (matching the host's `activeComposeEditLedgerRef`), so a superseded/accepted edit's old
+            // confirmation shows no dead buttons. Handlers are opt-in per host (SpaarkeAi provides them).
+            ...(msg.role === 'Assistant' &&
+              msg.metadata?.composeEdit && {
+                onComposeEditAccept,
+                onComposeEditReject,
+                onComposeEditTryAnother,
+                composeEditActive: msg.metadata.composeEdit.ledgerRef === activeComposeEditLedgerRef,
+              }),
           };
 
           return <SprkChatMessage key={`msg-${index}`} {...msgProps} />;
