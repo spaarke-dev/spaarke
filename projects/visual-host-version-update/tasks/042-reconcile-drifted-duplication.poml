@@ -1,7 +1,7 @@
 <task id="VHVU-042" project="VisualHost Decoupling & @spaarke/visuals Extraction">
   <metadata>
     <title>Reconcile drifted duplication (single VisualType owner; one EventDueDateCard)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>B2</phase>
     <estimated-effort>4 hours</estimated-effort>
     <tags>shared-lib, dedup, types</tags>

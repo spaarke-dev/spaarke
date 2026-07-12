@@ -23,8 +23,8 @@ export * from './RichTextEditor';
 // Dialogs
 export * from './ChoiceDialog';
 
-// Event Due Date Card
-export * from './EventDueDateCard';
+// EventDueDateCard removed (VHVU-042): canonical copy now lives in @spaarke/visuals
+// (the only consumer, VisualHost, imports it from there). This copy was unused.
 
 // Side Pane components (reusable across entity detail side panes)
 export * from './SidePane';

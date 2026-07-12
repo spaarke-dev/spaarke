@@ -19,7 +19,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ complete · ⛔
 | VHVU-031 | Deploy VisualHost + pages to dev; UAT "+" via navigateTo (dark+light) | A3 | FULL | sonnet/high | 030,021 | 🚀 deployed to DEV1 2026-07-11 · ⏸ awaiting owner UAT |
 | VHVU-040 | Scaffold `@spaarke/visuals` sibling package | B1 | FULL | sonnet/high | 031 | ✅ |
 | VHVU-041 | Move 15 visuals + 7 utils + viz types into package | B2 | FULL | sonnet/high | 040 | ✅ |
-| VHVU-042 | Reconcile drifted duplication (one `VisualType`, one `EventDueDateCard`) | B2 | FULL | sonnet/high | 041 | 🔲 |
+| VHVU-042 | Reconcile drifted duplication (one `VisualType`, one `EventDueDateCard`) | B2 | FULL | sonnet/high | 041 | ✅ |
 | VHVU-050 | Refactor 3 self-fetch visuals to props-in + split `ViewDataService` | B3 | FULL | sonnet/xhigh | 041 | 🔲 |
 | VHVU-060 | Repoint VisualHost to `@spaarke/visuals`; verify build/bundle/drill | B4 | FULL | sonnet/high | 042,050 | 🔲 |
 | VHVU-061 | Deploy + UAT visuals parity on dev | B4 | FULL | sonnet/high | 060 | 🔲 |
