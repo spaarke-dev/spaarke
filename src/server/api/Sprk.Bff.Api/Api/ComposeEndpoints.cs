@@ -1407,6 +1407,32 @@ public static class ComposeEndpoints
                 detail: "Caller lacks SPE ACL write permission for this drive-item.",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.3");
         }
+        catch (Sprk.Bff.Api.Infrastructure.Graph.DocumentLockedByWordException ex)
+        {
+            // DEF-14: the SPE drive-item is checked out / open in Word for Web. The write layer
+            // (UploadSessionManager) translates the Graph 423/resourceLocked ODataError into this
+            // typed domain exception; we map it to a 423 with actionable copy instead of the opaque
+            // 500 that used to leak "ODataError". Mirrors the PushAnnotations handler.
+            logger.LogWarning(ex, "Compose save: drive-item locked by Word (423). TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status423Locked,
+                title: "Document Open or Checked Out",
+                detail: "This document is checked out or open in Word — check it in or close the other " +
+                        "editor, then Save again. Your Compose changes are safe and still pending.",
+                type: "https://tools.ietf.org/html/rfc4918#section-11.3");
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Graph.EtagPreconditionFailedException ex)
+        {
+            // DEF-14: the drive-item changed under the caller since load (If-Match precondition
+            // failed). Map to 412 rather than clobbering; the client's recovery is reload + reapply.
+            logger.LogWarning(ex, "Compose save: ETag precondition failed (412). TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status412PreconditionFailed,
+                title: "Document Changed",
+                detail: "This document changed since you opened it — reload and reapply your changes. " +
+                        "Nothing was overwritten.",
+                type: "https://tools.ietf.org/html/rfc7232#section-4.2");
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Compose save: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
