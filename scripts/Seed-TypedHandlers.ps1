@@ -173,24 +173,10 @@ $RowFiles = @{
     # surface). sprk_availableincontexts = Chat (100000001) — playbook nodes write to
     # sprk_analysisoutput, not the chat-session workspace tab list.
     "SEND-WORKSPACE-ARTIFACT"          = "$RepoRoot/infra/dataverse/sprk_analysistool-send-workspace-artifact-row.json"
-    # R6 Pillar 6b / D-C-06 / task 055 — UpdateWorkspaceTabHandler: single row exposing the
-    # update_workspace_tab(tabId, widgetData, expectedLastUserEditAt?) chat tool. Mutates an
-    # existing WorkspaceTab via IWorkspaceStateService.UpsertTabAsync with Q8 USER-WINS
-    # conflict resolution (refuses with structured 'stale_read' response when the stored
-    # LastUserEditAt is later than the LLM-supplied timestamp). sprk_requiredcapability = null
-    # (intentional — default user affordance available in every chat session; handler-side
-    # gates supply the authorization surface). sprk_availableincontexts = Chat (100000001).
-    "UPDATE-WORKSPACE-TAB"             = "$RepoRoot/infra/dataverse/sprk_analysistool-update-workspace-tab-row.json"
-    # R6 Pillar 6b / D-C-07 / task 056 — CloseWorkspaceTabHandler: single row exposing the
-    # close_workspace_tab(tabId) chat tool. Removes a non-pinned tab from the current chat
-    # session's workspace via IWorkspaceStateService.CloseTabAsync. Pinned tabs are refused
-    # with structured 'pinned_tab_refused' response (Q8 USER WINS — closing pinned content
-    # requires explicit user action). sprk_requiredcapability = null (intentional — default
-    # user affordance available in every chat session). sprk_availableincontexts = Chat
-    # (100000001). Added to seed script 2026-06-25 (R6 surface completion sprint) — closes
-    # TIER-C UAT primary failure where LLM lacked the ability to close tabs and read
-    # workspace content despite the C# handlers being deployed.
-    "CLOSE-WORKSPACE-TAB"              = "$RepoRoot/infra/dataverse/sprk_analysistool-close-workspace-tab-row.json"
+    # AIR2-075 RETIREMENT (2026-07-10): UPDATE-WORKSPACE-TAB (UpdateWorkspaceTabHandler) and
+    # CLOSE-WORKSPACE-TAB (CloseWorkspaceTabHandler) were retired with the orphaned
+    # IWorkspaceStateService write path — do not re-seed. Live rows are deactivated at
+    # consolidation.
     # R6 Pillar 7 / D-C-23 / task 069 — ManagePinnedContextHandler: single row exposing the
     # manage_pinned_context(action, pinType, title, content?) chat tool. Creates or deletes
     # PinnedContextItem rows via IPinnedContextRepository. Voice command surface (FR-47):
@@ -216,16 +202,10 @@ $RowFiles = @{
     # write_session_memory / retrieve_matter_memory / promote_to_matter_memory /
     # get_user_preferences / get_org_templates) are DEFERRED.
     "RECALL-SESSION-FILE"              = "$RepoRoot/infra/dataverse/sprk_analysistool-recall-session-file-row.json"
-    # chat-routing-redesign-r1 / Phase 5R / task 118b / FR-57 — GetWorkspaceTabContentHandler:
-    # single row exposing the get_workspace_tab_content(tabId, sectionName?) chat tool. Closes
-    # the T2 workspace-output → AI-memory round-trip per architecture §6.5 + §11.1: composed
-    # widget state (sections + values) for an existing workspace tab becomes AI-readable on
-    # subsequent chat turns. READ-ONLY projection over the existing Pillar 6b plumbing
-    # (IWorkspaceStateService.GetTabsAsync) — NO new state storage; NO mutation. Sibling write
-    # tool is UPDATE-WORKSPACE-TAB (task 055). sprk_requiredcapability = null (intentional —
-    # default user affordance available in every chat session). sprk_availableincontexts =
-    # Chat (100000001) — playbook nodes do not read from chat-session workspace tabs.
-    "GET-WORKSPACE-TAB-CONTENT"        = "$RepoRoot/infra/dataverse/sprk_analysistool-get-workspace-tab-content-row.json"
+    # AIR2-075 RETIREMENT (2026-07-10): GET-WORKSPACE-TAB-CONTENT (GetWorkspaceTabContentHandler)
+    # was retired with the orphaned workspace-tab tool cluster — do not re-seed. The KEPT read
+    # path is IWorkspaceStateService.GetTabsAsync via GET /api/workspace/state + the
+    # SprkChatAgentFactory workspace-state prompt block (no seed row of its own).
     # spaarke-ai-architecture-redesign-r1 / task 008 / FR-P0-07 (read half) — the three
     # dataverse.* READ tools with GA-Dataverse-MCP-frozen contracts (ADR-039):
     #   dataverse.describe    → DataverseDescribeHandler    (describe(path, scope?))
@@ -265,6 +245,15 @@ $RowFiles = @{
     # Namespaced tool ids per the FR-P0-03 contract: analysis.rerun / analysis.refine.
     "ANALYSIS-RERUN"                   = "$RepoRoot/infra/dataverse/sprk_analysistool-analysis-rerun-row.json"
     "ANALYSIS-REFINE"                  = "$RepoRoot/infra/dataverse/sprk_analysistool-analysis-refine-row.json"
+
+    # spaarke-ai-architecture-redesign-r2 task 057 (FR-B-08 / FR-30) — MemoryWriteHandler.
+    # memory.write is AI-INITIATED + SILENT + provenance-tagged: it declares
+    # sprk_sideeffectclass = Write (100000001) so the ONE gate wraps it, but its declared
+    # riskProfile (tier 1 + reversible) makes the Confirmation Policy v2 engine execute it
+    # silently (no dialog) — the silence is the ENGINE's decision from catalog DATA, not a
+    # gate bypass. Namespaced tool id: memory.write. LIVE seeding is deferred to the task 069
+    # gate-deploy prep (mirror-first here).
+    "MEMORY-WRITE"                     = "$RepoRoot/infra/dataverse/sprk_analysistool-memory-write-row.json"
 }
 
 # -----------------------------------------------------------------------------

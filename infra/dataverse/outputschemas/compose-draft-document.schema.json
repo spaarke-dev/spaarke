@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/compose-draft-document.schema.json",
+  "title": "Compose — Draft Document — Output Schema (compose-draft-document)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='compose-draft-document' (spaarkeai-compose-r2 DEF-08). MIRRORS VERBATIM the outputSchema baked into infra/dataverse/actions/compose-draft-document.action.json (the systemPrompt/schema author surface). The FULL-DOCUMENT payload that becomes the opaque SessionOutput.Payload written under the `compose` disposition before render (ADR-040). body_html is the load-bearing full-document discriminator SendWorkspaceArtifactHandler keys on. Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required array, no anyOf/oneOf/discriminator; document_kind is a closed set via the `enum` keyword (NOT a property-level boolean required, which is FORBIDDEN).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "body_html", "document_kind", "cited_refs"],
+  "$comment-required": "Object-level required array only — property-level boolean 'required' is FORBIDDEN (OpenAiFunctionSchemaValidator). document_kind's closed set is expressed via the `enum` keyword.",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Short, specific document title — used as the Compose tab title and document name.",
+      "maxLength": 200
+    },
+    "body_html": {
+      "type": "string",
+      "description": "The FULL document body as semantic HTML using ONLY <h1><h2><h3><p><ul><ol><li><strong><em><br>. No markdown, no <script>/<style>, no inline styles, no <head>/<html>/<body> wrapper. Rendered directly into the Compose editor as an editable draft. The load-bearing full-document discriminator (SendWorkspaceArtifactHandler detects a full-document compose output by this field).",
+      "maxLength": 24000
+    },
+    "document_kind": {
+      "type": "string",
+      "description": "The closest document-kind label for the drafted document.",
+      "enum": ["letter", "memo", "response", "notice", "agreement", "general"]
+    },
+    "cited_refs": {
+      "type": "array",
+      "description": "Source references the draft drew from (file names; session-output ledger references). Empty array only when the document legitimately needs no source grounding — never fabricated.",
+      "items": { "type": "string" }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 <task id="AIR2-079" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>G-R2-D verification — CI green + publish-size report + seam-fork check</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>H — G-R2-D Hardening</phase>
     <gate>G-R2-D (hardening — GATE)</gate>
     <estimated-effort>0.5 day</estimated-effort>

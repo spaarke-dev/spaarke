@@ -87,6 +87,7 @@ public class SessionDispatchOrchestrator
     private readonly EventRulesOptions _manifestProbeOptions;
     private readonly Sprk.Bff.Api.Telemetry.AiTelemetry _aiTelemetry;
     private readonly ILogger<SessionDispatchOrchestrator> _logger;
+    private readonly TimeProvider _timeProvider;
 
     public SessionDispatchOrchestrator(
         ChatSessionManager sessionManager,
@@ -100,7 +101,8 @@ public class SessionDispatchOrchestrator
         PendingPlanManager pendingPlanManager,
         IOptions<EventRulesOptions> manifestProbeOptions,
         Sprk.Bff.Api.Telemetry.AiTelemetry aiTelemetry,
-        ILogger<SessionDispatchOrchestrator> logger)
+        ILogger<SessionDispatchOrchestrator> logger,
+        TimeProvider? timeProvider = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
@@ -118,6 +120,11 @@ public class SessionDispatchOrchestrator
         _manifestProbeOptions = manifestProbeOptions?.Value ?? throw new ArgumentNullException(nameof(manifestProbeOptions));
         _aiTelemetry = aiTelemetry ?? throw new ArgumentNullException(nameof(aiTelemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        // Track-B hygiene sweep (R9, task 073): clock for the manifest readiness probe's
+        // Task.Delay — optional, defaults to TimeProvider.System (production/DI); tests
+        // inject a FakeTimeProvider for deterministic probe-delay assertions instead of
+        // relying on a real (or zeroed) wall-clock wait.
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>
@@ -142,6 +149,7 @@ public class SessionDispatchOrchestrator
         _manifestProbeOptions = null!;
         _aiTelemetry = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = null!;
     }
 
     /// <summary>
@@ -365,7 +373,7 @@ public class SessionDispatchOrchestrator
             // so the "context selected" leg is anchored to the turn it grounds (OutputRouter allocates the
             // SAME ordinal for the SessionOutput below — no output is appended between).
             var contextTurn = (session.Outputs is { Count: > 0 } ? session.Outputs.Max(o => o.Turn) : 0) + 1;
-            var conversationTail = BuildConversationTail(session);
+            var conversationTail = ConversationContextProducer.BuildConversationTail(session);
 
             BoundInputs boundInputs;
 
@@ -386,6 +394,13 @@ public class SessionDispatchOrchestrator
                                 Args = request.Args,
                                 LedgerOutputs = session.Outputs,
                                 ConversationTail = conversationTail,
+                                // Task 053 (FR-B-04): the host record makes the envelope feature-complete
+                                // (Business host-identity + Record memory refs). Id-only shape — no lazy
+                                // name fetch here; deterministic + pinned. Prompts are UNCHANGED (the
+                                // executor renders the operand only; the envelope feeds fingerprint/counts).
+                                HostEntityType = session.HostContext?.EntityType,
+                                HostEntityId = session.HostContext?.EntityId,
+                                HostEntityName = session.HostContext?.EntityName,
                                 TenantId = request.TenantId,
                                 SessionId = request.SessionId,
                                 Turn = contextTurn,
@@ -572,13 +587,19 @@ public class SessionDispatchOrchestrator
         // Wait-briefly-or-degrade, IDENTICAL policy + bounds to the Event path's G-P1
         // Defect 3 probe (EventRulesOptions.ReadinessProbe*, ~5s default): re-read the
         // session until requested ids all resolve (explicit subset) or the manifest is
-        // non-empty (default-all), then degrade to whatever resolved. Task.Delay matches
-        // the Event-path precedent; the TimeProvider refactor is on the /defer list.
+        // non-empty (default-all), then degrade to whatever resolved. Track-B hygiene
+        // sweep (R9, task 073): the probe now delays via TimeProvider (per ADR-038 §5 /
+        // docs/standards/TEST-ARCHITECTURE.md §4) instead of raw Task.Delay, so tests can
+        // deterministically drive the probe with a FakeTimeProvider instead of relying on
+        // a zeroed real-world delay.
         if (IsResolutionIncomplete(requestedFileIds, targetFiles))
         {
             for (var attempt = 1; attempt <= _manifestProbeOptions.ReadinessProbeAttempts; attempt++)
             {
-                await Task.Delay(Math.Max(0, _manifestProbeOptions.ReadinessProbeDelayMs), cancellationToken)
+                await Task.Delay(
+                        TimeSpan.FromMilliseconds(Math.Max(0, _manifestProbeOptions.ReadinessProbeDelayMs)),
+                        _timeProvider,
+                        cancellationToken)
                     .ConfigureAwait(false);
                 var refreshed = await _sessionManager
                     .GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
@@ -662,6 +683,12 @@ public class SessionDispatchOrchestrator
                 {
                     FileDocument = documentText,
                     ConversationTail = conversationTail,
+                    // Task 053 (FR-B-04): feature-complete envelope on the file-operand path too — Business
+                    // host-identity + Record memory refs from the host record. Prompts UNCHANGED (the
+                    // executor renders the `## Document` operand only).
+                    HostEntityType = session.HostContext?.EntityType,
+                    HostEntityId = session.HostContext?.EntityId,
+                    HostEntityName = session.HostContext?.EntityName,
                     TenantId = request.TenantId,
                     SessionId = request.SessionId,
                     Turn = contextTurn,
@@ -677,28 +704,9 @@ public class SessionDispatchOrchestrator
         };
     }
 
-    /// <summary>
-    /// The session's prior <see cref="SessionOutput"/>s projected as ADR-040 ledger REFERENCES for the
-    /// ContextEnvelope <c>Memory.Conversation</c> tail (identifiers only — the payloads live in the ledger,
-    /// never copied into the envelope). Empty on a first turn.
-    /// </summary>
-    private static IReadOnlyList<LedgerEntryReference> BuildConversationTail(ChatSession session)
-    {
-        var outputs = session.Outputs;
-        if (outputs is not { Count: > 0 })
-        {
-            return Array.Empty<LedgerEntryReference>();
-        }
-
-        return outputs
-            .Select(o => new LedgerEntryReference
-            {
-                Key = o.Key,
-                UcId = o.UcId,
-                Disposition = o.Disposition,
-            })
-            .ToList();
-    }
+    // Task 053 (FR-B-04): the conversation-tail reference projection moved to
+    // ContextSliceProducers.ConversationContextProducer.BuildConversationTail so tail production is
+    // single-home (this orchestrator + the interactive ChatEndpoints path both call it).
 
     /// <summary>Outcome of <see cref="ResolveFileOperandAsync"/>: either resolved <see cref="Inputs"/> or an <see cref="Error"/> to stream.</summary>
     private sealed record FileOperandResult
@@ -744,23 +752,52 @@ public class SessionDispatchOrchestrator
     }
 
     /// <summary>
-    /// Deserialize the STORED ledger payload into the terminal chunk. Payloads matching
-    /// the <see cref="DocumentAnalysisResult"/> shape surface as the structured
-    /// <see cref="AnalysisChunk.Completed(DocumentAnalysisResult)"/> (the client
-    /// synthesizes per-field workspace deltas from <c>result</c>); anything else
-    /// degrades to a text completion — the client always sees a terminal
-    /// <c>complete</c> chunk, never a silent EOF. Same wire semantics as
-    /// the pre-044 summarize shell so there is ONE AnalysisChunk vocabulary.
+    /// Deserialize the STORED ledger payload into the terminal chunk. The discriminator is
+    /// summarize-preserving AND compose-lossless (spaarkeai-compose-r2 UAT wire-loss fix):
+    /// <list type="bullet">
+    ///   <item>A JSON object carrying the <see cref="DocumentAnalysisResult"/> SIGNATURE
+    ///     (<c>tldr</c> / <c>entities</c> / <c>keywords</c> — fields present in NO compose
+    ///     output schema) is the summarize / document-analysis case: it is coerced to the
+    ///     typed <see cref="DocumentAnalysisResult"/> via
+    ///     <see cref="AnalysisChunk.Completed(DocumentAnalysisResult)"/> so the wire shape is
+    ///     BYTE-IDENTICAL to the shipped summarize contract (DAR defaults + top-level
+    ///     <c>summary</c>). The section-keyed client bridge (dispatchConsumer.ts) is unchanged.</item>
+    ///   <item>ANY OTHER JSON object (compose actions — <c>explanation</c>/<c>keyConcepts</c>,
+    ///     <c>matches</c>/<c>overallRisk</c>, <c>changes</c>, ... — or any future non-DAR
+    ///     disposition) is passed THROUGH verbatim via <see cref="AnalysisChunk.CompletedRaw"/>,
+    ///     so its fields survive on the wire at <c>result</c> for the client's shape-detecting
+    ///     formatter (composeResultFormat.ts). BEFORE this fix every such payload was coerced to
+    ///     DocumentAnalysisResult, and System.Text.Json silently dropped its unknown properties →
+    ///     the client received an EMPTY DAR blob instead of prose.</item>
+    ///   <item>A non-object payload (array/scalar) or unparseable content degrades to a text
+    ///     completion — the client always sees a terminal <c>complete</c> chunk, never a silent EOF.</item>
+    /// </list>
     /// </summary>
     private static AnalysisChunk DeserializeResultChunk(string jsonContent)
     {
         try
         {
-            var doc = JsonSerializer.Deserialize<DocumentAnalysisResult>(jsonContent);
-            if (doc is not null)
+            using var doc = JsonDocument.Parse(jsonContent);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object)
             {
-                doc.ParsedSuccessfully = true;
-                return AnalysisChunk.Completed(doc);
+                if (IsDocumentAnalysisShape(root))
+                {
+                    // Summarize / document-analysis consumer: coerce to the typed DAR so the wire
+                    // shape (incl. DAR defaults + the top-level `summary`) is unchanged. The payload
+                    // already IS the DAR shape, so this round-trips losslessly (non-regression).
+                    var dar = JsonSerializer.Deserialize<DocumentAnalysisResult>(jsonContent);
+                    if (dar is not null)
+                    {
+                        dar.ParsedSuccessfully = true;
+                        return AnalysisChunk.Completed(dar);
+                    }
+                }
+
+                // Compose / other capability output: pass the payload THROUGH verbatim (clone so it
+                // outlives this JsonDocument's using-scope). The compose fields reach the client at
+                // `result` intact — the coercion that stripped them is gone.
+                return AnalysisChunk.CompletedRaw(root.Clone());
             }
         }
         catch (JsonException)
@@ -770,6 +807,21 @@ public class SessionDispatchOrchestrator
         }
         return AnalysisChunk.Completed(jsonContent);
     }
+
+    /// <summary>
+    /// Whether a terminal ledger payload object carries the <see cref="DocumentAnalysisResult"/>
+    /// SIGNATURE — i.e. at least one of <c>tldr</c> / <c>entities</c> / <c>keywords</c>. These three
+    /// fields are unique to the summarize / document-analysis output schema and appear in NONE of the
+    /// five compose output schemas (compose-explain-clause, compose-compare-to-playbook,
+    /// compose-draft-alternative, compose-summarize-word-changes, compose-defined-terms), so this is
+    /// an unambiguous discriminator. Deliberately does NOT key on <c>summary</c> alone: the
+    /// compose-summarize-word-changes schema also has a <c>summary</c> field, and treating that as DAR
+    /// would strip its <c>changes[]</c> — the very wire-loss this fix removes.
+    /// </summary>
+    private static bool IsDocumentAnalysisShape(JsonElement root) =>
+        root.TryGetProperty("tldr", out _)
+        || root.TryGetProperty("entities", out _)
+        || root.TryGetProperty("keywords", out _);
 
     /// <summary>
     /// Tolerant extraction of the P1 <c>fileIds</c> arg (string array). Missing /

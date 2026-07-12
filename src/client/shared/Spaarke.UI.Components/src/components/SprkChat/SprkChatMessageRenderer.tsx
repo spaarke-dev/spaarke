@@ -39,7 +39,7 @@ import {
 } from '@fluentui/react-icons';
 import type { CitationSourceType, IPlaybookOptionCandidate } from './types';
 import { renderMarkdown as renderMarkdownHtml, SPRK_MARKDOWN_CSS } from '../../services/renderMarkdown';
-import { OutcomeCard, type IOutcomeCard } from './OutcomeCard';
+import { OutcomeCard, type IOutcomeCard, type INextStepChip } from './OutcomeCard';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Markdown CSS injection (one-time, idempotent)
@@ -214,6 +214,18 @@ export interface ISprkChatMessageRendererProps {
    * When omitted, link renders disabled (defensive UX).
    */
   onOpenLibraryModal?: (sessionAttachmentIds: string[]) => void;
+
+  /**
+   * spaarke-ai-architecture-redesign-r2 task 062 (FR-A1-06 / FR-B-13 workspace-intelligence
+   * precursor). Called when the user clicks a next-step chip on an `outcome_card` card. The
+   * chip's `targetBindingId` (present for `actionKind === 'invoke_capability'`) is the ONLY
+   * routing datum a host needs to invoke the ONE Click-path helper —
+   * `dispatchConsumer(chip.targetBindingId, args)` from `services/dispatchConsumer.ts`.
+   * SprkChatMessageRenderer/OutcomeCard are presentational and context-agnostic (ADR-012): they
+   * never call dispatchConsumer themselves. When omitted, chips render disabled (defensive UX,
+   * same pattern as onSelectPlaybook/onOpenLibraryModal above).
+   */
+  onNextStep?: (chip: INextStepChip) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -726,6 +738,7 @@ export const SprkChatMessageRenderer: React.FC<ISprkChatMessageRendererProps> = 
   onOpenDiff,
   onSelectPlaybook,
   onOpenLibraryModal,
+  onNextStep,
 }) => {
   const styles = useStyles();
 
@@ -754,9 +767,11 @@ export const SprkChatMessageRenderer: React.FC<ISprkChatMessageRendererProps> = 
 
     case 'outcome_card':
       // task 035 / FR-A1-06 — structured side-effect completion card (Completion Engine).
-      // Presentational: the server-composed link opens in a new tab; next-step chips render
-      // for task 062 to wire live dispatch (it "reads the next-step chips added here").
-      return <OutcomeCard card={data as IOutcomeCardResponse} />;
+      // Presentational: the server-composed link opens in a new tab. Next-step chip dispatch
+      // wiring closed by task 062 (FR-B-13 workspace-intelligence precursor): `onNextStep` is
+      // threaded through from the host (same optional-callback pattern as onSelectPlaybook /
+      // onOpenLibraryModal above); chips render disabled when the host omits it.
+      return <OutcomeCard card={data as IOutcomeCardResponse} onNextStep={onNextStep} />;
 
     case 'markdown':
     default:

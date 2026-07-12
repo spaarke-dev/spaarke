@@ -20,10 +20,11 @@
 
 import * as React from 'react';
 import { makeStyles, shorthands, tokens, mergeClasses, Text, Spinner, Button } from '@fluentui/react-components';
-import { ArrowExportRegular } from '@fluentui/react-icons';
+import { ArrowExportRegular, DocumentEditRegular } from '@fluentui/react-icons';
 import { ISprkChatMessageProps, ICitation, IDocumentStatusChatMessage } from './types';
 import { CitationMarker } from './SprkChatCitationPopover';
 import { SprkChatMessageRenderer } from './SprkChatMessageRenderer';
+import type { INextStepChip } from './OutcomeCard';
 import { SprkChatDocumentStatus } from './SprkChatDocumentStatus';
 import { PlanPreviewCard } from './PlanPreviewCard';
 import type { PlanStep } from './PlanPreviewCard';
@@ -315,6 +316,16 @@ export interface ISprkChatMessageExtendedProps extends ISprkChatMessageProps {
    */
   onInsert?: (content: string) => void;
   /**
+   * DEF-08 Part B: called when the user clicks "Open in Compose" on a completed assistant message.
+   * The host (ConversationPane) opens a (reused) Compose editor tab SEEDED with this message's text
+   * as an editable full-document draft (create-on-save) — the manual fallback for a chat drafting
+   * intent. Only rendered on completed (non-streaming) assistant messages with content when the
+   * host provides this callback (opt-in).
+   *
+   * @param content - The message text content to seed the Compose draft with.
+   */
+  onOpenInCompose?: (content: string) => void;
+  /**
    * Called when the user clicks "Save to matter files" on a completed document
    * status message. SprkChat.tsx calls the BFF persist endpoint and updates the
    * message's persistenceState accordingly.
@@ -353,6 +364,14 @@ export interface ISprkChatMessageExtendedProps extends ISprkChatMessageProps {
    * The link renders disabled when this prop is absent.
    */
   onOpenLibraryModal?: (sessionAttachmentIds: string[]) => void;
+
+  /**
+   * spaarke-ai-architecture-redesign-r2 task 062 (FR-A1-06 / FR-B-13 workspace-intelligence
+   * precursor). Called when the user clicks a next-step chip on an `outcome_card` card. Threaded
+   * straight through to `SprkChatMessageRenderer` (only meaningful when
+   * `metadata.responseType === 'outcome_card'`); chips render disabled when omitted.
+   */
+  onNextStep?: (chip: INextStepChip) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -416,11 +435,14 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   isPlanExecuting,
   onCancelExecution,
   onInsert,
+  onOpenInCompose,
   onSaveToMatterFiles,
   hasContainerId,
   // chat-routing-redesign-r1 task 117b
   onSelectPlaybook,
   onOpenLibraryModal,
+  // spaarke-ai-architecture-redesign-r2 task 062
+  onNextStep,
 }) => {
   const styles = useStyles();
   const isUser = message.role === 'User';
@@ -567,6 +589,10 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
           // when responseType === 'playbook_options'.
           onSelectPlaybook={onSelectPlaybook}
           onOpenLibraryModal={onOpenLibraryModal}
+          // spaarke-ai-architecture-redesign-r2 task 062 (FR-B-13): thread the
+          // next-step chip handler down to the outcome_card renderer. Only used
+          // when responseType === 'outcome_card'.
+          onNextStep={onNextStep}
         />
         {/*
          * chat-routing-redesign-r1 task 117b: suppress the Insert button on
@@ -597,6 +623,8 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   // The button is NOT rendered for user messages (spec-2D: "Insert button MUST only
   // appear on AI response messages, not user messages").
   const showInsertButton = isAssistant && !isStreaming && !!message.content && !!onInsert;
+  // DEF-08 Part B: "Open in Compose" — same gating as Insert, opt-in via onOpenInCompose.
+  const showOpenInComposeButton = isAssistant && !isStreaming && !!message.content && !!onOpenInCompose;
 
   return (
     <div className={containerClass} role="listitem" aria-label={`${message.role} message`}>
@@ -617,17 +645,30 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
         <span className={timestampClass}>{formatTimestamp(message.timestamp)}</span>
       )}
 
-      {showInsertButton && (
+      {(showInsertButton || showOpenInComposeButton) && (
         <div className={styles.messageActions}>
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={React.createElement(ArrowExportRegular)}
-            onClick={() => onInsert!(message.content)}
-            title="Insert into editor"
-          >
-            Insert
-          </Button>
+          {showInsertButton && (
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={React.createElement(ArrowExportRegular)}
+              onClick={() => onInsert!(message.content)}
+              title="Insert into editor"
+            >
+              Insert
+            </Button>
+          )}
+          {showOpenInComposeButton && (
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={React.createElement(DocumentEditRegular)}
+              onClick={() => onOpenInCompose!(message.content)}
+              title="Open this as an editable document in Compose"
+            >
+              Open in Compose
+            </Button>
+          )}
         </div>
       )}
     </div>

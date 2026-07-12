@@ -100,6 +100,26 @@ public sealed record BoundInputs
     /// output over a pre-fingerprint snapshot would clobber the just-written fingerprint (ADR-040 append-only).
     /// </summary>
     public ChatSession? UpdatedSession { get; init; }
+
+    /// <summary>
+    /// The per-turn ContextEnvelope token-budget report (FR-B-05, task 054) — counts only (NFR-07). Covers
+    /// the stable-prefix fragment slices the Binder assembles (Environment/User/Business) plus the envelope
+    /// ceiling; the Conversation ledger tail carries no content in the envelope (ADR-040 references-only), so
+    /// its token count is 0 here (it is budget-gated where it is rendered, and by the breach-fails-eval gate).
+    /// A breach is surfaced (logged), never silently truncated.
+    /// </summary>
+    public ContextBudgetReport? BudgetReport { get; init; }
+
+    /// <summary>
+    /// The host record's cross-session RECORD-memory prompt fragment (F-2/F-7 envelope-convergence task,
+    /// FR-B-04), produced by the Binder from the SAME <see cref="Sprk.Bff.Api.Services.Ai.Memory.IMemoryItemStore.ToRecordPromptFragmentAsync"/>
+    /// the interactive provider used — the single source both the interactive prompt (D1) and the dispatch
+    /// prompt (D6/PE-D8(b)) consume. Carried HERE as prompt text (not in the <see cref="Context"/> envelope,
+    /// whose Memory slice stays references-only per ADR-040/NFR-07). Empty when no host record / no memory /
+    /// no store / a soft-failed store read. Its measured token count feeds the RecordMemory budget line
+    /// (FR-B-05, real per-turn measurement — the F-7 fix).
+    /// </summary>
+    public string? RecordMemoryFragment { get; init; }
 }
 
 /// <summary>
@@ -143,6 +163,23 @@ public sealed record ContextBindingRequest
     /// <summary>Assembled Business-slice fragment (host-record identity + schema card).</summary>
     public string? BusinessFragment { get; init; }
 
+    // ── Host-record identity sources (task 053, FR-B-04) — when supplied and no explicit
+    //    BusinessFragment is given, the Binder self-produces the Business slice's host-identity block
+    //    (and, when the memory store is available, the Record memory-item references) from these. The
+    //    id-only-or-provided-name shape is deterministic; no lazy name fetch happens at bind time. ──
+
+    /// <summary>Host entity type (already normalized, e.g. <c>matter</c>) the chat/dispatch is hosted on. Null → no host-identity self-production.</summary>
+    public string? HostEntityType { get; init; }
+
+    /// <summary>Host record's Dataverse id. Null → no host-identity self-production.</summary>
+    public string? HostEntityId { get; init; }
+
+    /// <summary>Host record display name when the caller already holds it (no lazy fetch at bind time). Null → the id-only host-identity shape.</summary>
+    public string? HostEntityName { get; init; }
+
+    /// <summary>Already-humanized host page-type label, or null → no page sentence in the host-identity block.</summary>
+    public string? HostPageTypeLabel { get; init; }
+
     /// <summary>
     /// Pre-resolved server-side caller contact id (claims→contact) — reference, not free text. When
     /// null, <see cref="ContextBinder"/> resolves it deterministically from <see cref="Caller"/> (or
@@ -153,6 +190,15 @@ public sealed record ContextBindingRequest
     /// args or a model completion (ADR-039 "no runtime judgment for what should be data").
     /// </summary>
     public string? CallerContactId { get; init; }
+
+    /// <summary>
+    /// Pre-resolved server-side caller <c>systemuserid</c> (claims→systemuser) — the canonical key for the
+    /// User slice's user-memory RECALL fragment (F-2 / D3; operator ruling 2026-07-09 (c)). When null,
+    /// <see cref="ContextBinder"/> resolves it deterministically from <see cref="Caller"/> (or the ambient
+    /// <c>IHttpContextAccessor.HttpContext.User</c> in production) via <see cref="ICallerSystemUserResolver"/>.
+    /// Always originates from server-side deterministic resolution, never client args or a model completion.
+    /// </summary>
+    public string? CallerSystemUserId { get; init; }
 
     /// <summary>
     /// The caller's claims principal for server-side contact resolution (FR-B-06, task 055). Optional —

@@ -258,10 +258,40 @@ async function bootstrap(): Promise<void> {
             sessionFileId?: string;
             fileName?: string | null;
           };
+          // DEF-08: AI-drafted full-document seed (Part A ledgerRef / Part B inline html).
+          draft?: {
+            ledgerRef?: string;
+            sessionId?: string;
+            html?: string;
+            fileName?: string | null;
+          };
         }
       | undefined;
     if (!seed) {
       return app;
+    }
+
+    // DEF-08: an AI-drafted full document (a `compose-draft-document` output, or an "Open in
+    // Compose" per-message affordance) rides as `compose.draft` and mounts as a transient working
+    // draft (create-on-save). Checked before the upload/stored-document paths — mutually exclusive.
+    if (
+      seed.draft &&
+      ((typeof seed.draft.ledgerRef === "string" && seed.draft.ledgerRef.length > 0 &&
+        typeof seed.draft.sessionId === "string" && seed.draft.sessionId.length > 0) ||
+        (typeof seed.draft.html === "string" && seed.draft.html.length > 0))
+    ) {
+      const composeDraftLaunch: ComposeLaunchContextValue = {
+        composeMode: "editor",
+        document: null,
+        driveId: "",
+        draft: {
+          ledgerRef: seed.draft.ledgerRef,
+          sessionId: seed.draft.sessionId,
+          html: seed.draft.html,
+          fileName: seed.draft.fileName ?? undefined,
+        },
+      };
+      return <ComposeLaunchContext.Provider value={composeDraftLaunch}>{app}</ComposeLaunchContext.Provider>;
     }
 
     // FR-03 (task 012): an Assistant-UPLOADED file has no SPE pointer — it rides as
@@ -417,9 +447,16 @@ async function bootstrap(): Promise<void> {
     dataParam ? decodeURIComponent(dataParam) : ""
   );
 
+  // Accept BOTH param keys: the R2 app + UAT URL contract use `entityType`, but
+  // the shared ribbon launcher (launch-resolver.ts buildLaunchUrl) emits
+  // `entityLogicalName`. Reading only `entityType` silently dropped the host
+  // record on every ribbon launch (Document "Open in Compose" → Assistant had no
+  // document context; DEF-UAT-1, 2026-07-12). Read either key.
   const entityLogicalName =
     searchParams.get("entityType") ??
     dataParams.get("entityType") ??
+    searchParams.get("entityLogicalName") ??
+    dataParams.get("entityLogicalName") ??
     undefined;
 
   const entityId =

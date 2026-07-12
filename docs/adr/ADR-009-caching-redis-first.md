@@ -160,6 +160,11 @@ Markdown-only alert documentation (`docs/guides/redis-cache-azure-setup.md` §8)
 | Location | Cache Type | TTL | ADR Reference |
 |----------|------------|-----|---------------|
 | `NavMapEndpoints.cs` | `IMemoryCache` | 15 min | Justified metadata hotspot (see code comments) |
+| `Infrastructure/Caching/EndpointResponseCache.cs` | `IMemoryCache` | Per-call TTL | Deliberate in-process L1 response cache — see documented exception below |
+
+### Documented exceptions
+
+- **`EndpointResponseCache` (`Infrastructure/Caching/EndpointResponseCache.cs`)** — dated **2026-07-10**, surfaced by the `spaarke-ai-architecture-redesign-r2` end-to-end audit (finding F-6 triage). This type is an **intentional** in-process L1 response cache introduced by `ci-cd-unit-test-remediation-r1` task 087 (spec **FR-A06**) to consolidate scattered `IMemoryCache` usage out of endpoint handlers into a single, testable seam. It is a deliberate per-process L1 design and MUST NOT be converted to `IDistributedCache` (that would defeat its response-memoization purpose). Resolved via ADR-conflict resolution **path A** (project-scoped documented exception). The `Spaarke.ArchTests` `ADR009_CachingTests.ServicesShouldPreferDistributedCache` check allowlists this type **by exact name only**; no other `*Cache` type rides the exemption.
 
 ### Requirements for New L1 Caching
 

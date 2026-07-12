@@ -1,0 +1,43 @@
+{
+  "$comment": "spaarkeai-compose-r2 DEF-08 (Part A) — compose-draft-document Action SEED (systemPrompt home). ACTION-ONLY, no playbook: per ADR-039 a capability is an Action row + Binding row, and the Compose R2 engine is frozen (NO new sprk_analysisplaybook records). This file is the mirror-first author surface for the sprk_analysisaction row (sprk_actioncode=compose-draft-document) carrying the JPS systemPrompt + Azure-OpenAI-Structured-Outputs output schema. Deploy via scripts/Deploy-AnalysisAction.ps1 (action-only; upsert by sprk_actioncode). The Binding that routes to it is in sprk_playbookconsumer-rows.json and DECLARES the core `compose` disposition (BindingDisposition.Compose = 100000006). The input/output schema mirrors under infra/dataverse/inputschemas|outputschemas are the CI-validated projections of this row. Owner hygiene: actionCode carries NO version suffix (compose-draft-document, not @v1).",
+  "$comment-vs-draft-correspondence": "§11 Component Justification — this is a NEW Action, NOT a reuse of DRAFT-CORR@v1. draft-correspondence's output schema is EMAIL-shaped ({subject, recipients_suggestion, plain-text body capped 6000, forced salutation + '[Your name]' closing}) with the Informational disposition rendering inline Assistant prose. It cannot represent an editor-seedable FULL DOCUMENT body (memo, response, agreement, general document) as drafting-ready HTML, and reusing it would force every 'write a memo/document' into letter shape. This Action emits a full-document body_html + title with the `compose` disposition so SendWorkspaceArtifactHandler can seed a Compose tab from the ledger output.",
+  "$comment-disposition": "UNLIKE draft-correspondence (Informational, inline prose), this Action's Binding declares the core `compose` disposition (sprk_disposition = 100000006). The LLM emits a FULL-DOCUMENT payload ({title, body_html, document_kind, cited_refs}) written to the session ledger as a SessionOutput under the `compose` disposition BEFORE any render (ADR-040 storage-precedes-rendering). SendWorkspaceArtifactHandler resolves the recent full-document compose output (detected by the body_html field) and seeds the opened Compose tab with a ledgerRef; the client materializes the document from the ledger. The disposition lives on the Binding row (sprk_disposition), not here.",
+  "$comment-body-html-contract": "body_html is the LOAD-BEARING discriminator: SendWorkspaceArtifactHandler distinguishes a full-document compose output from a compose-draft-alternative EDIT payload (target_text/new_text) by the presence of a non-empty body_html string. Keep body_html as the full-document body field; do not rename it without updating SendWorkspaceArtifactHandler.ResolveComposeDraftSeed.",
+  "actionCode": "compose-draft-document",
+  "name": "Compose — Draft Document",
+  "description": "Draft a complete, editor-ready document (a letter, memo, response, notice, or other document) grounded in the session's documents and ledger outputs, for opening in the Compose editor (DEF-08). Unlike draft-correspondence (which drafts a client email/letter to SEND via the Communication service and renders inline prose), this capability produces a full drafting-ready document body as semantic HTML with a title, written to the session ledger under the `compose` disposition so it opens in a Compose editor tab the attorney can revise and Save. Use when the user asks to draft/write/compose a document to work on in the editor.",
+  "actionType": 0,
+  "$comment-actionType": "ExecutorType.AiAnalysis = 0 — handled by the existing prompt-driven executor (ActionRunner + PromptSchemaRenderer). No new executor (ADR-039 reuse).",
+  "temperature": 0.4,
+  "$comment-temperature": "Moderate temperature — drafting a full document needs faithful substance grounded in the session material with enough latitude to produce coherent, well-organized prose. Higher than the read/explain actions (0.2) because it composes new document text, but grounded in the supplied documents.",
+  "systemPrompt": "ROLE: You are the Spaarke Compose document drafter. The user has asked you to draft or write a document (a letter, memo, response, notice, agreement, or other document) about the material in this conversation. You produce a COMPLETE, drafting-ready document that will open in the Compose editor for the user to revise and save — not inline chat prose.\n\nINPUT: the session's documents and any prior ledger outputs (summaries, comparisons) the retrieval layer supplied, plus the user's drafting request.\n\nINSTRUCTIONS:\n  1. Draft a complete, self-contained document responsive to the user's request, grounded in the session material. Organize it appropriately for the document kind (e.g. a letter has a salutation, body paragraphs, and a closing; a memo has a heading block and sections).\n  2. Emit a JSON object matching the output schema EXACTLY. additionalProperties is false; do not add fields.\n  3. title: a short, specific title for the document (≤200 chars) — used as the Compose tab title and document name (e.g. 'Client Letter — Acme NDA Findings').\n  4. body_html: the FULL document body as SEMANTIC HTML the editor renders directly. Use ONLY this subset: <h1> <h2> <h3> <p> <ul> <ol> <li> <strong> <em> <br>. Do NOT emit markdown, code fences, <script>, <style>, inline style attributes, class attributes, or a <head>/<html>/<body> wrapper — emit only the body content elements. Every paragraph is a <p>. This is drafting-ready contract/correspondence prose (no placeholders like '[insert]' unless the source genuinely lacks the fact — prefer a signature-block placeholder only where a human signature is expected).\n  5. document_kind: the closest label from the closed set for the document you drafted.\n  6. cited_refs: the source references the draft drew from (file names; session-output ledger references like '{bindingId}@t{n}' when the request names earlier conversation outputs). An uncited draft grounded in session material is invalid (ADR-039 grounded outputs); use an empty array ONLY when the user asked for a document that legitimately needs no source grounding.\n\nCONSTRAINTS:\n  - Do NOT fabricate facts, parties, dates, or legal effect the session material does not support. Draft from what is present; where a required fact is genuinely absent, use a clearly-bracketed placeholder rather than inventing it.\n  - body_html MUST be valid, well-formed HTML using ONLY the allowed subset — no markdown, no scripts, no styles. A malformed or markdown body will not render in the editor.\n  - Emit ONE document. Do not propose alternatives or ask the user to choose inside body_html.\n  - Do NOT echo secrets, tokens, or content outside the supplied session material.",
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["title", "body_html", "document_kind", "cited_refs"],
+    "$comment-required": "Object-level required array (ALL four fields required). Property-level boolean 'required' is FORBIDDEN (invalid JSON Schema; 400-fails the request) — OpenAiFunctionSchemaValidator enforces this. document_kind is a CLOSED SET expressed via the OpenAI-subset `enum` keyword, NOT a boolean required.",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "Short, specific document title — used as the Compose tab title and document name.",
+        "maxLength": 200
+      },
+      "body_html": {
+        "type": "string",
+        "description": "The FULL document body as semantic HTML using ONLY <h1><h2><h3><p><ul><ol><li><strong><em><br>. No markdown, no <script>/<style>, no inline styles, no <head>/<html>/<body> wrapper. Rendered directly into the Compose editor as an editable draft. This is the load-bearing full-document discriminator (SendWorkspaceArtifactHandler detects a full-document compose output by this field).",
+        "maxLength": 24000
+      },
+      "document_kind": {
+        "type": "string",
+        "description": "The closest document-kind label for the drafted document.",
+        "enum": ["letter", "memo", "response", "notice", "agreement", "general"]
+      },
+      "cited_refs": {
+        "type": "array",
+        "description": "Source references the draft drew from (file names; session-output ledger references). Empty array only when the document legitimately needs no source grounding — never fabricated.",
+        "items": { "type": "string" }
+      }
+    }
+  }
+}

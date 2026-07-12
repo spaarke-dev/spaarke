@@ -1,0 +1,176 @@
+<task id="100" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>E2E-R1 — Getting-started vertical: upload/search → load → Save → persisted sprk_document (Cluster 1)</title>
+    <phase>9 E2E Remediation</phase>
+    <status>completed</status>
+    <estimated-hours>16</estimated-hours>
+    <effort>xhigh</effort>
+    <dependencies>010, 011, 012, 013, 015</dependencies>
+    <blocks>017, 082</blocks>
+    <tags>bff-api, frontend, spe, testing, e2e-remediation</tags>
+    <rigor-hint reason="Foundational cross-toolchain wiring on the flagship entry path; 8 individually-fatal breaks + the anti-recurrence test; FULL, unconditional Step 9.5">FULL</rigor-hint>
+    <model-tier reason="Cross-toolchain (client BU resolution + wire DTO + reducer + endpoint + service), high blast radius on the flagship create-on-save leg, ADR-007/005/013 surface">opus</model-tier>
+    <parallel-group>e2e-remediation-serial</parallel-group>
+    <parallel-safe reason="Touches ComposeWorkspace.tsx + ComposeEndpoints.cs + ComposeService.cs which other remediation tasks also touch — run SOLO">false</parallel-safe>
+    <source>notes/e2e-gap-register.md Cluster 1 (gaps 1.1–1.8) + the 5-slice E2E audit (Slice A)</source>
+  </metadata>
+
+  <prompt>
+    Make the ENTIRE getting-started vertical work END-TO-END through the HTTP wire and prove it with a
+    WebApplicationFactory test: a user opens the Compose workspace, chooses "Browse / open file" or "Upload"
+    (transient mount) or "Search for Document" (load), the document renders in the editor, and on first Save
+    the transient draft is PERSISTED as a real `sprk_document` in the user's Business-Unit SPE container
+    (create-on-save). Today this is non-functional over HTTP despite tasks 013/014/015 being marked ✅ —
+    the create-on-save service backbone (ComposeService.SaveAsync transient branch) is correct but is DEAD
+    CODE over HTTP because the client never resolves/sends the containerId, the Save route/DTO/guards/button
+    all block the transient path, and no test drives the slice through the wire. Close register Cluster 1
+    gaps 1.1–1.8 and land the anti-recurrence test. Loads (search, open-in-Compose) and replace-save already
+    work — verify, do not rebuild them.
+  </prompt>
+
+  <role>
+    Full-stack developer fluent in the Compose entry-path mounts (ComposeWorkspace reducer, transient/loaded
+    state), the BFF create-on-save path (ComposeService.SaveAsync + SpeFileStore facade), the 7 Create*Wizard
+    BU→container convention (EntityCreationService / Xrm.WebApi), and WebApplicationFactory integration tests.
+  </role>
+
+  <goal>
+    Browse/Upload → transient mount → Save persists a byte-correct `.docx` as a new `sprk_document` in the
+    resolved BU container and rebinds the session; Search/open-in-Compose → load still works. Every hop
+    connects over HTTP. A WebApplicationFactory test drives upload→save→persist through POST endpoints and
+    asserts the sprk_document + SPE item exist. All 8 Cluster-1 gaps closed; DEF-06/DEF-07 removed from the
+    defer list (fixed, not deferred).
+  </goal>
+
+  <context>
+    <background>
+      Source of truth: notes/e2e-gap-register.md Cluster 1 (gaps 1.1–1.8) with exact file:line evidence, and
+      design.md §2.7 (create-on-save = upgrade of PromoteIfEphemeralAsync to full ingestion parity). Owner
+      decisions in force: (Path 1, approved 2026-07-09) resolve BU→container CLIENT-SIDE via the existing
+      EntityCreationService / Xrm.WebApi convention — do NOT add a BFF BU→container resolver (Fork A). Fork-C
+      profile-analysis stays deferred to core (non-terminal deferred signal; aggregate=Partial) — do NOT build it.
+    </background>
+    <relevant-files>
+      <file purpose="client-workspace" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — triggerSave (send containerId; gate on containerId||isDirty||transient not effectiveDriveId — gaps 1.4/1.2); saveSucceeded must write documentSpeId into documentRef.speDriveItemId (gap 1.7).</file>
+      <file purpose="client-reducer" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.types.ts — mountTransient must carry containerId; saveSucceeded reducer must update speDriveItemId (gaps 1.3/1.7).</file>
+      <file purpose="client-toolbar" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeToolbar.tsx — Save button: gate on isDirty||hasTransientDraft; compute hasDocument as "loaded" not "has id" (gap 1.5 / DEF-07 + the second hasDocument lock).</file>
+      <file purpose="client-editor" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — the docxBytes effect must NOT force onDirtyChange(false) for a TRANSIENT mount (gap 1.6 / DEF-01).</file>
+      <file purpose="host-bu-resolve" edit="true">src/solutions/SpaarkeAi/src/App.tsx (+ the compose mount host) — resolve the user's BU containerId via EntityCreationService/Xrm.WebApi and thread it in (STOP setting containerId: undefined) (gap 1.3).</file>
+      <file purpose="bu-resolver-REUSE" edit="false">src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts — the resolveBusinessUnitContainerId (businessunit.sprk_containerid) reuse target; the 7 Create*Wizard services use it. Do NOT reimplement.</file>
+      <file purpose="server-endpoint" edit="true">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — add containerId to SaveComposeDocumentBody; add a transient-create route (or make documentSpeId/driveId optional) so a draft with no SPE item can be saved; map ContainerId + null DocumentSpeId into SaveComposeDocumentRequest (gaps 1.1/1.2); add annotations/rehydrate fields is OUT of scope (that is task 103).</file>
+      <file purpose="server-service-REUSE" edit="false">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — SaveAsync transient branch (container→record→indexing) is already correct; do NOT rewrite it — just make it REACHABLE. IComposeService.cs DTO already carries ContainerId.</file>
+      <file purpose="association" edit="true">src/solutions/SpaarkeAi/src/components/compose/useCreateOnSaveAssociation.ts — call associate(newDocumentId) from the save-completion flow (gap 1.8); currently only invoked in a test.</file>
+      <file purpose="e2e-test" edit="true">tests/integration/contract/Api/Ai/ComposeCreateOnSaveEndpointContractTests.cs (NEW) — the anti-recurrence WebApplicationFactory slice test.</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner-Path1">BU→container resolved CLIENT-SIDE via EntityCreationService / Xrm.WebApi (the 7-wizard convention). NO new BFF BU→container resolver.</constraint>
+    <constraint source="cleanGuid">Every GUID that enters an @odata.bind or /entityset(guid) URL from an Xrm source (BU resolution businessunit id, the createRecord-returned sprk_document id, the parent-association @odata.bind) MUST be wrapped with `cleanGuid` from `@spaarke/ui-components` (no-op on bare GUIDs; deep-import fallback for stale tarballs). Do NOT hand-roll `.replace(/[{}]/g,'')`.</constraint>
+    <constraint source="ADR-007">SPE writes go through the SpeFileStore/Infrastructure facade; no Microsoft.Graph types leak into Services/Compose.</constraint>
+    <constraint source="ADR-005">Persist to the SPE container resolved from the user's BU.</constraint>
+    <constraint source="ADR-013">Services/Compose injects no AI internals; Fork-C profile analysis stays a deferred signal.</constraint>
+    <constraint source="ADR-028">Client save/resolve fetches use @spaarke/auth (and Xrm.WebApi for host Dataverse).</constraint>
+    <constraint source="no-defer">Fix all 8 gaps in this pass; remove DEF-06/DEF-07 from notes/defer-issues.md (fixed, not deferred). Do NOT file new deferrals for in-scope gaps.</constraint>
+    <constraint source="bff-hygiene">BFF-touching: report publish-size delta vs 49.63 MB baseline + CVE scan.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose/create-on-save, spe-persistence, bu-container-resolution, webapplicationfactory-e2e</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r2/notes/e2e-gap-register.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-005-flat-storage.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load the register Cluster 1 + this POML. Read the 8 broken hops at their cited file:line and the EntityCreationService BU→container reuse target. Confirm the ComposeService.SaveAsync transient branch is present and correct (it is — do not rewrite).</step>
+    <step order="1">Server: add `containerId` to SaveComposeDocumentBody; add a transient-create route (or relax the id/driveId requirement) so a draft with no SPE item reaches the transient branch; map ContainerId + null DocumentSpeId into the request (gaps 1.1/1.2).</step>
+    <step order="2">Client BU resolution: resolve the user's BU containerId via EntityCreationService/Xrm.WebApi at the host; thread it prop → mountTransient → state.documentRef.containerId (gap 1.3). Wrap any Xrm GUID going into OData with cleanGuid.</step>
+    <step order="3">Client save: send containerId in the triggerSave body; gate triggerSave + the Save button on containerId||isDirty||transientDraft (gaps 1.4/1.5); stop the transient-mount dirty-reset (gap 1.6); on saveSucceeded write the returned documentSpeId into documentRef.speDriveItemId (gap 1.7).</step>
+    <step order="4">Association: call useCreateOnSaveAssociation.associate(newDocumentId) from the save-completion flow (gap 1.8), cleanGuid on the @odata.bind. (Hosting the prompt in the Tier-2c dialog may stay minimal — the REQUIRED bar is that a chosen parent persists at save.)</step>
+    <step order="5">ANTI-RECURRENCE TEST (definition-of-done, non-waivable): add ComposeCreateOnSaveEndpointContractTests — a WebApplicationFactory test that POSTs an upload then the save (with containerId, no documentSpeId) through the real endpoints and asserts a new sprk_document + SPE item exist and the session rebinds. This is the pattern every later remediation task reuses.</step>
+    <step order="6">Verify: dotnet build + dotnet test (new + Compose regression); Compose.Components tsc + jest; publish-size + CVE. Run Step 9.5 (code-review + adr-check) UNCONDITIONALLY. Update the 100 POML notes; remove DEF-06/DEF-07 from defer-issues.md. Do NOT edit TASK-INDEX/current-task (main session reconciles).</step>
+  </steps>
+
+  <outputs>
+    <output type="code">ComposeEndpoints.cs (containerId wire DTO + transient-create route)</output>
+    <output type="code">ComposeWorkspace.tsx + .types.ts + ComposeToolbar.tsx + ComposeEditor.tsx (containerId thread, save gates, dirty-reset fix, speId carry-back)</output>
+    <output type="code">App.tsx / compose mount host (BU containerId resolution via EntityCreationService, cleanGuid)</output>
+    <output type="code">useCreateOnSaveAssociation wired into save-completion</output>
+    <output type="test">tests/integration/contract/Api/Ai/ComposeCreateOnSaveEndpointContractTests.cs (WebApplicationFactory upload→save→persist slice)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Browse/open-file → transient mount → Save persists a new sprk_document in the resolved BU container; SaveComposeDocumentBody carries containerId and the client sends it (gaps 1.1–1.4 closed).</criterion>
+    <criterion testable="true">Upload → transient mount → Save persists byte-correct .docx (FR-06a: original-if-unedited branch still honored) as a new sprk_document.</criterion>
+    <criterion testable="true">The Save button is enabled for a transient mount (gated on isDirty||hasTransientDraft, not documentId); the transient dirty-reset no longer fires (gaps 1.5/1.6).</criterion>
+    <criterion testable="true">On save success the client writes the server-minted documentSpeId into documentRef.speDriveItemId so a second Save targets the real item (gap 1.7).</criterion>
+    <criterion testable="true">A chosen parent association persists at save via associate(newDocumentId) (gap 1.8); every Xrm GUID entering an OData bind is wrapped with cleanGuid.</criterion>
+    <criterion testable="true">Search-for-Document and open-in-Compose LOAD paths still work (verified, not rebuilt).</criterion>
+    <criterion testable="true">A WebApplicationFactory test drives upload→save→persist through the real POST endpoints and asserts the sprk_document + SPE item exist (anti-recurrence definition-of-done).</criterion>
+    <criterion testable="true">DEF-06 and DEF-07 removed from notes/defer-issues.md (fixed). No new deferrals filed for in-scope gaps. BFF publish-size delta + CVE reported; Step 9.5 clean.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If closing a gap requires reopening an owner decision (e.g. the transient-create route conflicts with an existing routing contract, or BU resolution genuinely cannot run in the SpaarkeAi host context), STOP and surface per CLAUDE.md §6/§6.5 — do not silently pick an alternative.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    Completed 2026-07-10 (SOLO, FULL rigor, opus/xhigh). Made the getting-started create-on-save
+    vertical reachable end-to-end over HTTP without rewriting the (correct) ComposeService backbone.
+
+    Per-gap closure (Cluster 1, all 8 closed):
+    - 1.1/1.2 — Added `POST /api/compose/documents/create-on-save` (literal route, no id segment →
+      no `/documents//save` 404) + `containerId` on `SaveComposeDocumentBody` (+ `driveId` now
+      optional). Maps `DocumentSpeId=null` + `ContainerId` into `SaveComposeDocumentRequest` →
+      reaches SaveAsync's transient branch. Shared `ExecuteSaveAsync` DRYs replace + create paths.
+    - 1.3 — BU→container resolved CLIENT-SIDE at the compose mount host
+      (`composeEditor.registration.ts` `ComposeSectionMount`) via
+      `EntityCreationService.resolveUserBuDefaults` (`businessunit.sprk_containerid`, Fork A) and
+      threaded as the new `containerId` prop → `mountTransient` → `documentRef.containerId`. NO BFF
+      resolver added. App.tsx no longer sets `containerId: undefined` on the load ref (comment fixed).
+      NOTE (directional deviation): the POML said "App.tsx (+ compose mount host)"; post-092/093 the
+      real mount host is `composeEditor.registration.ts`, so resolution landed there (covers SpaarkeAi
+      three-pane AND standalone LegalWorkspace). App.tsx load-ref cleaned per gap-1.3 evidence.
+    - 1.4 — `triggerSave` sends `containerId` on the create-on-save body; gate relaxed
+      (transient ? needs containerId : needs driveId); honest banner when the BU has no container.
+    - 1.5 — Save button gated on `isDirty || hasTransientDraft` (new prop), not `documentId` (DEF-07).
+    - 1.6 — ComposeEditor keeps internal `dirtyRef=false` for a transient mount (FR-06a original bytes)
+      but reports `onDirtyChange(true)` so Save stays enabled (DEF-01 decoupled from FR-06a).
+    - 1.7 — `saveSucceeded` reducer writes the server-minted `documentSpeId` into `speDriveItemId`
+      so a 2nd Save takes the replace path.
+    - 1.8 — `ComposeWorkspace.onCreateOnSaveComplete(newDocId)` fires on transient-create success;
+      provided via `ComposeLaunchContext` from `ThreePaneShell` → `useCreateOnSaveAssociation.associate`.
+      `documentAssociationWrite` now uses `cleanGuid` (replaced hand-rolled brace-strip) on BOTH the
+      @odata.bind recordId AND the document id. The associate() WIRE is landed; hosting the
+      selection PROMPT in the Tier-2c dialog remains the documented follow-up (defer-issues, narrowed).
+
+    cleanGuid: exported from `@spaarke/ui-components` barrel; applied on the Xrm user id (mount host),
+    association recordId + document id. containerId is an SPE id in a JSON body (not an OData URL) →
+    correctly NOT wrapped.
+
+    Anti-recurrence test (definition-of-done): tests/integration/contract/Api/Ai/
+    ComposeCreateOnSaveEndpointContractTests.cs — WebApplicationFactory with the REAL ComposeService
+    (only SPE/Dataverse/indexing mocked at module boundaries). Drives POST upload → POST create-on-save
+    (containerId, no documentSpeId) through the real routes; asserts new sprk_document (captured
+    CreateAsync entity carries the minted SPE id) + SPE item minted in the resolved BU drive + session
+    rebind to the new sprk_documentid. Plus 400-on-missing-containerId + 401-unauth. 3/3 pass.
+
+    Verification: BFF build 0 errors; dotnet test 293 compose tests pass (290 existing + 3 new).
+    compose-components tsc clean + 69 jest pass (browse/upload/search LOAD paths verified, not rebuilt).
+    ui-components/SpaarkeAi/LegalWorkspace tsc: my files clean (remaining errors are pre-existing
+    unrelated noise). Publish 45.23 MB compressed incl PDBs (< 49.63 baseline, < 60 ceiling).
+    CVE: only pre-existing Kiota HIGH (GHSA-7j59-v9qr-6fq9), no new. Step 9.5 code-review + adr-check:
+    0 critical, 0 new ADR violations; ADR-013 Compose-facade NetArchTest green (5 ArchTest failures are
+    pre-existing baseline on untouched code). DEF-06 + DEF-07 removed from defer-issues.md (fixed);
+    the 014-split entry narrowed to the remaining prompt-hosting UI.
+  </notes>
+</task>

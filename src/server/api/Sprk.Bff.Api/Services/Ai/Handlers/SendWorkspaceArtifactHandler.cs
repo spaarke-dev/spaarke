@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Models.Workspace;
+using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Workspace;
@@ -15,13 +17,13 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <remarks>
 /// <para>
 /// <strong>One handler, one method</strong>: the only LLM-facing function is
-/// <c>send_workspace_artifact(widgetType, title, widgetData, matterId?)</c>. The LLM passes a
-/// widget-typed payload + display title; the handler constructs a <see cref="WorkspaceTab"/>
-/// + calls <see cref="IWorkspaceStateService.UpsertTabAsync"/> + returns a tab-created summary
-/// to the LLM. The frontend tab strip materializes the tab on the next
-/// <c>GET /api/workspace/tabs</c> poll (the workspace state service is the deterministic source
-/// of truth — no out-of-band SSE event is required for tab materialization because the polling
-/// channel ALREADY exists per Pillar 6a).
+/// <c>send_workspace_artifact(widgetType, title, widgetData)</c> where <c>widgetType</c> is
+/// <c>Workspace</c> — it opens a named workspace LAYOUT (e.g. "Compose") as a live tab in the
+/// SpaarkeAi workspace pane by emitting a <c>workspace_open_tab</c> frame on the existing
+/// context_event SSE channel, then gating success on a client ack (D-F3 UI-action
+/// truthfulness). The legacy artifact variants (Summary / DocumentViewer / Dashboard / Table)
+/// were RETIRED by AIR2-075 — this handler no longer writes <c>IWorkspaceStateService</c> tab
+/// state at all.
 /// </para>
 /// <para>
 /// <strong>Auto-discovery + data-driven registration (R6 Pillar 2)</strong>: registered via the
@@ -39,50 +41,34 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// workspace tab list).
 /// </para>
 /// <para>
-/// <strong>Capability gate</strong>: <c>sprk_requiredcapability = null</c>. Sending an artifact
-/// to the workspace pane is a default user affordance — every chat session, standalone or
-/// playbook-bound, can dispatch artifacts. The 4-variant <see cref="WidgetType"/> enum is the
-/// authorization surface (Summary | DocumentViewer | Dashboard | Table) — there is no "free
-/// text widget" escape hatch, so the LLM cannot smuggle arbitrary payloads into the workspace
-/// outside the closed union.
+/// <strong>Capability gate</strong>: <c>sprk_requiredcapability = null</c>. Opening a workspace
+/// layout tab is a default user affordance — every chat session, standalone or playbook-bound,
+/// can open a tab. The single <c>Workspace</c> widgetType is the authorization surface — there
+/// is no "free text widget" escape hatch.
 /// </para>
 /// <para>
 /// <strong>ADR compliance</strong>:
 /// </para>
 /// <list type="bullet">
 /// <item><strong>ADR-010</strong>: auto-discovered via assembly scan; ZERO manual DI line.
-/// Dependencies (<see cref="IWorkspaceStateService"/>, <see cref="IGuidProvider"/>,
-/// <see cref="TimeProvider"/>) are already registered by <c>WorkspaceModule</c>.</item>
-/// <item><strong>ADR-013</strong>: lives under <c>Services/Ai/Handlers/</c>; injects
-/// <see cref="IWorkspaceStateService"/> (BFF-internal workspace plumbing) directly — NOT
-/// through a PublicContracts facade because workspace state is not an AI capability (it is
-/// a chat-session state primitive owned by Pillar 6a). Mirrors task 053 (system-prompt
-/// composition reads <see cref="IWorkspaceStateService"/> directly inside
-/// <c>SprkChatAgentFactory</c>).</item>
+/// Dependencies (<see cref="IGuidProvider"/>, <see cref="TimeProvider"/>,
+/// <c>WorkspaceLayoutService</c>, <c>IDataverseUserClient</c>, <c>IUiActionAckCoordinator</c>)
+/// are already registered.</item>
+/// <item><strong>ADR-013</strong>: lives under <c>Services/Ai/Handlers/</c>; the Workspace
+/// layout-tab open uses the SSE writer + <c>WorkspaceLayoutService</c> + ack coordinator —
+/// BFF-internal chat-session plumbing, NOT an AI-internal seam behind a PublicContracts
+/// facade.</item>
 /// <item><strong>ADR-014</strong>: <c>TenantId</c> is required on the
-/// <see cref="ChatInvocationContext"/> and forwarded into the tab's
-/// <see cref="WorkspaceTab.TenantId"/> + the underlying Redis key + Cosmos partition key. Cross-
-/// tenant dispatch is structurally impossible (the workspace state service enforces a tenant
-/// match between <paramref name="tenantId"/> and <see cref="WorkspaceTab.TenantId"/>).</item>
+/// <see cref="ChatInvocationContext"/>; the Compose pre-seed Dataverse read runs under the
+/// calling user's OBO token so cross-tenant access is structurally impossible.</item>
 /// <item><strong>ADR-015</strong>: telemetry emits handler name + decision + tabId + widgetType
-/// + matter scope present/absent + duration ONLY. NEVER the LLM-supplied <c>widgetData</c>
-/// content; NEVER the user's chat message. The handler does NOT inspect or log
-/// <see cref="WorkspaceTab.WidgetData"/> bodies — only the discriminator. The tab's
-/// <see cref="WorkspaceTabSourceProvenance.CreatedBy"/> is the deterministic
-/// <c>agent:{chatSessionId}</c> sentinel — never user message text.</item>
+/// + duration ONLY. NEVER the LLM-supplied <c>widgetData</c> content; NEVER the user's chat
+/// message. Layout/document identifiers are logged as flags or GUIDs, never file names.</item>
 /// <item><strong>ADR-016</strong>: no separate rate limiter — the chat session's existing
-/// concurrency slot (per-session lock in <c>ChatSessionManager</c>) caps the dispatch rate.
-/// One artifact per LLM tool-call turn matches the natural conversational cadence.</item>
-/// <item><strong>ADR-018</strong>: NO new feature flag. The handler's auto-discovery is gated
-/// by <see cref="IWorkspaceStateService"/> resolving in DI — when Pillar 6a is not deployed
-/// (e.g., Redis + Cosmos unconfigured), the handler is not auto-discovered and the LLM does
-/// not see the tool.</item>
-/// <item><strong>ADR-029</strong>: BCL-only implementation; per-handler publish-size delta
-/// ≤+0.1 MB.</item>
-/// <item><strong>ADR-030</strong>: no new SSE channel added. The frontend tab strip
-/// re-materializes via the existing workspace polling endpoint (R6 Pillar 6a). The R6 Pillar
-/// 9 prompt builder reads the same workspace state on the next chat turn so the LLM sees
-/// the new tab in its system prompt.</item>
+/// concurrency slot (per-session lock in <c>ChatSessionManager</c>) caps the open rate.</item>
+/// <item><strong>ADR-029</strong>: BCL-only implementation.</item>
+/// <item><strong>ADR-030</strong>: the <c>workspace_open_tab</c> frame is additive on the
+/// existing context_event SSE channel — no new SSE channel is introduced.</item>
 /// </list>
 /// </remarks>
 public sealed class SendWorkspaceArtifactHandler : IToolHandler
@@ -90,21 +76,16 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     private const string HandlerIdValue = nameof(SendWorkspaceArtifactHandler);
 
     /// <summary>
-    /// Closed enum of widget-type discriminators accepted by this handler. The four
-    /// artifact variants mirror <see cref="WorkspaceTabWidgetData"/>'s
-    /// <c>[JsonDerivedType]</c> annotations + the R6-era TypeScript <c>WorkspaceTab</c>
-    /// contract. <c>Workspace</c> (G-P3 UAT round-2 R2-D, 2026-07-07) opens a NAMED
-    /// workspace LAYOUT (e.g. "Compose") as a live tab in the SpaarkeAi workspace pane —
-    /// the same mechanism the Workspaces menu drives client-side
-    /// (<c>widget_load {widgetType:'workspace', widgetData:{layoutId, layoutName}}</c>).
-    /// Any value outside this set is rejected by <see cref="ValidateChat"/> with a clear error.
+    /// Closed enum of widget-type discriminators accepted by this handler. <c>Workspace</c>
+    /// (G-P3 UAT round-2 R2-D, 2026-07-07) opens a NAMED workspace LAYOUT (e.g. "Compose") as a
+    /// live tab in the SpaarkeAi workspace pane — the same mechanism the Workspaces menu drives
+    /// client-side (<c>widget_load {widgetType:'workspace', widgetData:{layoutId, layoutName}}</c>).
+    /// The legacy artifact variants (Summary / DocumentViewer / Dashboard / Table) were retired
+    /// by AIR2-075. Any value outside this set is rejected by <see cref="ValidateChat"/> with a
+    /// clear error.
     /// </summary>
     internal static readonly HashSet<string> SupportedWidgetTypes = new(StringComparer.Ordinal)
     {
-        "Summary",
-        "DocumentViewer",
-        "Dashboard",
-        "Table",
         "Workspace"
     };
 
@@ -127,29 +108,33 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     /// </summary>
     internal static readonly TimeSpan WorkspaceTabAckTimeout = TimeSpan.FromSeconds(8);
 
-    private static readonly JsonSerializerOptions WidgetDataJsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
+    /// <summary>
+    /// Default workspace layout used when the tool call targets a Compose open without an
+    /// explicit layout (R5 / UAT defects 6/7). The handler is chat-only and Compose is its
+    /// flagship layout; defaulting a missing layout to this is strictly better than the prior
+    /// hard-error that forced the model to synthesize a layout id. This is a PARAMETER default
+    /// (not an intent-detection mechanism — ADR-039 §MUST NOT): it never selects a capability
+    /// or routes dispatch, it just fills a missing tool argument.
+    /// </summary>
+    internal const string DefaultComposeLayoutName = "Compose";
 
-    private readonly IWorkspaceStateService _workspaceStateService;
     private readonly IGuidProvider _guidProvider;
     private readonly TimeProvider _timeProvider;
     private readonly WorkspaceLayoutService _layoutService;
     private readonly IDataverseUserClient _dataverse;
     private readonly IUiActionAckCoordinator _ackCoordinator;
+    private readonly ChatSessionManager _sessionManager;
     private readonly ILogger<SendWorkspaceArtifactHandler> _logger;
 
     public SendWorkspaceArtifactHandler(
-        IWorkspaceStateService workspaceStateService,
         IGuidProvider guidProvider,
         TimeProvider timeProvider,
         WorkspaceLayoutService layoutService,
         IDataverseUserClient dataverse,
         IUiActionAckCoordinator ackCoordinator,
+        ChatSessionManager sessionManager,
         ILogger<SendWorkspaceArtifactHandler> logger)
     {
-        _workspaceStateService = workspaceStateService ?? throw new ArgumentNullException(nameof(workspaceStateService));
         _guidProvider = guidProvider ?? throw new ArgumentNullException(nameof(guidProvider));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _layoutService = layoutService ?? throw new ArgumentNullException(nameof(layoutService));
@@ -160,6 +145,11 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
         // D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): gates this tool's success
         // on a client ack referencing the emitted frame id (see ExecuteOpenWorkspaceTabAsync).
         _ackCoordinator = ackCoordinator ?? throw new ArgumentNullException(nameof(ackCoordinator));
+        // task 113 (UAT defect 5): reads the session-scoped ActiveDocument to resolve the Compose
+        // mount target when the LLM supplies no explicit current pointer — so "edit in Compose"
+        // mounts the just-uploaded file, not a stale stored one. AI-internal→AI-internal injection
+        // (both under Services/Ai) — ADR-013 compliant; ADR-010 concrete-injection.
+        _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -170,15 +160,14 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Send Workspace Artifact",
         // FR-A-01 (AIR2-020): mirror of the authored sprk_description in infra/dataverse/sprk_analysistool-send-workspace-artifact-row.json — keep byte-equal; edit the JSON, not this literal.
-        Description: @"Open a tab in the user's workspace pane. PREFERRED USE — open a named workspace LAYOUT as a live tab: widgetType 'Workspace' with widgetData {""kind"":""Workspace"",""layoutName"":""<layout name>""}. Use layoutName 'Compose' when the user asks to open the Compose editor or to start composing/drafting a document in the workspace; other layouts (e.g. 'Daily Briefing', 'Documents') open the same way. When opening the Compose layout ABOUT A SPECIFIC DOCUMENT, add widgetData.documentId (the sprk_document GUID, e.g. from a search result path tables/sprk_document/records/{guid}) — Compose then opens WITH that document loaded. To open a file the user UPLOADED into this chat, add widgetData.sessionFileId (the uploaded file's id from the session's attachments) instead of documentId — Compose opens with that file mounted as a transient working draft (no document record is created until the user saves). Use documentId for stored sprk_document records and sessionFileId for session uploads; set at most one. If the requested layout does not exist, the tool result lists the available layout names — relay them honestly. The tab opens immediately in the workspace pane and the tool result confirms it; only claim a tab was opened when this tool result says so. Legacy artifact variants (Summary, DocumentViewer, Dashboard, Table) record an artifact to workspace state but are NOT visible in the current workspace UI — avoid them unless explicitly instructed. Agent-created tabs default to visible-to-assistant.",
+        Description: @"Open a tab in the user's workspace pane. PREFERRED USE — open a named workspace LAYOUT as a live tab: widgetType 'Workspace' with widgetData {""kind"":""Workspace"",""layoutName"":""<layout name>""}. Use layoutName 'Compose' when the user asks to open the Compose editor or to start composing/drafting a document in the workspace; other layouts (e.g. 'Daily Briefing', 'Documents') open the same way. When opening the Compose layout ABOUT A SPECIFIC DOCUMENT, add widgetData.documentId (the sprk_document GUID, e.g. from a search result path tables/sprk_document/records/{guid}) — Compose then opens WITH that document loaded. To open a file the user UPLOADED into this chat, add widgetData.sessionFileId (the uploaded file's id from the session's attachments) instead of documentId — Compose opens with that file mounted as a transient working draft (no document record is created until the user saves). Use documentId for stored sprk_document records and sessionFileId for session uploads; set at most one. If the requested layout does not exist, the tool result lists the available layout names — relay them honestly. The tab opens immediately in the workspace pane and the tool result confirms it; only claim a tab was opened when this tool result says so.",
         Version: "1.1.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]
         {
             new ToolParameterDefinition(
                 "widgetType",
-                "Closed enum: 'Workspace' (open a named workspace layout as a live tab — preferred) | " +
-                "'Summary' | 'DocumentViewer' | 'Dashboard' | 'Table' (legacy artifact variants).",
+                "Closed enum: 'Workspace' (open a named workspace layout as a live tab).",
                 ToolParameterType.String,
                 Required: true),
             new ToolParameterDefinition(
@@ -188,27 +177,13 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 Required: true),
             new ToolParameterDefinition(
                 "widgetData",
-                "JSON object carrying the per-variant payload. MUST include a 'kind' field equal to widgetType. " +
+                "JSON object carrying the payload. MUST include a 'kind' field equal to widgetType ('Workspace'). " +
                 "Workspace: layoutName (the workspace layout's display name, e.g. 'Compose') or layoutId (GUID); " +
                 "optional documentId (sprk_document GUID) to pre-seed the Compose layout with a STORED document, " +
                 "OR sessionFileId (a chat-session uploaded file id) to mount an UPLOADED file as a transient " +
-                "working draft (create-on-save) — set at most one. " +
-                "Legacy variants: Summary: body; DocumentViewer: documentId/filename/mimeType/sizeBytes; " +
-                "Dashboard: layoutId/dashboardName; Table: rowCount/filteredColumns/selectedRows.",
+                "working draft (create-on-save) — set at most one.",
                 ToolParameterType.Object,
-                Required: true),
-            new ToolParameterDefinition(
-                "matterId",
-                "Optional Dataverse sprk_matter GUID to anchor the tab to. When omitted, the chat session's " +
-                "MatterId is used; when neither is present the tab is anchored to a synthetic 'unattached' " +
-                "context that the user can later pin to a matter.",
-                ToolParameterType.String,
-                Required: false),
-            new ToolParameterDefinition(
-                "matterName",
-                "Optional display name for the matter (used in tab tooltip when matterId is supplied).",
-                ToolParameterType.String,
-                Required: false)
+                Required: true)
         });
 
     /// <inheritdoc />
@@ -288,21 +263,15 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                     $"'widgetData.kind' ('{kindProp.GetString()}') must equal 'widgetType' ('{widgetType}').");
             }
 
-            // Workspace layout tabs (R2-D): the payload must name the layout to open.
+            // Workspace layout tabs (R2-D): the payload MAY name the layout to open.
             if (string.Equals(widgetType, "Workspace", StringComparison.Ordinal))
             {
-                var hasLayoutName = dataProp.TryGetProperty("layoutName", out var lnProp) &&
-                                    lnProp.ValueKind == JsonValueKind.String &&
-                                    !string.IsNullOrWhiteSpace(lnProp.GetString());
-                var hasLayoutId = dataProp.TryGetProperty("layoutId", out var liProp) &&
-                                  liProp.ValueKind == JsonValueKind.String &&
-                                  Guid.TryParse(liProp.GetString(), out _);
-                if (!hasLayoutName && !hasLayoutId)
-                {
-                    return ToolValidationResult.Failure(
-                        "'widgetData' for widgetType 'Workspace' must include 'layoutName' (the layout's " +
-                        "display name, e.g. 'Compose') or 'layoutId' (a GUID).");
-                }
+                // R5 (task 113 / UAT defects 6/7): layoutName/layoutId are NO LONGER required.
+                // When neither is supplied the execute path defaults to the 'Compose' layout
+                // (ExecuteOpenWorkspaceTabAsync), so a literal-following model never has to
+                // synthesize a layout id for "open/edit in compose". This is a parameter default,
+                // not a new intent-detection mechanism (ADR-039). The optional documentId /
+                // sessionFileId checks below still apply.
 
                 // R4-2 (2026-07-07): optional STORED-document pre-seed pointer — a real
                 // sprk_document GUID resolved server-side to its SPE drive-item.
@@ -332,15 +301,6 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                         "'widgetData' cannot set both 'documentId' (a stored sprk_document) and " +
                         "'sessionFileId' (an uploaded chat file) — set at most one.");
                 }
-            }
-
-            // matterId — optional; when present MUST be a valid GUID.
-            if (doc.RootElement.TryGetProperty("matterId", out var matterIdProp) &&
-                matterIdProp.ValueKind == JsonValueKind.String &&
-                !string.IsNullOrWhiteSpace(matterIdProp.GetString()) &&
-                !Guid.TryParse(matterIdProp.GetString(), out _))
-            {
-                return ToolValidationResult.Failure("'matterId' must be a valid GUID when provided.");
             }
         }
         catch (JsonException ex)
@@ -385,169 +345,24 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = _timeProvider.GetUtcNow() });
         }
 
-        // ADR-015: log handler + IDs + widgetType + matter scope present/absent + title LENGTH.
-        // NEVER the widgetData body; NEVER the title text.
+        // ADR-015: log handler + IDs + widgetType + title LENGTH. NEVER the widgetData body; NEVER the title text.
         _logger.LogInformation(
-            "SendWorkspaceArtifactHandler ({Correlation}) dispatch start widgetType={WidgetType} tenantId={TenantId} matterScoped={MatterScoped} titleLen={TitleLen}",
-            correlationLogId, args.WidgetType, context.TenantId, args.MatterId is not null, args.Title.Length);
+            "SendWorkspaceArtifactHandler ({Correlation}) dispatch start widgetType={WidgetType} tenantId={TenantId} titleLen={TitleLen}",
+            correlationLogId, args.WidgetType, context.TenantId, args.Title.Length);
 
         // ── G-P3 UAT round-2 R2-D (2026-07-07): Workspace layout tab — live open ─────
         // Opens a named workspace layout (e.g. "Compose") as a tab in the SpaarkeAi
         // workspace pane by emitting a `workspace_open_tab` frame on the existing
         // context_event SSE channel; the client bridge dispatches the SAME
         // PaneEventBus `workspace.widget_load` event the Workspaces menu uses.
-        if (string.Equals(args.WidgetType, "Workspace", StringComparison.Ordinal))
-        {
-            return await ExecuteOpenWorkspaceTabAsync(
-                context, tool, args, startedAt, stopwatch, correlationLogId, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        // Resolve matter context: explicit matterId arg > ChatInvocationContext.MatterId > synthetic unattached.
-        var matterContext = ResolveMatterContext(args, context);
-
-        // Build deterministic IDs + timestamps via the seamed providers (Phase 4 Track C).
-        var tabId = _guidProvider.NewGuid().ToString("N");
-        var createdAtIso = startedAt.ToString("o");
-
-        // Deserialize the LLM-supplied widgetData JSON object into the polymorphic
-        // WorkspaceTabWidgetData. System.Text.Json reads the 'kind' discriminator (already
-        // validated to match widgetType in ValidateChat).
-        WorkspaceTabWidgetData widgetData;
-        try
-        {
-            widgetData = DeserializeWidgetData(args.WidgetDataRawJson, args.WidgetType);
-        }
-        catch (JsonException ex)
-        {
-            stopwatch.Stop();
-            _logger.LogWarning(ex,
-                "SendWorkspaceArtifactHandler ({Correlation}) widgetData deserialization failed for widgetType={WidgetType}",
-                correlationLogId, args.WidgetType);
-            return ToolResult.Error(
-                HandlerId, tool.Id, tool.Name,
-                $"widgetData payload could not be deserialized for widgetType '{args.WidgetType}': {ex.Message}",
-                ToolErrorCodes.ValidationFailed,
-                new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = _timeProvider.GetUtcNow() });
-        }
-
-        var sessionId = context.ChatSessionId.ToString("N");
-
-        var tab = new WorkspaceTab
-        {
-            Id = tabId,
-            WidgetType = args.WidgetType,
-            WidgetData = widgetData,
-            SessionId = sessionId,
-            TenantId = context.TenantId,
-            // Pillar 9 visibility: agent-created tabs default to visible so the LLM sees its
-            // own artifact in the next turn's system prompt. The user can toggle visibility
-            // via the tab strip (FR-35 acceptance criterion).
-            VisibleToAssistant = true,
-            SourceProvenance = new WorkspaceTabSourceProvenance
-            {
-                Source = "agent",
-                // ADR-015 binding: deterministic creator id only — NEVER user message text.
-                CreatedBy = $"agent:{context.ChatSessionId:N}",
-                CreatedAt = createdAtIso
-            },
-            MatterContext = matterContext,
-            IsPinned = false,
-            // Agent-created tabs default to non-editable (the chat reply is the authoring
-            // surface). The user pins or "Convert to editable" toggles this in the UI per
-            // Pillar 6b user affordances.
-            CanEdit = false,
-            LastUserEditAt = null,
-            CreatedAt = createdAtIso,
-            UpdatedAt = createdAtIso
-        };
-
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            await _workspaceStateService.UpsertTabAsync(
-                context.TenantId,
-                sessionId,
-                tab,
-                cancellationToken).ConfigureAwait(false);
-
-            stopwatch.Stop();
-            _logger.LogInformation(
-                "SendWorkspaceArtifactHandler ({Correlation}) dispatch complete tabId={TabId} widgetType={WidgetType} in {Duration}ms",
-                correlationLogId, tabId, args.WidgetType, stopwatch.ElapsedMilliseconds);
-
-            // G-P3 UAT round-2 R2-D honesty (2026-07-07): the four legacy artifact
-            // variants persist to workspace state (R6 Pillar 6a), but the post-046
-            // SpaarkeAi client has no polling channel and no registry keys for these
-            // widget types — the artifact is NOT visible on the live tab strip. The
-            // summary must not claim a visible tab (the round-2 fabrications built on
-            // exactly this kind of over-claiming result text).
-            var summaryText =
-                $"Workspace artifact '{args.Title}' recorded to workspace state (widgetType={args.WidgetType}, " +
-                $"tabId={tabId}). NOTE: this artifact is NOT visible as a tab in the current workspace UI — " +
-                "do not tell the user a tab was opened. To open a live workspace tab use widgetType 'Workspace' " +
-                "with a layoutName.";
-
-            return ToolResult.Ok(
-                HandlerId, tool.Id, tool.Name,
-                data: new SendWorkspaceArtifactPayload
-                {
-                    TabId = tabId,
-                    WidgetType = args.WidgetType,
-                    SessionId = sessionId,
-                    MatterId = matterContext.MatterId,
-                    VisibleToAssistant = tab.VisibleToAssistant,
-                    Title = args.Title
-                },
-                summary: summaryText,
-                confidence: 1.0,
-                execution: new ToolExecutionMetadata
-                {
-                    StartedAt = startedAt,
-                    CompletedAt = _timeProvider.GetUtcNow(),
-                    ModelCalls = 0
-                });
-        }
-        catch (OperationCanceledException)
-        {
-            stopwatch.Stop();
-            _logger.LogInformation(
-                "SendWorkspaceArtifactHandler ({Correlation}) cancelled tabId={TabId}",
-                correlationLogId, tabId);
-            return ToolResult.Error(
-                HandlerId, tool.Id, tool.Name,
-                "Workspace artifact dispatch was cancelled.",
-                ToolErrorCodes.Cancelled,
-                new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = _timeProvider.GetUtcNow() });
-        }
-        catch (InvalidOperationException ex)
-        {
-            // Tenant/session-mismatch guard from WorkspaceStateService.UpsertTabAsync — surface
-            // as ValidationFailed because the error is structural / arg-derived, not a system
-            // outage.
-            stopwatch.Stop();
-            _logger.LogError(ex,
-                "SendWorkspaceArtifactHandler ({Correlation}) tenant/session mismatch on upsert tabId={TabId}: {Reason}",
-                correlationLogId, tabId, ex.Message);
-            return ToolResult.Error(
-                HandlerId, tool.Id, tool.Name,
-                $"Workspace artifact dispatch failed validation: {ex.Message}",
-                ToolErrorCodes.ValidationFailed,
-                new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = _timeProvider.GetUtcNow() });
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            _logger.LogError(ex,
-                "SendWorkspaceArtifactHandler ({Correlation}) dispatch failed tabId={TabId}: {ErrorType}",
-                correlationLogId, tabId, ex.GetType().Name);
-            return ToolResult.Error(
-                HandlerId, tool.Id, tool.Name,
-                $"Workspace artifact dispatch failed: {ex.Message}",
-                ToolErrorCodes.InternalError,
-                new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = _timeProvider.GetUtcNow() });
-        }
+        //
+        // AIR2-075: this is the ONLY remaining path. The Summary / DocumentViewer /
+        // Dashboard / Table legacy artifact variants were retired with the orphaned
+        // IWorkspaceStateService write path; TryParseArgs already gated widgetType to the
+        // closed {"Workspace"} set, so dispatch straight to the live-open path.
+        return await ExecuteOpenWorkspaceTabAsync(
+            context, tool, args, startedAt, stopwatch, correlationLogId, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -638,14 +453,66 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 Timed());
         }
 
+        // ── DEF-08 Part A: resolve a recent FULL-DOCUMENT compose draft to SEED the tab ───────
+        // When the model supplied NO explicit pointer, first look for a recent full-document
+        // compose output (a compose-draft-document SessionOutput) in the session ledger. If one
+        // exists, seed the opened tab with its ledgerRef (the client re-materializes the document
+        // from the ledger — ADR-040 render-follows-store; the SSE frame carries the identifier,
+        // never content — ADR-015). This is the fix for the blank-Compose-tab defect: a chat
+        // "write a letter" → "open as a document" flow now lands the draft IN the editor.
+        //
+        // Precedence: an explicit documentId/sessionFileId from the model always wins; a fresh
+        // full-document draft wins over the ActiveDocument mount (it is the more specific fresh
+        // intent). The draft resolution is gated to FULL-DOCUMENT compose outputs (body_html), so
+        // an "edit in Compose" of an uploaded file — which produces NO such output — still falls
+        // through to the ActiveDocument path (task 113 preserved). Deterministic session-state
+        // read (not intent detection — ADR-039).
+        ComposeDraftSeed? draftSeed = null;
+        if (documentId == Guid.Empty && sessionFileId is null)
+        {
+            draftSeed = await ResolveComposeDraftSeedAsync(context, correlationLogId, cancellationToken).ConfigureAwait(false);
+        }
+
+        // ── task 113 (UAT defect 5): resolve the Compose mount target from the session-scoped
+        // ACTIVE-DOCUMENT when the LLM supplied NO explicit current pointer AND no full-document
+        // draft seed applies ─────────────────────────────────────────────────────────────────
+        // "edit in Compose" after a fresh upload must mount THAT upload, not a stale stored doc.
+        // An explicit documentId/sessionFileId from the model always wins (the stored-document
+        // "open this specific doc" override) — we only consult the active document when BOTH are
+        // absent AND no draft seed resolved. Deterministic session-state read (not intent
+        // detection — ADR-039).
+        if (documentId == Guid.Empty && sessionFileId is null && draftSeed is null)
+        {
+            var active = await ResolveActiveDocumentAsync(context, cancellationToken).ConfigureAwait(false);
+            if (active is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(active.SessionFileId))
+                {
+                    sessionFileId = active.SessionFileId;
+                    _logger.LogInformation(
+                        "SendWorkspaceArtifactHandler ({Correlation}) resolved Compose mount from active document — source={Source} kind=session-upload",
+                        correlationLogId, active.Source);
+                }
+                else if (!string.IsNullOrWhiteSpace(active.SprkDocumentId) &&
+                         Guid.TryParse(active.SprkDocumentId, out var activeDocGuid))
+                {
+                    documentId = activeDocGuid;
+                    _logger.LogInformation(
+                        "SendWorkspaceArtifactHandler ({Correlation}) resolved Compose mount from active document — source={Source} kind=stored",
+                        correlationLogId, active.Source);
+                }
+            }
+        }
+
+        // R5 (task 113 / UAT defects 6/7): default a missing layout to 'Compose' rather than
+        // erroring, so a literal-following model never has to synthesize a layout id for
+        // "open/edit in compose". Parameter default, not intent detection (ADR-039).
         if (layoutId == Guid.Empty && string.IsNullOrWhiteSpace(layoutName))
         {
-            stopwatch.Stop();
-            return ToolResult.Error(
-                HandlerId, tool.Id, tool.Name,
-                "widgetData for widgetType 'Workspace' must include 'layoutName' (e.g. 'Compose') or a 'layoutId' GUID.",
-                ToolErrorCodes.ValidationFailed,
-                Timed());
+            layoutName = DefaultComposeLayoutName;
+            _logger.LogInformation(
+                "SendWorkspaceArtifactHandler ({Correlation}) no layout supplied — defaulting to '{Layout}' (R5 / UAT defects 6/7).",
+                correlationLogId, DefaultComposeLayoutName);
         }
 
         try
@@ -730,6 +597,27 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                     }
                 });
             }
+            else if (draftSeed is not null)
+            {
+                // DEF-08 Part A: seed the tab with the ledger REFERENCE to the drafted document
+                // (ADR-040 render-follows-store + ADR-015 identifier-only on the wire). The client
+                // reads GET /api/ai/chat/sessions/{sessionId}/compose-outputs, materializes the
+                // full-document body (body_html) from the ledger entry at ledgerRef, and mounts it
+                // as an editable transient draft (create-on-save). No content rides the SSE frame.
+                widgetDataJson = JsonSerializer.Serialize(new
+                {
+                    layoutId = layout.Id.ToString("D"),
+                    layoutName = layout.Name,
+                    compose = new
+                    {
+                        draft = new
+                        {
+                            ledgerRef = draftSeed.LedgerRef,
+                            sessionId = chatSessionIdForSeed
+                        }
+                    }
+                });
+            }
             else
             {
                 widgetDataJson = JsonSerializer.Serialize(new
@@ -807,6 +695,11 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 summaryText += " The tab is mounting the uploaded file as a transient working draft — it opens " +
                                "with the file loaded; no document record is created until the user saves.";
             }
+            else if (draftSeed is not null)
+            {
+                summaryText += " The tab is pre-seeded with the drafted document — it opens with the draft loaded " +
+                               "for editing, not empty; no document record is created until the user saves.";
+            }
             else if (preSeedNote is not null)
             {
                 // Honest partial success: the tab opened, the pre-seed did not.
@@ -822,7 +715,8 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                     layoutId = layout.Id.ToString("D"),
                     layoutName = layout.Name,
                     preSeededDocumentId = composeSeed?.SprkDocumentId,
-                    mountedSessionFileId = hasUploadMount ? sessionFileId : null
+                    mountedSessionFileId = hasUploadMount ? sessionFileId : null,
+                    seededDraftLedgerRef = draftSeed?.LedgerRef
                 },
                 summary: summaryText,
                 confidence: 1.0,
@@ -849,6 +743,176 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 ToolErrorCodes.InternalError,
                 Timed());
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Active-document resolution (task 113 / UAT defect 5)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Loads the chat session for this invocation and returns its session-scoped
+    /// <see cref="ActiveDocumentIdentity"/> (or null when the session/identity is absent).
+    /// Probes the session id in "N" form first (the canonical <c>ChatSessionManager</c> key —
+    /// <c>Guid.ToString("N")</c>) then "D", mirroring the Compose upload path's tolerance for
+    /// either spelling. Fail-soft: any lookup error degrades to null (the handler then behaves
+    /// exactly as it did before — the model's explicit pointer or an honest empty open).
+    /// </summary>
+    private async Task<ActiveDocumentIdentity?> ResolveActiveDocumentAsync(
+        ChatInvocationContext context,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(context.TenantId))
+        {
+            return null;
+        }
+
+        try
+        {
+            foreach (var sessionIdForm in new[]
+                     {
+                         context.ChatSessionId.ToString("N"),
+                         context.ChatSessionId.ToString("D"),
+                     })
+            {
+                var session = await _sessionManager
+                    .GetSessionAsync(context.TenantId, sessionIdForm, cancellationToken)
+                    .ConfigureAwait(false);
+                if (session?.ActiveDocument is { } active)
+                {
+                    return active;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Fail-soft (ADR-015: identifiers only) — never let an active-document lookup
+            // failure break the tab-open; the model's explicit pointer / empty open still works.
+            _logger.LogWarning(ex,
+                "SendWorkspaceArtifactHandler active-document resolution failed for session={Session} — degrading to no active document.",
+                context.ChatSessionId);
+        }
+
+        return null;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Compose full-document draft seed resolution (DEF-08 Part A)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The ledger reference threaded to the client for a full-document Compose draft seed. Carries
+    /// ONLY the addressable ledger key (<c>{bindingId}@t{n}</c>) — an identifier, never the drafted
+    /// content (ADR-015). The client resolves the body from
+    /// <c>GET /api/ai/chat/sessions/{sessionId}/compose-outputs</c> (ADR-040 render-follows-store).
+    /// </summary>
+    internal sealed record ComposeDraftSeed(string LedgerRef);
+
+    /// <summary>
+    /// Resolves the CURRENT (highest-turn) FULL-DOCUMENT <c>compose</c> output for this chat
+    /// session — the output a <c>compose-draft-document</c> capability wrote to the session ledger
+    /// (DEF-08 Part A). Returns its addressable key as a <see cref="ComposeDraftSeed"/>, or null when
+    /// the session holds no such output.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Full-document discriminator</b>: a <c>compose</c> ledger entry is treated as a
+    /// full-document draft ONLY when its opaque payload carries a non-empty <c>body_html</c> string
+    /// (the <c>compose-draft-document</c> output schema field). This deliberately EXCLUDES a
+    /// <c>compose-draft-alternative</c> EDIT payload (<c>target_text</c>/<c>new_text</c>) — an edit
+    /// is not a full document and must never seed a whole tab. (Edits also route to the DOCUMENT
+    /// session, not this chat session, per DEF-09 — this is a defense-in-depth second gate.)
+    /// </para>
+    /// <para>
+    /// <b>Session resolution</b>: mirrors <see cref="ResolveActiveDocumentAsync"/> — probes the
+    /// <c>ChatSessionManager</c> key in "N" then "D" form. Fail-soft: any lookup error degrades to
+    /// null (the tab still opens, empty — the handler behaves exactly as before DEF-08).
+    /// </para>
+    /// <para>
+    /// <b>ADR-015</b>: logs the ledger KEY + turn (identifiers) only — never the drafted body.
+    /// </para>
+    /// </remarks>
+    private async Task<ComposeDraftSeed?> ResolveComposeDraftSeedAsync(
+        ChatInvocationContext context,
+        string correlationLogId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(context.TenantId))
+        {
+            return null;
+        }
+
+        try
+        {
+            foreach (var sessionIdForm in new[]
+                     {
+                         context.ChatSessionId.ToString("N"),
+                         context.ChatSessionId.ToString("D"),
+                     })
+            {
+                var session = await _sessionManager
+                    .GetSessionAsync(context.TenantId, sessionIdForm, cancellationToken)
+                    .ConfigureAwait(false);
+                if (session?.Outputs is not { Count: > 0 } outputs)
+                {
+                    continue;
+                }
+
+                Models.Ai.Chat.SessionOutput? current = null;
+                foreach (var output in outputs)
+                {
+                    if (!string.Equals(output.Disposition, ComposeDisposition.DispositionValue, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+                    if (Models.Ai.Chat.SessionLedger.IsTruncationMarker(output.Payload))
+                    {
+                        continue; // a truncated draft cannot be materialized — never seed it
+                    }
+                    if (output.Payload.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+                    // Full-document discriminator: non-empty body_html (compose-draft-document).
+                    if (!output.Payload.TryGetProperty("body_html", out var bodyHtml) ||
+                        bodyHtml.ValueKind != JsonValueKind.String ||
+                        string.IsNullOrEmpty(bodyHtml.GetString()))
+                    {
+                        continue;
+                    }
+                    if (current is null || output.Turn > current.Turn)
+                    {
+                        current = output;
+                    }
+                }
+
+                if (current is not null)
+                {
+                    // ADR-015: ledger key + turn are identifiers — never the drafted body.
+                    _logger.LogInformation(
+                        "SendWorkspaceArtifactHandler ({Correlation}) resolved compose full-document draft seed — ledgerRef={LedgerRef} turn={Turn}",
+                        correlationLogId, current.Key, current.Turn);
+                    return new ComposeDraftSeed(current.Key);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Fail-soft (ADR-015: identifiers only) — a draft-seed lookup failure never breaks the
+            // tab-open; the tab still opens (empty) exactly as it did before DEF-08.
+            _logger.LogWarning(ex,
+                "SendWorkspaceArtifactHandler ({Correlation}) compose draft-seed resolution failed — degrading to no seed.",
+                correlationLogId);
+        }
+
+        return null;
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -949,10 +1013,9 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Parse <c>widgetType</c> / <c>title</c> / <c>widgetData</c> / <c>matterId</c> /
-    /// <c>matterName</c> from the chat tool-call arguments JSON. ValidateChat catches most
-    /// errors but we re-project defensively for the dispatch path so test fixtures that skip
-    /// ValidateChat still get clear diagnostics.
+    /// Parse <c>widgetType</c> / <c>title</c> / <c>widgetData</c> from the chat tool-call
+    /// arguments JSON. ValidateChat catches most errors but we re-project defensively for the
+    /// dispatch path so test fixtures that skip ValidateChat still get clear diagnostics.
     /// </summary>
     private static bool TryParseArgs(
         string? toolArgumentsJson,
@@ -1010,33 +1073,11 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
             }
             var widgetDataRawJson = dataProp.GetRawText();
 
-            Guid? matterId = null;
-            if (root.TryGetProperty("matterId", out var matterIdProp) &&
-                matterIdProp.ValueKind == JsonValueKind.String &&
-                !string.IsNullOrWhiteSpace(matterIdProp.GetString()))
-            {
-                if (!Guid.TryParse(matterIdProp.GetString(), out var parsedMatterId))
-                {
-                    error = "'matterId' must be a valid GUID when provided.";
-                    return false;
-                }
-                matterId = parsedMatterId;
-            }
-
-            string? matterName = null;
-            if (root.TryGetProperty("matterName", out var matterNameProp) &&
-                matterNameProp.ValueKind == JsonValueKind.String)
-            {
-                matterName = matterNameProp.GetString();
-            }
-
             args = new ParsedArgs
             {
                 WidgetType = widgetType,
                 Title = title,
-                WidgetDataRawJson = widgetDataRawJson,
-                MatterId = matterId,
-                MatterName = matterName
+                WidgetDataRawJson = widgetDataRawJson
             };
             return true;
         }
@@ -1045,67 +1086,6 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
             error = $"Tool arguments JSON is malformed: {ex.Message}";
             return false;
         }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Widget data deserialization
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Deserialize the LLM-supplied widget data JSON into the polymorphic
-    /// <see cref="WorkspaceTabWidgetData"/>. The 'kind' discriminator was validated to match
-    /// <paramref name="widgetType"/> by <see cref="ValidateChat"/>; System.Text.Json's
-    /// polymorphism metadata layer reads 'kind' and instantiates the concrete subtype.
-    /// </summary>
-    private static WorkspaceTabWidgetData DeserializeWidgetData(string widgetDataRawJson, string widgetType)
-    {
-        var deserialized = JsonSerializer.Deserialize<WorkspaceTabWidgetData>(widgetDataRawJson, WidgetDataJsonOptions);
-        if (deserialized is null)
-        {
-            throw new JsonException(
-                $"widgetData deserialized to null for widgetType '{widgetType}' — the LLM-supplied payload " +
-                "is structurally invalid.");
-        }
-        return deserialized;
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Matter resolution
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Resolve the workspace tab's matter context with the following precedence:
-    /// (1) explicit <paramref name="args"/>.MatterId from the tool call,
-    /// (2) <see cref="ChatInvocationContext.MatterId"/> when the chat session is matter-scoped,
-    /// (3) synthetic 'unattached' sentinel ("00000000-0000-0000-0000-000000000000" + "Unattached")
-    /// when neither is present — the user can later pin the tab to a real matter via
-    /// <see cref="IWorkspaceStateService.PinTabAsync"/>.
-    /// </summary>
-    private static WorkspaceTabMatterContext ResolveMatterContext(ParsedArgs args, ChatInvocationContext context)
-    {
-        if (args.MatterId is not null)
-        {
-            return new WorkspaceTabMatterContext
-            {
-                MatterId = args.MatterId.Value.ToString("D"),
-                MatterName = args.MatterName ?? args.MatterId.Value.ToString("D")
-            };
-        }
-
-        if (context.MatterId is not null)
-        {
-            return new WorkspaceTabMatterContext
-            {
-                MatterId = context.MatterId.Value.ToString("D"),
-                MatterName = args.MatterName ?? context.MatterId.Value.ToString("D")
-            };
-        }
-
-        return new WorkspaceTabMatterContext
-        {
-            MatterId = Guid.Empty.ToString("D"),
-            MatterName = "Unattached"
-        };
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -1121,40 +1101,5 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
         public string WidgetType { get; init; }
         public string Title { get; init; }
         public string WidgetDataRawJson { get; init; }
-        public Guid? MatterId { get; init; }
-        public string? MatterName { get; init; }
-    }
-
-    /// <summary>
-    /// Structured output payload returned in <see cref="ToolResult.Data"/>. Carries the
-    /// deterministic tab identity + widget discriminator + matter scope + title — suitable for
-    /// the LLM to render or summarize in its next assistant turn.
-    /// ADR-015 binding: NEVER carries the widgetData body content.
-    /// </summary>
-    public sealed class SendWorkspaceArtifactPayload
-    {
-        /// <summary>Deterministic tab identifier (matches <see cref="WorkspaceTab.Id"/>).</summary>
-        [JsonPropertyName("tabId")]
-        public required string TabId { get; init; }
-
-        /// <summary>Widget-type discriminator that was applied (echo of the tool argument).</summary>
-        [JsonPropertyName("widgetType")]
-        public required string WidgetType { get; init; }
-
-        /// <summary>Chat session id the tab was attached to (32-char no-dash format).</summary>
-        [JsonPropertyName("sessionId")]
-        public required string SessionId { get; init; }
-
-        /// <summary>Matter id the tab was anchored to (D-format GUID or empty-GUID for unattached).</summary>
-        [JsonPropertyName("matterId")]
-        public required string MatterId { get; init; }
-
-        /// <summary>Whether the tab is initially visible to the assistant (always true for agent-created tabs).</summary>
-        [JsonPropertyName("visibleToAssistant")]
-        public required bool VisibleToAssistant { get; init; }
-
-        /// <summary>Display title that was applied to the tab.</summary>
-        [JsonPropertyName("title")]
-        public required string Title { get; init; }
     }
 }

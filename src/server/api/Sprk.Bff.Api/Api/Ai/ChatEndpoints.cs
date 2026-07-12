@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.Safety.CrossMatter;
 using Sprk.Bff.Api.Services.Ai.Sessions;
@@ -200,6 +201,27 @@ public static class ChatEndpoints
             .WithSummary("Read stored compose-disposition draft outputs for a session (FR-04)")
             .WithDescription("Projects the session ledger's compose-disposition SessionOutputs (ADR-040 store-before-render). ComposeWorkspace re-reads these to materialize AI-drafted content into the editor. Returns an empty list until a compose Binding writes an output (the write half — BindingDisposition.Compose + OutputRouter case — is core spaarke-ai-architecture-redesign-r2 task 010).")
             .Produces<IReadOnlyList<ComposeLedgerOutputDto>>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(404);
+
+        // POST /api/ai/chat/sessions/{sessionId}/compose-outputs/supersede — FR-17 undo/replace
+        // (spaarkeai-compose-r2 task 034). Retract a prior compose draft as a LEDGER SUPERSESSION:
+        // append a NEW superseding `compose` SessionOutput (ADR-040 "corrections are new entries
+        // referencing the superseded key") so the retraction is durable across refresh — NOT a
+        // client-only DOM undo (HANDOFF §1 item 5). Consumes the published supersession semantics
+        // (ComposeDisposition.ResolveCurrent — the highest-turn compose entry is the head). Does NOT
+        // touch OutputRouter.cs / Binding.cs (E-20 frozen files) and adds no disposition/route: it
+        // appends to the SAME session.Outputs store via the SAME UpdateSessionCacheAsync seam the
+        // OutputRouter uses (ADR-040 append-only). "undo" is a retraction (empty payload → the client
+        // re-materializes to nothing); "replace" chains this retraction to a fresh Draft-Alternative
+        // dispatch (the client). Same auth as the sibling session-write endpoints (ADR-008).
+        group.MapPost("/sessions/{sessionId}/compose-outputs/supersede", SupersedeComposeOutputAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("SupersedeComposeOutput")
+            .WithSummary("Retract/supersede a prior compose draft as a ledger supersession (FR-17)")
+            .WithDescription("Appends a NEW superseding compose-disposition SessionOutput that retracts the referenced {bindingId}@t{n} entry (ADR-040 append-only supersession — undo/replace is a durable ledger write, never a client DOM undo). Superseding an already-superseded (or non-existent) ref is an idempotent no-op / honest 404. The client re-materializes the editor from current ledger state (compose-outputs read + the Flow-5 apply signal).")
+            .Produces<ComposeSupersedeResponse>()
             .ProducesProblem(400)
             .ProducesProblem(401)
             .ProducesProblem(404);
@@ -598,6 +620,10 @@ public static class ChatEndpoints
                 sseWriter,
                 latestUserMessage: effectiveMessage,
                 uploadedFiles: session.UploadedFiles,
+                // F-1/F-2/F-7 envelope-convergence (D1): forward the session ledger so the provider performs
+                // the ONE per-turn ContextEnvelope bind (fingerprint write, ADR-040) and consumes the bound
+                // envelope for the interactive prompt. The endpoint's separate bind below is retired.
+                ledgerOutputs: session.Outputs,
                 cancellationToken: cancellationToken);
 
             // Convert session history to AI framework messages for context
@@ -612,7 +638,7 @@ public static class ChatEndpoints
             // question. Appended AFTER history, BEFORE the user turn: volatile content
             // rides the tail so the [system]+[history] prefix stays prompt-cache-stable
             // (NFR-04). Recent-window + per-output caps in ChatHistoryManager.
-            var ledgerOutputsContext = ChatHistoryManager.BuildLedgerOutputsContext(session.Outputs);
+            var ledgerOutputsContext = ConversationContextProducer.BuildLedgerOutputsContext(session.Outputs);
             if (ledgerOutputsContext is not null)
             {
                 var augmented = new List<AiChatMessage>(history.Count + 1);
@@ -621,6 +647,18 @@ public static class ChatEndpoints
                 history = augmented;
             }
             // === End finding-3 ledger context =========================================
+
+            // === F-1/F-2/F-7 envelope-convergence (D1) — interactive Context Binder convergence =====
+            // The ONE per-turn ContextEnvelope bind now lives INSIDE the context provider
+            // (PlaybookChatContextProvider.GetContextAsync, invoked via SprkChatAgentFactory.CreateAgentAsync
+            // above), where it CONSUMES the bound envelope for the interactive prompt's host-identity
+            // (Business), user-memory (User, F-2 recall), and record-memory sections and RENDERS the
+            // environment date suffix from the same envelope — the direct producer-append sites retire on
+            // the live path. This relocation keeps the fingerprint write (ADR-040 store-before-render,
+            // NFR-07) exactly-once per turn; the earlier endpoint-side bind (which discarded the envelope)
+            // is deleted so the turn is never double-bound. Byte-identical for existing sections; the
+            // renderer-vs-legacy parity pins prove it before the legacy sites were made fallback-only.
+            // === End interactive bind relocation ======================================
 
             // === FR-P2-05 HARD CUTOVER (task 034) — legacy dispatch pre-passes DELETED ===
             // Before the cutover, three pre-passes ran here between agent creation and the
@@ -1272,6 +1310,174 @@ public static class ChatEndpoints
         }
         return result;
     }
+
+    /// <summary>
+    /// POST /api/ai/chat/sessions/{sessionId}/compose-outputs/supersede
+    ///
+    /// FR-17 undo/replace via ledger supersession (spaarkeai-compose-r2 task 034). Retracts a prior
+    /// <c>compose</c> draft by appending a NEW superseding <c>compose</c> <see cref="SessionOutput"/>
+    /// (ADR-040: append-only — corrections are new entries referencing the superseded key). This is
+    /// the durable-across-refresh half that a client-only mark-strip (a DOM undo) cannot provide:
+    /// the retraction becomes the highest-turn compose entry, so a reload re-materializes from
+    /// current ledger state with the prior suggestion gone (HANDOFF §1 item 5). Idempotent — a ref
+    /// already superseded (or a non-existent ref) is a no-op / honest 404.
+    /// </summary>
+    private static async Task<IResult> SupersedeComposeOutputAsync(
+        string sessionId,
+        ComposeSupersedeRequest request,
+        ChatSessionManager sessionManager,
+        HttpContext httpContext,
+        ILogger<ChatSessionManager> logger,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        if (request is null || string.IsNullOrWhiteSpace(request.SupersedesRef))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "supersedesRef is required (the {bindingId}@t{n} key of the compose output to supersede).");
+        }
+
+        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
+        if (session is null)
+        {
+            return Results.NotFound(new { error = $"Session {sessionId} not found" });
+        }
+
+        var result = SupersedeComposeOutput(session.Outputs, request.SupersedesRef);
+        switch (result.Outcome)
+        {
+            case ComposeSupersedeOutcome.NotFound:
+                // Honest failure — no compose entry addressable at that ref.
+                return Results.NotFound(new
+                {
+                    error = $"No compose output '{request.SupersedesRef}' found in session {sessionId}.",
+                });
+
+            case ComposeSupersedeOutcome.NoOp:
+                // Idempotent: the ref was already superseded (or is itself a retraction). No write.
+                logger.LogInformation(
+                    "SupersedeComposeOutput NOOP (already superseded): session={SessionId} ref={Ref} current={Current}",
+                    sessionId, request.SupersedesRef, result.CurrentKey);
+                return Results.Ok(new ComposeSupersedeResponse(
+                    result.CurrentKey!, request.SupersedesRef, ComposeSupersedeResponse.OutcomeNoop));
+
+            case ComposeSupersedeOutcome.Superseded:
+            default:
+                // Durable ledger write (same seam OutputRouter uses — ADR-040 store-precedes-render).
+                await sessionManager
+                    .UpdateSessionCacheAsync(session with { Outputs = result.Outputs }, cancellationToken)
+                    .ConfigureAwait(false);
+                logger.LogInformation(
+                    "SupersedeComposeOutput: session={SessionId} superseded={Ref} newKey={NewKey} turn={Turn}",
+                    sessionId, request.SupersedesRef, result.NewEntry!.Key, result.NewEntry.Turn);
+                return Results.Ok(new ComposeSupersedeResponse(
+                    result.NewEntry!.Key, request.SupersedesRef, ComposeSupersedeResponse.OutcomeSuperseded));
+        }
+    }
+
+    /// <summary>Outcome of <see cref="SupersedeComposeOutput"/>.</summary>
+    internal enum ComposeSupersedeOutcome
+    {
+        /// <summary>No compose entry is addressable at the supplied ref — honest failure (404).</summary>
+        NotFound,
+        /// <summary>The ref is already superseded (not the head) or is itself a retraction — idempotent no-op.</summary>
+        NoOp,
+        /// <summary>A new superseding retraction entry was appended.</summary>
+        Superseded,
+    }
+
+    /// <summary>Result of the pure supersession computation (no I/O — unit-testable like <see cref="ProjectComposeOutputs"/>).</summary>
+    internal readonly record struct ComposeSupersedeResult(
+        ComposeSupersedeOutcome Outcome,
+        IReadOnlyList<SessionOutput> Outputs,
+        SessionOutput? NewEntry,
+        string? CurrentKey);
+
+    /// <summary>
+    /// Pure supersession computation over a session ledger (FR-17). Given the <c>{bindingId}@t{n}</c>
+    /// key of a prior <c>compose</c> output, returns the appended superseding retraction entry (a new
+    /// highest-turn <c>compose</c> output whose empty payload re-materializes to NOTHING), OR an
+    /// idempotent no-op when the ref is already superseded / itself a retraction, OR not-found.
+    /// Consumes the published supersession semantics (<see cref="ComposeDisposition.ResolveCurrent"/> —
+    /// the head is the highest-turn compose entry). <c>internal</c> + pure for direct unit testing.
+    /// </summary>
+    internal static ComposeSupersedeResult SupersedeComposeOutput(
+        IReadOnlyList<SessionOutput>? ledger,
+        string supersedesRef)
+    {
+        var outputs = ledger ?? Array.Empty<SessionOutput>();
+
+        // Locate the referenced compose entry (must be an addressable compose output).
+        SessionOutput? prior = null;
+        foreach (var o in outputs)
+        {
+            if (string.Equals(o.Key, supersedesRef, StringComparison.Ordinal)
+                && string.Equals(o.Disposition, ComposeDisposition.DispositionValue, StringComparison.Ordinal))
+            {
+                prior = o;
+                break;
+            }
+        }
+
+        if (prior is null)
+        {
+            return new ComposeSupersedeResult(ComposeSupersedeOutcome.NotFound, outputs, null, null);
+        }
+
+        // The CURRENT head for this binding is the highest-turn compose entry (published semantics).
+        // prior exists ⇒ ResolveCurrent is non-null.
+        var current = ComposeDisposition.ResolveCurrent(outputs, prior.BindingId)!;
+
+        // Idempotent no-op: the ref is no longer the head (already superseded), or it is itself a
+        // retraction marker — either way, appending another retraction would be a redundant write.
+        if (!string.Equals(current.Key, supersedesRef, StringComparison.Ordinal) || IsComposeRetraction(prior))
+        {
+            return new ComposeSupersedeResult(ComposeSupersedeOutcome.NoOp, outputs, null, current.Key);
+        }
+
+        // Append the superseding retraction entry at turn = max+1 (same key algebra as OutputRouter).
+        var turn = outputs.Max(o => o.Turn) + 1;
+        var key = SessionLedger.BuildOutputKey(prior.BindingId, turn);
+        var payload = JsonSerializer.SerializeToElement(new Dictionary<string, object>
+        {
+            [ComposeRetractionMarker] = true,
+            ["supersedes_ref"] = supersedesRef,
+        });
+        var entry = new SessionOutput
+        {
+            Key = key,
+            BindingId = prior.BindingId,
+            UcId = prior.UcId,
+            Turn = turn,
+            Disposition = ComposeDisposition.DispositionValue,
+            Payload = payload,
+            // Provenance — the superseded key this entry corrects (ADR-040).
+            SourceRefs = new[] { supersedesRef },
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+
+        var updated = new List<SessionOutput>(outputs) { entry };
+        return new ComposeSupersedeResult(ComposeSupersedeOutcome.Superseded, updated, entry, key);
+    }
+
+    /// <summary>Sentinel property marking a compose output as an FR-17 retraction (empty edit; re-materializes to nothing).</summary>
+    internal const string ComposeRetractionMarker = "retracted";
+
+    /// <summary>True when <paramref name="output"/> is an FR-17 retraction entry (payload carries <c>"retracted": true</c>).</summary>
+    internal static bool IsComposeRetraction(SessionOutput output) =>
+        output.Payload.ValueKind == JsonValueKind.Object
+        && output.Payload.TryGetProperty(ComposeRetractionMarker, out var flag)
+        && flag.ValueKind == JsonValueKind.True;
 
     // The R2-052 per-action HITL confirm handler was DELETED by D12 / FR-P2-02 (task 031):
     // it was the second confirmation store's handler. Side-effect confirmation is unified
@@ -2071,7 +2277,7 @@ public static class ChatEndpoints
                 // (append-only, after the `confirmed` approval marker), and (b) the
                 // honest failure is persisted as an assistant transcript message so the
                 // next turn's history carries the real outcome.
-                var failureText = BuildGateOutcomeMessage(
+                var failureText = GateOutcomeProducer.BuildGateOutcomeMessage(
                     success: false, resolution.Tool.Name, outcome.Error, ledgerKey: null);
                 await pendingPlanManager.WriteGateMarkerAsync(
                     tenantId, sessionId, gateId,
@@ -2097,7 +2303,7 @@ public static class ChatEndpoints
             var userFacingSummary = outcome.UserSummary ?? outcome.Summary;
             await PersistGateOutcomeMessageAsync(
                 httpContext, tenantId, sessionId,
-                BuildGateOutcomeMessage(
+                GateOutcomeProducer.BuildGateOutcomeMessage(
                     success: true, resolution.Tool.Name, userFacingSummary, outcome.LedgerKey, outcome.RecordUrl),
                 logger, cancellationToken);
 
@@ -2169,7 +2375,7 @@ public static class ChatEndpoints
                     missingFields: null, turn: invocation.Turn, ct: cancellationToken);
                 await PersistGateOutcomeMessageAsync(
                     httpContext, tenantId, sessionId,
-                    BuildGateOutcomeMessage(success: false, invocation.Title ?? invocation.ToolId, error, ledgerKey: null),
+                    GateOutcomeProducer.BuildGateOutcomeMessage(success: false, invocation.Title ?? invocation.ToolId, error, ledgerKey: null),
                     logger, cancellationToken);
 
                 return BuildGateDispatchFailedProblem(error);
@@ -2177,7 +2383,7 @@ public static class ChatEndpoints
 
             await PersistGateOutcomeMessageAsync(
                 httpContext, tenantId, sessionId,
-                BuildGateOutcomeMessage(success: true, invocation.Title ?? invocation.ToolId, summary, ledgerKey: null),
+                GateOutcomeProducer.BuildGateOutcomeMessage(success: true, invocation.Title ?? invocation.ToolId, summary, ledgerKey: null),
                 logger, cancellationToken);
 
             return Results.Ok(new GateResolveResult("confirmed", summary));
@@ -2225,36 +2431,10 @@ public static class ChatEndpoints
         title: "Dispatch Failed",
         extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.dispatch-failed" });
 
-    /// <summary>
-    /// Maximum characters of a gate-outcome transcript message (Dataverse
-    /// <c>sprk_content</c> caps at 10 000; outcomes are summaries, not payloads).
-    /// </summary>
-    internal const int MaxGateOutcomeMessageChars = 2_000;
-
-    /// <summary>
-    /// Builds the honest gate-resolution transcript message (G-P3 UAT round-2
-    /// R2-A/R2-C, 2026-07-07). Success carries the executed summary (+ a clickable
-    /// markdown record link when the handler reported the created/updated record —
-    /// R4-3, 2026-07-07 — and the ledger key when present); failure states EXPLICITLY
-    /// that nothing was created or modified — the exact counter-copy to the round-2
-    /// fabrication pattern. The success detail SHOULD be the handler's USER-facing
-    /// outcome sentence (R4-6): this message renders verbatim in the operator's
-    /// transcript, so instruction-to-model text must never reach it.
-    /// </summary>
-    internal static string BuildGateOutcomeMessage(
-        bool success, string actionName, string? detail, string? ledgerKey, string? recordUrl = null)
-    {
-        var text = success
-            ? $"✅ Confirmed action '{actionName}' executed. {detail ?? "Completed."}" +
-              (recordUrl is null ? string.Empty : $" [Open record]({recordUrl})") +
-              (ledgerKey is null ? string.Empty : $" (ledger: {ledgerKey})")
-            : $"❌ Confirmed action '{actionName}' FAILED: {detail ?? "The confirmed action failed."} " +
-              "No record was created or modified by this confirmation.";
-
-        return text.Length <= MaxGateOutcomeMessageChars
-            ? text
-            : text[..MaxGateOutcomeMessageChars] + "…";
-    }
+    // Task 053 (FR-B-04): BuildGateOutcomeMessage + MaxGateOutcomeMessageChars (the gate-outcome
+    // transcript primitive) moved to ContextSliceProducers.GateOutcomeProducer — the single production
+    // home for this Memory.Conversation primitive. Persistence (PersistGateOutcomeMessageAsync below)
+    // stays here: it is session plumbing, not string production.
 
     /// <summary>
     /// Persists a gate-resolution outcome as an Assistant transcript message so

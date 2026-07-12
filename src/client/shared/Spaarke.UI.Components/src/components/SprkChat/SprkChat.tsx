@@ -336,6 +336,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // G-P2 round-1 finding 2 (2026-07-06) — Insert affordance is opt-in per host;
   // only hosts with an insert target (AnalysisWorkspace editor) enable it.
   enableInsertToEditor = false,
+  onOpenInCompose,
   documents = [],
   playbooks = [],
   predefinedPrompts = [],
@@ -357,6 +358,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // R6 Pillar 8 task 097b / TIER-C surface completion — fires whenever the
   // internal messages array changes. Optional; ADR-012 context-agnostic.
   onMessagesChange,
+  // spaarkeai-compose-r2 task 072 (FR-35 Doc Q&A stretch) — fires with the full
+  // ICitation[] (incl. excerpt) whenever a non-empty citations set arrives.
+  // Optional observation callback; ADR-012 context-agnostic.
+  onCitations,
   // R6 Pillar 8 (tasks 080+) outbound-body decoration hook (optional; ADR-012
   // context-agnostic). Existing consumers ignore.
   onDecorateOutboundBody,
@@ -365,6 +370,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onPlaybookOptions: onPlaybookOptionsProp,
   onSelectPlaybook,
   onOpenLibraryModal,
+  // spaarke-ai-architecture-redesign-r2 task 062 (FR-A1-06 / FR-B-13) — outcome_card
+  // next-step chip click forwarding to host. Optional; ADR-012 generic seam (same
+  // pattern as onSelectPlaybook/onOpenLibraryModal above).
+  onNextStep,
   // R6 Pillar 6c / task 095 — trace bridge: context_event SSE forwarding to host.
   onContextEvent: onContextEventProp,
   // FR-P2-03 task 032 — capture_mode: modal wizard escape forwarding to host.
@@ -1220,6 +1229,17 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       onMessagesChange(messages);
     }
   }, [messages, onMessagesChange]);
+
+  // spaarkeai-compose-r2 task 072 (FR-35 Doc Q&A stretch) — fire onCitations
+  // whenever the SSE `citations` event populates a non-empty set (the SAME
+  // `streamCitations` state already attached to the last assistant message's
+  // render props above). Never fires on an empty array — an uncited answer
+  // must not trigger any downstream "grounded answer" reaction (ADR-039).
+  React.useEffect(() => {
+    if (onCitations && streamCitations.length > 0) {
+      onCitations(streamCitations);
+    }
+  }, [streamCitations, onCitations]);
 
   // Send a message and start streaming the response
   const handleSend = React.useCallback(
@@ -2371,6 +2391,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           // onOpenLibraryModal callbacks down so the inline link buttons in
           // the playbook_options card can dispatch the right actions (FR-50 / 51).
           const isPlaybookOptions = msg.metadata?.responseType === 'playbook_options';
+          // spaarke-ai-architecture-redesign-r2 task 062 (FR-A1-06 / FR-B-13) — thread
+          // onNextStep down so the outcome_card's next-step chips can dispatch.
+          const isOutcomeCard = msg.metadata?.responseType === 'outcome_card';
 
           // ── FR-14: Merge persistence state into document_status messages ────
           // The persistence state is tracked locally in documentPersistenceState map
@@ -2409,6 +2432,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
               msg.role === 'Assistant' && {
                 onInsert: handleInsert,
               }),
+            // DEF-08 Part B: "Open in Compose" on completed assistant messages — prop-gated the
+            // same way as onInsert. Only hosts that provide onOpenInCompose (SpaarkeAi's
+            // ConversationPane) render the affordance; others don't.
+            ...(onOpenInCompose &&
+              msg.role === 'Assistant' && {
+                onOpenInCompose,
+              }),
             ...(isPlanPreview && {
               onProceed: () => handlePlanProceed(index),
               onCancel: () => handlePlanCancel(index),
@@ -2429,6 +2459,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             ...(isPlaybookOptions && {
               onSelectPlaybook,
               onOpenLibraryModal,
+            }),
+            // spaarke-ai-architecture-redesign-r2 task 062 — wire the next-step chip
+            // click handler for the outcome_card card. When a host doesn't supply
+            // onNextStep, SprkChatMessageRenderer/OutcomeCard render the chips
+            // disabled (defensive UX, same pattern as playbook_options above).
+            ...(isOutcomeCard && {
+              onNextStep,
             }),
           };
 

@@ -20,7 +20,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Memory;
 /// </para>
 /// <para>
 /// Mocks the Cosmos <see cref="Container"/> directly via the internal test constructor —
-/// pattern mirrors <see cref="MatterMemoryServiceTests"/>.
+/// pattern mirrors <see cref="MemoryItemStoreTests"/>.
 /// </para>
 /// </remarks>
 public sealed class PinnedContextRepositoryTests

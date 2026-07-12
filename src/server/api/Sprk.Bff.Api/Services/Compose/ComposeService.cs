@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
@@ -51,7 +53,16 @@ public class ComposeService : IComposeService
     internal const string StepProfileAnalysis = "profile-analysis";
     internal const string StepIndexing = "indexing";
 
+    // FR-28 push/save pipeline (task 055) — the consumer-declared step set for the
+    // push-annotations orchestration: push (native OOXML render) → save (SPE write) →
+    // version (new version id confirmed). Mirrors the FR-05 step-naming convention above
+    // (stable string keys a future JobAwareCompletionState OutcomeCard renders).
+    internal const string StepPush = "push";
+    internal const string StepSave = "save";
+    internal const string StepVersion = "version";
+
     private const string ComposeCreateOnSaveJobType = "compose-create-on-save";
+    private const string ComposePushSaveJobType = "compose-push-save";
     private const string DocxContentType =
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -61,6 +72,7 @@ public class ComposeService : IComposeService
     private readonly DocxAnnotationWriter _annotationWriter;
     private readonly IPostUploadIndexingEnqueuer _indexing;
     private readonly ILogger<ComposeService> _logger;
+    private readonly ComposePushSaveStatusStore? _pushSaveStatusStore;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -68,7 +80,8 @@ public class ComposeService : IComposeService
         IGenericEntityService dataverse,
         DocxAnnotationWriter annotationWriter,
         IPostUploadIndexingEnqueuer indexing,
-        ILogger<ComposeService> logger)
+        ILogger<ComposeService> logger,
+        IDistributedCache? cache = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -76,6 +89,12 @@ public class ComposeService : IComposeService
         _annotationWriter = annotationWriter;
         _indexing = indexing;
         _logger = logger;
+        // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
+        // Optional + defaults null so existing 6-arg test constructors (sibling task suites
+        // 013/050/060/062/102) keep compiling unchanged; DI (AddScoped<IComposeService,
+        // ComposeService>) resolves the real IDistributedCache registered via
+        // AddStackExchangeRedisCache in every non-test host, so production always persists.
+        _pushSaveStatusStore = cache is not null ? new ComposePushSaveStatusStore(cache) : null;
     }
 
     /// <inheritdoc />
@@ -140,24 +159,29 @@ public class ComposeService : IComposeService
             ? request.DocumentRecordId.Value.ToString()
             : request.DocumentSpeId;
 
-        // FR-29 (R2, design.md §8): if the caller supplies a known prior SessionId bound to
-        // THIS SAME document identity, RESUME it instead of minting a new one — this is what
-        // carries AnchoredAnnotations/DefinedTermsTracking forward across a document re-open
-        // (the annotations are keyed to document identity, not to a DOCX version — design.md
-        // §8 "Cross-version persistence"). A mismatched or missing session falls back to the
-        // R1 mint-new behavior unchanged (purely additive).
+        // FR-29 (R2, design.md §8) + FR-33 (task 062): if the caller supplies a known prior
+        // SessionId bound to THIS SAME cross-version key — DocumentId (bindingId, already
+        // version-independent: sprk_documentid or the SPE drive-item id, NEVER a DOCX version
+        // identifier) AND, when supplied, MatterId — RESUME it instead of minting a new one.
+        // This is what carries AnchoredAnnotations/DefinedTermsTracking/action-history forward
+        // across a document re-open (design.md §8 "Cross-version persistence": bound to
+        // `DocumentId + MatterId`, NOT to a specific DOCX version — a Word save that produces a
+        // new version never changes this key). A mismatched or missing session falls back to
+        // the R1 mint-new behavior unchanged (purely additive; see
+        // <see cref="IsSameCrossVersionBinding"/>).
         ChatSession? session = null;
         if (!string.IsNullOrWhiteSpace(request.SessionId))
         {
             var candidate = await _sessions.GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
                 .ConfigureAwait(false);
-            if (candidate is not null && string.Equals(candidate.DocumentId, bindingId, StringComparison.Ordinal))
+            if (candidate is not null && IsSameCrossVersionBinding(candidate, bindingId, request.MatterId))
             {
                 session = candidate;
                 _logger.LogDebug(
-                    "Compose load: resumed existing session {SessionId} bound to document={BindingId} (tenant={TenantId}) — restoring {AnnotationCount} annotation(s), {DefinedTermCount} defined term(s)",
-                    session.SessionId, bindingId, request.TenantId,
-                    session.AnchoredAnnotations?.Count ?? 0, session.DefinedTermsTracking?.Count ?? 0);
+                    "Compose load: resumed existing session {SessionId} bound to document={BindingId} matter={MatterId} (tenant={TenantId}) — restoring {AnnotationCount} annotation(s), {DefinedTermCount} defined term(s), {OutputCount} ledger output(s)",
+                    session.SessionId, bindingId, request.MatterId, request.TenantId,
+                    session.AnchoredAnnotations?.Count ?? 0, session.DefinedTermsTracking?.Count ?? 0,
+                    session.Outputs?.Count ?? 0);
             }
         }
 
@@ -165,9 +189,15 @@ public class ComposeService : IComposeService
                 tenantId: request.TenantId,
                 documentId: bindingId,
                 playbookId: null,
-                hostContext: null,
+                hostContext: BuildMatterHostContext(request.MatterId),
                 ct: cancellationToken)
             .ConfigureAwait(false);
+
+        // FR-33 (task 062, design.md §8): restore prior decisions from the ledger alongside the
+        // FR-29 annotations — task 061's read-only GetActionHistory query over the resumed
+        // session's Outputs/ToolChains. No new stored structure (ADR-040); a freshly-minted
+        // session naturally has an empty ledger.
+        var actionHistory = GetActionHistory(session);
 
         return new LoadComposeDocumentResult
         {
@@ -181,8 +211,50 @@ public class ComposeService : IComposeService
             Size = metadata.Size,
             AnchoredAnnotations = session.AnchoredAnnotations ?? Array.Empty<AnchoredAnnotation>(),
             DefinedTermsTracking = session.DefinedTermsTracking ?? Array.Empty<DefinedTerm>(),
+            ActionHistory = actionHistory,
         };
     }
+
+    /// <summary>
+    /// FR-33 (design.md §8) cross-version session-binding predicate: a resumed session must
+    /// match the SAME <c>DocumentId</c> binding (<paramref name="bindingId"/> — version
+    /// independent by construction; see <see cref="LoadAsync"/> remarks) AND, when the caller
+    /// supplies a <paramref name="matterId"/>, the SAME Matter — read from the candidate
+    /// session's <see cref="ChatHostContext"/> (canonical <c>EntityType == "matter"</c> per
+    /// <see cref="Models.Ai.Chat.EntityTypeNormalizer"/>, <c>EntityId == matterId</c>). A
+    /// <c>null</c>/whitespace <paramref name="matterId"/> preserves the FR-29 DocumentId-only
+    /// match (backward compatible with callers that predate FR-33). This augments the EXISTING
+    /// caller-supplied-SessionId resume path — no new lookup index, no parallel session cache
+    /// (ADR-040).
+    /// </summary>
+    private static bool IsSameCrossVersionBinding(ChatSession candidate, string bindingId, string? matterId)
+    {
+        if (!string.Equals(candidate.DocumentId, bindingId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(matterId))
+        {
+            return true;
+        }
+
+        return candidate.HostContext is { } hostContext
+            && string.Equals(hostContext.EntityType, ParentEntityContext.EntityTypes.Matter, StringComparison.Ordinal)
+            && string.Equals(hostContext.EntityId, matterId, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// FR-33 (design.md §8): seeds a new Compose session's <see cref="ChatHostContext"/> with
+    /// the Matter binding when the caller supplies one, so the NEXT <see cref="LoadAsync"/>
+    /// call for the same document + matter can resume via
+    /// <see cref="IsSameCrossVersionBinding"/>. Returns <c>null</c> (R1 behavior, unchanged)
+    /// when no <paramref name="matterId"/> is supplied.
+    /// </summary>
+    private static ChatHostContext? BuildMatterHostContext(string? matterId) =>
+        string.IsNullOrWhiteSpace(matterId)
+            ? null
+            : new ChatHostContext(EntityType: ParentEntityContext.EntityTypes.Matter, EntityId: matterId);
 
     /// <inheritdoc />
     public async Task<SaveComposeDocumentResult> SaveAsync(
@@ -190,13 +262,24 @@ public class ComposeService : IComposeService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.SessionId))
-            throw new ArgumentException("SessionId is required for first-Save promotion rebind.", nameof(request));
+        // SessionId is OPTIONAL (task 110): the Browse/local-file first Save legitimately has no
+        // chat session. The FR-07 rebind this would drive is skipped below when SessionId is
+        // absent (empty/whitespace). TenantId + Content remain hard preconditions.
         if (string.IsNullOrWhiteSpace(request.TenantId))
             throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
         if (request.Content.IsEmpty)
             throw new ArgumentException("Content is required and must be non-empty.", nameof(request));
 
+        // ────────────────────────────────────────────────────────────────────────────
+        // FR-06a upload fidelity (task 015): the choice between the pristine ORIGINAL
+        // upload bytes and the tipTapToDocxBytes-regenerated bytes is made by the CALLER
+        // (ComposeWorkspace.tsx triggerSave), keyed off the editor's own dirty flag — an
+        // unedited mount sends the retained original bytes byte-identical; an edited
+        // mount sends the regenerated .docx. SaveAsync treats request.Content as an
+        // OPAQUE, already-decided byte payload: it MUST NOT re-encode, re-wrap, or
+        // otherwise transform it before persisting, in either branch below. See
+        // ComposeServiceUploadFidelityTests.cs for the byte-identity regression guard.
+        // ────────────────────────────────────────────────────────────────────────────
         var observedAt = DateTimeOffset.UtcNow;
         var isTransientCreate = string.IsNullOrWhiteSpace(request.DocumentSpeId);
 
@@ -346,8 +429,8 @@ public class ComposeService : IComposeService
     {
         if (string.IsNullOrWhiteSpace(request.DocumentSpeId))
             throw new ArgumentException("DocumentSpeId (drive-item id) is required.", nameof(request));
-        if (string.IsNullOrWhiteSpace(request.SessionId))
-            throw new ArgumentException("SessionId is required for the ephemeral→promoted rebind.", nameof(request));
+        // SessionId is OPTIONAL (task 110): the ephemeral→promoted rebind is skipped when no
+        // session is bound (transient Browse/local-file first Save). See the conditional rebinds below.
         if (string.IsNullOrWhiteSpace(request.TenantId))
             throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
 
@@ -361,13 +444,19 @@ public class ComposeService : IComposeService
                 "Compose promote: existing sprk_document {DocumentRecordId} found for driveItem={DocumentSpeId} — idempotent no-op",
                 existingId.Value, request.DocumentSpeId);
 
-            await RebindSessionDocumentIdAsync(
-                    tenantId: request.TenantId,
-                    sessionId: request.SessionId,
-                    currentDocumentId: request.DocumentSpeId,
-                    newDocumentId: existingId.Value.ToString(),
-                    cancellationToken)
-                .ConfigureAwait(false);
+            // FR-07 rebind is OPTIONAL (task 110): skip entirely when no session is bound
+            // (transient Browse/local-file first Save). RebindSessionDocumentIdAsync is already
+            // null-tolerant, but skipping avoids an empty-session lookup + a misleading warn.
+            if (!string.IsNullOrWhiteSpace(request.SessionId))
+            {
+                await RebindSessionDocumentIdAsync(
+                        tenantId: request.TenantId,
+                        sessionId: request.SessionId,
+                        currentDocumentId: request.DocumentSpeId,
+                        newDocumentId: existingId.Value.ToString(),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             return new PromoteComposeDocumentResult
             {
@@ -418,13 +507,18 @@ public class ComposeService : IComposeService
         }
 
         // 3) Rebind the ChatSession DocumentId from SPE id → new sprk_documentid (FR-07).
-        await RebindSessionDocumentIdAsync(
-                tenantId: request.TenantId,
-                sessionId: request.SessionId,
-                currentDocumentId: request.DocumentSpeId,
-                newDocumentId: newId.ToString(),
-                cancellationToken)
-            .ConfigureAwait(false);
+        //    OPTIONAL (task 110): skip when no session is bound (transient Browse/local-file
+        //    first Save). The sprk_document create above already completed without a session.
+        if (!string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            await RebindSessionDocumentIdAsync(
+                    tenantId: request.TenantId,
+                    sessionId: request.SessionId,
+                    currentDocumentId: request.DocumentSpeId,
+                    newDocumentId: newId.ToString(),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         return new PromoteComposeDocumentResult
         {
@@ -621,6 +715,8 @@ public class ComposeService : IComposeService
             "Compose push-annotations: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} annotations={AnnotationCount}",
             request.TenantId, request.DriveId, request.DocumentSpeId, request.Annotations.Count);
 
+        var observedAt = DateTimeOffset.UtcNow;
+
         // 1) Download the CURRENT bytes via the facade (ADR-007 — no Graph type here).
         var stream = await _spe.DownloadFileAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
             .ConfigureAwait(false);
@@ -638,26 +734,95 @@ public class ComposeService : IComposeService
             sourceBytes = buffer.ToArray();
         }
 
+        // ────────────────────────────────────────────────────────────────────────────
+        // FR-28 (task 055) — push/save pipeline with per-step JobAwareCompletionState
+        // projection (push → save → version). A failure at either step aborts the pipeline
+        // with NO partial write: the SPE write only happens after the pure Annotate render
+        // fully succeeds (an in-memory transform — nothing is sent to SPE until step 3), and
+        // ReplaceFileContentAsUserAsync's If-Match is atomic at the Graph boundary (the whole
+        // new version lands or the whole call is rejected — never a half-applied version).
+        // Every branch below persists the resulting per-step state to Redis (ADR-009) before
+        // propagating/returning, so a future job-aware OutcomeCard has real state to read
+        // regardless of outcome.
+        // ────────────────────────────────────────────────────────────────────────────
+
         // 2) Render annotations into native OOXML markup. Pure — no I/O, no AI (ADR-013).
         //    DocxAnnotationException (malformed / target-not-found) propagates to the endpoint,
         //    which maps it to 400 / 422 ProblemDetails. This runs BEFORE the write, so a bad
         //    annotation batch never leaves a partial SPE version.
-        var annotatedBytes = _annotationWriter.Annotate(sourceBytes, request.Annotations);
+        byte[] annotatedBytes;
+        try
+        {
+            annotatedBytes = _annotationWriter.Annotate(sourceBytes, request.Annotations);
+        }
+        catch (Exception ex)
+        {
+            await PersistPushSaveStatusAsync(
+                    request.DocumentSpeId,
+                    FailedSignal(StepPush, $"push failed: {ex.Message}"),
+                    NotStartedSignal(StepSave),
+                    NotStartedSignal(StepVersion),
+                    observedAt,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            throw;
+        }
 
         // 3) Persist with optimistic concurrency (If-Match). A drive-item that moved under the
         //    caller (Word autosave) surfaces as EtagPreconditionFailedException (412); an open
         //    Word co-authoring session surfaces as DocumentLockedByWordException (423). Both
         //    propagate to the endpoint. Nothing partially writes.
         using var annotatedStream = new MemoryStream(annotatedBytes, writable: false);
-        var saved = await _spe.ReplaceFileContentAsUserAsync(
-                httpContext, request.DriveId, request.DocumentSpeId, annotatedStream, request.IfMatch, cancellationToken)
-            .ConfigureAwait(false);
+        FileHandleDto? saved;
+        try
+        {
+            saved = await _spe.ReplaceFileContentAsUserAsync(
+                    httpContext, request.DriveId, request.DocumentSpeId, annotatedStream, request.IfMatch, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await PersistPushSaveStatusAsync(
+                    request.DocumentSpeId,
+                    CompletedSignal(StepPush),
+                    FailedSignal(StepSave, $"save failed: {ex.Message}"),
+                    NotStartedSignal(StepVersion),
+                    observedAt,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            throw;
+        }
 
         if (saved is null || string.IsNullOrEmpty(saved.Id))
         {
+            await PersistPushSaveStatusAsync(
+                    request.DocumentSpeId,
+                    CompletedSignal(StepPush),
+                    FailedSignal(StepSave, "SPE annotated-write returned no version id"),
+                    NotStartedSignal(StepVersion),
+                    observedAt,
+                    cancellationToken)
+                .ConfigureAwait(false);
             throw new InvalidOperationException(
                 $"SPE annotated-write failed: drive-item not found or version not returned. drive={request.DriveId} item={request.DocumentSpeId}");
         }
+
+        // 4) All three steps landed — persist the terminal-success state.
+        var completion = await PersistPushSaveStatusAsync(
+                request.DocumentSpeId,
+                CompletedSignal(StepPush),
+                CompletedSignal(StepSave),
+                CompletedSignal(StepVersion),
+                observedAt,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        // 5) Tier-2c preview echo (design.md §2.4 / HANDOFF §4): comment/track-change counts +
+        //    the Word-vs-Compose split, attached as post-write completion evidence. The SAME
+        //    calculator backs the pre-confirm PreviewPushAnnotationsAsync path below.
+        var composeOnlyCount = await ResolveComposeOnlyCountAsync(request.TenantId, request.SessionId, cancellationToken)
+            .ConfigureAwait(false);
+        var preview = ComposePushSavePreviewCalculator.Compute(request.Annotations, composeOnlyCount);
 
         return new PushAnnotationsResult
         {
@@ -667,8 +832,120 @@ public class ComposeService : IComposeService
             ETag = saved.ETag,
             Size = saved.Size,
             AnnotationCount = request.Annotations.Count,
+            Preview = preview,
+            CompletionState = completion,
         };
     }
+
+    /// <inheritdoc />
+    public async Task<ComposePushSavePreview> PreviewPushAnnotationsAsync(
+        PreviewPushAnnotationsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.TenantId))
+            throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
+        if (request.Annotations is null || request.Annotations.Count == 0)
+            throw new ArgumentException("At least one annotation is required.", nameof(request));
+
+        var composeOnlyCount = await ResolveComposeOnlyCountAsync(request.TenantId, request.SessionId, cancellationToken)
+            .ConfigureAwait(false);
+        return ComposePushSavePreviewCalculator.Compute(request.Annotations, composeOnlyCount);
+    }
+
+    // =========================================================================
+    // FR-28 push/save pipeline — helpers (per-step job-aware projection + Redis persistence).
+    // Mirrors the FR-05 create-on-save helpers above (CompletedSignal / ProjectCreateOnSaveState)
+    // — same JobAwareCompletionStateProjector, a different consumer-declared step set.
+    // =========================================================================
+
+    /// <summary>
+    /// FR-28: resolves the "stays in Compose only" count for the Tier-2c preview from the
+    /// session's <c>DefinedTermsTracking</c> (FR-29) — the one Compose-domain collection with no
+    /// Word-native OOXML representation (contrast anchored annotations, which map onto the
+    /// <c>DocxAnnotation</c> push payload). Returns 0 (graceful degrade, not a failure) when no
+    /// session id is supplied — callers that predate this optional field still get a valid
+    /// preview, just with <c>ComposeOnlyCount</c> = 0.
+    /// </summary>
+    private async Task<int> ResolveComposeOnlyCountAsync(string tenantId, string? sessionId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return 0;
+        }
+
+        var state = await GetComposeAnnotationsAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+        return state.DefinedTermsTracking.Count;
+    }
+
+    /// <summary>
+    /// FR-28: projects the push/save per-step signals through the shared
+    /// <see cref="JobAwareCompletionStateProjector"/> and persists the result to Redis (ADR-009)
+    /// via <see cref="ComposePushSaveStatusStore"/> — best-effort: a Redis outage is logged and
+    /// swallowed here so it never masks or rolls back a document write/failure that has already
+    /// happened on its own terms (see <see cref="ComposePushSaveStatusStore"/> remarks). The
+    /// projected state is always returned/used for the in-flight HTTP response regardless of
+    /// whether the Redis write succeeded.
+    /// </summary>
+    private async Task<JobAwareCompletionState> PersistPushSaveStatusAsync(
+        string documentSpeId,
+        StoredStepSignal pushSignal,
+        StoredStepSignal saveSignal,
+        StoredStepSignal versionSignal,
+        DateTimeOffset observedAt,
+        CancellationToken ct)
+    {
+        var job = new JobContract
+        {
+            JobType = ComposePushSaveJobType,
+            SubjectId = documentSpeId,
+            CorrelationId = documentSpeId,
+            IdempotencyKey = $"compose-push-save-{documentSpeId}-{observedAt.Ticks}",
+        };
+
+        var completion = JobAwareCompletionStateProjector.Project(
+            job,
+            new List<StoredStepSignal> { pushSignal, saveSignal, versionSignal },
+            observedAt);
+
+        if (_pushSaveStatusStore is not null)
+        {
+            try
+            {
+                await _pushSaveStatusStore.SaveAsync(documentSpeId, completion, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose push-save: failed to persist cross-request completion state to Redis for driveItem={DocumentSpeId} — the in-flight response is unaffected.",
+                    documentSpeId);
+            }
+        }
+
+        return completion;
+    }
+
+    /// <summary>A stored terminal-failure signal for a step (single attempt, so never
+    /// RetryPending — the push/save pipeline does not auto-retry within one HTTP call).</summary>
+    private static StoredStepSignal FailedSignal(string stepName, string detail) => new()
+    {
+        StepName = stepName,
+        StoredStatus = JobStatus.Failed,
+        Started = true,
+        Attempt = 1,
+        MaxAttempts = 1,
+        Detail = detail,
+    };
+
+    /// <summary>A stored non-terminal "never started" signal for a step that never ran because an
+    /// earlier step in the SAME pipeline invocation failed first (pipeline-abort semantics — no
+    /// partial write, no partial step).</summary>
+    private static StoredStepSignal NotStartedSignal(string stepName) => new()
+    {
+        StepName = stepName,
+        StoredStatus = null,
+        Started = false,
+    };
 
     // =========================================================================
     // FR-29 anchored annotations (task 060). See design.md §8 + ChatSession.cs

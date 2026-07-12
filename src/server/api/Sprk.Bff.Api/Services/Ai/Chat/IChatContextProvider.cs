@@ -44,6 +44,18 @@ public interface IChatContextProvider
     /// omit the parameter behave exactly as before. Treat <c>null</c> and empty list
     /// identically ("no manifest").
     /// </param>
+    /// <param name="sessionId">
+    /// Optional chat session id (F-1/F-2/F-7 envelope-convergence task, D1). When supplied together with a
+    /// Context Binder, the provider performs the ONE per-turn ContextEnvelope bind here (writing the
+    /// context fingerprint, ADR-040 store-before-render) and consumes the bound envelope for the
+    /// host-identity / user-memory / record-memory sections. Null → the provider skips the bind and falls
+    /// back to the shipped direct-append path (byte-identical output).
+    /// </param>
+    /// <param name="ledgerOutputs">
+    /// Optional session ledger outputs (ADR-040) for the per-turn bind (D1): the conversation-tail
+    /// references, the turn ordinal (max prior output turn + 1) the fingerprint anchors to, and the live
+    /// Conversation token measurement (F-7). Null/empty is a first turn.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A fully composed <see cref="ChatContext"/>.</returns>
     Task<ChatContext> GetContextAsync(
@@ -53,5 +65,7 @@ public interface IChatContextProvider
         ChatHostContext? hostContext = null,
         IReadOnlyList<string>? additionalDocumentIds = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
+        string? sessionId = null,
+        IReadOnlyList<SessionOutput>? ledgerOutputs = null,
         CancellationToken cancellationToken = default);
 }

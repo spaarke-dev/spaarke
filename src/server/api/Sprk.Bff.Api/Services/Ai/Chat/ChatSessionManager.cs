@@ -542,7 +542,20 @@ public class ChatSessionManager
             ToolChains = SessionPersistenceService.MapToolChainsToStored(session.ToolChains),
             WidgetEvents = SessionPersistenceService.MapWidgetEventsToStored(session.WidgetEvents),
             Gates = SessionPersistenceService.MapGatesToStored(session.Gates),
-            ContextFingerprints = SessionPersistenceService.MapContextFingerprintsToStored(session.ContextFingerprints)
+            ContextFingerprints = SessionPersistenceService.MapContextFingerprintsToStored(session.ContextFingerprints),
+
+            // R2 Compose-domain annotations (FR-29 / task 102 gap 4.5 / DEF-05): carry the two
+            // MUTABLE Compose collections through the warm tier so they survive a Redis eviction /
+            // cold restore. Null (no annotations yet) maps to an empty list. Domain records stored
+            // directly (see StoredSession remarks). Action history is NOT stored — it projects over
+            // Outputs (above), which already round-trip.
+            AnchoredAnnotations = session.AnchoredAnnotations?.ToList() ?? [],
+            DefinedTermsTracking = session.DefinedTermsTracking?.ToList() ?? [],
+
+            // R2 session-scoped active-document pointer (task 113): carry it through the warm tier
+            // so a Redis eviction / cold restore does not silently drop the active document (the
+            // ADR-040 document-reference-survival MUST — the same P2 class this mapper documents).
+            ActiveDocument = session.ActiveDocument
         };
     }
 
@@ -607,7 +620,22 @@ public class ChatSessionManager
             ToolChains = SessionPersistenceService.MapToolChainsFromStored(stored.ToolChains),
             WidgetEvents = SessionPersistenceService.MapWidgetEventsFromStored(stored.WidgetEvents),
             Gates = SessionPersistenceService.MapGatesFromStored(stored.Gates),
-            ContextFingerprints = SessionPersistenceService.MapContextFingerprintsFromStored(stored.ContextFingerprints)
+            ContextFingerprints = SessionPersistenceService.MapContextFingerprintsFromStored(stored.ContextFingerprints),
+
+            // R2 Compose-domain annotations (FR-29 / task 102 gap 4.5 / DEF-05): restore the two
+            // MUTABLE Compose collections from the warm tier. Empty stored lists map to null ("none
+            // yet") — matching the sibling ledger collections' convention.
+            AnchoredAnnotations = stored.AnchoredAnnotations is { Count: > 0 }
+                ? stored.AnchoredAnnotations
+                : null,
+            DefinedTermsTracking = stored.DefinedTermsTracking is { Count: > 0 }
+                ? stored.DefinedTermsTracking
+                : null,
+
+            // R2 session-scoped active-document pointer (task 113) — restore from the warm tier
+            // (null when the Cosmos document pre-dates the field). Matches the sibling collections'
+            // convention: absent → null ("no active document yet").
+            ActiveDocument = stored.ActiveDocument
         };
     }
 }

@@ -56,8 +56,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// pinned-context entity is a user-curated memory primitive consumed by hierarchical memory
 /// composition at chat-turn build time (task 067) — there is no playbook-node executor that
 /// writes user pins. Mirrors the chat-only scoping of task 054
-/// (<see cref="SendWorkspaceArtifactHandler"/>) and task 055
-/// (<see cref="UpdateWorkspaceTabHandler"/>).
+/// (<see cref="SendWorkspaceArtifactHandler"/>).
 /// </para>
 ///
 /// <para>
@@ -115,7 +114,7 @@ public sealed class ManagePinnedContextHandler : IToolHandler
     // specific `context.*` event types per ADR-015 (the existing method
     // signatures don't fit pin-mutation telemetry, exactly as task 068's
     // shared-budget tracker found). Following the workspace.conflict_refused
-    // Counter pattern from task 058 (UpdateWorkspaceTabHandler) keeps both
+    // Counter pattern from task 058 keeps both
     // contracts simple and ADR-015-compliant.
     // ─────────────────────────────────────────────────────────────────────────
     internal const string MeterName = "Sprk.Bff.Api.Memory";

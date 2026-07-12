@@ -37,7 +37,7 @@
  * @see ADR-012 — Shared Component Library (context-agnostic services)
  */
 
-import { discoverNavProps, findNavProp } from '@spaarke/ui-components';
+import { discoverNavProps, findNavProp, cleanGuid } from '@spaarke/ui-components';
 import type { AssociationResult, EntityTypeOption, IDataService } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
@@ -161,11 +161,16 @@ export async function associateDocumentToParent(
       );
     }
 
-    const cleanRecordId = association.recordId.replace(/[{}]/g, '').toLowerCase();
+    // cleanGuid (task 100): both the parent recordId (Xrm picker source) and the server-minted
+    // sprk_document id enter OData URLs — the @odata.bind value and the `/sprk_documents(id)`
+    // path. Wrap BOTH with the canonical `cleanGuid` (no-op on bare GUIDs). NEVER hand-roll
+    // `.replace(/[{}]/g,'')` — a repo-wide bug was caused by scattered local brace-strippers.
+    const cleanRecordId = cleanGuid(association.recordId);
+    const cleanDocumentId = cleanGuid(documentId);
     const entitySet = _ENTITY_SET_MAP[association.entityType];
     const bindProp = navProp ?? association.entityType;
 
-    await dataService.updateRecord('sprk_document', documentId, {
+    await dataService.updateRecord('sprk_document', cleanDocumentId, {
       [`${bindProp}@odata.bind`]: `/${entitySet}(${cleanRecordId})`,
     });
 

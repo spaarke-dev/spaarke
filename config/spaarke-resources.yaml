@@ -228,10 +228,13 @@ environments:
         semantic_search: standard
         resource_id: /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/spe-infrastructure-westus2/providers/Microsoft.Search/searchServices/spaarke-search-dev
         # ---------------------------------------------------------------------
-        # Canonical 8-index catalog (post `spaarke-ai-azure-setup-dev-r1` Phase 5)
+        # Canonical 7-index catalog (post `spaarke-ai-azure-setup-dev-r1` Phase 5;
+        # `spaarke-playbook-embeddings` RETIRED — physically deleted from
+        # spaarke-search-dev, verified 404 on 2026-07-10 by task AIR2-076;
+        # embedding dispatch replaced by the ADR-039 closed-catalog model).
         # See: docs/architecture/AI-SEARCH-INDEX-CATALOG.md §4 for full per-index
         # consumer map, schema path, scope dimensions, and post-deploy invariants.
-        # All 8 deployed + invariants pass; ingested counts as of 2026-06-26.
+        # Ingested counts as of 2026-06-26.
         # ---------------------------------------------------------------------
         indexes:
           spaarke-files-index:
@@ -269,11 +272,8 @@ environments:
             schema: infrastructure/ai-search/spaarke-invoices-index.json
             ingestion: runtime (InvoiceIndexingJobHandler)
             doc_count_2026_06_26: 0 # schema-only for dev rebuild
-          spaarke-playbook-embeddings:
-            purpose: Playbook dispatch vectors; global (no tenantId — shared catalog); renamed from `playbook-embeddings`
-            schema: infrastructure/ai-search/spaarke-playbook-embeddings.json
-            ingestion: scripts/Index-ExistingPlaybooks.ps1
-            doc_count_2026_06_26: 34
+          # spaarke-playbook-embeddings: RETIRED (deleted from the live service;
+          # 404 verified 2026-07-10, task AIR2-076 — see header note above)
         # ---------------------------------------------------------------------
         # Default index (BACKWARD-COMPAT): used by code paths that haven't yet
         # adopted the per-record / per-request searchIndexName parameter

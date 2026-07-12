@@ -1,6 +1,6 @@
 {
   "$schema": "https://spaarke.com/schemas/scope-model-index/v1",
-  "$generated": "2026-07-07T13:55:44Z",
+  "$generated": "2026-07-10T10:30:51Z",
   "actions": [
     {
       "code": "INS-OBS",
@@ -208,8 +208,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Comprehensive review of commercial contracts to extract obligations, parties, key dates, payment terms, and risk factors.",
-      "documentTypes": ["Contract", "MSA", "PSA", "VendorAgreement"],
-      "tags": ["legal", "contract", "review"]
+      "documentTypes": null,
+      "tags": null
     },
     {
       "code": "ACT-003",
@@ -219,8 +219,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Analysis of commercial and residential lease agreements to extract rent obligations, lease term, renewal options, permitted use, and termination rights.",
-      "documentTypes": ["CommercialLease", "ResidentialLease", "NNN", "OfficeLease", "RetailLease"],
-      "tags": ["legal", "lease", "real-estate"]
+      "documentTypes": null,
+      "tags": null
     },
     {
       "code": "ACT-005",
@@ -230,8 +230,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Analysis of Service Level Agreements to identify service level objectives, performance metrics, measurement methodology, penalties and remedies, exclusions, and escalation procedures.",
-      "documentTypes": ["SLA", "ManagedServiceSLA", "CloudSLA"],
-      "tags": ["legal", "sla", "service-level"]
+      "documentTypes": null,
+      "tags": null
     },
     {
       "code": "ACT-023",
@@ -373,8 +373,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Analysis of non-disclosure agreements to identify key restrictions, permitted disclosures, exclusions, effective dates, and mutual vs. unilateral obligations.",
-      "documentTypes": ["NDA", "ConfidentialityAgreement", "CDA"],
-      "tags": ["legal", "nda", "confidentiality"]
+      "documentTypes": null,
+      "tags": null
     },
     {
       "code": "ACT-004",
@@ -384,8 +384,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Extraction and validation of invoice data including vendor details, invoice number, line items, amounts, taxes, payment terms, and due dates for accounts payable processing.",
-      "documentTypes": ["Invoice", "UtilityBill", "SubscriptionInvoice", "APDocument"],
-      "tags": ["financial", "invoice", "accounts-payable"]
+      "documentTypes": null,
+      "tags": null
     },
     {
       "code": "ACT-006",
@@ -395,8 +395,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Analysis of employment agreements to extract compensation, benefits, equity, IP assignment, non-compete and non-solicitation restrictions, termination provisions, and severance terms.",
-      "documentTypes": ["OfferLetter", "EmploymentContract", "ContractorAgreement"],
-      "tags": ["legal", "employment", "HR"]
+      "documentTypes": null,
+      "tags": null
     },
     {
       "code": "ACT-007",
@@ -406,8 +406,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Analysis of Statements of Work to extract deliverables, milestones, acceptance criteria, payment schedules, change order procedures, and key dependencies or assumptions.",
-      "documentTypes": ["SOW", "WorkOrder", "TaskOrder", "ProjectOrder"],
-      "tags": ["legal", "sow", "project"]
+      "documentTypes": null,
+      "tags": null
     },
     {
       "code": "ACT-008",
@@ -417,8 +417,8 @@
       "modelTier": null,
       "workflowClass": null,
       "description": "Catch-all legal document analysis for unclassified legal instruments. Identifies document type, parties, key obligations, critical dates, financial commitments, and risk factors for any legal document not covered by a more specific action.",
-      "documentTypes": ["LegalDocument", "Unclassified"],
-      "tags": ["legal", "general", "triage"]
+      "documentTypes": null,
+      "tags": null
     },
     {
       "code": "ACT-017",
@@ -636,7 +636,7 @@
       "kind": "Coded",
       "modelTier": null,
       "workflowClass": "DailyBriefingNarrator",
-      "description": "FR-P3-04 (spaarke-ai-architecture-redesign-r1 task 043): the platform's FIRST full coded composite Action. Executes the registered ICodedWorkflow class DailyBriefingNarrator (collect via DailyBriefingCollector feeder -> TL;DR narration reading its prompt hot-editable from the BRIEF-NARRATE-TLDR Action row + deterministic per-channel bullets (R5 tasks 010/012 retired the former per-channel LLM Action) -> entity-name scrub -> section-keyed output). Dispatched exclusively via its daily-briefing-narrate Binding rows (default=render/informational, email=email disposition). Control flow is code; behavior is data (ADR-039).",
+      "description": "FR-P3-04 (spaarke-ai-architecture-redesign-r1 task 043): the platform's FIRST full coded composite Action. Executes the registered ICodedWorkflow class DailyBriefingNarrator (collect via DailyBriefingCollector feeder -> TL;DR + per-channel narration reading prompts hot-editable from the BRIEF-NARRATE-TLDR / BRIEF-NARRATE-CHANNEL Action rows -> entity-name scrub -> section-keyed output). Dispatched exclusively via its daily-briefing-narrate Binding rows (default=render/informational, email=email disposition). Control flow is code; behavior is data (ADR-039).",
       "documentTypes": null,
       "tags": null
     },
@@ -658,40 +658,40 @@
       "id": "62518925-d310-f111-8342-7c1e520aa4df",
       "name": "Summary Generation",
       "description": "Generate an executive summary of 3-5 key bullet points at the start of the response",
-      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-004", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
-      "tags": ["summary", "executive", "overview"]
+      "compatibleActions": null,
+      "tags": null
     },
     {
       "code": "SKL-005",
       "id": "63518925-d310-f111-8342-7c1e520aa4df",
       "name": "Party Identification",
       "description": "Identify all parties with full legal names, roles, shortened forms, and any stated contact details",
-      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
-      "tags": ["parties", "identification", "entities"]
+      "compatibleActions": null,
+      "tags": null
     },
     {
       "code": "SKL-006",
       "id": "64518925-d310-f111-8342-7c1e520aa4df",
       "name": "Obligation Mapping",
       "description": "Map all mutual obligations into a structured table showing party, obligation, condition, and deadline",
-      "compatibleActions": ["ACT-001", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
-      "tags": ["obligations", "mapping", "structured"]
+      "compatibleActions": null,
+      "tags": null
     },
     {
       "code": "SKL-008",
       "id": "65518925-d310-f111-8342-7c1e520aa4df",
       "name": "Financial Terms",
       "description": "Extract all monetary amounts, payment schedules, rates, and financial obligations",
-      "compatibleActions": ["ACT-001", "ACT-003", "ACT-004", "ACT-005", "ACT-007"],
-      "tags": ["financial", "monetary", "payment"]
+      "compatibleActions": null,
+      "tags": null
     },
     {
       "code": "SKL-010",
       "id": "66518925-d310-f111-8342-7c1e520aa4df",
       "name": "Jurisdiction and Governing Law",
       "description": "Identify applicable law, jurisdiction, dispute resolution mechanism, and arbitration body",
-      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
-      "tags": ["jurisdiction", "governing-law", "dispute-resolution"]
+      "compatibleActions": null,
+      "tags": null
     },
     {
       "code": "SKL-025",
@@ -794,40 +794,40 @@
       "id": "1a434c23-d310-f111-8342-7ced8d1dc988",
       "name": "Citation Extraction",
       "description": "Inject citation instructions — every claim is followed by [Section: X, Page Y] references",
-      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
-      "tags": ["citation", "sourcing", "evidence"]
+      "compatibleActions": null,
+      "tags": null
     },
     {
       "code": "SKL-002",
       "id": "1c434c23-d310-f111-8342-7ced8d1dc988",
       "name": "Risk Flagging",
       "description": "Highlight clauses requiring legal review with [RISK: HIGH/MEDIUM/LOW] prefixes",
-      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
-      "tags": ["risk", "flagging", "compliance"]
+      "compatibleActions": null,
+      "tags": null
     },
     {
       "code": "SKL-004",
       "id": "1e434c23-d310-f111-8342-7ced8d1dc988",
       "name": "Date Extraction",
       "description": "Extract and normalize all dates to ISO 8601 format in a structured Key Dates table",
-      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-004", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
-      "tags": ["dates", "extraction", "normalization"]
+      "compatibleActions": null,
+      "tags": null
     },
     {
       "code": "SKL-007",
       "id": "1f434c23-d310-f111-8342-7ced8d1dc988",
       "name": "Defined Terms",
       "description": "Extract all defined terms and their definitions into an alphabetical glossary",
-      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
-      "tags": ["definitions", "glossary", "terms"]
+      "compatibleActions": null,
+      "tags": null
     },
     {
       "code": "SKL-009",
       "id": "20434c23-d310-f111-8342-7ced8d1dc988",
       "name": "Termination Analysis",
       "description": "Analyze all termination triggers, notice periods, cure periods, and post-termination consequences",
-      "compatibleActions": ["ACT-001", "ACT-002", "ACT-003", "ACT-005", "ACT-006", "ACT-007", "ACT-008"],
-      "tags": ["termination", "notice", "cure"]
+      "compatibleActions": null,
+      "tags": null
     },
     {
       "code": "SKL-035",
@@ -904,15 +904,6 @@
   ],
   "knowledge": [
     {
-      "code": "KNW-009-governing-law-and-jurisdiction-guide",
-      "id": "a7bd8e41-8271-f111-ab0d-70a8a590c51c",
-      "name": "KNW-009-governing-law-and-jurisdiction-guide",
-      "deliveryType": "RAG Index",
-      "description": "Golden reference document: KNW-009-governing-law-and-jurisdiction-guide. Indexed into spaarke-rag-references for RAG retrieval.",
-      "contentType": "Reference",
-      "tags": null
-    },
-    {
       "code": "KM-017",
       "id": "67a89c92-5218-f111-8343-7c1e520aa4df",
       "name": "invoice-validation-rules",
@@ -937,7 +928,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: definitions for 50+ standard contract terms including acceptance, amendment, arbitration, assignment, breach, cap on liability, confidentiality, force majeure, governing law, indemnification, IP, limitation of liability, representations and warranties, severability, termination, and waiver.",
       "contentType": "Reference",
-      "tags": ["glossary", "contract", "definitions"]
+      "tags": null
     },
     {
       "code": "KNW-003",
@@ -946,7 +937,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: commercial lease standards covering base rent and escalation, operating expense structures, controllable vs. uncontrollable expense caps, permitted use, exclusive use rights, renewal/expansion/termination options, tenant improvement allowance, and holdover provisions.",
       "contentType": "Reference",
-      "tags": ["lease", "commercial", "standards"]
+      "tags": null
     },
     {
       "code": "KNW-004",
@@ -955,7 +946,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: AP invoice processing guide covering invoice types, required fields, three-way and two-way matching, matching tolerances, duplicate detection, vendor master file validation, PO validation, contract compliance, tax validation, exception handling, and approval workflow.",
       "contentType": "Reference",
-      "tags": ["invoice", "accounts-payable", "processing"]
+      "tags": null
     },
     {
       "code": "KNW-007",
@@ -964,7 +955,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: annotated IP assignment clauses including broad work product assignment, independent contractor work-for-hire, background IP definition and license-back, prior inventions exclusion, AI/ML model and training data assignment, open source compliance, moral rights waiver, and future patents assignment.",
       "contentType": "Reference",
-      "tags": ["IP", "assignment", "clauses"]
+      "tags": null
     },
     {
       "code": "KNW-008",
@@ -973,7 +964,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: comprehensive termination and remedy reference covering termination for cause triggers, notice and cure periods, termination for convenience, termination fees, post-termination transition, return/destruction of data, survival provisions, damages types, liquidated damages, injunctive relief, and set-off rights.",
       "contentType": "Reference",
-      "tags": ["termination", "remedies", "provisions"]
+      "tags": null
     },
     {
       "code": "KNW-009",
@@ -982,7 +973,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: governing law and dispute resolution reference covering common US/international law choices, conflict-of-law exclusions, exclusive vs. non-exclusive jurisdiction, arbitration institutions, tiered dispute resolution, interim relief, and New York Convention enforcement.",
       "contentType": "Reference",
-      "tags": ["jurisdiction", "governing-law", "arbitration"]
+      "tags": null
     },
     {
       "code": "KM-002",
@@ -1045,7 +1036,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: 20-item checklist for NDA review covering party identification, purpose, confidential information definition and scope, standard exclusions, standard of care, permitted use, permitted disclosure, agreement term, survival of obligations, return/destruction, injunctive relief, and governing law.",
       "contentType": "Reference",
-      "tags": ["checklist", "nda", "review"]
+      "tags": null
     },
     {
       "code": "KNW-005",
@@ -1054,7 +1045,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: SLA/SLO/SLI definitions, availability tiers, response time/latency metrics, throughput, error rate targets, incident severity levels with response time and resolution SLAs, tiered service credit schedules, and measurement methodology.",
       "contentType": "Reference",
-      "tags": ["sla", "metrics", "availability"]
+      "tags": null
     },
     {
       "code": "KNW-006",
@@ -1063,7 +1054,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: US employment law fundamentals covering at-will employment, employee vs. independent contractor classification, FLSA wage and overtime, non-compete enforceability by state, DTSA immunity notice, work made for hire, invention assignment, FMLA, ADA, USERRA, WARN Act, and OWBPA requirements.",
       "contentType": "Reference",
-      "tags": ["employment", "labor-law", "compliance"]
+      "tags": null
     },
     {
       "code": "KNW-010",
@@ -1072,7 +1063,7 @@
       "deliveryType": "RAG Index",
       "description": "Vectorized reference document: 32 red flags across 10 categories with severity ratings covering liability/indemnification, payment/financial, termination, data/privacy, IP, contract structure, dispute resolution, confidentiality, employment/personnel, and miscellaneous flags.",
       "contentType": "Reference",
-      "tags": ["red-flags", "risk", "compliance"]
+      "tags": null
     },
     {
       "code": "KM-005",
@@ -1098,87 +1089,6 @@
       "name": "DD Checklist",
       "deliveryType": "Inline",
       "description": "Due diligence checklist categories for comprehensive contract and document review. Organized by workstream: corporate governance, financial, tax, employment, intellectual property, real estate, environmental, litigation, regulatory, and commercial contracts.",
-      "contentType": "Reference",
-      "tags": null
-    },
-    {
-      "code": "KNW-003-lease-agreement-standards",
-      "id": "e43ffc17-8271-f111-ab0d-7ced8ddc4a05",
-      "name": "KNW-003-lease-agreement-standards",
-      "deliveryType": "RAG Index",
-      "description": "Golden reference document: KNW-003-lease-agreement-standards. Indexed into spaarke-rag-references for RAG retrieval.",
-      "contentType": "Reference",
-      "tags": null
-    },
-    {
-      "code": "KNW-005-sla-metrics-reference",
-      "id": "28549e24-8271-f111-ab0d-7ced8ddc4a05",
-      "name": "KNW-005-sla-metrics-reference",
-      "deliveryType": "RAG Index",
-      "description": "Golden reference document: KNW-005-sla-metrics-reference. Indexed into spaarke-rag-references for RAG retrieval.",
-      "contentType": "Reference",
-      "tags": null
-    },
-    {
-      "code": "KNW-006-employment-law-quick-reference",
-      "id": "3a99f32a-8271-f111-ab0d-7ced8ddc4a05",
-      "name": "KNW-006-employment-law-quick-reference",
-      "deliveryType": "RAG Index",
-      "description": "Golden reference document: KNW-006-employment-law-quick-reference. Indexed into spaarke-rag-references for RAG retrieval.",
-      "contentType": "Reference",
-      "tags": null
-    },
-    {
-      "code": "KNW-008-termination-and-remedy-provisions",
-      "id": "20fb7839-8271-f111-ab0d-7ced8ddc4a05",
-      "name": "KNW-008-termination-and-remedy-provisions",
-      "deliveryType": "RAG Index",
-      "description": "Golden reference document: KNW-008-termination-and-remedy-provisions. Indexed into spaarke-rag-references for RAG retrieval.",
-      "contentType": "Reference",
-      "tags": null
-    },
-    {
-      "code": "KNW-001-contract-terms-glossary",
-      "id": "a928110e-8271-f111-ab0d-7ced8ddc4cc6",
-      "name": "KNW-001-contract-terms-glossary",
-      "deliveryType": "RAG Index",
-      "description": "Golden reference document: KNW-001-contract-terms-glossary. Indexed into spaarke-rag-references for RAG retrieval.",
-      "contentType": "Reference",
-      "tags": null
-    },
-    {
-      "code": "KNW-002-nda-checklist",
-      "id": "7732a516-8271-f111-ab0d-7ced8ddc4cc6",
-      "name": "KNW-002-nda-checklist",
-      "deliveryType": "RAG Index",
-      "description": "Golden reference document: KNW-002-nda-checklist. Indexed into spaarke-rag-references for RAG retrieval.",
-      "contentType": "Reference",
-      "tags": null
-    },
-    {
-      "code": "KNW-004-invoice-processing-guide",
-      "id": "173b1923-8271-f111-ab0d-7ced8ddc4cc6",
-      "name": "KNW-004-invoice-processing-guide",
-      "deliveryType": "RAG Index",
-      "description": "Golden reference document: KNW-004-invoice-processing-guide. Indexed into spaarke-rag-references for RAG retrieval.",
-      "contentType": "Reference",
-      "tags": null
-    },
-    {
-      "code": "KNW-007-ip-assignment-clause-library",
-      "id": "ec2d2935-8271-f111-ab0d-7ced8ddc4cc6",
-      "name": "KNW-007-ip-assignment-clause-library",
-      "deliveryType": "RAG Index",
-      "description": "Golden reference document: KNW-007-ip-assignment-clause-library. Indexed into spaarke-rag-references for RAG retrieval.",
-      "contentType": "Reference",
-      "tags": null
-    },
-    {
-      "code": "KNW-010-legal-red-flags-catalog",
-      "id": "e2d04145-8271-f111-ab0d-7ced8ddc4cc6",
-      "name": "KNW-010-legal-red-flags-catalog",
-      "deliveryType": "RAG Index",
-      "description": "Golden reference document: KNW-010-legal-red-flags-catalog. Indexed into spaarke-rag-references for RAG retrieval.",
       "contentType": "Reference",
       "tags": null
     }
@@ -1352,7 +1262,7 @@
       "handler": "DocumentClassifierHandler",
       "sideEffectClass": null,
       "description": "Classify documents into categories/taxonomies",
-      "tags": ["refinement", "editing", "formatting"]
+      "tags": null
     },
     {
       "code": "TL-006",
@@ -1362,7 +1272,7 @@
       "handler": "SummaryHandler",
       "sideEffectClass": null,
       "description": "Generate structured summaries of document sections or complete documents",
-      "tags": ["summary", "generation", "condensation"]
+      "tags": null
     },
     {
       "code": "TL-010",
@@ -1422,7 +1332,7 @@
       "handler": "SemanticSearchHandler",
       "sideEffectClass": null,
       "description": "Search knowledge bases using semantic similarity",
-      "tags": ["extraction", "parties", "entities"]
+      "tags": null
     },
     {
       "code": "RISK-DETECTOR",
@@ -1435,33 +1345,13 @@
       "tags": null
     },
     {
-      "code": "GET-WORKSPACE-TAB-CONTENT",
-      "id": "cb930271-0e71-f111-ab0e-7ced8ddc4a05",
-      "toolId": null,
-      "name": "SYS-Get Workspace Tab Content",
-      "handler": "GetWorkspaceTabContentHandler",
-      "sideEffectClass": null,
-      "description": "Read the composed widget state of an existing workspace tab. Use this when the user refers to content they can see in a workspace tab (e.g., 'make the summary shorter', 'change the tldr') and you need the CURRENT state to reason about what to modify. Returns the composed sections + values from the tab's widget data — NOT raw streaming chunks. Inputs: tabId (required); sectionName (optional, scope read to one section). Outputs: status discriminator (ok | not_found | section_missing), widgetType, sections map (section name → value), sectionCount, message. Read-only — this tool NEVER mutates tab state; for edits use update_workspace_tab. When the tab is not in the current workspace state OR the sectionName is missing, the response is a structured re-readable status — never an error. Architecture §6.5 / §11.1.",
-      "tags": null
-    },
-    {
-      "code": "CLOSE-WORKSPACE-TAB",
-      "id": "cc930271-0e71-f111-ab0e-7ced8ddc4a05",
-      "toolId": null,
-      "name": "SYS-Close Workspace Tab",
-      "handler": "CloseWorkspaceTabHandler",
-      "sideEffectClass": null,
-      "description": "Closes an open workspace tab in the user's current chat-session workspace. Use this when the user asks to close a tab, dismiss a panel, or clear something from their workspace. Pass the stable 'tabId' of the tab. Pinned tabs cannot be closed through this tool — the response will indicate the tab is pinned and the user must explicitly unpin it first. Closing a non-existent or already-closed tab returns success (idempotent). Cosmos durable rows for previously-pinned data are preserved when a tab is closed.",
-      "tags": null
-    },
-    {
       "code": "DATAVERSE-READ-QUERY",
       "id": "8631a3cd-b678-f111-ab0e-7ced8ddc4a05",
       "toolId": "dataverse.read_query",
       "name": "SYS-Dataverse Read Query",
       "handler": "DataverseReadQueryHandler",
       "sideEffectClass": "Read",
-      "description": "Executes a read-only SQL SELECT against Dataverse under the calling user's permissions and returns rows with record-id citations. Use dataverse.describe FIRST to get the table's column logical names and types, then construct a query that strictly follows the supported dialect: SELECT [TOP n] explicit column list FROM one table [WHERE simple column-to-literal predicates combined with AND/OR] [ORDER BY column ASC|DESC]. NOT supported: SELECT *, JOIN, GROUP BY, aggregates (COUNT/SUM/AVG/MIN/MAX), subqueries, DISTINCT, HAVING, UNION, OFFSET, GETDATE(). Default row cap 50 (TOP max 200). Results respect the current user's Dataverse security roles and row-level security. Spaarke entity map (use these logical names): 'matter'/'case'/'deal' = sprk_matter (key columns sprk_mattername, sprk_matternumber, sprk_matterdescription, statuscode; lookups sprk_practicearea, sprk_mattertype, sprk_assignedattorney1 to contact, sprk_externalaccount to account). 'project'/'workstream' = sprk_project (sprk_projectname, sprk_projectnumber). 'document'/'contract'/'file' = sprk_document (sprk_documentname, sprk_filename, sprk_documenttype, sprk_filesummary; lookups sprk_matter, sprk_project). People = contact; client companies = account; law firms/vendors = sprk_organization.",
+      "description": "Executes a read-only SQL SELECT against Dataverse under the calling user's permissions and returns rows with record-id citations. Use dataverse.describe FIRST to get the table's column logical names and types, then construct a query that strictly follows the supported dialect: SELECT [TOP n] explicit column list FROM one table [WHERE simple column-to-literal predicates combined with AND/OR] [ORDER BY column ASC|DESC]. NOT supported: SELECT *, JOIN, GROUP BY, aggregates (COUNT/SUM/AVG/MIN/MAX), subqueries, DISTINCT, HAVING, UNION, OFFSET, GETDATE(). For distributions/aggregations (counts by category), SELECT the category column across rows (TOP up to 200) and aggregate the values YOURSELF from the result. LOOKUP columns (e.g. sprk_practicearea on sprk_matter) ARE selectable and return the referenced record's GUID — query the referenced table (e.g. sprk_practicearea_ref) to map GUIDs to display names. Choice columns return numeric option values — map them to labels via dataverse.describe. Default row cap 50 (TOP max 200). Results respect the current user's Dataverse security roles and row-level security. Spaarke entity map (use these logical names): 'matter'/'case'/'deal' = sprk_matter (key columns sprk_mattername, sprk_matternumber, sprk_matterdescription, statuscode; lookups sprk_practicearea to sprk_practicearea_ref, sprk_mattertype to sprk_mattertype_ref, sprk_assignedattorney1 to contact, sprk_externalaccount to account). 'project'/'workstream' = sprk_project (sprk_projectname, sprk_projectnumber). 'document'/'contract'/'file' = sprk_document (sprk_documentname, sprk_filename, sprk_documenttype, sprk_filesummary; lookups sprk_matter, sprk_project). People = contact; client companies = account; law firms/vendors = sprk_organization.",
       "tags": null
     },
     {
@@ -1471,7 +1361,7 @@
       "name": "SYS-Dataverse Create Record",
       "handler": "DataverseCreateRecordHandler",
       "sideEffectClass": "Write",
-      "description": "Inserts one row into a Dataverse table under the calling user's permissions and returns the created record id as a citable path (tables/{table}/records/{guid}). Call dataverse.describe first if the table's schema is unknown — do NOT guess column logical names from display names. Values: strings/numbers/booleans for simple fields; numeric option values for choice columns (NEVER labels — use dataverse.describe to find the numeric values); comma-separated numeric values for multi-select choice; lookup fields as {\"relatedTable\": \"...\", \"recordId\": \"guid\"} — recordId is REQUIRED: resolve the target record's GUID FIRST via dataverse.search_data or dataverse.read_query IN THE SAME TURN you draft the proposal, BEFORE asking the user to confirm; a lookup without recordId is rejected. If you cannot resolve a GUID for an optional lookup or the numeric value for an optional choice, OMIT that column and mention the value in a text column instead — never guess. Records you create belong to the calling user automatically — never set owner/assignee columns for the requesting user themselves. Do NOT create sprk_document rows from chat: document records require a file uploaded to SharePoint Embedded and no chat tool can upload file content — if asked to save chat output 'to documents', say honestly that you cannot create documents from chat and offer an alternative (create a task, draft an email, or open a workspace tab). WRITE tool: executes with the user's own privileges; if the user cannot create rows in the table, the call fails with their access error. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname); people = contact, companies = account.",
+      "description": "Inserts one row into a Dataverse table under the calling user's permissions and returns the created record id as a citable path (tables/{table}/records/{guid}). Call dataverse.describe first if the table's schema is unknown — do NOT guess column logical names from display names. Values: strings/numbers/booleans for simple fields; numeric option values for choice columns (NEVER labels — use dataverse.describe to find the numeric values); comma-separated numeric values for multi-select choice; lookup fields as {\"relatedTable\": \"...\", \"recordId\": \"guid\"} — recordId is REQUIRED: resolve the target record's GUID FIRST via dataverse.search_data or dataverse.read_query IN THE SAME TURN you draft the proposal, BEFORE asking the user to confirm; a lookup without recordId is rejected. NEVER use OData annotations as item keys — no '@odata.bind', no '@' or '.' in any key: the ONLY way to set a lookup on this transport is the {relatedTable, recordId} object form, and choice columns take plain numeric values. If you cannot resolve a GUID for an optional lookup or the numeric value for an optional choice, OMIT that column and mention the value in a text column instead — never guess. sprk_matter write contract (from live metadata — verify anything else with dataverse.describe): sprk_mattername (text, REQUIRED); sprk_matternumber (text); sprk_matterdescription (multiline text); sprk_mattertype is a LOOKUP to sprk_mattertype_ref and sprk_practicearea is a LOOKUP to sprk_practicearea_ref — resolve the reference row's GUID via dataverse.read_query first and send {\"relatedTable\":\"sprk_mattertype_ref\",\"recordId\":\"guid\"} (same pattern for practice area with sprk_practicearea_ref), or OMIT the column and put the value in sprk_matterdescription. Records you create belong to the calling user automatically — never set owner/assignee columns for the requesting user themselves. HARD RULE — sprk_document creates are BLOCKED: this tool REJECTS any create on the sprk_document table before anything is written (VALIDATION_FAILED). Spaarke document records require the full ingestion pipeline (file upload → SharePoint Embedded storage → document profile → indexing) that only the Document Upload wizard drives; no chat tool can upload file content. Never attempt or retry a sprk_document create — no argument change makes it valid. If asked to create a document or save chat output 'to documents', say honestly that documents can't be created from chat and point the user to the Document Upload wizard (or offer an alternative: work with a file uploaded into this chat, create a task, draft an email, or open a workspace tab). WRITE tool: executes with the user's own privileges; if the user cannot create rows in the table, the call fails with their access error. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname — creation BLOCKED on this tool, Document Upload wizard only); people = contact, companies = account.",
       "tags": null
     },
     {
@@ -1495,6 +1385,16 @@
       "tags": null
     },
     {
+      "code": "MEMORY-WRITE",
+      "id": "2172b721-637c-f111-ab0e-7ced8ddc4a05",
+      "toolId": "memory.write",
+      "name": "SYS-Memory Write",
+      "handler": "MemoryWriteHandler",
+      "sideEffectClass": "Write",
+      "description": "Records a durable memory item for the current user or record scope so later turns can recall it. Memory writes are AI-initiated and silent; the user review/delete surface is the control. Tag every item with provenance (source, bindingId/ledgerRef, trustLevel) at capture time.",
+      "tags": null
+    },
+    {
       "code": "MANAGE-PINNED-CONTEXT",
       "id": "9625a354-906b-f111-ab0d-7ced8ddc4cc6",
       "toolId": null,
@@ -1511,17 +1411,7 @@
       "name": "SYS-Send Workspace Artifact",
       "handler": "SendWorkspaceArtifactHandler",
       "sideEffectClass": null,
-      "description": "Open a tab in the user's workspace pane. PREFERRED USE — open a named workspace LAYOUT as a live tab: widgetType 'Workspace' with widgetData {\"kind\":\"Workspace\",\"layoutName\":\"<layout name>\"}. Use layoutName 'Compose' when the user asks to open the Compose editor or to start composing/drafting a document in the workspace; other layouts (e.g. 'Daily Briefing', 'Documents') open the same way. If the requested layout does not exist, the tool result lists the available layout names — relay them honestly. The tab opens immediately in the workspace pane and the tool result confirms it; only claim a tab was opened when this tool result says so. Legacy artifact variants (Summary, DocumentViewer, Dashboard, Table) record an artifact to workspace state but are NOT visible in the current workspace UI — avoid them unless explicitly instructed. Agent-created tabs default to visible-to-assistant.",
-      "tags": null
-    },
-    {
-      "code": "UPDATE-WORKSPACE-TAB",
-      "id": "806162a3-ec6d-f111-ab0e-7ced8ddc4cc6",
-      "toolId": null,
-      "name": "SYS-Update Workspace Tab",
-      "handler": "UpdateWorkspaceTabHandler",
-      "sideEffectClass": null,
-      "description": "Update an existing workspace tab's widget data. Use this when you have refined a previously dispatched artifact and the user should see the updated state on the same tab (instead of a new one). Conflict resolution: pass the 'expectedLastUserEditAt' timestamp you observed when you last read the tab from your system-prompt snapshot. If the user has edited the tab since then, this tool will REFUSE with a 'stale_read' status — you must re-read the workspace state in your next turn and re-attempt with the refreshed timestamp. User edits always win. Omit expectedLastUserEditAt only when the tab has never been user-edited (e.g., you just created it via send_workspace_artifact).",
+      "description": "Open a tab in the user's workspace pane. PREFERRED USE — open a named workspace LAYOUT as a live tab: widgetType 'Workspace' with widgetData {\"kind\":\"Workspace\",\"layoutName\":\"<layout name>\"}. Use layoutName 'Compose' when the user asks to open the Compose editor or to start composing/drafting a document in the workspace; other layouts (e.g. 'Daily Briefing', 'Documents') open the same way. When opening the Compose layout ABOUT A SPECIFIC DOCUMENT, add widgetData.documentId (the sprk_document GUID, e.g. from a search result path tables/sprk_document/records/{guid}) — Compose then opens WITH that document loaded. Session-UPLOADED chat files cannot pre-seed Compose (they exist only as extracted text, not stored documents) — omit documentId for them; the tab opens empty and the tool result says so — relay it honestly. If the requested layout does not exist, the tool result lists the available layout names — relay them honestly. The tab opens immediately in the workspace pane and the tool result confirms it; only claim a tab was opened when this tool result says so. Legacy artifact variants (Summary, DocumentViewer, Dashboard, Table) record an artifact to workspace state but are NOT visible in the current workspace UI — avoid them unless explicitly instructed. Agent-created tabs default to visible-to-assistant.",
       "tags": null
     },
     {
@@ -1581,84 +1471,106 @@
       "name": "SYS-Email Draft",
       "handler": "EmailDraftToolHandler",
       "sideEffectClass": "Communicate",
-      "description": "Creates a DRAFT email record in Spaarke's Communication service for the user to review and send. NEVER sends email - sending is always user-initiated from the Communication service. Compose the subject and body from grounded session outputs (summaries, records created this session) and cite their ledger keys in source_refs. Optionally associate the draft to a record via 'regarding' (e.g. the matter it concerns). COMMUNICATE tool: invocation is confirmation-gated; the record is created with the user's own privileges.",
+      "description": "Creates a DRAFT email record in Spaarke's Communication service for the user to review and send. NEVER sends email - sending is always user-initiated from the Communication service. Compose the subject and body from grounded session outputs (summaries, records created this session) and cite their ledger keys in source_refs. The draft CANNOT carry attachments — never write body text that references an attached or enclosed document ('please find attached', 'enclosed is'). When the user asks to email content already produced in this conversation (a summary, findings, a comparison), include that content INLINE in the body; if their request implies attaching a file, say the email is sent without attachments and inline the material instead. Optionally associate the draft to a record via 'regarding' (e.g. the matter it concerns). COMMUNICATE tool: invocation is confirmation-gated; the record is created with the user's own privileges.",
       "tags": null
     }
   ],
   "models": [
     {
+      "avoidFor": [
+        "classification",
+        "triage",
+        "simple-summary"
+      ],
+      "provider": "AzureOpenAI",
       "name": "gpt-4o",
-      "provider": "AzureOpenAI",
       "contextWindow": 128000,
-      "costTier": "high",
       "speedTier": "medium",
-      "recommendedFor": ["deep-analysis", "extraction", "legal-reasoning", "financial-calculation"],
-      "avoidFor": ["classification", "triage", "simple-summary"]
+      "recommendedFor": [
+        "deep-analysis",
+        "extraction",
+        "legal-reasoning",
+        "financial-calculation"
+      ],
+      "costTier": "high"
     },
     {
+      "avoidFor": [
+        "complex-reasoning",
+        "detailed-extraction",
+        "legal-reasoning"
+      ],
+      "provider": "AzureOpenAI",
       "name": "gpt-4o-mini",
-      "provider": "AzureOpenAI",
       "contextWindow": 128000,
-      "costTier": "low",
       "speedTier": "fast",
-      "recommendedFor": ["classification", "triage", "simple-summary", "condition-routing"],
-      "avoidFor": ["complex-reasoning", "detailed-extraction", "legal-reasoning"]
+      "recommendedFor": [
+        "classification",
+        "triage",
+        "simple-summary",
+        "condition-routing"
+      ],
+      "costTier": "low"
     },
     {
-      "name": "gpt-4-turbo",
+      "avoidFor": [
+        "new-playbooks"
+      ],
       "provider": "AzureOpenAI",
+      "name": "gpt-4-turbo",
       "contextWindow": 128000,
-      "costTier": "high",
       "speedTier": "slow",
-      "recommendedFor": ["legacy-compatibility"],
-      "avoidFor": ["new-playbooks"]
+      "recommendedFor": [
+        "legacy-compatibility"
+      ],
+      "costTier": "high"
     }
   ],
   "modelSelectionRules": [
     {
+      "model": "gpt-4o-mini",
       "taskType": "classification",
-      "model": "gpt-4o-mini",
-      "reason": "Bounded decision with well-defined categories; speed over depth"
+      "reason": "Bounded decision; speed over depth"
     },
     {
+      "model": "gpt-4o-mini",
       "taskType": "triage",
-      "model": "gpt-4o-mini",
-      "reason": "Binary or categorical decisions; speed matters more than depth"
+      "reason": "Binary/categorical; speed matters"
     },
     {
+      "model": "gpt-4o",
       "taskType": "deep-analysis",
-      "model": "gpt-4o",
-      "reason": "Multi-faceted analysis with nuanced reasoning requires full model"
+      "reason": "Multi-faceted reasoning requires full model"
     },
     {
+      "model": "gpt-4o",
       "taskType": "extraction",
-      "model": "gpt-4o",
-      "reason": "Accurate extraction of structured data from unstructured text requires strong reasoning"
+      "reason": "Accuracy critical for structured output"
     },
     {
+      "model": "gpt-4o-mini",
       "taskType": "summarization-simple",
-      "model": "gpt-4o-mini",
-      "reason": "TL;DR and bullet summaries are well-handled by mini"
+      "reason": "TL;DR and bullets well-handled by mini"
     },
     {
+      "model": "gpt-4o",
       "taskType": "summarization-detailed",
-      "model": "gpt-4o",
-      "reason": "Comprehensive summaries with citations need full model"
+      "reason": "Citations and cross-references need full model"
     },
     {
+      "model": "gpt-4o",
       "taskType": "legal-reasoning",
-      "model": "gpt-4o",
-      "reason": "Legal analysis requires nuanced interpretation and risk assessment"
+      "reason": "Nuanced interpretation and risk assessment"
     },
     {
+      "model": "gpt-4o",
       "taskType": "financial-calculation",
-      "model": "gpt-4o",
-      "reason": "Financial computations and reconciliation require accuracy"
+      "reason": "Multi-step computation needs accuracy"
     },
     {
-      "taskType": "condition-routing",
       "model": "gpt-4o-mini",
-      "reason": "Simple boolean or categorical checks"
+      "taskType": "condition-routing",
+      "reason": "Simple boolean/categorical checks"
     }
   ],
   "compositions": {}

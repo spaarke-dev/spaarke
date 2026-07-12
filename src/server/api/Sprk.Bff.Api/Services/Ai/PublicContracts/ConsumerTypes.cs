@@ -243,12 +243,45 @@ public static class ConsumerTypes
     /// </summary>
     public const string ComposeDraftAlternative = "compose-draft-alternative";
 
-    // NOTE (AIR2-E42): create-matter (task 042, DEF-003 / #593) is intentionally
-    // NOT registered here yet — its ConsumerType constant lands together with its
-    // live Binding/Action row at the G-R2-A gate-deploy step (task 049). Registering
-    // the constant ahead of the row trips both the ConstantsWithoutRows health
-    // finding AND the golden-utterance planned-vs-existing coherence guard
-    // (GU-065/066/067 are catalogStatus:"planned"). Keep constant+row atomic at 049.
+    /// <summary>
+    /// The Compose full-document drafting capability (DEF-08 Part A, spaarkeai-compose-r2) —
+    /// a prompted Action (<c>compose-draft-document</c>) that drafts a COMPLETE, editor-ready
+    /// document (letter / memo / response / notice / agreement / general) as semantic HTML with a
+    /// title, grounded in the session's documents and ledger outputs. Declares the core
+    /// <c>compose</c> Binding disposition (<see cref="BindingDisposition.Compose"/>, 100000006) —
+    /// the full-document output is ledger-written before render (ADR-040). Distinct from
+    /// <see cref="DraftCorrespondence"/> (Informational, inline email/letter prose): this output is
+    /// an editor-seedable full-document body (<c>body_html</c>) that
+    /// <c>SendWorkspaceArtifactHandler</c> resolves from the session ledger to SEED an opened
+    /// Compose tab with a ledgerRef (the DEF-08 blank-tab fix). §11 justification lives in
+    /// <c>infra/dataverse/actions/compose-draft-document.action.json</c>. Registered ahead of the
+    /// live Binding-row deploy (mirror-first at
+    /// <c>infra/dataverse/sprk_playbookconsumer-rows.json</c>); interim
+    /// <see cref="RoutingConsumerTypeHealthCheck"/> <c>ConstantsWithoutRows</c> finding until seeded.
+    /// </summary>
+    public const string ComposeDraftDocument = "compose-draft-document";
+
+    /// <summary>
+    /// The create-matter capability (FR-A1-13 / UC-B-6, DEF-003 / #593,
+    /// spaarke-ai-architecture-redesign-r2 task 042): a prompted Action
+    /// (CREATE-MATTER@v1) that DRAFTS a proposed matter (name, description,
+    /// practice-area/matter-type LABEL suggestions, source citations) grounded in
+    /// the session's documents, projected into the agent loop as
+    /// <c>capability_create-matter</c>. Authored EXACTLY like create-task (R19
+    /// minimal shape — no forced-elicitation required fields; the model may still
+    /// ask conversationally per the Binding's tool description). The WRITE leg is
+    /// the EXISTING <c>dataverse.create_record</c> typed handler (declared
+    /// <c>side_effect_class: write</c> — confirmation-gated; executed on confirm by
+    /// <c>TypedHandlerResumeExecutor</c>) creating <c>sprk_matter</c>, resolving the
+    /// practice-area/matter-type LABELS to <c>sprk_practicearea_ref</c> /
+    /// <c>sprk_mattertype_ref</c> lookup GUIDs in-turn and carrying a provenance line
+    /// naming the source document. Registered at the G-R2-A gate-deploy step together
+    /// with its live Binding/Action row (per
+    /// <c>projects/spaarke-ai-architecture-redesign-r2/notes/jps/create-matter-binding-row-pending-seed.json</c>
+    /// deploySequence); flipping GU-065/066/067 to catalogStatus=existing is the
+    /// atomic golden-utterance half of the same change.
+    /// </summary>
+    public const string CreateMatter = "create-matter";
 
     /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
@@ -277,5 +310,7 @@ public static class ConsumerTypes
         ComposeSummarizeWordChanges,
         ComposeDefinedTerms,
         ComposeDraftAlternative,
+        ComposeDraftDocument,
+        CreateMatter,
     };
 }

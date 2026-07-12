@@ -220,6 +220,13 @@ public sealed class OutputRouter : IOutputRouter
         // therefore yields an OutcomeCard (NFR-09), riding this disposition surface with no
         // second rendering path. The card's next-step chips come from the Binding's DECLARED
         // transitions (catalog data); the trace ref defaults to the ledger key.
+        //
+        // Task 036 live-wiring (audit F-3): when the STORED payload embeds a JobAwareCompletionState
+        // (task 014 v1) under the reserved CompletionEngine.JobAwareCompletionStateField, the composer
+        // routes through ComposeJobAware so the OutcomeStatus is DERIVED from the job aggregate — a
+        // record whose downstream indexing/analysis is still pending renders Partial, never Succeeded
+        // (NFR-12 ingestion parity). A single-shot (non-job) payload is byte/behavior-identical to the
+        // legacy hardcoded-Succeeded composer.
         var outcome = CompletionEngine.ComposeForRoutedOutput(entry, binding);
 
         // ── 3. ROUTE by disposition — the ONLY rendering contract (ADR-040 / ADR-039).

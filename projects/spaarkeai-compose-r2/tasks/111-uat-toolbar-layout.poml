@@ -1,0 +1,118 @@
+<task id="111" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>UAT-R2 — inline AI popup: AI-only toolbar (no formatting) + right-click/point-insertion trigger + layout fix</title>
+    <phase>9 UAT-Fix</phase>
+    <status>pending</status>
+    <estimated-hours>3</estimated-hours>
+    <effort>high</effort>
+    <dependencies>none</dependencies>
+    <blocks>114</blocks>
+    <tags>pcf,react,fluent-ui,compose,frontend,uat-remediation</tags>
+    <rigor-hint reason="Modifies .tsx UI; FULL; render-level DoD">FULL</rigor-hint>
+    <model-tier reason="Contained Fluent v9 layout fix in a single widget; sonnet">sonnet</model-tier>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe reason="Edits only ComposeAiToolbar.tsx + ComposeEditor.tsx (the BubbleMenu). Disjoint from 110 (BFF) and 112 (ConversationPane/formatter). No file overlap with any Wave-1 sibling.">true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    UAT defect #3a + owner refinement (2026-07-10): the inline selection popup renders with broken layout AND
+    mixes formatting controls with AI actions. Owner decision: the inline popup must be **AI functions ONLY** —
+    REMOVE the formatting controls from the BubbleMenu (formatting stays in the persistent TOP toolbar), and the
+    popup must be openable **two ways**: (a) select text, (b) **right-click at a point** (point insertion) — with
+    the browser's native context menu SUPPRESSED inside the Compose editor. Layout root cause to fix along the
+    way: `ComposeAiToolbar` returns a Fragment whose first child is a bare `&lt;ToolbarDivider/&gt;` + a second
+    `&lt;Toolbar&gt;` mounted as bare children of the BubbleMenu flex row; the divider has no Toolbar context and
+    the buttons overflow. Result: a single clean AI-only Toolbar, opened on selection OR right-click.
+  </prompt>
+
+  <role>
+    Frontend engineer fluent in TipTap BubbleMenu + Fluent UI v9 Toolbar/ToolbarButton/ToolbarDivider composition
+    and `makeStyles` token-based styling (ADR-021). You correct a Toolbar-composition bug without changing the
+    action set, dispatch behavior, or the disabled-until-registered gating.
+  </role>
+
+  <goal>
+    The inline popup is a single, clean, AI-ONLY Fluent Toolbar (the 5 AI actions + overflow) — NO formatting
+    controls (those remain in the persistent top toolbar, untouched), properly-contextualized divider, no
+    overflow (wrap or width-cap). It opens on (a) text selection AND (b) right-click at a caret point; inside the
+    Compose editor the browser's native context menu is suppressed (contextmenu preventDefault) and the AI
+    toolbar opens at the click/caret point instead. Dispatch wiring (handleActionClick → composeActionBridge) and
+    the disabled-until-bindingId gating are unchanged; selection-dependent actions still act on the current
+    selection if any.
+  </goal>
+
+  <context>
+    <background>
+      Files: `ComposeAiToolbar.tsx:482-485` (the Fragment `&lt;&gt;&lt;ToolbarDivider/&gt;&lt;Toolbar .../&gt;`),
+      `:357-363` (`styles.toolbar` re-imposing display:flex/columnGap over the Fluent Toolbar), `:219-260` (the 5
+      DEFAULT_ACTIONS, each shipping `bindingId:''` → disabled until `registerComposeAiToolbarAction`). Host:
+      `ComposeEditor.tsx:461-470` (`styles.bubbleMenu`, a center-aligned plain flex row), `:849-885` (the
+      formatting `&lt;Toolbar&gt;`), `:848` (BubbleMenu), `:892-899` (where `&lt;ComposeAiToolbar/&gt;` is mounted).
+    </background>
+    <relevant-files>
+      <file purpose="fix-toolbar-composition" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</file>
+      <file purpose="host-bubblemenu-and-toolbar" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+    </relevant-files>
+    <notes>
+      AI-ONLY popup: remove the formatting `&lt;Toolbar&gt;` from the BubbleMenu content; the popup renders ONE
+      Fluent `&lt;Toolbar&gt;` containing only the AI actions (+ overflow), with the divider in-context and
+      flexWrap/maxWidth so nothing overflows. Drop the redundant `display:flex`/`columnGap` override in
+      `styles.toolbar`. Do NOT touch the persistent top formatting toolbar in ComposeEditor — formatting stays
+      there. RIGHT-CLICK TRIGGER: TipTap BubbleMenu is selection-driven, so a right-click/point trigger needs an
+      explicit handler — wire a ProseMirror `handleDOMEvents.contextmenu` (or an editor-level `onContextMenu`) that
+      calls `preventDefault()` inside the editor and opens the AI toolbar at the click/caret position (use a
+      controlled/floating popover anchored to the click point, or set a transient selection at the caret to drive
+      the BubbleMenu). Both triggers (selection + right-click) coexist. Semantic tokens (ADR-021); verify dark mode.
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="project (E2E DoD)">This is a UI-render defect: DoD is a render/DOM assertion (React Testing Library or the project's component test harness) that the popup mounts as a single Toolbar with the divider inside Toolbar context and no overflow — not merely a build-pass. The toolbar must also be shown MOUNTED + REACHABLE in the BubbleMenu.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; no hard-coded colors; dark-mode correct.</constraint>
+    <constraint source="project">Do NOT change the 5 action ids, dispatch wiring, or the disabled-until-bindingId gating (that is task 048's contract).</constraint>
+    <constraint source="ADR-028">No auth/fetch changes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose/inline-toolbar, tiptap-bubblemenu, fluent-v9-toolbar</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r2/notes/uat-r2-defect-triage-2026-07-10.md</file>
+      <file>projects/spaarkeai-compose-r2/tasks/030-bubble-menu-toolbar.poml</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <justification component="No new component — corrects existing Toolbar composition">
+    <existing>ComposeAiToolbar + the BubbleMenu Toolbar already exist (task 030).</existing>
+    <extension>Refactor the existing composition (fold AI items into the host Toolbar / fix divider context + overflow). No new component.</extension>
+    <cost-of-doing-nothing>The inline AI affordance — the primary FR-14 surface — renders visibly broken, undermining the whole inline-AI UX the owner just tested.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Load the triage note + task 030 + ADR-021. Read `ComposeAiToolbar.tsx:357-363/482-485` and `ComposeEditor.tsx:461-470/848-899` to confirm the composition + the persistent top formatting toolbar.</step>
+    <step order="1">Make the BubbleMenu popup AI-ONLY: remove the formatting `&lt;Toolbar&gt;` from the popup content; render one Fluent `&lt;Toolbar&gt;` with only the AI actions (+ overflow), divider in-context, flexWrap/maxWidth so nothing overflows; remove the orphaned top-level divider; drop the redundant `display:flex`/`columnGap` in `styles.toolbar`. Do NOT touch the top formatting toolbar.</step>
+    <step order="2">Add the right-click/point-insertion trigger: wire a ProseMirror `handleDOMEvents.contextmenu` (or editor-level `onContextMenu`) that `preventDefault()`s the browser menu inside the editor and opens the AI toolbar at the click/caret point (works with NO selection). Keep the existing text-selection trigger working too.</step>
+    <step order="3">Verify dark mode + semantic tokens. Add/extend a component test asserting: (a) popup contains ONLY AI actions (no formatting buttons); (b) one Toolbar, divider in-context, no overflow; (c) contextmenu handler calls preventDefault + opens the AI toolbar; (d) right-click with no selection still opens it; (e) the top formatting toolbar is untouched/formatting still reachable.</step>
+    <step order="4">Recompile the Spaarke.Compose.Components package per code-page-deploy cache rules; run the component tests + lint.</step>
+    <step order="5">code-review + adr-check (Step 9.5). Report for the main session to update TASK-INDEX + commit.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</output>
+    <output type="test">Spaarke.Compose.Components toolbar render test (single-Toolbar + divider-context + no-overflow assertions)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The inline popup contains ONLY the AI actions (+ overflow) — NO formatting controls; formatting remains reachable in the untouched top toolbar.</criterion>
+    <criterion testable="true">The popup renders as ONE Toolbar; the divider is a child of a Toolbar (has context); no orphaned top-level ToolbarDivider; buttons wrap or the bar is width-capped (no overflow).</criterion>
+    <criterion testable="true">Right-click inside the Compose editor suppresses the browser context menu (preventDefault) and opens the AI toolbar at the click/caret point — including with NO selection (point insertion).</criterion>
+    <criterion testable="true">The existing text-selection trigger still opens the popup; both triggers coexist.</criterion>
+    <criterion testable="true">All 5 AI actions retain their ids + the disabled-until-bindingId gating + dispatch wiring; colors use Fluent v9 semantic tokens; correct in dark mode (ADR-021).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

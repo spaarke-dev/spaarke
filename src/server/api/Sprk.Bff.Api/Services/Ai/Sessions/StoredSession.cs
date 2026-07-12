@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Sprk.Bff.Api.Models.Ai.Chat;
 
 namespace Sprk.Bff.Api.Services.Ai.Sessions;
 
@@ -174,4 +175,47 @@ public class StoredSession
     /// <summary>Per-turn ContextEnvelope fingerprints (identifiers/counts only — NFR-07; AIR2-038).</summary>
     [JsonPropertyName("contextFingerprints")]
     public List<StoredContextFingerprint> ContextFingerprints { get; set; } = [];
+
+    // =========================================================================
+    // R2 Compose-domain annotations (spaarkeai-compose-r2 FR-29 / task 102 gap 4.5 / DEF-05).
+    //
+    // The two MUTABLE Compose-domain session collections (design.md §8) — anchored annotations
+    // and defined-terms tracking. Previously persisted through the Redis HOT tier only, so a
+    // Redis eviction / cold restore silently dropped them (the DEF-05 failure). These fields
+    // carry them through the Cosmos WARM tier so a reopen that outlives the Redis TTL still
+    // restores prior annotations + defined terms.
+    //
+    // Stored as the domain records directly (they are plain System.Text.Json-serializable
+    // records) rather than minting parallel Stored* shapes — the same reuse rationale as the
+    // other Compose collections (Component Justification §11: no new DTO surface where the
+    // domain record round-trips cleanly). Web camelCase serialization matches the rest of this
+    // document. Both default to empty lists so older Cosmos documents deserialize cleanly
+    // (additive schema evolution per ADR-015; partition key unchanged). Tier 3 user-owned /
+    // GDPR-erased with the session document.
+    //
+    // NOTE: action history is NOT stored here — it is a read-only projection over
+    // <see cref="Outputs"/> (ComposeService.GetActionHistory), which already round-trips through
+    // the warm tier, so it survives automatically once Outputs do.
+    // =========================================================================
+
+    /// <summary>R2 anchored annotations (design.md §8) — MUTABLE Compose-domain positional UI state.</summary>
+    [JsonPropertyName("anchoredAnnotations")]
+    public List<AnchoredAnnotation> AnchoredAnnotations { get; set; } = [];
+
+    /// <summary>R2 defined-terms tracking (design.md §8 / spec FR-11) — session-scoped detected terms.</summary>
+    [JsonPropertyName("definedTermsTracking")]
+    public List<DefinedTerm> DefinedTermsTracking { get; set; } = [];
+
+    /// <summary>
+    /// R2 session-scoped active-document pointer (spaarkeai-compose-r2 task 113) — the "which
+    /// document is the user acting on?" fact for the chat↔Compose bridge. Stored as the domain
+    /// record directly (same reuse rationale as <see cref="AnchoredAnnotations"/> — no parallel
+    /// Stored* shape where the record round-trips cleanly, Component Justification §11). Null when
+    /// no document is active or the Cosmos document pre-dates this field (additive per ADR-015;
+    /// partition key unchanged). Carried through the warm tier so the active document is NOT
+    /// dropped on a Redis eviction / cold restore (the ADR-040 document-reference-survival MUST).
+    /// Tier 3 user-owned / GDPR-erased with the session document.
+    /// </summary>
+    [JsonPropertyName("activeDocument")]
+    public ActiveDocumentIdentity? ActiveDocument { get; set; }
 }

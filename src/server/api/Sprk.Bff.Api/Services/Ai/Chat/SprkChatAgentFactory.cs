@@ -204,19 +204,9 @@ public class SprkChatAgentFactory
         "rules: relay the links the platform hands you; never compose, guess, or reconstruct one " +
         "yourself.";
 
-    /// <summary>
-    /// Builds the current-date context line (G-P3 UAT round-5 R5-A, 2026-07-07): the model
-    /// receives no clock and hallucinated "tomorrow" as a 2024 date. Appended at the END of
-    /// the system prompt (stable position; rotates once per UTC day — the accepted daily
-    /// prompt-cache rotation). Exposed internal for the directive-presence tests.
-    /// </summary>
-    internal static string BuildCurrentDateDirective(DateTimeOffset utcNow) =>
-        "\n\n## Current Date\n" +
-        $"Today's date is {utcNow:yyyy-MM-dd} ({utcNow:dddd}, UTC). Resolve EVERY relative date the user " +
-        "gives ('today', 'tomorrow', 'next Friday', 'in two weeks') against THIS date before composing any " +
-        "field value — never guess the year. The user's local date may differ by one day near midnight UTC; " +
-        "when you propose an action containing a resolved date, state the absolute date in your proposal " +
-        "text so the user can correct it before confirming.";
+    // Task 053 (FR-B-04): BuildCurrentDateDirective moved to the shared
+    // ContextSliceProducers.EnvironmentFactsProducer (the ONE source for this primitive — the interactive
+    // append site above + the Context Binder's Workspace slice both call it). Byte-identical output.
 
     public SprkChatAgentFactory(
         IChatClient chatClient,
@@ -321,6 +311,7 @@ public class SprkChatAgentFactory
         string? latestUserMessage = null,
         IReadOnlyList<string>? previousTurnToolNames = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
+        IReadOnlyList<SessionOutput>? ledgerOutputs = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -336,6 +327,9 @@ public class SprkChatAgentFactory
         // Load playbook context (system prompt, document summary, metadata).
         // R5 task 033: forward uploadedFiles so the provider surfaces them on the
         // returned ChatContext.UploadedFiles for the manifest-suffix step below.
+        // F-1/F-2/F-7 envelope-convergence (D1): forward the session id + ledger outputs so the provider
+        // performs the ONE per-turn ContextEnvelope bind (fingerprint write) and consumes the bound envelope
+        // for host-identity / user-memory / record-memory. The endpoint's separate bind is retired.
         var context = await contextProvider.GetContextAsync(
             documentId,
             tenantId,
@@ -343,6 +337,8 @@ public class SprkChatAgentFactory
             hostContext,
             additionalDocumentIds,
             uploadedFiles,
+            sessionId,
+            ledgerOutputs,
             cancellationToken);
 
         // === Document context injection (R2-011, R2-012) ===
@@ -672,23 +668,49 @@ public class SprkChatAgentFactory
         // === FR-P2-02 — the ONE confirmation gate at the loop's tool-invocation boundary =
         // Every projected typed-handler tool whose catalog row DECLARES a side-effecting
         // class (write / communicate per PendingPlanManager.RequiresConfirmation — ADR-039:
-        // by declaration, never tool-name lists) is wrapped in SideEffectGateAIFunction:
-        // when the LLM invokes it, the invocation SUSPENDS into the unified pending store
-        // (ledger Gate marker BEFORE any render, ADR-040) instead of executing. This is the
-        // NFR-03 last line — adversarial instructions in uploaded-document text or tool
-        // results can at worst produce a suspended, user-visible confirmation, never an
-        // executed side effect. Landed by task 037 (FR-P2-08) after the eval suite's
-        // injection family exposed that the interim pre-pass gate deleted in task 034 had
-        // no loop-native replacement for typed-handler tools. NFR-04: the wrapper preserves
-        // name/description/schema verbatim, so the projected block is byte-identical.
+        // by declaration, never tool-name lists) is wrapped in SideEffectGateAIFunction.
+        // When the LLM invokes a wrapped tool, the wrapper does NOT unconditionally suspend
+        // (that was the pre-task-044 semantics). Instead it consults the ConfirmationPolicyEngine
+        // via SideEffectGateAIFunction.EvaluatePolicy → the deterministic ConfirmationPolicyEngine
+        // (the single live decider) — which, from the catalog/Binding risk data, returns one
+        // GateOutcome: Execute / ExecuteWithUndo (auto-execute a tier-1/reversible side effect,
+        // e.g. memory.write), Elicit (ask for missing args), ConfirmDialog (suspend into the
+        // unified pending store — ledger Gate marker BEFORE any render, ADR-040 — for a
+        // user-visible confirmation), or HonestBlock (fail-closed). This is the NFR-03 last line —
+        // adversarial instructions in uploaded-document text or tool results can at worst be
+        // routed to a suspended, user-visible confirmation or blocked, never silently executing
+        // a high-risk side effect the policy would gate. Gate landed by task 037
+        // (FR-P2-08); the always-suspend outcome was replaced by the policy-engine decision in
+        // task 044. NFR-04: the wrapper preserves name/description/schema verbatim, so the
+        // projected block is byte-identical.
+        // === F-8 — safety-perimeter producer activation (audit finding F-8 follow-up) ==========
+        // The PromptShield fail-open verdict is the gate's overlay-2 (SafetyPerimeterDegraded) signal.
+        // Its PRODUCER — PromptShieldChatMiddleware — is wired onto the live pipeline (below, outermost)
+        // ONLY when AiSafety:PromptShield:ChatPipelineEnabled=true (default false = byte-identical to
+        // pre-F-8). When enabled we create ONE per-turn signal holder shared between the gate wrap-sites
+        // (readers, via the overlay-2 probe) and the shield middleware (the writer). When disabled the
+        // holder stays null and the gate probe stays null exactly as before this task — no scan, no
+        // block, unfed overlay.
+        var promptShieldChatEnabled =
+            PromptShieldChatMiddleware.IsChatPipelineEnabled(_serviceProvider.GetService<IConfiguration>());
+        var safetyPerimeterSignal = promptShieldChatEnabled ? new SafetyPerimeterSignal() : null;
+
         for (var i = 0; i < tools.Count; i++)
         {
             if (tools[i] is ToolHandlerToAIFunctionAdapter adapter
                 && adapter.Tool.SideEffectClass is { } declaredClass
                 && PendingPlanManager.RequiresConfirmation(declaredClass))
             {
+                // dispatchUncertaintyProbe stays null (no live routing-confidence producer reaches this
+                // gate; ambiguity is covered by layer 1 — the agent asking). safetyPerimeterDegradedProbe
+                // now reads THIS turn's PromptShield fail-open verdict from the shared signal when the
+                // shield is enabled; otherwise it stays null (unfed overlay, byte-identical to pre-F-8).
+                // The value flows from the probe — never hardcoded (the anti-shim gate tests fail if it were).
                 tools[i] = new SideEffectGateAIFunction(
-                    adapter, declaredClass, _serviceProvider, tenantId, sessionId, _logger, sseWriter);
+                    adapter, declaredClass, _serviceProvider, tenantId, sessionId, _logger, sseWriter,
+                    safetyPerimeterDegradedProbe: safetyPerimeterSignal is null
+                        ? null
+                        : () => safetyPerimeterSignal.Degraded);
             }
         }
 
@@ -876,9 +898,18 @@ public class SprkChatAgentFactory
         // available server-side (JWT claims carry no tz), so the line is UTC + an explicit
         // near-midnight ambiguity instruction.
         var timeProvider = scope.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
+        // F-1 envelope-convergence (D1): when the provider bound a per-turn envelope, RENDER the
+        // environment (current-date) SUFFIX from that envelope's Workspace slice via the renderer — the
+        // interactive prompt now CONSUMES the envelope for the date instead of calling the producer here.
+        // Byte-identical: RenderEnvironmentSuffix returns the Workspace fragment, itself produced by the
+        // SAME EnvironmentFactsProducer at bind time (day-granular, so stable across the sub-second gap).
+        // Falls back to the direct producer call on the no-binder path (compound-OFF / legacy tests).
+        var dateSuffix = context.BoundEnvelope is not null
+            ? Context.ContextEnvelopeRenderer.RenderEnvironmentSuffix(context.BoundEnvelope)
+            : Context.EnvironmentFactsProducer.BuildCurrentDateDirective(timeProvider.GetUtcNow());
         context = context with
         {
-            SystemPrompt = context.SystemPrompt + BuildCurrentDateDirective(timeProvider.GetUtcNow()),
+            SystemPrompt = context.SystemPrompt + dateSuffix,
         };
         // === End R5-A date context =======================================================
 
@@ -907,11 +938,10 @@ public class SprkChatAgentFactory
             agentLogger,
             turnContract);
 
-        // === Middleware pipeline (AIPL-057, AIPU-072) ===
-        // Wrap order: ContentSafety (innermost) -> CostControl -> Telemetry -> Routing (outermost).
-        // The outermost middleware (Routing) executes first on each call and decides which backend
-        // handles the request before the inner pipeline ever sees the message.
-        agent = WrapWithMiddleware(agent, tenantId);
+        // === Middleware pipeline (AIPL-057, AIPU-072; F-8 shield outermost) ===
+        // Wrap order: ContentSafety (innermost) -> CostControl -> Telemetry -> Routing -> PromptShield
+        // (outermost, F-8, only when enabled). The outermost middleware executes first on each call.
+        agent = WrapWithMiddleware(agent, tenantId, sessionId, safetyPerimeterSignal);
 
         return agent;
     }
@@ -934,7 +964,15 @@ public class SprkChatAgentFactory
     /// </summary>
     /// <param name="agent">The inner agent to wrap.</param>
     /// <param name="tenantId">Tenant ID for Agent Service thread scoping (ADR-014).</param>
-    private ISprkChatAgent WrapWithMiddleware(ISprkChatAgent agent, string tenantId)
+    /// <param name="sessionId">Chat session id (F-8 shield logging correlation).</param>
+    /// <param name="safetyPerimeterSignal">
+    /// F-8: the shared per-turn safety-perimeter holder written by <see cref="PromptShieldChatMiddleware"/>
+    /// and read by the gate's overlay-2 probe. Non-null ONLY when the shield is enabled by config
+    /// (<see cref="PromptShieldChatMiddleware.ChatPipelineEnabledConfigKey"/>). When null the shield is
+    /// NOT added — the pipeline is byte-identical to pre-F-8.
+    /// </param>
+    private ISprkChatAgent WrapWithMiddleware(
+        ISprkChatAgent agent, string tenantId, string sessionId, SafetyPerimeterSignal? safetyPerimeterSignal)
     {
         // 1. Content safety (innermost — filters before other middleware processes tokens)
         agent = new AgentContentSafetyMiddleware(
@@ -966,6 +1004,22 @@ public class SprkChatAgentFactory
                 agentServiceOptions,
                 _logger,
                 tenantId);
+        }
+
+        // 5. PromptShield (OUTERMOST, F-8) — pre-LLM injection perimeter + per-turn fail-open signal.
+        // Added ONLY when the shield is enabled by config (safetyPerimeterSignal non-null). Placed
+        // outermost so the user turn is scanned (and the overlay-2 signal is set) BEFORE routing chooses
+        // a backend and before the inner tool loop runs. Captive-dependency-safe: the middleware captures
+        // the ROOT provider and resolves the Scoped IPromptShieldService from a fresh per-turn scope.
+        // ADR-010: factory-instantiated, no additional DI registration.
+        if (safetyPerimeterSignal is not null)
+        {
+            agent = new PromptShieldChatMiddleware(
+                agent,
+                _serviceProvider,
+                safetyPerimeterSignal,
+                sessionId,
+                _logger);
         }
 
         return agent;

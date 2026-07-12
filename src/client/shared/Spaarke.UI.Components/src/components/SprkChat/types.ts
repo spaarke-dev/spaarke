@@ -18,6 +18,7 @@
 // "N files attached" indicator, per-file remove cascade, and ready-batch
 // inline-confirmation injection.
 import type { ChatAttachment, AttachmentChip } from './hooks/useChatFileAttachment';
+import type { INextStepChip } from './OutcomeCard';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chat Message Types
@@ -835,6 +836,13 @@ export interface ISprkChatProps {
    * show a button that does nothing (G-P2 UAT round-1 finding 2, 2026-07-06).
    */
   enableInsertToEditor?: boolean;
+  /**
+   * DEF-08 Part B: called when the user clicks "Open in Compose" on a completed assistant message.
+   * Opt-in per host (SpaarkeAi's ConversationPane provides it): the host opens a (reused) Compose
+   * editor tab seeded with the message's text as an editable draft. Omitted → no button rendered.
+   * @param content - the assistant message text to seed the Compose draft with.
+   */
+  onOpenInCompose?: (content: string) => void;
   /** Available documents for context switching */
   documents?: IDocumentOption[];
   /** Available playbooks for context switching */
@@ -950,6 +958,22 @@ export interface ISprkChatProps {
    * the link renders disabled.
    */
   onOpenLibraryModal?: (sessionAttachmentIds: string[]) => void;
+
+  /**
+   * Callback fired when the user clicks a next-step chip rendered by `OutcomeCard`
+   * for `responseType === 'outcome_card'` (spaarke-ai-architecture-redesign-r2 task 062 —
+   * FR-A1-06 / FR-B-13 workspace-intelligence precursor).
+   *
+   * The chip's `targetBindingId` (present when `actionKind === 'invoke_capability'`,
+   * sourced ONLY from the Binding's DECLARED `sprk_chiptransitions` — never model-invented)
+   * is the routing datum the ONE Click-path helper needs:
+   * `dispatchConsumer(chip.targetBindingId, args)` from `services/dispatchConsumer.ts`.
+   * SprkChat threads this straight through to `SprkChatMessage`/`SprkChatMessageRenderer`;
+   * it never calls dispatchConsumer itself (ADR-012 context-agnostic).
+   *
+   * When the prop is omitted the chips render disabled.
+   */
+  onNextStep?: (chip: INextStepChip) => void;
 
   /**
    * Callback fired when a chat attachment finishes client-side extraction and
@@ -1186,6 +1210,29 @@ export interface ISprkChatProps {
   onDecorateOutboundBody?: (
     body: Record<string, unknown>
   ) => Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
+
+  /**
+   * Fires with the FULL citation list (`ICitation[]`, including `excerpt` +
+   * `source`) whenever the SSE `citations` event populates a non-empty set for
+   * the latest assistant answer (the SAME data SprkChat already renders as
+   * `[N]` superscript markers via `SprkChatMessage`'s `citations` prop —
+   * see `streamCitations` in `useSseStream`).
+   *
+   * This is an OBSERVATION callback (mirrors `onMessagesChange` /
+   * `onPaneEvent`) — SprkChat's own citation rendering is unaffected whether
+   * or not a host provides this prop. Added for spaarkeai-compose-r2 task 072
+   * (FR-35 Document Q&A stretch): the Compose host uses the excerpt text to
+   * drive an in-document ephemeral highlight of the cited span. Never fires
+   * for an uncited answer (empty citations array) — hosts MUST NOT treat the
+   * absence of a call as an error; it is the expected "ungrounded/no citation"
+   * case (ADR-039 grounded-output invariant).
+   *
+   * ADR-015: citation `excerpt` text is the SAME content already rendered to
+   * the user in the transcript (not a new content surface) — hosts bridging
+   * this to telemetry must still strip it per the existing citation-content
+   * privacy contract.
+   */
+  onCitations?: ((citations: ICitation[]) => void) | null;
 }
 
 /** Props for SprkChatMessage sub-component. */

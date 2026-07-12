@@ -78,6 +78,12 @@ export interface ComposeWorkspaceState {
   documentRef: ComposeDocumentRef | null;
   sessionId: string;
   docxBytes: ArrayBuffer | null;
+  /**
+   * DEF-08: AI-drafted full-document seed HTML. Populated by `mountDraftHtml` (mutually exclusive
+   * with `docxBytes`) — the editor sets its content directly from this HTML. Null on every non-draft
+   * path.
+   */
+  seedHtml: string | null;
   /** ETag from last load — used as if-match on save (per ComposeEndpoints contract). */
   etag: string | null;
   /** Mammoth import warnings (Tier 1 safe). */
@@ -109,9 +115,17 @@ export type ComposeWorkspaceAction =
   | { kind: 'loadFailed'; errorMessage: string }
   // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
   | { kind: 'requestUploadMount'; sessionId: string }
-  | { kind: 'mountTransient'; docxBytes: ArrayBuffer; fileName?: string }
+  // FR-05 (task 100): `containerId` is the client-resolved BU container the first Save
+  // (create-on-save) persists into; carried on the transient documentRef so triggerSave
+  // can send it. Undefined until the host resolves it (see ComposeWorkspaceProps.containerId).
+  | { kind: 'mountTransient'; docxBytes: ArrayBuffer; fileName?: string; containerId?: string }
+  // ── DEF-08: AI-drafted full-document seed mount (create-on-save, like mountTransient) ──
+  | { kind: 'mountDraftHtml'; html: string; fileName?: string; containerId?: string }
   | { kind: 'requestSave' }
-  | { kind: 'saveSucceeded'; sprkDocumentId?: string; etag: string | null }
+  // FR-05 (task 100): create-on-save mints a NEW SPE drive-item; `documentSpeId` carries the
+  // server-minted id back so a second Save targets the real item (the replace path), not the
+  // empty transient pointer (gap 1.7).
+  | { kind: 'saveSucceeded'; sprkDocumentId?: string; documentSpeId?: string; etag: string | null }
   | { kind: 'saveFailed'; errorMessage: string }
   | { kind: 'reset' }
   | { kind: 'importWarnings'; warnings: Array<{ type: string; message: string }> }
@@ -134,6 +148,7 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   documentRef: null,
   sessionId: '',
   docxBytes: null,
+  seedHtml: null,
   etag: null,
   importWarnings: [],
   errorMessage: null,
@@ -161,6 +176,7 @@ export function composeWorkspaceReducer(
         ...state,
         status: 'loaded',
         docxBytes: action.docxBytes,
+        seedHtml: null,
         etag: action.etag,
         sessionId: action.sessionId,
         documentRef: state.documentRef
@@ -197,8 +213,22 @@ export function composeWorkspaceReducer(
         ...state,
         status: 'loaded',
         docxBytes: action.docxBytes,
+        seedHtml: null,
         etag: null,
-        documentRef: { speDriveItemId: '', fileName: action.fileName },
+        documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
+        checkoutStatus: 'skipped',
+        errorMessage: null,
+      };
+    // ── DEF-08: AI-drafted full-document seed. Like mountTransient (create-on-save, no SPE
+    // pointer, checkout skipped) but the editor content comes from seedHtml, not docxBytes.
+    case 'mountDraftHtml':
+      return {
+        ...state,
+        status: 'loaded',
+        docxBytes: null,
+        seedHtml: action.html,
+        etag: null,
+        documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
         checkoutStatus: 'skipped',
         errorMessage: null,
       };
@@ -214,6 +244,12 @@ export function composeWorkspaceReducer(
           ? {
               ...state.documentRef,
               sprkDocumentId: action.sprkDocumentId ?? state.documentRef.sprkDocumentId,
+              // gap 1.7: carry the server-minted SPE id back so the mount is no longer transient
+              // (empty speDriveItemId) — a second Save now targets the real drive-item.
+              speDriveItemId:
+                action.documentSpeId && action.documentSpeId.length > 0
+                  ? action.documentSpeId
+                  : state.documentRef.speDriveItemId,
             }
           : state.documentRef,
       };

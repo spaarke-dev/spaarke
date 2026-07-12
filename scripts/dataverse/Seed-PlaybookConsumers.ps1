@@ -318,20 +318,20 @@ foreach ($r in $rows) {
             Write-Host "  FAILED   $($r.consumerType)/$($r.consumerCode) -> actionCode '$($r.actionCode)' not found in target env (seed the Action row first)" -ForegroundColor Red
             $summary.Failed++; continue
         }
-        $body['sprk_action@odata.bind'] = "/sprk_analysisactions($($actionMap[$r.actionCode]))"
+        $body['sprk_Action@odata.bind'] = "/sprk_analysisactions($($actionMap[$r.actionCode]))"
     }
     if ($r.playbookName) {
         if (-not $playbookMap.ContainsKey($r.playbookName)) {
             Write-Host "  FAILED   $($r.consumerType)/$($r.consumerCode) -> playbookName '$($r.playbookName)' not found in target env (deploy the playbook first)" -ForegroundColor Red
             $summary.Failed++; continue
         }
-        $body['sprk_playbook@odata.bind'] = "/sprk_analysisplaybooks($($playbookMap[$r.playbookName]))"
+        $body['sprk_Playbook@odata.bind'] = "/sprk_analysisplaybooks($($playbookMap[$r.playbookName]))"
     }
 
     try {
         Invoke-WebRequest -Uri $url -Headers $headers -Method Patch -Body ($body | ConvertTo-Json -Depth 5) -UseBasicParsing | Out-Null
         # Null lookups in the mirror must CLEAR any existing value (convergence).
-        foreach ($nav in @(@{ f = $r.actionCode; n = 'sprk_action' }, @{ f = $r.playbookName; n = 'sprk_playbook' })) {
+        foreach ($nav in @(@{ f = $r.actionCode; n = 'sprk_Action' }, @{ f = $r.playbookName; n = 'sprk_Playbook' })) {
             if (-not $nav.f) {
                 try { Invoke-WebRequest -Uri "$url/$($nav.n)/`$ref" -Headers $headers -Method Delete -UseBasicParsing | Out-Null } catch { }
             }

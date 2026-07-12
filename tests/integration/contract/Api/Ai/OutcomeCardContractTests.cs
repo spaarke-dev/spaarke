@@ -44,7 +44,7 @@ public class OutcomeCardContractTests
             link: OutcomeCardLink.ServerComposed(ServerUrl, "Open the matter", kind: "record"),
             nextSteps: new[]
             {
-                new NextStepChip("Analyze the document", "invoke_capability"),
+                new NextStepChip("Analyze the document", "invoke_capability", TargetBindingId: "3a1c30d1-cccc-f111-ab0e-70a8a590c51c"),
                 new NextStepChip("Open the workspace", "navigate", TargetUrl: ServerUrl),
             },
             completion: OutcomeCompletion.SingleShot(),
@@ -129,10 +129,14 @@ public class OutcomeCardContractTests
         chips.GetArrayLength().Should().Be(2);
         chips[0].GetProperty("label").GetString().Should().Be("Analyze the document");
         chips[0].GetProperty("actionKind").GetString().Should().Be("invoke_capability");
+        chips[0].GetProperty("targetBindingId").GetString().Should().Be("3a1c30d1-cccc-f111-ab0e-70a8a590c51c",
+            "an invoke_capability chip carries the dispatchable target (task 062 — Click path's dispatchConsumer(bindingId, args))");
         chips[0].TryGetProperty("targetUrl", out _).Should().BeFalse(
             "a null optional field is omitted (WhenWritingNull) — additive tolerant wire shape");
         chips[1].GetProperty("actionKind").GetString().Should().Be("navigate");
         chips[1].GetProperty("targetUrl").GetString().Should().Be(ServerUrl);
+        chips[1].TryGetProperty("targetBindingId", out _).Should().BeFalse(
+            "a navigate placeholder declares no target Binding — the null optional field is omitted");
     }
 
     // =====================================================================

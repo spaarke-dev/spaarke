@@ -22,7 +22,12 @@
  *  5. Honor ADR-021 (Fluent v9 semantic tokens; no hex) and ADR-022 (React 19).
  *  6. Mount the inline AI toolbar (task 030, FR-14, `ComposeAiToolbar`) inside
  *     the BubbleMenu on non-collapsed selection — see the "AI TOOLBAR MOUNT"
- *     region below for the exact insertion point.
+ *     region below for the exact insertion point. Task 111 (UAT-R2, 2026-07-10)
+ *     made this popup AI-actions ONLY (formatting controls removed from it —
+ *     see the BubbleMenu JSX comment) and added a SECOND, independent trigger:
+ *     right-click inside the editor opens the same toolbar at the click point
+ *     (works on a collapsed caret too) — see the `contextMenuAnchor` state +
+ *     `handleDOMEvents.contextmenu` hook.
  *
  *  HEARTBEAT HOISTED (R2/R3 refactor, 2026-06-29): The 3-min SPE check-out
  *  heartbeat that previously lived here has been moved to the workspace level
@@ -75,23 +80,16 @@ import TaskItem from '@tiptap/extension-task-item';
 import CharacterCount from '@tiptap/extension-character-count';
 import TextAlign from '@tiptap/extension-text-align';
 
-import { makeStyles, tokens, Spinner, Text, Toolbar, ToolbarButton, Button } from '@fluentui/react-components';
-import {
-  TextBold24Regular,
-  TextItalic24Regular,
-  TextUnderline24Regular,
-  TextStrikethrough24Regular,
-  Link24Regular,
-  LinkDismiss24Regular,
-  Checkmark16Regular,
-  Dismiss16Regular,
-} from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, tokens, Spinner, Text, Button } from '@fluentui/react-components';
+import { Checkmark16Regular, Dismiss16Regular } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
+import { QaHighlightExtension } from './marks/QaHighlightExtension';
 import { usePendingRedline, type MaterializeStatus } from './hooks/usePendingRedline';
+import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighlight';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the side-effect widget
 // registration (`register-workspace-widgets.ts` transitively pulls in
@@ -147,6 +145,14 @@ const LOCKED_EXTENSIONS = [
  * lives in `useStyles().editorSurface` via the `compose-mark-*` classes (semantic tokens; ADR-021).
  */
 const COMPOSE_R2_MARKS = [InsertionMark, DeletionMark, CommentAnchorMark];
+
+/**
+ * FR-35 Doc Q&A ephemeral highlight (task 072, stretch) — a single ProseMirror
+ * VIEW-DECORATION plugin (NOT a Mark; see the extension's file header). Kept
+ * as its own additive array, separate from COMPOSE_R2_MARKS, because it is a
+ * structurally different kind of extension (plugin-only, no schema mark).
+ */
+const COMPOSE_R2_QA_HIGHLIGHT = [QaHighlightExtension];
 
 // ---------------------------------------------------------------------------
 // Constants — selection debounce
@@ -231,6 +237,17 @@ export interface ComposeEditorProps {
    * triggers a mammoth re-import.
    */
   docxBytes: ArrayBuffer | null;
+
+  /**
+   * DEF-08: seed HTML for an AI-drafted full document. When present (and `docxBytes` is null),
+   * the editor sets its content DIRECTLY from this HTML instead of decoding DOCX — the drafting
+   * body already IS the editor content (no docx round-trip). Rendered once on mount as a
+   * TRANSIENT working draft (reported dirty so create-on-save first Save is reachable), then the
+   * editor owns subsequent edits. Mutually exclusive with `docxBytes` (a draft seed sets
+   * `docxBytes` null). Save serializes the editor content via `tipTapToDocxBytes` exactly as for a
+   * docx mount.
+   */
+  initialHtml?: string | null;
 
   /**
    * Document pointer used by PaneEventBus events + heartbeat endpoint URL.
@@ -341,6 +358,21 @@ export interface ComposeEditorHandle {
    * the FR-19 "do not guess" rule. The true ledger-supersession WRITE is FR-17/034.
    */
   materializePendingRedline(draft: ComposeDraftPayload, provenance: ComposeDraftProvenance): MaterializeStatus;
+
+  /**
+   * FR-35 Doc Q&A ephemeral highlight (spaarkeai-compose-r2 task 072, stretch).
+   * Resolve `sourceText` (the cited excerpt from a grounded Text-path answer)
+   * against the CURRENT document and, on a unique match, render a TRANSIENT
+   * highlight decoration + scroll it into view. `sectionLabel` drives the
+   * "Found in …" affordance. Returns the outcome (`'highlighted'` /
+   * `'not_found'` / `'ambiguous'` / `'noop'`) so the caller can distinguish a
+   * genuine miss (the citation belongs to a different source than this open
+   * document) from success — never guesses (FR-19 sibling rule).
+   */
+  highlightCitedSpan(sourceText: string, sectionLabel?: string): QaHighlightStatus;
+
+  /** Clear the active Doc Q&A ephemeral highlight immediately (no-op if none active). */
+  clearCitedHighlight(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -416,6 +448,14 @@ const useStyles = makeStyles({
       color: tokens.colorNeutralForeground1,
       borderRadius: tokens.borderRadiusSmall,
     },
+    // FR-35 Doc Q&A ephemeral highlight (task 072) — a ProseMirror view
+    // decoration, NOT a doc Mark (never serializes to DOCX). Semantic tokens
+    // only (ADR-021 dark-mode-correct).
+    '& .compose-qa-highlight': {
+      backgroundColor: tokens.colorPaletteMarigoldBackground2,
+      borderRadius: tokens.borderRadiusSmall,
+      transition: 'background-color 0.2s ease-out',
+    },
   },
   loadingState: {
     display: 'flex',
@@ -425,15 +465,29 @@ const useStyles = makeStyles({
     columnGap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground2,
   },
+  // Task 111: the popup is now AI-actions-ONLY (ComposeAiToolbar owns the
+  // single Toolbar rendered inside it). `flexWrap` + `maxWidth` are ADDITIVE
+  // overflow-prevention (previously absent) — the text-labelled AI buttons
+  // wrap onto a second row instead of overflowing the popup width.
   bubbleMenu: {
     display: 'flex',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    maxWidth: '420px',
     columnGap: tokens.spacingHorizontalXXS,
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
     boxShadow: tokens.shadow4,
     padding: tokens.spacingHorizontalXXS,
+  },
+  // Task 111 — right-click (context-menu) AI-toolbar trigger. Reuses
+  // `bubbleMenu`'s visual treatment (semantic tokens, dark-mode-correct) via
+  // `mergeClasses`; only the positioning differs (fixed at the click point
+  // instead of tippy-anchored to the selection).
+  contextMenuPopup: {
+    position: 'fixed',
+    zIndex: 1000,
   },
   // R2 pending-redline accept/reject affordances (task 033, FR-16). Semantic tokens only
   // (ADR-021 dark-mode-correct) — no hardcoded hex.
@@ -470,6 +524,17 @@ const useStyles = makeStyles({
   redlineErrorText: {
     flex: 1,
     minWidth: 0,
+  },
+  // FR-35 Doc Q&A ephemeral highlight banner (task 072, stretch). Semantic
+  // tokens only (ADR-021 dark-mode-correct) — transient, dismissible-by-timeout.
+  qaHighlightBanner: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+    padding: tokens.spacingHorizontalS,
+    backgroundColor: tokens.colorPaletteMarigoldBackground1,
+    color: tokens.colorPaletteMarigoldForeground1,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
 });
 
@@ -546,11 +611,10 @@ function useSelectionEventDispatch(
         // Flow 1 — always fires on selection-change (even collapsed selections,
         // because subscribers may want to update precedent context as cursor
         // moves through clauses).
-        // Per ADR-030: the Compose discriminants are additive on the existing
-        // `context` channel typed union; we cast through `unknown` because the
-        // PaneEventChannelMap doesn't yet enumerate these Compose additions at
-        // the shared-lib level (compose-contracts.ts is solution-local until a
-        // second consumer needs the types — see Spike #2 §11 / task 041).
+        // Per ADR-030: `compose_selection_changed` is now a TYPED additive
+        // discriminant on the `context` channel (ContextPaneEvent — enumerated at
+        // the shared-lib bus layer by task 104). No `as any` — the literal is
+        // type-checked against the channel union.
         dispatch('context', {
           type: 'compose_selection_changed',
           documentRef,
@@ -561,11 +625,12 @@ function useSelectionEventDispatch(
           },
           sessionId,
           timestamp,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any);
+        });
 
         // Flow 2 — fires only when selection is meaningful (non-collapsed +
         // ≥10 chars) to avoid noise on click-only cursor moves.
+        // `compose_selection_offer` is a TYPED additive discriminant on the
+        // `conversation` channel (ConversationPaneEvent — task 104).
         const isCollapsed = from === to;
         if (!isCollapsed && selectionText.length >= FLOW2_MIN_CHARS) {
           dispatch('conversation', {
@@ -579,8 +644,7 @@ function useSelectionEventDispatch(
             jpsScope: 'compose-selection',
             sessionId,
             timestamp,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          } as any);
+          });
         }
       }, SELECTION_DEBOUNCE_MS);
     };
@@ -619,6 +683,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
   function ComposeEditor(props, ref) {
     const {
       docxBytes,
+      initialHtml,
       documentRef,
       bffBaseUrl,
       sessionId = '',
@@ -633,11 +698,47 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const [isImporting, setIsImporting] = React.useState<boolean>(false);
     const dirtyRef = React.useRef<boolean>(false);
 
+    // ----- Task 111 — right-click (context-menu) AI-toolbar trigger --------
+    // The screen point (viewport coords) of the last suppressed native context
+    // menu; non-null while the point-insertion AI-toolbar popup is open. Set
+    // via the ProseMirror `handleDOMEvents.contextmenu` hook below (the
+    // TipTap-idiomatic way to intercept a raw DOM event scoped to the editor's
+    // contenteditable region — NOT a React `onContextMenu` on an ancestor,
+    // which would also catch right-clicks on the surrounding chrome). This
+    // popup is independent of TipTap's tippy-driven `BubbleMenu` (which stays
+    // selection-only, per its default `shouldShow`): a plain, React-state-
+    // driven popup positioned at the click point, so it works even when there
+    // is NO selection (a caret / point-insertion), per task 111 requirement 2.
+    const [contextMenuAnchor, setContextMenuAnchor] = React.useState<{ x: number; y: number } | null>(null);
+    const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
+
+    // Dismiss the context-menu popup on an outside click or Escape. Mirrors
+    // the standard "click-away" pattern; the BubbleMenu's own dismissal
+    // (blur/click-outside) is unaffected — this effect only governs the
+    // separate point-insertion popup.
+    React.useEffect(() => {
+      if (!contextMenuAnchor) return;
+      const handlePointerDown = (event: MouseEvent): void => {
+        if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
+          setContextMenuAnchor(null);
+        }
+      };
+      const handleKeyDown = (event: KeyboardEvent): void => {
+        if (event.key === 'Escape') setContextMenuAnchor(null);
+      };
+      document.addEventListener('mousedown', handlePointerDown);
+      document.addEventListener('keydown', handleKeyDown);
+      return () => {
+        document.removeEventListener('mousedown', handlePointerDown);
+        document.removeEventListener('keydown', handleKeyDown);
+      };
+    }, [contextMenuAnchor]);
+
     // ----- TipTap editor instance -----------------------------------------
     const editor = useEditor({
       // LOCKED Spike #1 set + the ADDITIVE R2 custom marks (task 031) — the locked list itself
       // is unchanged (spread, not mutated), honoring the "do not touch the locked list" constraint.
-      extensions: [...LOCKED_EXTENSIONS, ...COMPOSE_R2_MARKS],
+      extensions: [...LOCKED_EXTENSIONS, ...COMPOSE_R2_MARKS, ...COMPOSE_R2_QA_HIGHLIGHT],
       content: '<p></p>',
       // editorProps to apply Fluent v9 inherited foreground; semantic-token
       // styling on `.ProseMirror` lives in useStyles above.
@@ -647,6 +748,32 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // contract parity).
           role: 'textbox',
           'aria-multiline': 'true',
+        },
+        // Task 111 requirement 2 — suppress the browser's native context menu
+        // inside the Compose editor region and open the AI toolbar at the
+        // click point instead. `handleDOMEvents` is ProseMirror's supported
+        // raw-DOM-event seam (fires for every native event on the editor's
+        // DOM, scoped to that element); returning `true` tells ProseMirror the
+        // event was handled. Works for a collapsed selection (caret) too —
+        // this handler doesn't touch selection at all, it only opens the
+        // popup at (clientX, clientY).
+        //
+        // DUAL-POPUP DEDUPE (task 111 requirement 3): the selection BubbleMenu
+        // already shows the AI toolbar whenever there is a NON-EMPTY selection.
+        // A right-click at that moment must NOT open a second, redundant popup.
+        // We always `preventDefault` (suppress the browser's native menu) but
+        // only open the right-click popup when the selection is COLLAPSED
+        // (`from === to`) — i.e. the BubbleMenu is not showing. With a live
+        // selection we leave the BubbleMenu as the sole popup.
+        handleDOMEvents: {
+          contextmenu: (view, event) => {
+            event.preventDefault();
+            const { from, to } = view.state.selection;
+            if (from === to) {
+              setContextMenuAnchor({ x: event.clientX, y: event.clientY });
+            }
+            return true;
+          },
         },
       },
       onUpdate: () => {
@@ -661,20 +788,39 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     React.useEffect(() => {
       if (!editor) return;
       if (!docxBytes) {
+        // DEF-08: an AI-drafted full-document seed sets the editor content DIRECTLY from HTML
+        // (no docx decode) — the draft body IS the editor content. A draft is a transient working
+        // draft (never yet saved), so report dirty=true to the workspace (create-on-save first Save
+        // must be reachable), while the editor's OWN dirtyRef stays clean (an untouched seed still
+        // Saves the pristine draft). Mirrors the transient-mount dirty semantics below.
+        if (initialHtml && initialHtml.length > 0) {
+          editor.commands.setContent(initialHtml);
+          dirtyRef.current = false;
+          onDirtyChange?.(true);
+          return;
+        }
         // Reset to empty paragraph if cleared.
         editor.commands.setContent('<p></p>');
         dirtyRef.current = false;
         onDirtyChange?.(false);
         return;
       }
+      // gap 1.6 / DEF-01: a TRANSIENT (Browse/Upload) mount has no SPE pointer yet (empty
+      // speDriveItemId). Its create-on-save first Save must be reachable, so we report
+      // dirty=true to the workspace (there IS unsaved work — the draft has never been
+      // persisted). The editor's OWN dirtyRef stays FALSE below so an *untouched* transient
+      // Save still persists the pristine ORIGINAL bytes byte-identical (FR-06a, task 015) —
+      // triggerSave keys the byte-branch off `editorRef.current.isDirty()` (= dirtyRef), NOT
+      // the workspace-facing onDirtyChange signal. A stored (non-transient) load reports clean.
+      const isTransientMount = !documentRef?.speDriveItemId;
       let cancelled = false;
       setIsImporting(true);
       docxToTipTapHtml(docxBytes)
         .then(({ html, messages }) => {
           if (cancelled) return;
           editor.commands.setContent(html);
-          dirtyRef.current = false; // fresh load is clean
-          onDirtyChange?.(false);
+          dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
+          onDirtyChange?.(isTransientMount);
           // Privacy: messages are Tier 1 safe (configuration metadata).
           // Document HTML itself is Tier 3 — NEVER logged.
           if (messages.length > 0) {
@@ -695,7 +841,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       return () => {
         cancelled = true;
       };
-    }, [editor, docxBytes, onDirtyChange, onImportWarnings]);
+      // `documentRef?.speDriveItemId` is read (transient-vs-stored) but intentionally NOT a dep:
+      // the effect must re-run ONLY on a new `docxBytes` mount. Adding it would re-run on
+      // save-success (when speDriveItemId gets populated on the same bytes) and clobber the
+      // user's edits by re-importing the original mount bytes. The captured value is correct
+      // because `mountTransient` sets docxBytes + documentRef atomically in one render.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [editor, docxBytes, initialHtml, onDirtyChange, onImportWarnings]);
 
     // ----- Selection dispatch (heartbeat hoisted to ComposeWorkspace) -----
     useSelectionEventDispatch(editor, documentRef, sessionId, dispatch);
@@ -703,6 +855,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // ----- FR-16 pending-redline materialization (task 033) ---------------
     // Owns materialize-from-ledger → FR-15 marks + accept/reject + supersession.
     const redline = usePendingRedline(editor);
+
+    // ----- FR-35 Doc Q&A ephemeral highlight (task 072, stretch) -----------
+    const qaHighlight = useDocQaHighlight(editor);
 
     // ----- Imperative handle ----------------------------------------------
     React.useImperativeHandle(
@@ -737,8 +892,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           redline.materialize(draft, provenance);
         },
         materializePendingRedline: (draft, provenance) => redline.materialize(draft, provenance),
+        highlightCitedSpan: (sourceText, sectionLabel) => qaHighlight.highlight(sourceText, sectionLabel),
+        clearCitedHighlight: () => qaHighlight.clear(),
       }),
-      [editor, redline]
+      [editor, redline, qaHighlight]
     );
 
     // ----- Render ---------------------------------------------------------
@@ -753,26 +910,6 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       );
     }
 
-    // BubbleMenu handler for the "Link" button — prompts for a URL and applies
-    // it as a link mark to the current selection. Removing an existing link
-    // uses the same button when a link is already active.
-    const toggleLink = React.useCallback((): void => {
-      if (!editor) return;
-      if (editor.isActive('link')) {
-        editor.chain().focus().unsetLink().run();
-        return;
-      }
-      const previousUrl = editor.getAttributes('link').href as string | undefined;
-      // eslint-disable-next-line no-alert
-      const url = window.prompt('Enter URL', previousUrl ?? 'https://');
-      if (url === null) return; // cancelled
-      if (url.trim() === '') {
-        editor.chain().focus().unsetLink().run();
-        return;
-      }
-      editor.chain().focus().extendMarkRange('link').setLink({ href: url.trim() }).run();
-    }, [editor]);
-
     return (
       <div
         className={styles.container}
@@ -781,51 +918,23 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         data-compose-editor-document-id={documentRef?.sprkDocumentId ?? ''}
         data-compose-editor-spe-id={documentRef?.speDriveItemId ?? ''}
       >
+        {/* Persistent top toolbar — headings/lists/blockquote/align/undo-redo.
+            UNCHANGED by task 111 (bold/italic/underline/strike/link have no
+            control here today — see ComposeFormatToolbar.tsx's own docstring;
+            they are ONLY reachable via the selection-triggered AI-actions
+            popup's host, the BubbleMenu below, which task 111 made AI-actions
+            ONLY — this is a known, flagged trade-off, not a silent removal). */}
         <ComposeFormatToolbar editor={editor} disabled={isImporting} />
         {editor ? (
           <BubbleMenu editor={editor} tippyOptions={{ duration: 100, placement: 'top' }} className={styles.bubbleMenu}>
-            <Toolbar size="small" aria-label="Selection formatting" data-testid="compose-bubble-menu">
-              <ToolbarButton
-                appearance={editor.isActive('bold') ? 'primary' : 'subtle'}
-                icon={<TextBold24Regular />}
-                aria-label="Bold"
-                aria-pressed={editor.isActive('bold')}
-                onClick={() => editor.chain().focus().toggleBold().run()}
-              />
-              <ToolbarButton
-                appearance={editor.isActive('italic') ? 'primary' : 'subtle'}
-                icon={<TextItalic24Regular />}
-                aria-label="Italic"
-                aria-pressed={editor.isActive('italic')}
-                onClick={() => editor.chain().focus().toggleItalic().run()}
-              />
-              <ToolbarButton
-                appearance={editor.isActive('underline') ? 'primary' : 'subtle'}
-                icon={<TextUnderline24Regular />}
-                aria-label="Underline"
-                aria-pressed={editor.isActive('underline')}
-                onClick={() => editor.chain().focus().toggleUnderline().run()}
-              />
-              <ToolbarButton
-                appearance={editor.isActive('strike') ? 'primary' : 'subtle'}
-                icon={<TextStrikethrough24Regular />}
-                aria-label="Strikethrough"
-                aria-pressed={editor.isActive('strike')}
-                onClick={() => editor.chain().focus().toggleStrike().run()}
-              />
-              <ToolbarButton
-                appearance={editor.isActive('link') ? 'primary' : 'subtle'}
-                icon={editor.isActive('link') ? <LinkDismiss24Regular /> : <Link24Regular />}
-                aria-label={editor.isActive('link') ? 'Remove link' : 'Add link'}
-                aria-pressed={editor.isActive('link')}
-                onClick={toggleLink}
-              />
-            </Toolbar>
-
             {/* ===================================================================
-                AI TOOLBAR MOUNT — task 030 (FR-14). Localized region; task 031
-                (custom marks) edits AFTER this block — keep this region
-                self-contained so that follow-on edit stays a clean insertion.
+                AI TOOLBAR MOUNT — task 030 (FR-14), AI-actions-ONLY per task 111
+                (UAT-R2 layout fix): the sibling formatting Toolbar that used to
+                render here was REMOVED (task 111) — ComposeAiToolbar is now the
+                popup's ONLY content, owning its own single Toolbar (no orphaned
+                divider, no double-Toolbar padding). Task 031 (custom marks)
+                edits AFTER this block — keep this region self-contained so that
+                follow-on edits stay a clean insertion.
                 =================================================================== */}
             <ComposeAiToolbar
               editor={editor}
@@ -837,6 +946,45 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             />
             {/* =================== END AI TOOLBAR MOUNT (task 030) =================== */}
           </BubbleMenu>
+        ) : null}
+
+        {/* ===================================================================
+            TASK 111 requirement 2 — right-click (context-menu) AI-toolbar
+            trigger. Independent of the tippy-driven BubbleMenu above (see the
+            `handleDOMEvents.contextmenu` hook in the `useEditor` call): a
+            plain, React-state-positioned popup at the click point, open for
+            BOTH a selection and a collapsed caret (`forceVisible`). Reuses
+            `styles.bubbleMenu`'s visual treatment via `mergeClasses` so it's
+            visually consistent with the selection-triggered popup.
+            =================================================================== */}
+        {contextMenuAnchor ? (
+          <div
+            ref={contextMenuRef}
+            className={mergeClasses(styles.bubbleMenu, styles.contextMenuPopup)}
+            style={{ left: contextMenuAnchor.x, top: contextMenuAnchor.y }}
+            data-testid="compose-ai-context-menu"
+          >
+            <ComposeAiToolbar
+              editor={editor}
+              documentRef={documentRef}
+              sessionId={sessionId}
+              bffBaseUrl={bffBaseUrl}
+              dispatch={dispatch}
+              enqueueComposeAction={enqueueComposeAction}
+              forceVisible
+            />
+          </div>
+        ) : null}
+
+        {/* ===================================================================
+            FR-35 Doc Q&A ephemeral highlight banner — task 072 (stretch).
+            Renders ONLY while a cited answer's source span is highlighted
+            (auto-clears after HIGHLIGHT_TTL_MS or on the next Q&A / clear).
+            =================================================================== */}
+        {qaHighlight.activeHighlight ? (
+          <div className={styles.qaHighlightBanner} role="status" data-testid="compose-qa-highlight-banner">
+            <Text size={200}>Found in {qaHighlight.activeHighlight.sectionLabel ?? 'this document'}</Text>
+          </div>
         ) : null}
 
         {/* ===================================================================

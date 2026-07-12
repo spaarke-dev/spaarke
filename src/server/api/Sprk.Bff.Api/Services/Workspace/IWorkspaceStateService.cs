@@ -3,33 +3,25 @@ using Sprk.Bff.Api.Models.Workspace;
 namespace Sprk.Bff.Api.Services.Workspace;
 
 /// <summary>
-/// Q4 hybrid persistence for R6 Pillar 6a workspace tabs.
+/// Q4 hybrid persistence for R6 Pillar 6a workspace tabs — READ surface.
 ///
 /// <para>
-/// Storage tiers:
+/// Storage tiers read on <see cref="GetTabsAsync"/>:
 /// <list type="bullet">
-///   <item><b>Redis hot tier</b> — 24h TTL. Key <c>workspace:{tenantId}:{sessionId}</c>
-///   (ADR-014 + NFR-16 binding). Every active-session tab is mirrored here.</item>
+///   <item><b>Redis hot tier</b> — 24h TTL. Key
+///   <c>tenant:{tenantId}:workspace-state:{sessionId}:v1</c> (ADR-014 + NFR-16 binding).</item>
 ///   <item><b>Cosmos durable tier</b> — container <c>memory</c>, partition key
-///   <c>/tenantId</c>, document <c>id = workspace-tab_{tenantId}_{tabId}</c>,
-///   <c>documentType = "workspace-tab"</c>. Populated on
-///   <see cref="PinTabAsync"/> (matter-attach + pin promotion).</item>
+///   <c>/tenantId</c>, document discriminator <c>documentType = "workspace-tab"</c>.</item>
 /// </list>
 /// </para>
 ///
 /// <para>
-/// Operation semantics:
-/// <list type="bullet">
-///   <item><see cref="GetTabsAsync"/> — returns the MERGED set: hot-tier rows for the
-///   (tenant, session) tuple UNION durable-tier rows whose matterId is referenced by the
-///   hot-tier rows. Hot-tier rows take precedence (same id) — most-recent wins.</item>
-///   <item><see cref="UpsertTabAsync"/> — Redis-only write (24h TTL).
-///   Does not touch Cosmos.</item>
-///   <item><see cref="PinTabAsync"/> — sets <see cref="WorkspaceTab.IsPinned"/> = true and
-///   writes through to Cosmos durable. Redis row is preserved.</item>
-///   <item><see cref="CloseTabAsync"/> — removes the row from Redis ONLY. Does not delete
-///   Cosmos durable rows (pinned-to-matter rows persist).</item>
-/// </list>
+/// The tab WRITE path (upsert / pin / close) was retired by AIR2-075 together with the
+/// orphaned Get/Update/Close Workspace Tab chat tools and the SendWorkspaceArtifact legacy
+/// artifact variants. This service now exposes the read path only — consumed by
+/// <c>GET /api/workspace/state</c> restore and the <c>SprkChatAgentFactory</c> workspace-state
+/// system-prompt block. Any durable rows returned are pre-existing (pinned) tabs; nothing in
+/// the BFF writes new tab state.
 /// </para>
 ///
 /// <para>
@@ -57,53 +49,5 @@ public interface IWorkspaceStateService
     Task<IReadOnlyList<WorkspaceTab>> GetTabsAsync(
         string tenantId,
         string sessionId,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Upserts a tab into the Redis hot tier with 24h TTL. The tab is identified by
-    /// (<paramref name="tenantId"/>, <paramref name="sessionId"/>, <c>tab.Id</c>).
-    /// Does NOT touch the Cosmos durable tier.
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier.</param>
-    /// <param name="sessionId">Chat session identifier.</param>
-    /// <param name="tab">Tab to upsert.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task UpsertTabAsync(
-        string tenantId,
-        string sessionId,
-        WorkspaceTab tab,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Promotes a tab from hot tier to Cosmos durable tier:
-    /// sets <see cref="WorkspaceTab.IsPinned"/> = true, updates
-    /// <see cref="WorkspaceTab.MatterContext"/>.MatterId to <paramref name="matterId"/>,
-    /// writes through to BOTH Redis (24h TTL refresh) AND Cosmos. The Redis row is
-    /// preserved (still served from hot tier until TTL expiry).
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier.</param>
-    /// <param name="sessionId">Chat session identifier.</param>
-    /// <param name="tabId">Tab identifier (<see cref="WorkspaceTab.Id"/>).</param>
-    /// <param name="matterId">Dataverse matter id to attach.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task PinTabAsync(
-        string tenantId,
-        string sessionId,
-        string tabId,
-        string matterId,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Removes the tab from the Redis hot tier. Does NOT touch Cosmos durable rows —
-    /// a pinned tab survives close.
-    /// </summary>
-    /// <param name="tenantId">Tenant identifier.</param>
-    /// <param name="sessionId">Chat session identifier.</param>
-    /// <param name="tabId">Tab identifier.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task CloseTabAsync(
-        string tenantId,
-        string sessionId,
-        string tabId,
         CancellationToken ct = default);
 }
