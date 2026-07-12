@@ -1036,6 +1036,41 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     []
   );
 
+  // DEF-11 — register a whole-document revision's REVIEW FLAGS (`flag-risks` intent → payload.comments)
+  // as anchored `comment` AnchoredAnnotations. Same pipeline as DEF-13's edit-reason comment: each flag
+  // flows through `anchoredAnnotations` (persisted by the gap-4.3 effect) → `anchoredAnnotationsToDocxAnnotations`
+  // → PushAnnotations → `DocxAnnotationWriter` (a real `w:comment` anchored to `target_text` on Save/Push).
+  // No accept/reject (flags carry no edit). Deduped by the ledger key + index so a re-materialize
+  // (refresh / duplicate signal) never appends duplicates.
+  const registerAiReviewComments = React.useCallback(
+    (comments: Array<{ target_text?: string; comment?: string }>, provenance: { ledgerRef: string; bindingId: string }): void => {
+      const flags = comments
+        .map((c, i) => ({ i, target: c?.target_text?.trim() ?? '', body: c?.comment?.trim() ?? '' }))
+        .filter(c => c.target.length > 0 && c.body.length > 0);
+      if (flags.length === 0) return;
+      setAnchoredAnnotations(prev => {
+        const existing = new Set(prev.map(a => a.id));
+        const additions: AnchoredAnnotation[] = [];
+        for (const flag of flags) {
+          const annotationId = `ai-review:${provenance.ledgerRef}#${flag.i}`;
+          if (existing.has(annotationId)) continue;
+          additions.push({
+            id: annotationId,
+            type: 'comment',
+            anchor: { textPattern: flag.target, paragraphHint: -1, spanId: provenance.ledgerRef },
+            body: flag.body,
+            author: 'Spaarke Assistant',
+            timestamp: new Date().toISOString(),
+            source: 'ai',
+            provenance: { bindingId: provenance.bindingId, ledgerRef: provenance.ledgerRef },
+          });
+        }
+        return additions.length > 0 ? [...prev, ...additions] : prev;
+      });
+    },
+    []
+  );
+
   const materializeComposeDraftFromLedger = React.useCallback(
     async (targetLedgerRef?: string): Promise<void> => {
       if (state.status !== 'loaded') return;
@@ -1076,11 +1111,21 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // Idempotent — never double-apply the same stored draft (refresh / duplicate signal).
         if (target.key === lastMaterializedKey) return;
 
-        editor.materializeComposeDraft(target.payload, {
+        const provenance = {
           ledgerRef: target.key, // {bindingId}@t{n} provenance
           bindingId: target.bindingId,
           turn: target.turn,
-        });
+        };
+        // DEF-11: a whole-document revision (`compose-revise-document`) carries a CHANGE LIST
+        // (`edits[]`) and/or REVIEW FLAGS (`comments[]`). A single-edit draft (compose-draft-alternative /
+        // compose-draft-document) has neither — it keeps the shipped single-materialize path.
+        const editList = Array.isArray(target.payload?.edits) ? target.payload.edits : null;
+        const commentList = Array.isArray(target.payload?.comments) ? target.payload.comments : null;
+        if (editList && editList.length > 0) {
+          editor.materializeComposeEdits(editList, provenance); // multi-change redline
+        } else {
+          editor.materializeComposeDraft(target.payload, provenance); // single-edit redline (unchanged)
+        }
         setLastMaterializedKey(target.key);
         setComposeDraftError(null);
 
@@ -1092,16 +1137,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // edit's `target_text` (the redline range); skipped for an insertion-style draft with no
         // target (no span to anchor a comment to) or an empty rationale. Deduped by the ledger key so
         // a refresh/duplicate materialize never appends a second copy.
-        registerAiEditReasonComment(target.payload, {
-          ledgerRef: target.key,
-          bindingId: target.bindingId,
-        });
+        // DEF-11: a whole-document revision's REVIEW FLAGS become anchored comments (flag-risks intent).
+        // A single-edit draft instead contributes its rationale as ONE anchored comment (DEF-13).
+        if (commentList && commentList.length > 0) {
+          registerAiReviewComments(commentList, provenance);
+        } else {
+          registerAiEditReasonComment(target.payload, {
+            ledgerRef: target.key,
+            bindingId: target.bindingId,
+          });
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         setComposeDraftError(`Failed to insert drafted content: ${message}`);
       }
     },
-    [state.status, state.sessionId, bffBaseUrl, lastMaterializedKey, registerAiEditReasonComment]
+    [state.status, state.sessionId, bffBaseUrl, lastMaterializedKey, registerAiEditReasonComment, registerAiReviewComments]
   );
 
   // -------------------------------------------------------------------------

@@ -1657,7 +1657,8 @@ public static class ComposeEndpoints
                     Source: source,
                     SessionFileId: body.SessionFileId,
                     FileName: body.FileName ?? file?.FileName,
-                    RegisteredAt: DateTimeOffset.UtcNow);
+                    RegisteredAt: DateTimeOffset.UtcNow,
+                    DocumentSessionId: body.DocumentSessionId);
             }
             else
             {
@@ -1667,7 +1668,8 @@ public static class ComposeEndpoints
                     SpeDriveItemId: body.SpeDriveItemId,
                     SpeDriveId: body.SpeDriveId,
                     FileName: body.FileName,
-                    RegisteredAt: DateTimeOffset.UtcNow);
+                    RegisteredAt: DateTimeOffset.UtcNow,
+                    DocumentSessionId: body.DocumentSessionId);
             }
 
             var updated = session with { ActiveDocument = identity };
@@ -1683,7 +1685,8 @@ public static class ComposeEndpoints
                 SessionFileId: identity.SessionFileId,
                 DocumentId: identity.SprkDocumentId,
                 FileName: identity.FileName,
-                CorrelationId: httpContext.TraceIdentifier));
+                CorrelationId: httpContext.TraceIdentifier,
+                DocumentSessionId: identity.DocumentSessionId));
         }
         catch (Exception ex)
         {
@@ -1764,6 +1767,15 @@ public sealed record ComposeUploadResponse(
 /// is an optional provenance discriminant (defaults to <c>compose-direct</c> for a session file,
 /// <c>stored</c> for a document) — see <see cref="ActiveDocumentIdentity"/>.
 /// </summary>
+/// <param name="DocumentSessionId">
+/// DEF-11 (spaarkeai-compose-r2) — OPTIONAL id of the separate, coordinated Compose "document
+/// session" (<c>ComposeWorkspace.state.sessionId</c>) that hosts this document's compose-disposition
+/// ledger outputs. Additive: older clients omitting this field are unaffected (the active-document
+/// pointer still registers; <see cref="ActiveDocumentIdentity.DocumentSessionId"/> stays null and the
+/// text-path capability dispatch falls back to the chat session per its fail-soft rule). When
+/// supplied, <c>BindingCapabilityTool</c> routes text-path <c>compose</c>-disposition dispatches to
+/// THIS session instead of the chat session, matching the DEF-09 Click-path precedent.
+/// </param>
 public sealed record ComposeActiveDocumentRequest(
     [property: JsonPropertyName("sessionId")] string SessionId,
     [property: JsonPropertyName("sessionFileId")] string? SessionFileId = null,
@@ -1771,17 +1783,19 @@ public sealed record ComposeActiveDocumentRequest(
     [property: JsonPropertyName("source")] string? Source = null,
     [property: JsonPropertyName("fileName")] string? FileName = null,
     [property: JsonPropertyName("speDriveItemId")] string? SpeDriveItemId = null,
-    [property: JsonPropertyName("speDriveId")] string? SpeDriveId = null);
+    [property: JsonPropertyName("speDriveId")] string? SpeDriveId = null,
+    [property: JsonPropertyName("documentSessionId")] string? DocumentSessionId = null);
 
 /// <summary>Response shape for <c>POST /api/compose/active-document</c> (task 113) — echoes the
-/// registered active-document pointer.</summary>
+/// registered active-document pointer. <see cref="DocumentSessionId"/> added DEF-11 (spaarkeai-compose-r2).</summary>
 public sealed record ComposeActiveDocumentResponse(
     [property: JsonPropertyName("sessionId")] string SessionId,
     [property: JsonPropertyName("source")] string Source,
     [property: JsonPropertyName("sessionFileId")] string? SessionFileId,
     [property: JsonPropertyName("documentId")] string? DocumentId,
     [property: JsonPropertyName("fileName")] string? FileName,
-    [property: JsonPropertyName("correlationId")] string CorrelationId);
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    [property: JsonPropertyName("documentSessionId")] string? DocumentSessionId = null);
 
 /// <summary>Request body for <c>POST /api/compose/documents/{id}/save</c> (replace path) and
 /// <c>POST /api/compose/documents/create-on-save</c> (FR-05 transient create path, task 100).

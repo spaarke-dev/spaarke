@@ -249,6 +249,21 @@ public record ChatSession(
 /// <param name="SpeDriveId">Optional SPE drive id when already known (stored documents).</param>
 /// <param name="FileName">Optional display file name (best-effort; display only).</param>
 /// <param name="RegisteredAt">UTC timestamp the document became active (observability / most-recent-wins).</param>
+/// <param name="DocumentSessionId">
+/// DEF-11 (spaarkeai-compose-r2) — the id of the SEPARATE, coordinated Compose "document session"
+/// (<c>ComposeWorkspace.state.sessionId</c>, keyed DocumentId+MatterId per tasks 062/102) that hosts
+/// this document's compose-disposition ledger outputs, when one is registered. Owner decision
+/// (DEF-09): a Compose edit belongs to the DOCUMENT session, not the chat session — the two sessions
+/// are deliberately kept separate, never unified. DEF-09 wired this for the CLICK path (the client's
+/// <c>dispatchConsumer</c> posts directly to an explicit session override). This field is the TEXT/
+/// agent-path counterpart: when a chat-loop capability tool call targets a <c>compose</c>-disposition
+/// Binding (see <see cref="Services.Ai.Chat.BindingCapabilityTool"/>), it reads this field off the
+/// CHAT session's <see cref="ChatSession.ActiveDocument"/> and — when non-empty — dispatches into
+/// THAT document session instead of the chat session, so the same "edit lands where the redline
+/// materializes" invariant holds regardless of which path (Click or Text) produced it. Null means no
+/// document session is registered (fail-soft: the dispatch falls back to the chat session, matching
+/// pre-DEF-11 behavior). Additive — older Redis/Cosmos payloads deserialize with this null.
+/// </param>
 public sealed record ActiveDocumentIdentity(
     string Source,
     string? SessionFileId = null,
@@ -256,7 +271,8 @@ public sealed record ActiveDocumentIdentity(
     string? SpeDriveItemId = null,
     string? SpeDriveId = null,
     string? FileName = null,
-    DateTimeOffset? RegisteredAt = null)
+    DateTimeOffset? RegisteredAt = null,
+    string? DocumentSessionId = null)
 {
     /// <summary>Source discriminant: a stored <c>sprk_document</c> row.</summary>
     public const string SourceStored = "stored";

@@ -219,6 +219,26 @@
       "toolDescription": "Draft a complete document to open in the Compose editor. Use when the user asks to draft, write, or compose a letter, memo, response, notice, or other DOCUMENT they want to work on and revise in the editor (e.g. 'write a letter to the client about these findings', 'draft a memo responding to this notice', 'open this as a document'). Produces a full drafting-ready document (title + body) grounded in the session's files and prior conversation outputs, opened in a Compose editor tab the user can edit and save — it does NOT send anything and does NOT create a record until the user saves. This is DIFFERENT from draft-correspondence: use draft-correspondence when the user wants to draft an email/letter to SEND via email; use this capability when the user wants a document to WORK ON in the Compose editor. Optional arg: request (the drafting instruction, defaults to the user's message)."
     },
     {
+      "$comment": "spaarkeai-compose-r2 DEF-11 — Click/text-path Binding for compose-revise-document, the ONE whole-document revision capability. DECLARES the core `compose` disposition: disposition 100000006 VERIFIED against Binding.cs BindingDisposition.Compose (same routing promotion as compose-draft-alternative/compose-draft-document — ToLedgerValue -> 'compose', OutputRouter pass-through store-before-render, ADR-040). UNLIKE compose-draft-alternative (a single selected clause, ONE edit) and compose-draft-document (drafts a brand-new document from scratch), this Action revises the WHOLE existing open document and emits a DUAL-CHANNEL payload (edits[] pending track-changes + comments[] anchored review flags) selected by revisionIntent (align-clauses/improve-clarity -> edits; flag-risks -> comments only; custom -> either/both). risk 100000000 = BindingRisk.None (the pending redlines + review comments ARE the review surface — the attorney accepts/replaces/undoes each edit and resolves/dismisses each comment before any persistence; no confirmation turn), captureMode 100000000 = BindingCaptureMode.LoopElicitation. surfaces=assistant,compose: selectable in the Assistant chat loop for whole-document revision intents AND materializes on the Compose editor/Workspace channel. §11 justification vs compose-draft-alternative/compose-draft-document lives in infra/dataverse/actions/compose-revise-document.action.json. Read-through the shipped session-dispatch seam — ZERO new BFF routes; the CHAT-session-vs-DOCUMENT-session routing decision (DEF-09 precedent) is made by BindingCapabilityTool reading ChatSession.ActiveDocument.DocumentSessionId when this Binding's disposition is Compose, NOT by a new route. actionCode/name carry NO version suffix (owner hygiene).",
+      "consumerType": "compose-revise-document",
+      "consumerCode": "default",
+      "environment": "*",
+      "name": "Compose — Revise Document",
+      "priority": 500,
+      "enabled": true,
+      "playbookName": null,
+      "actionCode": "compose-revise-document",
+      "ucid": null,
+      "disposition": 100000006,
+      "risk": 100000000,
+      "captureMode": 100000000,
+      "surfaces": "assistant,compose",
+      "chipTransitions": null,
+      "onEventBindings": null,
+      "matchConditions": null,
+      "toolDescription": "Revise the WHOLE document currently open in Compose. Use when the user asks to revise, review, align, or flag risks across the ENTIRE document they have open (e.g. 'align this whole contract with our playbook', 'flag any risky clauses in this document', 'clean up the clarity of this agreement', 'revise this document to tighten the indemnification language'). This is DIFFERENT from compose-draft-alternative (which rewrites only the ONE clause the user has selected/highlighted) and compose-draft-document (which drafts a BRAND-NEW document from scratch) — use this capability when the user wants an existing OPEN document reviewed or revised end-to-end. Produces pending track-change edits and/or anchored review comments the attorney accepts, replaces, resolves, or undoes; it does NOT persist any change until accepted. Required arg: revisionIntent (one of align-clauses, flag-risks, improve-clarity, custom — infer from the user's phrasing; default to improve-clarity if unclear). Optional arg: instruction (free-text refinement, required for custom)."
+    },
+    {
       "consumerType": "create-matter",
       "consumerCode": "default",
       "environment": "*",

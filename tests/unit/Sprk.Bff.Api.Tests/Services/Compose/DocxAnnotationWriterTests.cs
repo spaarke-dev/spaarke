@@ -343,6 +343,71 @@ public class DocxAnnotationWriterTests
         AssertNoValidationErrors(doc);
     }
 
+    // -- DEF-11: multiple flag-risks review comments in one revision pass (real OOXML wire assertion)
+
+    [Fact]
+    public void Annotate_WithMultipleFlagRisksComments_WritesOneAnchoredWCommentPerFinding()
+    {
+        // DEF-11 compose-revise-document (flag-risks revisionIntent): the revision pass can emit
+        // SEVERAL anchored review-flag comments in a single call (one per risky clause), NOT a
+        // single comment like the DEF-13 AI-edit-reason case above. Each finding is mapped to a
+        // Comment DocxAnnotation (anchoredAnnotationsToDocxAnnotations) and must materialize as its
+        // OWN native w:comment with its own id and its own anchor span — this proves, through the
+        // REAL DOCX write path (no mock), that the writer already handles the multi-comment shape
+        // the flag-risks payload produces: distinct ids, distinct anchors, distinct bodies, and a
+        // schema-valid document.
+        var source = CreateDocx(
+            "The Supplier shall indemnify the Customer without limit for any breach.",
+            "Either party may terminate this Agreement at any time without notice.",
+            "All confidential information survives termination indefinitely.");
+        var flaggedRisks = new[]
+        {
+            new DocxAnnotation { Kind = TrackChangeKind.Comment, TargetText = "indemnify the Customer without limit", CommentText = "Uncapped indemnity exposes the Supplier to unlimited liability.", Author = "Spaarke Assistant", Date = When },
+            new DocxAnnotation { Kind = TrackChangeKind.Comment, TargetText = "terminate this Agreement at any time without notice", CommentText = "No notice period on termination creates business continuity risk.", Author = "Spaarke Assistant", Date = When },
+            new DocxAnnotation { Kind = TrackChangeKind.Comment, TargetText = "survives termination indefinitely", CommentText = "An indefinite survival clause with no sunset is unusually broad.", Author = "Spaarke Assistant", Date = When },
+        };
+
+        var result = _sut.Annotate(source, flaggedRisks);
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(result), false);
+        var body = doc.MainDocumentPart!.Document!.Body!;
+
+        // Three distinct native w:comment entries, one per flagged risk.
+        var comments = doc.MainDocumentPart!.WordprocessingCommentsPart!.Comments!.Elements<Comment>().ToList();
+        comments.Should().HaveCount(3, "each flagged risk becomes its own native w:comment");
+        comments.Select(c => c.Id!.Value).Should().OnlyHaveUniqueItems("EDGE-3: monotonic distinct ids per comment");
+        comments.Select(c => c.InnerText).Should().BeEquivalentTo(new[]
+        {
+            "Uncapped indemnity exposes the Supplier to unlimited liability.",
+            "No notice period on termination creates business continuity risk.",
+            "An indefinite survival clause with no sunset is unusually broad.",
+        });
+        comments.Should().OnlyContain(c => c.Author!.Value == "Spaarke Assistant");
+
+        // Each comment's range brackets ONLY its own paragraph — three anchor triples, matched by id.
+        var rangeStarts = body.Descendants<CommentRangeStart>().ToList();
+        var rangeEnds = body.Descendants<CommentRangeEnd>().ToList();
+        var references = body.Descendants<CommentReference>().ToList();
+        rangeStarts.Should().HaveCount(3);
+        rangeEnds.Should().HaveCount(3);
+        references.Should().HaveCount(3);
+        foreach (var comment in comments)
+        {
+            rangeStarts.Should().ContainSingle(r => r.Id!.Value == comment.Id!.Value);
+            rangeEnds.Should().ContainSingle(r => r.Id!.Value == comment.Id!.Value);
+            references.Should().ContainSingle(r => r.Id!.Value == comment.Id!.Value);
+        }
+
+        // Each paragraph carries exactly one comment anchor (no cross-paragraph bleed).
+        foreach (var paragraph in body.Elements<Paragraph>())
+        {
+            paragraph.Descendants<CommentRangeStart>().Should().HaveCount(1);
+        }
+
+        // Schema-valid per Spike 5 (0 validator errors) even with three concurrent comment anchors.
+        AssertNoValidationErrors(doc);
+    }
+
     // -- Helpers ---------------------------------------------------------------------------------
 
     private static byte[] CreateDocx(params string[] paragraphs)

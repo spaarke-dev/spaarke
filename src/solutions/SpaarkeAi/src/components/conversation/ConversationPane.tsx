@@ -65,6 +65,7 @@ import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-component
 import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
 import { formatComposeActionResultMarkdown } from "./composeResultFormat";
 import { makeLocalAssistantMessage, makeComposeEditControlsMessage } from "./summarizeRouting";
+import { routeReviseIntent } from "./composeReviseRouting";
 import {
   AuthLoadingState,
   PlaybookHeaderStrip,
@@ -87,6 +88,15 @@ export {
   makeComposeEditControlsMessage,
 } from "./summarizeRouting";
 export type { SummarizeRouteDecision, SummarizeIntentInputs } from "./summarizeRouting";
+// DEF-11 whole-document revise disambiguation (tests import these from '../ConversationPane').
+export {
+  routeReviseIntent,
+  REVISE_SLASH_PREFIX,
+  REVISE_DISAMBIGUATION_MESSAGE,
+  REVISION_INTENTS,
+  REVISION_INTENT_SUGGESTIONS,
+} from "./composeReviseRouting";
+export type { RevisionIntent, ReviseRouteDecision, RevisionIntentSuggestion } from "./composeReviseRouting";
 
 /**
  * DEF-09 / DEF-12: the SUMMARY-ONLY confirmation line for a compose EDIT action. The alternative
@@ -99,6 +109,18 @@ export type { SummarizeRouteDecision, SummarizeIntentInputs } from "./summarizeR
  */
 export const COMPOSE_EDIT_CONFIRMATION =
   'I revised the selected text — review the tracked change in the document, then accept, reject, or try another.';
+
+/**
+ * DEF-11: the SUMMARY-ONLY confirmation line for a WHOLE-DOCUMENT revise action
+ * (`compose-revise-document` — align-clauses / flag-risks / improve-clarity / custom over the
+ * entire open document, not a selection). Same rationale as {@link COMPOSE_EDIT_CONFIRMATION} — the
+ * multi-change redline (or the review-flag comments) live in the document itself, never restated
+ * here. Selected purely by `request.revisionScope === 'whole-document'` in `dispatchComposeAction`;
+ * Accept/Reject/Try-another on this message route through the SAME handlers (Accept-all / Reject-all
+ * fall out of `usePendingRedline`'s base-ledgerRef semantics, not a different code path here).
+ */
+export const COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION =
+  'I revised the document — review the tracked changes in the document, then accept, reject, or try another.';
 
 export function ConversationPane(): React.JSX.Element {
   const styles = useConversationPaneLayoutStyles();
@@ -319,13 +341,19 @@ export function ConversationPane(): React.JSX.Element {
             // to THIS message via `composeEdit` metadata (ledgerRef), so it must be injected AFTER the
             // apply leg resolves the ledgerRef. If (defensively) the ledger didn't resolve, fall back
             // to a plain confirmation (no controls — there is no addressable edit to act on).
+            // DEF-11: a whole-document revise uses the document-scoped confirmation copy; a
+            // selection edit (DEF-09, unchanged) keeps the original wording. Same controls either way.
+            const confirmationText =
+              request.revisionScope === "whole-document"
+                ? COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION
+                : COMPOSE_EDIT_CONFIRMATION;
             injection.enqueue(
               ledgerRef
-                ? makeComposeEditControlsMessage(COMPOSE_EDIT_CONFIRMATION, {
+                ? makeComposeEditControlsMessage(confirmationText, {
                     ledgerRef,
                     bindingId: request.bindingId,
                   })
-                : makeLocalAssistantMessage(COMPOSE_EDIT_CONFIRMATION)
+                : makeLocalAssistantMessage(confirmationText)
             );
           }
           if (ledgerRef) {
@@ -363,6 +391,37 @@ export function ConversationPane(): React.JSX.Element {
       clearTrackedEdit();
     },
     [acceptRedlineViaBridge, clearTrackedEdit]
+  );
+
+  // DEF-11 — whole-document revise disambiguation. Mirrors the `/summarize` prompt-first
+  // pattern (`routeSummarizeIntent` in `useAttachments.handleBeforeSendMessage`): a synchronous
+  // BEFORE-send hook that may inject a deterministic LOCAL interjection alongside the outbound
+  // message — it never cancels or rewrites the send itself (ADR-039: no client-side capability
+  // routing). A bare `/revise` is ambiguous (no intent, no instruction) → inject the two-path
+  // disambiguation copy (highlight a section directly vs. whole-document) naming the four
+  // `compose-revise-document` intents as typed `/revise <intent>` follow-ups (`routeReviseIntent`
+  // parses those deterministically on the NEXT send). `/revise <intent>` already specifies intent →
+  // no interjection; the caller dispatches through the SAME `dispatchComposeAction` path as any other
+  // Compose edit action (bindingId still comes from capability discovery, never from this routing).
+  //
+  // NOTE (honest boundary, not silently skipped): the four intents are NOT rendered as REAL
+  // clickable suggestion chips here. `useConsumerChips`'s wire parser (`parseConsumerChips`)
+  // unconditionally drops any chip missing a non-empty `bindingId` — there is no capability-discovery
+  // seam yet that resolves a `compose-revise-document` Binding id client-side (this is a brand-new
+  // BFF action; no scope/binding lookup exists for it, unlike the toolbar's stub-then-register
+  // pattern in `ComposeAiToolbar`, which the chip pipeline cannot express since it silently
+  // filters incomplete chips rather than rendering a disabled affordance). Wiring fabricated chip
+  // ids would render broken buttons; the text fallback covers the same four options via the
+  // `/revise <intent>` follow-up, which IS fully wired and tested (`composeReviseRouting.test.ts`).
+  const handleBeforeSendMessage = React.useCallback(
+    (messageText: string): void => {
+      attachments.handleBeforeSendMessage(messageText);
+      const decision = routeReviseIntent(messageText);
+      if (decision.kind === "disambiguate") {
+        injection.enqueue(makeLocalAssistantMessage(decision.interjection));
+      }
+    },
+    [attachments, injection]
   );
 
   // FR-13 Step 1: publish `dispatchComposeAction` into the cross-pane Compose
@@ -676,7 +735,7 @@ export function ConversationPane(): React.JSX.Element {
               onAttachmentRemoved={attachments.handleAttachmentRemoved}
               injectLocalMessage={injection.pendingInjection}
               onLocalMessageInjected={injection.handleLocalMessageInjected}
-              onBeforeSendMessage={attachments.handleBeforeSendMessage}
+              onBeforeSendMessage={handleBeforeSendMessage}
               onMessagesChange={commands.noteMessagesChanged}
               onDecorateOutboundBody={commands.handleDecorateOutboundBody}
               onPlaybookOptions={playbookOptions.handlePlaybookOptions}

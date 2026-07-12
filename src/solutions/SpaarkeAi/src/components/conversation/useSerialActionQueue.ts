@@ -92,6 +92,16 @@ export interface ComposeActionRequest {
    * it — serialization ordering is unaffected.
    */
   readonly documentSessionId?: string;
+  /**
+   * DEF-11: present ⇒ this edit action revises the WHOLE open document (a `compose-revise-document`
+   * dispatch — `revisionIntent` in `args.slots`), not just a selection. The host
+   * (`ConversationPane.dispatchComposeAction`) uses it ONLY to pick the Assistant confirmation
+   * copy variant ("I revised the document…" vs "I revised the selected text…") — routing,
+   * materialize, and Accept-all/Reject-all/Try-another are identical to a selection edit (the
+   * multi-change vs single-edit distinction lives in the stored payload SHAPE, not here). The queue
+   * itself does not interpret it — serialization ordering is unaffected.
+   */
+  readonly revisionScope?: "selection" | "whole-document";
 }
 
 interface QueueEntry {

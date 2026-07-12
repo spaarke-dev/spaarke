@@ -209,14 +209,47 @@ export interface ComposeEditorDocumentRef {
 export interface ComposeDraftPayload {
   /** Text the draft targets for replacement; absent/empty for an insertion-style draft. */
   target_text?: string;
-  /** The drafted content to materialize into the editor (load-bearing field). */
-  new_text: string;
+  /** The drafted content to materialize into the editor (load-bearing single-edit field). */
+  new_text?: string;
   /** How the client resolves `target_text` (Compose vocabulary, e.g. `strict` / `insert`). */
   match_mode?: string;
   /** Optional model-supplied rationale (provenance/explanation). */
   rationale?: string;
   /** Citations / source ids the draft was grounded on (ids only). */
   sources?: string[];
+  /**
+   * DEF-11 whole-document revision: a CHANGE LIST of targeted edits across the document
+   * (`compose-revise-document` output). When present (non-empty), the workspace materializes a
+   * MULTI-change redline via {@link ComposeEditorHandle.materializeComposeEdits} instead of the
+   * single-edit path. Mutually meaningful with {@link comments}: a payload may carry either or both.
+   */
+  edits?: ComposeDraftEdit[];
+  /**
+   * DEF-11 whole-document revision: anchored review FLAGS (no rewrite) — `flag-risks` intent. Each
+   * becomes an anchored `comment` annotation (DEF-13 path) shown in the doc + written as a Word
+   * `w:comment` on Save. Flags are NOT accept/reject-able (they carry no edit).
+   */
+  comments?: ComposeDraftComment[];
+}
+
+/** DEF-11: one targeted edit in a whole-document revision change list. Shape = the single-edit redline payload. */
+export interface ComposeDraftEdit {
+  /** Exact substring to replace — VERBATIM from the document so the editor can locate it. */
+  target_text: string;
+  /** The proposed replacement clause language, inserted as a pending track-change. */
+  new_text: string;
+  /** How to locate `target_text`: `strict` (default) | `first` | `all`. */
+  match_mode?: string;
+  /** Optional per-change rationale. */
+  rationale?: string;
+}
+
+/** DEF-11: one anchored review flag in a whole-document revision (no rewrite). */
+export interface ComposeDraftComment {
+  /** Exact substring the flag is anchored to. */
+  target_text: string;
+  /** The reviewer flag / comment body. */
+  comment: string;
 }
 
 /**
@@ -358,6 +391,15 @@ export interface ComposeEditorHandle {
    * the FR-19 "do not guess" rule. The true ledger-supersession WRITE is FR-17/034.
    */
   materializePendingRedline(draft: ComposeDraftPayload, provenance: ComposeDraftProvenance): MaterializeStatus;
+
+  /**
+   * DEF-11 whole-document revision. Materialize a CHANGE LIST (`compose-revise-document.edits`) as a
+   * MULTI-change pending redline: each edit `i` renders as its own insertion/deletion pair keyed by
+   * the sub-provenance `{ledgerRef}#{i}` (so per-change on-click accept/reject stays granular), all
+   * under the ONE stored compose output. Accept/Reject on the Assistant confirmation address the BASE
+   * `ledgerRef` → Accept-all / Reject-all. Returns one status per edit (index-aligned).
+   */
+  materializeComposeEdits(edits: ComposeDraftEdit[], provenance: ComposeDraftProvenance): MaterializeStatus[];
 
   /**
    * DEF-12 — commit the pending redline addressed by `ledgerRef` (delegates to
@@ -950,6 +992,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           redline.materialize(draft, provenance);
         },
         materializePendingRedline: (draft, provenance) => redline.materialize(draft, provenance),
+        materializeComposeEdits: (edits, provenance) => redline.materializeMany(edits, provenance),
         acceptPendingRedline: (ledgerRef) => redline.accept(ledgerRef),
         rejectPendingRedline: (ledgerRef) => redline.reject(ledgerRef),
         highlightCitedSpan: (sourceText, sectionLabel) => qaHighlight.highlight(sourceText, sectionLabel),

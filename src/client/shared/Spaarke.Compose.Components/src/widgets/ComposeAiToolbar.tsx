@@ -167,6 +167,12 @@ export type ComposeActionEnqueue = (request: {
    * dispatch + Assistant-rendered prose.
    */
   documentSessionId?: string;
+  /**
+   * DEF-11: present ⇒ this edit action revises the WHOLE open document (`compose-revise-document`),
+   * not just a selection. The host uses it ONLY to pick the Assistant confirmation copy variant;
+   * routing/materialize/Accept-all are unaffected (mirrors `ComposeActionRequest.revisionScope`).
+   */
+  revisionScope?: "selection" | "whole-document";
 }) => Promise<DispatchConsumerResult>;
 
 // ---------------------------------------------------------------------------

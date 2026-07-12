@@ -113,6 +113,131 @@ describe('resolveTargetSpans (match_mode contract)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// DEF-11 — whole-document revision: multi-change materialize + Accept-all/Reject-all
+// ---------------------------------------------------------------------------
+function countMarks(editor: Editor, markName: 'insertion' | 'deletion'): number {
+  let n = 0;
+  editor.state.doc.descendants(node => {
+    if (node.isText && node.marks.some(m => m.type.name === markName)) n += 1;
+    return true;
+  });
+  return n;
+}
+
+describe('usePendingRedline.materializeMany (DEF-11 whole-document revision)', () => {
+  const BASE = { ledgerRef: 'rev@t1', bindingId: 'rev', turn: 1 };
+  const THREE_EDITS = [
+    { target_text: 'quick', new_text: 'swift' },
+    { target_text: 'brown', new_text: 'auburn' },
+    { target_text: 'lazy', new_text: 'idle' },
+  ];
+
+  it('materializes a MULTI-change redline: one ins/del pair per edit, distinct #{i} sub-keys', () => {
+    const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    let statuses: string[] = [];
+    act(() => {
+      statuses = result.current.materializeMany(THREE_EDITS, BASE);
+    });
+
+    expect(statuses).toEqual(['applied', 'applied', 'applied']);
+    // THREE independent changes → 3 insertion marks + 3 deletion marks (NOT one).
+    expect(countMarks(editor, 'insertion')).toBe(3);
+    expect(countMarks(editor, 'deletion')).toBe(3);
+    // Each carries its own sub-key so per-change on-click stays granular.
+    expect(editor.getHTML()).toContain('data-ledger-ref="rev@t1#0"');
+    expect(editor.getHTML()).toContain('data-ledger-ref="rev@t1#1"');
+    expect(editor.getHTML()).toContain('data-ledger-ref="rev@t1#2"');
+    expect(result.current.pending).toHaveLength(3);
+    editor.destroy();
+  });
+
+  it('Accept-all (base key) commits EVERY sub-change: alternatives kept, originals struck-removed, 0 pending', () => {
+    const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materializeMany(THREE_EDITS, BASE);
+    });
+    act(() => {
+      result.current.accept('rev@t1'); // BASE key → Accept-ALL
+    });
+
+    const html = editor.getHTML();
+    expect(countMarks(editor, 'insertion')).toBe(0);
+    expect(countMarks(editor, 'deletion')).toBe(0);
+    expect(html).toContain('swift');
+    expect(html).toContain('auburn');
+    expect(html).toContain('idle');
+    expect(html).not.toContain('quick');
+    expect(result.current.pending).toHaveLength(0);
+    editor.destroy();
+  });
+
+  it('Reject-all (base key) reverts EVERY sub-change: originals restored, alternatives gone, 0 pending', () => {
+    const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materializeMany(THREE_EDITS, BASE);
+    });
+    act(() => {
+      result.current.reject('rev@t1'); // BASE key → Reject-ALL
+    });
+
+    const html = editor.getHTML();
+    expect(countMarks(editor, 'insertion')).toBe(0);
+    expect(countMarks(editor, 'deletion')).toBe(0);
+    expect(html).toContain('quick');
+    expect(html).not.toContain('swift');
+    expect(result.current.pending).toHaveLength(0);
+    editor.destroy();
+  });
+
+  it('per-change on-click accept (exact sub-key) commits ONE change and leaves the others pending', () => {
+    const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materializeMany(THREE_EDITS, BASE);
+    });
+    act(() => {
+      result.current.accept('rev@t1#1'); // just the "brown"→"auburn" change
+    });
+
+    expect(result.current.pending).toHaveLength(2);
+    expect(result.current.pending.map(p => p.ledgerRef).sort()).toEqual(['rev@t1#0', 'rev@t1#2']);
+    // Two changes remain pending → 2 ins + 2 del marks.
+    expect(countMarks(editor, 'insertion')).toBe(2);
+    expect(countMarks(editor, 'deletion')).toBe(2);
+    editor.destroy();
+  });
+
+  it('skips an unresolved target (do-not-guess) but still applies the resolvable edits', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    let statuses: string[] = [];
+    act(() => {
+      statuses = result.current.materializeMany(
+        [
+          { target_text: 'quick', new_text: 'swift' },
+          { target_text: 'not-in-doc', new_text: 'x' },
+        ],
+        BASE
+      );
+    });
+
+    expect(statuses[0]).toBe('applied');
+    expect(statuses[1]).toBe('not_found');
+    expect(result.current.pending).toHaveLength(1);
+    expect(result.current.error).toMatchObject({ kind: 'not_found' });
+    editor.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // usePendingRedline — hook logic
 // ---------------------------------------------------------------------------
 describe('usePendingRedline (materialize from ledger)', () => {

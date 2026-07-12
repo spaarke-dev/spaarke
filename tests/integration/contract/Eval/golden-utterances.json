@@ -2146,6 +2146,172 @@
       },
       "assertions": { "schemaConformance": "compose-draft-document", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-08 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-128",
+      "family": "compose-revise-document",
+      "ucId": "UC-G-2",
+      "channel": "text",
+      "notes": "DEF-11: align-clauses revisionIntent — a whole-document alignment request routes to compose-revise-document (Compose disposition, edits[] grounded on the matter/firm playbook), NOT compose-draft-alternative (which is selection-scoped to one clause).",
+      "utterance": "align this whole contract with our standard playbook",
+      "context": { "surface": "compose-workspace", "sessionHasDocument": true },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "compose-revise-document",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": "compose-revise-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-11 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-129",
+      "family": "compose-revise-document",
+      "ucId": "UC-G-2",
+      "channel": "text",
+      "notes": "DEF-11: flag-risks revisionIntent — a risk-flagging request over the whole document routes here and produces comments[] only, never a rewrite.",
+      "utterance": "flag any risky clauses in this document for me to review",
+      "context": { "surface": "compose-workspace", "sessionHasDocument": true },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "compose-revise-document",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": "compose-revise-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-11 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-130",
+      "family": "compose-revise-document",
+      "ucId": "UC-G-2",
+      "channel": "text",
+      "notes": "DEF-11: improve-clarity revisionIntent — a clarity clean-up request over the whole document.",
+      "utterance": "clean up the clarity and organization of this whole agreement",
+      "context": { "surface": "compose-workspace", "sessionHasDocument": true },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "compose-revise-document",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": "compose-revise-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-11 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-131",
+      "family": "compose-revise-document",
+      "ucId": "UC-G-2",
+      "channel": "text",
+      "notes": "DEF-11: custom revisionIntent via a specific free-text instruction naming a section, still a whole-document revise request.",
+      "utterance": "revise this document to tighten the indemnification language throughout",
+      "context": { "surface": "compose-workspace", "sessionHasDocument": true },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "compose-revise-document",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": "compose-revise-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-11 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-132",
+      "family": "compose-revise-document",
+      "ucId": "UC-G-2",
+      "channel": "text",
+      "notes": "DEF-11: a whole-document revise utterance with no clause selected — the distinguishing signal vs compose-draft-alternative is 'this document'/'the whole thing', not a highlighted clause.",
+      "utterance": "review the whole document and revise it where needed",
+      "context": { "surface": "compose-workspace", "sessionHasDocument": true },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "compose-revise-document",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": "compose-revise-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-11 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-133",
+      "family": "compose-revise-document-dispatch",
+      "ucId": "UC-G-2",
+      "channel": "click",
+      "notes": "DEF-11: the Compose editor 'Revise document' toolbar/menu action (align-clauses) — the dispatch (Click) leg of the compose-revise-document family. Asserts the compose-disposition ledger write (ComposeReviseDocumentDispatchCases_AssertComposeDispositionLedgerWrite).",
+      "utterance": "[Revise document — Align to playbook] editor action on the whole open document",
+      "context": { "surface": "compose-workspace", "sessionHasDocument": true },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "compose-revise-document",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": "compose-revise-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-11 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-134",
+      "family": "compose-revise-document-dispatch",
+      "ucId": "UC-G-2",
+      "channel": "click",
+      "utterance": "[Revise document — Flag risks] editor action producing anchored review comments only (no edits)",
+      "context": { "surface": "compose-workspace", "sessionHasDocument": true },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "compose-revise-document",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": "compose-revise-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-11 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-135",
+      "family": "compose-revise-document-dispatch",
+      "ucId": "UC-G-2",
+      "channel": "click",
+      "utterance": "[Revise document — Improve clarity] editor action producing multiple pending track-change edits",
+      "context": { "surface": "compose-workspace", "sessionHasDocument": true },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "compose-revise-document",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": "compose-revise-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-11 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-136",
+      "family": "compose-revise-document-dispatch",
+      "ucId": "UC-G-2",
+      "channel": "click",
+      "utterance": "chat 'revise this document to tighten indemnification' dispatches compose-revise-document — the DOCUMENT session (not the chat session) receives the compose-disposition ledger write, per DEF-09's edit-belongs-to-the-document-session precedent",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "compose-revise-document",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": "compose-revise-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-11 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-137",
+      "family": "compose-revise-document-dispatch",
+      "ucId": "UC-G-2",
+      "channel": "click",
+      "utterance": "[Revise document — Custom instruction] editor action following a user-typed refinement",
+      "context": { "surface": "compose-workspace", "sessionHasDocument": true },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "compose-revise-document",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": "compose-revise-document", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-11 (catalog deploy)" }
     }
   ]
 }
