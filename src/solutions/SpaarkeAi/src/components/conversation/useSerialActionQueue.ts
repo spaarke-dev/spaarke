@@ -82,6 +82,16 @@ export interface ComposeActionRequest {
   readonly bindingId: string;
   /** Forwarded verbatim to `dispatchConsumer` as its second argument. */
   readonly args?: DispatchConsumerArgs;
+  /**
+   * DEF-09: present ⇒ this is an editor-materializing compose EDIT action (Draft
+   * alternative). It carries the Compose editor's DOCUMENT session id. The host
+   * (`ConversationPane.dispatchComposeAction`) folds it into the dispatch's
+   * `args.sessionIdOverride` so the `/dispatch` write lands in the DOCUMENT session
+   * `ComposeWorkspace` reads `compose-outputs` from (inline redline appears), and
+   * renders a CONFIRMATION-only Assistant line. The queue itself does not interpret
+   * it — serialization ordering is unaffected.
+   */
+  readonly documentSessionId?: string;
 }
 
 interface QueueEntry {

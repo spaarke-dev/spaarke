@@ -272,6 +272,25 @@ export function WorkspacePane(): React.JSX.Element {
   );
 
   // ---------------------------------------------------------------------------
+  // FR-34 D-F3 honest CONTENT-render ack — deferral map (task 071)
+  //
+  // The base D-F3 loop (above) acks a server `workspace_open_tab` frame the moment
+  // the TAB SHELL is materialized (manager.addTab). That is correct for a plain
+  // layout open, but WRONG for a CONTENT-bearing open — a chat "open as a document"
+  // frame that carries a full-document draft SEED
+  // (widgetData.compose.draft.{ledgerRef,sessionId}, DEF-08). For those, the tab
+  // opening is NOT the draft rendering: a seed that fails to materialize would still
+  // ack tab-open (false "the draft is in the editor" — the exact R2-D fabrication).
+  //
+  // So for a draft-seeded frame we DEFER: stash the server frame id keyed by the
+  // draft's ledgerRef here (instead of acking on tab-open), and fire the ack only
+  // when ComposeWorkspace emits `workspace.compose_content_rendered` for that
+  // ledgerRef (the editor actually rendered the seeded body). If it never renders,
+  // we never ack → the server's WaitForAckAsync times out → honest failure. Plain
+  // (non-seeded) opens are UNCHANGED: they still ack on tab-open below.
+  const pendingRenderAcksRef = React.useRef<Map<string, string>>(new Map());
+
+  // ---------------------------------------------------------------------------
   // Active-tab signal — Round 4 Fix 4 (2026-05-21)
   //
   // Foundation signal for cross-pane coordination: when the active workspace
@@ -758,6 +777,24 @@ export function WorkspacePane(): React.JSX.Element {
   usePaneEvent("workspace", (event: WorkspacePaneEvent): void => {
     const manager = managerRef.current;
 
+    // FR-34 D-F3 (task 071): the deferred CONTENT-render ack. ComposeWorkspace emits
+    // `compose_content_rendered` once a seeded draft actually renders in the editor.
+    // If we deferred an ack for this ledgerRef on the originating `workspace_open_tab`
+    // frame, fire it NOW (the genuine "content is on screen" confirmation) — mirroring
+    // the tab-open ack, only later + honest. No pending entry ⇒ no-op (a client-
+    // originated open, or a render we never gated on).
+    if (event.type === "compose_content_rendered") {
+      const ledgerRef = event.ledgerRef;
+      if (ledgerRef) {
+        const frameId = pendingRenderAcksRef.current.get(ledgerRef);
+        if (frameId) {
+          pendingRenderAcksRef.current.delete(ledgerRef);
+          sendUiActionAck(frameId);
+        }
+      }
+      return;
+    }
+
     if (event.type === "widget_load" && !event.tabId) {
       // Guard: ignore our own re-dispatched widget_load confirmations (which carry tabId).
       // Only the server-initiated events (no tabId) should open a new tab.
@@ -774,8 +811,80 @@ export function WorkspacePane(): React.JSX.Element {
       const displayName =
         event.displayName ?? meta?.displayName ?? widgetType;
 
+      // ── DEF-08 single-tab reuse ────────────────────────────────────────────
+      // A Compose-editor open (a compose-SEEDED workspace layout tab — a chat
+      // "open as a document" draft, an "Open in Compose" affordance, or a
+      // stored/upload compose open) must REUSE the single existing Compose tab
+      // rather than mint a NEW (often blank) one on every open. This fixes the
+      // accumulated-blank-Compose-tabs side effect: repeated opens ACTIVATE the
+      // one Compose tab (refreshing its seed) instead of stacking duplicates.
+      // Match an existing "workspace" tab by layoutId. Non-compose widget opens
+      // are unaffected (they still addTab as before).
+      const composeOpen = widgetData as
+        | { compose?: unknown; layoutId?: string; layoutName?: string }
+        | null;
+      const isComposeLayoutOpen =
+        widgetType === "workspace" &&
+        composeOpen != null &&
+        (composeOpen.compose != null || composeOpen.layoutName === "Compose");
+      // FR-34 D-F3 (task 071): a CONTENT-bearing open carries a full-document draft SEED
+      // (widgetData.compose.draft.ledgerRef — DEF-08 Part A). When present, the ack for this
+      // frame is DEFERRED (below) until ComposeWorkspace signals the draft actually rendered,
+      // keyed by this ledgerRef. Typed narrowing — no `any` (ADR-030). Absent for plain layout
+      // opens, upload mounts, and Part-B inline drafts, all of which ack on tab-open as before.
+      const composeDraftLedgerRef =
+        isComposeLayoutOpen && composeOpen?.compose && typeof composeOpen.compose === "object"
+          ? (composeOpen.compose as { draft?: { ledgerRef?: string } }).draft?.ledgerRef
+          : undefined;
+      // Part B dispatches by layout NAME only (no fetch in the Assistant pane) — resolve the id
+      // from the layouts list this pane already holds so the tab renders + reuse can match by id.
+      let composeLayoutId = composeOpen?.layoutId;
+      if (isComposeLayoutOpen && (!composeLayoutId || composeLayoutId.length === 0) && composeOpen?.layoutName) {
+        composeLayoutId = layouts.find((l) => l.name === composeOpen.layoutName)?.id;
+      }
+      // Ensure the widgetData carries the resolved layoutId so the Compose layout renders.
+      const composeWidgetData =
+        isComposeLayoutOpen && composeLayoutId && composeOpen && composeOpen.layoutId !== composeLayoutId
+          ? { ...(widgetData as Record<string, unknown>), layoutId: composeLayoutId }
+          : widgetData;
+      if (isComposeLayoutOpen && typeof composeLayoutId === "string" && composeLayoutId.length > 0) {
+        const existingComposeTab = manager.getSnapshot().tabs.find((t) => {
+          if (t.widgetType !== "workspace") return false;
+          const d = t.widgetData as { layoutId?: string } | null;
+          return d?.layoutId === composeLayoutId;
+        });
+        if (existingComposeTab) {
+          // Refresh the seed (a fresh draft picks up if the editor hadn't loaded
+          // yet; a loaded editor's draft effect status-gate prevents clobbering
+          // unsaved edits) and activate the single tab.
+          manager.updateTab(existingComposeTab.id, composeWidgetData);
+          manager.setActiveTab(existingComposeTab.id);
+          syncState();
+          if (event.frameId) {
+            // FR-34 D-F3 (task 071): a re-seed of the single Compose tab is still a CONTENT open —
+            // defer the ack to the draft's actual render if this frame carries a draft seed;
+            // otherwise ack the reuse now (unchanged).
+            if (composeDraftLedgerRef) {
+              pendingRenderAcksRef.current.set(composeDraftLedgerRef, event.frameId);
+            } else {
+              sendUiActionAck(event.frameId);
+            }
+          }
+          window.setTimeout(() => {
+            dispatch("workspace", {
+              type: "tab_change",
+              tabId: existingComposeTab.id,
+              widgetType: existingComposeTab.widgetType,
+              widgetData: composeWidgetData,
+            });
+          }, 0);
+          return;
+        }
+      }
+
       // Add the tab — this enforces MAX_WORKSPACE_TABS eviction internally.
-      const tabId = manager.addTab(widgetType, widgetData, displayName);
+      // (Compose opens carry the resolved layoutId so the layout renders.)
+      const tabId = manager.addTab(widgetType, composeWidgetData, displayName);
       syncState();
 
       // D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): the tab is NOW
@@ -783,8 +892,20 @@ export function WorkspacePane(): React.JSX.Element {
       // carried a frameId (an ack-gated tool call is waiting), ack it referencing
       // that EXACT frame id. Client-originated widget_load events (menu-opened
       // tabs) never carry a frameId, so this is a no-op for them.
+      //
+      // FR-34 D-F3 CONTENT-render refinement (task 071): if this frame carries a
+      // full-document draft SEED (composeDraftLedgerRef present — DEF-08), the tab
+      // SHELL is open but the seeded content is NOT yet on screen. DEFER the ack —
+      // stash the frame id keyed by ledgerRef and fire it only when
+      // ComposeWorkspace emits `compose_content_rendered` for that ledgerRef (the
+      // draft actually rendered). A seed that never renders never acks → honest
+      // server timeout. Non-seeded opens ack on tab-open exactly as before.
       if (event.frameId) {
-        sendUiActionAck(event.frameId);
+        if (composeDraftLedgerRef) {
+          pendingRenderAcksRef.current.set(composeDraftLedgerRef, event.frameId);
+        } else {
+          sendUiActionAck(event.frameId);
+        }
       }
 
       // Lazy-resolve the widget component; update the tab once resolved.

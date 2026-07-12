@@ -63,6 +63,14 @@ export interface AppliedComposeEdit {
   readonly bindingId: string;
   /** The originating dispatch request — replayed verbatim for "try another approach". */
   readonly request: ComposeActionRequest;
+  /**
+   * DEF-09: the DOCUMENT session the edit's ledger entry lives in (from the edit
+   * action's `documentSessionId`). The supersession retraction MUST target THIS
+   * session so undo/replace hits the same ledger the redline materialized from —
+   * not the chat session. Falls back to the chat session (`getSessionId()`) when
+   * absent (older/informational edits).
+   */
+  readonly sessionId?: string;
 }
 
 /** Dependencies the host (ConversationPane) supplies. */
@@ -133,8 +141,10 @@ export function useEditSupersession(deps: UseEditSupersessionDeps): UseEditSuper
    * a client-only mutation.
    */
   const supersede = React.useCallback(
-    async (supersedesRef: string): Promise<SupersedeResult | null> => {
-      const sessionId = getSessionId();
+    async (supersedesRef: string, sessionIdOverride?: string): Promise<SupersedeResult | null> => {
+      // DEF-09: retract in the SAME session the edit lives in (the document session for
+      // a compose edit), not the chat session.
+      const sessionId = sessionIdOverride ?? getSessionId();
       if (!sessionId || !bffBaseUrl) return null;
       try {
         const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/compose-outputs/supersede`;
@@ -157,13 +167,14 @@ export function useEditSupersession(deps: UseEditSupersessionDeps): UseEditSuper
   const undo = React.useCallback(async (): Promise<void> => {
     const edit = lastEdit;
     if (!edit) return;
-    const sessionId = getSessionId();
+    // DEF-09: operate on the edit's own (document) session, falling back to chat.
+    const sessionId = edit.sessionId ?? getSessionId();
     if (!sessionId) return;
 
     setBusy(true);
     setError(null);
     try {
-      const result = await supersede(edit.ledgerRef);
+      const result = await supersede(edit.ledgerRef, sessionId);
       if (!result) {
         setError("Couldn't undo the last edit. Please try again.");
         return;
@@ -182,7 +193,8 @@ export function useEditSupersession(deps: UseEditSupersessionDeps): UseEditSuper
     async (reDispatch: (request: ComposeActionRequest) => Promise<unknown>): Promise<void> => {
       const edit = lastEdit;
       if (!edit) return;
-      const sessionId = getSessionId();
+      // DEF-09: operate on the edit's own (document) session, falling back to chat.
+      const sessionId = edit.sessionId ?? getSessionId();
       if (!sessionId) return;
 
       setBusy(true);
@@ -190,7 +202,7 @@ export function useEditSupersession(deps: UseEditSupersessionDeps): UseEditSuper
       try {
         // 1. Retract the prior redline (durable supersession) and re-materialize it away NOW, so the
         //    old suggestion is gone while the fresh proposal streams.
-        const result = await supersede(edit.ledgerRef);
+        const result = await supersede(edit.ledgerRef, sessionId);
         if (result) {
           dispatchApply(buildComposeApplyEvent(result.key, edit.bindingId, sessionId));
         }
