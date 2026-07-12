@@ -6,6 +6,32 @@
 
 ---
 
+## 🔴 ACTIVE — UAT ROUND-3 (2026-07-12) — READ FIRST
+
+**Round-2 is DONE + deployed live (details in the round-2 block below).** Round-3 = owner UAT on the deployed surface → a UX/feature cluster (DEF-10..DEF-19, in `notes/defer-issues.md` "UAT round-3 build queue"). **Waves 1–3 committed; Wave 4 (DEF-11, flagship) building via background agent.**
+
+| Field | Value |
+|---|---|
+| **Branch** | `work/spaarkeai-compose-r2`; after Wave 3 HEAD = **`f96105913`**; **0 behind master** (core **#637** merged in). |
+| **Committed round-3** | Wave 1: `c5c832a94` (editor UX DEF-15/16/17) + `7eb47a483` (DEF-14 friendly Save-lock 423/412). Wave 2: `7cb764115` (DEF-10 doc-text→Assistant + DEF-19 context-scoped session keys). Wave 3: `f96105913` (DEF-12 accept/reject→Assistant + DEF-13 comment-on-edit). |
+| **Wave 4 BUILDING** | background agent **`a9990a44f51d9b525`** building **DEF-11** `compose-revise-document` (revision-intent family). **When it reports: verify → commit → consolidated gate → deploy.** |
+| **Deferred (owner)** | checkout-removal + If-Match Save concurrency (no AI-functionality impact); DEF-18 non-AI bubble functions (native spell-check + pinned toolbar cover it). Tracked in defer-issues. |
+| **Core** | #637 = core's DEF-UAT-1 part-1 host-context fix (`entityType ?? entityLogicalName`), merged into branch. Core otherwise at UAT/close. |
+| **NEXT ACTION** | **Reconcile Wave 4 (DEF-11) when agent `a9990a44` reports → commit → consolidated gate (BFF + SpaarkeAi + Compose.Components builds + jest + eval) → ONE round-3 deploy (BFF via `Deploy-BffApi.ps1` + `Deploy-SpaarkeAi.ps1` code page + seed the NEW `compose-revise-document` catalog row to spaarkedev1 the same direct-Web-API way `compose-draft-document` was seeded — recipe in `notes/catalog-deploy-tooling-debt-and-resume.md`) → owner re-UAT of the round-3 cluster.** |
+
+### DEF-11 confirmed design (revision-intent family — owner-approved 2026-07-12)
+- **Trigger = Assistant CHAT**; server-selected (toolDescription + eval, ADR-039); output routed to the **OPEN DOCUMENT's session** via the active-document bridge (DEF-09 "edit belongs to the document session" model — B(ii), incl. a modest BFF session-routing change + Placement Justification).
+- **ONE flexible action `compose-revise-document`** (Compose disp 100000006; mirror-first; NO version suffix; eval cases). Args: `revisionIntent{align-clauses|flag-risks|improve-clarity|custom}` + optional `instruction`. Output BOTH channels: `{edits:[{target_text,new_text}], comments:[{target_text,comment}]}` (either/both).
+- **Intent→output**: align-clauses→EDITS (playbook grounding, reuse compare-to-playbook scope) · improve-clarity→EDITS · flag-risks/discrepancies→COMMENTS (anchored flags) · custom→either/both.
+- **Client materialize**: edits → `usePendingRedline.materializeMany` (multi-change redline + Wave-3 Accept-all/Reject-all/Try-another + per-change on-click); comments → anchored `w:comment` (DEF-13 path). Open the SOURCE in Compose (DEF-08 seam) if not already.
+- **Disambiguation**: bare "revise this document" → Assistant offers "highlight sections directly (DEF-09)" OR "tell me how you'd like it revised" + revision-intent **suggestion chips**; a specified intent applies directly.
+- **Wire-body DoD**: two-session multi-change redline test (Accept-all) + a comments→OOXML `w:comment` test.
+
+### Round-3 defect status (notes/defer-issues.md)
+DEF-10 (=core UAT-1p2) doc-text→Assistant ✅ · **DEF-11 third flow 🔄 building** · DEF-12 accept/reject→Assistant ✅ · DEF-13 comment-on-edit ✅ · DEF-14 friendly Save-lock ✅ · DEF-15/16/17 editor UX ✅ · DEF-18 ⏸️ deferred · DEF-19 (=core UAT-2) context-scoped session keys ✅. Owner design-process note saved to user memory (`discuss-feature-shape-before-build-decisions`).
+
+---
+
 ## Quick Recovery (READ THIS FIRST) — 2026-07-10 (night): joint deploy done; finishing to 100%
 
 | Field | Value |
