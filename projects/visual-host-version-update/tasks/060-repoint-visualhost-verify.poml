@@ -1,7 +1,7 @@
 <task id="VHVU-060" project="VisualHost Decoupling & @spaarke/visuals Extraction">
   <metadata>
     <title>Repoint VisualHost to @spaarke/visuals; verify build/bundle/drill-through</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>B4</phase>
     <estimated-effort>3 hours</estimated-effort>
     <tags>pcf, integration, verify</tags>

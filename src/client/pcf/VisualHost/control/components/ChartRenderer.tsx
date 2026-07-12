@@ -20,7 +20,7 @@ import { DueDateCardVisual } from './DueDateCard';
 import { DueDateCardListVisual } from './DueDateCardList';
 import { GaugeVisual } from '../../../../shared/Spaarke.Visuals/src/components/GaugeVisual';
 import { HorizontalStackedBar } from '../../../../shared/Spaarke.Visuals/src/components/HorizontalStackedBar';
-import { resolveCardConfig } from '../utils/cardConfigResolver';
+import { resolveCardConfig } from '../../../../shared/Spaarke.Visuals/src/utils/cardConfigResolver';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';
 
 export interface IChartRendererProps {

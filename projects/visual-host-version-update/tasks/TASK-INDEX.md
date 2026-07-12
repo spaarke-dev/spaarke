@@ -21,7 +21,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ complete · ⛔
 | VHVU-041 | Move 15 visuals + 7 utils + viz types into package | B2 | FULL | sonnet/high | 040 | ✅ |
 | VHVU-042 | Reconcile drifted duplication (one `VisualType`, one `EventDueDateCard`) | B2 | FULL | sonnet/high | 041 | ✅ |
 | VHVU-050 | Refactor 3 self-fetch visuals to props-in + split `ViewDataService` | B3 | FULL | sonnet/xhigh | 041 | ✅ |
-| VHVU-060 | Repoint VisualHost to `@spaarke/visuals`; verify build/bundle/drill | B4 | FULL | sonnet/high | 042,050 | 🔲 |
+| VHVU-060 | Repoint VisualHost to `@spaarke/visuals`; verify build/bundle/drill | B4 | FULL | sonnet/high | 042,050 | ✅ |
 | VHVU-061 | Deploy + UAT visuals parity on dev | B4 | FULL | sonnet/high | 060 | 🔲 |
 | VHVU-070 | Author ADR-012 amendment (concise + full) | B5 | FULL | opus/high | 060 | 🔲 |
 | VHVU-090 | Project wrap-up (lessons-learned, test-diet, repo-cleanup) | — | STANDARD | sonnet/high | 070,061 | 🔲 |
