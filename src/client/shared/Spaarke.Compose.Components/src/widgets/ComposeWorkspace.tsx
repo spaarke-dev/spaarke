@@ -72,7 +72,7 @@ import type { ComposeActionEnqueue } from './ComposeAiToolbar';
 // `@spaarke/ai-outputs` subpaths, which LegalWorkspace's standalone Rollup
 // cannot resolve). Matches the SpaarkeAi `useWorkspaceLayouts` adapter pattern
 // (documented in `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`).
-import { type WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
+import { useDispatchPaneEvent, type WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 // Compose three-pane coordination — WORKSPACE leg (task 104 / E2E-R5). Typed
 // receivers for Flow 3 (compose_context_insert) + Flow 5 (compose_assistant_insert).
 import { useComposeWorkspaceReceivers } from './useComposeWorkspaceReceivers';
@@ -111,6 +111,7 @@ import { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHear
 import type {
   ComposeDocumentRef,
   ComposeUploadRef,
+  ComposeDraftSeedRef,
   ComposeAssistantToWorkspaceFlow,
   AnchoredAnnotation,
   DefinedTerm,
@@ -215,6 +216,17 @@ export interface ComposeWorkspaceProps {
    * with `initialDocumentRef` — an upload has no SPE pointer.
    */
   initialUploadRef?: ComposeUploadRef | null;
+
+  /**
+   * DEF-08: optional AI-drafted full-document SEED. When supplied (and no `initialDocumentRef` /
+   * `initialUploadRef`), the workspace materializes the drafted document into the editor as a
+   * TRANSIENT working draft (create-on-save on first Save). Two shapes (see {@link ComposeDraftSeedRef}):
+   *  - Part A `{ ledgerRef, sessionId }` — resolve the body from
+   *    `GET /api/ai/chat/sessions/{sessionId}/compose-outputs` (the `compose-draft-document` output).
+   *  - Part B `{ html }` — the drafted body supplied inline ("Open in Compose" affordance).
+   * Mutually exclusive with `initialDocumentRef` and `initialUploadRef`.
+   */
+  initialDraftRef?: ComposeDraftSeedRef | null;
 
   /** Optional initial ChatSession id (correlation). */
   initialSessionId?: string;
@@ -344,6 +356,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const {
     initialDocumentRef,
     initialUploadRef,
+    initialDraftRef,
     initialSessionId,
     matterId,
     bffBaseUrl,
@@ -372,6 +385,27 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   // Imperative editor ref for save (TipTap → DOCX bytes).
   const editorRef = React.useRef<ComposeEditorHandle | null>(null);
+
+  // -------------------------------------------------------------------------
+  // FR-34 D-F3 honest content-render ack (task 071)
+  // -------------------------------------------------------------------------
+  // A chat-opened Compose tab that carries a full-document draft SEED (DEF-08
+  // Part A: `initialDraftRef.{ledgerRef,sessionId}`) rides a server
+  // `workspace_open_tab` frame whose tool result is WAITING on a client ack
+  // (SendWorkspaceArtifactHandler.WaitForAckAsync). WorkspacePane DEFERS that ack
+  // for a seeded frame — the tab SHELL opening is not the content rendering — and
+  // fires it only when this render signal arrives. We emit the signal ONLY after
+  // the seed has actually materialized in the editor (`mountDraftHtml` → status
+  // 'loaded' + non-null `seedHtml`), correlated back to the waiting frame by
+  // `ledgerRef`. On a seed FAILURE (ledger miss / fetch error → the 'error' state)
+  // the signal NEVER fires → the server's WaitForAckAsync times out → the tool
+  // result fails HONESTLY (never a fabricated "the draft is in the editor").
+  // No content on the bus (ADR-015 identifiers-only); additive discriminant,
+  // typed, no `any` (ADR-030). Only Part A (a real ledgerRef → a real server ack)
+  // arms this; Part B inline-html "Open in Compose" is a client affordance with no
+  // ack-gated server frame, so it never arms the signal.
+  const dispatchPaneEvent = useDispatchPaneEvent();
+  const pendingDraftRenderSignalRef = React.useRef<{ ledgerRef: string; sessionId?: string } | null>(null);
 
   // FR-01 (task 010): hidden native file input backing "Browse / open file". Triggered
   // programmatically from handleBrowseRequested; see the input element rendered below.
@@ -1106,6 +1140,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     if (lookupResults.length === 0) return; // user dismissed the lookup — empty state unchanged
     const picked = lookupResults[0];
 
+    // DEF-02: a new Search pick supersedes any prior Search-resolved drive id. Clear it up
+    // front so a resolution that FAILS below (retrieveRecord throws, or a half-provisioned
+    // record with no SPE drive pointer) leaves NO stale override — otherwise `effectiveDriveId`
+    // would keep the PREVIOUS pick's drive and a later Save/Load could key off the WRONG drive.
+    // A successful resolution re-sets the correct drive at the bottom of this handler.
+    setSearchResolvedDriveId(null);
+
     let record: Record<string, unknown>;
     try {
       const dataService = createXrmDataService();
@@ -1297,6 +1338,135 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, [initialUploadRef?.sessionFileId, initialUploadRef?.sessionId, bffBaseUrl]);
 
   // -------------------------------------------------------------------------
+  // DEF-08: AI-drafted full-document seed mount
+  // -------------------------------------------------------------------------
+  // When launched with a draft seed (and no stored-doc / upload), materialize the drafted
+  // document BODY into the editor as a TRANSIENT working draft (create-on-save on first Save — the
+  // same lifecycle as an upload mount). Two provenance shapes:
+  //   - Part B: `initialDraftRef.html` (inline, "Open in Compose" affordance) — mount directly.
+  //   - Part A: `initialDraftRef.{ledgerRef,sessionId}` — resolve the body from the session ledger
+  //     via GET /compose-outputs (ADR-040 render-follows-store; the content lives in the ledger,
+  //     the seed carried only an identifier — ADR-015). Mutually exclusive with the stored-doc /
+  //     upload paths.
+  React.useEffect(() => {
+    if (!initialDraftRef) return;
+    if (initialDocumentRef || initialUploadRef) return; // stored-doc / upload win (mutually exclusive)
+    if (state.status !== 'empty' && state.status !== 'error') return;
+
+    // Part B: inline html — mount directly, no fetch.
+    if (typeof initialDraftRef.html === 'string' && initialDraftRef.html.length > 0) {
+      setSearchResolvedDriveId(null);
+      dispatch({
+        kind: 'mountDraftHtml',
+        html: initialDraftRef.html,
+        fileName: initialDraftRef.fileName,
+        containerId: containerIdRef.current,
+      });
+      setIsDirty(true);
+      return;
+    }
+
+    // Part A: resolve the drafted body from the session ledger by ledgerRef.
+    const ledgerRef = initialDraftRef.ledgerRef;
+    const draftSessionId = initialDraftRef.sessionId;
+    if (!ledgerRef || !draftSessionId) return;
+    if (!bffBaseUrl) {
+      dispatch({
+        kind: 'loadFailed',
+        errorMessage: 'BFF base URL is not configured. Cannot open the drafted document.',
+      });
+      return;
+    }
+
+    const ac = new AbortController();
+    // Enter the loading spinner WITHOUT a documentRef (reuses the upload-mount transition) so the
+    // stored-document Load effect stays inert — this effect owns the mount.
+    dispatch({ kind: 'requestUploadMount', sessionId: draftSessionId });
+
+    (async () => {
+      try {
+        const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(draftSessionId)}/compose-outputs`;
+        const response = await authenticatedFetch(url, { method: 'GET', signal: ac.signal });
+        if (!response.ok) {
+          dispatch({
+            kind: 'loadFailed',
+            errorMessage:
+              response.status === 404
+                ? 'The drafted document is no longer available (the session may have expired). Try drafting it again.'
+                : `Failed to load the drafted document (HTTP ${response.status}).`,
+          });
+          return;
+        }
+
+        // GET /compose-outputs → ComposeLedgerOutputDto[]: { key, bindingId, turn, disposition, payload }.
+        // The nested `payload` is passed through opaquely (snake_case body_html preserved).
+        const outputs = (await response.json()) as Array<{
+          key?: string;
+          payload?: { body_html?: string; title?: string };
+        }>;
+        const match = Array.isArray(outputs) ? outputs.find(o => o?.key === ledgerRef) : undefined;
+        const bodyHtml = match?.payload?.body_html;
+        if (ac.signal.aborted) return;
+        if (typeof bodyHtml !== 'string' || bodyHtml.length === 0) {
+          dispatch({
+            kind: 'loadFailed',
+            errorMessage: 'The drafted document could not be found in this session. Try drafting it again.',
+          });
+          return;
+        }
+
+        // A draft mount has no SPE drive — clear any stale Search-resolved drive id.
+        setSearchResolvedDriveId(null);
+        // FR-34 D-F3 (task 071): arm the render-ack signal BEFORE the state flips to 'loaded'
+        // so the watcher effect below emits `compose_content_rendered` the instant the seeded
+        // editor renders (never on a mere tab-shell open). Correlated to the waiting server frame
+        // by ledgerRef. A failure path above already returned via loadFailed WITHOUT arming this —
+        // so a seed that never renders never acks (honest timeout).
+        pendingDraftRenderSignalRef.current = { ledgerRef, sessionId: draftSessionId };
+        dispatch({
+          kind: 'mountDraftHtml',
+          html: bodyHtml,
+          fileName: match?.payload?.title,
+          containerId: containerIdRef.current,
+        });
+        // A freshly-seeded draft is unsaved by definition — mark dirty so Save (create-on-save) is
+        // enabled immediately.
+        setIsDirty(true);
+      } catch (err) {
+        if (ac.signal.aborted) return;
+        const message = err instanceof Error ? err.message : String(err);
+        dispatch({ kind: 'loadFailed', errorMessage: `Failed to load the drafted document: ${message}` });
+      }
+    })();
+
+    return () => ac.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDraftRef?.ledgerRef, initialDraftRef?.sessionId, initialDraftRef?.html, bffBaseUrl]);
+
+  // -------------------------------------------------------------------------
+  // FR-34 D-F3 (task 071) — emit the content-render ack signal once the seeded
+  // draft actually renders in the editor
+  // -------------------------------------------------------------------------
+  // Fires ONLY when a Part-A draft seed reached the 'loaded' state with populated
+  // `seedHtml` (the editor is rendered with the drafted body — see the render
+  // branch: showEditor mounts <ComposeEditor initialHtml={state.seedHtml} />). This
+  // is the honest "content is on screen" moment WorkspacePane's deferred ack waits
+  // for — NOT the tab-shell open. One-shot per seed (the ref is cleared on emit);
+  // a seed that failed to render left the ref null (loadFailed returned early) so
+  // nothing is emitted and the server ack times out honestly.
+  React.useEffect(() => {
+    const signal = pendingDraftRenderSignalRef.current;
+    if (!signal) return;
+    if (state.status !== 'loaded' || state.seedHtml === null) return;
+    pendingDraftRenderSignalRef.current = null;
+    dispatchPaneEvent('workspace', {
+      type: 'compose_content_rendered',
+      ledgerRef: signal.ledgerRef,
+      sessionId: signal.sessionId,
+    });
+  }, [state.status, state.seedHtml, dispatchPaneEvent]);
+
+  // -------------------------------------------------------------------------
   // Editor doc-ref shape (shared lib has its own narrower interface)
   // -------------------------------------------------------------------------
   const editorDocRef: ComposeEditorDocumentRef | undefined = state.documentRef
@@ -1455,6 +1625,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             <ComposeEditor
               ref={editorRef}
               docxBytes={state.docxBytes}
+              initialHtml={state.seedHtml}
               documentRef={editorDocRef}
               bffBaseUrl={bffBaseUrl}
               sessionId={state.sessionId}

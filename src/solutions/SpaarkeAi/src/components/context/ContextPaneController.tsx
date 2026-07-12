@@ -53,8 +53,6 @@ import {
   GetStartedCardsWidget,
   // R6 Pillar 7 / task 096 — Pinned Memory affordance for the Context pane.
   PinnedMemoryListWidget,
-  // R6 Pillar 6c / task 095 — Claude-Code-like activity trace.
-  ExecutionTraceWidget,
 } from "@spaarke/ai-widgets";
 import type {
   ContextWidgetComponent,
@@ -68,6 +66,7 @@ import { getBffBaseUrl } from "../../config/runtimeConfig";
 import { useContextTool } from "../../hooks/useContextTool";
 import { ContextPaneMenu } from "./ContextPaneMenu";
 import { SemanticSearchCriteriaTool } from "./SemanticSearchCriteriaTool";
+import { ComposeTraceHost } from "./ComposeTraceHost";
 
 // ---------------------------------------------------------------------------
 // ContextStage — maps to each of the five named context rendering modes.
@@ -759,20 +758,24 @@ export function ContextPaneController(): React.JSX.Element {
       );
     }
 
-    // R6 Pillar 6c / task 095 — Execution Trace surface. The widget subscribes
-    // to the `context` PaneEventBus channel and renders an ordered list of
-    // tool calls, knowledge retrievals, playbook node executions, and decisions.
-    // ADR-015 is enforced at the widget level (typed fields only).
-    //
-    // Today's bridge: the widget renders empty until events reach the
-    // PaneEventBus context channel. BFF currently emits to OpenTelemetry +
-    // structured logs (R6 task 063). Full BFF→SSE→PaneEventBus bridge is
-    // tracked as a follow-up R7 backlog item — the widget is mounted now so
-    // the surface exists and can light up as soon as the bridge lands.
+    // R6 Pillar 6c / task 095 + compose-r2 FR-32 / task 064 — Execution Trace
+    // (decision-traceability) surface. HOSTS the core's D-F4 view AS-IS via
+    // <ComposeTraceHost/>: it binds the published ExecutionTraceWidget to this
+    // Context pane with the two host-embeddable inputs (session id + the
+    // `restoreTrace` server read fn → GET /api/ai/chat/sessions/{id}/trace via
+    // ISessionTraceReader). Compose invents NO local trace rendering (charter
+    // §3.4). The widget rehydrates the durable ADR-040 ledger projection on
+    // mount, so dispatched-action provenance (which Action/tool ran, its
+    // gate/disposition, ledger refs) is visible as an audit trail that survives
+    // a hard refresh — not just the same-page-load in-memory buffer. Live
+    // `context.tool_chain` events still append after backfill (the widget's own
+    // subscription). AUDIT-ONLY: read-only surface, no input control (project
+    // CLAUDE.md). ADR-015 identifier/count-only rendering is enforced in the
+    // widget; ADR-028 `@spaarke/auth` is used by the host's read fn.
     if (selectedTool === "execution-trace") {
       return (
         <div className={styles.content} data-testid="context-pane-execution-trace">
-          <ExecutionTraceWidget data={{}} widgetType="execution-trace" />
+          <ComposeTraceHost />
         </div>
       );
     }

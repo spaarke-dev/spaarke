@@ -60,7 +60,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 061 | FR-31 action history via ledger queries (no duplicate structure) | 6 Memory | 🟢 | none | ✅ | FULL | sonnet | high |
 | 062 | FR-33 compaction over ledger + cross-version persistence (DocumentId+MatterId) | 6 Memory | 🟢 | 061 | ✅ | STANDARD | sonnet | high |
 | 063 | FR-30 workspace-scope MemoryItems via gated memory.write | 6 Memory | 🔴 core-blocked | none | ⛔ BLOCKED-ON-CORE (§6.5, 2026-07-10): core's memory.write (057) is chat-only + untrusted-origin gate deferred; needs a dispatched-action/gated capture facade + the gate. Correct end-state, NOT ledger. Handoff [#629](https://github.com/spaarke-dev/spaarke/issues/629). Compose side ready on delivery. | FULL | sonnet | high |
-| 064 | FR-32 Context-pane provenance + D-F4 trace hosting | 6 Memory | 🔴 | none | ⛔ | FULL | sonnet | high |
+| 064 | FR-32 Context-pane provenance + D-F4 trace hosting | 6 Memory | ✅ | none | — | FULL | sonnet | high |
 | 070 | FR-34 activate six coordinated flows (PaneEventBus choreography) | 7 Coord | 🟡 | 030,031 | ⭐ SUPERSEDED by 104 | FULL | opus | high |
 | 071 | FR-34 D-F3 UI ack-on-frame-id | 7 Coord | 🔴 | 070 | ⛔ | FULL | sonnet | high |
 | 072 | FR-35 Document Q&A over session-mounted document (stretch) | 7 Coord | 🟢 | none | ✅◐ UX+tests done; live grounded-answer E2E-pending deploy | STANDARD | sonnet | high |

@@ -836,6 +836,13 @@ export interface ISprkChatProps {
    * show a button that does nothing (G-P2 UAT round-1 finding 2, 2026-07-06).
    */
   enableInsertToEditor?: boolean;
+  /**
+   * DEF-08 Part B: called when the user clicks "Open in Compose" on a completed assistant message.
+   * Opt-in per host (SpaarkeAi's ConversationPane provides it): the host opens a (reused) Compose
+   * editor tab seeded with the message's text as an editable draft. Omitted → no button rendered.
+   * @param content - the assistant message text to seed the Compose draft with.
+   */
+  onOpenInCompose?: (content: string) => void;
   /** Available documents for context switching */
   documents?: IDocumentOption[];
   /** Available playbooks for context switching */

@@ -244,6 +244,24 @@ public static class ConsumerTypes
     public const string ComposeDraftAlternative = "compose-draft-alternative";
 
     /// <summary>
+    /// The Compose full-document drafting capability (DEF-08 Part A, spaarkeai-compose-r2) —
+    /// a prompted Action (<c>compose-draft-document</c>) that drafts a COMPLETE, editor-ready
+    /// document (letter / memo / response / notice / agreement / general) as semantic HTML with a
+    /// title, grounded in the session's documents and ledger outputs. Declares the core
+    /// <c>compose</c> Binding disposition (<see cref="BindingDisposition.Compose"/>, 100000006) —
+    /// the full-document output is ledger-written before render (ADR-040). Distinct from
+    /// <see cref="DraftCorrespondence"/> (Informational, inline email/letter prose): this output is
+    /// an editor-seedable full-document body (<c>body_html</c>) that
+    /// <c>SendWorkspaceArtifactHandler</c> resolves from the session ledger to SEED an opened
+    /// Compose tab with a ledgerRef (the DEF-08 blank-tab fix). §11 justification lives in
+    /// <c>infra/dataverse/actions/compose-draft-document.action.json</c>. Registered ahead of the
+    /// live Binding-row deploy (mirror-first at
+    /// <c>infra/dataverse/sprk_playbookconsumer-rows.json</c>); interim
+    /// <see cref="RoutingConsumerTypeHealthCheck"/> <c>ConstantsWithoutRows</c> finding until seeded.
+    /// </summary>
+    public const string ComposeDraftDocument = "compose-draft-document";
+
+    /// <summary>
     /// The create-matter capability (FR-A1-13 / UC-B-6, DEF-003 / #593,
     /// spaarke-ai-architecture-redesign-r2 task 042): a prompted Action
     /// (CREATE-MATTER@v1) that DRAFTS a proposed matter (name, description,
@@ -292,6 +310,7 @@ public static class ConsumerTypes
         ComposeSummarizeWordChanges,
         ComposeDefinedTerms,
         ComposeDraftAlternative,
+        ComposeDraftDocument,
         CreateMatter,
     };
 }
