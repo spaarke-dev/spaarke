@@ -465,15 +465,19 @@ const useStyles = makeStyles({
     columnGap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground2,
   },
-  // Task 111: the popup is now AI-actions-ONLY (ComposeAiToolbar owns the
-  // single Toolbar rendered inside it). `flexWrap` + `maxWidth` are ADDITIVE
-  // overflow-prevention (previously absent) — the text-labelled AI buttons
-  // wrap onto a second row instead of overflowing the popup width.
+  // DEF-17 (UAT-R3): the popup (AI-actions-ONLY since task 111) must present a
+  // SINGLE row. The former `flexWrap: 'wrap'` + `maxWidth: '420px'` cap forced
+  // a second wrapped row once the text-labelled buttons exceeded 420px — that
+  // is exactly the two-line bug DEF-17 fixes. The popup now sizes to its
+  // single-row content (`flexWrap: 'nowrap'`, no width cap); any action that
+  // would not fit lives in ComposeAiToolbar's ⋯ overflow menu rather than
+  // wrapping. `maxWidth: '100vw'` is a viewport safety net only (a floating
+  // tippy popup should never exceed the screen), not a wrap trigger.
   bubbleMenu: {
     display: 'flex',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    maxWidth: '420px',
+    flexWrap: 'nowrap',
+    maxWidth: '100vw',
     columnGap: tokens.spacingHorizontalXXS,
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,

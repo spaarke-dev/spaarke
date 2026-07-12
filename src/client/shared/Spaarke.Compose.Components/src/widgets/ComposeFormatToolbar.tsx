@@ -72,6 +72,20 @@ const useStyles = makeStyles({
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalXXS,
     flexWrap: 'wrap',
+    // DEF-16 (UAT-R3): pin the formatting toolbar to the top of the editor
+    // scroll region so it stays reachable while a long document body scrolls
+    // beneath it. `position: sticky; top: 0` pins the bar to the top of
+    // whichever ancestor actually scrolls: in the healthy layout the sibling
+    // `.editorSurface` is the scroller and the bar (its preceding sibling)
+    // never moves — sticky is inert; but when the height chain collapses in an
+    // embedded host and an OUTER container scrolls with the toolbar inside the
+    // flow, sticky keeps it visible. The opaque background + z-index prevent
+    // scrolled content bleeding through the pinned bar. Semantic tokens only
+    // (ADR-021 dark-mode-correct).
+    position: 'sticky',
+    top: 0,
+    zIndex: 1,
+    backgroundColor: tokens.colorNeutralBackground1,
   },
   headingMenuButton: {
     minWidth: '96px',

@@ -189,11 +189,16 @@ describe('ComposeAiToolbar — task 111 layout fix (single Toolbar + divider con
     expect(toolbar.contains(divider)).toBe(true);
   });
 
-  it('no overflow: the Toolbar wraps instead of clipping (real Griffel-injected CSS, not a class-name guess)', () => {
+  it('DEF-17: the Toolbar renders on a SINGLE line (flex-wrap: nowrap) — overflow goes to the ⋯ menu, not a second row', () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
     renderToolbar({ editor });
     const toolbar = screen.getByTestId('compose-ai-toolbar');
-    expect(getComputedStyle(toolbar).flexWrap).toBe('wrap');
+    // Real Griffel-injected CSS (not a class-name guess): the AI bubble must be
+    // one row. Actions that do not fit belong in the overflow menu.
+    expect(getComputedStyle(toolbar).flexWrap).toBe('nowrap');
+    // The single-row container also holds the ⋯ overflow trigger — the
+    // structural seam for spilling extra (incl. future DEF-18) actions off-row.
+    expect(within(toolbar).getByTestId('compose-ai-toolbar-more')).toBeInTheDocument();
   });
 
   it('forceVisible renders the toolbar even on a COLLAPSED selection (task 111 right-click / point-insertion trigger)', () => {

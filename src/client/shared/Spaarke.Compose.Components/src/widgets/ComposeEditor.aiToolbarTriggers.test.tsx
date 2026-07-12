@@ -157,8 +157,10 @@ describe('ComposeEditor — right-click AI-toolbar trigger (task 111 requirement
     expect(within(popup).queryByLabelText('Strikethrough')).not.toBeInTheDocument();
     expect(within(popup).queryByLabelText('Add link')).not.toBeInTheDocument();
 
-    // No CSS overflow — wrap or width-cap is present (real Griffel-injected CSS).
-    expect(getComputedStyle(toolbar).flexWrap).toBe('wrap');
+    // DEF-17 (UAT-R3): the AI bubble renders on a SINGLE line (flex-wrap:
+    // nowrap); overflow actions go to the ⋯ menu, not a second row (real
+    // Griffel-injected CSS).
+    expect(getComputedStyle(toolbar).flexWrap).toBe('nowrap');
   });
 
   it('dismisses on Escape and on an outside click', async () => {

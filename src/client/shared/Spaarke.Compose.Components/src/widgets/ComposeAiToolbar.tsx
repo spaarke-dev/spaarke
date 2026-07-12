@@ -408,14 +408,19 @@ export interface ComposeAiToolbarProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  // Task 111: the redundant `display: 'flex'` / `columnGap` override was
-  // dropped — Fluent's own `<Toolbar>` already applies its layout (fighting
-  // it caused double-spacing). `flexWrap` is an ADDITION (not a duplicate of
-  // Toolbar's own behavior): it lets the AI buttons wrap onto a second row
-  // instead of overflowing the popup width when the host (ComposeEditor's
-  // `styles.bubbleMenu`) width-caps the container.
+  // DEF-17 (UAT-R3): the inline AI bubble must render on ONE line. `flexWrap:
+  // 'nowrap'` (superseding task 111's `'wrap'`) keeps the primary buttons +
+  // in-context divider + overflow (⋯) trigger on a single row; any action that
+  // does not fit belongs in the "More actions…" overflow menu (placement:
+  // 'overflow'), NOT on a second wrapped row. This is also the extension seam
+  // for DEF-18 (a later task adding 1-3 non-AI functions): register them with
+  // `placement: 'overflow'` and they land in the ⋯ menu with zero layout
+  // change; promote at most a couple to `placement: 'primary'` only if the
+  // popup width comfortably holds them. `whiteSpace: 'nowrap'` guards against a
+  // multi-word label (e.g. "Compare to playbook") wrapping inside its button.
   toolbar: {
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
+    whiteSpace: 'nowrap',
   },
 });
 

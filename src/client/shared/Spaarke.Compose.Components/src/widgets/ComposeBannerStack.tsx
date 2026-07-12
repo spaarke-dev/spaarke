@@ -28,7 +28,16 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, MessageBar, MessageBarBody, MessageBarTitle } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
+  MessageBarActions,
+  Button,
+} from '@fluentui/react-components';
+import { Dismiss16Regular } from '@fluentui/react-icons';
 
 import type { ComposeCheckoutLockedByInfo, ComposeCheckoutStatus } from './ComposeWorkspace.types';
 import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts';
@@ -64,8 +73,21 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     pendingAssistantInsert,
   } = props;
 
+  // DEF-15 (UAT-R3): the "Document opened with N simplification(s)" warning is
+  // informational and permanent-until-dismissed. Per-mount dismissal is enough
+  // (owner: "it need not persist across mounts") — a plain local flag. It resets
+  // whenever a NEW set of import warnings arrives (a fresh document load hands a
+  // new `importWarnings` array reference) so a later, genuinely-different import
+  // is not silently swallowed by a stale dismissal.
+  const [importWarningsDismissed, setImportWarningsDismissed] = React.useState(false);
+  React.useEffect(() => {
+    setImportWarningsDismissed(false);
+  }, [importWarnings]);
+
+  const showImportWarnings = importWarnings.length > 0 && !importWarningsDismissed;
+
   const showStack =
-    importWarnings.length > 0 ||
+    showImportWarnings ||
     !!errorMessage ||
     !!pendingAssistantInsert ||
     checkoutStatus === 'conflict' ||
@@ -115,12 +137,25 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
         </MessageBar>
       ) : null}
 
-      {importWarnings.length > 0 ? (
+      {showImportWarnings ? (
         <MessageBar intent="warning" data-testid="compose-workspace-import-warning-banner" aria-live="polite">
           <MessageBarBody>
             <MessageBarTitle>Document opened with {importWarnings.length} simplification(s)</MessageBarTitle>
             Some advanced features may not be preserved on save.
           </MessageBarBody>
+          {/* DEF-15: Fluent v9's MessageBar dismiss affordance — the trailing
+              container action. Clears the banner for this mount only. */}
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-import-warning-dismiss"
+                onClick={() => setImportWarningsDismissed(true)}
+              />
+            }
+          />
         </MessageBar>
       ) : null}
 

@@ -207,6 +207,16 @@ describe('ComposeFormatToolbar — Link add/edit (window.prompt preserved)', () 
 // 3. Existing block-format controls still reachable (no regression)
 // ---------------------------------------------------------------------------
 
+describe('ComposeFormatToolbar — DEF-16 pinned/sticky top toolbar', () => {
+  it('is position: sticky at top:0 so it stays visible while the document body scrolls', () => {
+    renderFormatToolbar();
+    const toolbar = screen.getByTestId('compose-format-toolbar');
+    const style = getComputedStyle(toolbar);
+    expect(style.position).toBe('sticky');
+    expect(style.top).toBe('0px');
+  });
+});
+
 describe('ComposeFormatToolbar — existing block controls unregressed', () => {
   it('still renders lists/blockquote/align/undo-redo/heading menu', () => {
     renderFormatToolbar();
