@@ -447,9 +447,16 @@ async function bootstrap(): Promise<void> {
     dataParam ? decodeURIComponent(dataParam) : ""
   );
 
+  // Accept BOTH param keys: the R2 app + UAT URL contract use `entityType`, but
+  // the shared ribbon launcher (launch-resolver.ts buildLaunchUrl) emits
+  // `entityLogicalName`. Reading only `entityType` silently dropped the host
+  // record on every ribbon launch (Document "Open in Compose" → Assistant had no
+  // document context; DEF-UAT-1, 2026-07-12). Read either key.
   const entityLogicalName =
     searchParams.get("entityType") ??
     dataParams.get("entityType") ??
+    searchParams.get("entityLogicalName") ??
+    dataParams.get("entityLogicalName") ??
     undefined;
 
   const entityId =
