@@ -21,7 +21,7 @@ Think of it as a capable colleague who knows your firm's playbooks, has read the
 
 When you type a request, Spaarke AI runs a short, disciplined loop:
 
-1. **Understands the request** in the context of where you are (which matter or document, who you are, what was said earlier in the conversation).
+1. **Understands the request** in the context of where you are (which record you launched it from, who you are, what was said earlier in the conversation). It knows "where you are" because the launch surface passes the record's identity in as **host context** — the assistant doesn't guess it.
 2. **Picks the right capability** from a catalog of things it's allowed to do — this is the routing step.
 3. **Decides whether it needs to check with you** — a reversible, low-risk action just happens; a risky or irreversible one asks first.
 4. **Does the work**, records what happened, and **shows you a result card** with links, next steps, and an undo where it applies.
@@ -93,7 +93,7 @@ The building blocks above surface as a handful of concrete behaviors:
 
 - **It's a capable assistant, not an autopilot.** It's excellent at drafting, creating, summarizing, and finding — and it deliberately keeps you in the loop for anything consequential.
 - **It's honest by design.** The system is built so the assistant would rather say "I couldn't do that, here's why, here's a way forward" than fabricate a success. If you ever see it claim something that didn't happen, that's a bug, not the intended behavior.
-- **It gets more useful in context.** Open it *on a matter* (from the record) and it works with that matter's context and memory. Open it standalone and you'll name your own context — both are supported.
+- **It gets more useful in context.** Today you open it two ways: **standalone** from its home page (you name your own context), or **from a document record** via the "Open in Compose" command, which launches it bound to that document. Launching it bound to other record types (a matter, a project) is a ready capability being rolled out to those command bars — the assistant already understands any host record it's handed; the entry buttons are what's expanding.
 - **It improves as your catalog grows.** New capabilities are added by authoring new Actions/Bindings and playbooks — the assistant's power expands through governed catalog entries, not by loosening its guardrails.
 - **Your data stays scoped.** Retrieval and memory are organized by subject (the record, the user), and the assistant works within the scope of what you're doing.
 
@@ -101,20 +101,37 @@ The building blocks above surface as a handful of concrete behaviors:
 
 ## 6. A worked example (end to end)
 
-You're on the **Acme v. Widgeco** matter and you type:
+You open the assistant from its home page and type:
 
-> *"Create a follow-up task to review the NDA by Friday, and remember that we always call the other side 'Widgeco Ltd.'"*
+> *"Create a follow-up task to review the Widgeco NDA by Friday, assign it to me, and remember that I prefer task descriptions kept to two sentences."*
 
 Here's what happens under the hood, mapped to the building blocks:
 
-1. **Context** — the assistant already knows you're on the Acme matter and who you are (no re-explaining).
-2. **Routing (Binding)** — "create a task" resolves to the create-task Action; "remember…" resolves to a memory write.
-3. **Judgment** — creating a task is low-risk and reversible → it just does it. The memory write is automatic and silent.
-4. **Action** — the task is created on the matter, due Friday, assigned appropriately; the fact "counterparty = Widgeco Ltd." is captured as **record memory** with provenance.
+1. **Context** — the assistant assembles who you are and the recent conversation into the context envelope (no re-explaining who you are).
+2. **Routing (Binding)** — "create a task" resolves through the `create-task` Binding to its Action; "remember…" resolves to a memory write.
+3. **Judgment** — creating a task is low-risk and reversible → it just does it (assigned to you). The memory write is automatic and silent.
+4. **Action** — the task is drafted, then created (due Friday); the preference "keep task descriptions to two sentences" is captured as **your user memory** with provenance.
 5. **Result** — you get an **outcome card**: a link to the new task, an **Undo**, and **next-step chips**. No intrusive confirmation, because none was warranted.
-6. **Later** — next week, in a brand-new session on the same matter, you ask it to draft a letter to the other side. It writes "Widgeco Ltd." without being told — because the memory persisted.
+6. **Later** — next week, in a brand-new session, you ask it to draft another task. It keeps the description to two sentences without being told — because your memory persisted.
+
+*(If you'd launched the assistant bound to a record — today, a document via "Open in Compose" — a fact like "the counterparty is Widgeco Ltd." would attach to **that record's** memory instead, so anyone working that record benefits. Record-scope memory and user-scope memory are the two scopes described in §3.)*
 
 That's Spaarke AI: plain-language requests, grounded in your context, executed through a governed catalog of capabilities, with judgment about when to involve you and honesty about what it did.
+
+---
+
+---
+
+## 7. Availability today (what's live vs. rolling out)
+
+This overview describes the platform as designed; a few pieces are still being turned on, so here's the honest current state:
+
+- **Live now**: the assistant itself; the full capability catalog (Actions, Playbooks, Bindings, scopes); the judgment layer (confirm-once, ambiguity→ask, email drafted-never-sent); outcome cards, next-step chips, Undo, the "how did you decide?" trace, and progressive rendering; grounded retrieval; and **memory** (automatic capture + cross-session recall, record and user scope).
+- **Launch surfaces today**: the **standalone home page** (unbound), and **"Open in Compose" from a document record** (binds to that document). Opening the assistant bound to a **matter/project/other record** from its command bar is built in the app but not yet wired to those record ribbons — it's rolling out.
+- **Memory review/delete**: available through the platform's API today; an in-product screen to browse and delete your memory is a follow-on.
+- **Safety scanning** (pre-screening prompts for injection attempts): built and ships switched off by default; being enabled per environment.
+
+Nothing above changes the concepts in this doc — it's about which entry points and toggles are on, not what the platform does.
 
 ---
 

@@ -19,7 +19,7 @@
 
 **Two ways to open the assistant** (both exercised below):
 - **Unbound** — the standalone full-page SpaarkeAi workspace (no record context). Prompts must name their own context.
-- **Record-bound** — from a matter/project/invoice: the ribbon **"Spaarke AI"** launch (EntityFormLaunch), OR append `&entityType=sprk_matter&entityId={guid}` to the SpaarkeAi URL. The assistant opens knowing "this matter."
+- **Record-bound** — the only **deployed** record launch today is **"Open in Compose" on a `sprk_document`** (binds to that document). To exercise record-bound chat on a **matter** for B1–B4 (no matter ribbon button is wired yet — `EntityFormLaunch` exists in code but is not deployed to matter ribbons), append `&entityType=sprk_matter&entityId={guid}` to the SpaarkeAi URL manually. The assistant then opens knowing "this matter."
 
 ---
 
