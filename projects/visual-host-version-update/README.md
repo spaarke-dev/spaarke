@@ -1,6 +1,7 @@
 # VisualHost Decoupling & `@spaarke/visuals` Extraction
 
-> **Status**: Initialized — ready for implementation
+> **Portfolio**: [Project #641](https://github.com/spaarke-dev/spaarke/issues/641) · Parent [Epic #535 — ENTITY FUNCTIONALITY](https://github.com/spaarke-dev/spaarke/issues/535) · Board [Project #2](https://github.com/users/spaarke-dev/projects/2)
+> **Status**: ✅ Completed 2026-07-13 (merged via PR #639 + #640; v1.4.37 UAT-passed)
 > **Branch**: `work/visual-host-version-update`
 > **Created**: 2026-07-10
 
