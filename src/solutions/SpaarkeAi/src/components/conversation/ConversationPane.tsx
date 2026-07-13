@@ -145,15 +145,64 @@ export function ConversationPane(): React.JSX.Element {
   const paneCollapse = usePaneCollapseContext();
   const dispatch = useDispatchPaneEvent();
 
-  // DEF-08 Part B: the "Open in Compose" per-message affordance opens a (reused) Compose editor tab
-  // SEEDED with the assistant message's text as an editable draft. Dispatches by layout NAME only —
-  // the WorkspacePane widget_load handler resolves the Compose layout id (it already has the
-  // layouts list) and REUSES the single Compose tab. This avoids a layouts fetch in the Assistant
-  // pane. The drafted body rides inline as `compose.draft.html` (client-direct); the host renderer
-  // threads it into ComposeLaunchContext → ComposeWorkspace mounts it as an editable transient draft
-  // (create-on-save) — the SAME open-and-seed seam as Part A.
+  // Wave 3 Part 1 (UAT-R3 Test #1) — the client-side "active source document" pointer. When a chat
+  // upload / browse-direct-upload / opened host document has been registered as the session's active
+  // document (via `registerComposeActiveDocument` below — the single client chokepoint that learns a
+  // server sessionFileId), we remember its `{ sessionFileId, documentSessionId }` here so "Open in
+  // Compose" opens THAT source document instead of seeding the assistant message prose. Null until a
+  // source document is registered (a fresh chat with no upload → the message-seed fallback).
+  const activeSourceDocRef = React.useRef<{
+    sessionFileId: string;
+    documentSessionId?: string;
+    fileName?: string;
+  } | null>(null);
+
+  // Wave 3 Part 1 (Test #1 real repro): a file uploaded to the ASSISTANT (chat) — then "revise this
+  // document" → disambiguation → "Open in Compose" — was NEVER mounted in Compose, so the Compose-side
+  // registration never fired. Capture the uploaded file's server id when the chat attachment promotes
+  // (the `/documents` 202's `documentId`, threaded from useAttachments) and cache it as the active
+  // source document (most-recent-upload-wins). A chat upload has no Compose document session yet, so
+  // `documentSessionId` stays undefined — the compose.upload seed needs only { sessionId, sessionFileId }.
+  const handleSessionFileUploaded = React.useCallback(
+    ({ sessionFileId, fileName }: { sessionFileId: string; fileName: string }): void => {
+      activeSourceDocRef.current = { sessionFileId, fileName };
+    },
+    []
+  );
+
+  // Wave 3 Part 1: the "Open in Compose" per-message affordance.
+  //   (1) When the chat session has an ACTIVE uploaded/source document, open THAT document — dispatch
+  //       the SAME `compose.upload` seed SendWorkspaceArtifactHandler produces
+  //       ({layoutName:"Compose", compose:{ upload:{ sessionId, sessionFileId } }}), NOT the message
+  //       prose. This fixes Test #1: a revise-disambiguation message no longer seeds the disambiguation
+  //       PROSE into the editor — it opens the file being revised.
+  //   (2) With NO active source document, fall back to seeding the message text as an editable draft
+  //       (DEF-08 Part B — a genuine AI-drafted document, or the manual "open this as a document"
+  //       affordance). The drafted body rides inline as `compose.draft.html` (client-direct).
+  // Both dispatch by layout NAME only — the WorkspacePane widget_load handler resolves the Compose
+  // layout id + REUSES the single Compose tab (no layouts fetch in the Assistant pane).
   const handleOpenInCompose = React.useCallback(
     (content: string): void => {
+      const active = activeSourceDocRef.current;
+      const sessionId = chatSessionIdRef.current;
+      if (active?.sessionFileId && sessionId) {
+        dispatch("workspace", {
+          type: "widget_load",
+          widgetType: "workspace",
+          widgetData: {
+            layoutName: "Compose",
+            compose: {
+              upload: {
+                sessionId,
+                sessionFileId: active.sessionFileId,
+                fileName: active.fileName,
+              },
+            },
+          },
+          displayName: "Compose",
+        } as WorkspacePaneEvent);
+        return;
+      }
       if (!content) return;
       dispatch("workspace", {
         type: "widget_load",
@@ -194,6 +243,7 @@ export function ConversationPane(): React.JSX.Element {
     dispatch,
     inject: injection.inject,
     eventBatch,
+    onSessionFileUploaded: handleSessionFileUploaded,
   });
 
   const chips = useConsumerChips({
@@ -440,34 +490,67 @@ export function ConversationPane(): React.JSX.Element {
   // /api/compose/active-document) so a later "edit in Compose" mounts THIS file, not a stale one.
   // `@spaarke/auth` fetch (ADR-028). Fully soft-fail: on failure only chat-visibility is lost; the
   // Compose Save path is unaffected. No-op outside the bridge provider (standalone LegalWorkspace).
+  // Wave 3 Part 3 dedup cache: `${fileName}:${byteLength}` → sessionFileId. The Part-2 registration
+  // uploads the bytes ONCE per (session, file); a subsequent re-registration for the SAME file — which
+  // Part 3 fires on every tab_change so ActiveDocument re-points to the viewed tab (most-recent-active-
+  // wins) — reuses the cached sessionFileId and re-POSTs the active-document POINTER only (no duplicate
+  // ChatSessionFile, no redundant upload). Cleared per-session by the session-created reset below.
+  const activeDocUploadCacheRef = React.useRef<Map<string, string>>(new Map());
+
   const registerComposeActiveDocument = React.useCallback(
-    async ({ docxBytes, fileName }: { docxBytes: ArrayBuffer; fileName?: string }): Promise<void> => {
+    async ({
+      docxBytes,
+      fileName,
+      documentSessionId,
+    }: {
+      docxBytes: ArrayBuffer;
+      fileName?: string;
+      documentSessionId?: string;
+    }): Promise<void> => {
       const sessionId = getSessionId();
       if (!sessionId || !bffBaseUrl) return;
       try {
         const name = fileName ?? "compose-document.docx";
-        const form = new FormData();
-        form.append(
-          "file",
-          new Blob([docxBytes], {
-            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          }),
-          name
-        );
-        form.append("filename", name);
-        const uploadResp = await authenticatedFetch(
-          `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents`,
-          { method: "POST", body: form }
-        );
-        if (!uploadResp.ok) return;
-        const uploaded = (await uploadResp.json()) as { documentId?: string };
-        const sessionFileId = uploaded?.documentId;
-        if (!sessionFileId) return;
+        // Wave 3 Part 3: dedup the upload so tab_change re-registrations don't re-upload / duplicate.
+        const cacheKey = `${name}:${docxBytes.byteLength}`;
+        let sessionFileId = activeDocUploadCacheRef.current.get(cacheKey);
+        if (!sessionFileId) {
+          const form = new FormData();
+          form.append(
+            "file",
+            new Blob([docxBytes], {
+              type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            }),
+            name
+          );
+          form.append("filename", name);
+          const uploadResp = await authenticatedFetch(
+            `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents`,
+            { method: "POST", body: form }
+          );
+          if (!uploadResp.ok) return;
+          const uploaded = (await uploadResp.json()) as { documentId?: string };
+          sessionFileId = uploaded?.documentId;
+          if (!sessionFileId) return;
+          activeDocUploadCacheRef.current.set(cacheKey, sessionFileId);
+        }
+        // Wave 3 Part 2 (DEF-11 TEXT-path close): thread the tab's `documentSessionId` so the server
+        // sets ChatSession.ActiveDocument.DocumentSessionId → BindingCapabilityTool routes a typed
+        // revise/draft into THIS document session (redline in the open doc), not the chat session.
         await authenticatedFetch(`${bffBaseUrl}/api/compose/active-document`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, sessionFileId, source: "compose-direct", fileName: name }),
+          body: JSON.stringify({
+            sessionId,
+            sessionFileId,
+            source: "compose-direct",
+            fileName: name,
+            documentSessionId,
+          }),
         });
+        // Wave 3 Part 1: remember this as the session's ACTIVE source document so "Open in Compose"
+        // opens THAT document (compose.upload seed) rather than seeding the assistant message prose.
+        activeSourceDocRef.current = { sessionFileId, documentSessionId, fileName: name };
       } catch {
         // Non-fatal: the direct upload just won't be chat-visible; the Compose Save path is unaffected.
       }
@@ -544,6 +627,9 @@ export function ConversationPane(): React.JSX.Element {
       resetAttachments();
       resetChips();
       resetEventBatch();
+      // Wave 3: a fresh session has no active source document and no cached uploads.
+      activeSourceDocRef.current = null;
+      activeDocUploadCacheRef.current.clear();
       // R5-D (2026-07-07): the execution-trace replay buffer is session-scoped —
       // a fresh session must not replay the previous session's tool calls.
       clearExecutionTraceBuffer();

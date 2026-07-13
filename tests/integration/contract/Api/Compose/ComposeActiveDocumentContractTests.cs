@@ -164,6 +164,66 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
         resolved.ExtractedText.Should().Contain(extractedText,
             because: "the registered Compose-direct upload is now a summarize-resolvable ChatSessionFile (defect 4)");
     }
+
+    /// <summary>
+    /// Wave 3 (DEF-11 TEXT-path close): the client now threads the Compose tab's document session id
+    /// as <c>documentSessionId</c>. This drives the REAL route with it and asserts (1) the response
+    /// echoes it and (2) the persisted <see cref="ActiveDocumentIdentity.DocumentSessionId"/> is set —
+    /// which is precisely the field <c>BindingCapabilityTool</c> reads to route a TEXT/typed
+    /// revise-or-draft into the document session (proven end-to-end by
+    /// <c>ComposeDocumentSessionRoutingTests</c>). Without this persistence the TEXT path fail-softs to
+    /// the chat session and no redline appears in the open document.
+    /// </summary>
+    [Fact]
+    public async Task PostActiveDocument_WithDocumentSessionId_PersistsItOnActiveDocument()
+    {
+        var sessionId = Guid.NewGuid().ToString("N");
+        var documentSessionId = Guid.NewGuid().ToString("N");
+        const string fileId = "browse-mounted-file-def11";
+
+        var seeded = new ChatSession(
+            SessionId: sessionId,
+            TenantId: ComposeActiveDocumentFixture.TenantId,
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>(),
+            HostContext: null,
+            AdditionalDocumentIds: null,
+            UploadedFiles: new[]
+            {
+                new ChatSessionFile(
+                    FileId: fileId,
+                    FileName: "browse.docx",
+                    ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    SizeBytes: 64,
+                    SearchDocumentIdsCsv: $"{fileId}_s_0",
+                    UploadedAt: DateTimeOffset.UtcNow),
+            });
+        await _fixture.Sessions.UpdateSessionCacheAsync(seeded);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync("/api/compose/active-document", new
+        {
+            sessionId,
+            sessionFileId = fileId,
+            source = ActiveDocumentIdentity.SourceComposeDirect,
+            documentSessionId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<ComposeActiveDocumentResponse>();
+        body!.DocumentSessionId.Should().Be(documentSessionId,
+            because: "the response echoes the registered document session id (Wave 3 DEF-11)");
+
+        var after = await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, sessionId);
+        after!.ActiveDocument.Should().NotBeNull();
+        after.ActiveDocument!.DocumentSessionId.Should().Be(documentSessionId,
+            because: "BindingCapabilityTool reads ActiveDocument.DocumentSessionId to route a TEXT-path " +
+            "compose edit into the DOCUMENT session (redline in the open doc), not the chat session");
+    }
 }
 
 /// <summary>

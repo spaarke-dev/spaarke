@@ -53,6 +53,15 @@ export interface AttachmentsDeps {
   inject: (message: IChatMessage) => void;
   /** The Event-path batching machine (membership/settlement seams). */
   eventBatch: EventBatchMachine;
+  /**
+   * Wave 3 Part 1 (UAT-R3 Test #1 real repro): invoked with the server session-file id the instant a
+   * chat attachment is promoted to a `ChatSessionFile` via `POST /documents` (the 202's `documentId`).
+   * The host caches it as the session's ACTIVE source document (most-recent-upload-wins) so "Open in
+   * Compose" opens THAT uploaded file — even when it was never mounted in Compose — instead of seeding
+   * the assistant message prose. Mirrors the server-side `session.ActiveDocument` set on the same
+   * upload (Wave 2). Optional — omitted by callers that don't track an active source document.
+   */
+  onSessionFileUploaded?: (info: { sessionFileId: string; fileName: string }) => void;
 }
 
 export interface AttachmentsController {
@@ -80,6 +89,7 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
     dispatch,
     inject,
     eventBatch,
+    onSessionFileUploaded,
   } = deps;
   // Destructured stable methods (each is a stable useCallback inside
   // useEventBatch) so dependency arrays below key on the functions, not the
@@ -352,6 +362,10 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
               : null;
           if (documentId !== null) {
             queueDocumentUploadedEvent(chipId, documentId);
+            // Wave 3 Part 1 (Test #1 real repro): mirror the server-side session.ActiveDocument set on
+            // this same upload — cache the just-promoted file as the active source document so "Open in
+            // Compose" opens THAT file (compose.upload) even when it was never mounted in Compose.
+            onSessionFileUploaded?.({ sessionFileId: documentId, fileName: chipFilename });
           } else {
             markEventFilePromotionFailed(chipId);
           }
@@ -394,6 +408,7 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
     bffBaseUrl,
     queueDocumentUploadedEvent,
     markEventFilePromotionFailed,
+    onSessionFileUploaded,
   ]);
 
   /**

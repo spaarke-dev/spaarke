@@ -72,7 +72,7 @@ import type { ComposeActionEnqueue } from './ComposeAiToolbar';
 // `@spaarke/ai-outputs` subpaths, which LegalWorkspace's standalone Rollup
 // cannot resolve). Matches the SpaarkeAi `useWorkspaceLayouts` adapter pattern
 // (documented in `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`).
-import { useDispatchPaneEvent, type WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
+import { useDispatchPaneEvent, usePaneEvent, type WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 // Compose three-pane coordination — WORKSPACE leg (task 104 / E2E-R5). Typed
 // receivers for Flow 3 (compose_context_insert) + Flow 5 (compose_assistant_insert).
 import { useComposeWorkspaceReceivers } from './useComposeWorkspaceReceivers';
@@ -1378,7 +1378,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // forget; the host lands the bytes as a ChatSessionFile + marks the active document. Null
       // (no-op) on a standalone LegalWorkspace mount. Bytes travel by a direct function call — never
       // the PaneEventBus (ADR-015 keeps the bus content-free).
-      void registerActiveDocumentRef.current?.({ docxBytes: result, fileName: file.name });
+      // Wave 3 Part 2: thread the tab's minted document session id so the server sets
+      // ActiveDocument.DocumentSessionId → a typed revise/draft (TEXT path) routes into THIS doc session.
+      void registerActiveDocumentRef.current?.({
+        docxBytes: result,
+        fileName: file.name,
+        documentSessionId: browseDocumentSessionId,
+      });
     };
     reader.onerror = () => {
       dispatch({
@@ -1426,10 +1432,39 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     void registerActiveDocumentRef.current?.({
       docxBytes: state.docxBytes,
       fileName: state.documentRef?.fileName,
+      // Wave 3 Part 2: the stored document's loaded session id IS its document session (keyed
+      // DocumentId+MatterId) — register it so a typed revise/draft routes into THIS doc session.
+      documentSessionId: state.sessionId,
     });
     // registerActiveDocumentRef is a stable ref; excluded from deps intentionally.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.status, state.documentRef?.speDriveItemId, state.docxBytes]);
+
+  // -------------------------------------------------------------------------
+  // Wave 3 Part 3 — tab-scoped ActiveDocument (multi-tab correctness)
+  // -------------------------------------------------------------------------
+  // With multiple Compose tabs the Assistant-typed edit must target the tab the user is VIEWING, not
+  // the last one that mounted. When a Compose tab becomes the ACTIVE workspace tab (WorkspacePane
+  // dispatches `tab_change` / `active_widget_changed` on the `workspace` channel), re-register THIS
+  // tab's document as the session's active document — most-recent-active-wins — so
+  // ChatSession.ActiveDocument.DocumentSessionId re-points to the viewed tab and BindingCapabilityTool
+  // routes a typed revise/draft here. Reuses the Part-2 registration conduit (the host dedups the
+  // upload → pointer-only re-assert; no duplicate ChatSessionFile). NO new bus event (ADR-030): the
+  // existing tab_change discriminant is the signal. Gated on a loaded document with a real document
+  // session id, and only when the newly-active tab is a Compose tab.
+  usePaneEvent('workspace', (event: WorkspacePaneEvent): void => {
+    if (event.type !== 'tab_change' && event.type !== 'active_widget_changed') return;
+    if (state.status !== 'loaded' && state.status !== 'saving') return;
+    if (!state.sessionId || !state.docxBytes) return;
+    const wd = event.widgetData as { compose?: unknown; layoutName?: string } | null | undefined;
+    const activeTabIsCompose = wd != null && (wd.compose != null || wd.layoutName === 'Compose');
+    if (!activeTabIsCompose) return;
+    void registerActiveDocumentRef.current?.({
+      docxBytes: state.docxBytes,
+      fileName: state.documentRef?.fileName,
+      documentSessionId: state.sessionId,
+    });
+  });
 
   // -------------------------------------------------------------------------
   // FR-03 (task 012) — transient upload-mount

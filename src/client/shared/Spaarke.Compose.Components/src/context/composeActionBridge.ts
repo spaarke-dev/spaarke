@@ -60,6 +60,15 @@ import type { ComposeActionEnqueue } from '../widgets/ComposeAiToolbar';
 export type ComposeActiveDocumentRegistration = (info: {
   docxBytes: ArrayBuffer;
   fileName?: string;
+  /**
+   * spaarkeai-compose-r2 Wave 3 (DEF-11 TEXT-path close) — the Compose TAB's document session id
+   * (`ComposeWorkspace.state.sessionId`: the Wave-2 browse-minted id, or a stored/upload session id).
+   * The host threads it into the `POST /api/compose/active-document` body as `documentSessionId` so the
+   * server sets `ChatSession.ActiveDocument.DocumentSessionId`; `BindingCapabilityTool` then routes a
+   * TEXT/typed revise-or-draft into THIS document session (redline in the open doc) instead of
+   * fail-softing to the chat session. Omitted (undefined) on registrations that have no tab session yet.
+   */
+  documentSessionId?: string;
 }) => void | Promise<void>;
 
 /**
