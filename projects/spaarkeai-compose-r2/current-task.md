@@ -1,8 +1,10 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-13 — ROUND-4 DEPLOYED to spaarkedev1 (BFF + code page; NO new catalog). Branch = 6 round-4 waves on top of round-3. Master merge HELD until owner UAT passes.
+> **Last Updated**: 2026-07-13 — ROUND-5 DEPLOYED (code page only; client-only revise flow, commit `46eaaef32`) on top of ROUND-4 (6 waves, BFF+code page). Master merge HELD until owner UAT passes.
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+>
+> **ROUND-5 (2026-07-13)** — re-UAT #1: "revise this document" on a chat-uploaded doc wrote the revision as CHAT PROSE (dispatched to chat session, edits returned as LLM tool-text — auto-open-source-in-Compose seam was unbuilt). FIX (client-only, `46eaaef32`, deployed): natural-language "revise this document" → CANCEL agent turn → auto-mount source in Compose (compose.upload seed; ComposeWorkspace upload-mount door now registers documentSessionId — the real gap) → "Your file has been loaded into Compose. What type of revision…" + 4 clickable intent chips (ReviseIntentChips: align-clauses/flag-risks/improve-clarity/custom) → chip click (or named intent, once session registers) dispatches compose-revise-document with post-mount documentSessionId via shipped dispatchComposeAction edit path → redline in Compose, Accept/Reject in Assistant, no narration. bindingId from capability discovery (ADR-039). Gate: conversation 313/313 (+10), Compose.Components 146/146, build OK. **re-UAT #2** ("open this file" → NotImplementedException): exhaustive trace found NO reachable NIE at HEAD (compose-outputs read is pure; ComposeService.UploadAsync has 0 callers; ITenantCache NIE defaults overridden in prod) → most likely STALE CACHED BUNDLE; owner to hard-refresh+retry; if it recurs, correlation-ID / App Insights pull pins the exact frame.
 
 ---
 
