@@ -1,24 +1,62 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-10 (by context-handoff — POST merge-to-master + coordinated redeploy; working tree CLEAN, all committed + pushed, no agents running; HEAD `c67b130ea`, branch 4 ahead / 0 behind master)
+> **Last Updated**: 2026-07-10 (night) — parity-merged with redesign-r2 (#628) + joint deploy DONE + dispatch wire-loss fix (115) live. Working tree: `PING-to-core-joint-deploy-landed` note may be uncommitted. HEAD ~`34ffe01ad` merged to master via **PR #632**.
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
 
-## Quick Recovery (READ THIS FIRST) — 2026-07-10 (Phase 9b UAT remediation)
+## Quick Recovery (READ THIS FIRST) — 2026-07-10 (night): joint deploy done; finishing to 100%
 
 | Field | Value |
 |-------|-------|
 | **Project** | spaarkeai-compose-r2 — AI-native legal drafting workspace |
-| **Milestone** | Owner smoke test (2026-07-10) found 7 real defects (the earlier "AI complete E2E" was unit-green/user-broken). **Phase 9b UAT remediation COMPLETE + DEPLOYED**: 110/111/112/113 fixes + 114 deploy; merged to master (PR #627, master `69255dd4f`); BFF + SpaarkeAi live on spaarkedev1. |
-| **Status** | 110 ✅ · 112 ✅ · 111 ✅ · 113 ✅ · 114 ✅ deployed (BFF 46.59 MB hash-verified+healthy; `sprk_spaarkeai` published; `/api/compose/active-document` route live). Owner also confirmed Search-for-Document (011) works. |
-| **Next Action** | **Owner re-UAT** via `notes/UAT-r2-reuat-checklist.md` — re-test all 7 items (allow ≤5 min for BFF cache; bounce BFF once if a fix seems inactive >5 min). Then remaining OPEN: task **034** (undo/replace scope decision), 056 webhook, 082 flagship, core-gated 063/064/071, then 090 wrap-up. |
+| **Milestone** | Phase 9b UAT fixes + dispatch wire-loss fix (**115**) + undo/replace (**034**) DEPLOYED; parity-merged with redesign-r2's F-1..F-11 wave (#628); **PR #632 merged to master**; BFF + `sprk_spaarkeai` live on spaarkedev1. |
+| **GOAL** | Get compose-r2 to **100% built/deployed** so owner can do complete end-to-end UAT. Then redesign-r2 confirms their side. |
+| **Next Action** | **UAT round-2 in progress (2026-07-10 night). Compose-r2 is now on the CRITICAL PATH for the joint close — core (redesign-r2) chose Option 1: ONE combined deploy after my wrap-up lands, one UAT.** Sequence: **DEF-09** (inline-redline session-mismatch — BUILDING) → **re-merge #633 master** (PromptShield default-off + create-matter; MUST precede DEF-08) → **DEF-08** (Assistant draft→Compose, "both layered"; additive `SendWorkspaceArtifactHandler.widgetData` seed) → **071** (+fold DEF-08 C content-render honest-ack) → **DEF-02** (small) → merge complete wrap-up to master → tell core "ready for combined deploy". Then core deploys BFF+SpaarkeAi from master, operator runs consolidated UAT, then **056/082** live-verify + **090** wrap-up. |
 
-### Phase 9b remediation (this session) — see `notes/uat-r2-defect-triage-2026-07-10.md`
-- Root-caused the 7 UAT items → 5 themes via 3 parallel investigations. Owner chose the **unified active-document identity** for R4. conflict-check: shared handler/session co-owned with redesign-r2, **no live overlap**.
-- 110 (server: sessionId optional on transient-create) · 111 (client: AI-only inline popup + right-click/point trigger + B/I/U/S/Link ported to top toolbar) · 112 (client: per-action prose formatter + workspace-channel suppress) · 113 (BFF+client: additive session-scoped `ActiveDocument` on ChatSession; server-side mount resolution + `layoutName='Compose'` default; Compose uploads register with the chat session).
-- 113 out-of-list edits (justified): `StoredSession.cs`/`ChatSessionManager.cs` (warm-tier restore of ActiveDocument, ADR-040), `composeActionBridge.ts` (cross-pane seam vs frozen mount plumbing). ADR-013 register-endpoint warning accepted **Path A**. `OutputRouter.cs`/`Binding.cs` untouched.
+### 🔗 UAT round-2 defect cluster + joint-deploy coordination (2026-07-10 night) — READ
+**Owner UAT round-2 surfaced a coherent cluster: "AI output → the Compose editor" is broken from two entry points.** Both are registered in `notes/defer-issues.md` with confirmed root causes:
+- **DEF-09** (Draft Alternative → no inline redline): **session-scope mismatch** — toolbar dispatch writes the `compose`-disposition ledger entry into the **chat** session (`ConversationPane.dispatchComposeAction` → `getSessionId()→chatSessionId`), but `ComposeWorkspace.materializeComposeDraftFromLedger` reads from its **document** session (`state.sessionId`, keyed DocumentId+MatterId per 062/102). **Owner decision (binding): a Compose edit belongs to the DOCUMENT session — keep TWO sessions, do NOT unify.** Fix = route compose EDIT-action dispatch to the document session (client-only) + confirmation-only Assistant render. Wave-A-committed already: 064/014-split (b9e25c8a3).
+- **DEF-08** (chat "write a letter" → Compose): open-tab flow carries **no content payload** (opens blank shell), no editor content-injection tool → "paste it" is **hallucinated** (R2-D false-UI-claim). Owner chose **"both layered"**: (A) new catalog Action `compose-draft-document` (Compose disposition) → open + **seed** a Compose tab from a full-document ledger output; (B) "Open in Compose" affordance; (C) honest-ack the content RENDER (extend 071/D-F3 from tab-open to content-render); + single-tab reuse. Additive `SendWorkspaceArtifactHandler.widgetData` seed with **server-side resolution** (no generic tool-schema change → no hard core dep).
+- **Coordination**: core merges **#633** (PromptShield default-off + create-matter code-half) then HOLDS activation deploy; I finish the wrap-up + merge; ONE combined deploy carries both. Notes: `REPLY-to-core-633-merge-and-deploy-2026-07-10.md`, `HANDOFF-to-core-session-identity-and-compose-seed-2026-07-10.md`. Incoming from core: `PING-to-compose-core-completion-deploy-2026-07-10.md`, `HANDOFF-to-compose-r2-fr30-triage-2026-07-10.md`.
+- **FR-30 / #629**: core triaged → memory hard-governance project (NOT r2 core); no core deliverable owed; task 063 "ready on delivery". **FR-30 is OUT of compose-r2's "100%"** — operator scheduling call on the governance project.
+- **Process lesson still binding**: DEF-08/09 are the SAME "unit-green, E2E-inert" class as 115 — every fix here MUST carry a **wire-body** test (dispatch→ledger→client-materialize→editor), NOT a stored-ledger/shared-single-session shortcut.
+
+### DEPLOYED + end-to-end UAT-able NOW
+Entry (Browse/Search/upload) → edit → **inline AI actions (Explain/Compare → PROSE via 115 fix; Draft → inline redline)** → **undo/replace (034)** → Save/create-on-save (110 sessionless save) → Word shuttle → session memory + action history → three-pane coordination → Doc Q&A. FR-01..29, 31, 33, 35, FR-34-core. Re-test guide: `notes/UAT-r2-reuat-checklist.md`. **Owner asked to confirm Explain returns prose (hard-refresh Ctrl+F5 first).**
+
+### THE 115 FIX (root cause of the "empty JSON" UAT) — critical to remember
+`SessionDispatchOrchestrator.DeserializeResultChunk` coerced EVERY dispatch result via `JsonSerializer.Deserialize<DocumentAnalysisResult>` → System.Text.Json dropped compose fields → empty DAR JSON on the wire (ledger stored correct; wire render lossy). Fix: `AnalysisChunk.Result` `DocumentAnalysisResult?`→`object?` + `CompletedRaw(JsonElement)`; discriminator (tldr|entities|keywords ⇒ DAR/summarize; else pass-through). **PROCESS LESSON (binding): dispatch/render tests MUST assert on the WIRE BODY, not the stored ledger entry** — the stored-entry shortcut is what let 112 (and a prior task) ship green over a broken screen. Applied to 115; apply to all future dispatch-render work.
+
+### Remaining work to 100% (compose-r2)
+| Item | FR | State | Files |
+|---|---|---|---|
+| **DEF-01** dirty-reset on transient mount | — | held (real Save-path robustness bug, #601) | `ComposeEditor.tsx` docxBytes effect |
+| **DEF-02** searchResolvedDriveId reset | — | held (low-risk) | `ComposeWorkspace.tsx`/`.types.ts` |
+| **064** Context-pane provenance / D-F4 trace hosting | FR-32 | **buildable** (core 038 on master: `ISessionTraceReader` + `ExecutionTraceWidget`) | `SpaarkeAi/.../ConversationPane.tsx` + `Spaarke.LegalWorkspace/src` |
+| **071** UI ack-on-frame-id | FR-34 ack | **buildable** (core 037 on master; dep 104 ✅; core's server D-F3 wait already on master) | `PaneEventBus.ts`, `ConversationPane.tsx`, `ComposeEditor.tsx`, `useSseStream.ts`, `SessionDispatchOrchestrator.cs` |
+| **014-split** parent-association PICKER UI | FR-05 | held (persist wire landed; picker not built) | `SpaarkeAi/.../compose/CreateOnSaveAssociationPrompt.tsx` + `useCreateOnSaveAssociation.ts` + `shell/ThreePaneShell.tsx` |
+| **063** durable governed memory | FR-30 | **CORE-BLOCKED** (#629 handed to redesign-r2 — dispatched-action gated capture facade + untrusted-origin gate). NOT buildable here. | — |
+| **056** Word round-trip live verify | FR-26 | owner-run (code deployed; DEF-03 webhook secrets provisioned on spaarke-bff-dev) | — |
+| **082** flagship browser gate | G-R2-C | owner-run | — |
+| **090** wrap-up | — | after all above | — |
+
+**Wave ordering for the finish (file-overlap aware)**: DEF-01 (ComposeEditor) ∥ 064 (SpaarkeAi/LegalWorkspace) can pair; then 071 LAST (touches ComposeEditor+ConversationPane+orchestrator — overlaps everything); DEF-02 + 014-split (both Compose.Components/SpaarkeAi) fit where non-overlapping. Build gate between waves; **wire-body tests** for 071 (dispatch-render).
+
+### redesign-r2 (core) coordination state
+- Core merged **#628** (F-1..F-11 audit + CI-honesty). We reconciled 034 onto their `ChatEndpoints.cs` bind-move + applied `ledgerOutputs`/`BoundEnvelope`/`sessionId` signatures (clean, BFF 0 err).
+- **Core's turn** (per their PING): **PromptShield chat-perimeter PR** (config-gated DEFAULT-OFF; byte-identical on merge; activation = App Service setting + MI grant at a small follow-up deploy — chat currently has NO prompt-injection scanning until then) → **their 049/069 UAT** → **#629 triage** (FR-30) → **090 close**.
+- Handoffs: `notes/PING-to-core-joint-deploy-landed-2026-07-10.md` (deploy done + 115-touched-your-seam heads-up), `notes/HANDOFF-to-core-fr30-memory-governance-2026-07-10.md` (#629), `notes/PING-from-core-parity-merge-landed-2026-07-10.md`.
+
+### Other coordination facts
+- **#621 CLOSED** by core (test-fixture artifact, not env defect) — stop adjudicating the Changed-Surface smoke.
+- **CI now honest** (core F-5): after re-merging master, real integration red surfaces for the first time (not a new regression). Format/lint/markdown CI jobs are advisory noise — don't let them gate deploys.
+- DEF-03 webhook secrets (`Compose__Webhook__{SigningKey,ClientState,NotificationUrl}`) provisioned as dev App Service settings; prod KV-ref placeholders in `appsettings.template.json`.
+- Spikes **001** ✅ closed (satisfied by shipped Phase-4) / **008** ⏭️ closed-not-built (overtaken by shipped Word shuttle).
+
+### Prior Phase 9b remediation (this session) — see `notes/uat-r2-defect-triage-2026-07-10.md`
+- 7 UAT items → 5 themes; owner chose **unified active-document identity** for R4. 110 (sessionless save) · 111 (AI-only bubble + right-click + B/I/U/S/Link→top toolbar) · 112 (per-action prose formatter) · 113 (session-scoped `ActiveDocument` bridge + `layoutName='Compose'` default). All committed + on master.
 
 ### Prior milestone (still true)
 - Merged to master (PR **#626**, master `14dd8ee3c`) + BFF & code page deployed. Phase-9 E2E remediation (100-104), 048/055/072/081/083 all landed. AI catalog deployed (5 actions + 5 bindings + Compose disposition 100000006).

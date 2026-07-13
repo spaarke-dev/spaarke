@@ -453,13 +453,35 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 Timed());
         }
 
+        // ── DEF-08 Part A: resolve a recent FULL-DOCUMENT compose draft to SEED the tab ───────
+        // When the model supplied NO explicit pointer, first look for a recent full-document
+        // compose output (a compose-draft-document SessionOutput) in the session ledger. If one
+        // exists, seed the opened tab with its ledgerRef (the client re-materializes the document
+        // from the ledger — ADR-040 render-follows-store; the SSE frame carries the identifier,
+        // never content — ADR-015). This is the fix for the blank-Compose-tab defect: a chat
+        // "write a letter" → "open as a document" flow now lands the draft IN the editor.
+        //
+        // Precedence: an explicit documentId/sessionFileId from the model always wins; a fresh
+        // full-document draft wins over the ActiveDocument mount (it is the more specific fresh
+        // intent). The draft resolution is gated to FULL-DOCUMENT compose outputs (body_html), so
+        // an "edit in Compose" of an uploaded file — which produces NO such output — still falls
+        // through to the ActiveDocument path (task 113 preserved). Deterministic session-state
+        // read (not intent detection — ADR-039).
+        ComposeDraftSeed? draftSeed = null;
+        if (documentId == Guid.Empty && sessionFileId is null)
+        {
+            draftSeed = await ResolveComposeDraftSeedAsync(context, correlationLogId, cancellationToken).ConfigureAwait(false);
+        }
+
         // ── task 113 (UAT defect 5): resolve the Compose mount target from the session-scoped
-        // ACTIVE-DOCUMENT when the LLM supplied NO explicit current pointer ───────────────────
+        // ACTIVE-DOCUMENT when the LLM supplied NO explicit current pointer AND no full-document
+        // draft seed applies ─────────────────────────────────────────────────────────────────
         // "edit in Compose" after a fresh upload must mount THAT upload, not a stale stored doc.
         // An explicit documentId/sessionFileId from the model always wins (the stored-document
         // "open this specific doc" override) — we only consult the active document when BOTH are
-        // absent. Deterministic session-state read (not intent detection — ADR-039).
-        if (documentId == Guid.Empty && sessionFileId is null)
+        // absent AND no draft seed resolved. Deterministic session-state read (not intent
+        // detection — ADR-039).
+        if (documentId == Guid.Empty && sessionFileId is null && draftSeed is null)
         {
             var active = await ResolveActiveDocumentAsync(context, cancellationToken).ConfigureAwait(false);
             if (active is not null)
@@ -575,6 +597,27 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                     }
                 });
             }
+            else if (draftSeed is not null)
+            {
+                // DEF-08 Part A: seed the tab with the ledger REFERENCE to the drafted document
+                // (ADR-040 render-follows-store + ADR-015 identifier-only on the wire). The client
+                // reads GET /api/ai/chat/sessions/{sessionId}/compose-outputs, materializes the
+                // full-document body (body_html) from the ledger entry at ledgerRef, and mounts it
+                // as an editable transient draft (create-on-save). No content rides the SSE frame.
+                widgetDataJson = JsonSerializer.Serialize(new
+                {
+                    layoutId = layout.Id.ToString("D"),
+                    layoutName = layout.Name,
+                    compose = new
+                    {
+                        draft = new
+                        {
+                            ledgerRef = draftSeed.LedgerRef,
+                            sessionId = chatSessionIdForSeed
+                        }
+                    }
+                });
+            }
             else
             {
                 widgetDataJson = JsonSerializer.Serialize(new
@@ -652,6 +695,11 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 summaryText += " The tab is mounting the uploaded file as a transient working draft — it opens " +
                                "with the file loaded; no document record is created until the user saves.";
             }
+            else if (draftSeed is not null)
+            {
+                summaryText += " The tab is pre-seeded with the drafted document — it opens with the draft loaded " +
+                               "for editing, not empty; no document record is created until the user saves.";
+            }
             else if (preSeedNote is not null)
             {
                 // Honest partial success: the tab opened, the pre-seed did not.
@@ -667,7 +715,8 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                     layoutId = layout.Id.ToString("D"),
                     layoutName = layout.Name,
                     preSeededDocumentId = composeSeed?.SprkDocumentId,
-                    mountedSessionFileId = hasUploadMount ? sessionFileId : null
+                    mountedSessionFileId = hasUploadMount ? sessionFileId : null,
+                    seededDraftLedgerRef = draftSeed?.LedgerRef
                 },
                 summary: summaryText,
                 confidence: 1.0,
@@ -745,6 +794,122 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
             _logger.LogWarning(ex,
                 "SendWorkspaceArtifactHandler active-document resolution failed for session={Session} — degrading to no active document.",
                 context.ChatSessionId);
+        }
+
+        return null;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Compose full-document draft seed resolution (DEF-08 Part A)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The ledger reference threaded to the client for a full-document Compose draft seed. Carries
+    /// ONLY the addressable ledger key (<c>{bindingId}@t{n}</c>) — an identifier, never the drafted
+    /// content (ADR-015). The client resolves the body from
+    /// <c>GET /api/ai/chat/sessions/{sessionId}/compose-outputs</c> (ADR-040 render-follows-store).
+    /// </summary>
+    internal sealed record ComposeDraftSeed(string LedgerRef);
+
+    /// <summary>
+    /// Resolves the CURRENT (highest-turn) FULL-DOCUMENT <c>compose</c> output for this chat
+    /// session — the output a <c>compose-draft-document</c> capability wrote to the session ledger
+    /// (DEF-08 Part A). Returns its addressable key as a <see cref="ComposeDraftSeed"/>, or null when
+    /// the session holds no such output.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Full-document discriminator</b>: a <c>compose</c> ledger entry is treated as a
+    /// full-document draft ONLY when its opaque payload carries a non-empty <c>body_html</c> string
+    /// (the <c>compose-draft-document</c> output schema field). This deliberately EXCLUDES a
+    /// <c>compose-draft-alternative</c> EDIT payload (<c>target_text</c>/<c>new_text</c>) — an edit
+    /// is not a full document and must never seed a whole tab. (Edits also route to the DOCUMENT
+    /// session, not this chat session, per DEF-09 — this is a defense-in-depth second gate.)
+    /// </para>
+    /// <para>
+    /// <b>Session resolution</b>: mirrors <see cref="ResolveActiveDocumentAsync"/> — probes the
+    /// <c>ChatSessionManager</c> key in "N" then "D" form. Fail-soft: any lookup error degrades to
+    /// null (the tab still opens, empty — the handler behaves exactly as before DEF-08).
+    /// </para>
+    /// <para>
+    /// <b>ADR-015</b>: logs the ledger KEY + turn (identifiers) only — never the drafted body.
+    /// </para>
+    /// </remarks>
+    private async Task<ComposeDraftSeed?> ResolveComposeDraftSeedAsync(
+        ChatInvocationContext context,
+        string correlationLogId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(context.TenantId))
+        {
+            return null;
+        }
+
+        try
+        {
+            foreach (var sessionIdForm in new[]
+                     {
+                         context.ChatSessionId.ToString("N"),
+                         context.ChatSessionId.ToString("D"),
+                     })
+            {
+                var session = await _sessionManager
+                    .GetSessionAsync(context.TenantId, sessionIdForm, cancellationToken)
+                    .ConfigureAwait(false);
+                if (session?.Outputs is not { Count: > 0 } outputs)
+                {
+                    continue;
+                }
+
+                Models.Ai.Chat.SessionOutput? current = null;
+                foreach (var output in outputs)
+                {
+                    if (!string.Equals(output.Disposition, ComposeDisposition.DispositionValue, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+                    if (Models.Ai.Chat.SessionLedger.IsTruncationMarker(output.Payload))
+                    {
+                        continue; // a truncated draft cannot be materialized — never seed it
+                    }
+                    if (output.Payload.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+                    // Full-document discriminator: non-empty body_html (compose-draft-document).
+                    if (!output.Payload.TryGetProperty("body_html", out var bodyHtml) ||
+                        bodyHtml.ValueKind != JsonValueKind.String ||
+                        string.IsNullOrEmpty(bodyHtml.GetString()))
+                    {
+                        continue;
+                    }
+                    if (current is null || output.Turn > current.Turn)
+                    {
+                        current = output;
+                    }
+                }
+
+                if (current is not null)
+                {
+                    // ADR-015: ledger key + turn are identifiers — never the drafted body.
+                    _logger.LogInformation(
+                        "SendWorkspaceArtifactHandler ({Correlation}) resolved compose full-document draft seed — ledgerRef={LedgerRef} turn={Turn}",
+                        correlationLogId, current.Key, current.Turn);
+                    return new ComposeDraftSeed(current.Key);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Fail-soft (ADR-015: identifiers only) — a draft-seed lookup failure never breaks the
+            // tab-open; the tab still opens (empty) exactly as it did before DEF-08.
+            _logger.LogWarning(ex,
+                "SendWorkspaceArtifactHandler ({Correlation}) compose draft-seed resolution failed — degrading to no seed.",
+                correlationLogId);
         }
 
         return null;

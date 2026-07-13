@@ -12,7 +12,8 @@
 | **Project** | set-regarding-and-field-mapping-resolver-r2 |
 | **Status** | ✅ Implementation complete + merged to master + BFF deployed to dev + UAT in progress |
 | **Master HEAD** | `4d85deef7` (worktree = origin/master = main-repo master, all synced) |
-| **Next Action** | User imports **`VisualHostSolution_v1.4.34.zip`** (path below) + re-tests wizard create; expect warning-free inheritance for populated lookups |
+| **Next Action** | Commit task-016 convergence + push/merge. Then only **090 wrap-up** remains open. (User still to import `VisualHostSolution_v1.4.34.zip` for the UI refinement.) |
+| **Task 016** | ✅ 2026-07-12 — matterService nav-prop convergence done (approach C; payload byte-identical; 183 tests green). Only 090 remains. |
 
 ### The v1.4.34 zip to import
 `C:\code_files\spaarke-wt-set-regarding-and-field-mapping-resolver-r2\src\client\pcf\VisualHost\Solution\bin\VisualHostSolution_v1.4.34.zip`
@@ -39,11 +40,11 @@ All 16 tasks done. During UAT, the profile-fetch endpoint 500'd; root cause was 
 Hand-built repro queries with hardcoded GUIDs diverged from the BFF's actual path (skipped Step 1 LookupRecordTypeIdsAsync). The **container-log stack trace** (Kudu `…/api/vfs/LogFiles/<date>_containerStream.log`) was the turning point — pull logs earlier next time.
 
 ## Task status (all 16 + follow-ups)
-- Phase 0: 001 ✅ 002 ✅ 003 ✅ · Phase 1: 010 ✅ 011 ✅ 012 ✅ 013 ✅ 014 ✅ 015 ✅ · Phase 2: 020 ✅ 021 ✅ 022 ✅ · Phase 3: 030 ✅ · Phase 4: 040 ✅ 041 ✅.
-- **090 wrap-up NOT formally run** — live E2E is happening organically via UAT; `/test-diet`, `/repo-cleanup`, README/plan → Complete, lessons-learned still pending if a formal close is wanted.
+- Phase 0: 001 ✅ 002 ✅ 003 ✅ · Phase 1: 010 ✅ 011 ✅ 012 ✅ 013 ✅ 014 ✅ 015 ✅ **016 ✅ (2026-07-12)** · Phase 2: 020 ✅ 021 ✅ 022 ✅ · Phase 3: 030 ✅ · Phase 4: 040 ✅ 041 ✅.
+- **090 wrap-up NOT formally run** — the ONLY remaining task; `/test-diet`, `/repo-cleanup`, README/plan → Complete, lessons-learned still pending if a formal close is wanted.
 
 ## Deferred / follow-ups
-- **016** matterService nav-prop convergence (create-payload-touching; needs payload-equivalence test + sign-off; §6.5).
+- **016 ✅ DONE (2026-07-12)** — matterService converged onto shared `discoverNavProps` via new `toNavPropMap` adapter (approach C). Create payload byte-identical (equivalence test). §6.5 resolved with no ADR tension. See `notes/task-011-BLOCKED.md` RESOLUTION footer. Out-of-scope discovery sites still independent: `CreateProjectWizard.tsx` (component-level), `TodoRegardingUpdateBuilder.ts`.
 - **To Do follow-on** child-creation path (`createTodoRegardingChild`, from invoice/reportCard wizards) left unwired — gracefully no-ops.
 - **Matter/Project** parent link is post-create N:N, not pre-create regarding — engine fires only when an `association` is present (forward-compatible).
 - **Report Card reverse-lookup**: registry `sprk_regardingfield=sprk_regardingreportcard` names the convention only; confirm if a physical column is needed.

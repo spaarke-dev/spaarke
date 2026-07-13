@@ -1,7 +1,7 @@
 # Current Task State — Spaarke AI Architecture Redesign R2 (Core)
 
-> **Last Updated**: 2026-07-10 (late evening) — REMEDIATION WAVE in flight (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first.
+> **Last Updated**: 2026-07-12 (pre-compact handoff for UAT continuation) — by context-handoff.
+> **Recovery**: Read Quick Recovery first.
 
 ---
 
@@ -9,15 +9,30 @@
 
 | Field | Value |
 |---|---|
-| **Phase** | **Post-audit remediation wave** (operator-directed). E2E completion audit DONE: `notes/e2e-completion-audit-2026-07-10.md` (committed `dd81632c3`). Operator ruled: F-1..F-4 + F-7..F-11 are r2 DELIVERABLES (no deferral); F-5 fixed immediately. |
-| **Done this wave** | **F-5 CI TRX-overwrite fix COMMITTED** (`fe1d1cfab`): LogFilePrefix per-project TRX + multi-TRX pass-2 verdict in `.github/workflows/sdap-ci.yml`. Consequence: CI will honestly FAIL until F-6 pre-existing failures are fixed (agents on it). |
-| **In flight (6 background agents, do not duplicate)** | (1) fix-client: F-4 onNextStep wiring in ConversationPane + F-9 TZ-pinned EntityInfoWidget test. (2) fix-harness: F-10 CVE hard-stop in Measure-BffPublishSize.ps1. (3) fix-test-hygiene: F-11 AuditLog flake root-fix (#618) + SprkChatAgentFactory:662 stale comment + F-6 stale guards (Canvas ×2 retarget-or-delete, StableId Consumer06/07 update, AiModule dead comment). (4) fix-jobaware: F-3 wire ComposeJobAware onto live path (honest-stop clause if no real consumer). (5) fix-ambiguity: F-8 thread real content-safety/uncertainty into gate. (6) fix-analysis-tests: F-6 ExecuteAnalysis ×2 root-cause (UAC one may be a SECURITY bug — filter not applied) + #621 GET-after-DELETE 500 root-cause. |
-| **WAVE COMPLETE + MERGED (2026-07-10 ~23:00Z)** | ALL findings fixed. **PR #628 MERGED** (master `ef5d098b4`, full remediation wave) + **PR #631 MERGED** (F-5 completion: build-test job-level swallow REMOVED, 2 Scheduling flakes registered). **Master CI CONFIRMED honest-green with blocking active.** #618 + #621 CLOSED (root-fixed / fixture-artifact); #619 = (a)-only. ADR ArchTests 5→2 (2 handoff charters in `notes/adr-archtest-handoff-charters.md`). Compose-r2 pinged (their notes: PING-from-core-parity-merge-landed + HANDOFF-from-core-remediation-wave) — they reconcile 034 onto the bind-move and take the JOINT DEPLOY from master. |
-| **Shield (F-8 follow-up, operator-approved in-wave)** | PromptShieldChatMiddleware DONE + committed LOCALLY (`51a490a60` on this worktree branch, default-OFF config gate `AiSafety:PromptShield:ChatPipelineEnabled`). AFTER compose's joint deploy: rebase branch on master → PR → merge → small BFF deploy + spaarkedev1 activation (setting=true + ContentSafety endpoint + MI "Cognitive Services User" role). Env checklist in the commit message + agent report. |
-| **Blocked on operator** | 049 + 069 browser UAT (AFTER joint deploy + shield deploy); #629 FR-30 memory-governance handoff triage (from compose, separate); then 090 close (defer groups a–f still unfiled; memory hard-governance risk re-confirm). |
+| **Phase** | **All substantive r2 work COMPLETE + merged + deployed.** In the **live-UAT + defect-intake** stage. Resuming: continue the browser UAT and address findings. |
+| **Deployed state (spaarkedev1)** | master `07aecc801` (both projects). BFF + SpaarkeAi live. **create-matter seeded live** (Action `63f086d3…` + Binding `89cd91f6…`; healthz Healthy). **DEF-UAT-1 part-1 fix deployed** (SpaarkeAi rebuilt+published `sprk_spaarkeai`). memory.write row Active; `memory-items`+`audit-partitioned` Cosmos live. |
+| **Next action on resume** | Continue **CONSOLIDATED-UAT-CHECKLIST** (`notes/CONSOLIDATED-UAT-CHECKLIST.md`): Parts A/B/C1/C3 ready NOW; **re-test "Open in Compose" host context** (part-1 fix just deployed — Assistant should know the host document); C2 (injection) waits on shield. Clean pass → ADR-041 + ADR-042 Accepted → 090 close. |
+| **Open PRs** | **#636** (Spaarke AI 101 surface-accuracy fixes) — OPEN, awaiting operator review/merge. #637 (DEF-UAT-1 part-1) — MERGED. #633/#635 merged. |
+| **Blocked on operator** | (1) **🔔 PromptShield activation infra decision** — NO ContentSafety resource on dev (only `spaarke-openai-dev` AIServices); needs endpoint choice + MI "Cognitive Services User" role grant; shield ships default-OFF. (2) **UAT run** + findings. (3) Optional: operator wants a written **"Linear vs Multistep / Action vs Binding vs Playbook" product-strategy statement** — offered, not yet requested. |
 
-### Key facts
-- Audit verdict: NO fabricated completions; gaps = built-but-not-load-bearing (F-1 envelope telemetry-only, F-2 user-memory no recall, F-3 job-aware dormant, F-4 chips inert) + systemic F-5 CI swallow + F-6 pre-existing failures (all R1-era: Canvas/StableId guards, ExecuteAnalysis ×2) + minor tail F-7..F-11.
-- Live env verified: healthz Healthy; memory.write row `2172b721` ACTIVE; 3 retired rows Inactive (send-artifact Active); `memory-items`+`audit-partitioned` containers live.
-- Master CI run 29108634079 = "success" while logs show 9 test failures + 5 ADR ArchTest failures → F-5 proof.
-- Deferral inventory given to operator (DEF-001..004, PE-D1..D8/#612–#619, unfiled close groups a–f, parked items). PE-D7/#618 being fixed now; PE-D8(b) scope question asked.
+### Live UAT defects (2026-07-12) — `notes/UAT-defects-launch-context-and-session-2026-07-12.md`
+- **DEF-UAT-1 part 1** (host-context param mismatch: launcher emits `entityLogicalName`, app read only `entityType`) — **FIXED (main.tsx reads either) + DEPLOYED + MERGED #637**.
+- **DEF-UAT-1 part 2** (Compose/host document TEXT not shared with Assistant — "summarize this document" fails) → **compose-r2** (session-identity surface). Handoff written.
+- **DEF-UAT-2** (chat session not context-scoped — home page shows Document's session; single global `sprk_ai2_chatSessionId` localStorage key in AiSessionProvider) → **compose-r2**. Handoff written (`spaarke-wt-spaarkeai-compose-r2/.../HANDOFF-from-core-uat-defects-launch-and-session-2026-07-12.md`).
+
+### Product-strategy alignment (playbooks) — resolved this session
+- Terminology: **Linear** (single-step prompted Action path = `Services/Ai/LinearConsumers/`, ActionRunner) vs **Multistep** (composite). (NOT "degenerate" — that was r7's transitional "degenerate 3-node playbook.")
+- Ratified (OQ-2, 2026-07-05, architecture doc §4.2): playbook node-graph engine **FROZEN** (Insights only, retired by attrition); **single-node/Linear wrappers dissolve**; dispatch = **Binding → prompted Action** directly (no wrapper); "playbook" = product language + composite container (new composites = `coded`); PlaybookBuilder → BA scope/prompt/Binding editor (no maker graphs).
+- **Build is transitional**: chat capabilities (summarize/classify/create-*) = direct Actions; legacy analysis/Insights playbooks (Document Profile, Email Analysis, matter-health, pre-fills, Document Summary, Summarize File) STILL on frozen engine (not yet migrated). Operator's "they moved off" = end-state, not current.
+- Not every Action needs a playbook wrapper (that was r7; walked back).
+
+### Spec-vs-built reconciliation (signed) — `notes/spec-vs-built-reconciliation-2026-07-10.md`
+65/65 FR/NFR dispositioned; 58 delivered. Agreed-out (operator-signed): #616 retrieval ACL (security project), memory hard-governance group-e (governance project), FR-B-03 memory review/delete UI (API-only), job-aware chat card (invariant delivered on Compose path; card agreed-out), #629 FR-30 (governance project), #592/#591/#612/#594/#617/#619a, Work IQ runtime, close-out groups a/b/c/d/f.
+
+### Remaining to close (090)
+After UAT sign-off: flip 049/069 gate rows + 090; file named deferrals (groups a–f) via /defer; lessons-learned; test-diet already done; wrap-up PR citing the signed reconciliation; /repo-cleanup; /devops-project-sync completion.
+
+### Coordination
+Compose-r2: joint deploy done (#632/#634); owns DEF-UAT-1 part 2 + DEF-UAT-2 + FR-30/#629 (governance project). Session-identity two-session model: core does NOT unify (confirmed). Deploy rule: merge worktree with master BEFORE any deploy; coordinate SpaarkeAi deploys.
+
+*Resume: "continue" → UAT (Parts A/B/C1/C3 + re-test Open-in-Compose); intake findings; then shield decision + 090 close. Fable session; sub-agents can't write .claude/.*

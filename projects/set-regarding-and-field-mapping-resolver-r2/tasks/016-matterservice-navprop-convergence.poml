@@ -3,7 +3,7 @@
   <metadata>
     <title>Converge matterService nav-prop onto shared discoverNavProps (create-payload-touching)</title>
     <phase>1: Client Engine</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>011</dependencies>
     <blocks>none</blocks>
@@ -80,7 +80,17 @@
     <criterion testable="true">Shared-lib build + matterService tests green.</criterion>
   </acceptance-criteria>
 
-  <notes>Ref: spec.md FR-08, design.md §4.1a. Created 2026-07-09 as the §6.5 Path-A follow-up split off from task 011.</notes>
+  <notes>Ref: spec.md FR-08, design.md §4.1a. Created 2026-07-09 as the §6.5 Path-A follow-up split off from task 011.
+    COMPLETED 2026-07-12 via approach C: added shared `toNavPropMap(entries)` to PolymorphicResolverService;
+    matterService now sources its column→navprop map via `toNavPropMap(await discoverNavProps(entity))` at both
+    call sites (sprk_matter create-payload binds + sprk_document link), and its private `_discoverNavProps`/`_navPropCache`
+    were removed (`_resolveNavProp` map-accessor retained). Create payload proven byte-identical (keys/values/insertion
+    order) by new `matterService.navProp.test.ts` (adapter last-wins unit test + e2e payload-equivalence, incl. cleanGuid
+    normalization). Shared-lib build green; 183 tests green across matter + neighbors. §6.5 resolves cleanly with NO ADR
+    tension remaining — the payload is unchanged, so no exception/amendment was needed. One nav-prop discovery
+    implementation now serves all 7 create-wizard services. Out-of-scope (documented, not touched): CreateProjectWizard.tsx
+    has a component-level ManyToOneRelationships fetch, and TodoRegardingUpdateBuilder has its own — neither is one of the
+    7 services; flagged for a future dedup if desired.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
