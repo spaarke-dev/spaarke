@@ -1,26 +1,25 @@
 # VisualHost - Architecture Documentation
 
-> **Version**: 1.4.36 | **Last Updated**: July 12, 2026
+> **Version**: 1.4.37 | **Last Updated**: July 12, 2026
 >
 > **Audience**: Developers, solution architects, AI coding agents
 >
 > **Purpose**: Architecture decisions, data source modes, and design principles for the VisualHost visualization framework
 
 > **Last Reviewed**: 2026-07-12
-> **Reviewed By**: `visual-host-version-update` (VHVU-030 + Phase B extraction)
-> **Status**: Updated for the decoupling project — see the two changes below.
+> **Reviewed By**: `visual-host-version-update` (VHVU-030 "+" cutover + Phase B: extraction, props-in inversion, full repoint, ADR-012 amendment)
+> **Status**: Updated for the **completed** decoupling project — see the changes below.
 >
-> **Two architectural changes shipped by `visual-host-version-update` (v1.4.36):**
+> **Architectural changes shipped by `visual-host-version-update` (through v1.4.37):**
 > 1. **The "+" Create button now launches wizards via `Xrm.Navigation.navigateTo`** (standalone Code Pages), replacing the previous inline `React.lazy` embedding. This removed `@spaarke/auth` + `@spaarke/sdap-client` from the PCF bundle (≈1.5 MB → ~0.78 MB) and moved all create-flow auth to the Code Page. See "The '+' Create Button" below.
-> 2. **The presentational visual components + their pure utils/types moved to a new dedicated sibling package, [`@spaarke/visuals`](../../src/client/shared/Spaarke.Visuals/)** — NOT `@spaarke/ui-components`, and no longer "internal to VisualHost." VisualHost consumes them from there. See "Component Homes" + "How to Extend VisualHost" below.
->
-> **In-progress note (Phase B):** as of v1.4.36 the leaf visuals + 7 utils + viz types live in `@spaarke/visuals`; `ChartRenderer` (the host dispatcher), the three self-fetch visuals (`CalendarVisual`, `DueDateCard`, `DueDateCardList`), and `CardChrome` intentionally remain in the PCF. Three pervasive utils (`logger`, `cardConfigResolver`, `trendAnalysis`) are consumed through thin re-export shims at their old PCF paths pending the final repoint (VHVU-060). `GradeMetricCard.tsx` remains DEPRECATED (use MetricCard with ReportCardMetric).
+> 2. **All presentational visual components + their pure utils/types moved to a new dedicated sibling package, [`@spaarke/visuals`](../../src/client/shared/Spaarke.Visuals/)** — NOT `@spaarke/ui-components`. VisualHost consumes them from there. This is now **ADR-sanctioned**: [ADR-012 was amended (2026-07-12, path B per CLAUDE.md §6.5)](../adr/ADR-012-shared-component-library.md) to govern `@spaarke/visuals` as the canonical home for data-viz primitives + restate the anti-fragmentation boundary. See "Component Homes" + "How to Extend VisualHost" below.
+> 3. **The three formerly self-fetching visuals (`CalendarVisual`, `DueDateCard`, `DueDateCardList`) were inverted to props-in** (VHVU-050): the **presentational** component lives in `@spaarke/visuals`; a thin PCF-side **container** (same file names) owns the fetch + FetchXML + record navigation and passes data down as props. `ViewDataService` was split into pure FetchXML builders (`fetchXmlBuilders.ts`) vs WebAPI executors. **The repoint is complete (VHVU-060):** the `cardConfigResolver` + `trendAnalysis` shims were closed; `logger` is retained as an intentional host-side facade. `ChartRenderer` (the host dispatcher, which consumes `webAPI`) and `CardChrome` intentionally remain in the PCF. `GradeMetricCard.tsx` remains DEPRECATED (use MetricCard with ReportCardMetric).
 
 ---
 
 ## Architecture Overview
 
-VisualHost is a **configuration-driven visualization framework** for Dataverse model-driven apps. A single PCF control renders 13 different visual types based on a `sprk_chartdefinition` entity record (12 base types + ReportCardMetric as a MetricCard preset). It supports three data source modes: **view/basic aggregation** (grouped records), **field pivot** (multiple fields from a single record), and **self-managed** (DueDateCard types). It also provides **drill-through navigation** that opens web resource-based dataset grids in Dataverse dialogs with full context filtering.
+VisualHost is a **configuration-driven visualization framework** for Dataverse model-driven apps. A single PCF control renders 13 different visual types based on a `sprk_chartdefinition` entity record (12 base types + ReportCardMetric as a MetricCard preset). It supports three data source modes: **view/basic aggregation** (grouped records), **field pivot** (multiple fields from a single record), and **self-managed** (DueDateCard types — the PCF container fetches independently, then hands its presentational component the data as props). It also provides **drill-through navigation** that opens web resource-based dataset grids in Dataverse dialogs with full context filtering.
 
 ```
                     ┌──────────────────────────────┐
@@ -108,8 +107,8 @@ DueDateCard and DueDateCardList build their own FetchXML with a link-entity for 
 | CalendarVisual | Calendar heat map |
 | MiniTable | Compact ranked table |
 | TrendCard | Trend sparkline |
-| DueDateCard | Single event card (self-managed data) |
-| DueDateCardList | Event card list (self-managed data) |
+| DueDateCard | Single event card (presentational; PCF container fetches + passes props) |
+| DueDateCardList | Event card list (presentational; PCF container fetches + passes props) |
 | GaugeVisual (v1.3.0) | SVG semicircular arc with color thresholds. Two modes: `"single"` (0–1 field value) and `"ratio"` (field / totalField) |
 | HorizontalStackedBar (v1.3.0) | Financial progress bar: `dataPoints[0]`=spent, `dataPoints[1]`=budget, remaining computed automatically |
 
@@ -214,11 +213,11 @@ When a chart definition sets `sprk_createwizardenabled = Yes`, the toolbar/CardC
 
 | Home | What lives there | Reusable in |
 |------|------------------|-------------|
-| **`@spaarke/visuals`** (presentational package) | The 13 leaf visual components (MetricCard, MetricCardMatrix, BarChart, LineChart, DonutChart, GaugeVisual, HorizontalStackedBar, StatusDistributionBar, TrendCard, GradeMetricCard, MiniTable, EventDueDateCard, ErrorBoundary) + 7 pure utils (chartColors, valueFormatters, gradeUtils, tokenSetColors, trendAnalysis, cardConfigResolver, logger) + the viz **types** (`VisualType`, `IChartData`, `IAggregatedDataPoint`, `ICardConfig`, `TrendDirection`, …) | PCF, future code-page dashboards, standalone apps — anything that binds data itself |
+| **`@spaarke/visuals`** (presentational package) | All 16 leaf visual components — MetricCard, MetricCardMatrix, BarChart, LineChart, DonutChart, GaugeVisual, HorizontalStackedBar, StatusDistributionBar, TrendCard, GradeMetricCard, MiniTable, EventDueDateCard, ErrorBoundary, **and (props-in as of VHVU-050) `CalendarVisual`, `DueDateCard`, `DueDateCardList`** — + 7 pure utils (chartColors, valueFormatters, gradeUtils, tokenSetColors, trendAnalysis, cardConfigResolver, logger) + the viz **types** (`VisualType`, `IChartData`, `IAggregatedDataPoint`, `ICardConfig`, `TrendDirection`, …). Presentational-only: no `Xrm`/`WebAPI`/FetchXML. | PCF, future code-page dashboards, standalone apps — anything that binds data itself |
 | **`@spaarke/ui-components`** | `AiSummaryPopover`, `AppInsightsService`, `useWizardPageBootstrap`, `cleanGuid` (via `PolymorphicResolverService`) | consumed by VisualHost (AI popover + telemetry) and the wizard Code Pages |
-| **PCF host** (`VisualHost/control/`) | `VisualHostRoot` (orchestration + the "+" handler), `ChartRenderer` (visual-type dispatch — consumes `webAPI`), the 3 **self-fetch** visuals (`CalendarVisual`, `DueDateCard`, `DueDateCardList`), `CardChrome`, `ThemeProvider`, all `services/` (Config/Aggregation/FieldPivot/View/ClickAction) | PCF only — these are host-coupled by design |
+| **PCF host** (`VisualHost/control/`) | `VisualHostRoot` (orchestration + the "+" handler), `ChartRenderer` (visual-type dispatch — consumes `webAPI`), the 3 thin **data-fetching containers** (`CalendarVisual`, `DueDateCard`, `DueDateCardList` — each fetches + maps records + owns navigation, then renders the matching presentational component from `@spaarke/visuals`), `CardChrome`, `ThemeProvider`, all `services/` (Config/Aggregation/FieldPivot/View/ClickAction) + the pure FetchXML builders (`fetchXmlBuilders.ts`) | PCF only — these are host-coupled by design |
 
-**Why these stay host-side:** `ChartRenderer` takes `webAPI` and dispatches to the self-fetch visuals, so it cannot be presentational. `CardChrome` + the tool registry + drill-through are host concerns (config-driven from the chart-definition JSON). Keeping them in the PCF is what keeps `@spaarke/visuals` a clean, dependency-free view layer.
+**Why these stay host-side:** `ChartRenderer` takes `webAPI` and dispatches to the containers, so it cannot be presentational. The 3 containers own Dataverse fetch + FetchXML + record navigation (the data layer). `CardChrome` + the tool registry + drill-through are host concerns (config-driven from the chart-definition JSON). Keeping the data + dispatch + chrome in the PCF is what keeps `@spaarke/visuals` a clean, dependency-free view layer — the boundary ADR-012 (as amended) now mandates.
 
 ## How to Extend VisualHost
 
@@ -226,7 +225,7 @@ When a chart definition sets `sprk_createwizardenabled = Yes`, the toolbar/CardC
 
 1. **Build the component** in `@spaarke/visuals/src/components/` — presentational only (props in, no `Xrm`/`webAPI`); take `IAggregatedDataPoint[]` (or a pivot shape) as data input and use Fluent v9 design tokens (automatic dark mode). Export it from `src/components/index.ts`.
 2. **Add the enum value** to `VisualType` in `@spaarke/visuals/src/types/index.ts` (mirror the Dataverse `sprk_visualtype` option-set integer).
-3. **Wire the dispatch** — add a `case` in `ChartRenderer.tsx` (in the PCF) importing your component from `@spaarke/visuals` and passing it the shaped `IChartData`. If it needs its own data (like the self-fetch cards), keep the fetching component in the PCF instead and dispatch to it locally.
+3. **Wire the dispatch** — add a `case` in `ChartRenderer.tsx` (in the PCF) importing your component from `@spaarke/visuals` and passing it the shaped `IChartData`. If it needs to fetch its **own** data, follow the **container pattern** (VHVU-050): keep the presentational component in `@spaarke/visuals` (props-in, no data access) and add a thin PCF-side **container** that does the fetch + FetchXML and passes the data down; dispatch `ChartRenderer` to the container. Data access MUST NOT enter `@spaarke/visuals` (ADR-012, as amended).
 4. **Document** the new type + its `sprk_optionsjson` keys in [VISUALHOST-SETUP-GUIDE.md](../guides/VISUALHOST-SETUP-GUIDE.md), then bump VisualHost (5 locations) + redeploy.
 
 > Prefer a **preset over a new component** where possible — e.g. `ReportCardMetric` is not its own component, it's a MetricCard fallthrough that `cardConfigResolver` decorates (see "Why ReportCardMetric as a Fallthrough Case"). One well-configured component beats five overlapping ones (root CLAUDE.md §11).
@@ -328,7 +327,7 @@ Also enabled in FR-VH-01: `fieldPivot` consumption for the Donut case in `ChartR
 | Context filter | Single field | Multi-field context filters |
 | Data services | Client-side aggregation | Server-side aggregation via BFF API for large datasets |
 | Visual type presets | ReportCardMetric as fallthrough | Additional domain presets via same pattern |
-| ~~Chart components internal to VisualHost~~ | ✅ **DONE (v1.4.36)** — extracted to `@spaarke/visuals` (presentational sibling package) | Remaining: move `ChartRenderer` + the 3 self-fetch visuals once their data coupling is inverted (VHVU-050); finish the util shim repoint (VHVU-060) |
+| ~~Chart components internal to VisualHost~~ | ✅ **DONE (v1.4.37)** — all presentational visuals live in `@spaarke/visuals`; the 3 self-fetch visuals inverted to props-in + PCF containers (VHVU-050); util-shim repoint finished (VHVU-060); ADR-012 amended to govern the package (VHVU-070) | `ChartRenderer` stays host-side **by design** (consumes `webAPI` + dispatches — not presentational) |
 
 ---
 
