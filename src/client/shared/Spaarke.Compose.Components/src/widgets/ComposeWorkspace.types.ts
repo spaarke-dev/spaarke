@@ -118,7 +118,14 @@ export type ComposeWorkspaceAction =
   // FR-05 (task 100): `containerId` is the client-resolved BU container the first Save
   // (create-on-save) persists into; carried on the transient documentRef so triggerSave
   // can send it. Undefined until the host resolves it (see ComposeWorkspaceProps.containerId).
-  | { kind: 'mountTransient'; docxBytes: ArrayBuffer; fileName?: string; containerId?: string }
+  //
+  // Wave 2 (UAT-R3 Test #3 fix): `sessionId` establishes the tab's DOCUMENT session id for a
+  // door that has NO server round-trip (the Browse-direct-upload path). The assistant-upload
+  // path sets sessionId earlier via `requestUploadMount`; Browse has no server-assigned id, so
+  // the caller MINTS a client-generated document session id and threads it here. When omitted
+  // (the upload path's `mountTransient`, which follows `requestUploadMount`) the reducer
+  // preserves the sessionId already on state — INVARIANT: no mount leaves state.sessionId empty.
+  | { kind: 'mountTransient'; docxBytes: ArrayBuffer; fileName?: string; containerId?: string; sessionId?: string }
   // ── DEF-08: AI-drafted full-document seed mount (create-on-save, like mountTransient) ──
   | { kind: 'mountDraftHtml'; html: string; fileName?: string; containerId?: string }
   | { kind: 'requestSave' }
@@ -209,12 +216,21 @@ export function composeWorkspaceReducer(
       // Pointer-less transient working draft: docxBytes populated, documentRef carries
       // ONLY a display fileName (empty speDriveItemId = "no SPE pointer yet"). No
       // sprk_document, no checkout (skipped) — first Save runs create-on-save (task 013).
+      //
+      // Wave 2 (UAT-R3 Test #3 fix): a Browse-direct-upload has no server round-trip, so it
+      // supplies a MINTED document session id via `action.sessionId`. The upload path reaches
+      // here AFTER `requestUploadMount` already set state.sessionId and omits `action.sessionId`,
+      // so fall back to the existing state.sessionId in that case. INVARIANT: state.sessionId is
+      // NEVER left '' after a mount — downstream AI-edit routing threads it as `documentSessionId`
+      // (ComposeAiToolbar), and `documentSessionId.length > 0` is what classifies a compose EDIT
+      // (redline) vs a misrouted INFORMATIONAL prose card (ConversationPane.dispatchComposeAction).
       return {
         ...state,
         status: 'loaded',
         docxBytes: action.docxBytes,
         seedHtml: null,
         etag: null,
+        sessionId: action.sessionId ?? state.sessionId,
         documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
         checkoutStatus: 'skipped',
         errorMessage: null,

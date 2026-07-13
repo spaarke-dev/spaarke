@@ -151,6 +151,23 @@ function toAssistantInsertPayload(event: WorkspacePaneEvent): ComposeAssistantTo
 // Re-export types for backwards-compatible consumer imports.
 export type { ComposeCheckoutStatus, ComposeWorkspaceState, ComposeWorkspaceAction } from './ComposeWorkspace.types';
 
+/**
+ * Mint a client-generated DOCUMENT session id for a mount door that has no server round-trip
+ * (Wave 2 / UAT-R3 Test #3: the Browse-direct-upload path). The assistant-upload path receives a
+ * server sessionId (`POST /api/compose/upload`); Browse bytes are LOCAL, so there is no
+ * server-assigned id — this is the tab-lifetime document session id that AI-edit dispatch threads
+ * as `documentSessionId` so a compose EDIT routes to the DOCUMENT session (redline) instead of
+ * being misclassified INFORMATIONAL (prose card). Prefers `crypto.randomUUID()` when available and
+ * degrades to a timestamp+random id so jsdom/older runtimes without it still mint a stable value.
+ */
+function mintDocumentSessionId(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) {
+    return c.randomUUID();
+  }
+  return `compose-doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 // ---------------------------------------------------------------------------
 // FR-02 (task 011) — `sprk_document` field constants for the Search lookup
 // ---------------------------------------------------------------------------
@@ -1336,9 +1353,23 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // A Browse mount has no SPE drive — clear any stale Search-resolved drive id
       // (FR-02/task 011) so a later Save doesn't key off the WRONG drive.
       setSearchResolvedDriveId(null);
+      // Wave 2 (UAT-R3 Test #3 fix): mint the tab's DOCUMENT session id here. Unlike the
+      // assistant-upload path (which gets a server sessionId via requestUploadMount), a Browse
+      // mount never hits the server, so its `mountTransient` reducer previously left
+      // state.sessionId ''. That empty id caused the AI toolbar to thread `documentSessionId: ''`,
+      // which ConversationPane reclassified as INFORMATIONAL (prose card) instead of a compose
+      // EDIT (redline). A minted, tab-lifetime id restores EDIT routing (DEF-09/DEF-11) and the
+      // redline-from-ledger materialization (which aborts on empty state.sessionId).
+      const browseDocumentSessionId = mintDocumentSessionId();
       // FR-05 (task 100): carry the host-resolved BU container so the first Save (create-on-save)
       // knows which SPE container to mint the new sprk_document's drive-item in.
-      dispatch({ kind: 'mountTransient', docxBytes: result, fileName: file.name, containerId: containerIdRef.current });
+      dispatch({
+        kind: 'mountTransient',
+        docxBytes: result,
+        fileName: file.name,
+        containerId: containerIdRef.current,
+        sessionId: browseDocumentSessionId,
+      });
       // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
       // (create-on-save, task 013) is enabled immediately.
       setIsDirty(true);

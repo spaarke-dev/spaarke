@@ -584,7 +584,26 @@ public static class ChatDocumentEndpoints
                 var updatedFiles = (session.UploadedFiles ?? Array.Empty<ChatSessionFile>())
                     .Append(newFile)
                     .ToList();
-                var updatedSession = session with { UploadedFiles = updatedFiles };
+
+                // Wave 2 (UAT-R3 Test #2 fix): a chat upload also becomes the session's ACTIVE
+                // document — most-recent-upload-wins. This is the "which document is the user acting
+                // on?" fact SendWorkspaceArtifactHandler.ResolveActiveDocumentAsync reads when the LLM
+                // supplies no explicit pointer, so "open this file" mounts the just-uploaded file
+                // (source=session-upload → compose.upload seed) instead of a blank Compose tab.
+                // Pointer only (ADR-015 Tier 3 identifiers): SessionFileId is the same GUID used as the
+                // ChatSessionFile.FileId / doc-upload cache documentId. DocumentSessionId is left null
+                // (fail-soft) — a later compose active-document registration fills it if one is created.
+                var activeDocument = new ActiveDocumentIdentity(
+                    Source: ActiveDocumentIdentity.SourceSessionUpload,
+                    SessionFileId: documentId,
+                    FileName: filename,
+                    RegisteredAt: DateTimeOffset.UtcNow);
+
+                var updatedSession = session with
+                {
+                    UploadedFiles = updatedFiles,
+                    ActiveDocument = activeDocument,
+                };
 
                 // Persist via UpdateSessionCacheAsync (decision D-06: Redis hot tier +
                 // fire-and-forget Cosmos write-through). Internal virtual; same-assembly access.
