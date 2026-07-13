@@ -45,6 +45,17 @@ jest.mock('../utils/docxBridge', () => ({
   tipTapToDocxBytes: jest.fn(async () => new ArrayBuffer(0)),
 }));
 
+// Wave 6 (DEF-G): the editor now gates the mammoth import on a valid DOCX byte
+// signature (ZIP local-file-header magic `PK\x03\x04`) — a non-docx buffer routes
+// to the reference-only state instead of the editable editor. These dirty-reporting
+// tests represent a VALID docx mount, so the fixture bytes must begin with that
+// signature (the mocked bridge otherwise ignores the content).
+function docxBytesFixture(totalLen = 8): ArrayBuffer {
+  const buf = new Uint8Array(totalLen);
+  buf.set([0x50, 0x4b, 0x03, 0x04], 0); // PK\x03\x04
+  return buf.buffer;
+}
+
 function renderEditor(
   documentRef: ComposeEditorDocumentRef | undefined,
   onDirtyChange: (dirty: boolean) => void,
@@ -55,7 +66,7 @@ function renderEditor(
       <PaneEventBusProvider>
         <ComposeEditor
           ref={ref}
-          docxBytes={new ArrayBuffer(8)}
+          docxBytes={docxBytesFixture(8)}
           documentRef={documentRef}
           sessionId="session-def01"
           onDirtyChange={onDirtyChange}

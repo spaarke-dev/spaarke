@@ -81,7 +81,7 @@ import CharacterCount from '@tiptap/extension-character-count';
 import TextAlign from '@tiptap/extension-text-align';
 
 import { makeStyles, mergeClasses, tokens, Spinner, Text, Button } from '@fluentui/react-components';
-import { Checkmark16Regular, Dismiss16Regular } from '@fluentui/react-icons';
+import { Checkmark16Regular, Dismiss16Regular, DocumentProhibited24Regular } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
 import { InsertionMark } from './marks/InsertionMark';
@@ -98,6 +98,55 @@ import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighl
 import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widgets/events';
 
 import { docxToTipTapHtml, tipTapToDocxBytes } from '../utils/docxBridge';
+
+// ---------------------------------------------------------------------------
+// Wave 6 (UAT-R4, DEF-G) — non-docx reference-only guard
+// ---------------------------------------------------------------------------
+//
+// Editable Compose content is DOCX-ONLY by design (mammoth parses OOXML/zip;
+// there is no PDF→editable conversion — Open-in-Word is the escape hatch). A
+// DOCX is a ZIP archive, so its first four bytes are the ZIP local-file-header
+// magic `PK\x03\x04` (0x50 0x4B 0x03 0x04). Any other leading signature — a
+// `%PDF-` header, plain text, etc. — cannot be a DOCX; mammoth would THROW on
+// it and (pre-Wave-6) leave a silent, confusing empty `<p></p>` editor. Since
+// Wave 3 made "Open in Compose" open the active SOURCE document, a chat-uploaded
+// PDF can now reach this editor. We detect non-docx from the byte signature
+// BEFORE calling mammoth and render an explicit reference-only state instead
+// (with the mammoth throw as a defensive fallback that renders the same state).
+//
+// `PK\x05\x06` (empty archive) / `PK\x07\x08` (spanned) are deliberately NOT
+// treated as docx — a real .docx always begins with a local file header
+// (`PK\x03\x04`), never an empty/spanned end-of-central-directory marker.
+const ZIP_LOCAL_FILE_HEADER = [0x50, 0x4b, 0x03, 0x04] as const;
+
+/** True when `bytes` begins with the ZIP local-file-header magic — the necessary signature of a DOCX. */
+function isDocxBytes(bytes: ArrayBuffer): boolean {
+  if (bytes.byteLength < ZIP_LOCAL_FILE_HEADER.length) return false;
+  const sig = new Uint8Array(bytes, 0, ZIP_LOCAL_FILE_HEADER.length);
+  return ZIP_LOCAL_FILE_HEADER.every((b, i) => sig[i] === b);
+}
+
+/**
+ * Known non-DOCX file extensions. An OOXML ZIP signature is necessary but NOT
+ * sufficient for a DOCX — .xlsx / .pptx / .zip are also `PK\x03\x04` ZIPs, so
+ * the fileName extension is a second, complementary signal. A `.pdf` / `.txt`
+ * is caught by the signature alone; a PK-zip sibling format needs the extension.
+ */
+const NON_DOCX_EXTENSION = /\.(pdf|txt|rtf|doc|xlsx?|pptx?|csv|zip|md|html?|json|xml|png|jpe?g|gif|tiff?)$/i;
+
+/**
+ * Wave 6 (DEF-G) — decide whether a mounted buffer is an EDITABLE DOCX (attempt
+ * mammoth) or a reference-only file. Combines the two pre-mammoth signals so the
+ * common non-docx cases are caught BEFORE the import (never relying on a mammoth
+ * throw, which — swapped mid-session — would fight ProseMirror's DOM):
+ *  1. An explicitly non-docx fileName extension is reference-only even if the
+ *     bytes look like a ZIP (xlsx/pptx are ZIPs too).
+ *  2. Otherwise, a real .docx must carry the OOXML ZIP local-file-header magic.
+ */
+function isEditableDocx(bytes: ArrayBuffer, fileName: string | undefined): boolean {
+  if (fileName && NON_DOCX_EXTENSION.test(fileName.trim())) return false;
+  return isDocxBytes(bytes);
+}
 
 // ---------------------------------------------------------------------------
 // LOCKED Spike #1 extension list — DO NOT add to or remove from this list
@@ -524,6 +573,30 @@ const useStyles = makeStyles({
     columnGap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground2,
   },
+  // Wave 6 (DEF-G) — reference-only state for a non-docx file that reached the
+  // editor. Calm + informative (NOT an error / not a blank editor). Semantic
+  // tokens only (ADR-021 dark-mode-correct).
+  referenceOnly: {
+    display: 'flex',
+    flex: 1,
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    rowGap: tokens.spacingVerticalS,
+    padding: tokens.spacingHorizontalXXL,
+    textAlign: 'center',
+    color: tokens.colorNeutralForeground2,
+  },
+  referenceOnlyIcon: {
+    fontSize: '48px',
+    width: '48px',
+    height: '48px',
+    color: tokens.colorNeutralForeground3,
+  },
+  referenceOnlyDetail: {
+    maxWidth: '420px',
+    color: tokens.colorNeutralForeground3,
+  },
   // DEF-17 (UAT-R3): the popup (AI-actions-ONLY since task 111) must present a
   // SINGLE row. The former `flexWrap: 'wrap'` + `maxWidth: '420px'` cap forced
   // a second wrapped row once the text-labelled buttons exceeded 420px — that
@@ -749,6 +822,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const [isImporting, setIsImporting] = React.useState<boolean>(false);
     const dirtyRef = React.useRef<boolean>(false);
 
+    // ----- Wave 6 (DEF-G) — non-docx reference-only state ------------------
+    // Non-null when a NON-DOCX buffer reached the editor (detected by byte
+    // signature before mammoth, or via the mammoth-throw fallback). The editor
+    // then renders an explicit reference-only surface instead of a silent empty
+    // `<p></p>`. `fileName` is the UI label only (Tier 1 identifier).
+    const [referenceOnly, setReferenceOnly] = React.useState<{ fileName?: string } | null>(null);
+
     // ----- Task 111 — right-click (context-menu) AI-toolbar trigger --------
     // The screen point (viewport coords) of the last suppressed native context
     // menu; non-null while the point-insertion AI-toolbar popup is open. Set
@@ -888,6 +968,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     React.useEffect(() => {
       if (!editor) return;
       if (!docxBytes) {
+        // Any prior reference-only state is cleared when we leave the docx path.
+        setReferenceOnly(null);
         // DEF-08: an AI-drafted full-document seed sets the editor content DIRECTLY from HTML
         // (no docx decode) — the draft body IS the editor content. A draft is a transient working
         // draft (never yet saved), so report dirty=true to the workspace (create-on-save first Save
@@ -905,6 +987,22 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         onDirtyChange?.(false);
         return;
       }
+      // Wave 6 (DEF-G): a NON-DOCX buffer (e.g. a chat-uploaded PDF reaching the
+      // editor via Wave-3 "Open in Compose") cannot be edited — mammoth would
+      // throw and leave a silent empty editor. Detect it from the byte signature
+      // BEFORE attempting the import and render an explicit reference-only state.
+      // The editable DOCX path below is unchanged. Nothing is editable here, so
+      // report dirty=false (no create-on-save for a reference-only file).
+      if (!isEditableDocx(docxBytes, documentRef?.fileName)) {
+        editor.commands.setContent('<p></p>');
+        dirtyRef.current = false;
+        setReferenceOnly({ fileName: documentRef?.fileName });
+        onDirtyChange?.(false);
+        return;
+      }
+      // A valid DOCX cleared any prior reference-only state (e.g. a subsequent
+      // real .docx mount replacing a non-docx one).
+      setReferenceOnly(null);
       // gap 1.6 / DEF-01: a TRANSIENT (Browse/Upload) mount has no SPE pointer yet (empty
       // speDriveItemId). Its create-on-save first Save must be reachable, so we report
       // dirty=true to the workspace (there IS unsaved work — the draft has never been
@@ -932,8 +1030,16 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         .catch(err => {
           // eslint-disable-next-line no-console
           console.error('[ComposeEditor] DOCX import failed', err instanceof Error ? err.message : String(err));
-          // Caller can detect via onImportWarnings empty + ProseMirror empty;
-          // R2 will add a structured error callback.
+          // Wave 6 (DEF-G): the pre-mammoth `isEditableDocx` gate above is the
+          // ROBUST non-docx detector (extension + ZIP signature) — it routes the
+          // real reference-only cases (PDF/txt/xlsx/etc.) away BEFORE this import,
+          // while ProseMirror is still pristine. We deliberately do NOT flip to
+          // reference-only HERE: a mammoth throw on a buffer that DID pass the gate
+          // is a genuinely-DOCX-but-unparseable case (corrupt OOXML / rare env
+          // failure), and swapping the surface mid-session would unmount a live
+          // ProseMirror instance. Preserve the original behavior — log + leave the
+          // editor — so a transient import failure never yields a false "can't be
+          // edited" verdict for a real .docx.
         })
         .finally(() => {
           if (!cancelled) setIsImporting(false);
@@ -1008,6 +1114,33 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           <div className={styles.loadingState} role="status" aria-live="polite">
             <Spinner size="small" />
             <Text size={200}>Loading editor…</Text>
+          </div>
+        </div>
+      );
+    }
+
+    // Wave 6 (DEF-G) — a non-docx file reached the editor: show an explicit,
+    // calm reference-only surface INSTEAD of the editable ProseMirror surface
+    // (never a silent empty `<p></p>`). Editable content is DOCX-only by design;
+    // the file remains available to the Assistant for reference (summarize,
+    // extract, Q&A). Semantic tokens only (ADR-021 dark-mode-correct).
+    if (referenceOnly) {
+      return (
+        <div
+          className={styles.container}
+          role="region"
+          aria-label={referenceOnly.fileName ?? 'Compose editor'}
+          data-compose-editor-spe-id={documentRef?.speDriveItemId ?? ''}
+        >
+          <div className={styles.referenceOnly} role="status" data-testid="compose-reference-only">
+            <DocumentProhibited24Regular className={styles.referenceOnlyIcon} aria-hidden="true" />
+            <Text weight="semibold">
+              {referenceOnly.fileName ? `“${referenceOnly.fileName}” can’t be edited in Compose` : "This file can’t be edited in Compose"}
+            </Text>
+            <Text size={200} className={styles.referenceOnlyDetail}>
+              Only Word (.docx) documents can be edited here. This file is available to the Assistant
+              for reference — ask it to summarize, extract from, or answer questions about it.
+            </Text>
           </div>
         </div>
       );
