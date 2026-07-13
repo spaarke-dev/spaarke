@@ -85,6 +85,13 @@ import type { WorkspaceRenderer } from "@spaarke/ui-components";
 // @spaarke/compose-components — the dependency runs the other way.)
 import { ComposeLaunchContext } from "@spaarke/compose-components";
 import type { ComposeLaunchContextValue } from "@spaarke/compose-components";
+// spaarkeai-compose-r2 Wave 5: register Compose as a first-class DIRECT
+// workspace widget (widgetType 'compose') alongside the existing layout path.
+// ADDITIVE — the "Compose" layout row, dropdown entry, DEF-08 single-tab reuse,
+// and standalone LegalWorkspace mount are all unchanged. Lives here (not in
+// @spaarke/ai-widgets) because the Direct factory resolves ComposeWorkspace
+// from @spaarke/compose-components, which ai-widgets must NOT depend on (cycle).
+import { registerComposeWidget } from "./components/workspace/registerComposeWidget";
 
 // ---------------------------------------------------------------------------
 // BFF base URL baked in at build time via Vite env var (AIPU-091).
@@ -333,6 +340,12 @@ async function bootstrap(): Promise<void> {
     return <ComposeLaunchContext.Provider value={composeLaunch}>{app}</ComposeLaunchContext.Provider>;
   };
   setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer);
+
+  // spaarkeai-compose-r2 Wave 5: register the 'compose' Direct widget +
+  // getVisibleState into the WorkspaceWidgetRegistry (additive; the module also
+  // registers as a top-level side effect, this explicit call documents intent
+  // and guards against tree-shaking).
+  registerComposeWidget();
 
   // -------------------------------------------------------------------------
   // 1. Resolve runtime config
