@@ -24,7 +24,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ complete · ⛔
 | VHVU-060 | Repoint VisualHost to `@spaarke/visuals`; verify build/bundle/drill | B4 | FULL | sonnet/high | 042,050 | ✅ |
 | VHVU-061 | Deploy + UAT visuals parity on dev | B4 | FULL | sonnet/high | 060 | 📦 v1.4.37 packed → owner importing to DEV1 · ⏸ UAT |
 | VHVU-070 | Author ADR-012 amendment (concise + full) | B5 | FULL | opus/high | 060 | ✅ |
-| VHVU-090 | Project wrap-up (lessons-learned, test-diet, repo-cleanup) | — | STANDARD | sonnet/high | 070,061 | 🔲 |
+| VHVU-090 | Project wrap-up (lessons-learned, test-diet, repo-cleanup) | — | STANDARD | sonnet/high | 070,061 | 🔄 test-diet + test relocation done (report + @spaarke/visuals harness); lessons-learned optional |
 
 ## Parallel Execution Groups
 
