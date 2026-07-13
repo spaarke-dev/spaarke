@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Xrm.Sdk;
@@ -9,6 +10,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Jobs;
 
@@ -44,6 +46,16 @@ public class ComposeService : IComposeService
     private const string GraphItemIdAttribute = "sprk_graphitemid";
     private const string DisplayNameAttribute = "sprk_documentname";
     private const string FileNameAttribute = "sprk_filename";
+    // SPE-pointer + file-metadata columns — logical names mirrored from the canonical
+    // OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync write (Services/Office),
+    // which maps through Spaarke.Dataverse UpdateDocumentRequest → DataverseWebApiService.
+    // WITHOUT these, every downstream reader (open-links, preview) validates the SPE pointer,
+    // finds drive-id empty + sprk_hasfile false, and 409s "No file is attached to this document".
+    private const string GraphDriveIdAttribute = "sprk_graphdriveid";
+    private const string HasFileAttribute = "sprk_hasfile";
+    private const string FileSizeAttribute = "sprk_filesize";
+    private const string MimeTypeAttribute = "sprk_mimetype";
+    private const string FilePathAttribute = "sprk_filepath";
 
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).
@@ -73,6 +85,16 @@ public class ComposeService : IComposeService
     private readonly IPostUploadIndexingEnqueuer _indexing;
     private readonly ILogger<ComposeService> _logger;
     private readonly ComposePushSaveStatusStore? _pushSaveStatusStore;
+    // FR-05 Fork C (compose-r2): the ADR-013-safe profile seam is the Service-Bus job ENQUEUE
+    // — the SAME AppOnlyDocumentAnalysis job the Office-Add-in save path enqueues via
+    // UploadFinalizationWorker.QueueNextStageAsync. ComposeService injects ONLY the generic
+    // JobSubmissionService (Services/Jobs — NOT an AI-internal type; no IOpenAiClient /
+    // IPlaybookService / IAppOnlyAnalysisService reach). The background ProfileSummary/AppOnly
+    // worker runs app-only/MI and reads the doc's SPE pointers (sprk_graphdriveid +
+    // sprk_graphitemid, set on the promoted record) from Dataverse to fetch + profile the file.
+    // Optional + defaults null (same rationale as _pushSaveStatusStore below) so existing 6-arg
+    // test constructors keep compiling; DI resolves the real singleton in every non-test host.
+    private readonly JobSubmissionService? _jobSubmission;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -81,7 +103,8 @@ public class ComposeService : IComposeService
         DocxAnnotationWriter annotationWriter,
         IPostUploadIndexingEnqueuer indexing,
         ILogger<ComposeService> logger,
-        IDistributedCache? cache = null)
+        IDistributedCache? cache = null,
+        JobSubmissionService? jobSubmission = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -89,6 +112,7 @@ public class ComposeService : IComposeService
         _annotationWriter = annotationWriter;
         _indexing = indexing;
         _logger = logger;
+        _jobSubmission = jobSubmission;
         // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
         // Optional + defaults null so existing 6-arg test constructors (sibling task suites
         // 013/050/060/062/102) keep compiling unchanged; DI (AddScoped<IComposeService,
@@ -365,6 +389,15 @@ public class ComposeService : IComposeService
             SessionId = request.SessionId,
             TenantId = request.TenantId,
             DisplayName = request.DisplayName,
+            // Thread the already-computed SPE pointer + file metadata into the record write so
+            // the created sprk_document is COMPLETE (drive-id + has-file + size/mime/filepath),
+            // mirroring OfficeDocumentPersistence. The SPE upload above already produced these;
+            // this only carries them forward — no new upload logic.
+            GraphDriveId = effectiveDriveId,
+            FileName = fileName,
+            FileSize = saved.Size ?? request.Content.Length,
+            MimeType = DocxContentType,
+            FilePath = saved.WebUrl,
         };
 
         var promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
@@ -395,15 +428,32 @@ public class ComposeService : IComposeService
             .ConfigureAwait(false);
 
         // ────────────────────────────────────────────────────────────────────────────
-        // Project per-step states (container → record → profile-analysis[deferred] → indexing)
+        // STEP 3 — profile-analysis (FR-05 Fork C, compose-r2). The promoted sprk_document now
+        // carries sprk_hasfile=true + sprk_graphdriveid (+ sprk_graphitemid), so the app-only MI
+        // worker CAN fetch + profile the file. ENQUEUE the same AppOnlyDocumentAnalysis job the
+        // Office save path enqueues (UploadFinalizationWorker.QueueNextStageAsync) — best-effort,
+        // fire-and-forget: the synchronous save is NEVER blocked on profiling, and an enqueue
+        // failure degrades to a non-terminal (Queued) profile step, never poisoning the save
+        // aggregate. Idempotency (analysis-{docId}-documentprofile) dedups re-saves at the worker.
+        // ────────────────────────────────────────────────────────────────────────────
+        var profileSignal = promotion.DocumentRecordId.HasValue
+            ? await EnqueueProfileAnalysisAsync(
+                    promotion.DocumentRecordId.Value, httpContext.TraceIdentifier, cancellationToken)
+                .ConfigureAwait(false)
+            : ProfileNotAttemptedSignal("no sprk_document record id resolved — profile not enqueued");
+
+        // ────────────────────────────────────────────────────────────────────────────
+        // Project per-step states (container → record → profile-analysis[enqueued] → indexing)
         // through the shared JobAwareCompletionStateProjector. A fileless/unindexed record can
-        // never be a success (aggregate Failed/Partial); profile is deferred to core (Fork C).
+        // never be a success (aggregate Failed/Partial); the enqueued profile step is non-terminal
+        // (Queued) until the background worker completes it (Fork C, compose-r2).
         // ────────────────────────────────────────────────────────────────────────────
         var completion = ProjectCreateOnSaveState(
             subjectId: effectiveSpeId,
             correlationId: httpContext.TraceIdentifier,
             containerSignal: CompletedSignal(StepContainer),
             recordSignal: CompletedSignal(StepRecord),
+            profileSignal: profileSignal,
             indexingSignal: IndexingSignal(indexingResult),
             observedAt: observedAt);
 
@@ -468,15 +518,51 @@ public class ComposeService : IComposeService
         }
 
         // 2) Create the sprk_document row.
+        //    The record MUST carry the full SPE pointer + file metadata (drive-id + has-file +
+        //    size/mime/filepath), NOT just the item-id — otherwise downstream readers (open-links,
+        //    preview) validate the pointer, find drive-id empty + sprk_hasfile false, and 409
+        //    "No file is attached to this document yet." Field set mirrors the canonical
+        //    OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync write.
         var entity = new Entity(DocumentLogicalName);
         entity[GraphItemIdAttribute] = request.DocumentSpeId;
         var effectiveDisplayName = !string.IsNullOrWhiteSpace(request.DisplayName)
             ? request.DisplayName!
             : $"Compose document ({request.DocumentSpeId})";
         entity[DisplayNameAttribute] = effectiveDisplayName;
-        if (!string.IsNullOrWhiteSpace(request.DisplayName))
+
+        // Prefer the resolved file name (carries the .docx extension); fall back to the display
+        // name for standalone promote callers that supply neither.
+        var effectiveFileName = !string.IsNullOrWhiteSpace(request.FileName)
+            ? request.FileName!
+            : request.DisplayName;
+        if (!string.IsNullOrWhiteSpace(effectiveFileName))
         {
-            entity[FileNameAttribute] = request.DisplayName!;
+            entity[FileNameAttribute] = effectiveFileName!;
+        }
+
+        // SPE drive pointer — the field whose absence is the root cause of the 409s.
+        if (!string.IsNullOrWhiteSpace(request.GraphDriveId))
+        {
+            entity[GraphDriveIdAttribute] = request.GraphDriveId!;
+        }
+
+        // A promoted Compose document always has an SPE file behind it (the drive-item id is a
+        // hard precondition of this method). Mark it so downstream readers stop rejecting it.
+        entity[HasFileAttribute] = true;
+
+        if (request.FileSize.HasValue)
+        {
+            // sprk_filesize is a Whole Number (int) column; the OrganizationService write path is
+            // strict about CLR type, so cast (same as OfficeDocumentPersistence / DataverseServiceClientImpl).
+            entity[FileSizeAttribute] = (int)request.FileSize.Value;
+        }
+        if (!string.IsNullOrWhiteSpace(request.MimeType))
+        {
+            entity[MimeTypeAttribute] = request.MimeType!;
+        }
+        if (!string.IsNullOrWhiteSpace(request.FilePath))
+        {
+            entity[FilePathAttribute] = request.FilePath!;
         }
 
         Guid newId;
@@ -578,17 +664,88 @@ public class ComposeService : IComposeService
     };
 
     /// <summary>
-    /// The DEFERRED profile-analysis signal (Fork C, core-owned). No stored outcome, not started —
-    /// projects to <see cref="JobAwareState.Queued"/> (the honest "nothing persisted yet" state,
-    /// since the contract has no dedicated Deferred member) with a <c>deferred</c> diagnostic so
-    /// the OutcomeCard and a future re-profile pass can distinguish it from a genuinely-queued step.
+    /// FR-05 Fork C (compose-r2): enqueues the background document-profile job for a newly-created
+    /// (or idempotently-resolved) <c>sprk_document</c> and returns the resulting profile-analysis
+    /// step signal. This is the SAME <see cref="AppOnlyDocumentAnalysisJobHandler"/> job the Office
+    /// save path enqueues (see <c>UploadFinalizationWorker.QueueNextStageAsync</c>) — the doc's SPE
+    /// pointers (<c>sprk_graphdriveid</c> + <c>sprk_graphitemid</c>) let the app-only/MI worker
+    /// fetch + profile the file; only the <c>DocumentId</c> travels in the payload (the worker
+    /// resolves the rest from Dataverse, exactly as the Office path does).
     /// </summary>
-    private static StoredStepSignal DeferredProfileSignal() => new()
+    /// <remarks>
+    /// Best-effort by design: a null enqueuer (test host) or a Service-Bus failure returns a
+    /// NON-terminal (Queued) signal with a diagnostic detail, never a terminal Failed — the
+    /// synchronous save is not blocked on profiling and its aggregate is never poisoned by a
+    /// profile-enqueue miss (idempotency <c>analysis-{docId}-documentprofile</c> lets the next save
+    /// re-enqueue). ADR-013: this method injects NO AI-internal type; it submits a job and the
+    /// background worker does the AI.
+    /// </remarks>
+    private async Task<StoredStepSignal> EnqueueProfileAnalysisAsync(
+        Guid documentId, string correlationId, CancellationToken cancellationToken)
+    {
+        if (_jobSubmission is null)
+        {
+            return ProfileNotAttemptedSignal(
+                "profile enqueuer unavailable (no JobSubmissionService injected) — profile not enqueued");
+        }
+
+        var idempotencyKey = $"analysis-{documentId}-documentprofile";
+        var job = new JobContract
+        {
+            JobId = Guid.NewGuid(),
+            JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
+            SubjectId = documentId.ToString(),
+            CorrelationId = string.IsNullOrWhiteSpace(correlationId) ? Guid.NewGuid().ToString() : correlationId,
+            IdempotencyKey = idempotencyKey,
+            Attempt = 1,
+            MaxAttempts = 3,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
+            {
+                DocumentId = documentId,
+                Source = "ComposeCreateOnSave",
+                EnqueuedAt = DateTimeOffset.UtcNow,
+            })),
+        };
+
+        try
+        {
+            await _jobSubmission.SubmitJobAsync(job, cancellationToken).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Compose create-on-save: enqueued {JobType} profile job {JobId} for document {DocumentId} (idempotency {IdempotencyKey})",
+                AppOnlyDocumentAnalysisJobHandler.JobTypeName, job.JobId, documentId, idempotencyKey);
+
+            // Enqueued, not yet picked up by the worker → Started=false, no stored outcome → Queued.
+            return new StoredStepSignal
+            {
+                StepName = StepProfileAnalysis,
+                StoredStatus = null,
+                Started = false,
+                Detail = $"enqueued: {AppOnlyDocumentAnalysisJobHandler.JobTypeName} job {job.JobId} " +
+                         $"submitted for document {documentId} (background app-only/MI profiling; idempotency {idempotencyKey})",
+            };
+        }
+        catch (Exception ex)
+        {
+            // Best-effort: log + degrade to a non-terminal signal. The save has already succeeded on
+            // its own terms (SPE + record + indexing); profiling re-enqueues on the next save.
+            _logger.LogWarning(ex,
+                "Compose create-on-save: failed to enqueue profile job for document {DocumentId} — best-effort, save unaffected; will retry on next save.",
+                documentId);
+            return ProfileNotAttemptedSignal($"profile enqueue failed (best-effort; retries on next save): {ex.Message}");
+        }
+    }
+
+    /// <summary>A non-terminal (Queued) profile-analysis signal for when the profile job was NOT
+    /// enqueued (container/record step never produced a record, no enqueuer, or a best-effort
+    /// enqueue failure). Non-terminal so it never poisons the create-on-save aggregate.</summary>
+    private static StoredStepSignal ProfileNotAttemptedSignal(string detail) => new()
     {
         StepName = StepProfileAnalysis,
         StoredStatus = null,
         Started = false,
-        Detail = "deferred: core-owned Services/Ai/PublicContracts/IDocumentProfileAi (Fork C) — not implemented in this task",
+        Detail = detail,
     };
 
     /// <summary>Maps the indexing enqueue outcome to a stored step signal: submitted (sync-OBO ran)
@@ -632,6 +789,7 @@ public class ComposeService : IComposeService
         string correlationId,
         StoredStepSignal containerSignal,
         StoredStepSignal recordSignal,
+        StoredStepSignal profileSignal,
         StoredStepSignal indexingSignal,
         DateTimeOffset observedAt)
     {
@@ -647,7 +805,7 @@ public class ComposeService : IComposeService
         {
             containerSignal,
             recordSignal,
-            DeferredProfileSignal(),
+            profileSignal,
             indexingSignal,
         };
 
@@ -676,6 +834,9 @@ public class ComposeService : IComposeService
             correlationId: request.SessionId,
             containerSignal: containerFailed,
             recordSignal: new StoredStepSignal { StepName = StepRecord, StoredStatus = null, Started = false },
+            // Container failed → no record → nothing to profile. Non-terminal so the aggregate stays
+            // Failed (driven by the container step), not double-counted.
+            profileSignal: ProfileNotAttemptedSignal("profile not attempted: container step failed"),
             indexingSignal: new StoredStepSignal { StepName = StepIndexing, StoredStatus = null, Started = false },
             observedAt: observedAt);
 

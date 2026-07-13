@@ -34,7 +34,6 @@ import { WelcomePanel } from "../WelcomePanel";
 // receivers for Flow 2 (compose_selection_offer) + Flow 4 (compose_context_offer).
 import { ComposeAssistantCoordination } from "./ComposeAssistantCoordination";
 import { useShellStage, useRestoreContext, usePaneCollapseContext } from "../shell/ThreePaneShell";
-import { assistantTextToDraftHtml } from "./assistantDraftHtml";
 import { HistoryMenu } from "./HistoryOverlay";
 import { CommandHelpPanel } from "./CommandHelpPanel";
 import { HelpAffordance } from "./HelpAffordance";
@@ -70,8 +69,9 @@ import {
   detectReviseThisDocumentIntent,
   REVISE_MOUNT_ASK_MESSAGE,
   type RevisionIntent,
+  type ComposeDocAction,
 } from "./composeReviseRouting";
-import { ReviseIntentChips } from "./ReviseIntentChips";
+import { ComposeDocActionChips } from "./ReviseIntentChips";
 import { useCapabilityDiscovery } from "./useCapabilityDiscovery";
 import {
   AuthLoadingState,
@@ -105,14 +105,16 @@ export {
   // Wave 4 (end-to-end revise) — natural-language "revise this document" detection + chip surface.
   detectReviseThisDocumentIntent,
   REVISE_MOUNT_ASK_MESSAGE,
-  REVISE_CHIP_OPTIONS,
+  // FIX #1 (editor-centric reframe) — document-level action chips replace the revision-type chips.
+  COMPOSE_DOC_ACTION_CHIPS,
 } from "./composeReviseRouting";
 export type {
   RevisionIntent,
   ReviseRouteDecision,
   RevisionIntentSuggestion,
   ReviseThisDocumentDetection,
-  ReviseChipOption,
+  ComposeDocAction,
+  ComposeDocActionChip,
 } from "./composeReviseRouting";
 
 /**
@@ -225,22 +227,11 @@ export function ConversationPane(): React.JSX.Element {
     return true;
   }, [dispatch]);
 
-  const handleOpenInCompose = React.useCallback(
-    (content: string): void => {
-      if (mountActiveSourceDocInCompose()) return;
-      if (!content) return;
-      dispatch("workspace", {
-        type: "widget_load",
-        widgetType: "workspace",
-        widgetData: {
-          layoutName: "Compose",
-          compose: { draft: { html: assistantTextToDraftHtml(content) } },
-        },
-        displayName: "Compose",
-      } as WorkspacePaneEvent);
-    },
-    [mountActiveSourceDocInCompose, dispatch]
-  );
+  // FIX #10a: the generic per-message "Open in Compose" affordance was REMOVED (owner decision — it
+  // did not reliably work and was not always appropriate). Mounting now happens only via INTENTIONAL
+  // affordances: the natural-language "revise this document" flow (which calls
+  // `mountActiveSourceDocInCompose` below) and the server-driven `workspace_open_tab` seed — NOT an
+  // auto-appended per-message link. `handleOpenInCompose` + the `onOpenInCompose` prop wiring are gone.
 
   // Session-id getter for the dispatch/event seams (stable across renders).
   const chatSessionIdRef = React.useRef<string | null>(chatSessionId);
@@ -270,6 +261,15 @@ export function ConversationPane(): React.JSX.Element {
     () =>
       launchableCapabilities.find((c) => c.consumerType === "compose-revise-document")?.bindingId ??
       null,
+    [launchableCapabilities]
+  );
+
+  // FIX #1 (Summarize doc-action chip) — resolve the EXISTING `compose-summarize` Binding id from the
+  // SAME closed capability catalog (ADR-039: bindingId only from discovery). Dispatched informationally
+  // on the CHAT session via the shared `dispatchBinding` path (below) — no new dispatch mechanism.
+  const summarizeBindingId = React.useMemo<string | null>(
+    () =>
+      launchableCapabilities.find((c) => c.consumerType === "compose-summarize")?.bindingId ?? null,
     [launchableCapabilities]
   );
 
@@ -512,6 +512,14 @@ export function ConversationPane(): React.JSX.Element {
     [acceptRedlineViaBridge, clearTrackedEdit]
   );
 
+  // FIX #3 — "Keep redline". Dismiss the Assistant action prompt but LEAVE the pending redline marks in
+  // place so the user keeps editing. Clears ONLY the tracked edit (so the per-message controls hide) —
+  // does NOT call `acceptRedlineViaBridge` and does NOT undo/reject. The redline marks + the per-change
+  // on-click Accept/Reject popover remain in the editor (no editor mutation, no ledger write).
+  const handleKeepComposeEdit = React.useCallback(() => {
+    clearTrackedEdit();
+  }, [clearTrackedEdit]);
+
   // DEF-11 — whole-document revise disambiguation. Mirrors the `/summarize` prompt-first
   // pattern (`routeSummarizeIntent` in `useAttachments.handleBeforeSendMessage`): a synchronous
   // BEFORE-send hook that may inject a deterministic LOCAL interjection alongside the outbound
@@ -576,26 +584,68 @@ export function ConversationPane(): React.JSX.Element {
     [reviseBindingId, dispatchComposeAction, injection]
   );
 
-  // A revise-intent chip click. Reads the CURRENT (post-mount) document session id — the reactive
-  // back-fill first, then the ref (belt-and-suspenders) — so the dispatch never captures a stale
-  // null. If the mount hasn't established the session yet, ask the user to retry rather than misroute
-  // to the chat session (which is exactly the prose-narration bug this wave fixes).
-  const handleReviseIntentPick = React.useCallback(
-    (revisionIntent: RevisionIntent, instruction?: string): void => {
-      const documentSessionId =
-        activeComposeDocSessionId ?? activeSourceDocRef.current?.documentSessionId ?? null;
-      if (!documentSessionId) {
-        injection.enqueue(
-          makeLocalAssistantMessage(
-            "Your document is still loading into Compose — give it a moment, then pick a revision type again."
-          )
-        );
-        return;
+  // FIX #1 (editor-centric reframe) — a DOCUMENT-LEVEL action chip click (summarize / add-to-DMS /
+  // draft-email). These replace the old revision-type chips: whole-document revision is now driven
+  // from the editor (highlight text → inline toolbar), so the post-mount chips offer document-level
+  // actions instead, each REUSING an existing mechanism (no new services — CLAUDE.md §11):
+  //  - "summarize"   → dispatch the shipped `compose-summarize` capability on the CHAT session via the
+  //                    shared `chips.dispatchBinding` path (informational; renders as an Assistant
+  //                    message, exactly like any other Click-path consumer chip).
+  //  - "add-to-dms"  → hand off to the workspace pane (which owns the Compose editor) to run the
+  //                    create-on-save / save-to-matter flow for the mounted document and open the File
+  //                    Preview modal for the created Document (NOT a workspace mount). A confirmation
+  //                    message keeps the flow sensible even if the doc isn't saved yet (offer to open it).
+  //  - "draft-email" → dispatch the Email workspace `widget_load` using the EXACT interop contract the
+  //                    WorkspacePane owner's handler expects (the stub tab itself is created by that owner).
+  const handleDocAction = React.useCallback(
+    (action: ComposeDocAction): void => {
+      switch (action) {
+        case "summarize": {
+          if (!summarizeBindingId) {
+            injection.enqueue(
+              makeLocalAssistantMessage(
+                "Sorry — the summarize capability isn't available right now. Please try again."
+              )
+            );
+            return;
+          }
+          // Same shared dispatchConsumer path the other chat consumer chips use (chat session).
+          chips.dispatchBinding(summarizeBindingId, { slots: undefined });
+          return;
+        }
+        case "add-to-dms": {
+          // Reuse the Compose create-on-save / save-to-matter flow (owned by the workspace pane) via a
+          // workspace hand-off; the workspace then opens the File Preview modal for the created Document.
+          dispatch("workspace", {
+            type: "widget_load",
+            layoutName: "Compose",
+            widgetType: "workspace",
+            widgetData: { source: "compose-add-to-dms" },
+            displayName: "Compose",
+          } as WorkspacePaneEvent);
+          injection.enqueue(
+            makeLocalAssistantMessage(
+              "I'm adding the document to the DMS. Once it's saved, you can preview it from the Compose editor."
+            )
+          );
+          return;
+        }
+        case "draft-email": {
+          // EMAIL path — dispatch the Email workspace widget_load with the EXACT interop contract so it
+          // interops with the WorkspacePane owner's handler.
+          dispatch("workspace", {
+            type: "widget_load",
+            layoutName: "Email",
+            widgetType: "email",
+            widgetData: { source: "compose-reporting-email" },
+          } as WorkspacePaneEvent);
+          return;
+        }
+        default:
+          return;
       }
-      setReviseChipsPending(false);
-      dispatchReviseDocument(revisionIntent, instruction, documentSessionId);
     },
-    [activeComposeDocSessionId, injection, dispatchReviseDocument]
+    [summarizeBindingId, chips, injection, dispatch]
   );
 
   // FR-13 Step 1: publish `dispatchComposeAction` into the cross-pane Compose
@@ -988,11 +1038,12 @@ export function ConversationPane(): React.JSX.Element {
             />
           )}
 
-          {/* Wave 4 (end-to-end revise): after a natural-language "revise this document" auto-mounts
-              the chat-uploaded file, the mount-then-ask message is injected into the transcript and
-              these four intent chips appear. Clicking one dispatches compose-revise-document into the
-              document session (inline redline), NOT a narrated chat turn. */}
-          {reviseChipsPending && <ReviseIntentChips onPick={handleReviseIntentPick} />}
+          {/* FIX #1 (editor-centric reframe): after a natural-language "revise this document" auto-mounts
+              the chat-uploaded file, the mount message tells the user to edit in the Compose editor, and
+              these three DOCUMENT-LEVEL action chips appear (Summarize / Add to DMS / Draft reporting
+              email). They replace the old revision-type chips — whole-document revision now happens via
+              the editor's highlight-to-edit toolbar. */}
+          {reviseChipsPending && <ComposeDocActionChips onAction={handleDocAction} />}
 
           <div className={styles.sprkChatFlex}>
             <SprkChat
@@ -1025,15 +1076,16 @@ export function ConversationPane(): React.JSX.Element {
               onOpenLibraryModal={playbookOptions.handleOpenLibraryModal}
               onContextEvent={contextBridge.handleContextEvent}
               onCitations={docQaCitation.onCitations}
-              // DEF-08 Part B: "Open in Compose" per-message affordance (opt-in; opens+seeds a
-              // reused Compose draft tab with the message text).
-              onOpenInCompose={handleOpenInCompose}
+              // FIX #10a: the generic per-message "Open in Compose" affordance was removed —
+              // `onOpenInCompose` is intentionally NOT passed (no auto-appended mount link).
               // DEF-12: per-message Accept / Reject / Try-another controls on the compose-edit
               // confirmation message. Wired to the EXISTING handlers; SprkChat renders them only on
               // the message whose composeEdit.ledgerRef === activeComposeEditLedgerRef (the live edit).
               onComposeEditAccept={handleAcceptComposeEdit}
               onComposeEditReject={handleUndoEdit}
               onComposeEditTryAnother={handleReplaceEdit}
+              // FIX #3: "Keep redline" — clears the action prompt without mutating the editor/ledger.
+              onComposeEditKeep={handleKeepComposeEdit}
               activeComposeEditLedgerRef={supersession.lastEdit?.ledgerRef ?? null}
               // F-4: activate OutcomeCard next-step chips — routes an
               // invoke_capability chip's targetBindingId through the shared

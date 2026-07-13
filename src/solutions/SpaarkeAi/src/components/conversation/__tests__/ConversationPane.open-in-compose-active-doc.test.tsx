@@ -1,19 +1,15 @@
 /**
- * ConversationPane.open-in-compose-active-doc.test.tsx — Wave 3 Parts 1 + 2 (UAT-R3 Test #1 + DEF-11).
+ * ConversationPane.open-in-compose-active-doc.test.tsx — Wave 3 Part 2 (DEF-11 active-document registration).
  *
- * Part 1 (Test #1): "Open in Compose" must open the ACTIVE SOURCE DOCUMENT, not the chat message text.
- *   (a) With an active source document registered, `onOpenInCompose(content)` dispatches a
- *       `compose.upload` seed ({layoutName:"Compose", compose:{ upload:{ sessionId, sessionFileId } }})
- *       — the same shape SendWorkspaceArtifactHandler produces — NOT a `compose.draft.html` of the prose.
- *   (b) With NO active source document (a genuine AI-drafted / manual-fallback message), it still seeds
- *       the message text as an editable draft (`compose.draft.html`).
- *
- * Part 2 (DEF-11 TEXT-path close): registering the active document POSTs the tab's `documentSessionId`
- *   in the `/api/compose/active-document` request body (the field the server persists so
- *   BindingCapabilityTool routes a typed revise/draft into the document session).
+ * NOTE (spaarkeai-compose-r2 FIX #10a): the generic per-message "Open in Compose" affordance was
+ * REMOVED. The former Part 1 tests (which drove `onOpenInCompose`) are gone with the feature. What
+ * remains here is the STILL-VALID Part 2 coverage: registering the active document POSTs the tab's
+ * `documentSessionId` in the `/api/compose/active-document` request body (the field the server
+ * persists so BindingCapabilityTool routes a typed revise/draft into the document session), and the
+ * upload dedups across re-registrations.
  *
  * Drives the REAL ConversationPane over a real PaneEventBus + ComposeActionBridge; the network is
- * mocked at the wire boundary. Mirrors the ConversationPane.compose-edit-controls forcing-test harness.
+ * mocked at the wire boundary.
  */
 import '@testing-library/jest-dom';
 import { TextEncoder as NodeTextEncoder, TextDecoder as NodeTextDecoder } from 'util';
@@ -54,28 +50,11 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit) =
   return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
 });
 
-// SprkChat stub — captures the onOpenInCompose prop the affordance invokes + the attachment lifecycle
-// props so a chat upload can be driven end-to-end (onAttachmentReady → onAttachmentsChanged → promote).
-const captured: {
-  onOpenInCompose?: (content: string) => void;
-  onAttachmentReady?: (a: unknown) => void;
-  onAttachmentsChanged?: (chips: unknown[]) => void;
-} = {};
 jest.mock('@spaarke/ui-components', () => {
   const actual = jest.requireActual('@spaarke/ui-components');
   return {
     ...actual,
-    SprkChat: (props: ISprkChatProps) => {
-      const p = props as ISprkChatProps & {
-        onOpenInCompose?: (content: string) => void;
-        onAttachmentReady?: (a: unknown) => void;
-        onAttachmentsChanged?: (chips: unknown[]) => void;
-      };
-      captured.onOpenInCompose = p.onOpenInCompose;
-      captured.onAttachmentReady = p.onAttachmentReady;
-      captured.onAttachmentsChanged = p.onAttachmentsChanged;
-      return <div data-testid="sprkchat-stub">{props.transcriptFooterSlot}</div>;
-    },
+    SprkChat: (props: ISprkChatProps) => <div data-testid="sprkchat-stub">{props.transcriptFooterSlot}</div>,
   };
 });
 
@@ -146,116 +125,11 @@ function renderPane() {
   );
 }
 
-function lastComposeOpen(): WorkspacePaneEvent | undefined {
-  return [...workspaceEvents]
-    .reverse()
-    .find(
-      (e) =>
-        e.type === 'widget_load' &&
-        (e.widgetData as { layoutName?: string } | null)?.layoutName === 'Compose'
-    );
-}
-
 beforeEach(() => {
   workspaceEvents.length = 0;
   activeDocPostBodies.length = 0;
   authenticatedFetchMock.mockClear();
-  captured.onOpenInCompose = undefined;
-  captured.onAttachmentReady = undefined;
-  captured.onAttachmentsChanged = undefined;
   bridgeRef.current = null;
-});
-
-const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-
-/** Drives the chat attachment lifecycle so the auto-promote effect POSTs /documents (→ sessionFileId). */
-async function driveChatUpload(fileName: string): Promise<void> {
-  const bytes = new Uint8Array([10, 20, 30]);
-  await act(async () => {
-    captured.onAttachmentReady!({
-      id: 'chip-1',
-      filename: fileName,
-      file: new File([bytes], fileName, { type: DOCX_MIME }),
-      contentType: DOCX_MIME,
-      textContent: '',
-    });
-    captured.onAttachmentsChanged!([{ id: 'chip-1', filename: fileName, status: 'ready' }]);
-    for (let i = 0; i < 10; i++) await Promise.resolve();
-  });
-}
-
-describe('Wave 3 Part 1: "Open in Compose" opens the active source document, not the message prose', () => {
-  it('with NO active source document, seeds the message text as an editable draft (compose.draft.html)', async () => {
-    renderPane();
-    expect(captured.onOpenInCompose).toBeDefined();
-
-    await act(async () => {
-      captured.onOpenInCompose!('You could revise the indemnity clause as follows...');
-      await Promise.resolve();
-    });
-
-    const open = lastComposeOpen();
-    expect(open).toBeDefined();
-    const compose = (open!.widgetData as { compose?: Record<string, unknown> }).compose ?? {};
-    expect(compose.draft).toBeDefined();
-    expect(compose.upload).toBeUndefined();
-  });
-
-  it('with an active source document registered, opens THAT document via a compose.upload seed', async () => {
-    renderPane();
-    // Register a browse/host-direct active document through the bridge (the ComposeWorkspace hand-off).
-    await act(async () => {
-      await bridgeRef.current!.registerActiveDocument({
-        docxBytes: new Uint8Array([1, 2, 3]).buffer,
-        fileName: 'NDA.docx',
-        documentSessionId: DOC_SESSION,
-      });
-      for (let i = 0; i < 6; i++) await Promise.resolve();
-    });
-
-    workspaceEvents.length = 0; // ignore any dispatch noise from registration
-
-    await act(async () => {
-      captured.onOpenInCompose!('Do you want to revise the whole document or a section?');
-      await Promise.resolve();
-    });
-
-    const open = lastComposeOpen();
-    expect(open).toBeDefined();
-    const compose = (open!.widgetData as { compose?: { upload?: Record<string, unknown>; draft?: unknown } }).compose ?? {};
-    // Part 1: opens the SOURCE document (compose.upload), NOT the disambiguation prose (compose.draft).
-    expect(compose.draft).toBeUndefined();
-    expect(compose.upload).toBeDefined();
-    expect(compose.upload!.sessionFileId).toBe(SESSION_FILE_ID);
-    expect(compose.upload!.sessionId).toBe(CHAT_SESSION);
-  });
-
-  it('after a CHAT upload never mounted in Compose (Test #1 real repro), opens THAT uploaded file', async () => {
-    renderPane();
-    expect(captured.onAttachmentReady).toBeDefined();
-
-    // The file is uploaded to the ASSISTANT (chat) only — no Compose mount, no bridge registration.
-    await driveChatUpload('revise-me.docx');
-
-    // The chat upload promoted to a ChatSessionFile (the auto-promote /documents POST).
-    expect(authenticatedFetchMock.mock.calls.some(([u]) => String(u).includes('/documents'))).toBe(true);
-
-    workspaceEvents.length = 0;
-
-    // The disambiguation message's "Open in Compose" must open the uploaded FILE, not the prose.
-    await act(async () => {
-      captured.onOpenInCompose!('Do you want to revise the whole document or a section?');
-      await Promise.resolve();
-    });
-
-    const open = lastComposeOpen();
-    expect(open).toBeDefined();
-    const compose = (open!.widgetData as { compose?: { upload?: Record<string, unknown>; draft?: unknown } }).compose ?? {};
-    expect(compose.draft).toBeUndefined();
-    expect(compose.upload).toBeDefined();
-    expect(compose.upload!.sessionFileId).toBe(SESSION_FILE_ID);
-    expect(compose.upload!.sessionId).toBe(CHAT_SESSION);
-  });
 });
 
 describe('Wave 3 Part 2: registering the active document POSTs the tab document session id (DEF-11)', () => {

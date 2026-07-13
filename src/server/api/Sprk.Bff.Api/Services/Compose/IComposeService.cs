@@ -469,6 +469,32 @@ public sealed record PromoteComposeDocumentRequest
 
     /// <summary>Optional display name used only when a new row is created.</summary>
     public string? DisplayName { get; init; }
+
+    // ── SPE pointer + file metadata (threaded from SaveAsync's already-computed upload result) ──
+    // Written onto the new sprk_document so the record is COMPLETE — carrying the SPE drive
+    // pointer + has-file flag + size/mime/filepath, mirroring the canonical
+    // OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync write. Without these the
+    // record has only the item-id, and every downstream reader (open-links, preview) 409s
+    // "No file is attached to this document yet." All optional: a standalone /promote caller
+    // that supplies none still creates a row (sprk_hasfile is set true by precondition — the
+    // drive-item id itself proves a file exists), just without the drive pointer.
+
+    /// <summary>SPE drive (container) id → <c>sprk_graphdriveid</c>. The field whose absence is
+    /// the root cause of the "no file attached" 409s.</summary>
+    public string? GraphDriveId { get; init; }
+
+    /// <summary>Resolved file name (carries the <c>.docx</c> extension) → <c>sprk_filename</c>.
+    /// Preferred over <see cref="DisplayName"/> for the file-name column when supplied.</summary>
+    public string? FileName { get; init; }
+
+    /// <summary>File size in bytes → <c>sprk_filesize</c> (cast to the Whole Number column).</summary>
+    public long? FileSize { get; init; }
+
+    /// <summary>MIME type → <c>sprk_mimetype</c> (DOCX for Compose).</summary>
+    public string? MimeType { get; init; }
+
+    /// <summary>SPE web URL → <c>sprk_filepath</c> (enables "Open in SharePoint" links).</summary>
+    public string? FilePath { get; init; }
 }
 
 /// <summary>Promote outcome — resolved <c>sprk_documentid</c> + a flag distinguishing

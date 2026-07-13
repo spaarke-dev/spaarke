@@ -100,6 +100,13 @@ export interface ComposeWorkspaceState {
   sameUserConflictInfo: { checkedOutAt: string | null } | null;
   /** User-facing checkout failure message (set only when status is `'failed'`). */
   checkoutFailureMessage: string | null;
+  /**
+   * UAT #7 (compose-r2): monotonically-incrementing token bumped on every successful Save. A
+   * change in value (not the value itself) is the signal the banner stack uses to surface a
+   * transient "Saved ✓" MessageBar — so a second identical Save still re-triggers the confirmation.
+   * 0 = no save has succeeded yet this mount.
+   */
+  saveSuccessToken: number;
 }
 
 export type ComposeWorkspaceAction =
@@ -164,6 +171,7 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   checkoutLockedBy: null,
   sameUserConflictInfo: null,
   checkoutFailureMessage: null,
+  saveSuccessToken: 0,
 };
 
 export function composeWorkspaceReducer(
@@ -256,6 +264,8 @@ export function composeWorkspaceReducer(
         ...state,
         status: 'loaded',
         etag: action.etag,
+        // UAT #7: bump the token so the banner stack surfaces a fresh transient "Saved ✓".
+        saveSuccessToken: state.saveSuccessToken + 1,
         documentRef: state.documentRef
           ? {
               ...state.documentRef,

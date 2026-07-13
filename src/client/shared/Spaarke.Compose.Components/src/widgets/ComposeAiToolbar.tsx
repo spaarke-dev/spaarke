@@ -121,7 +121,15 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { Info24Regular, ArrowSwapRegular, DocumentEdit24Regular, MoreHorizontal20Regular } from '@fluentui/react-icons';
+import {
+  Info24Regular,
+  ArrowSwapRegular,
+  DocumentEdit24Regular,
+  MoreHorizontal20Regular,
+  Mail24Regular,
+  Open24Regular,
+  Send24Regular,
+} from '@fluentui/react-icons';
 import { useAuth } from '@spaarke/auth';
 import {
   createConsumerDispatcher,
@@ -231,21 +239,17 @@ const EXPLAIN_TOOLTIP =
 const COMPARE_TOOLTIP =
   'Compare this clause against the matter/firm playbook — surfaces matches, deviations, and a risk score.';
 const DRAFT_TOOLTIP = 'Draft an alternative version of this clause as a pending suggestion you can accept or reject.';
-// Tooltip copy for the two whole-document overflow actions (excerpts of the
-// authored `sprk_playbookconsumer` toolDescription for each — same "tool
-// descriptions ARE the prompt" sourcing rule as the primary three).
-const SUMMARIZE_WORD_CHANGES_TOOLTIP =
-  'Summarize the tracked changes a reviewer made in Word — insertions, deletions, comments, and structural edits — in plain language. Read-only.';
+// Tooltip copy for the whole-document overflow action (excerpt of the authored
+// `sprk_playbookconsumer` toolDescription — same "tool descriptions ARE the
+// prompt" sourcing rule as the primary three).
 const DEFINED_TERMS_TOOLTIP =
   'Scan the document for defined terms and check they are used consistently. Read-only; results render in the Context pane.';
 
 /**
- * The five R2-committed AI actions (design.md §2.0/§2.1-§2.5). The three
- * clause-selection actions are `primary` (always-visible buttons); the two
- * whole-document actions (summarize-word-changes, defined-terms) are
- * `overflow` (in the "More actions…" menu) — closing gap 2.3 (they previously
- * had NO client trigger at all: absent from DEFAULT_ACTIONS, the overflow was
- * empty). All five dispatch through the SAME 046 seam (`handleActionClick` →
+ * The R2-committed AI actions (design.md §2.0/§2.1-§2.5). The three
+ * clause-selection actions are `primary` (always-visible buttons); the
+ * whole-document defined-terms action is `overflow` (in the "More actions…"
+ * menu). All dispatch through the SAME 046 seam (`handleActionClick` →
  * `enqueueComposeAction` / `dispatchConsumer`) — no new route or discriminant.
  *
  * All ship with `bindingId: ''` — see file header "PHASE-4 STUB BOUNDARY".
@@ -254,12 +258,13 @@ const DEFINED_TERMS_TOOLTIP =
  * `registerComposeAiToolbarAction` (see file header). Those GUIDs are minted
  * per-environment at catalog SEED time (task 047, owner/live-env), so button
  * ENABLEMENT is E2E-pending on that deploy — but the trigger ENTRY POINTS
- * (this registry) exist now, which is what gap 2.3 required.
+ * (this registry) exist now.
  *
- * NOTE (summarize-word-changes): the overflow gives it a working trigger now.
- * Its dedicated "return-from-Word" entry (fired when a reviewer's edits come
- * back from Word) is hosted by the return-from-Word reanchor UI (Cluster 3 /
- * task 054), which is not yet mounted — that additional entry lands with 054.
+ * NOTE (FIX #5, UAT): `compose-summarize-word-changes` was REMOVED from this
+ * selection-toolbar registry. It is a RETURN-FROM-WORD action requiring real
+ * tracked-change data (`changesText`); on the selection toolbar it has no change
+ * data, so the LLM fabricates a phantom "[Insertion]". Its legitimate trigger is
+ * the return-from-Word reanchor UI (Cluster 3 / task 054), not this toolbar.
  */
 const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
   {
@@ -285,15 +290,6 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     // DEF-09: the ONLY compose-disposition EDIT action — its alternative renders as an
     // inline redline in the document, so route to the DOCUMENT session + confirm-only.
     materializesInEditor: true,
-  },
-  {
-    // gap 2.3 — the return-from-Word summarization trigger (FR-10). Overflow
-    // entry now; the dedicated return-from-Word entry lands with task 054.
-    id: 'compose-summarize-word-changes',
-    label: 'Summarize Word changes',
-    tooltip: SUMMARIZE_WORD_CHANGES_TOOLTIP,
-    bindingId: '',
-    placement: 'overflow',
   },
   {
     // gap 2.3 — the defined-terms scan (FR-11). Overflow-menu trigger per the
@@ -549,6 +545,36 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
     [editor, dispatchConsumer, enqueueComposeAction, documentRef, sessionId]
   );
 
+  // FIX #10b (UAT) — "Email" affordance. Compose is the default drafting
+  // surface; an explicit email path is a STUB for now. Both menu items open a
+  // new STUB email widget tab by dispatching a `workspace` `widget_load` on the
+  // EXISTING PaneEventBus (ADR-030; NO new bus, NO dispatch endpoint). The
+  // contract MATCHES the chat "email" chip another agent emits:
+  //   workspace / widget_load, widgetType 'email', displayName 'Email',
+  //   widgetData { layoutName: 'Email', mode: 'open' | 'send', ... }.
+  // WorkspacePane resolves the EmailStubWidget for `widgetType === 'email'`.
+  //   - Open in Email → mode 'open', carries the drafted body text.
+  //   - Send in Email → mode 'send', carries the current file as an attachment.
+  const handleEmailAction = React.useCallback(
+    (mode: 'open' | 'send'): void => {
+      if (!editor) return;
+      const draftedText = editor.state.doc.textBetween(0, editor.state.doc.content.size, '\n');
+      const attachmentFileName = documentRef?.fileName ?? 'Untitled.docx';
+      dispatch('workspace', {
+        type: 'widget_load',
+        widgetType: 'email',
+        displayName: 'Email',
+        widgetData: {
+          layoutName: 'Email',
+          mode,
+          ...(mode === 'open' ? { bodyText: draftedText } : {}),
+          ...(mode === 'send' ? { attachmentFileName } : {}),
+        },
+      });
+    },
+    [editor, documentRef, dispatch]
+  );
+
   if (!editor) return null;
 
   const { from, to } = editor.state.selection;
@@ -580,6 +606,42 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           </ToolbarButton>
         </Tooltip>
       ))}
+
+      <ToolbarDivider />
+
+      {/* FIX #10b — Email split-menu (STUB target). Consistent with the primary
+          labelled buttons; both items dispatch a workspace/widget_load that opens
+          the EmailStubWidget tab (see handleEmailAction). */}
+      <Menu positioning="below-end">
+        <MenuTrigger disableButtonEnhancement>
+          <ToolbarButton
+            appearance="subtle"
+            icon={<Mail24Regular />}
+            aria-label="Email"
+            data-testid="compose-ai-toolbar-email"
+          >
+            Email
+          </ToolbarButton>
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            <MenuItem
+              icon={<Open24Regular />}
+              data-testid="compose-ai-toolbar-email-open"
+              onClick={() => handleEmailAction('open')}
+            >
+              Open in Email
+            </MenuItem>
+            <MenuItem
+              icon={<Send24Regular />}
+              data-testid="compose-ai-toolbar-email-send"
+              onClick={() => handleEmailAction('send')}
+            >
+              Send in Email
+            </MenuItem>
+          </MenuList>
+        </MenuPopover>
+      </Menu>
 
       <ToolbarDivider />
 

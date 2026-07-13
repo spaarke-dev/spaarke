@@ -873,6 +873,12 @@ export interface ISprkChatProps {
   onComposeEditReject?: (ledgerRef: string, bindingId: string) => void;
   onComposeEditTryAnother?: (ledgerRef: string, bindingId: string) => void;
   /**
+   * spaarkeai-compose-r2 FIX #3 — "Keep redline". Dismisses the Assistant action prompt but LEAVES the
+   * pending redline marks in place so the user keeps editing (the host clears only the tracked edit;
+   * it does NOT accept, undo, or reject). Optional; omitting it renders that control disabled.
+   */
+  onComposeEditKeep?: (ledgerRef: string, bindingId: string) => void;
+  /**
    * spaarkeai-compose-r2 DEF-12 — the `ledgerRef` of the currently-live pending Compose edit (or
    * null when none). Only the confirmation message whose `metadata.composeEdit.ledgerRef` matches
    * this value shows its Accept/Reject/Try-another controls; stale confirmations (superseded edits)

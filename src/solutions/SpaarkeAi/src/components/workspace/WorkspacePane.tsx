@@ -56,6 +56,11 @@ import type {
 } from "./WorkspaceTabManager";
 import { WorkspaceTabManagerComponent } from "./WorkspaceTabManagerComponent";
 import { WorkspacePaneMenu } from "./WorkspacePaneMenu";
+// FIX #10b — STUB email widget rendered when the Compose "Email" affordance
+// (or the chat "email" chip) dispatches a `widget_load` with widgetType 'email'.
+// Statically imported so the email branch resolves the component synchronously
+// (no WorkspaceWidgetRegistry round-trip).
+import { EmailStubWidget } from "./EmailStubWidget";
 import {
   logTelemetryError,
   TELEMETRY_TAB_RESTORE_LOAD_FAILURE,
@@ -800,6 +805,37 @@ export function WorkspacePane(): React.JSX.Element {
       // Only the server-initiated events (no tabId) should open a new tab.
       const widgetType = event.widgetType ?? "unknown";
       const widgetData = event.widgetData ?? null;
+
+      // ── FIX #10b — STUB email tab ──────────────────────────────────────────
+      // The Compose "Email" affordance (ComposeAiToolbar → handleEmailAction) and
+      // the chat "email" chip dispatch widgetType 'email' (layoutName 'Email').
+      // Resolve EmailStubWidget SYNCHRONOUSLY (statically imported — no registry
+      // round-trip) and open a tab. Same addTab → confirm-dispatch pattern as the
+      // generic path below; auto-activates via addTab.
+      const emailData = widgetData as { layoutName?: string } | null;
+      if (widgetType === "email" || emailData?.layoutName === "Email") {
+        const emailDisplayName = event.displayName ?? "Email";
+        const emailTabId = manager.addTab("email", widgetData, emailDisplayName);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        manager.resolveTabComponent(emailTabId, EmailStubWidget as React.ComponentType<any>, emailDisplayName);
+        syncState();
+        const emailSnapshot = manager.getSnapshot();
+        dispatch("workspace", {
+          type: "widget_load",
+          widgetType: "email",
+          tabId: emailTabId,
+          ...(emailSnapshot.tabs.length > 0 ? { tabCount: emailSnapshot.tabs.length } : {}),
+        });
+        dispatch("workspace", {
+          type: "tab_count_change",
+          tabCount: emailSnapshot.tabs.length,
+        });
+        // D-F3 truthfulness parity with the generic path — ack a server frame if present.
+        if (event.frameId) {
+          sendUiActionAck(event.frameId);
+        }
+        return;
+      }
 
       // Resolve the tab display name with this precedence:
       //   1. Event payload `displayName` (Round 4 Fix 4: lets the menu set the

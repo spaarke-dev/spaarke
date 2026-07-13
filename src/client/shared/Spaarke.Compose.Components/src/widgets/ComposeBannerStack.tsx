@@ -37,7 +37,7 @@ import {
   MessageBarActions,
   Button,
 } from '@fluentui/react-components';
-import { Dismiss16Regular } from '@fluentui/react-icons';
+import { Dismiss16Regular, DocumentRegular } from '@fluentui/react-icons';
 
 import type { ComposeCheckoutLockedByInfo, ComposeCheckoutStatus } from './ComposeWorkspace.types';
 import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts';
@@ -49,7 +49,32 @@ export interface ComposeBannerStackProps {
   checkoutFailureMessage: string | null;
   importWarnings: Array<{ type: string; message: string }>;
   pendingAssistantInsert: ComposeAssistantToWorkspaceFlow | null;
+  /**
+   * UAT #7 (compose-r2): a monotonically-incrementing token bumped by the parent on every
+   * successful Save. A CHANGE in value (not its magnitude) surfaces a transient "Saved ✓"
+   * MessageBar that auto-dismisses after {@link SAVE_SUCCESS_VISIBLE_MS}. 0 = no save yet.
+   */
+  saveSuccessToken?: number;
+
+  /**
+   * spaarkeai-compose-r2 #1(b) — the `sprk_documentid` of the document persisted by the last
+   * successful Save (create-on-save "Add to DMS" or a replace Save). When present alongside
+   * {@link onOpenPreview}, the Saved ✓ banner surfaces an "Open preview" affordance that opens the
+   * File Preview modal for THAT document (not a workspace mount). Undefined until a Save yields an id.
+   */
+  savedDocumentId?: string;
+
+  /**
+   * spaarkeai-compose-r2 #1(b) — invoked when the user clicks "Open preview" on the Saved ✓ banner.
+   * The parent (ComposeWorkspace, workspace-side) opens the File Preview modal for
+   * {@link savedDocumentId}. Absent → the affordance is not rendered (back-compat: pre-existing
+   * callers that only pass `saveSuccessToken` get the unchanged banner).
+   */
+  onOpenPreview?: () => void;
 }
+
+/** How long the transient "Saved ✓" confirmation stays up before auto-dismissing. */
+const SAVE_SUCCESS_VISIBLE_MS = 4000;
 
 const useStyles = makeStyles({
   bannerStack: {
@@ -71,6 +96,9 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     checkoutFailureMessage,
     importWarnings,
     pendingAssistantInsert,
+    saveSuccessToken = 0,
+    savedDocumentId,
+    onOpenPreview,
   } = props;
 
   // DEF-15 (UAT-R3): the "Document opened with N simplification(s)" warning is
@@ -86,10 +114,26 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
 
   const showImportWarnings = importWarnings.length > 0 && !importWarningsDismissed;
 
+  // UAT #7: a successful Save previously showed no confirmation — the button flipped from
+  // "Saving" back to idle silently. Surface a transient success MessageBar whenever the parent
+  // bumps `saveSuccessToken`, auto-dismissing after SAVE_SUCCESS_VISIBLE_MS. Keyed on the token
+  // value (not a boolean) so a second identical Save re-triggers the banner. An in-flight save
+  // error (a fresh `errorMessage`) suppresses the stale success row.
+  const [showSaveSuccess, setShowSaveSuccess] = React.useState(false);
+  React.useEffect(() => {
+    if (saveSuccessToken <= 0) return;
+    setShowSaveSuccess(true);
+    const timer = setTimeout(() => setShowSaveSuccess(false), SAVE_SUCCESS_VISIBLE_MS);
+    return () => clearTimeout(timer);
+  }, [saveSuccessToken]);
+
+  const showSaveSuccessBanner = showSaveSuccess && !errorMessage;
+
   const showStack =
     showImportWarnings ||
     !!errorMessage ||
     !!pendingAssistantInsert ||
+    showSaveSuccessBanner ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -98,6 +142,39 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
 
   return (
     <div className={styles.bannerStack}>
+      {showSaveSuccessBanner ? (
+        <MessageBar intent="success" data-testid="compose-workspace-save-success-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Saved to matter files</MessageBarTitle>
+            Your document was saved and is available in the matter&apos;s files.
+          </MessageBarBody>
+          {/* #1(b): when the just-saved document's id is known, offer an "Open preview" link that
+              opens the File Preview modal for THAT document (parent-owned; not a workspace mount). */}
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-save-success-dismiss"
+                onClick={() => setShowSaveSuccess(false)}
+              />
+            }
+          >
+            {onOpenPreview && savedDocumentId ? (
+              <Button
+                appearance="transparent"
+                icon={<DocumentRegular />}
+                data-testid="compose-workspace-save-success-open-preview"
+                onClick={onOpenPreview}
+              >
+                Open preview
+              </Button>
+            ) : null}
+          </MessageBarActions>
+        </MessageBar>
+      ) : null}
+
       {errorMessage ? (
         <MessageBar intent="error" data-testid="compose-workspace-error-banner" aria-live="polite">
           <MessageBarBody>

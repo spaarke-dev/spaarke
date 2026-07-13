@@ -341,6 +341,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onComposeEditAccept,
   onComposeEditReject,
   onComposeEditTryAnother,
+  onComposeEditKeep,
   activeComposeEditLedgerRef,
   documents = [],
   playbooks = [],
@@ -2481,6 +2482,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                 onComposeEditAccept,
                 onComposeEditReject,
                 onComposeEditTryAnother,
+                onComposeEditKeep,
                 composeEditActive: msg.metadata.composeEdit.ledgerRef === activeComposeEditLedgerRef,
               }),
           };

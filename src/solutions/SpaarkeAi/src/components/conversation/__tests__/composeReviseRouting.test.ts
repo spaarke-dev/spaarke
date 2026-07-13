@@ -10,7 +10,7 @@ import {
   REVISION_INTENTS,
   REVISION_INTENT_SUGGESTIONS,
   detectReviseThisDocumentIntent,
-  REVISE_CHIP_OPTIONS,
+  COMPOSE_DOC_ACTION_CHIPS,
   REVISE_MOUNT_ASK_MESSAGE,
 } from '../composeReviseRouting';
 
@@ -170,25 +170,26 @@ describe('detectReviseThisDocumentIntent (natural-language "revise this document
   });
 });
 
-describe('REVISE_CHIP_OPTIONS / REVISE_MOUNT_ASK_MESSAGE (Wave 4 UX contract)', () => {
-  it('carries the four intents with owner-confirmed labels, in order', () => {
-    expect(REVISE_CHIP_OPTIONS.map(o => o.revisionIntent)).toEqual([
-      'align-clauses',
-      'flag-risks',
-      'improve-clarity',
-      'custom',
+describe('COMPOSE_DOC_ACTION_CHIPS / REVISE_MOUNT_ASK_MESSAGE (FIX #1 editor-centric UX contract)', () => {
+  it('carries the three document-level actions with owner-confirmed labels, in order', () => {
+    expect(COMPOSE_DOC_ACTION_CHIPS.map(c => c.action)).toEqual([
+      'summarize',
+      'add-to-dms',
+      'draft-email',
     ]);
-    expect(REVISE_CHIP_OPTIONS.map(o => o.label)).toEqual([
-      'Align to playbook',
-      'Flag risks',
-      'Improve clarity',
-      'Custom…',
+    expect(COMPOSE_DOC_ACTION_CHIPS.map(c => c.id)).toEqual(
+      COMPOSE_DOC_ACTION_CHIPS.map(c => c.action)
+    );
+    expect(COMPOSE_DOC_ACTION_CHIPS.map(c => c.label)).toEqual([
+      'Summarize the document →',
+      'Add the document to the DMS →',
+      'Draft a reporting email to the client →',
     ]);
   });
 
-  it('the mount-then-ask message matches the owner-confirmed wording', () => {
+  it('the mount message matches the FIX #1 editor-centric wording', () => {
     expect(REVISE_MOUNT_ASK_MESSAGE).toBe(
-      'Your file has been loaded into Compose. What type of revision do you have in mind?'
+      'Your file is available to edit in the Compose editor. Highlight text to use the different editing options.'
     );
   });
 });

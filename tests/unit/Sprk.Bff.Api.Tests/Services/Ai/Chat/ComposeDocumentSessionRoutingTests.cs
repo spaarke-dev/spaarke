@@ -127,6 +127,37 @@ public class ComposeDocumentSessionRoutingTests
             "that invoked it, even when a document session happens to be registered");
     }
 
+    [Fact]
+    public async Task InvokeAsync_ComposeReviseDocumentBinding_RedirectsToEditor_WithoutDispatching()
+    {
+        // Model Y (spaarkeai-compose-r2 #2): an agent-turn invocation of the whole-document
+        // compose-revise-document capability must NOT dispatch — its rewrite cannot render as an
+        // inline redline from the agent path (that materialization is wired only to the client
+        // Click-path apply-leg), so a dispatch would be narrated as a rewrite in chat. Owner decision:
+        // editing lives in the EDITOR — the tool returns an honest highlight-to-edit redirect instead.
+        // The guard is scoped to compose-revise-document ONLY, so this bypass does not affect the
+        // DEF-11 routing exercised by the tests above (compose-draft-document).
+        var chatSessionId = Guid.NewGuid().ToString("N");
+        var documentSessionId = Guid.NewGuid().ToString("N");
+        await SeedSessionAsync(chatSessionId, new ActiveDocumentIdentity(
+            Source: ActiveDocumentIdentity.SourceComposeDirect,
+            SessionFileId: "file-1",
+            DocumentSessionId: documentSessionId));
+
+        var dispatcher = new RecordingDispatchOrchestrator();
+        var tool = CreateTool(chatSessionId, dispatcher, BindingDisposition.Compose,
+            consumerType: "compose-revise-document");
+
+        var result = await tool.InvokeAsync(new AIFunctionArguments { ["revisionIntent"] = "improve-clarity" });
+
+        dispatcher.DispatchCount.Should().Be(0,
+            "Model Y: compose-revise-document invoked from the agent turn is redirected to the editor, " +
+            "never dispatched — even with a document session registered, the DEF-11 route is bypassed for " +
+            "this consumer type because a whole-document rewrite cannot render as an inline redline in chat");
+        result!.ToString()!.ToLowerInvariant().Should().Contain("highlight",
+            "the redirect steers the user to the Compose editor's highlight-to-edit options");
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================
@@ -151,12 +182,19 @@ public class ComposeDocumentSessionRoutingTests
     private BindingCapabilityTool CreateTool(
         string sessionId,
         SessionDispatchOrchestrator dispatcher,
-        BindingDisposition disposition)
+        BindingDisposition disposition,
+        string? consumerType = null)
     {
+        // Default compose consumer type is compose-draft-document (a compose-disposition capability
+        // that STILL dispatches through DEF-11 routing). compose-revise-document is intentionally NOT
+        // the default: Model Y (#2) short-circuits it to an editor redirect BEFORE dispatch, so the
+        // routing tests must use a compose capability that actually reaches the DEF-11 routing.
+        var resolvedConsumerType = consumerType
+            ?? (disposition == BindingDisposition.Compose ? "compose-draft-document" : "compose-explain-clause");
         var binding = new Binding
         {
             BindingId = Guid.NewGuid(),
-            ConsumerType = disposition == BindingDisposition.Compose ? "compose-revise-document" : "compose-explain-clause",
+            ConsumerType = resolvedConsumerType,
             ActionId = Guid.NewGuid(),
             ToolDescription = "Test capability.",
             InputSchemaJson = disposition == BindingDisposition.Compose

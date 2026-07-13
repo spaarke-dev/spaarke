@@ -204,6 +204,28 @@ public class SprkChatAgentFactory
         "rules: relay the links the platform hands you; never compose, guess, or reconstruct one " +
         "yourself.";
 
+    /// <summary>
+    /// spaarkeai-compose-r2 — Model Y redirect for the #2 defect (a free-text edit instruction typed
+    /// in the Assistant while a document is open in Compose was narrated as a full-document rewrite in
+    /// chat). Editing lives in the EDITOR (highlight-to-edit), not the chat loop. This directive stops
+    /// the model from free-forming a rewrite as plain chat text — the failure mode the deterministic
+    /// <see cref="BindingCapabilityTool"/> compose-revise-document guard cannot catch (that guard only
+    /// fires when the model INVOKES the tool; this covers the model composing the rewrite as prose
+    /// instead). Deterministic constant text (NFR-04 prompt-cache stability). Its own wording is
+    /// self-gating ("When a document is open in the Compose editor…") so it is a no-op for non-Compose
+    /// sessions. Exposed internal for the directive-presence tests.
+    /// </summary>
+    internal const string ComposeEditRedirectDirective =
+        "\n\n## Editing a document open in Compose (Spaarke platform contract)\n" +
+        "When a document is open in the Compose editor and the user asks you to EDIT, rewrite, expand, " +
+        "shorten, tighten, or otherwise revise part or all of it through chat, DO NOT produce a " +
+        "rewritten version of the document — in whole or in part — in your chat reply, and do NOT " +
+        "invoke a whole-document revise capability to do it. Editing happens IN the Compose editor, " +
+        "not in chat. Instead, tell the user to highlight the text they want to change in the Compose " +
+        "editor and choose an editing option (for example, Draft alternative or Improve clarity). Keep " +
+        "the reply to a single short sentence pointing them to the editor's highlight-to-edit options; " +
+        "never restate or regenerate the document's contents in chat.";
+
     // Task 053 (FR-B-04): BuildCurrentDateDirective moved to the shared
     // ContextSliceProducers.EnvironmentFactsProducer (the ONE source for this primitive — the interactive
     // append site above + the Context Binder's Workspace slice both call it). Byte-identical output.
@@ -889,6 +911,22 @@ public class SprkChatAgentFactory
             };
         }
         // === End D-F0 doctrine ==========================================================
+
+        // === spaarkeai-compose-r2 — Model Y compose-edit redirect (#2 defect) ============
+        // Steer free-text "edit this document" requests to the EDITOR (highlight-to-edit)
+        // instead of a narrated full-document rewrite in chat. Pairs with the deterministic
+        // BindingCapabilityTool compose-revise-document guard (which covers the model
+        // INVOKING the tool); this covers the model composing the rewrite as plain prose.
+        // Self-gating wording (no-op outside Compose); appended whenever tools project so a
+        // Compose-hosted session always carries it. Deterministic constant text (NFR-04).
+        if (finalTools.Count > 0)
+        {
+            context = context with
+            {
+                SystemPrompt = context.SystemPrompt + ComposeEditRedirectDirective,
+            };
+        }
+        // === End compose-edit redirect ==================================================
 
         // === G-P3 UAT round-5 R5-A — current-date context (2026-07-07) ==================
         // Incident: "due date tomorrow" produced 6/13/2024 — the model had NO current-date

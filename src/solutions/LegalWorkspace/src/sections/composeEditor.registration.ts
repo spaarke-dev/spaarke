@@ -225,7 +225,32 @@ export const composeEditorRegistration: SectionRegistration = {
       id: "compose-editor",
       type: "content",
       title: "Compose",
-      style: { overflow: "hidden" },
+      // FIX #6 (UAT) — height-chain bound so the Compose format toolbar stays
+      // PINNED while the editor body scrolls. The Compose section is a single
+      // tall scrollable surface, unlike the dashboard grid sections. Left as a
+      // "grow" section (only `defaultHeight` → a `minHeight` FLOOR, no ceiling),
+      // buildDynamicWorkspaceConfig injects `minHeight: 720px` and the card
+      // GROWS WITH CONTENT — so the OUTER WorkspaceShell `.shell` (overflow:auto)
+      // becomes the scroller and ComposeFormatToolbar's `position:sticky` is
+      // inert (the sticky ancestor never moves; an ancestor above it scrolls).
+      //
+      // This style makes the SectionPanel card a BOUNDED flex column that fills
+      // its grid row track (`height:100%` resolves against the stretched track;
+      // `minHeight:'0px'` — truthy, so buildDynamicWorkspaceConfig SKIPS the
+      // 720px floor injection). With the card bounded, the height chain resolves
+      // straight down to ComposeEditor's `editorSurface` (flex:1; overflow:auto)
+      // — which becomes THE scroll region, so the sibling flex-shrink:0 toolbar
+      // stays pinned. ComposeWorkspace / ComposeEditor internals are already
+      // well-formed; this bounds the host section that wraps them. The DEF-16
+      // sticky rule in ComposeFormatToolbar is kept as belt-and-suspenders.
+      style: {
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        flex: 1,
+        minHeight: "0px",
+        height: "100%",
+      },
       renderContent: () =>
         React.createElement(ComposeSectionMount, {
           bffBaseUrl: context.bffBaseUrl,

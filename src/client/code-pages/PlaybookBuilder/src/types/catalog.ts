@@ -32,6 +32,7 @@ export enum BindingDisposition {
   Email = 100000003,
   Record = 100000004,
   Notification = 100000005,
+  Compose = 100000006,
 }
 
 export enum BindingRisk {

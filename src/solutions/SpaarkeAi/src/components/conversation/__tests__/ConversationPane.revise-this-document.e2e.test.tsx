@@ -43,6 +43,7 @@ const CHAT_SESSION = '00000000-0000-0000-0000-00000000c8a7';
 const DOC_SESSION = '00000000-0000-0000-0000-0000000d0c07';
 const SESSION_FILE_ID = 'session-file-active-source-123';
 const REVISE_BINDING = 'binding-revise-document-guid';
+const SUMMARIZE_BINDING = 'binding-compose-summarize-guid';
 const BFF = 'https://test-bff.example.com';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -99,6 +100,14 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit) =
             displayLabel: 'Revise the whole document.',
             surfaces: ['assistant', 'compose'],
             launchArgsSchemaJson: '{"type":"object","required":["revisionIntent"]}',
+          },
+          {
+            bindingId: SUMMARIZE_BINDING,
+            consumerType: 'compose-summarize',
+            consumerCode: 'default',
+            displayLabel: 'Summarize the document.',
+            surfaces: ['assistant', 'compose'],
+            launchArgsSchemaJson: '{"type":"object"}',
           },
         ],
       }),
@@ -275,8 +284,8 @@ beforeEach(() => {
   bridgeRef.current = null;
 });
 
-describe('Wave 4: "revise this document" (no named intent) → mount + ask + chips, no server revise', () => {
-  it('cancels the agent turn, auto-mounts the file, injects the ask message, renders the four chips', async () => {
+describe('FIX #1: "revise this document" (no named intent) → mount + editor-centric message + doc-action chips', () => {
+  it('cancels the agent turn, auto-mounts the file, injects the mount message, renders the three doc-action chips', async () => {
     renderPane();
     await driveChatUpload('revise-me.docx');
     workspaceEvents.length = 0;
@@ -297,21 +306,20 @@ describe('Wave 4: "revise this document" (no named intent) → mount + ask + chi
     expect(compose.upload).toBeDefined();
     expect(compose.upload!.sessionFileId).toBe(SESSION_FILE_ID);
 
-    // The mount-then-ask message is injected + the four intent chips render.
+    // The editor-centric mount message is injected + the three DOCUMENT-LEVEL action chips render.
     expect(injectedMessages.map((m) => m.content)).toContain(REVISE_MOUNT_ASK_MESSAGE);
-    expect(screen.getByTestId('revise-intent-chips')).toBeInTheDocument();
-    expect(screen.getByTestId('revise-intent-chip-align-clauses')).toBeInTheDocument();
-    expect(screen.getByTestId('revise-intent-chip-flag-risks')).toBeInTheDocument();
-    expect(screen.getByTestId('revise-intent-chip-improve-clarity')).toBeInTheDocument();
-    expect(screen.getByTestId('revise-intent-chip-custom')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-doc-action-chips')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-doc-action-chip-summarize')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-doc-action-chip-add-to-dms')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-doc-action-chip-draft-email')).toBeInTheDocument();
 
-    // No SERVER revise dispatch was made — the edits are NOT narrated as prose.
+    // No SERVER revise dispatch was made — the chips are document actions, not a whole-document revise.
     expect(dispatchPostUrls).toHaveLength(0);
   });
 });
 
-describe('Wave 4: clicking an intent chip dispatches compose-revise-document to the DOCUMENT session', () => {
-  it('routes the dispatch to the document session with the chosen revisionIntent', async () => {
+describe('FIX #1: the document-level action chips reuse existing mechanisms', () => {
+  it('"Draft a reporting email" dispatches the Email workspace widget_load (exact interop contract), no revise dispatch', async () => {
     renderPane();
     await driveChatUpload('revise-me.docx');
 
@@ -319,25 +327,42 @@ describe('Wave 4: clicking an intent chip dispatches compose-revise-document to 
       await captured.onDecorateOutboundBody!({ message: 'revise this document' });
       for (let i = 0; i < 4; i++) await Promise.resolve();
     });
+    workspaceEvents.length = 0;
 
-    // The mount registers the document session (what ComposeWorkspace does post-mount).
-    await simulateComposeMountRegistration();
-
-    // Click the "Align to playbook" chip.
     await act(async () => {
-      fireEvent.click(screen.getByTestId('revise-intent-chip-align-clauses'));
+      fireEvent.click(screen.getByTestId('compose-doc-action-chip-draft-email'));
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+    });
+
+    const emailEvent = workspaceEvents.find(
+      (e) => e.type === 'widget_load' && e.widgetType === 'email'
+    ) as (WorkspacePaneEvent & { layoutName?: string; widgetData?: { source?: string } }) | undefined;
+    expect(emailEvent).toBeDefined();
+    expect(emailEvent!.layoutName).toBe('Email');
+    expect(emailEvent!.widgetData?.source).toBe('compose-reporting-email');
+
+    // The email chip is NOT a revise — no /dispatch was POSTed.
+    expect(dispatchPostUrls).toHaveLength(0);
+  });
+
+  it('"Summarize the document" dispatches compose-summarize on the CHAT session (informational)', async () => {
+    renderPane();
+    await driveChatUpload('revise-me.docx');
+
+    await act(async () => {
+      await captured.onDecorateOutboundBody!({ message: 'revise this document' });
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('compose-doc-action-chip-summarize'));
       for (let i = 0; i < 10; i++) await Promise.resolve();
     });
 
-    // The dispatch targeted the DOCUMENT session (non-empty) — not the chat session.
+    // Summarize dispatches on the CHAT session (not the document session) — informational.
     expect(dispatchPostUrls).toHaveLength(1);
-    expect(dispatchPostUrls[0]).toContain(`/sessions/${DOC_SESSION}/dispatch`);
-    expect(dispatchPostUrls[0]).not.toContain(`/sessions/${CHAT_SESSION}/dispatch`);
-    // The chosen revisionIntent reached the wire body.
-    expect(dispatchPostBodies[0]).toContain('align-clauses');
-
-    // The chips were consumed on click.
-    expect(screen.queryByTestId('revise-intent-chips')).not.toBeInTheDocument();
+    expect(dispatchPostUrls[0]).toContain(`/sessions/${CHAT_SESSION}/dispatch`);
+    expect(dispatchPostUrls[0]).not.toContain(`/sessions/${DOC_SESSION}/dispatch`);
   });
 });
 

@@ -60,6 +60,28 @@ describe('SprkChatMessage — DEF-12 compose-edit controls', () => {
     expect(screen.getByText(CONFIRMATION)).toBeInTheDocument();
   });
 
+  it('FIX #3: renders "Keep redline" and routes its click to onComposeEditKeep with the ledgerRef', () => {
+    const onKeep = jest.fn();
+    renderWithProvider(
+      <SprkChatMessage
+        message={composeEditMessage}
+        composeEditActive
+        onComposeEditAccept={jest.fn()}
+        onComposeEditKeep={onKeep}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('compose-edit-keep'));
+    expect(onKeep).toHaveBeenCalledWith('binding-1@t1', 'binding-1');
+  });
+
+  it('FIX #3: the "Keep redline" control is disabled when onComposeEditKeep is omitted', () => {
+    renderWithProvider(
+      <SprkChatMessage message={composeEditMessage} composeEditActive onComposeEditAccept={jest.fn()} />
+    );
+    expect(screen.getByTestId('compose-edit-keep')).toBeDisabled();
+  });
+
   it('suppresses the controls when the edit is NOT the live one (composeEditActive=false)', () => {
     renderWithProvider(
       <SprkChatMessage message={composeEditMessage} composeEditActive={false} onComposeEditAccept={jest.fn()} />

@@ -25,14 +25,19 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
@@ -40,8 +45,10 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Compose;
+using Sprk.Bff.Api.Services.Jobs;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Compose;
@@ -57,6 +64,10 @@ public sealed class ComposeServiceCreateOnSaveTests
     private readonly Mock<IGenericEntityService> _dataverse = new(MockBehavior.Strict);
     private readonly Mock<IPostUploadIndexingEnqueuer> _indexing = new(MockBehavior.Strict);
     private readonly Mock<ChatSessionManager> _sessions;
+    // FR-05 Fork C (compose-r2): the profile step now ENQUEUES an AppOnlyDocumentAnalysis job
+    // (SubmitJobAsync is virtual precisely for this override). Loose so un-arranged calls return a
+    // completed Task; profile-focused tests capture the submitted JobContract.
+    private readonly Mock<JobSubmissionService> _jobSubmission;
 
     public ComposeServiceCreateOnSaveTests()
     {
@@ -71,6 +82,12 @@ public sealed class ComposeServiceCreateOnSaveTests
         _sessions
             .Setup(s => s.GetSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ChatSession?)null);
+
+        _jobSubmission = new Mock<JobSubmissionService>(
+            MockBehavior.Loose,
+            Options.Create(new ServiceBusOptions()),
+            Mock.Of<ILogger<JobSubmissionService>>(),
+            new Mock<ServiceBusClient>().Object);
     }
 
     private ComposeService CreateSut() => new(
@@ -79,7 +96,8 @@ public sealed class ComposeServiceCreateOnSaveTests
         _dataverse.Object,
         new DocxAnnotationWriter(),
         _indexing.Object,
-        NullLogger<ComposeService>.Instance);
+        NullLogger<ComposeService>.Instance,
+        jobSubmission: _jobSubmission.Object);
 
     private static ReadOnlyMemory<byte> DocxBytes() =>
         new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x14, 0x00 }; // DOCX ZIP signature
@@ -166,13 +184,20 @@ public sealed class ComposeServiceCreateOnSaveTests
         ComposeService.IsInterimCreateOnSaveSuccess(completion).Should().BeTrue();
     }
 
-    // ── Acceptance: profile-analysis emits a deferred (non-implemented) state ───────────────────
+    // ── Acceptance (Fork C, compose-r2): profile-analysis ENQUEUES a background profile job ─────
     [Fact]
-    public async Task SaveAsync_TransientDraft_ProfileAnalysisStep_IsDeferredAndNotImplemented()
+    public async Task SaveAsync_TransientDraft_EnqueuesProfileJobForCreatedDocument()
     {
         ArrangeContainerCreate();
-        ArrangeNoExistingRecordThenCreate(Guid.NewGuid());
+        var recordId = Guid.NewGuid();
+        ArrangeNoExistingRecordThenCreate(recordId);
         ArrangeIndexing(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        JobContract? submitted = null;
+        _jobSubmission
+            .Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+            .Callback<JobContract, CancellationToken>((j, _) => submitted = j)
+            .Returns(Task.CompletedTask);
 
         var sut = CreateSut();
         var request = new SaveComposeDocumentRequest
@@ -186,9 +211,54 @@ public sealed class ComposeServiceCreateOnSaveTests
 
         var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
 
+        // The SAME AppOnlyDocumentAnalysis job the Office save path enqueues — keyed to the created
+        // sprk_document id, idempotency analysis-{docId}-documentprofile, so the app-only/MI worker
+        // resolves the SPE pointers from Dataverse and profiles the file.
+        _jobSubmission.Verify(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Once);
+        submitted.Should().NotBeNull();
+        submitted!.JobType.Should().Be(AppOnlyDocumentAnalysisJobHandler.JobTypeName);
+        submitted.SubjectId.Should().Be(recordId.ToString());
+        submitted.IdempotencyKey.Should().Be($"analysis-{recordId}-documentprofile");
+        submitted.Payload!.RootElement.GetProperty("DocumentId").GetGuid().Should().Be(recordId);
+
+        // The profile step is non-terminal (Queued — enqueued, worker not yet run); aggregate stays Partial.
         var profile = result.CompletionState!.Steps.Single(s => s.StepName == ComposeService.StepProfileAnalysis);
-        profile.State.Should().Be(JobAwareState.Queued, "profile has no stored outcome — it is deferred to core's IDocumentProfileAi (Fork C)");
-        profile.Detail.Should().Contain("deferred");
+        profile.State.Should().Be(JobAwareState.Queued);
+        profile.Detail.Should().Contain("enqueued");
+        result.CompletionState!.Aggregate.Should().Be(JobAwareState.Partial);
+    }
+
+    // ── Acceptance (best-effort): a profile-enqueue failure NEVER fails the save ────────────────
+    [Fact]
+    public async Task SaveAsync_WhenProfileEnqueueThrows_SaveStillSucceeds_ProfileNonTerminal()
+    {
+        ArrangeContainerCreate();
+        var recordId = Guid.NewGuid();
+        ArrangeNoExistingRecordThenCreate(recordId);
+        ArrangeIndexing(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        _jobSubmission
+            .Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Service Bus unavailable"));
+
+        var sut = CreateSut();
+        var request = new SaveComposeDocumentRequest
+        {
+            DocumentSpeId = null,
+            ContainerId = ContainerId,
+            Content = DocxBytes(),
+            SessionId = Guid.NewGuid().ToString(),
+            TenantId = Tenant,
+        };
+
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        // Save is unaffected: record created + indexed → interim success; profile degrades to Queued.
+        result.DocumentRecordId.Should().Be(recordId);
+        var profile = result.CompletionState!.Steps.Single(s => s.StepName == ComposeService.StepProfileAnalysis);
+        profile.State.Should().Be(JobAwareState.Queued);
+        profile.Detail.Should().Contain("failed");
+        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
     }
 
     // ── Acceptance (negative): missing client container fails the container step honestly ───────

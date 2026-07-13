@@ -134,16 +134,19 @@ describe('ComposeEditor — right-click AI-toolbar trigger (task 111 requirement
     const toolbar = toolbars[0];
     expect(toolbar).toHaveAttribute('data-testid', 'compose-ai-toolbar');
 
-    // All 5 AI actions present (3 primary buttons + overflow trigger; the 2
-    // overflow actions are behind "More actions").
+    // AI actions present (3 primary buttons + the Email menu + overflow trigger;
+    // the whole-document defined-terms action is behind "More actions"). FIX #5
+    // removed summarize-word-changes from the selection toolbar.
     expect(within(toolbar).getByTestId('compose-ai-toolbar-compose-explain-clause')).toBeInTheDocument();
     expect(within(toolbar).getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeInTheDocument();
     expect(within(toolbar).getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeInTheDocument();
     expect(within(toolbar).getByTestId('compose-ai-toolbar-more')).toBeInTheDocument();
 
     await fireEvent.click(within(toolbar).getByTestId('compose-ai-toolbar-more'));
-    expect(await screen.findByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-ai-toolbar-overflow-compose-defined-terms')).toBeInTheDocument();
+    expect(await screen.findByTestId('compose-ai-toolbar-overflow-compose-defined-terms')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')
+    ).not.toBeInTheDocument();
 
     // Divider is a child of the (single) Toolbar — has Toolbar context, not orphaned.
     const divider = toolbar.querySelector('[role="separator"]');

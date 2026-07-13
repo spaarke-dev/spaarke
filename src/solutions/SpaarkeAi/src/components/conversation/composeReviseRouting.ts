@@ -140,22 +140,42 @@ export function routeReviseIntent(messageText: string): ReviseRouteDecision {
 // chat-uploaded source document being present — a bare phrasing with no uploaded doc falls through
 // to the normal agent turn.
 
-/** The mount-then-ask Assistant interjection shown after auto-mounting the chat-uploaded doc. */
+/**
+ * The mount-then-ask Assistant interjection shown after auto-mounting the chat-uploaded doc.
+ *
+ * REFRAMED (spaarkeai-compose-r2 FIX #1, editor-centric): after the file mounts, the primary
+ * revision surface is the Compose EDITOR itself (highlight text → inline editing toolbar), not a
+ * set of whole-document revision-type chips. The three chips that accompany this message are now
+ * DOCUMENT-LEVEL actions (see {@link COMPOSE_DOC_ACTION_CHIPS}), not `RevisionIntent` values.
+ */
 export const REVISE_MOUNT_ASK_MESSAGE =
-  'Your file has been loaded into Compose. What type of revision do you have in mind?';
+  'Your file is available to edit in the Compose editor. Highlight text to use the different editing options.';
 
-/** One clickable revise-intent chip option — the four DEF-11 intents in owner-confirmed wording. */
-export interface ReviseChipOption {
-  readonly revisionIntent: RevisionIntent;
+/**
+ * A document-level action offered as a chip after a document mounts in Compose (FIX #1). These are
+ * NOT `RevisionIntent` values — the whole-document revision-type chips were retired in favour of an
+ * editor-centric flow (highlight text in the editor to revise). Each chip drives an EXISTING
+ * mechanism from the host (ConversationPane): `summarize` reuses the `compose-summarize` dispatch,
+ * `add-to-dms` reuses the Compose create-on-save / save-to-matter flow + File Preview, and
+ * `draft-email` dispatches the Email workspace `widget_load`.
+ */
+export type ComposeDocAction = 'summarize' | 'add-to-dms' | 'draft-email';
+
+/** One clickable document-level action chip (label + the action it carries). */
+export interface ComposeDocActionChip {
+  /** Stable chip id (also the action discriminant). */
+  readonly id: ComposeDocAction;
+  /** Chip label (owner-confirmed wording; trailing arrow is part of the copy). */
   readonly label: string;
+  /** The document-level action the host dispatches when the chip is clicked. */
+  readonly action: ComposeDocAction;
 }
 
-/** The four revise-intent chip options rendered after the mount-then-ask message (owner wording). */
-export const REVISE_CHIP_OPTIONS: readonly ReviseChipOption[] = [
-  { revisionIntent: 'align-clauses', label: 'Align to playbook' },
-  { revisionIntent: 'flag-risks', label: 'Flag risks' },
-  { revisionIntent: 'improve-clarity', label: 'Improve clarity' },
-  { revisionIntent: 'custom', label: 'Custom…' },
+/** The three document-level action chips rendered after the mount message (FIX #1, in order). */
+export const COMPOSE_DOC_ACTION_CHIPS: readonly ComposeDocActionChip[] = [
+  { id: 'summarize', label: 'Summarize the document →', action: 'summarize' },
+  { id: 'add-to-dms', label: 'Add the document to the DMS →', action: 'add-to-dms' },
+  { id: 'draft-email', label: 'Draft a reporting email to the client →', action: 'draft-email' },
 ];
 
 /** Result of {@link detectReviseThisDocumentIntent}. */

@@ -91,7 +91,7 @@ import { authenticatedFetch } from '@spaarke/auth';
 // `DataverseLookupField` and the 1c ribbon launcher (`DocumentComposeLaunch.ts`)
 // already use. No new lookup UI, no new BFF endpoint (ADR-039: this is a data query,
 // not a dispatch).
-import { createXrmNavigationService, createXrmDataService, type LookupResult } from '@spaarke/ui-components';
+import { createXrmNavigationService, createXrmDataService, RichFilePreviewDialog, type LookupResult } from '@spaarke/ui-components';
 
 import { ComposeToolbar } from './ComposeToolbar';
 import { ComposeEmptyState } from './ComposeEmptyState';
@@ -448,6 +448,41 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // the same stored draft). `composeDraftError` surfaces a soft failure without crashing.
   const [lastMaterializedKey, setLastMaterializedKey] = React.useState<string | null>(null);
   const [composeDraftError, setComposeDraftError] = React.useState<string | null>(null);
+
+  // -------------------------------------------------------------------------
+  // #1(b) — "Open preview" for the document persisted by the last Save
+  // -------------------------------------------------------------------------
+  // The "Add the document to the DMS" flow (create-on-save) previously saved but gave the user no
+  // way to open the created Document. We capture the server-minted `sprk_documentid` in triggerSave's
+  // success path (below) and surface an "Open preview" affordance on the Saved ✓ banner that opens the
+  // File Preview MODAL for that document (NOT a workspace mount) — reusing the shared
+  // `RichFilePreviewDialog` (`@spaarke/ui-components`) + the BFF `GET /api/documents/{id}/preview-url`
+  // endpoint the LegalWorkspace/SemanticSearch surfaces already use. `savedPreview` holds the id +
+  // display name; `previewOpen` gates the modal.
+  const [savedPreview, setSavedPreview] = React.useState<{ documentId: string; fileName?: string } | null>(null);
+  const [previewOpen, setPreviewOpen] = React.useState(false);
+
+  // Xrm navigation service for the preview modal's "Open record" action (host-context; no BFF route).
+  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+
+  // Fetch the ephemeral iframe preview URL for the saved document (RichFilePreview's fetchPreviewUrl
+  // contract). Same endpoint + shape as `DocumentApiService.getDocumentPreviewUrl`; ComposeWorkspace
+  // already holds `bffBaseUrl` + `authenticatedFetch`, so no new service is introduced (§11 reuse).
+  const fetchSavedPreviewUrl = React.useCallback(async (): Promise<string | null> => {
+    const docId = savedPreview?.documentId;
+    if (!docId || !bffBaseUrl) return null;
+    try {
+      const response = await authenticatedFetch(
+        `${bffBaseUrl}/api/documents/${encodeURIComponent(docId)}/preview-url`,
+        { method: 'GET' }
+      );
+      if (!response.ok) return null;
+      const data = (await response.json()) as { previewUrl?: string };
+      return data.previewUrl ?? null;
+    } catch {
+      return null; // non-fatal — the modal shows its own "preview not available" fallback
+    }
+  }, [savedPreview?.documentId, bffBaseUrl]);
 
   // -------------------------------------------------------------------------
   // FR-29 / FR-33 (R2, tasks 060/102) — anchored annotations + defined-terms +
@@ -960,10 +995,20 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const payload = (await response.json()) as {
         documentSpeId: string;
         documentRecordId?: string;
+        // #1(b): the create-on-save response's new-document id. `documentRecordId` is the
+        // established field (the `sprk_documentid`); `documentId` is read defensively in case the
+        // sibling BFF change names it that. Either drives the Saved ✓ banner's "Open preview" link.
+        documentId?: string;
         eTag?: string;
         size: number;
         wasPromotedThisSave: boolean;
       };
+
+      // #1(b): remember the persisted document so the Saved ✓ banner can open its File Preview modal.
+      const savedDocumentId = payload.documentRecordId ?? payload.documentId;
+      if (savedDocumentId) {
+        setSavedPreview({ documentId: savedDocumentId, fileName: state.documentRef.fileName });
+      }
 
       dispatch({
         kind: 'saveSucceeded',
@@ -1827,6 +1872,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             checkoutFailureMessage={state.checkoutFailureMessage}
             importWarnings={state.importWarnings}
             pendingAssistantInsert={state.pendingAssistantInsert}
+            saveSuccessToken={state.saveSuccessToken}
+            // #1(b): once a Save yields a document id, offer "Open preview" on the Saved ✓ banner.
+            savedDocumentId={savedPreview?.documentId}
+            onOpenPreview={savedPreview ? () => setPreviewOpen(true) : undefined}
           />
 
           {/* FR-04 (task 016): soft failure surfacing for draft materialization. */}
@@ -1886,6 +1935,26 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         onResolve={handleReanchorResolve}
         onClose={() => setReanchorPanelOpen(false)}
       />
+
+      {/* #1(b): File Preview modal for the document persisted by "Add to DMS" / Save. Opened from the
+          Saved ✓ banner's "Open preview" link. Reuses the shared RichFilePreviewDialog + the BFF
+          preview-url endpoint (no workspace mount, no new component). Rendered only once a Save has
+          minted a document id. */}
+      {savedPreview ? (
+        <RichFilePreviewDialog
+          open={previewOpen}
+          documentId={savedPreview.documentId}
+          documentName={savedPreview.fileName ?? 'Document'}
+          onClose={() => setPreviewOpen(false)}
+          fetchPreviewUrl={fetchSavedPreviewUrl}
+          onOpenFile={() => undefined}
+          onEmailDocument={() => undefined}
+          onCopyLink={() => undefined}
+          onOpenRecord={() => {
+            void navigationService.openRecord('sprk_document', savedPreview.documentId);
+          }}
+        />
+      ) : null}
 
       {/* Error state — load failed; no document loaded */}
       {state.status === 'error' ? (
