@@ -113,6 +113,52 @@ describe('resolveTargetSpans (match_mode contract)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// resolveTargetSpans — typographic normalization (round-3 UAT Test #4)
+// The doc carries Word/DOCX typographic characters; the model straightens them in its echoed
+// target_text. A 1:1 fold on BOTH sides restores the match without shifting positions.
+// ---------------------------------------------------------------------------
+describe('resolveTargetSpans (typographic normalization — round-3 UAT Test #4)', () => {
+  it('matches doc smart double-quotes against a straight-quoted target', () => {
+    const editor = makeEditor('<p>the “party” agrees</p>');
+    const r = resolveTargetSpans(editor, 'the "party" agrees', 'strict');
+    expect(r.ok).toBe(true);
+    editor.destroy();
+  });
+
+  it('matches a doc smart apostrophe against a straight apostrophe', () => {
+    const editor = makeEditor('<p>the company’s obligations</p>');
+    const r = resolveTargetSpans(editor, "the company's obligations", 'strict');
+    expect(r.ok).toBe(true);
+    editor.destroy();
+  });
+
+  it('matches a doc NBSP against a regular space in the target', () => {
+    const editor = makeEditor('<p>Section 12 applies</p>');
+    const r = resolveTargetSpans(editor, 'Section 12 applies', 'strict');
+    expect(r.ok).toBe(true);
+    editor.destroy();
+  });
+
+  it('matches a doc en/em dash against a hyphen in the target', () => {
+    const editor = makeEditor('<p>see pages 10–15 herein</p>');
+    const r = resolveTargetSpans(editor, 'see pages 10-15 herein', 'strict');
+    expect(r.ok).toBe(true);
+    editor.destroy();
+  });
+
+  it('the resolved span still points at the ORIGINAL characters (1:1 offset map intact)', () => {
+    const editor = makeEditor('<p>a “term” b</p>');
+    const r = resolveTargetSpans(editor, '"term"', 'strict');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      // The span must cover the doc's ORIGINAL curly-quoted text, not a normalized copy.
+      expect(editor.state.doc.textBetween(r.spans[0].from, r.spans[0].to)).toBe('“term”');
+    }
+    editor.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // DEF-11 — whole-document revision: multi-change materialize + Accept-all/Reject-all
 // ---------------------------------------------------------------------------
 function countMarks(editor: Editor, markName: 'insertion' | 'deletion'): number {
@@ -410,6 +456,79 @@ describe('usePendingRedline (materialize from ledger)', () => {
     expect(html).toContain('data-ledger-ref="b1@t1"');
     expect(result.current.pending).toHaveLength(1);
     reloaded.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// usePendingRedline.materialize — selection fallback (round-3 UAT Test #4)
+// When the (normalize-tolerant) target still can't be located verbatim, anchor at the user's live
+// selection instead of dead-ending — but ONLY for not_found + a non-empty selection.
+// ---------------------------------------------------------------------------
+describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test #4)', () => {
+  it('not_found + a live non-empty selection → anchors the redline at the selection', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    // User still has a range selected (the clause they asked to revise); the model echoed a target
+    // that is NOT a verbatim substring of the doc.
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 10 });
+    });
+    let status: string | undefined;
+    act(() => {
+      status = result.current.materialize(
+        { target_text: 'a paraphrase that is not present verbatim', new_text: 'nimble auburn', match_mode: 'strict' },
+        PROV
+      );
+    });
+
+    expect(status).toBe('applied');
+    const html = editor.getHTML();
+    expect(html).toContain('data-compose-mark="deletion"');
+    expect(html).toContain('nimble auburn');
+    expect(result.current.error).toBeNull();
+    expect(result.current.pending).toHaveLength(1);
+    editor.destroy();
+  });
+
+  it('not_found + a COLLAPSED caret (no selection) → honest banner, nothing applied', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      editor.commands.setTextSelection(1); // collapsed caret → empty selection
+    });
+    let status: string | undefined;
+    act(() => {
+      status = result.current.materialize(
+        { target_text: 'not present in this document', new_text: 'x', match_mode: 'strict' },
+        PROV
+      );
+    });
+
+    expect(status).toBe('not_found');
+    expect(result.current.error).toMatchObject({ kind: 'not_found' });
+    expect(result.current.pending).toHaveLength(0);
+    expect(editor.getHTML()).not.toContain('data-compose-mark');
+    editor.destroy();
+  });
+
+  it('AMBIGUOUS is NOT overridden by a selection (keeps the reselect banner — do not guess)', () => {
+    const editor = makeEditor('<p>term and term</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      editor.commands.setTextSelection({ from: 1, to: 5 });
+    });
+    let status: string | undefined;
+    act(() => {
+      status = result.current.materialize({ target_text: 'term', new_text: 'x', match_mode: 'strict' }, PROV);
+    });
+
+    expect(status).toBe('ambiguous');
+    expect(result.current.error).toMatchObject({ kind: 'ambiguous' });
+    expect(result.current.pending).toHaveLength(0);
+    editor.destroy();
   });
 });
 
