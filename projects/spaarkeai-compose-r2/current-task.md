@@ -8,6 +8,27 @@
 
 ---
 
+## Quick Recovery (READ THIS FIRST) — 2026-07-13 (by context-handoff)
+
+| Field | Value |
+|---|---|
+| **Project** | spaarkeai-compose-r2 — AI-native legal drafting (Compose + SpaarkeAi 3-pane + BFF) |
+| **Milestone** | ROUND-4 (6 waves) + ROUND-5 (revise flow) **DEPLOYED to spaarkedev1**; branch clean, HEAD `737459f31`; **master merge HELD**. |
+| **Status** | in-progress — **AWAITING OWNER RE-UAT** (owner testing now). |
+| **Next Action** | 1) Receive owner re-UAT results: round-5 revise flow (mount→intent-chips→redline), round-4 Tests #3 (browse-upload redline)/#4 (stored-doc redline placement)/trace-auto-open/non-docx, and #2 "open this file" AFTER a hard-refresh (Ctrl+F5). 2) Fix anything that surfaces (one agent per wave; no nested sub-agents; gate+commit; redeploy). 3) On clean UAT → **merge branch → master** (the held step). 4) **THEN** build the **Compose→true-widget** conversion per `notes/compose-to-widget-requirements.md` (owner-approved for AFTER this UAT). |
+| **#2 status** | "open this file" NotImplementedException — exhaustive trace found NO reachable NIE at HEAD → **likely stale cached bundle**; resolves on hard-refresh. If it recurs, pull the correlation ID from `spaarke-bff-dev` App Insights. |
+| **Compose→widget** | Owner asked directly: Wave 5 only registered Compose as a Direct widget + getVisibleState (DORMANT — layout still drives the mount). The TRUE-widget flip (route open-paths through `widget_load{'compose'}`, re-key WorkspacePane tab-reuse, robust bidirectional Assistant⇄Compose, Context/Execution-Trace first-class) is fully specified in **`notes/compose-to-widget-requirements.md`** — build it AFTER UAT settles, isolated from bug fixes. |
+
+### Files this session (all COMMITTED — tree clean)
+- Round-4 waves: `89fbef95d` `7e1819db0` `209edb6cc` `4577a0608` `3c451e933` `d5ae23cca`; deploy checkpoint `f16b7d1e2`.
+- Round-5 revise flow: `46eaaef32`; deploy checkpoint `737459f31`.
+- New notes: `notes/uat-round3-reuat-diagnosis.md`, `notes/round4-active-artifact-build-plan.md`, `notes/HANDOFF-to-core-fr30-anchor-2026-07-12.md`, `notes/compose-to-widget-requirements.md`, `scripts/seed-compose-revise-document.ps1`.
+
+### Critical context
+Master is HELD until owner UAT passes. Core (redesign-r2) WAITS (single owner = us; FR-30 anchor answered in the handoff note). Deploy = `Deploy-BffApi.ps1` (hash-verify) + clear-vite-cache build + `Deploy-SpaarkeAi.ps1`; round-5 was code-page-only (client-only). Binding execution lesson: ONE agent per wave, never nested sub-agents.
+
+---
+
 ## 🔴 ACTIVE — UAT ROUND-4 (2026-07-13) — DEPLOYED, AWAITING OWNER RE-UAT — READ FIRST
 
 **Round-3 done + deployed (round-3 block below).** Round-3 re-UAT surfaced Tests #1–4 + a trace ask + a console error → the **"Active Workspace Document" contract** cluster. Root cause: an *uploaded* document never established the tab-scoped **document session** that "open this file" + inline redline depend on (two axes: Identity + Anchoring). All fixed across **6 committed waves**, gated, and **deployed to spaarkedev1**. Awaiting owner re-UAT; **branch→master merge HELD until UAT passes**.
