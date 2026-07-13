@@ -1,42 +1,46 @@
 # Current Task
 
-**Active task**: VHVU-060 — Repoint VisualHost fully to @spaarke/visuals; move ChartRenderer + close util shims; verify build/bundle/drill
-**Status**: not-started
-**Phase**: B4
-**Next action**: Begin VHVU-060. VHVU-050 (self-fetch → props-in refactor) is COMPLETE + build-verified. 060 can now move ChartRenderer + the 3 self-fetch containers' *presentational* halves are already in @spaarke/visuals; 060 finishes the repoint (close the 3 util shims logger/cardConfigResolver/trendAnalysis, move ChartRenderer if NFR-05 allows).
+**Active task**: VHVU-090 — Project wrap-up (lessons-learned, test-diet, repo-cleanup)
+**Status**: not-started — **BLOCKED on VHVU-061 owner UAT sign-off**
+**Phase**: — (wrap-up)
+**Next action**: Once the owner imports v1.4.37 to DEV1 and signs off UAT (061), run VHVU-090: wrap-up notes + `/test-diet` (reconcile the moved-component tests → relocate into @spaarke/visuals' own harness) + repo cleanup + final PR.
 
-### VHVU-050 outcome (2026-07-12) — COMPLETE + VERIFIED
-- **Inverted data flow** for the 3 self-fetch visuals. Each is now a pure presentational component in `@spaarke/visuals` + a thin PCF-side data-fetching container (existing file names kept, so `ChartRenderer` imports are unchanged):
-  - `@spaarke/visuals/src/components/CalendarVisual.tsx` (pure; `events` + `detailedEvents` + `fetchError` props) ← container `control/components/CalendarVisual.tsx` (owns fetch + `mapRecordToEvent`, re-exports `ICalendarEvent`).
-  - `@spaarke/visuals/src/components/DueDateCard.tsx` (pure; `cardProps` + `loading`/`error` props) ← container `control/components/DueDateCard.tsx` (exports `DueDateCardVisual`).
-  - `@spaarke/visuals/src/components/DueDateCardList.tsx` (pure; `cards` + `loading`/`error` + `navigatingId` props) ← container `control/components/DueDateCardList.tsx` (exports `DueDateCardListVisual`; owns `window.Xrm` nav).
-- **ViewDataService split** (pure vs executor): pure FetchXML-string helpers → NEW `control/services/fetchXmlBuilders.ts` (`injectContextFilter`, `injectRequiredAttributes`, `applyMaxItems`, `substituteParameters`, `ISubstitutionParams`); executors stay in `ViewDataService.ts`, which **re-exports** the pure helpers so `DataAggregationService` + the containers keep their `from './ViewDataService'` import paths.
-- **DIRECTIONAL DEVIATION from POML step 1** (noted per §8.5): POML said move pure FetchXML helpers *into @spaarke/visuals*. Kept them **PCF-side** in `fetchXmlBuilders.ts` instead — the project CLAUDE.md non-negotiable is "@spaarke/visuals is presentational only — no FetchXML", and after the refactor NOTHING in @spaarke/visuals consumes them (only the PCF containers do). Split is still "pure (fetchXmlBuilders) vs executor (ViewDataService)"; goal + acceptance-criteria satisfied without breaching the binding non-negotiable.
-- **Verified**: `@spaarke/visuals` `tsc --noEmit` green; the 3 moved visuals grep-clean of webApi/Xrm/FetchXML/ComponentFramework (NFR-05); VisualHost `build:prod` green, bundle **762 KiB**, leak-free (PublicClientApplication=0, SdapClient=0), cleanGuid intact (`trim().toLowerCase()`=1), footer v1.4.36=1; service tests **48/48 pass** (ConfigurationLoader + DataAggregationService — proves the ViewDataService re-export chain).
-- **Behavior-preserving** (owner-confirmed constraint): changed WHERE the fetch happens, not WHAT renders. Re-UAT the Calendar day-detail popover + DueDate cards at VHVU-061.
+### Session status (2026-07-12) — B3/B4/B5 COMPLETE + committed
+| Task | State | Commit |
+|---|---|---|
+| VHVU-050 self-fetch → props-in + ViewDataService split | ✅ | c8f2d159a |
+| Test-harness repair (was 0 runnable → 131 pass) | ✅ | 0947d2987 |
+| VHVU-060 repoint to @spaarke/visuals + close 2 shims | ✅ | 83b11a4ba |
+| VHVU-061 bump v1.4.37 + build + pack | ✅ packed | e676f458e |
+| VHVU-070 ADR-012 amendment (concise + full) | ✅ | 738b4a1b1 |
 
-### KNOWN FOLLOW-UPS
-- **Test harness (VHVU-090 / test-diet)**: the VisualHost component test suite is blocked by a **pre-existing** `@testing-library/react` TS2305 (`screen`/`fireEvent` not exported) that stops ALL component tests (moved + stayed) before they run — unrelated to this refactor. Pure-visual tests (Calendar/DueDate props-in states) belong in @spaarke/visuals' own jest harness at 090, same bucket as the 6 already-moved component tests. Existing `control/components/__tests__/CalendarVisual.test.tsx` still targets the container (re-exports) and will pass once the harness is fixed.
-- **ADR-044 (pre-existing observation)**: the DueDateCard/DueDateCardList containers still hand-roll `.replace(/[{}]/g,'')` on GUIDs inside FetchXML building (relocated verbatim, not new). Behavior-preserving kept it as-is; candidate for a future `cleanGuid` adoption, out of VHVU-050 scope.
+### VHVU-061 — DEPLOY HANDOFF (owner-driven)
+- **Packed ZIP**: `src/client/pcf/VisualHost/Solution/bin/VisualHostSolution_v1.4.37.zip` (owner uploads/imports).
+- Followed `/pcf-deploy`: 5-location version bump verified; prebuild:prod (ensure-dist-fresh) ran; fresh `build:prod` (762 KiB); built ControlManifest.xml == solution copy; bundle+styles copied; packed via pack.ps1; ZIP verified to contain v1.4.37; no description-key apostrophes. Target env = **SPAARKE DEV 1**.
+- Custom-page host: if control shows old version after import → Maker republish (File→Save→Publish) + hard refresh.
+- **UAT plan** (behavior-preserving → everything must match v1.4.36): Gate 0 footer v1.4.37; Gate 1 all 12 visual types render; Gate 2 the 3 refactored visuals (Calendar day-detail popover + Copy; DueDateCard date/color; DueDateCardList → event modal 80%×80%); Gate 3 dark mode (ADR-021 tokens); Gate 4 drill-through + CardChrome expand + AI sparkle.
+- **Owner sign-off pending** → then 061 ✅.
 
-### Deployed state (stable — no redeploy for 050)
-- **v1.4.36 is live on SPAARKE DEV 1**, UAT PASSED. VHVU-050 is a source refactor with a byte-similar bundle (762 vs 761 KiB); the 061 deploy carries it to dev when owner-gated.
+### Test-harness fix (durable — the "CI issue" the owner flagged)
+Root causes (both pre-existing, masked): (1) `@testing-library/react` v16 needs peer `@testing-library/dom` (never installed → TS2305 screen/fireEvent); (2) `@fluentui/react-context-selector` needs `scheduler` (not installed). Fix: installed both + added React/react-dom/scheduler singleton `moduleNameMapper` (pure visuals import @fluentui/React from the sibling package → force single copies, avoid Invalid-hook-call). Result **9/9 suites, 131 tests**. Relocating the moved-component tests into @spaarke/visuals' OWN harness is the VHVU-090 test-diet item.
 
-### Quick Recovery
-| Field | Value |
-|---|---|
-| Done | Phase A (001–031 deployed) + B1 (040) + B2 (041, 042) + **B3 (050 self-fetch refactor)** — all committed + build-verified |
-| Next | **VHVU-060** repoint + verify → 070 (ADR-012 amend, .claude/ main-session-only) → 061 (deploy+UAT) → 090 (wrap-up + test-diet) |
-| Gates awaiting owner | 004 (opt deploy), 021 + 031 + 061 (UAT) |
+### KNOWN FOLLOW-UPS for VHVU-090
+- **test-diet**: relocate the 6 moved-component tests (BarChart/Donut/Line/MetricCard/MiniTable/StatusDistributionBar) + add pure Calendar/DueDate tests into a jest harness inside @spaarke/visuals (currently they run cross-package from VisualHost).
+- **ADR-044 (pre-existing)**: DueDateCard/List containers hand-roll `.replace(/[{}]/g,'')` on GUIDs in FetchXML (relocated verbatim in 050); candidate for `cleanGuid` adoption, out of scope so far.
+- **logger facade**: `control/utils/logger.ts` intentionally retained (documented) — NOT a pending shim.
+
+### Guardrails (unchanged)
+- Keep @spaarke/visuals at **@types/react@18** (the cast-free pin).
+- @spaarke/visuals is presentational-only (no Xrm/WebAPI/FetchXML) — now ADR-sanctioned (ADR-012 amendment, VHVU-070).
+- Branch ahead of origin/master; behavior-preserving refactor — v1.4.36 stays live until owner imports v1.4.37.
 
 ## Progress
-- [x] Phase A (001–031)
-- [x] B1 040 scaffold + @18 fix
-- [x] B2 041 move + 042 reconcile
-- [x] **B3 050 self-fetch → props-in refactor + ViewDataService split**
-- [ ] 060 repoint (move ChartRenderer, close 3 util shims) → 070 ADR-012 amend → 061 deploy/UAT → 090 wrap-up (+ test-diet)
+- [x] Phase A (001–031 deployed)
+- [x] B1 040 · B2 041/042 · **B3 050** · **B4 060** · **B5 070**
+- [x] Test harness repaired (131 tests green)
+- [ ] **VHVU-061 owner import + UAT sign-off** (packed, handed off)
+- [ ] VHVU-090 wrap-up (+ /test-diet) — after 061
 
 ## Notes
-- Deploy/UAT tasks are outward-facing → owner go + live env.
-- VHVU-070 (ADR-012 amendment) is `.claude/` main-session-only — never a sub-agent.
-- **Keep @spaarke/visuals at @types/react@18** (the pin that made the extraction cast-free).
+- VHVU-070 was `.claude/` main-session-only — done in main session (no sub-agent).
+- Deploy/UAT are owner-gated outward-facing steps.
