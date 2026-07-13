@@ -28,7 +28,7 @@ This directory contains AI-optimized versions of Architecture Decision Records. 
 | ADR-007 | SpeFileStore facade | No Graph SDK types leak above facade | Accepted |
 | ADR-008 | Endpoint filters for auth | No global auth middleware | Accepted |
 | ADR-010 | DI minimalism | ≤15 non-framework DI registrations | Accepted |
-| ADR-012 | Shared component library | `@spaarke/ui-components` as single source of truth; abstracted services via `IDataService` | Accepted (Revised 2026-03-19) |
+| ADR-012 | Shared component library | `@spaarke/ui-components` (UX + abstracted-I/O `IDataService`) + `@spaarke/visuals` (presentational data-viz sibling, 2026-07-12 amendment); no ad-hoc per-project viz libs | Accepted (Amended 2026-07-12) |
 | ADR-013 | AI Architecture | Extend BFF (4 extraction criteria); PublicContracts facade discipline; **canonical verb = capability invocation `invoke(bindingId, args)` (2026-07-05 amendment); `IInvokePlaybookAi` grandfathered legacy shim — no new consumers** | Accepted (amended 2026-07-05) |
 | ADR-021 | Fluent UI v9 Design System | All UI uses Fluent v9; React 19 for Code Pages; dark mode required | Accepted |
 | ADR-022 | PCF Platform Libraries | PCF uses React 16/17 platform-provided; Code Pages use React 19 bundled | Accepted |

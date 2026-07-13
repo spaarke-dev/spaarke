@@ -1,7 +1,7 @@
 <task id="VHVU-070" project="VisualHost Decoupling & @spaarke/visuals Extraction">
   <metadata>
     <title>Author ADR-012 amendment (concise + full)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <phase>B5</phase>
     <estimated-effort>3 hours</estimated-effort>
     <tags>adr, docs, governance</tags>

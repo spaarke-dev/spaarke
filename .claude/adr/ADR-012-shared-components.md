@@ -1,8 +1,8 @@
 # ADR-012: Shared Component Library (Concise)
 
-> **Status**: Accepted (Revised 2026-03-19)
+> **Status**: Accepted (Amended 2026-07-12)
 > **Domain**: Frontend Architecture
-> **Last Updated**: 2026-03-19
+> **Last Updated**: 2026-07-12 (Amendment: `@spaarke/visuals` presentational sibling — see below)
 
 ---
 
@@ -11,6 +11,38 @@
 Maintain a shared TypeScript/React component library at `src/client/shared/Spaarke.UI.Components/` as the **single source of truth** for all reusable UI — components, hooks, services, types, and themes. The library is consumed by PCF controls (React 16/17), Code Pages (React 19), and the Power Pages SPA.
 
 **Rationale**: Prevents code duplication, ensures consistent UX, and centralizes maintenance. All wizard, dialog, shell, and grid components belong in the shared library — not duplicated per-solution.
+
+---
+
+## Amendment (2026-07-12): `@spaarke/visuals` — Governed Presentational Sibling Package
+
+> Path B amendment per [CLAUDE.md §6.5](../../CLAUDE.md). Introduced by the `visual-host-version-update` project. Sanctions a SECOND governed shared package alongside `@spaarke/ui-components` and restates the anti-fragmentation boundary for data-visualization primitives.
+
+**Decision**: `src/client/shared/Spaarke.Visuals/` (`@spaarke/visuals`) is a **sanctioned, canonical shared package** — the single home for reusable **presentational data-visualization primitives** (KPI/metric cards, bar/line/donut charts, gauges, distribution bars, calendar grid, due-date cards, mini-table). It is a **sibling** to `@spaarke/ui-components`, not a fork of it.
+
+**Why a separate package instead of folding into `@spaarke/ui-components`** — the default per root [CLAUDE.md §11](../../CLAUDE.md) is to *extend, not add*; this addition clears that bar for three concrete reasons:
+
+1. **Heavyweight-dependency quarantine.** The viz primitives require `@fluentui/react-charting` (a large dependency). Folding them into `@spaarke/ui-components` would force **every** ui-components consumer (wizards, dialogs, grids) to pull `react-charting` transitively. Isolating it in `@spaarke/visuals` keeps the charting weight opt-in.
+2. **Strict presentational purity.** `@spaarke/visuals` is **data-agnostic**: no `Xrm` / `WebAPI` / `ComponentFramework` / FetchXML — the **host binds data** and passes it in as props. This is a tighter contract than `@spaarke/ui-components` (which sanctions abstracted-I/O services via `IDataService`). Mixing the two contracts in one package blurs the boundary.
+3. **`@types/react@18` pin for cross-surface JSX safety.** The package pins `@types/react@18`. React 18's `ReactNode` is a subset of React 19's, so an `@18`-typed component is assignable into **both** a React-16 PCF host and a React-19 Code Page with **no `TS2786`** JSX skew — the VisualHost extraction needed zero cast workarounds. (Contrast: importing `@spaarke/ui-components` **source**, typed `@types/react@19`, into a PCF triggers the drift documented in [ADR-022](ADR-022-pcf-platform-libraries.md#shared-library-react-version-drift).)
+
+### Restated anti-fragmentation boundary (BINDING)
+
+- **`@spaarke/visuals` is THE canonical home for data-viz primitives.** No solution, Code Page, or PCF may spin up a competing/ad-hoc visualization library or re-implement chart/card primitives locally. Extend `@spaarke/visuals` instead.
+- **Data binding stays with the host.** Consumers fetch data (PCF `webAPI`, Code Page `Xrm.WebApi` / BFF) and pass it to `@spaarke/visuals` components as props. Fetch / query / FetchXML logic MUST NOT enter the package.
+- **Card chrome, tool registries, and drill-through stay host-side** and config-driven (e.g. the VisualHost PCF's `CardChrome` + `ClickActionHandler`), composing shared components where they exist.
+
+### When a NEW governed sibling package is justified (vs extending an existing one)
+
+Adding another shared package is a high bar. **All three** MUST hold — otherwise extend `@spaarke/ui-components` or `@spaarke/visuals`:
+
+1. **Distinct contract** — a cohesive capability whose contract differs from the existing packages' (e.g. data-agnostic presentational viz vs abstracted-I/O UX services).
+2. **Quarantine-worthy dependency** — pulls a heavyweight/specialized dependency that existing-package consumers should not inherit transitively.
+3. **Cross-surface reuse** — consumed (or credibly about to be) by 2+ surfaces (PCF / Code Page / SPA).
+
+Absent all three, the root [CLAUDE.md §11](../../CLAUDE.md) three-question reuse test applies: extend the existing package.
+
+**Sanctioned shared packages (as of this amendment)**: `@spaarke/ui-components` (UX components + abstracted-I/O services), `@spaarke/visuals` (presentational data-viz), `@spaarke/auth` (auth), plus the domain component libraries (`@spaarke/events-components`, etc.). New siblings require an ADR amendment.
 
 ---
 
@@ -219,4 +251,4 @@ import { FindSimilarDialog, WizardShell } from "@spaarke/ui-components";
 
 ---
 
-**Lines**: ~217
+**Lines**: ~254
