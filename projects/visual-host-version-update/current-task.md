@@ -1,9 +1,16 @@
 # Current Task
 
-**Active task**: VHVU-090 — Project wrap-up (lessons-learned, test-diet, repo-cleanup)
-**Status**: not-started — **BLOCKED on VHVU-061 owner UAT sign-off**
+**Active task**: VHVU-090 — Project wrap-up (test-diet + relocation DONE; lessons-learned optional)
+**Status**: test-diet + test relocation complete; awaiting push/merge of this follow-up
 **Phase**: — (wrap-up)
-**Next action**: Once the owner imports v1.4.37 to DEV1 and signs off UAT (061), run VHVU-090: wrap-up notes + `/test-diet` (reconcile the moved-component tests → relocate into @spaarke/visuals' own harness) + repo cleanup + final PR.
+**Next action**: Push this follow-up branch → new PR → merge. (VHVU-061 UAT: owner confirmed v1.4.37 "looks good".)
+
+### VHVU-090 test-diet + relocation (2026-07-13) — DONE
+- **`/code-review`**: CLEAN (quality improved; ADR-012/021/028 compliant; 2 pre-existing suggestions — ADR-044 hand-rolled GUID, one 607-line presentational file).
+- **`/test-diet`**: report at [`notes/test-diet-report.md`](notes/test-diet-report.md). 0 scaffolding to delete; 0 ambiguous. One finding: 6 chart-component tests were PATH-VIOLATIONs (tested `@spaarke/visuals` components but lived in the PCF).
+- **Relocation executed**: bootstrapped a Jest harness in `@spaarke/visuals` (`jest.config.cjs` + `babel.config.cjs` + `jest.setup.ts` + `tsconfig.jest.json`; `.cjs` because the package is `"type": "module"`; added test devDeps incl. `@testing-library/dom` + `scheduler`; `tsconfig.json` excludes tests from the prod `tsc` build). `git mv`'d the 6 tests to `src/components/__tests__/`, fixed imports (`../X` + `../../types`).
+- **Verified**: `@spaarke/visuals` **71 tests / 6 suites** pass; VisualHost **60 tests / 3 suites** (CalendarVisual container + 2 services) pass; `@spaarke/visuals` `tsc --noEmit` green. Same 131-test coverage, correctly homed. VisualHost bundle unchanged (no runtime source touched) → no redeploy.
+- VisualHost jest `moduleNameMapper` React singletons **retained** — still load-bearing for the `CalendarVisual` container test's cross-package import of the pure component.
 
 ### Session status (2026-07-12) — B3/B4/B5 COMPLETE + committed
 | Task | State | Commit |

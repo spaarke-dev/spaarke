@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { render, screen } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
-import { BarChart } from '../../../../../shared/Spaarke.Visuals/src/components/BarChart';
+import { LineChart } from '../LineChart';
 import type { IAggregatedDataPoint } from '../../types';
 
 const renderWithTheme = (component: React.ReactElement, theme = webLightTheme) => {
@@ -9,41 +9,41 @@ const renderWithTheme = (component: React.ReactElement, theme = webLightTheme) =
 };
 
 const mockData: IAggregatedDataPoint[] = [
-  { label: 'Q1', value: 100, fieldValue: 'q1' },
-  { label: 'Q2', value: 150, fieldValue: 'q2' },
-  { label: 'Q3', value: 120, fieldValue: 'q3' },
-  { label: 'Q4', value: 180, fieldValue: 'q4' },
+  { label: 'Jan', value: 100, fieldValue: 'jan' },
+  { label: 'Feb', value: 120, fieldValue: 'feb' },
+  { label: 'Mar', value: 90, fieldValue: 'mar' },
+  { label: 'Apr', value: 150, fieldValue: 'apr' },
+  { label: 'May', value: 130, fieldValue: 'may' },
 ];
 
-describe('BarChart', () => {
+describe('LineChart', () => {
   describe('rendering', () => {
     it('renders with required props', () => {
-      renderWithTheme(<BarChart data={mockData} />);
+      renderWithTheme(<LineChart data={mockData} />);
 
-      // Chart should be present (Fluent charting renders SVG)
       expect(document.querySelector('svg')).toBeInTheDocument();
     });
 
     it('renders with title', () => {
-      renderWithTheme(<BarChart data={mockData} title="Quarterly Sales" />);
+      renderWithTheme(<LineChart data={mockData} title="Monthly Trend" />);
 
-      expect(screen.getByText('Quarterly Sales')).toBeInTheDocument();
+      expect(screen.getByText('Monthly Trend')).toBeInTheDocument();
     });
 
     it('renders empty state when no data', () => {
-      renderWithTheme(<BarChart data={[]} title="Empty Chart" />);
+      renderWithTheme(<LineChart data={[]} title="Empty Chart" />);
 
       expect(screen.getByText('No data available')).toBeInTheDocument();
     });
 
-    it('renders horizontal orientation', () => {
-      renderWithTheme(<BarChart data={mockData} orientation="horizontal" />);
+    it('renders line variant', () => {
+      renderWithTheme(<LineChart data={mockData} variant="line" />);
 
       expect(document.querySelector('svg')).toBeInTheDocument();
     });
 
-    it('renders vertical orientation (default)', () => {
-      renderWithTheme(<BarChart data={mockData} orientation="vertical" />);
+    it('renders area variant', () => {
+      renderWithTheme(<LineChart data={mockData} variant="area" />);
 
       expect(document.querySelector('svg')).toBeInTheDocument();
     });
@@ -53,37 +53,35 @@ describe('BarChart', () => {
     it('accepts onDrillInteraction callback', () => {
       const mockDrill = jest.fn();
 
-      renderWithTheme(<BarChart data={mockData} onDrillInteraction={mockDrill} drillField="quarter" />);
+      renderWithTheme(<LineChart data={mockData} onDrillInteraction={mockDrill} drillField="month" />);
 
-      // Chart should render with drill capability
       expect(document.querySelector('svg')).toBeInTheDocument();
     });
   });
 
   describe('theme support', () => {
     it('renders correctly in dark theme', () => {
-      renderWithTheme(<BarChart data={mockData} title="Dark Theme Chart" />, webDarkTheme);
+      renderWithTheme(<LineChart data={mockData} title="Dark Theme Line" />, webDarkTheme);
 
-      expect(screen.getByText('Dark Theme Chart')).toBeInTheDocument();
-      expect(document.querySelector('svg')).toBeInTheDocument();
+      expect(screen.getByText('Dark Theme Line')).toBeInTheDocument();
     });
   });
 
   describe('props', () => {
     it('respects showLegend prop', () => {
-      renderWithTheme(<BarChart data={mockData} showLegend={true} />);
+      renderWithTheme(<LineChart data={mockData} showLegend={true} />);
 
       expect(document.querySelector('svg')).toBeInTheDocument();
     });
 
     it('respects height prop', () => {
-      const { container } = renderWithTheme(<BarChart data={mockData} height={400} />);
+      const { container } = renderWithTheme(<LineChart data={mockData} height={350} />);
 
       expect(container.firstChild).toBeInTheDocument();
     });
 
-    it('respects responsive prop', () => {
-      renderWithTheme(<BarChart data={mockData} responsive={false} />);
+    it('respects lineColor prop', () => {
+      renderWithTheme(<LineChart data={mockData} lineColor="#FF5733" />);
 
       expect(document.querySelector('svg')).toBeInTheDocument();
     });
