@@ -574,6 +574,31 @@ export function ContextPaneController(): React.JSX.Element {
       return;
     }
 
+    // FIX D (Wave 4) — Compose tab activation auto-opens the Execution Trace.
+    //
+    // When the newly-active workspace tab is a Compose tab, auto-select the
+    // Execution Trace context tool (the transparency surface showing which
+    // tools / knowledge / skills the AI deploys). We detect a Compose tab with
+    // the SAME discriminant WorkspacePane uses for single-tab reuse: widgetType
+    // "workspace" AND (widgetData.compose present OR widgetData.layoutName ===
+    // "Compose"). Typed narrowing — no `any` (ADR-030).
+    //
+    // Owner decision: this is a ONE-SHOT select-on-activate, NOT a lock. We do
+    // NOT force-revert when the user later switches away from Compose or picks
+    // another tool — setSelectedTool persists the user's manual choice to
+    // sessionStorage via useContextTool, so their subsequent selection wins.
+    const composeTab = event.widgetData as
+      | { compose?: unknown; layoutName?: string }
+      | null
+      | undefined;
+    const isComposeTab =
+      workspaceWidgetType === "workspace" &&
+      composeTab != null &&
+      (composeTab.compose != null || composeTab.layoutName === "Compose");
+    if (isComposeTab) {
+      setSelectedTool("execution-trace");
+    }
+
     // Look up the recommended context widget type for this workspace widget.
     const recommendedContextType = getContextWidgetForTab(workspaceWidgetType);
 
@@ -612,7 +637,7 @@ export function ContextPaneController(): React.JSX.Element {
         setActiveWidget(null);
       }
     });
-  }, []));
+  }, [setSelectedTool]));
 
   // ---------------------------------------------------------------------------
   // PaneEventBus dispatcher — kept for non-card workspace events.
