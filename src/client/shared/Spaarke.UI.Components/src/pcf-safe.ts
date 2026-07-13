@@ -46,7 +46,8 @@ export type { SdapApiClientOptions, OnUnauthorizedCallback } from './services/do
 // ─── Types (no React dependency) ────────────────────────────────────────────
 export type { MiniGraphNode, MiniGraphEdge } from './types/MiniGraphTypes';
 export type { ILookupItem } from './types/LookupTypes';
-export type { DrillInteraction } from './types/DrillInteractionTypes';
+// DrillInteraction moved to @spaarke/visuals (VHVU-042). Import it from there:
+//   import type { DrillInteraction } from '@spaarke/visuals/types';
 
 // ─── Utilities (no React dependency) ────────────────────────────────────────
 export { createLogger } from './utils/logger';

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { render, screen } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
-import { BarChart } from '../BarChart';
+import { BarChart } from '../../../../../shared/Spaarke.Visuals/src/components/BarChart';
 import type { IAggregatedDataPoint } from '../../types';
 
 const renderWithTheme = (component: React.ReactElement, theme = webLightTheme) => {

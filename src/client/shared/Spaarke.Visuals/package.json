@@ -1,0 +1,37 @@
+{
+  "name": "@spaarke/visuals",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Presentational chart/visual React components (KPI cards, charts, gauges, distribution bars). Data-agnostic: no Xrm/WebAPI/ComponentFramework/FetchXML — the host binds data. Consumed by the VisualHost PCF and future code-page dashboards.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./components": "./src/components/index.ts",
+    "./types": "./src/types/index.ts",
+    "./utils": "./src/utils/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@fluentui/react-charting": "^5.0.0",
+    "@fluentui/react-components": "^9.0.0",
+    "@fluentui/react-icons": "^2.0.0",
+    "react": "^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0",
+    "react-dom": "^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@fluentui/react-charting": "^5.23.0",
+    "@fluentui/react-components": "^9.46.2",
+    "@fluentui/react-icons": "^2.0.200",
+    "@types/node": "^22.19.19",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.3.3"
+  }
+}

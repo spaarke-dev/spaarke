@@ -1,0 +1,36 @@
+<task id="VHVU-061" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Deploy + UAT visuals parity on dev</title>
+    <status>not-started</status>
+    <phase>B4</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>deploy, uat, pcf</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-060</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Deploy the @spaarke/visuals-backed VisualHost to dev and confirm every visual renders identically to before the extraction, including dark mode and drill-through.</prompt>
+  <role>QA / deployment engineer</role>
+  <goal>Post-extraction VisualHost deployed to dev with full visual + drill-through parity in light and dark.</goal>
+  <constraints>
+    <constraint source="project">Dev only; owner confirmation before import.</constraint>
+    <constraint source="ADR-021">Dark-mode via semantic tokens — verify all visuals.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Bump VisualHost version, pack + import to dev.</step>
+    <step id="2">Smoke-test every visual type (charts, cards, gauge, calendar, due-date, mini-table) against a configured chart definition.</step>
+    <step id="3">Verify dark mode + drill-through/expand.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All visual types render with parity.</criterion>
+    <criterion>Dark mode + drill-through unchanged.</criterion>
+    <criterion>Owner sign-off recorded.</criterion>
+  </acceptance-criteria>
+</task>

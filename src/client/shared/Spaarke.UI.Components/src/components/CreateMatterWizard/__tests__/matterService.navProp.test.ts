@@ -29,7 +29,7 @@ import type { IDataService } from '../../../types/serviceInterfaces';
 // 1. Adapter-level equivalence — toNavPropMap reproduces the map form exactly
 // ---------------------------------------------------------------------------
 
-describe('toNavPropMap — reproduces matter\'s former map-form discovery', () => {
+describe("toNavPropMap — reproduces matter's former map-form discovery", () => {
   it('returns {} for an empty entry set', () => {
     expect(toNavPropMap([])).toEqual({});
   });
@@ -99,11 +99,31 @@ function makeDataService(): {
 
 /** ManyToOneRelationships metadata for sprk_matter (PascalCase nav props). */
 const MATTER_RELATIONSHIPS = [
-  { ReferencingAttribute: 'sprk_mattertype', ReferencingEntityNavigationPropertyName: 'sprk_MatterType', ReferencedEntity: 'sprk_mattertype_ref' },
-  { ReferencingAttribute: 'sprk_practicearea', ReferencingEntityNavigationPropertyName: 'sprk_PracticeArea', ReferencedEntity: 'sprk_practicearea_ref' },
-  { ReferencingAttribute: 'sprk_assignedattorney1', ReferencingEntityNavigationPropertyName: 'sprk_AssignedAttorney1', ReferencedEntity: 'contact' },
-  { ReferencingAttribute: 'sprk_assignedparalegal1', ReferencingEntityNavigationPropertyName: 'sprk_AssignedParalegal1', ReferencedEntity: 'contact' },
-  { ReferencingAttribute: 'sprk_assignedlawfirm1', ReferencingEntityNavigationPropertyName: 'sprk_AssignedLawFirm1', ReferencedEntity: 'sprk_organization' },
+  {
+    ReferencingAttribute: 'sprk_mattertype',
+    ReferencingEntityNavigationPropertyName: 'sprk_MatterType',
+    ReferencedEntity: 'sprk_mattertype_ref',
+  },
+  {
+    ReferencingAttribute: 'sprk_practicearea',
+    ReferencingEntityNavigationPropertyName: 'sprk_PracticeArea',
+    ReferencedEntity: 'sprk_practicearea_ref',
+  },
+  {
+    ReferencingAttribute: 'sprk_assignedattorney1',
+    ReferencingEntityNavigationPropertyName: 'sprk_AssignedAttorney1',
+    ReferencedEntity: 'contact',
+  },
+  {
+    ReferencingAttribute: 'sprk_assignedparalegal1',
+    ReferencingEntityNavigationPropertyName: 'sprk_AssignedParalegal1',
+    ReferencedEntity: 'contact',
+  },
+  {
+    ReferencingAttribute: 'sprk_assignedlawfirm1',
+    ReferencingEntityNavigationPropertyName: 'sprk_AssignedLawFirm1',
+    ReferencedEntity: 'sprk_organization',
+  },
 ];
 
 const BFF_BASE = 'https://example.test';
@@ -114,7 +134,7 @@ describe('MatterService — nav-prop convergence create-payload equivalence (tas
   beforeEach(() => {
     _resetNavPropCacheForTests();
     globalThis.fetch = jest.fn(async (url: string) => {
-      if (typeof url === 'string' && url.includes("sprk_matter")) {
+      if (typeof url === 'string' && url.includes('sprk_matter')) {
         return { ok: true, status: 200, json: async () => ({ value: MATTER_RELATIONSHIPS }) } as unknown as Response;
       }
       return { ok: false, status: 404, json: async () => ({ value: [] }) } as unknown as Response;
@@ -174,7 +194,9 @@ describe('MatterService — nav-prop convergence create-payload equivalence (tas
   it('falls back to the column logical name when metadata discovery yields nothing (unchanged behavior)', async () => {
     // Force discovery to return [] → toNavPropMap({}) → `map[col] ?? col`
     // falls back to the bare column name, exactly as the old code did.
-    globalThis.fetch = jest.fn(async () => ({ ok: false, status: 500, json: async () => ({}) }) as unknown as Response) as unknown as typeof fetch;
+    globalThis.fetch = jest.fn(
+      async () => ({ ok: false, status: 500, json: async () => ({}) }) as unknown as Response
+    ) as unknown as typeof fetch;
 
     const { dataService, createCalls } = makeDataService();
     const service = new MatterService(dataService, jest.fn(), BFF_BASE);

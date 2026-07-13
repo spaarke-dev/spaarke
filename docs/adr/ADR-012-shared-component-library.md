@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** (Revised) |
+| Status | **Accepted** (Amended) |
 | Date | 2025-10-03 |
-| Updated | 2026-03-19 |
+| Updated | 2026-07-12 |
 | Authors | Spaarke Engineering |
 | Sprint | Sprint 5 - Universal Dataset PCF |
 
@@ -66,6 +66,54 @@ The library provides:
 | **No hard-coded styling** | No hard-coded colors — use semantic tokens and theming |
 | **Dark-mode compatible** | Everything must render correctly in dark mode and high-contrast |
 | **Accessibility** | WCAG-aligned behavior (keyboard nav, focus states, contrast) |
+
+---
+
+## Amendment (2026-07-12): `@spaarke/visuals` — Governed Presentational Sibling Package
+
+> **Path B amendment** per [CLAUDE.md §6.5](../../CLAUDE.md) (ADR Conflict Resolution — the ADR is amended because context changed, not silently deviated from). Introduced by the `visual-host-version-update` project, which extracted the VisualHost PCF's visual primitives into a dedicated shared package. The concise companion ([.claude/adr/ADR-012-shared-components.md](../../.claude/adr/ADR-012-shared-components.md)) carries the same decision.
+
+### Decision
+
+`src/client/shared/Spaarke.Visuals/` (`@spaarke/visuals`) is a **sanctioned, canonical shared package** — the single home for reusable **presentational data-visualization primitives**: KPI/metric cards, metric-card matrix, bar/line/area/donut charts, gauges, horizontal-stacked and status-distribution bars, calendar grid, due-date card + list, mini-table, and their formatting/color/trend utilities. It is a **sibling** to `@spaarke/ui-components`, governed by this ADR — not a fork, and not a per-project one-off.
+
+The original ADR-012 named `@spaarke/ui-components` as *the* single source of truth for reusable UI. That remains true for UX components and abstracted-I/O services. This amendment recognizes that **data-visualization primitives are a distinct concern** best served by a second governed package, and records why.
+
+### Why a separate package rather than folding into `@spaarke/ui-components`
+
+The default per root [CLAUDE.md §11](../../CLAUDE.md) (Component Justification — Default to Reuse) is to **extend an existing package, not add a new one**. This addition clears that bar for three concrete reasons — each names a failure mode that folding-in would cause:
+
+1. **Heavyweight-dependency quarantine.** The viz primitives depend on `@fluentui/react-charting` — a large charting dependency. If they lived in `@spaarke/ui-components`, **every** ui-components consumer (every wizard, dialog, grid, chat surface across PCF / Code Page / SPA) would pull `react-charting` transitively into its bundle, whether or not it renders a chart. A dedicated package makes the charting weight **opt-in**: only surfaces that import `@spaarke/visuals` pay for it. *Failure mode avoided: bundle bloat across ~30 unrelated consumers.*
+2. **Strict presentational purity (a tighter contract than ui-components).** `@spaarke/visuals` is **data-agnostic**: it contains no `Xrm`, `WebAPI`, `ComponentFramework`, or FetchXML — the **host binds data** and passes it in as props. `@spaarke/ui-components` deliberately sanctions *abstracted-I/O* services (`IDataService`, upload/navigation coordinators). Housing a no-I/O-at-all contract and an abstracted-I/O contract in one package blurs the "what may this package touch?" boundary that keeps both portable. *Failure mode avoided: erosion of the presentational boundary, letting data-access creep into visual components.*
+3. **`@types/react@18` pin for cross-surface JSX safety.** The package pins `@types/react@18`. Because React 18's `ReactNode` is a **subset** of React 19's, an `@18`-typed component is assignable into **both** a React-16 PCF host and a React-19 Code Page with **no `TS2786`** ("cannot be used as a JSX component") skew. The VisualHost extraction moved 15+ components with **zero** cast workarounds as a result. Importing `@spaarke/ui-components` **source** (typed `@types/react@19`) into a PCF, by contrast, triggers exactly that drift — documented at [ADR-022 § Shared-Library React-Version Drift](./ADR-022-pcf-platform-libraries.md#shared-library-react-version-drift). Pinning the viz package at `@18` sidesteps it structurally. *Failure mode avoided: per-import `as unknown as React.ComponentType` casts multiplying across every consumer.*
+
+### Restated anti-fragmentation boundary (BINDING)
+
+This amendment is **not** a license to proliferate visualization libraries. It draws a firm line:
+
+- **`@spaarke/visuals` is THE canonical home for data-viz primitives.** No solution, Code Page, or PCF may spin up a competing / ad-hoc visualization library, vendor a second charting stack, or re-implement chart / card / gauge primitives locally. If a needed primitive is missing, **extend `@spaarke/visuals`**.
+- **Data binding stays with the host.** Consumers fetch their own data (PCF `webAPI`; Code Page `Xrm.WebApi` or BFF) and pass it to `@spaarke/visuals` components as props. Fetch / query / FetchXML / aggregation logic MUST NOT enter the package. (The VisualHost PCF demonstrates the pattern: PCF-side containers own the fetch + FetchXML; the package components are pure props-in.)
+- **Card chrome, tool registries, and drill-through stay host-side** and config-driven — e.g. the VisualHost PCF's `CardChrome`, tool registry, and `ClickActionHandler` drill-through wired via an `onDrillInteraction` callback — composing shared components (e.g. `AiSummaryPopover`) where they exist.
+
+### When a NEW governed sibling package is justified (vs extending an existing one)
+
+Adding a shared package (beyond `@spaarke/ui-components`, `@spaarke/visuals`, `@spaarke/auth`, and the domain component libraries) is a **high bar** and requires an ADR amendment. **All three** of the following MUST hold; if any fails, extend an existing package instead:
+
+1. **Distinct contract** — a cohesive capability whose contract materially differs from existing packages' (e.g. data-agnostic presentational viz vs abstracted-I/O UX services vs auth). "It's a different feature area" is **not** sufficient; the *contract* must differ.
+2. **Quarantine-worthy dependency** — it pulls a heavyweight or specialized dependency that existing-package consumers should not inherit transitively.
+3. **Cross-surface reuse** — it is consumed (or credibly about to be) by **2+ surfaces** (PCF / Code Page / SPA).
+
+Absent all three, apply the root [CLAUDE.md §11](../../CLAUDE.md) three-question reuse test and **extend** `@spaarke/ui-components` or `@spaarke/visuals`.
+
+### Consumption + contract summary
+
+| Aspect | `@spaarke/ui-components` | `@spaarke/visuals` |
+|---|---|---|
+| Purpose | UX components + abstracted-I/O services (wizards, dialogs, grids, shells) | Presentational data-visualization primitives |
+| Data access | Abstracted-I/O allowed (`IDataService`, adapters) | **None** — host binds data, props-in only |
+| Heavy deps | Lexical (RichTextEditor), etc. | `@fluentui/react-charting` (quarantined here) |
+| `@types/react` | `19` (Code-Page-first; PCF uses deep imports + boundary casts) | **`18`** (subset-safe for both R16 PCF and R19 Code Pages) |
+| React peer range | `>=16.14.0` | `^16.14.0 \|\| ^17 \|\| ^18 \|\| ^19` |
 
 ---
 
@@ -382,3 +430,4 @@ Use as a **pass/fail** review gate for PRs that add or change shared components.
 | 2026-02-23 | 1.2 | Updated for two-tier architecture; PCF React 16, Code Pages React 18; widened peerDeps | Spaarke Engineering |
 | 2026-03-10 | 1.3 | Updated component inventory to v2.0.0. Added PCF deep import pattern. Added callback-based props constraint. | Spaarke Engineering |
 | 2026-03-19 | 2.0 | **Major revision**: Replaced rigid "zero service dependencies / callback-based only" constraint with **service portability tiers** and `IDataService` abstraction pattern. Added domain wizard components (CreateMatter, CreateProject, etc.) to shared library inventory as extraction targets. Added IDataService, IUploadService, INavigationService interface definitions. Updated React version to 19 per ADR-021. Added Power Pages SPA as consumer. Added adapter pattern examples (Xrm, BFF, mock). Updated compliance checklist for service architecture. | Spaarke Engineering |
+| 2026-07-12 | 2.1 | **Amendment (path B, CLAUDE.md §6.5)**: Sanctioned `@spaarke/visuals` as a governed presentational sibling package (data-viz primitives; `@fluentui/react-charting` quarantine; `@types/react@18` pin for cross-surface JSX safety). Restated the anti-fragmentation boundary (no ad-hoc per-project viz libs; data binding + drill-through stay host-side) and defined the 3-test bar for justifying any new governed sibling package. Introduced by `visual-host-version-update`. | Spaarke Engineering |

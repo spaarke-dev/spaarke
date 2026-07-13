@@ -1,0 +1,40 @@
+<task id="VHVU-070" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Author ADR-012 amendment (concise + full)</title>
+    <status>complete</status>
+    <phase>B5</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>adr, docs, governance</tags>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-060</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Amend ADR-012 (path B per CLAUDE.md 6.5) to sanction @spaarke/visuals as a governed canonical sibling package and restate the anti-fragmentation boundary: data-viz primitives live in @spaarke/visuals; no solution/PCF spins up a competing viz lib. This is a .claude/ write — MAIN SESSION ONLY (sub-agents cannot write .claude/).</prompt>
+  <role>Architecture doc author</role>
+  <goal>ADR-012 amended in both the concise (.claude/adr) and full (docs/adr) forms, consistent with each other and with the sibling-package decision.</goal>
+  <constraints>
+    <constraint source="CLAUDE.md-6.5">Path B amendment: concise + full versions; merge alongside dependent code.</constraint>
+    <constraint source="CLAUDE.md-3">.claude/ writes are main-session only — do NOT dispatch to a sub-agent.</constraint>
+    <constraint source="design">Amendment must (1) sanction @spaarke/visuals, (2) restate: no ad-hoc per-project viz libs; heavyweight-dep quarantine is the trigger for a separate viz package.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>docs/adr/</file>
+      <file>projects/visual-host-version-update/design.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Draft the amendment text (sanction @spaarke/visuals + restated boundary + the @fluentui/react-charting quarantine rationale).</step>
+    <step id="2">Apply to the concise `.claude/adr/ADR-012-*` and the full `docs/adr/ADR-012-*` (main session).</step>
+    <step id="3">Cross-check consistency with root CLAUDE.md §11 and the sibling-package list.</step>
+    <step id="4">Add a CHANGELOG entry if the amendment touches procedure surfaces.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>ADR-012 amended (concise + full), consistent.</criterion>
+    <criterion>@spaarke/visuals sanctioned; anti-fragmentation boundary restated.</criterion>
+    <criterion>Authored in the main session (no sub-agent .claude/ write).</criterion>
+  </acceptance-criteria>
+</task>
