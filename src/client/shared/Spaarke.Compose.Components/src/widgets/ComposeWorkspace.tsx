@@ -1538,6 +1538,19 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // A freshly-mounted upload is unsaved by definition — mark dirty so Save
         // (create-on-save, task 013) is enabled immediately.
         setIsDirty(true);
+        // Wave 4 (spaarkeai-compose-r2, end-to-end revise): register THIS upload mount's document
+        // session with the host so `ChatSession.ActiveDocument.DocumentSessionId` back-fills — the
+        // Browse (line ~1383) and stored-doc (line ~1432) paths already do this, but the assistant
+        // upload-mount door did NOT, so a chat-uploaded doc auto-mounted for "revise this document"
+        // never established the routing target and a subsequent typed/chip revise fell back to the
+        // chat session (narrated as prose instead of redlined). `requestUploadMount` already set
+        // state.sessionId to `uploadRef.sessionId`; thread that same id. The host dedups the upload
+        // (pointer-only re-assert; no duplicate ChatSessionFile). No-op on a standalone mount.
+        void registerActiveDocumentRef.current?.({
+          docxBytes: bytes.buffer,
+          fileName: payload.fileName ?? uploadRef.fileName,
+          documentSessionId: uploadRef.sessionId,
+        });
       } catch (err) {
         if (ac.signal.aborted) return;
         const message = err instanceof Error ? err.message : String(err);

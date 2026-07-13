@@ -67,6 +67,13 @@ import { formatComposeActionResultMarkdown } from "./composeResultFormat";
 import { makeLocalAssistantMessage, makeComposeEditControlsMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
 import {
+  detectReviseThisDocumentIntent,
+  REVISE_MOUNT_ASK_MESSAGE,
+  type RevisionIntent,
+} from "./composeReviseRouting";
+import { ReviseIntentChips } from "./ReviseIntentChips";
+import { useCapabilityDiscovery } from "./useCapabilityDiscovery";
+import {
   AuthLoadingState,
   PlaybookHeaderStrip,
   PlaybookToast,
@@ -95,8 +102,18 @@ export {
   REVISE_DISAMBIGUATION_MESSAGE,
   REVISION_INTENTS,
   REVISION_INTENT_SUGGESTIONS,
+  // Wave 4 (end-to-end revise) — natural-language "revise this document" detection + chip surface.
+  detectReviseThisDocumentIntent,
+  REVISE_MOUNT_ASK_MESSAGE,
+  REVISE_CHIP_OPTIONS,
 } from "./composeReviseRouting";
-export type { RevisionIntent, ReviseRouteDecision, RevisionIntentSuggestion } from "./composeReviseRouting";
+export type {
+  RevisionIntent,
+  ReviseRouteDecision,
+  RevisionIntentSuggestion,
+  ReviseThisDocumentDetection,
+  ReviseChipOption,
+} from "./composeReviseRouting";
 
 /**
  * DEF-09 / DEF-12: the SUMMARY-ONLY confirmation line for a compose EDIT action. The alternative
@@ -181,28 +198,36 @@ export function ConversationPane(): React.JSX.Element {
   //       affordance). The drafted body rides inline as `compose.draft.html` (client-direct).
   // Both dispatch by layout NAME only — the WorkspacePane widget_load handler resolves the Compose
   // layout id + REUSES the single Compose tab (no layouts fetch in the Assistant pane).
+  // Wave 4 (end-to-end revise): auto-mount the active chat-uploaded source document into Compose by
+  // dispatching the SAME `compose.upload` seed "Open in Compose" produces. Reused by BOTH the
+  // per-message affordance below AND the natural-language "revise this document" flow (the mount must
+  // precede the revise dispatch so a document session is established — see the decorate hook). Returns
+  // true when a mount was dispatched (an active source document exists), false otherwise.
+  const mountActiveSourceDocInCompose = React.useCallback((): boolean => {
+    const active = activeSourceDocRef.current;
+    const sessionId = chatSessionIdRef.current;
+    if (!active?.sessionFileId || !sessionId) return false;
+    dispatch("workspace", {
+      type: "widget_load",
+      widgetType: "workspace",
+      widgetData: {
+        layoutName: "Compose",
+        compose: {
+          upload: {
+            sessionId,
+            sessionFileId: active.sessionFileId,
+            fileName: active.fileName,
+          },
+        },
+      },
+      displayName: "Compose",
+    } as WorkspacePaneEvent);
+    return true;
+  }, [dispatch]);
+
   const handleOpenInCompose = React.useCallback(
     (content: string): void => {
-      const active = activeSourceDocRef.current;
-      const sessionId = chatSessionIdRef.current;
-      if (active?.sessionFileId && sessionId) {
-        dispatch("workspace", {
-          type: "widget_load",
-          widgetType: "workspace",
-          widgetData: {
-            layoutName: "Compose",
-            compose: {
-              upload: {
-                sessionId,
-                sessionFileId: active.sessionFileId,
-                fileName: active.fileName,
-              },
-            },
-          },
-          displayName: "Compose",
-        } as WorkspacePaneEvent);
-        return;
-      }
+      if (mountActiveSourceDocInCompose()) return;
       if (!content) return;
       dispatch("workspace", {
         type: "widget_load",
@@ -214,13 +239,57 @@ export function ConversationPane(): React.JSX.Element {
         displayName: "Compose",
       } as WorkspacePaneEvent);
     },
-    [dispatch]
+    [mountActiveSourceDocInCompose, dispatch]
   );
 
   // Session-id getter for the dispatch/event seams (stable across renders).
   const chatSessionIdRef = React.useRef<string | null>(chatSessionId);
   chatSessionIdRef.current = chatSessionId;
   const getSessionId = React.useCallback(() => chatSessionIdRef.current, []);
+
+  // Wave 4 (end-to-end revise) — resolve the `compose-revise-document` Binding id CLIENT-SIDE from
+  // the closed catalog (ADR-039: bindingId comes only from capability discovery, never invented). The
+  // action declares `surfaces: "assistant,compose"`, so it is returned on the default `assistant`
+  // surface. This closes the honest boundary the original DEF-11 disambiguation noted ("no
+  // capability-discovery seam resolves compose-revise-document's Binding id client-side") — that seam
+  // (task 041) shipped and this action is on it. Null until the fetch resolves / when the catalog is
+  // unreachable (chips fail-soft).
+  // Deferred read: the catalog fetch stays inert until the FIRST natural-language revise request in
+  // this session flips `reviseCapabilityNeeded` (in the decorate hook below). This keeps a
+  // mounted-but-idle Assistant pane from issuing an eager background `/api/ai/capabilities` request
+  // (which would also perturb the fetch call-sequence other ConversationPane surfaces assert on). The
+  // fetch kicks off the moment a revise is detected — well before the user reads the ask message and
+  // clicks a chip, so the bindingId is resolved by dispatch time.
+  const [reviseCapabilityNeeded, setReviseCapabilityNeeded] = React.useState<boolean>(false);
+  const { capabilities: launchableCapabilities } = useCapabilityDiscovery({
+    bffBaseUrl,
+    authenticatedFetch,
+    enabled: reviseCapabilityNeeded,
+  });
+  const reviseBindingId = React.useMemo<string | null>(
+    () =>
+      launchableCapabilities.find((c) => c.consumerType === "compose-revise-document")?.bindingId ??
+      null,
+    [launchableCapabilities]
+  );
+
+  // Wave 4 — the natural-language revise flow's client state:
+  //  - `reviseChipsPending`: after auto-mount + the mount-then-ask message, show the four intent chips.
+  //  - `pendingNamedRevise`: the user NAMED an intent in the original message ("flag risks in this
+  //    document") → mount + apply THAT intent directly, but only ONCE the document session is
+  //    registered (the effect below fires when `activeComposeDocSessionId` back-fills).
+  //  - `activeComposeDocSessionId`: the post-mount document session id, back-filled REACTIVELY by
+  //    `registerComposeActiveDocument` (below) so the named-intent effect can await it — never a
+  //    captured stale null.
+  const [reviseChipsPending, setReviseChipsPending] = React.useState<boolean>(false);
+  const [pendingNamedRevise, setPendingNamedRevise] = React.useState<{
+    revisionIntent: RevisionIntent;
+    instruction?: string;
+  } | null>(null);
+  const [activeComposeDocSessionId, setActiveComposeDocSessionId] = React.useState<string | null>(
+    null
+  );
+  const reviseDispatchSeqRef = React.useRef(0);
 
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
@@ -474,6 +543,61 @@ export function ConversationPane(): React.JSX.Element {
     [attachments, injection]
   );
 
+  // Wave 4 (end-to-end revise) — dispatch `compose-revise-document` for the WHOLE open document into
+  // the DOCUMENT session so the edits materialize as an inline redline (+ comments for flag-risks),
+  // NOT narrated prose. This reuses the SHIPPED `dispatchComposeAction` edit path verbatim: a
+  // non-empty `documentSessionId` makes it an EDIT (routes to the doc session, confirmation-only,
+  // no prose — DEF-09), and `revisionScope: 'whole-document'` selects the DEF-11 confirmation copy.
+  // The bindingId comes ONLY from capability discovery (ADR-039); documentText is resolved
+  // SERVER-SIDE from the registered document session's file (ContextBinder file-operand path when the
+  // args omit a documentText operand) — see the wave notes. `instruction` rides only for `custom`.
+  const dispatchReviseDocument = React.useCallback(
+    (revisionIntent: RevisionIntent, instruction: string | undefined, documentSessionId: string): void => {
+      if (!reviseBindingId) {
+        injection.enqueue(
+          makeLocalAssistantMessage(
+            "Sorry — the document-revision capability isn't available right now. Please try again."
+          )
+        );
+        return;
+      }
+      const slots: Record<string, unknown> = { revisionIntent };
+      if (instruction && instruction.trim().length > 0) {
+        slots.instruction = instruction.trim();
+      }
+      void dispatchComposeAction({
+        id: `compose-revise-document#${(reviseDispatchSeqRef.current += 1)}`,
+        bindingId: reviseBindingId,
+        args: { slots },
+        documentSessionId,
+        revisionScope: "whole-document",
+      });
+    },
+    [reviseBindingId, dispatchComposeAction, injection]
+  );
+
+  // A revise-intent chip click. Reads the CURRENT (post-mount) document session id — the reactive
+  // back-fill first, then the ref (belt-and-suspenders) — so the dispatch never captures a stale
+  // null. If the mount hasn't established the session yet, ask the user to retry rather than misroute
+  // to the chat session (which is exactly the prose-narration bug this wave fixes).
+  const handleReviseIntentPick = React.useCallback(
+    (revisionIntent: RevisionIntent, instruction?: string): void => {
+      const documentSessionId =
+        activeComposeDocSessionId ?? activeSourceDocRef.current?.documentSessionId ?? null;
+      if (!documentSessionId) {
+        injection.enqueue(
+          makeLocalAssistantMessage(
+            "Your document is still loading into Compose — give it a moment, then pick a revision type again."
+          )
+        );
+        return;
+      }
+      setReviseChipsPending(false);
+      dispatchReviseDocument(revisionIntent, instruction, documentSessionId);
+    },
+    [activeComposeDocSessionId, injection, dispatchReviseDocument]
+  );
+
   // FR-13 Step 1: publish `dispatchComposeAction` into the cross-pane Compose
   // action bridge so the inline AI toolbar (workspace pane, ComposeAiToolbar's
   // `enqueueComposeAction`) routes THROUGH this Assistant-pane serial queue
@@ -551,6 +675,13 @@ export function ConversationPane(): React.JSX.Element {
         // Wave 3 Part 1: remember this as the session's ACTIVE source document so "Open in Compose"
         // opens THAT document (compose.upload seed) rather than seeding the assistant message prose.
         activeSourceDocRef.current = { sessionFileId, documentSessionId, fileName: name };
+        // Wave 4 (end-to-end revise): publish the document session id REACTIVELY so the named-intent
+        // revise effect can fire the dispatch the moment the mount establishes the session (the chip
+        // path reads the same value at click time). Only a registration carrying a real document
+        // session id counts — a pointer-only pre-DEF-11 registration leaves it untouched.
+        if (documentSessionId) {
+          setActiveComposeDocSessionId(documentSessionId);
+        }
       } catch {
         // Non-fatal: the direct upload just won't be chat-visible; the Compose Save path is unaffected.
       }
@@ -602,6 +733,61 @@ export function ConversationPane(): React.JSX.Element {
   });
   const selection = useSelectionChip({ noteTabFocus: commands.noteTabFocus });
 
+  // Wave 4 (end-to-end revise) — the outbound-body decoration hook. A natural-language "revise this
+  // document" about a CHAT-UPLOADED source document must NOT reach the agent turn (that dispatches
+  // `compose-revise-document` to the CHAT session, where — no Compose tab open — the tool result is
+  // narrated as prose instead of redlined; the root cause this wave fixes). Instead we CANCEL the
+  // send (return null — the same hard-slash suppression lever) and run the client-orchestrated flow:
+  //   1. AUTO-MOUNT the source document into Compose (establishes the document session + back-fills
+  //      ActiveDocument.DocumentSessionId per Wave 3).
+  //   2a. If the user NAMED an intent ("flag risks in this document") → apply it directly, gated on
+  //       the document session being registered (the effect below).
+  //   2b. Otherwise → show the mount-then-ask message + the four intent chips.
+  // Gated on an active source document being present; every other message delegates verbatim to the
+  // command-routing decorate (hard-slash / soft-slash / reference resolution — ADR-039 unchanged).
+  const { handleDecorateOutboundBody } = commands;
+  const handleDecorateOutboundBodyWithRevise = React.useCallback(
+    async (body: Record<string, unknown>): Promise<Record<string, unknown> | null> => {
+      const messageText = typeof body.message === "string" ? body.message : "";
+      const detection = detectReviseThisDocumentIntent(messageText);
+      const hasActiveSourceDoc =
+        activeSourceDocRef.current?.sessionFileId != null && chatSessionIdRef.current != null;
+      if (detection.isReviseThisDocument && hasActiveSourceDoc) {
+        const mounted = mountActiveSourceDocInCompose();
+        if (mounted) {
+          // Kick off the deferred capability read now so the compose-revise-document bindingId is
+          // resolved by the time the user clicks a chip / the named-intent effect fires.
+          setReviseCapabilityNeeded(true);
+          if (detection.namedIntent) {
+            // Apply the named intent once the mount registers the document session (effect below).
+            setPendingNamedRevise({ revisionIntent: detection.namedIntent });
+          } else {
+            injection.enqueue(makeLocalAssistantMessage(REVISE_MOUNT_ASK_MESSAGE));
+            setReviseChipsPending(true);
+          }
+          return null; // suppress the agent turn — the client orchestrates mount → ask/apply
+        }
+      }
+      return handleDecorateOutboundBody(body);
+    },
+    [handleDecorateOutboundBody, mountActiveSourceDocInCompose, injection]
+  );
+
+  // Wave 4 — fire a NAMED-intent revise the moment the auto-mount registers the document session.
+  // `activeComposeDocSessionId` back-fills reactively from `registerComposeActiveDocument` (post-
+  // mount), so this never captures a stale null: it waits for a real document session id before
+  // dispatching, then clears the pending state (once per named request).
+  React.useEffect(() => {
+    // Wait for ALL THREE preconditions: a pending named request, the document session (mount
+    // registered), AND the resolved bindingId (capability fetch settled). Not clearing the pending
+    // state until the bindingId is ready avoids a race where the mount registers before the deferred
+    // catalog read returns — the effect simply re-runs when `reviseBindingId` resolves.
+    if (!pendingNamedRevise || !activeComposeDocSessionId || !reviseBindingId) return;
+    const { revisionIntent, instruction } = pendingNamedRevise;
+    setPendingNamedRevise(null);
+    dispatchReviseDocument(revisionIntent, instruction, activeComposeDocSessionId);
+  }, [pendingNamedRevise, activeComposeDocSessionId, reviseBindingId, dispatchReviseDocument]);
+
   // ── SprkChat session callbacks ────────────────────────────────────────────
   // R7 12.3a: clear the persisted id BEFORE SprkChat creates a fresh session.
   const handleSessionStale = React.useCallback(
@@ -630,6 +816,10 @@ export function ConversationPane(): React.JSX.Element {
       // Wave 3: a fresh session has no active source document and no cached uploads.
       activeSourceDocRef.current = null;
       activeDocUploadCacheRef.current.clear();
+      // Wave 4: a fresh session clears any pending revise flow + the document-session back-fill.
+      setReviseChipsPending(false);
+      setPendingNamedRevise(null);
+      setActiveComposeDocSessionId(null);
       // R5-D (2026-07-07): the execution-trace replay buffer is session-scoped —
       // a fresh session must not replay the previous session's tool calls.
       clearExecutionTraceBuffer();
@@ -798,6 +988,12 @@ export function ConversationPane(): React.JSX.Element {
             />
           )}
 
+          {/* Wave 4 (end-to-end revise): after a natural-language "revise this document" auto-mounts
+              the chat-uploaded file, the mount-then-ask message is injected into the transcript and
+              these four intent chips appear. Clicking one dispatches compose-revise-document into the
+              document session (inline redline), NOT a narrated chat turn. */}
+          {reviseChipsPending && <ReviseIntentChips onPick={handleReviseIntentPick} />}
+
           <div className={styles.sprkChatFlex}>
             <SprkChat
               key={commands.sprkChatRemountKey}
@@ -823,7 +1019,7 @@ export function ConversationPane(): React.JSX.Element {
               onLocalMessageInjected={injection.handleLocalMessageInjected}
               onBeforeSendMessage={handleBeforeSendMessage}
               onMessagesChange={commands.noteMessagesChanged}
-              onDecorateOutboundBody={commands.handleDecorateOutboundBody}
+              onDecorateOutboundBody={handleDecorateOutboundBodyWithRevise}
               onPlaybookOptions={playbookOptions.handlePlaybookOptions}
               onSelectPlaybook={playbookOptions.handleSelectPlaybook}
               onOpenLibraryModal={playbookOptions.handleOpenLibraryModal}

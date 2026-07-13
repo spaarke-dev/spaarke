@@ -9,6 +9,9 @@ import {
   REVISE_DISAMBIGUATION_MESSAGE,
   REVISION_INTENTS,
   REVISION_INTENT_SUGGESTIONS,
+  detectReviseThisDocumentIntent,
+  REVISE_CHIP_OPTIONS,
+  REVISE_MOUNT_ASK_MESSAGE,
 } from '../composeReviseRouting';
 
 describe('routeReviseIntent', () => {
@@ -105,5 +108,87 @@ describe('REVISION_INTENTS / REVISION_INTENT_SUGGESTIONS (contract-closed enum)'
 describe('REVISE_SLASH_PREFIX', () => {
   it('is the literal "/revise"', () => {
     expect(REVISE_SLASH_PREFIX).toBe('/revise');
+  });
+});
+
+describe('detectReviseThisDocumentIntent (natural-language "revise this document")', () => {
+  it('detects a bare revise-this-document request with no named intent (→ ask via chips)', () => {
+    expect(detectReviseThisDocumentIntent('revise this document')).toEqual({
+      isReviseThisDocument: true,
+      namedIntent: undefined,
+    });
+    expect(detectReviseThisDocumentIntent('please review the contract')).toMatchObject({
+      isReviseThisDocument: true,
+    });
+    expect(detectReviseThisDocumentIntent('can you redline this agreement?')).toMatchObject({
+      isReviseThisDocument: true,
+    });
+  });
+
+  it('extracts a NAMED intent when the user names one in the original message', () => {
+    expect(detectReviseThisDocumentIntent('flag risks in this document')).toEqual({
+      isReviseThisDocument: true,
+      namedIntent: 'flag-risks',
+    });
+    expect(detectReviseThisDocumentIntent('review the contract and identify risks')).toMatchObject({
+      namedIntent: 'flag-risks',
+    });
+    expect(detectReviseThisDocumentIntent('align this document to our playbook')).toEqual({
+      isReviseThisDocument: true,
+      namedIntent: 'align-clauses',
+    });
+    expect(detectReviseThisDocumentIntent('revise the document to improve clarity')).toEqual({
+      isReviseThisDocument: true,
+      namedIntent: 'improve-clarity',
+    });
+    expect(detectReviseThisDocumentIntent('review the agreement and make it clearer')).toMatchObject({
+      namedIntent: 'improve-clarity',
+    });
+  });
+
+  it('false-positive guard: does NOT fire without both a revise verb AND a document reference', () => {
+    // No revise verb.
+    expect(detectReviseThisDocumentIntent('summarize this document').isReviseThisDocument).toBe(false);
+    expect(detectReviseThisDocumentIntent('explain the contract').isReviseThisDocument).toBe(false);
+    // No document reference.
+    expect(detectReviseThisDocumentIntent('please revise your estimate').isReviseThisDocument).toBe(false);
+    // Past tense (word-boundary guard) — not a present-tense request.
+    expect(detectReviseThisDocumentIntent('I reviewed the document yesterday').isReviseThisDocument).toBe(false);
+  });
+
+  it('does NOT fire on slash commands or empty text (those route elsewhere)', () => {
+    expect(detectReviseThisDocumentIntent('/revise flag-risks').isReviseThisDocument).toBe(false);
+    expect(detectReviseThisDocumentIntent('   ').isReviseThisDocument).toBe(false);
+    expect(detectReviseThisDocumentIntent('').isReviseThisDocument).toBe(false);
+  });
+
+  it('is deterministic and total', () => {
+    const inputs = ['revise this document', 'flag risks in this document', 'hello world', 'summarize the file'];
+    for (const input of inputs) {
+      expect(detectReviseThisDocumentIntent(input)).toEqual(detectReviseThisDocumentIntent(input));
+    }
+  });
+});
+
+describe('REVISE_CHIP_OPTIONS / REVISE_MOUNT_ASK_MESSAGE (Wave 4 UX contract)', () => {
+  it('carries the four intents with owner-confirmed labels, in order', () => {
+    expect(REVISE_CHIP_OPTIONS.map(o => o.revisionIntent)).toEqual([
+      'align-clauses',
+      'flag-risks',
+      'improve-clarity',
+      'custom',
+    ]);
+    expect(REVISE_CHIP_OPTIONS.map(o => o.label)).toEqual([
+      'Align to playbook',
+      'Flag risks',
+      'Improve clarity',
+      'Custom…',
+    ]);
+  });
+
+  it('the mount-then-ask message matches the owner-confirmed wording', () => {
+    expect(REVISE_MOUNT_ASK_MESSAGE).toBe(
+      'Your file has been loaded into Compose. What type of revision do you have in mind?'
+    );
   });
 });

@@ -125,3 +125,102 @@ export function routeReviseIntent(messageText: string): ReviseRouteDecision {
   // instruction. Never ambiguous once ANY text follows `/revise`.
   return { kind: 'intent-specified', messageText: trimmed, revisionIntent: 'custom', instruction: rest };
 }
+
+// ---------------------------------------------------------------------------
+// Natural-language "revise this document" detection (Wave 4 — end-to-end revise)
+// ---------------------------------------------------------------------------
+//
+// The `/revise` slash above is a CLOSED, structured trigger (mirrors `/summarize`). This section
+// adds detection of the NATURAL-LANGUAGE phrasing an attorney actually types about a CHAT-UPLOADED
+// document — "revise this document", "review the contract", "flag risks in this agreement",
+// "align this document to our playbook". This is still UX-PRESENTATION routing only (ADR-039):
+// the function decides WHETHER to run the client-orchestrated mount+ask flow, never WHICH Binding
+// runs (the `compose-revise-document` bindingId is resolved from capability discovery, never here)
+// and never re-detects intent from the wire. The CALLER additionally gates on an active
+// chat-uploaded source document being present — a bare phrasing with no uploaded doc falls through
+// to the normal agent turn.
+
+/** The mount-then-ask Assistant interjection shown after auto-mounting the chat-uploaded doc. */
+export const REVISE_MOUNT_ASK_MESSAGE =
+  'Your file has been loaded into Compose. What type of revision do you have in mind?';
+
+/** One clickable revise-intent chip option — the four DEF-11 intents in owner-confirmed wording. */
+export interface ReviseChipOption {
+  readonly revisionIntent: RevisionIntent;
+  readonly label: string;
+}
+
+/** The four revise-intent chip options rendered after the mount-then-ask message (owner wording). */
+export const REVISE_CHIP_OPTIONS: readonly ReviseChipOption[] = [
+  { revisionIntent: 'align-clauses', label: 'Align to playbook' },
+  { revisionIntent: 'flag-risks', label: 'Flag risks' },
+  { revisionIntent: 'improve-clarity', label: 'Improve clarity' },
+  { revisionIntent: 'custom', label: 'Custom…' },
+];
+
+/** Result of {@link detectReviseThisDocumentIntent}. */
+export interface ReviseThisDocumentDetection {
+  /** True when the message is a natural-language "revise/review this document" request. */
+  readonly isReviseThisDocument: boolean;
+  /**
+   * A named intent extracted from the ORIGINAL message ("flag risks in this document" → flag-risks;
+   * "align this document to our playbook" → align-clauses; "make this clearer" → improve-clarity).
+   * Undefined when the user did not name one — the caller shows the four intent chips and asks.
+   */
+  readonly namedIntent?: RevisionIntent;
+}
+
+// A revise/review verb. Deliberately excludes past tense ("reviewed", "revised") via word
+// boundaries so "I reviewed the doc yesterday" does NOT trigger — only present-tense requests.
+const REVISE_VERB_RE =
+  /\b(revise|review|redline|red-line|mark[\s-]?up|edit|improve|revising|reviewing|editing|clean[\s-]?up|tighten)\b/i;
+
+// A reference to the document under discussion (this/the/my/our + a document noun).
+const DOC_REFERENCE_RE =
+  /\b(this|the|my|our)\s+(document|doc|file|contract|agreement|draft|nda|brief|memo|clause|clauses|policy|text)\b/i;
+
+/**
+ * Extract a named revision intent from the original message, or undefined. Order matters — the most
+ * specific signal wins. Conservative: only returns a named intent on a clear keyword match; anything
+ * ambiguous returns undefined so the caller asks (renders the four chips).
+ */
+function extractNamedReviseIntent(text: string): RevisionIntent | undefined {
+  const t = text.toLowerCase();
+  if (/\brisk/.test(t) && /\b(flag|identif|spot|highlight|surface|find|call\s?out|assess|review)\b/.test(t)) {
+    return 'flag-risks';
+  }
+  if (/\bplaybook\b/.test(t) || (/\balign\b/.test(t) && /\bclause/.test(t))) {
+    return 'align-clauses';
+  }
+  if (/\b(clarity|clarif|clearer|readab|plain\s?language|simplif|concise)\b/.test(t)) {
+    return 'improve-clarity';
+  }
+  return undefined;
+}
+
+/**
+ * Pure, total, side-effect-free detection of a natural-language "revise this document" request. Does
+ * NOT fire on `/`-prefixed slash commands (those route via {@link routeReviseIntent}) nor on empty
+ * text. Requires BOTH a revise verb AND a document reference — the two-signal guard keeps false
+ * positives low ("summarize this document", "explain the contract" have no revise verb; "please
+ * revise your estimate" has no document reference). The CALLER additionally gates on an active
+ * chat-uploaded source document.
+ */
+export function detectReviseThisDocumentIntent(messageText: string): ReviseThisDocumentDetection {
+  const trimmed = messageText.trim();
+  if (trimmed.length === 0 || trimmed.startsWith('/')) {
+    return { isReviseThisDocument: false };
+  }
+  // Always require a document reference (the request is ABOUT the open document).
+  if (!DOC_REFERENCE_RE.test(trimmed)) {
+    return { isReviseThisDocument: false };
+  }
+  const namedIntent = extractNamedReviseIntent(trimmed);
+  // Fire on EITHER a generic revise verb ("revise/review this document") OR a named-intent phrase
+  // ("flag risks in this document", "align this document to our playbook") — the latter expresses a
+  // revision request even without a bare revise verb.
+  if (!REVISE_VERB_RE.test(trimmed) && !namedIntent) {
+    return { isReviseThisDocument: false };
+  }
+  return { isReviseThisDocument: true, namedIntent };
+}
