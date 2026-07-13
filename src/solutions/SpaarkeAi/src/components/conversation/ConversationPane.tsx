@@ -19,7 +19,7 @@
 import * as React from "react";
 import { Button, Tooltip } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular } from "@fluentui/react-icons";
-import { PaneHeader, SprkChat, createConsumerDispatcher } from "@spaarke/ui-components";
+import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService } from "@spaarke/ui-components";
 import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type {
@@ -56,6 +56,9 @@ import {
   useRegisterComposeActionDispatcher,
   useRegisterComposeActiveDocumentHandler,
   useComposeRedlineAccept,
+  useComposeInsertSuggestion,
+  useComposeSave,
+  useRegisterComposeSaveCompletedHandler,
 } from "@spaarke/compose-components/context/composeActionBridge";
 import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./composeApplyLeg";
 // FR-17 undo/replace (task 034) — the durable ledger-supersession hook + its Assistant affordance.
@@ -63,7 +66,7 @@ import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession"
 import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-components/types/compose-contracts";
 import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
 import { formatComposeActionResultMarkdown } from "./composeResultFormat";
-import { makeLocalAssistantMessage, makeComposeEditControlsMessage } from "./summarizeRouting";
+import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
 import {
   detectReviseThisDocumentIntent,
@@ -93,6 +96,7 @@ export {
   buildMultiFileSummarizeInterjection,
   makeLocalAssistantMessage,
   makeComposeEditControlsMessage,
+  makeSavedToDmsMessage,
 } from "./summarizeRouting";
 export type { SummarizeRouteDecision, SummarizeIntentInputs } from "./summarizeRouting";
 // DEF-11 whole-document revise disambiguation (tests import these from '../ConversationPane').
@@ -185,6 +189,12 @@ export function ConversationPane(): React.JSX.Element {
   const handleSessionFileUploaded = React.useCallback(
     ({ sessionFileId, fileName }: { sessionFileId: string; fileName: string }): void => {
       activeSourceDocRef.current = { sessionFileId, fileName };
+      // R2 (race-safe revise): a chat "revise this document" that arrived BEFORE this upload
+      // back-filled `activeSourceDocRef` is BUFFERED (see handleDecorateOutboundBodyWithRevise +
+      // the effect below). Bump this token so that buffered-revise effect re-runs the moment the
+      // source-doc id lands — mount + revise then fire regardless of ordering (never a chat-session
+      // agent turn that narrates the revise as prose).
+      setSourceDocReadyToken((t) => t + 1);
     },
     []
   );
@@ -209,11 +219,17 @@ export function ConversationPane(): React.JSX.Element {
     const active = activeSourceDocRef.current;
     const sessionId = chatSessionIdRef.current;
     if (!active?.sessionFileId || !sessionId) return false;
+    // spaarkeai-compose-r2: mount Compose through the first-class DIRECT
+    // 'compose' widget (ComposeDirectWidget → ComposeWorkspace), NOT the
+    // LegalWorkspace LAYOUT door. The `compose.upload` SEED SHAPE is UNCHANGED
+    // (ComposeDirectWidget.buildLaunchFromSeed consumes it verbatim) — only the
+    // widgetType/envelope flips. This makes ComposeWorkspace mount
+    // UNCONDITIONALLY (never LegalWorkspaceApp/dashboard) with no layout-row
+    // lookup or race. WorkspacePane REUSES the single 'compose' tab (re-seeding).
     dispatch("workspace", {
       type: "widget_load",
-      widgetType: "workspace",
+      widgetType: "compose",
       widgetData: {
-        layoutName: "Compose",
         compose: {
           upload: {
             sessionId,
@@ -290,6 +306,16 @@ export function ConversationPane(): React.JSX.Element {
     null
   );
   const reviseDispatchSeqRef = React.useRef(0);
+
+  // R2 (race-safe revise) — when a natural-language "revise this document" arrives BEFORE the
+  // uploaded file's registration has back-filled `activeSourceDocRef.sessionFileId`, we BUFFER the
+  // intent here (rather than falling through to a chat-session agent turn that narrates it as prose)
+  // and fire the mount + revise once the upload back-fills. `sourceDocReadyToken` bumps in
+  // `handleSessionFileUploaded` so the buffered-revise effect re-runs on back-fill.
+  const [pendingReviseThisDocument, setPendingReviseThisDocument] = React.useState<{
+    namedIntent: RevisionIntent | null;
+  } | null>(null);
+  const [sourceDocReadyToken, setSourceDocReadyToken] = React.useState(0);
 
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
@@ -424,6 +450,27 @@ export function ConversationPane(): React.JSX.Element {
   // Null when no live editor is registered (standalone mount / no Compose tab open). The Assistant's
   // per-message "Accept" routes through this to the EXISTING `usePendingRedline.accept` in the editor.
   const acceptRedlineViaBridge = useComposeRedlineAccept();
+
+  // R4 — "Insert into document". The editor's insert-suggestion handler, published by ComposeWorkspace
+  // into the cross-pane bridge. Null when no live editor is registered (no Compose tab open) — the
+  // Assistant then omits the SprkChat `onInsertToCompose` prop so the per-message button does not
+  // render (an insert has nowhere to land). Wired to SprkChat below.
+  const insertSuggestionToCompose = useComposeInsertSuggestion();
+
+  // FIX #1b — the editor's Save conduit (create-on-save / save-to-matter), published by ComposeWorkspace
+  // into the cross-pane bridge. Null when no live editor is registered (no Compose tab open) — the
+  // "Add the document to the DMS" chip then falls back to re-activating the Compose tab.
+  const composeSave = useComposeSave();
+
+  // FIX #7a — the document persisted by the last Compose Save, surfaced to the File Preview modal that
+  // the chat "Open preview" affordance opens. `savedPreview` holds the id + display name; `previewOpen`
+  // gates the modal. Reuses the shared `RichFilePreviewDialog` + the BFF `GET /api/documents/{id}/
+  // preview-url` endpoint (§11 reuse — no new component/service), mirroring ComposeWorkspace's #1(b) wiring.
+  const [savedPreview, setSavedPreview] = React.useState<{ documentId: string; fileName?: string } | null>(null);
+  const [previewOpen, setPreviewOpen] = React.useState(false);
+
+  // FIX #7a — Xrm navigation service for the preview modal's "Open record" action (host-context; no BFF route).
+  const previewNavigationService = React.useMemo(() => createXrmNavigationService(), []);
 
   const dispatchComposeAction = React.useCallback(
     (request: ComposeActionRequest): Promise<DispatchConsumerResult> => {
@@ -614,20 +661,27 @@ export function ConversationPane(): React.JSX.Element {
           return;
         }
         case "add-to-dms": {
-          // Reuse the Compose create-on-save / save-to-matter flow (owned by the workspace pane) via a
-          // workspace hand-off; the workspace then opens the File Preview modal for the created Document.
-          dispatch("workspace", {
-            type: "widget_load",
-            layoutName: "Compose",
-            widgetType: "workspace",
-            widgetData: { source: "compose-add-to-dms" },
-            displayName: "Compose",
-          } as WorkspacePaneEvent);
-          injection.enqueue(
-            makeLocalAssistantMessage(
-              "I'm adding the document to the DMS. Once it's saved, you can preview it from the Compose editor."
-            )
-          );
+          // FIX #1b — trigger the ACTUAL create-on-save via the cross-pane bridge conduit (the editor
+          // owns the create-on-save / save-to-matter flow). On success ComposeWorkspace fires the
+          // save-completed conduit, and `handleComposeSaveCompleted` posts a PERSISTENT "Saved to the
+          // DMS." chat message with an "Open preview" affordance — no transient banner. When no live
+          // editor is registered (defensive: no Compose tab open), fall back to re-activating the
+          // single 'compose' tab so the user can save from the editor.
+          if (composeSave) {
+            void composeSave();
+          } else {
+            dispatch("workspace", {
+              type: "widget_load",
+              widgetType: "compose",
+              widgetData: { source: "compose-add-to-dms" },
+              displayName: "Compose",
+            } as WorkspacePaneEvent);
+            injection.enqueue(
+              makeLocalAssistantMessage(
+                "Open the document in the Compose editor, then save it to add it to the DMS."
+              )
+            );
+          }
           return;
         }
         case "draft-email": {
@@ -645,8 +699,52 @@ export function ConversationPane(): React.JSX.Element {
           return;
       }
     },
-    [summarizeBindingId, chips, injection, dispatch]
+    [summarizeBindingId, chips, injection, dispatch, composeSave]
   );
+
+  // FIX #7a — the save-completed conduit handler (registered on the bridge below). ComposeWorkspace
+  // calls it after a successful create-on-save with the persisted document's id + filename. We inject
+  // a PERSISTENT local Assistant message ("Saved '{filename}' to the DMS.") carrying `savedPreview`
+  // metadata so SprkChat renders an "Open preview" button, and remember the id so the modal can open.
+  const handleComposeSaveCompleted = React.useCallback(
+    ({ documentRecordId, fileName }: { documentRecordId: string; fileName?: string }): void => {
+      if (!documentRecordId) return;
+      setSavedPreview({ documentId: documentRecordId, fileName });
+      injection.enqueue(makeSavedToDmsMessage(fileName, documentRecordId));
+    },
+    [injection]
+  );
+  useRegisterComposeSaveCompletedHandler(handleComposeSaveCompleted);
+
+  // FIX #7a — the chat "Open preview" affordance (SprkChat message action). Opens the File Preview
+  // modal for the message's saved document id. The id rides on the message metadata, so a session with
+  // multiple saves opens the correct document per message.
+  const handleOpenSavedPreview = React.useCallback(
+    (documentId: string, fileName?: string): void => {
+      setSavedPreview({ documentId, fileName });
+      setPreviewOpen(true);
+    },
+    []
+  );
+
+  // FIX #7a — fetch the ephemeral iframe preview URL for the saved document (RichFilePreview's
+  // fetchPreviewUrl contract). Same endpoint + shape ComposeWorkspace's #1(b) wiring uses; reuses the
+  // already-available `authenticatedFetch` + `bffBaseUrl` (no new service — §11).
+  const fetchSavedPreviewUrl = React.useCallback(async (): Promise<string | null> => {
+    const docId = savedPreview?.documentId;
+    if (!docId || !bffBaseUrl) return null;
+    try {
+      const response = await authenticatedFetch(
+        `${bffBaseUrl}/api/documents/${encodeURIComponent(docId)}/preview-url`,
+        { method: "GET" }
+      );
+      if (!response.ok) return null;
+      const data = (await response.json()) as { previewUrl?: string };
+      return data.previewUrl ?? null;
+    } catch {
+      return null; // non-fatal — the modal shows its own "preview not available" fallback
+    }
+  }, [savedPreview?.documentId, bffBaseUrl, authenticatedFetch]);
 
   // FR-13 Step 1: publish `dispatchComposeAction` into the cross-pane Compose
   // action bridge so the inline AI toolbar (workspace pane, ComposeAiToolbar's
@@ -676,10 +774,15 @@ export function ConversationPane(): React.JSX.Element {
       docxBytes,
       fileName,
       documentSessionId,
+      visible,
     }: {
       docxBytes: ArrayBuffer;
       fileName?: string;
       documentSessionId?: string;
+      // R3 ("Visible to assistant"): omitted / true = register visible (every auto-register path);
+      // false = the toggle turned OFF → withdraw (POST active-document with visible:false so the
+      // sibling server agent clears ChatSession.ActiveDocument).
+      visible?: boolean;
     }): Promise<void> => {
       const sessionId = getSessionId();
       if (!sessionId || !bffBaseUrl) return;
@@ -720,6 +823,9 @@ export function ConversationPane(): React.JSX.Element {
             source: "compose-direct",
             fileName: name,
             documentSessionId,
+            // R3: default ON (every auto-register path omits it) — the sibling server agent maps a
+            // false here to withdrawing this document from the session's active-document / chat context.
+            visible: visible ?? true,
           }),
         });
         // Wave 3 Part 1: remember this as the session's ACTIVE source document so "Open in Compose"
@@ -802,25 +908,37 @@ export function ConversationPane(): React.JSX.Element {
       const detection = detectReviseThisDocumentIntent(messageText);
       const hasActiveSourceDoc =
         activeSourceDocRef.current?.sessionFileId != null && chatSessionIdRef.current != null;
-      if (detection.isReviseThisDocument && hasActiveSourceDoc) {
-        const mounted = mountActiveSourceDocInCompose();
-        if (mounted) {
-          // Kick off the deferred capability read now so the compose-revise-document bindingId is
-          // resolved by the time the user clicks a chip / the named-intent effect fires.
-          setReviseCapabilityNeeded(true);
-          if (detection.namedIntent) {
-            // Apply the named intent once the mount registers the document session (effect below).
-            setPendingNamedRevise({ revisionIntent: detection.namedIntent });
-          } else {
-            injection.enqueue(makeLocalAssistantMessage(REVISE_MOUNT_ASK_MESSAGE));
-            setReviseChipsPending(true);
+      if (detection.isReviseThisDocument) {
+        if (hasActiveSourceDoc) {
+          const mounted = mountActiveSourceDocInCompose();
+          if (mounted) {
+            // Kick off the deferred capability read now so the compose-revise-document bindingId is
+            // resolved by the time the user clicks a chip / the named-intent effect fires.
+            setReviseCapabilityNeeded(true);
+            if (detection.namedIntent) {
+              // Apply the named intent once the mount registers the document session (effect below).
+              setPendingNamedRevise({ revisionIntent: detection.namedIntent });
+            } else {
+              injection.enqueue(makeLocalAssistantMessage(REVISE_MOUNT_ASK_MESSAGE));
+              setReviseChipsPending(true);
+            }
+            return null; // suppress the agent turn — the client orchestrates mount → ask/apply
           }
-          return null; // suppress the agent turn — the client orchestrates mount → ask/apply
+        } else if (attachments.uploadedFileCount > 0) {
+          // R2 (race-safe revise): an upload is IN FLIGHT but its registration hasn't back-filled
+          // `activeSourceDocRef.sessionFileId` yet (the user sent "revise this document" immediately
+          // after attaching). BUFFER the intent and SUPPRESS the agent turn — falling through here
+          // would dispatch compose-revise-document to the CHAT session with no Compose tab open, and
+          // the tool result would be narrated as prose (no mount, no redline). The buffered-revise
+          // effect below fires the mount + revise the moment `onSessionFileUploaded` back-fills.
+          setPendingReviseThisDocument({ namedIntent: detection.namedIntent ?? null });
+          setReviseCapabilityNeeded(true);
+          return null;
         }
       }
       return handleDecorateOutboundBody(body);
     },
-    [handleDecorateOutboundBody, mountActiveSourceDocInCompose, injection]
+    [handleDecorateOutboundBody, mountActiveSourceDocInCompose, injection, attachments.uploadedFileCount]
   );
 
   // Wave 4 — fire a NAMED-intent revise the moment the auto-mount registers the document session.
@@ -837,6 +955,30 @@ export function ConversationPane(): React.JSX.Element {
     setPendingNamedRevise(null);
     dispatchReviseDocument(revisionIntent, instruction, activeComposeDocSessionId);
   }, [pendingNamedRevise, activeComposeDocSessionId, reviseBindingId, dispatchReviseDocument]);
+
+  // R2 (race-safe revise) — fire a BUFFERED "revise this document" the moment the uploaded source
+  // doc's registration back-fills `activeSourceDocRef.sessionFileId` (signalled by
+  // `sourceDocReadyToken` bumping in `handleSessionFileUploaded`). This mirrors the named-intent
+  // effect above but gates on the UPLOAD readiness instead of the post-mount document session: it
+  // auto-mounts the now-registered source doc into Compose, then either applies the named intent
+  // (via `pendingNamedRevise` → the effect above, once the mount registers the doc session) or shows
+  // the mount-then-ask message + chips. Net: "revise" always ends in a mounted doc + doc-session
+  // routing, regardless of whether the message beat the upload.
+  React.useEffect(() => {
+    if (!pendingReviseThisDocument) return;
+    if (activeSourceDocRef.current?.sessionFileId == null || chatSessionIdRef.current == null) return;
+    const mounted = mountActiveSourceDocInCompose();
+    if (!mounted) return;
+    const { namedIntent } = pendingReviseThisDocument;
+    setPendingReviseThisDocument(null);
+    setReviseCapabilityNeeded(true);
+    if (namedIntent) {
+      setPendingNamedRevise({ revisionIntent: namedIntent });
+    } else {
+      injection.enqueue(makeLocalAssistantMessage(REVISE_MOUNT_ASK_MESSAGE));
+      setReviseChipsPending(true);
+    }
+  }, [sourceDocReadyToken, pendingReviseThisDocument, mountActiveSourceDocInCompose, injection]);
 
   // ── SprkChat session callbacks ────────────────────────────────────────────
   // R7 12.3a: clear the persisted id BEFORE SprkChat creates a fresh session.
@@ -870,6 +1012,8 @@ export function ConversationPane(): React.JSX.Element {
       setReviseChipsPending(false);
       setPendingNamedRevise(null);
       setActiveComposeDocSessionId(null);
+      // R2: a fresh session drops any buffered race-safe revise intent.
+      setPendingReviseThisDocument(null);
       // R5-D (2026-07-07): the execution-trace replay buffer is session-scoped —
       // a fresh session must not replay the previous session's tool calls.
       clearExecutionTraceBuffer();
@@ -947,6 +1091,21 @@ export function ConversationPane(): React.JSX.Element {
 
   const predefinedPrompts =
     selection.refinementPrompts.length > 0 ? selection.refinementPrompts : undefined;
+
+  // FIX #1a — the post-mount document-level action chips (Summarize / Add to DMS / Draft email) now
+  // render INSIDE the transcript footer, directly BENEATH the "Your file is available to edit…" ask
+  // message (next-step affordances), instead of ABOVE the whole chat. Combined with the Click-path
+  // consumer chips in the SAME footer slot (both land at the transcript's bottom edge). Memoized so
+  // SprkChat's slot-keyed auto-scroll fires only when the slot content actually changes.
+  const transcriptFooter = React.useMemo(
+    () => (
+      <>
+        {reviseChipsPending ? <ComposeDocActionChips onAction={handleDocAction} /> : null}
+        {chips.consumerChipsSlot}
+      </>
+    ),
+    [reviseChipsPending, handleDocAction, chips.consumerChipsSlot]
+  );
 
   const hostContext = entityContext
     ? {
@@ -1038,12 +1197,10 @@ export function ConversationPane(): React.JSX.Element {
             />
           )}
 
-          {/* FIX #1 (editor-centric reframe): after a natural-language "revise this document" auto-mounts
-              the chat-uploaded file, the mount message tells the user to edit in the Compose editor, and
-              these three DOCUMENT-LEVEL action chips appear (Summarize / Add to DMS / Draft reporting
-              email). They replace the old revision-type chips — whole-document revision now happens via
-              the editor's highlight-to-edit toolbar. */}
-          {reviseChipsPending && <ComposeDocActionChips onAction={handleDocAction} />}
+          {/* FIX #1a: the post-mount DOCUMENT-LEVEL action chips (Summarize / Add to DMS / Draft
+              reporting email) moved BELOW the ask message — they now render inside SprkChat's
+              transcriptFooterSlot (see `transcriptFooter`), beneath the "Your file is available to
+              edit…" message, as next-step affordances. */}
 
           <div className={styles.sprkChatFlex}>
             <SprkChat
@@ -1056,9 +1213,10 @@ export function ConversationPane(): React.JSX.Element {
               playbookId={playbookId}
               onSessionCreated={handleSessionCreated}
               onSessionStale={handleSessionStale}
-              // Click-path chips render INLINE IN THE TRANSCRIPT (G-P2 finding 1);
-              // the node is memoized so slot-keyed auto-scroll fires only on change.
-              transcriptFooterSlot={chips.consumerChipsSlot}
+              // Click-path chips render INLINE IN THE TRANSCRIPT (G-P2 finding 1); FIX #1a adds the
+              // post-mount document-action chips ABOVE them in the SAME footer slot (both beneath the
+              // last message). The node is memoized so slot-keyed auto-scroll fires only on change.
+              transcriptFooterSlot={transcriptFooter}
               onPlaybookChange={playbook.handlePlaybookChange}
               predefinedPrompts={predefinedPrompts}
               hostContext={hostContext}
@@ -1076,6 +1234,12 @@ export function ConversationPane(): React.JSX.Element {
               onOpenLibraryModal={playbookOptions.handleOpenLibraryModal}
               onContextEvent={contextBridge.handleContextEvent}
               onCitations={docQaCitation.onCitations}
+              // R4 — "Insert into document": one-click insert of a completed Assistant suggestion's
+              // text into the Compose editor as a tracked change at the current selection/cursor.
+              // Passed ONLY when a live editor is registered (a Compose tab is open) so the button
+              // renders exclusively when the insert can land; routes through the bridge to
+              // ComposeWorkspace's `materializeComposeDraft` (existing redline engine).
+              onInsertToCompose={insertSuggestionToCompose ?? undefined}
               // FIX #10a: the generic per-message "Open in Compose" affordance was removed —
               // `onOpenInCompose` is intentionally NOT passed (no auto-appended mount link).
               // DEF-12: per-message Accept / Reject / Try-another controls on the compose-edit
@@ -1091,6 +1255,9 @@ export function ConversationPane(): React.JSX.Element {
               // invoke_capability chip's targetBindingId through the shared
               // dispatchConsumer path (see handleNextStep above).
               onNextStep={handleNextStep}
+              // FIX #7a: "Open preview" on the persistent "Saved to the DMS" message — opens the File
+              // Preview modal for that document (savedPreview metadata carries the id per message).
+              onOpenSavedPreview={handleOpenSavedPreview}
             />
             <HelpAffordance onClick={() => commands.setHelpPanelOpen(true)} />
             <CommandHelpPanel
@@ -1102,6 +1269,26 @@ export function ConversationPane(): React.JSX.Element {
       </div>
 
       {playbook.toastPlaybookName !== null && <PlaybookToast name={playbook.toastPlaybookName} />}
+
+      {/* FIX #7a: File Preview modal for the document persisted by "Add to DMS". Opened from the
+          persistent "Saved to the DMS" chat message's "Open preview" action. Reuses the shared
+          RichFilePreviewDialog + the BFF preview-url endpoint (no new component/service — §11).
+          Rendered only once a Save has surfaced a document id. */}
+      {savedPreview ? (
+        <RichFilePreviewDialog
+          open={previewOpen}
+          documentId={savedPreview.documentId}
+          documentName={savedPreview.fileName ?? "Document"}
+          onClose={() => setPreviewOpen(false)}
+          fetchPreviewUrl={fetchSavedPreviewUrl}
+          onOpenFile={() => undefined}
+          onEmailDocument={() => undefined}
+          onCopyLink={() => undefined}
+          onOpenRecord={() => {
+            void previewNavigationService.openRecord("sprk_document", savedPreview.documentId);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

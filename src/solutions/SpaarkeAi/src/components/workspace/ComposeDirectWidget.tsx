@@ -28,6 +28,7 @@
  */
 
 import * as React from "react";
+import { makeStyles } from "@fluentui/react-components";
 import {
   ComposeWorkspace,
   ComposeLaunchContext,
@@ -41,6 +42,29 @@ import type { WorkspaceWidgetProps } from "@spaarke/ai-widgets";
 import { resolveTenantIdSync } from "@spaarke/auth";
 import { EntityCreationService, cleanGuid } from "@spaarke/ui-components";
 import type { ComposeWidgetData, ComposeWidgetSeed } from "./composeWidgetData";
+
+// ---------------------------------------------------------------------------
+// FIX #6 (spaarkeai-compose-r2) — bounded height host for the DIRECT mount.
+// ---------------------------------------------------------------------------
+// The Compose toolbar-pin fix previously lived in the LegalWorkspace layout-door
+// section shim, which the Direct-widget flip BYPASSES. This host div re-establishes
+// the bounded flex-column chain at the Direct layer: the WorkspacePane tab content
+// host is already bounded (WorkspaceTabManagerComponent `content` + `widgetWrapper`
+// height:100%), so this fills it (`height:100%`) as a `minHeight:0` flex column.
+// That gives ComposeWorkspace.root (height:100% + minHeight:0) a definite-height flex
+// parent, so its `editorSlot` (flex:1; minHeight:0) resolves and ComposeEditor's
+// `editorSurface` (flex:1; overflow:auto) becomes THE scroll region — keeping the
+// sticky ComposeFormatToolbar pinned instead of scrolling away with an outer container.
+const useStyles = makeStyles({
+  host: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    width: "100%",
+    minHeight: 0,
+    overflow: "hidden",
+  },
+});
 
 // ---------------------------------------------------------------------------
 // Seed → ComposeLaunchContext translation (mirror of main.tsx SpaarkeAiWorkspaceRenderer)
@@ -187,11 +211,15 @@ const ComposeDirectMount: React.FC = () => {
 export const ComposeDirectWidget: React.FC<WorkspaceWidgetProps<ComposeWidgetData>> = ({
   data,
 }) => {
+  const styles = useStyles();
   const launch = buildLaunchFromSeed(data?.compose);
   const mount = React.createElement(ComposeDirectMount);
-  return launch
+  const inner = launch
     ? React.createElement(ComposeLaunchContext.Provider, { value: launch }, mount)
     : mount;
+  // FIX #6 — wrap in the bounded flex-column host so the editor's scroll region resolves and the
+  // sticky format toolbar stays pinned under the Direct mount (see the useStyles comment above).
+  return React.createElement("div", { className: styles.host }, inner);
 };
 
 ComposeDirectWidget.displayName = "ComposeDirectWidget";

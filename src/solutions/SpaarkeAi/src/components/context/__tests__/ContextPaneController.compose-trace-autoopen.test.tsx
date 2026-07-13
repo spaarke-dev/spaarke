@@ -136,6 +136,28 @@ describe('ContextPaneController — Compose tab auto-opens Execution Trace (FIX 
     expect(await screen.findByTestId('execution-trace-widget')).toBeInTheDocument();
   });
 
+  it('auto-selects Execution Trace when the DIRECT "compose" widget tab becomes active (spaarkeai-compose-r2)', async () => {
+    const bus = new PaneEventBus();
+    renderController(bus);
+
+    act(() => {
+      bus.dispatch('workspace', {
+        type: 'tab_change',
+        // The first-class DIRECT Compose widget — recognized by widgetType alone,
+        // regardless of the widgetData seed shape (here: an upload seed).
+        widgetType: 'compose',
+        widgetData: {
+          compose: { upload: { sessionId: 's1', sessionFileId: 'f1' } },
+        },
+      });
+    });
+
+    expect(
+      await screen.findByTestId('context-pane-execution-trace')
+    ).toBeInTheDocument();
+    expect(await screen.findByTestId('execution-trace-widget')).toBeInTheDocument();
+  });
+
   it('auto-selects Execution Trace via the layoutName === "Compose" discriminant (no compose seed)', async () => {
     const bus = new PaneEventBus();
     renderController(bus);

@@ -1469,8 +1469,40 @@ public class SprkChatAgentFactory
     /// </remarks>
     internal const int SelectionTextMaxChars = 200;
 
+    /// <summary>
+    /// Registry widget-type discriminator for the first-class Compose DIRECT widget
+    /// (spaarkeai-compose-r2 — "the flip"). MUST match <c>registerComposeWidget.ts</c>
+    /// (<c>widgetType: 'compose'</c>) and <c>SendWorkspaceArtifactHandler.ClientComposeWidgetKey</c>.
+    /// A Compose tab HOLDS A DOCUMENT, so it is projected onto the DocumentViewer
+    /// visible-state (mirrors the client <c>composeWidgetVisibility</c>) rather than the
+    /// Dashboard variant — otherwise the agent only learns "there is a Compose dashboard",
+    /// never WHICH document is open.
+    /// </summary>
+    internal const string ComposeWidgetType = "compose";
+
+    /// <summary>
+    /// Graceful default filename for a Compose tab whose server-readable
+    /// <see cref="WorkspaceTabWidgetData"/> carries no document filename (e.g. a Dashboard-
+    /// shaped payload). Keeps the agent-visible identity as "a document in Compose" rather
+    /// than a mislabeled layout name. See the contract note on <see cref="DeriveComposeVisibleState"/>.
+    /// </summary>
+    internal const string ComposeDefaultFilename = "Compose document";
+
     internal static WorkspaceTabVisibleState? TryDeriveVisibleState(WorkspaceTab tab)
     {
+        // spaarkeai-compose-r2 ("the flip"): a first-class Compose Direct widget
+        // (widgetType "compose") HOLDS A DOCUMENT. Mirror the client
+        // composeWidgetVisibility (registerComposeWidget.ts) — project the active-document
+        // identity onto the DocumentViewer variant so the agent learns the FILENAME of the
+        // document open in Compose, not merely that a "Compose" dashboard exists. This is
+        // checked BEFORE the closed-union switch because a compose tab's typed widgetData
+        // may be either a DocumentViewer payload (carries the real filename) or a Dashboard
+        // payload (no filename — the contract gap noted on DeriveComposeVisibleState).
+        if (string.Equals(tab.WidgetType, ComposeWidgetType, StringComparison.OrdinalIgnoreCase))
+        {
+            return DeriveComposeVisibleState(tab.WidgetData);
+        }
+
         // Closed-union switch over the polymorphic widget-data types. A new widget kind
         // cannot accidentally leak more than the FR-57 contract permits because the
         // compiler requires explicit handling here.
@@ -1501,6 +1533,58 @@ public class SprkChatAgentFactory
             // Unknown / null widget data → no visible state (privacy default).
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Derive the agent-visible state for a Compose tab (widgetType "compose"). A Compose
+    /// tab always HOLDS A DOCUMENT, so it maps to <see cref="WorkspaceTabVisibleState.DocumentViewer"/>
+    /// carrying the filename — never the Dashboard variant.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Preferred path</b>: the persisted widgetData is a <see cref="DocumentViewerTabWidgetData"/>
+    /// (kind "DocumentViewer") carrying the real <c>filename</c> — mirrors the client
+    /// <c>composeWidgetVisibility</c> projection in <c>registerComposeWidget.ts</c>. The real
+    /// filename flows straight through, including any selection state.
+    /// </para>
+    /// <para>
+    /// <b>CONTRACT GAP (reported to the client-owning agent)</b>: the flipped Compose tab
+    /// persists its identity under <c>widgetData.compose.fileName</c> (see
+    /// <c>composeWidgetData.ts</c> — also <c>compose.upload.fileName</c> /
+    /// <c>compose.draft.fileName</c>). That shape has NO <c>kind</c> discriminator, so the
+    /// strict 4-variant <see cref="WorkspaceTabWidgetData"/> union cannot deserialize it into
+    /// a filename-bearing typed payload — a Compose tab currently deserializes as a
+    /// <see cref="DashboardTabWidgetData"/> (name only, e.g. "Compose"), which carries NO
+    /// document filename. When that is the case we still emit a DocumentViewer (so the agent
+    /// learns a document is open in Compose, not a "Compose dashboard") but with a graceful
+    /// default filename. The durable fix is client-owned: persist the Compose tab's widgetData
+    /// as a DocumentViewer payload (<c>{ kind: "DocumentViewer", filename, ... }</c>, which the
+    /// client already computes) so the real filename reaches this derivation. Server reuses the
+    /// existing DocumentViewer types only — no new widget kind, no schema change.
+    /// </para>
+    /// </remarks>
+    private static WorkspaceTabVisibleState DeriveComposeVisibleState(WorkspaceTabWidgetData? widgetData)
+    {
+        // Preferred: a DocumentViewer-shaped payload carries the real active-document filename.
+        if (widgetData is DocumentViewerTabWidgetData d && !string.IsNullOrWhiteSpace(d.Filename))
+        {
+            return new WorkspaceTabVisibleState.DocumentViewer(
+                Filename: d.Filename,
+                MimeType: d.MimeType,
+                SizeBytes: d.SizeBytes,
+                HasSelection: d.HasSelection ?? false,
+                SelectionText: TruncateSelection(d.SelectionText, d.HasSelection ?? false));
+        }
+
+        // Fallback (contract gap): no server-readable filename — emit DocumentViewer with a
+        // graceful default so the agent still learns a document is open in Compose. The
+        // Dashboard layout label ("Compose") is deliberately NOT masqueraded as a filename.
+        return new WorkspaceTabVisibleState.DocumentViewer(
+            Filename: ComposeDefaultFilename,
+            MimeType: string.Empty,
+            SizeBytes: 0,
+            HasSelection: false,
+            SelectionText: null);
     }
 
     /// <summary>Summary has visible state when EITHER a non-empty TL;DR OR a non-empty body exists.</summary>

@@ -123,6 +123,19 @@ export interface IChatMessageMetadata {
     /** `sprk_playbookconsumer` Binding id that produced the edit. */
     bindingId: string;
   };
+
+  /**
+   * spaarkeai-compose-r2 FIX #7a — marks this Assistant message as the PERSISTENT confirmation for a
+   * Compose document persisted via "Add to DMS" (create-on-save). When present (and the host provides
+   * `onOpenSavedPreview`), the message renders an "Open preview" button that opens the File Preview
+   * modal for `documentId`. Replaces the transient in-editor Saved ✓ banner's preview link.
+   */
+  savedPreview?: {
+    /** `sprk_documentid` of the persisted document (the File Preview modal target). */
+    documentId: string;
+    /** Display name for the preview modal title. */
+    fileName?: string;
+  };
 }
 
 /** A single chat message, matching ChatSessionMessageInfo from the history endpoint. */
@@ -859,6 +872,25 @@ export interface ISprkChatProps {
    * @param content - the assistant message text to seed the Compose draft with.
    */
   onOpenInCompose?: (content: string) => void;
+  /**
+   * spaarkeai-compose-r2 R4 — "Insert into document". When the host provides this, a completed
+   * Assistant message renders an "Insert into document" button that inserts the message's text into
+   * the open Compose editor as a tracked change at the user's current selection/cursor (a live
+   * selection → strike+replace; else insert at cursor). Opt-in per host (SpaarkeAi's ConversationPane
+   * passes it ONLY when a Compose editor is registered on the cross-pane bridge); omitting it renders
+   * no button. Distinct from the legacy `onInsert` (BroadcastChannel → Lexical editor) path.
+   * @param content - the Assistant message text to insert into the Compose document.
+   */
+  onInsertToCompose?: (content: string) => void;
+  /**
+   * spaarkeai-compose-r2 FIX #7a — "Open preview" on a persistent "Saved to the DMS" message. When
+   * the host provides this, an Assistant message carrying `metadata.savedPreview` renders an "Open
+   * preview" button that opens the File Preview modal for the saved document. Opt-in per host
+   * (SpaarkeAi's ConversationPane); omitting it renders no button.
+   * @param documentId - the persisted `sprk_documentid` to preview.
+   * @param fileName - optional display name for the modal title.
+   */
+  onOpenSavedPreview?: (documentId: string, fileName?: string) => void;
   /**
    * spaarkeai-compose-r2 DEF-12 — per-message Compose-edit controls. When the host provides these,
    * an Assistant message carrying `metadata.composeEdit` renders Accept / Reject / Try-another

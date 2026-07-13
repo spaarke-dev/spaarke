@@ -61,6 +61,12 @@ jest.mock('../context/composeActionBridge', () => ({
   useComposeActiveDocumentRegistration: () => registerActiveDocumentSpy,
   // DEF-12: ComposeWorkspace now also registers a redline-accept handler; stub it as a no-op here.
   useRegisterComposeRedlineAcceptHandler: () => undefined,
+  // spaarkeai-compose-r2 R3/R4: visibility + insert-suggestion handlers — inert doubles.
+  useRegisterComposeVisibilityHandler: () => undefined,
+  useRegisterComposeInsertSuggestionHandler: () => undefined,
+  // spaarkeai-compose-r2 FIX #1b/#7a — Save trigger + save-completed conduits; inert doubles.
+  useRegisterComposeSaveHandler: () => undefined,
+  useComposeSaveCompleted: () => null,
 }));
 
 // ── Heavy workspace hooks — inert doubles ───────────────────────────────────

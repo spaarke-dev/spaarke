@@ -1,31 +1,23 @@
 /**
- * WorkspacePane — DEF-08 single-tab reuse for compose-draft opens.
+ * WorkspacePane — FIX #10b: the Compose "Email" affordance mounts the EmailStubWidget tab.
  *
- * Defect (DEF-08 side effect): every chat "open as a document" / "Open in Compose" widget_load
- * minted a NEW workspace tab, so repeated opens accumulated duplicate (often blank) Compose tabs.
+ * Regression guard for the spaarkeai-compose-r2 flip: WorkspacePane's `widget_load` handler gained a
+ * `widgetType === 'compose'` branch (Compose DIRECT widget). This test proves the pre-existing
+ * `widgetType === 'email'` branch SURVIVED and still fires — the compose branch does NOT shadow it —
+ * so "Open in Email" / "Send in Email" (ComposeAiToolbar → handleEmailAction) open the stub email tab
+ * carrying the drafted body (open mode) / attachment filename (send mode).
  *
- * Fix under test: the `workspace.widget_load` handler REUSES the single existing Compose DIRECT
- * tab (matched by widgetType === 'compose' — spaarkeai-compose-r2) for a compose open — it updates
- * the seed + activates the tab instead of adding a duplicate.
- *
- * Harness derived from WorkspacePane.compose-relaunch.test.tsx. Auto-install is disabled by
- * returning a null activeLayout (layoutForAutoInstall stays null → the auto-install effect
- * early-returns), so the ONLY tabs come from the widget_load events this test dispatches.
+ * Harness derived from WorkspacePane.compose-draft-reuse.test.tsx (null activeLayout → no auto-install
+ * tab; EmailStubWidget is statically imported in WorkspacePane, so the REAL component renders here).
  */
 
 import '@testing-library/jest-dom';
 import * as React from 'react';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { act } from 'react-dom/test-utils';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
-
-interface RecordedPatch {
-  tabs: Array<{ id: string; widgetType: string }>;
-  activeTabId: string | null;
-}
-const recordedPatches: RecordedPatch[] = [];
 
 const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): Promise<Response> => {
   const method = init?.method ?? 'GET';
@@ -33,7 +25,6 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
     return { ok: true, status: 200, json: async () => ({ tabs: [], activeTabId: null }) } as Partial<Response> as Response;
   }
   if (method === 'PATCH' && url.includes('/tabs')) {
-    recordedPatches.push(JSON.parse(String(init?.body)) as RecordedPatch);
     return { ok: true, status: 204, json: async () => ({}) } as Partial<Response> as Response;
   }
   return { ok: false, status: 404, json: async () => ({}) } as Partial<Response> as Response;
@@ -43,9 +34,8 @@ jest.mock('@spaarke/ai-widgets', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const actual = jest.requireActual('@spaarke/ai-widgets') as any;
   const makeStub = (widgetType: string): React.FC<{ data?: unknown }> =>
-    function StubWidget({ data }: { data?: unknown }): React.JSX.Element {
-      const layoutName = (data as { layoutName?: string } | null)?.layoutName ?? widgetType;
-      return <div data-testid="active-widget-stub">{layoutName}</div>;
+    function StubWidget(): React.JSX.Element {
+      return <div data-testid={`stub-${widgetType}`} />;
     };
   return {
     ...actual,
@@ -55,7 +45,7 @@ jest.mock('@spaarke/ai-widgets', () => {
       getAccessToken: jest.fn().mockResolvedValue('test-token'),
       bffBaseUrl: 'https://test-bff.example.com',
       tenantId: 'test-tenant',
-      chatSessionId: 'session-reuse',
+      chatSessionId: 'session-email',
       setChatSessionId: jest.fn(),
       playbookId: undefined,
       setPlaybookId: jest.fn(),
@@ -75,7 +65,6 @@ jest.mock('@spaarke/ai-widgets', () => {
   };
 });
 
-// No compose-launch mode + null activeLayout → auto-install effect early-returns (no default tab).
 jest.mock('../../shell/ThreePaneShell', () => ({
   usePaneCollapseContext: () => null,
   useComposeLaunch: () => null,
@@ -83,7 +72,7 @@ jest.mock('../../shell/ThreePaneShell', () => ({
 
 jest.mock('../../../hooks/useWorkspaceLayouts', () => ({
   useWorkspaceLayouts: () => ({
-    layouts: [{ id: 'layout-compose', name: 'Compose', isSystem: true }],
+    layouts: [],
     activeLayout: null,
     isLoading: false,
     refetch: jest.fn(),
@@ -130,19 +119,25 @@ function renderPane(): { bus: PaneEventBus } {
   return { bus };
 }
 
-function composeDraftOpen(ledgerRef: string) {
+// The EXACT interop contract ComposeAiToolbar.handleEmailAction dispatches.
+function emailOpen() {
   return {
     type: 'widget_load' as const,
-    widgetType: 'compose',
-    widgetData: {
-      compose: { draft: { ledgerRef, sessionId: 'session-reuse' } },
-    },
-    displayName: 'Compose',
+    widgetType: 'email',
+    displayName: 'Email',
+    widgetData: { layoutName: 'Email', mode: 'open', bodyText: 'Drafted body text' },
+  };
+}
+function emailSend() {
+  return {
+    type: 'widget_load' as const,
+    widgetType: 'email',
+    displayName: 'Email',
+    widgetData: { layoutName: 'Email', mode: 'send', attachmentFileName: 'Report.docx' },
   };
 }
 
 beforeEach(() => {
-  recordedPatches.length = 0;
   authenticatedFetchMock.mockClear();
   if (!Element.prototype.scrollIntoView) {
     // eslint-disable-next-line @typescript-eslint/no-empty-function
@@ -150,38 +145,46 @@ beforeEach(() => {
   }
 });
 
-describe('WorkspacePane — DEF-08 compose-draft single-tab reuse', () => {
-  it('a SECOND compose-draft open REUSES the single Compose tab (no duplicate)', async () => {
+describe('WorkspacePane — FIX #10b email stub mount', () => {
+  it('"Open in Email" (widgetType email) mounts EmailStubWidget with the drafted body', async () => {
     const { bus } = renderPane();
 
-    // First open — adds the Compose tab.
     await act(async () => {
-      bus.dispatch('workspace', composeDraftOpen('binding-1@t1'));
-    });
-    await waitFor(() => {
-      const composeTabPatches = recordedPatches.filter((p) =>
-        p.tabs.some((t) => t.widgetType === 'compose'),
-      );
-      expect(composeTabPatches.length).toBeGreaterThan(0);
+      bus.dispatch('workspace', emailOpen());
     });
 
-    // Second open (a fresh draft) — must REUSE, not duplicate.
+    await waitFor(() => expect(screen.getByTestId('email-stub-widget')).toBeInTheDocument());
+    expect(screen.getByTestId('email-stub-body')).toHaveTextContent('Drafted body text');
+  });
+
+  it('"Send in Email" (send mode) mounts the stub with the attachment filename', async () => {
+    const { bus } = renderPane();
+
     await act(async () => {
-      bus.dispatch('workspace', composeDraftOpen('binding-1@t2'));
+      bus.dispatch('workspace', emailSend());
     });
 
-    // Every PATCH that carries a compose tab carries EXACTLY ONE (no accumulated duplicates).
-    await waitFor(() => {
-      const lastPatch = recordedPatches[recordedPatches.length - 1];
-      expect(lastPatch).toBeDefined();
+    await waitFor(() => expect(screen.getByTestId('email-stub-widget')).toBeInTheDocument());
+    expect(screen.getByTestId('email-stub-attachment')).toHaveTextContent('Report.docx');
+  });
+
+  it('the compose branch does NOT shadow email: an email load after a compose load still opens the stub', async () => {
+    const { bus } = renderPane();
+
+    // A compose DIRECT open first (exercises the widgetType==='compose' branch).
+    await act(async () => {
+      bus.dispatch('workspace', {
+        type: 'widget_load',
+        widgetType: 'compose',
+        widgetData: { compose: { draft: { ledgerRef: 'b@t1', sessionId: 'session-email' } } },
+        displayName: 'Compose',
+      });
     });
-    for (const patch of recordedPatches) {
-      const composeTabs = patch.tabs.filter((t) => t.widgetType === 'compose');
-      expect(composeTabs.length).toBeLessThanOrEqual(1);
-    }
-    const finalComposeTabs = recordedPatches[recordedPatches.length - 1].tabs.filter(
-      (t) => t.widgetType === 'compose',
-    );
-    expect(finalComposeTabs).toHaveLength(1);
+    // Then an email open — the email branch must still fire and become the active tab.
+    await act(async () => {
+      bus.dispatch('workspace', emailOpen());
+    });
+
+    await waitFor(() => expect(screen.getByTestId('email-stub-widget')).toBeInTheDocument());
   });
 });

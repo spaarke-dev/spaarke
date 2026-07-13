@@ -578,10 +578,12 @@ export function ContextPaneController(): React.JSX.Element {
     //
     // When the newly-active workspace tab is a Compose tab, auto-select the
     // Execution Trace context tool (the transparency surface showing which
-    // tools / knowledge / skills the AI deploys). We detect a Compose tab with
-    // the SAME discriminant WorkspacePane uses for single-tab reuse: widgetType
-    // "workspace" AND (widgetData.compose present OR widgetData.layoutName ===
-    // "Compose"). Typed narrowing — no `any` (ADR-030).
+    // tools / knowledge / skills the AI deploys). We detect a Compose tab by the
+    // first-class DIRECT widget key (widgetType "compose" —
+    // spaarkeai-compose-r2), OR the legacy LAYOUT-door discriminant retained for
+    // the standalone ribbon compose-launch path (widgetType "workspace" AND
+    // (widgetData.compose present OR widgetData.layoutName === "Compose")). Typed
+    // narrowing — no `any` (ADR-030).
     //
     // Owner decision: this is a ONE-SHOT select-on-activate, NOT a lock. We do
     // NOT force-revert when the user later switches away from Compose or picks
@@ -592,9 +594,10 @@ export function ContextPaneController(): React.JSX.Element {
       | null
       | undefined;
     const isComposeTab =
-      workspaceWidgetType === "workspace" &&
-      composeTab != null &&
-      (composeTab.compose != null || composeTab.layoutName === "Compose");
+      workspaceWidgetType === "compose" ||
+      (workspaceWidgetType === "workspace" &&
+        composeTab != null &&
+        (composeTab.compose != null || composeTab.layoutName === "Compose"));
     if (isComposeTab) {
       setSelectedTool("execution-trace");
     }

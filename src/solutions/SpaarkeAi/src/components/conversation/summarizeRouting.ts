@@ -197,3 +197,20 @@ export function makeComposeEditControlsMessage(
     metadata: { responseType: "markdown", composeEdit },
   };
 }
+
+/**
+ * FIX #7a — build the PERSISTENT "Saved to the DMS" Assistant message posted after the Compose
+ * create-on-save flow succeeds (the "Add the document to the DMS" chip → editor Save → save-completed
+ * conduit). The `savedPreview` metadata makes SprkChat render an "Open preview" affordance that opens
+ * the File Preview modal for `documentId` — replacing the transient in-editor Saved ✓ banner link.
+ * CLIENT-RENDERED only (not in BFF chat history), same as the other local-message helpers.
+ */
+export function makeSavedToDmsMessage(fileName: string | undefined, documentId: string): IChatMessage {
+  const name = fileName && fileName.trim().length > 0 ? fileName.trim() : "your document";
+  return {
+    role: "Assistant",
+    content: `Saved '${name}' to the DMS.`,
+    timestamp: new Date().toISOString(),
+    metadata: { responseType: "markdown", savedPreview: { documentId, fileName } },
+  };
+}

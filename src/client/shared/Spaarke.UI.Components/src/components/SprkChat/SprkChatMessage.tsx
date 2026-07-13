@@ -26,6 +26,8 @@ import {
   DismissRegular,
   ArrowSyncRegular,
   BookmarkRegular,
+  DocumentArrowRightRegular,
+  DocumentRegular,
 } from '@fluentui/react-icons';
 import { ISprkChatMessageProps, ICitation, IDocumentStatusChatMessage } from './types';
 import { CitationMarker } from './SprkChatCitationPopover';
@@ -330,6 +332,25 @@ export interface ISprkChatMessageExtendedProps extends ISprkChatMessageProps {
    */
   onOpenInCompose?: (content: string) => void;
   /**
+   * spaarkeai-compose-r2 R4 — "Insert into document". When provided (and the message is a completed
+   * Assistant message with content), renders an "Insert into document" button that inserts this
+   * message's text into the open Compose editor as a tracked change at the user's current
+   * selection/cursor. Distinct from the legacy {@link onInsert} (BroadcastChannel → Lexical editor)
+   * path; the host (SpaarkeAi ConversationPane) routes this through the cross-pane Compose bridge to
+   * the editor's existing redline engine. Omitting it renders no button.
+   *
+   * @param content - the message text to insert into the Compose document.
+   */
+  onInsertToCompose?: (content: string) => void;
+  /**
+   * spaarkeai-compose-r2 FIX #7a — "Open preview". When provided (and the message carries
+   * `metadata.savedPreview`), renders an "Open preview" button that opens the File Preview modal for
+   * the saved document. Omitting it renders no button.
+   * @param documentId - the persisted `sprk_documentid` to preview.
+   * @param fileName - optional display name for the modal title.
+   */
+  onOpenSavedPreview?: (documentId: string, fileName?: string) => void;
+  /**
    * Called when the user clicks "Save to matter files" on a completed document
    * status message. SprkChat.tsx calls the BFF persist endpoint and updates the
    * message's persistenceState accordingly.
@@ -461,6 +482,8 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   isPlanExecuting,
   onCancelExecution,
   onInsert,
+  onInsertToCompose,
+  onOpenSavedPreview,
   onSaveToMatterFiles,
   hasContainerId,
   // chat-routing-redesign-r1 task 117b
@@ -569,6 +592,50 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
           title="Keep the redline in the document and keep editing"
         >
           Keep redline
+        </Button>
+      </div>
+    ) : null;
+
+  // ── R4: "Insert into document" affordance ──────────────────────────────────
+  // Renders on a completed (non-streaming) ASSISTANT message with content when the host provides
+  // `onInsertToCompose` (SpaarkeAi ConversationPane, only when a live Compose editor is registered).
+  // Inserts THIS message's text into the open Compose document as a tracked change at the current
+  // selection/cursor (routed by the host through the cross-pane bridge to the existing redline
+  // engine). Distinct from the legacy `onInsert` BroadcastChannel path. Shared into both the
+  // structured-markdown branch and the plain-text branch below.
+  const renderInsertToComposeButton = (content: string): React.ReactNode =>
+    isAssistant && !isStreaming && !!onInsertToCompose && !!content ? (
+      <div className={styles.messageActions}>
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={React.createElement(DocumentArrowRightRegular)}
+          onClick={() => onInsertToCompose(content)}
+          data-testid="insert-into-document"
+          title="Insert this into the open Compose document as a tracked change"
+        >
+          Insert into document
+        </Button>
+      </div>
+    ) : null;
+
+  // ── FIX #7a: "Open preview" affordance on a persistent "Saved to the DMS" message ──────────────
+  // Renders on a completed ASSISTANT message carrying `metadata.savedPreview` when the host provides
+  // `onOpenSavedPreview` (SpaarkeAi ConversationPane). Opens the File Preview modal for the saved
+  // document. Shared into both the structured-markdown and plain-text render branches below.
+  const savedPreview = isAssistant && !isStreaming ? message.metadata?.savedPreview : undefined;
+  const savedPreviewNode =
+    savedPreview?.documentId && onOpenSavedPreview ? (
+      <div className={styles.messageActions}>
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={React.createElement(DocumentRegular)}
+          onClick={() => onOpenSavedPreview(savedPreview.documentId, savedPreview.fileName)}
+          data-testid="open-saved-preview"
+          title="Open a preview of the saved document"
+        >
+          Open preview
         </Button>
       </div>
     ) : null;
@@ -687,6 +754,10 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
         />
         {/* DEF-12: compose-edit confirmation controls (responseType 'markdown' renders here). */}
         {composeEditControlsNode}
+        {/* FIX #7a: "Open preview" on a persistent "Saved to the DMS" message. */}
+        {savedPreviewNode}
+        {/* R4: "Insert into document" — suppressed on playbook_options (no free-text body). */}
+        {responseType !== 'playbook_options' && renderInsertToComposeButton(structuredInsertContent)}
         {/*
          * chat-routing-redesign-r1 task 117b: suppress the Insert button on
          * `playbook_options` cards — they have no free-text body to insert into
@@ -738,6 +809,12 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
 
       {/* DEF-12: compose-edit confirmation controls (plain-text branch — when responseType is absent). */}
       {composeEditControlsNode}
+
+      {/* FIX #7a: "Open preview" on a persistent "Saved to the DMS" message (plain-text branch). */}
+      {savedPreviewNode}
+
+      {/* R4: "Insert into document" (plain-text branch). */}
+      {renderInsertToComposeButton(message.content)}
 
       {showInsertButton && (
         <div className={styles.messageActions}>

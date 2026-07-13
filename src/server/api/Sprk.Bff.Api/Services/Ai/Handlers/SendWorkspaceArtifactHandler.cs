@@ -96,6 +96,18 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     /// </summary>
     internal const string ClientWorkspaceWidgetKey = "workspace";
 
+    /// <summary>
+    /// The client workspace-widget registry key for the first-class Compose DIRECT
+    /// widget (spaarkeai-compose-r2). MUST match <c>registerComposeWidget.ts</c>
+    /// (<c>widgetType: 'compose'</c> → <c>ComposeDirectWidget</c> → <c>ComposeWorkspace</c>).
+    /// A COMPOSE mount emits THIS key (not <see cref="ClientWorkspaceWidgetKey"/>) so
+    /// ComposeWorkspace mounts UNCONDITIONALLY on the client — never
+    /// LegalWorkspaceApp/dashboard, and with no layout-row lookup. The
+    /// <c>compose:{…}</c> seed rides <c>widgetData</c> unchanged. Every OTHER layout
+    /// (Daily Briefing, Documents, …) keeps <see cref="ClientWorkspaceWidgetKey"/>.
+    /// </summary>
+    internal const string ClientComposeWidgetKey = "compose";
+
     /// <summary>SSE discriminant for the live tab-open frame (rides the existing context_event channel — ADR-030 additive).</summary>
     internal const string WorkspaceOpenTabEventType = "workspace_open_tab";
 
@@ -543,6 +555,18 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
             var tabId = _guidProvider.NewGuid().ToString("N");
             var displayName = string.IsNullOrWhiteSpace(args.Title) ? layout.Name : args.Title;
 
+            // spaarkeai-compose-r2: a COMPOSE mount is dispatched to the client as the
+            // first-class DIRECT 'compose' widget (ClientComposeWidgetKey) so
+            // ComposeWorkspace mounts unconditionally — never LegalWorkspaceApp/dashboard,
+            // and with no client-side layout-row lookup or race. This holds for EVERY
+            // compose case below, including the no-seed default fallback (an EMPTY Compose
+            // editor, never a non-Compose layout). Any OTHER layout (Daily Briefing,
+            // Documents, …) keeps the LAYOUT door (ClientWorkspaceWidgetKey). The
+            // widgetData seed payload is unchanged either way.
+            var clientWidgetKey = string.Equals(layout.Name, DefaultComposeLayoutName, StringComparison.OrdinalIgnoreCase)
+                ? ClientComposeWidgetKey
+                : ClientWorkspaceWidgetKey;
+
             // ── R4-2 (2026-07-07): Compose document pre-seed ─────────────────────────
             // A widgetData.documentId (sprk_document GUID) resolves — under the calling
             // user's OBO token — to its SPE drive-item pointer, which rides the
@@ -638,7 +662,7 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                     {
                         ContextEventType = WorkspaceOpenTabEventType,
                         ContextTimestamp = _timeProvider.GetUtcNow().ToString("o"),
-                        ContextWidgetType = ClientWorkspaceWidgetKey,
+                        ContextWidgetType = clientWidgetKey,
                         ContextDisplayName = displayName,
                         ContextTabId = tabId,
                         ContextWidgetDataJson = widgetDataJson

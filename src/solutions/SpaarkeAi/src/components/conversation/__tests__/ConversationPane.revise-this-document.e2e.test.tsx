@@ -27,7 +27,7 @@ if (typeof (global as any).TextEncoder === 'undefined') (global as any).TextEnco
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 if (typeof (global as any).TextDecoder === 'undefined') (global as any).TextDecoder = NodeTextDecoder;
 import React, { act } from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
@@ -233,13 +233,12 @@ function renderPane() {
 }
 
 function lastComposeUploadOpen(): WorkspacePaneEvent | undefined {
+  // spaarkeai-compose-r2: Compose mounts through the first-class DIRECT 'compose'
+  // widget (ComposeDirectWidget), so the mount dispatch carries widgetType
+  // 'compose' (not the LAYOUT door widgetType 'workspace' + layoutName 'Compose').
   return [...workspaceEvents]
     .reverse()
-    .find(
-      (e) =>
-        e.type === 'widget_load' &&
-        (e.widgetData as { layoutName?: string } | null)?.layoutName === 'Compose'
-    );
+    .find((e) => e.type === 'widget_load' && e.widgetType === 'compose');
 }
 
 /** Drives the chat attachment lifecycle so the auto-promote effect POSTs /documents (→ active source doc). */
@@ -312,6 +311,12 @@ describe('FIX #1: "revise this document" (no named intent) → mount + editor-ce
     expect(screen.getByTestId('compose-doc-action-chip-summarize')).toBeInTheDocument();
     expect(screen.getByTestId('compose-doc-action-chip-add-to-dms')).toBeInTheDocument();
     expect(screen.getByTestId('compose-doc-action-chip-draft-email')).toBeInTheDocument();
+
+    // FIX #1a: the chips render INSIDE SprkChat's transcript footer slot (beneath the ask message),
+    // NOT above the chat — the stub renders only `transcriptFooterSlot`, so finding the chips within
+    // it proves the below-the-message placement.
+    const stub = screen.getByTestId('sprkchat-stub');
+    expect(within(stub).getByTestId('compose-doc-action-chips')).toBeInTheDocument();
 
     // No SERVER revise dispatch was made — the chips are document actions, not a whole-document revise.
     expect(dispatchPostUrls).toHaveLength(0);
@@ -394,5 +399,47 @@ describe('Wave 4: a NAMED intent in the original message mounts + applies direct
     expect(dispatchPostUrls).toHaveLength(1);
     expect(dispatchPostUrls[0]).toContain(`/sessions/${DOC_SESSION}/dispatch`);
     expect(dispatchPostBodies[0]).toContain('flag-risks');
+  });
+});
+
+describe('FIX #1b/#7a: "Add the document to the DMS" chip → editor Save → persistent chat confirmation', () => {
+  it('clicking Add-to-DMS drives the editor Save conduit; the save-completed conduit posts a "Saved to the DMS" message with Open preview metadata', async () => {
+    renderPane();
+    await driveChatUpload('revise-me.docx');
+
+    // Drive the revise flow so the three doc-action chips render (in the transcript footer).
+    await act(async () => {
+      await captured.onDecorateOutboundBody!({ message: 'revise this document' });
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+    });
+    expect(screen.getByTestId('compose-doc-action-chip-add-to-dms')).toBeInTheDocument();
+
+    // Simulate ComposeWorkspace publishing its Save handler onto the bridge (a live Compose tab).
+    const fakeSave = jest.fn();
+    await act(async () => {
+      bridgeRef.current!.setComposeSaveHandler(fakeSave);
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+    });
+
+    // Clicking "Add the document to the DMS" triggers the ACTUAL editor Save via the bridge conduit
+    // (FIX #1b) — no eager transient message, no workspace re-activation hand-off.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('compose-doc-action-chip-add-to-dms'));
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+    });
+    expect(fakeSave).toHaveBeenCalledTimes(1);
+
+    // On Save success ComposeWorkspace fires the save-completed conduit → ConversationPane injects a
+    // PERSISTENT "Saved '…' to the DMS." chat message carrying savedPreview metadata (FIX #7a).
+    injectedMessages.length = 0;
+    await act(async () => {
+      bridgeRef.current!.notifyComposeSaveCompleted({ documentRecordId: 'doc-xyz', fileName: 'revise-me.docx' });
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+    });
+
+    const savedMsg = injectedMessages.find((m) => m.content.includes('to the DMS'));
+    expect(savedMsg).toBeDefined();
+    expect(savedMsg!.content).toBe("Saved 'revise-me.docx' to the DMS.");
+    expect(savedMsg!.metadata?.savedPreview).toEqual({ documentId: 'doc-xyz', fileName: 'revise-me.docx' });
   });
 });

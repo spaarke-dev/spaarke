@@ -83,6 +83,10 @@ import { useComposeWorkspaceReceivers } from './useComposeWorkspaceReceivers';
 import {
   useComposeActiveDocumentRegistration,
   useRegisterComposeRedlineAcceptHandler,
+  useRegisterComposeVisibilityHandler,
+  useRegisterComposeInsertSuggestionHandler,
+  useRegisterComposeSaveHandler,
+  useComposeSaveCompleted,
 } from '../context/composeActionBridge';
 import { authenticatedFetch } from '@spaarke/auth';
 // FR-02 (task 011): "Search for Document" opens the standard Dataverse lookup dialog
@@ -326,6 +330,12 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     width: '100%',
     height: '100%',
+    // FIX #6 (spaarkeai-compose-r2): `minHeight: 0` lets root shrink as a flex child of the Direct
+    // widget's bounded host (ComposeDirectWidget) instead of growing to its content height. Without
+    // it, `editorSlot` (flex:1) could not resolve a bounded height, an outer container would become
+    // the scroller, and the sticky ComposeFormatToolbar would scroll away. Harmless for the standalone
+    // / layout-door mounts (a block parent ignores it).
+    minHeight: 0,
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
     boxSizing: 'border-box',
@@ -461,6 +471,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // display name; `previewOpen` gates the modal.
   const [savedPreview, setSavedPreview] = React.useState<{ documentId: string; fileName?: string } | null>(null);
   const [previewOpen, setPreviewOpen] = React.useState(false);
+
+  // FIX #7a — the host (ConversationPane) save-completed conduit. When a Save persists a document,
+  // we hand the persisted id + filename to the Assistant so it POSTs a PERSISTENT "Saved '{filename}'
+  // to the DMS." chat message with an "Open preview" affordance (replacing the transient banner's
+  // preview link). Held in a ref so triggerSave's useCallback need not depend on the (identity-
+  // flipping) delegate. Null on a standalone LegalWorkspace mount → the editor's own Saved ✓ banner
+  // remains the only confirmation there.
+  const notifyComposeSaveCompleted = useComposeSaveCompleted();
+  const notifyComposeSaveCompletedRef = React.useRef(notifyComposeSaveCompleted);
+  notifyComposeSaveCompletedRef.current = notifyComposeSaveCompleted;
 
   // Xrm navigation service for the preview modal's "Open record" action (host-context; no BFF route).
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
@@ -1008,6 +1028,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const savedDocumentId = payload.documentRecordId ?? payload.documentId;
       if (savedDocumentId) {
         setSavedPreview({ documentId: savedDocumentId, fileName: state.documentRef.fileName });
+        // FIX #7a: report the completed Save to the Assistant so it posts a PERSISTENT confirmation
+        // + "Open preview" chat message. No-op (null delegate) on a standalone mount. The transient
+        // in-editor banner's preview link is dropped (below) now that the persistent affordance lives
+        // in chat; the banner's success signal is unaffected.
+        notifyComposeSaveCompletedRef.current?.({
+          documentRecordId: savedDocumentId,
+          fileName: state.documentRef.fileName,
+        });
       }
 
       dispatch({
@@ -1049,6 +1077,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     tenantId,
     onCreateOnSaveComplete,
   ]);
+
+  // FIX #1b — publish the editor's Save into the cross-pane bridge so the Assistant's "Add the
+  // document to the DMS" chip (ConversationPane) drives the SAME create-on-save / save-to-matter
+  // flow (`triggerSave`) via a DIRECT call — no PaneEventBus discriminant. No-op outside the bridge
+  // provider (standalone LegalWorkspace mount). Effect-scoped re-registration keys on triggerSave's
+  // identity (it re-binds when its captured save state changes) so the chip always hits the latest.
+  useRegisterComposeSaveHandler(triggerSave);
 
   // Keyboard shortcut: Ctrl/Cmd+S → save.
   React.useEffect(() => {
@@ -1441,6 +1476,68 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, []);
 
   // -------------------------------------------------------------------------
+  // R3 — "Visible to assistant" toggle → active-document register/withdraw
+  // -------------------------------------------------------------------------
+  // The toggle lives on the WORKSPACE tab strip (WorkspacePane.handleToggleVisibility), but the
+  // loaded document BYTES live HERE. When the user toggles it ON we register the doc's identity +
+  // extracted text into the chat context via the SAME conduit the Browse / stored-doc (DEF-10) /
+  // upload auto-registers use (`registerActiveDocument` → chat upload → ChatSessionFile RAG +
+  // ActiveDocument); OFF withdraws it (`visible: false` in the POST body, mapped server-side). No new
+  // conduit machinery (§11) — this handler just parameterizes the existing one with `visible`.
+  const handleComposeVisibilityChange = React.useCallback(
+    (visible: boolean): void => {
+      if (state.status !== 'loaded' && state.status !== 'saving') return;
+      if (!state.docxBytes) return;
+      void registerActiveDocumentRef.current?.({
+        docxBytes: state.docxBytes,
+        fileName: state.documentRef?.fileName,
+        documentSessionId: state.sessionId,
+        visible,
+      });
+    },
+    [state.status, state.docxBytes, state.documentRef?.fileName, state.sessionId]
+  );
+  useRegisterComposeVisibilityHandler(handleComposeVisibilityChange);
+
+  // -------------------------------------------------------------------------
+  // R4 — "Insert into document": Assistant suggestion → tracked change at selection
+  // -------------------------------------------------------------------------
+  // Track the editor's latest selection (Flow-1 `compose_selection_changed`, dispatched by
+  // ComposeEditor on the `context` channel) so the insert handler can decide strike+replace (a live
+  // selection) vs insert-at-cursor. Read-only cache; no editor changes (the engine already anchors).
+  const lastSelectionRef = React.useRef<{ from: number; to: number; selectionText: string } | null>(null);
+  usePaneEvent('context', (event): void => {
+    if (event.type !== 'compose_selection_changed') return;
+    lastSelectionRef.current = event.selection
+      ? { from: event.selection.from, to: event.selection.to, selectionText: event.selection.selectionText }
+      : null;
+  });
+
+  // Materialize an Assistant suggestion as a PENDING redline via the EXISTING engine
+  // (`materializeComposeDraft` → usePendingRedline.materialize) — no engine changes (§11). A live
+  // selection → `target_text` (strike+replace at selection); no selection → omit (insert at cursor).
+  // Each insert gets a UNIQUE ledgerRef/bindingId so multiple chat inserts coexist as independent
+  // redlines (a shared bindingId would make a later insert SUPERSEDE — strip — the earlier one). The
+  // per-change Accept/Reject popover + `usePendingRedline.accept/reject` handle it by ledgerRef.
+  const chatInsertSeqRef = React.useRef(0);
+  const handleInsertSuggestion = React.useCallback((content: string, messageId?: string): void => {
+    const editor = editorRef.current;
+    if (!editor || typeof editor.materializeComposeDraft !== 'function') return;
+    if (!content || content.trim().length === 0) return;
+    const sel = lastSelectionRef.current;
+    const targetText =
+      sel && sel.to > sel.from && sel.selectionText.trim().length > 0 ? sel.selectionText : undefined;
+    const id = messageId && messageId.length > 0 ? messageId : String((chatInsertSeqRef.current += 1));
+    const ledgerRef = `chat-insert:${id}`;
+    editor.materializeComposeDraft(
+      targetText ? { new_text: content, target_text: targetText } : { new_text: content },
+      { ledgerRef, bindingId: ledgerRef, turn: 0 }
+    );
+    setIsDirty(true);
+  }, []);
+  useRegisterComposeInsertSuggestionHandler(handleInsertSuggestion);
+
+  // -------------------------------------------------------------------------
   // DEF-10 (DEF-UAT-1 part 2, 2026-07-12) — share the loaded HOST document's
   // TEXT with the Assistant's chat session
   // -------------------------------------------------------------------------
@@ -1502,7 +1599,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     if (state.status !== 'loaded' && state.status !== 'saving') return;
     if (!state.sessionId || !state.docxBytes) return;
     const wd = event.widgetData as { compose?: unknown; layoutName?: string } | null | undefined;
-    const activeTabIsCompose = wd != null && (wd.compose != null || wd.layoutName === 'Compose');
+    // spaarkeai-compose-r2: a first-class DIRECT 'compose' tab is recognized by
+    // its widgetType regardless of the widgetData seed shape (an upload/draft/
+    // stored seed, or none at all after a re-activation). The legacy LAYOUT-door
+    // discriminant (compose seed / layoutName) is retained for the standalone
+    // ribbon compose-launch path (widgetType 'workspace').
+    const activeTabIsCompose =
+      event.widgetType === 'compose' ||
+      (wd != null && (wd.compose != null || wd.layoutName === 'Compose'));
     if (!activeTabIsCompose) return;
     void registerActiveDocumentRef.current?.({
       docxBytes: state.docxBytes,
@@ -1873,9 +1977,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             importWarnings={state.importWarnings}
             pendingAssistantInsert={state.pendingAssistantInsert}
             saveSuccessToken={state.saveSuccessToken}
-            // #1(b): once a Save yields a document id, offer "Open preview" on the Saved ✓ banner.
-            savedDocumentId={savedPreview?.documentId}
-            onOpenPreview={savedPreview ? () => setPreviewOpen(true) : undefined}
+            // FIX #7a: the transient "Open preview" link was REMOVED from the Saved ✓ banner — the
+            // persistent affordance now lives in the Assistant chat (a "Saved to the DMS" message
+            // with "Open preview", posted via the save-completed conduit). The banner keeps its
+            // success signal (saveSuccessToken) but no longer carries the preview link.
           />
 
           {/* FR-04 (task 016): soft failure surfacing for draft materialization. */}

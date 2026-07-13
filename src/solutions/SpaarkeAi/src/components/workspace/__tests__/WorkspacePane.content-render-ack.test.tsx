@@ -158,14 +158,16 @@ function renderPane(): { bus: PaneEventBus } {
 const FRAME_ID = 'server-frame-def08';
 const LEDGER_REF = 'binding-1@t1';
 
-/** A chat "open as a document" seeded-draft frame (DEF-08 Part A) — ack-gated. */
+/**
+ * A chat "open as a document" seeded-draft frame (DEF-08 Part A) — ack-gated.
+ * spaarkeai-compose-r2: Compose mounts via the first-class DIRECT 'compose'
+ * widget, so the frame carries widgetType 'compose' (the seed shape is unchanged).
+ */
 function seededDraftOpen() {
   return {
     type: 'widget_load' as const,
-    widgetType: 'workspace',
+    widgetType: 'compose',
     widgetData: {
-      layoutId: 'layout-compose',
-      layoutName: 'Compose',
       compose: { draft: { ledgerRef: LEDGER_REF, sessionId: 'session-render-ack' } },
     },
     displayName: 'Compose',

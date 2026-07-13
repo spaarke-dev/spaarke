@@ -337,6 +337,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // only hosts with an insert target (AnalysisWorkspace editor) enable it.
   enableInsertToEditor = false,
   onOpenInCompose,
+  // spaarkeai-compose-r2 R4 — "Insert into document" (Assistant suggestion → tracked change).
+  onInsertToCompose,
+  // spaarkeai-compose-r2 FIX #7a — "Open preview" on a persistent "Saved to the DMS" message.
+  onOpenSavedPreview,
   // spaarkeai-compose-r2 DEF-12 — per-message Compose-edit controls + the live-edit gate.
   onComposeEditAccept,
   onComposeEditReject,
@@ -2444,6 +2448,19 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             ...(onOpenInCompose &&
               msg.role === 'Assistant' && {
                 onOpenInCompose,
+              }),
+            // R4 — "Insert into document": prop-gated the same way. Only hosts that register a live
+            // Compose editor on the bridge (SpaarkeAi's ConversationPane) pass onInsertToCompose, so
+            // the button renders exclusively on Assistant messages when the insert can land.
+            ...(onInsertToCompose &&
+              msg.role === 'Assistant' && {
+                onInsertToCompose,
+              }),
+            // FIX #7a — "Open preview" on a persistent "Saved to the DMS" message. Prop-gated the same
+            // way; the button renders only on an Assistant message carrying `metadata.savedPreview`.
+            ...(onOpenSavedPreview &&
+              msg.role === 'Assistant' && {
+                onOpenSavedPreview,
               }),
             ...(isPlanPreview && {
               onProceed: () => handlePlanProceed(index),
