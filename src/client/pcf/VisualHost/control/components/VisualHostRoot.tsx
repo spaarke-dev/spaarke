@@ -105,7 +105,8 @@ function resolveWizardPage(
   let resolvedKey = trimmedKey ?? '';
   if (!resolvedKey && entityLogicalName) {
     const lower = entityLogicalName.trim().toLowerCase();
-    resolvedKey = ENTITY_TO_WIZARD_KEY[lower] ?? (lower.startsWith(SPRK_PREFIX) ? lower.slice(SPRK_PREFIX.length) : lower);
+    resolvedKey =
+      ENTITY_TO_WIZARD_KEY[lower] ?? (lower.startsWith(SPRK_PREFIX) ? lower.slice(SPRK_PREFIX.length) : lower);
   }
   if (!resolvedKey) return null;
   return WIZARD_KEY_TO_PAGE[resolvedKey] ?? null;
@@ -366,10 +367,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
   const handleCreateClick = useCallback(async () => {
     if (!chartDefinition) return;
 
-    const page = resolveWizardPage(
-      chartDefinition.createWizardKey,
-      chartDefinition.sprk_entitylogicalname ?? null
-    );
+    const page = resolveWizardPage(chartDefinition.createWizardKey, chartDefinition.sprk_entitylogicalname ?? null);
 
     if (!page) {
       const displayKey =

@@ -14,22 +14,12 @@
 import type { IChartDefinition } from '../types';
 import type { IConfigWebApi } from './ConfigurationLoader';
 import { logger } from '../utils/logger';
-import {
-  injectContextFilter,
-  applyMaxItems,
-  substituteParameters,
-  type ISubstitutionParams,
-} from './fetchXmlBuilders';
+import { injectContextFilter, applyMaxItems, substituteParameters, type ISubstitutionParams } from './fetchXmlBuilders';
 
 // VHVU-050 — pure FetchXML-string helpers now live in ./fetchXmlBuilders.
 // Re-export them here so existing importers (DataAggregationService, the PCF
 // visual containers) keep working without touching their import paths.
-export {
-  injectContextFilter,
-  injectRequiredAttributes,
-  applyMaxItems,
-  substituteParameters,
-} from './fetchXmlBuilders';
+export { injectContextFilter, injectRequiredAttributes, applyMaxItems, substituteParameters } from './fetchXmlBuilders';
 export type { ISubstitutionParams } from './fetchXmlBuilders';
 
 /**
