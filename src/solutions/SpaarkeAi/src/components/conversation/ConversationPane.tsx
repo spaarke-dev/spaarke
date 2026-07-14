@@ -1076,7 +1076,30 @@ export function ConversationPane(): React.JSX.Element {
     }));
   }, [restoreCtx?.recentMessages]);
 
+  // FIX #1a — the post-mount document-level action chips (Summarize / Add to DMS / Draft email) now
+  // render INSIDE the transcript footer, directly BENEATH the "Your file is available to edit…" ask
+  // message (next-step affordances), instead of ABOVE the whole chat. Combined with the Click-path
+  // consumer chips in the SAME footer slot (both land at the transcript's bottom edge). Memoized so
+  // SprkChat's slot-keyed auto-scroll fires only when the slot content actually changes.
+  //
+  // React #300 (hooks-count mismatch) fix: this useMemo MUST live ABOVE the auth guard below. On a
+  // cold `composeMode=editor` load `isAuthenticated` is false on the first render (auth probe pending)
+  // then true after it resolves — a hook placed BELOW the guard would run in the second render but
+  // not the first, changing the hook count and throwing "rendered more hooks than during the previous
+  // render". Keep every hook call above the guard.
+  const transcriptFooter = React.useMemo(
+    () => (
+      <>
+        {reviseChipsPending ? <ComposeDocActionChips onAction={handleDocAction} /> : null}
+        {chips.consumerChipsSlot}
+      </>
+    ),
+    [reviseChipsPending, handleDocAction, chips.consumerChipsSlot]
+  );
+
   // ── Auth loading guard (gate on isAuthenticated — never a token snapshot) ──
+  // NOTE (Rules of Hooks): every React.use* call MUST appear ABOVE this early return — see the
+  // React #300 note on `transcriptFooter` above. Do not add hooks below this line.
   if (!isAuthenticated) {
     return (
       <div className={styles.root}>
@@ -1091,21 +1114,6 @@ export function ConversationPane(): React.JSX.Element {
 
   const predefinedPrompts =
     selection.refinementPrompts.length > 0 ? selection.refinementPrompts : undefined;
-
-  // FIX #1a — the post-mount document-level action chips (Summarize / Add to DMS / Draft email) now
-  // render INSIDE the transcript footer, directly BENEATH the "Your file is available to edit…" ask
-  // message (next-step affordances), instead of ABOVE the whole chat. Combined with the Click-path
-  // consumer chips in the SAME footer slot (both land at the transcript's bottom edge). Memoized so
-  // SprkChat's slot-keyed auto-scroll fires only when the slot content actually changes.
-  const transcriptFooter = React.useMemo(
-    () => (
-      <>
-        {reviseChipsPending ? <ComposeDocActionChips onAction={handleDocAction} /> : null}
-        {chips.consumerChipsSlot}
-      </>
-    ),
-    [reviseChipsPending, handleDocAction, chips.consumerChipsSlot]
-  );
 
   const hostContext = entityContext
     ? {
