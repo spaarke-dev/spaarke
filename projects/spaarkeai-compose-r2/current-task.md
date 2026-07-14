@@ -13,7 +13,14 @@
 | **Status** | in-progress |
 | **Deployed** | spaarkedev1: round-6 + round-7 Waves A/B/C(#6/#7) **+ bug A + bug B (2026-07-14)**. BFF `spaarke-bff-dev` (SHA-256 4/4 verified, health OK, 46.62 MB). Client web resource `sprk_spaarkeai` (5206a442…, published). |
 | **Master merge** | HELD (branch 66 ahead / 34 behind origin/master; ~47 unpushed) |
-| **Next Action** | **AWAITING OWNER RE-UAT** — verify (a) Draft-alternative works (no /dispatch 404), (b) opening Email tab keeps the Compose file loaded. Then await owner **#8** shape → build #8. |
+| **Next Action** | **AWAITING OWNER RE-UAT (round-8)** — #1 multiple Compose tabs open simultaneously; #2 no 429 during drafting; #3 Draft-alternative targets the CURRENT selection. PLUS decide: supersession keeps ONE pending draft-alternative (drafting B discards kept A) — accumulate independent redlines? (#8 dedup spun out to projects/sdap-file-duplication-detector-r1.) |
+
+### Round-8 UAT fixes DEPLOYED (2026-07-14), tree clean
+- **#1** multi-instance Compose tabs — `b0d845b5c` (WorkspacePane instance-key reuse + per-tab keep-alive + tab-scoped active-doc). Was a regression from Bug B unify singleton.
+- **#2** compose 429 — `b0d845b5c` (5 endpoints re-bucketed off 5/min ai-upload: reads→ai-context 60/min, SPE-writes→ai-persist 20/min). BFF deployed, SHA-256 4/4 verified.
+- **#3** draft-alternative stale selection — `b0d845b5c` (snapshot+remap intended selection before supersession strip). Regression test added.
+- Gates: BFF unit 8230/0 · compose jest 183 · SpaarkeAi jest 419. Client `sprk_spaarkeai` published.
+- Bug A (draft-alt 404) confirmed FIXED by owner UAT step 7.
 
 ### Both bug fixes COMMITTED + DEPLOYED (2026-07-14), tree clean
 - **Bug A** = `bd3d1eb90` (draft-alternative /dispatch 404 — RegisterActiveDocument creates resolvable doc session; BFF).
