@@ -1698,9 +1698,22 @@ public static class ComposeEndpoints
             var updated = session with { ActiveDocument = identity };
             await sessionManager.UpdateSessionCacheAsync(updated, ct).ConfigureAwait(false);
 
+            // DEF-11 doc-session dispatch fix (spaarkeai-compose-r2): the Compose "document session"
+            // (identity.DocumentSessionId) is client-minted (crypto.randomUUID) and is NEVER created
+            // via POST /api/ai/chat/sessions. A materializesInEditor compose dispatch therefore targets
+            // POST /api/ai/chat/sessions/{documentSessionId}/dispatch and 404s, because
+            // SessionDispatchOrchestrator loads GetSessionAsync(tenantId, documentSessionId) → null.
+            // Idempotently ensure a minimal, resolvable ChatSession exists keyed by documentSessionId
+            // so the dispatch resolves and OutputRouter can write its SessionOutput. This is a
+            // deterministic session-store write (same UpdateSessionCacheAsync the pointer path uses) —
+            // NOT AI dispatch (ADR-039) and NOT SPE/Graph (ADR-007). Session-creation stays OUT of the
+            // dispatch seam; this is the single natural creation hook.
+            await EnsureDocumentSessionResolvableAsync(
+                sessionManager, tenantId, identity.DocumentSessionId, session, ct).ConfigureAwait(false);
+
             logger.LogInformation(
-                "Compose active-document registered: tenant={TenantId} session={SessionKey} source={Source} kind={Kind} TraceId={TraceId}",
-                tenantId, sessionKey, identity.Source, hasSessionFile ? "session-file" : "stored", httpContext.TraceIdentifier);
+                "Compose active-document registered: tenant={TenantId} session={SessionKey} source={Source} kind={Kind} docSession={DocumentSessionId} TraceId={TraceId}",
+                tenantId, sessionKey, identity.Source, hasSessionFile ? "session-file" : "stored", identity.DocumentSessionId ?? "(none)", httpContext.TraceIdentifier);
 
             return Results.Ok(new ComposeActiveDocumentResponse(
                 SessionId: body.SessionId,
@@ -1719,6 +1732,60 @@ public static class ComposeEndpoints
                 title: "Internal Server Error",
                 detail: "An unexpected error occurred while registering the active document.");
         }
+    }
+
+    /// <summary>
+    /// DEF-11 (spaarkeai-compose-r2): idempotently ensures a resolvable <see cref="ChatSession"/>
+    /// exists keyed by <paramref name="documentSessionId"/> so a compose <c>materializesInEditor</c>
+    /// dispatch to <c>POST /api/ai/chat/sessions/{documentSessionId}/dispatch</c> resolves (200) rather
+    /// than 404-ing. The Compose document session is client-minted and never created via the chat
+    /// session-create endpoint, so this registration hook is its single natural creation point.
+    ///
+    /// <para><b>Idempotency (critical)</b>: if a session already resolves for
+    /// <paramref name="documentSessionId"/>, this method is a no-op — it does NOT clobber the existing
+    /// session. That preserves any <see cref="ChatSession.Outputs"/> (the compose-disposition ledger
+    /// the editor materializes) written by prior dispatches; re-registration across the multiple mount
+    /// doors (Browse, upload, stored-doc, DEF-08 draft) MUST NOT wipe pending redlines.</para>
+    ///
+    /// <para>When absent, a MINIMAL session is created (empty Messages/Outputs, timestamps=now,
+    /// carrying over the chat session's <see cref="ChatSession.HostContext"/> and tenant) and persisted
+    /// via the same <see cref="ChatSessionManager.UpdateSessionCacheAsync"/> write the pointer path uses.
+    /// Compose EDIT actions bind their operand from dispatch args (the structured-operand path — no
+    /// session files required), so a minimal persisted session is sufficient for the dispatch to run and
+    /// write its <c>SessionOutput</c>.</para>
+    /// </summary>
+    private static async Task EnsureDocumentSessionResolvableAsync(
+        ChatSessionManager sessionManager,
+        string tenantId,
+        string? documentSessionId,
+        ChatSession chatSession,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(documentSessionId))
+        {
+            return;
+        }
+
+        // Preserve an existing doc session wholesale (Outputs / ledger) — never clobber.
+        var (existing, _) = await ResolveSessionAsync(sessionManager, tenantId, documentSessionId, ct)
+            .ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var documentSession = new ChatSession(
+            SessionId: documentSessionId,
+            TenantId: tenantId,
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: now,
+            LastActivity: now,
+            Messages: [],
+            HostContext: chatSession.HostContext);
+
+        await sessionManager.UpdateSessionCacheAsync(documentSession, ct).ConfigureAwait(false);
     }
 
     /// <summary>
