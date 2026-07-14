@@ -72,10 +72,9 @@ Status legend:
 | `spaarke-daily-update-service-r2` | `work/spaarke-daily-update-service-r2.3-orchestrator-diagnosis` | `C:/code_files/spaarke-wt-spaarke-daily-update-service-r2` | Y | Y | N | N | 2026-06-23 | Recent |
 | `customer-provisioning-orchestration-r1` | `work/customer-provisioning-orchestration-r1` | `C:/code_files/spaarke-wt-customer-provisioning-orchestration-r1` | Y | N | N | Y | 2026-06-18 | Recent |
 | `smart-todo-decoupling-r3` | `work/smart-todo-r3-wrap-up` | `C:/code_files/spaarke-wt-smart-todo-decoupling-r3` | Y | N | N | N | 2026-06-10 | Recent |
-| `email-communication-solution-r3` | `work/email-communication-solution-r3` | `C:/code_files/spaarke-wt-email-communication-solution-r3` | Y | N | N | N | 2026-06-05 | Recent |
 | `ai-spaarke-action-engine-r1` | `work/ai-spaarke-action-engine-r1` | `C:/code_files/spaarke-wt-ai-spaarke-action-engine-r1` | Y | Y | N | N | 2026-05-30 | Recent |
 
-**Count**: 24 active worktrees (`spaarke-ai-architecture-redesign-r1` added 2026-07-05 by `project-pipeline` — hot-path BFF=Y/SpaarkeAi=Y/Skills=Y; it formally closes `spaarke-ai-platform-unification-r7`, whose row should be archived when task 013/025 complete; `spaarke-dataset-grid-framework-r2` + `record-header-and-notepad-r1` both added 2026-07-02 by `project-pipeline` — the latter is hot-path=N across all four surfaces, no coordination required; `ai-spaarke-ai-workspace-UI-r2` added 2026-07-01 by `project-pipeline`; `spaarkeai-compose-r1` added 2026-06-29 by `project-pipeline`; R7 added 2026-06-28 by `project-pipeline`; R2 added 2026-06-26 by `project-pipeline`; exceeds spec's 5-6 estimate; this reflects current portfolio reality post-2026-05-20 ramp — flagged for spec refinement in `ci-cd-unit-test-remediation-r1` Phase 1 task `010`).
+**Count**: 23 active worktrees (`email-communication-solution-r3` retired 2026-07-14 — absorbed into `email-communication-solution-r4`, folder moved to `x-email-communication-solution-r3`; worktree `spaarke-wt-email-communication-solution-r3` + branch `work/email-communication-solution-r3` pending cleanup; `spaarke-ai-architecture-redesign-r1` added 2026-07-05 by `project-pipeline` — hot-path BFF=Y/SpaarkeAi=Y/Skills=Y; it formally closes `spaarke-ai-platform-unification-r7`, whose row should be archived when task 013/025 complete; `spaarke-dataset-grid-framework-r2` + `record-header-and-notepad-r1` both added 2026-07-02 by `project-pipeline` — the latter is hot-path=N across all four surfaces, no coordination required; `ai-spaarke-ai-workspace-UI-r2` added 2026-07-01 by `project-pipeline`; `spaarkeai-compose-r1` added 2026-06-29 by `project-pipeline`; R7 added 2026-06-28 by `project-pipeline`; R2 added 2026-06-26 by `project-pipeline`; exceeds spec's 5-6 estimate; this reflects current portfolio reality post-2026-05-20 ramp — flagged for spec refinement in `ci-cd-unit-test-remediation-r1` Phase 1 task `010`).
 
 ---
 
@@ -104,7 +103,6 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 - `spaarke-daily-update-service-r2` (widget framework migration)
 - `customer-provisioning-orchestration-r1` (configuration maps)
 - `smart-todo-decoupling-r3` (Office endpoints)
-- `email-communication-solution-r3` (email pipeline)
 - `ai-spaarke-action-engine-r1` (action handler registry)
 
 **Coordination action**: Any task adding a new service to `Sprk.Bff.Api` MUST run the `.claude/constraints/bff-extensions.md` checklist + state the placement decision in PR description per root CLAUDE.md §10.
