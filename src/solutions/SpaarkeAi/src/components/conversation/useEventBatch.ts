@@ -74,6 +74,18 @@ export interface EventBatchMachine {
   markEventFilePromotionFailed: (chipId: string) => void;
   /** A `/documents` promotion 202 landed — settle the chip with its documentId. */
   queueDocumentUploadedEvent: (chipId: string, documentId: string) => void;
+  /**
+   * spaarkeai-compose-r2 (manual Browse ingest ceremony): fire the Event path
+   * for a file that was promoted OUTSIDE the SprkChat attachment strip — a file
+   * mounted into Compose via Browse and context-uploaded through
+   * `registerComposeActiveDocument`'s `/documents` POST. There is no chip, so we
+   * settle a synthetic single-file batch immediately: the file already lives in
+   * `session.UploadedFiles` (the `/documents` call added it), so the server's
+   * classify rule resolves it and streams `event_classification` → the
+   * "Classified …" message, identical to an Assistant-uploaded file. Idempotency
+   * (once-per-file) is the CALLER's responsibility (the upload-dedup gate).
+   */
+  fireForPromotedFile: (sessionFileId: string) => void;
   /** Track the most recent outbound message (typed-command + playbook-options input). */
   noteOutboundMessage: (text: string) => void;
   /** Most recent outbound message text (ADR-015: never rendered, never logged). */
@@ -306,6 +318,25 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
     [maybeFire]
   );
 
+  const fireForPromotedFile = React.useCallback(
+    (sessionFileId: string): void => {
+      // Synthetic single-file batch: no chip strip involvement. A stable synthetic
+      // id (never collides with a real chip id) admits the promoted file to a fresh
+      // batch and settles it in the same call so `maybeFire` runs the canonical
+      // `runDocumentUploadedEvent` immediately (server resolves the file from
+      // session.UploadedFiles). Mirrors `queueDocumentUploadedEvent`'s settle path.
+      const chipId = `compose-promoted:${sessionFileId}`;
+      pendingEventFilesRef.current.push({ chipId, documentId: sessionFileId });
+      accountedChipIdsRef.current.delete(chipId);
+      expectedRef.current.add(chipId);
+      if (openedAtRef.current === null) {
+        openedAtRef.current = Date.now();
+      }
+      maybeFire();
+    },
+    [maybeFire]
+  );
+
   const noteOutboundMessage = React.useCallback((text: string): void => {
     lastSentMessageRef.current = text;
     lastSentAtRef.current = Date.now();
@@ -343,6 +374,7 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
       noteChipRemoved,
       markEventFilePromotionFailed,
       queueDocumentUploadedEvent,
+      fireForPromotedFile,
       noteOutboundMessage,
       getLastSentMessage,
       resetForSession,
@@ -352,6 +384,7 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
       noteChipRemoved,
       markEventFilePromotionFailed,
       queueDocumentUploadedEvent,
+      fireForPromotedFile,
       noteOutboundMessage,
       getLastSentMessage,
       resetForSession,

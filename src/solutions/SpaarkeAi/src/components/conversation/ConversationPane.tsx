@@ -66,7 +66,7 @@ import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession"
 import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-components/types/compose-contracts";
 import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
 import { formatComposeActionResultMarkdown } from "./composeResultFormat";
-import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage } from "./summarizeRouting";
+import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
 import {
   detectReviseThisDocumentIntent,
@@ -769,6 +769,16 @@ export function ConversationPane(): React.JSX.Element {
   // ChatSessionFile, no redundant upload). Cleared per-session by the session-created reset below.
   const activeDocUploadCacheRef = React.useRef<Map<string, string>>(new Map());
 
+  // spaarkeai-compose-r2 (manual Browse ingest ceremony): a file mounted into Compose via Browse and
+  // context-uploaded here must reach the SAME Assistant "ingest ceremony" as an Assistant-uploaded
+  // file — (1) an "I have your file: X" loaded message and (2) a "Classified 'X' as <type> (N%)"
+  // message from the Event path. `registerComposeActiveDocument` runs on load AND on every tab_change
+  // AND on visibility toggles, so the ceremony MUST fire ONCE per newly-loaded file. This set is the
+  // once-per-file gate keyed by the promoted `sessionFileId` (the id the `/documents` upload minted);
+  // a re-register / tab switch / withdraw for the same file finds the id already present and skips
+  // both messages + the classify fire. Cleared per-session by the session-created reset below.
+  const composeIngestCeremonyFiredRef = React.useRef<Set<string>>(new Set());
+
   // spaarkeai-compose-r2 (cold Workspaces-menu Compose bug): lazily obtain the pane's chat session.
   // A Compose tab opened COLD from the Workspaces menu (no prior Assistant interaction) has NO chat
   // session, so a Browse-mounted file's `registerComposeActiveDocument` used to early-return and the
@@ -867,6 +877,26 @@ export function ConversationPane(): React.JSX.Element {
           sessionFileId = uploaded?.documentId;
           if (!sessionFileId) return;
           activeDocUploadCacheRef.current.set(cacheKey, sessionFileId);
+
+          // spaarkeai-compose-r2 (manual Browse ingest ceremony): this is the FIRST successful upload
+          // of this file into the session (the cache-miss branch runs once per (session, file)). Bring
+          // the Browse-opened file to the same Assistant ceremony as an Assistant-uploaded file:
+          //   (1) the "I have your file: X" loaded message (same helper useAttachments emits on a chip
+          //       reaching 'ready'), and
+          //   (2) the "Classified 'X' as <type> (N% confidence)" message via the Event path — the file
+          //       already lives in session.UploadedFiles (this /documents call added it), so the
+          //       server's classify rule resolves it and streams event_classification.
+          // A WITHDRAW (visible === false) is NOT an ingest — never run the ceremony for it. The
+          // ceremony set is a once-per-file guard so a re-register that somehow reaches a fresh upload
+          // still can't double-emit.
+          if (visible !== false && !composeIngestCeremonyFiredRef.current.has(sessionFileId)) {
+            composeIngestCeremonyFiredRef.current.add(sessionFileId);
+            const confirmation = buildFileConfirmationMessage([name]);
+            if (confirmation !== null) {
+              injection.enqueue(makeLocalAssistantMessage(confirmation));
+            }
+            eventBatch.fireForPromotedFile(sessionFileId);
+          }
         }
         // Wave 3 Part 2 (DEF-11 TEXT-path close): thread the tab's `documentSessionId` so the server
         // sets ChatSession.ActiveDocument.DocumentSessionId → BindingCapabilityTool routes a typed
@@ -899,7 +929,7 @@ export function ConversationPane(): React.JSX.Element {
         // Non-fatal: the direct upload just won't be chat-visible; the Compose Save path is unaffected.
       }
     },
-    [getSessionId, bffBaseUrl, authenticatedFetch, ensureChatSession]
+    [getSessionId, bffBaseUrl, authenticatedFetch, ensureChatSession, injection, eventBatch]
   );
   useRegisterComposeActiveDocumentHandler(registerComposeActiveDocument);
   // ADR-015: structural signal only (queue depth + in-flight correlation id —
@@ -1089,6 +1119,9 @@ export function ConversationPane(): React.JSX.Element {
       // Wave 3: a fresh session has no active source document and no cached uploads.
       activeSourceDocRef.current = null;
       activeDocUploadCacheRef.current.clear();
+      // spaarkeai-compose-r2: the ingest-ceremony guard is session-scoped (keyed by the session's
+      // file ids) — a fresh session must re-run the ceremony for its own re-uploaded files.
+      composeIngestCeremonyFiredRef.current.clear();
       // Wave 4: a fresh session clears any pending revise flow + the document-session back-fill.
       setReviseChipsPending(false);
       setPendingNamedRevise(null);
