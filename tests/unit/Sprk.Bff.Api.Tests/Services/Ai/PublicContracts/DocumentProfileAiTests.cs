@@ -72,10 +72,21 @@ public sealed class DocumentProfileAiTests
             .ReturnsAsync(stream);
 
         Stream? delegatedStream = null;
+        string? delegatedPlaybook = null;
+        string? delegatedDriveId = null;
+        string? delegatedItemId = null;
         _analysis
             .Setup(a => a.AnalyzeDocumentFromStreamAsync(
-                documentId, FileName, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, string, Stream, string?, CancellationToken>((_, _, s, _, _) => delegatedStream = s)
+                documentId, FileName, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(), It.IsAny<string?>()))
+            .Callback<Guid, string, Stream, string?, CancellationToken, string?, string?>(
+                (_, _, s, playbook, _, driveId, itemId) =>
+                {
+                    delegatedStream = s;
+                    delegatedPlaybook = playbook;
+                    delegatedDriveId = driveId;
+                    delegatedItemId = itemId;
+                })
             .ReturnsAsync(AppOnlyDocumentAnalysisResult.Success(documentId, profileUpdate: null));
 
         var result = await CreateSut().ProfileDocumentAsUserAsync(documentId, ctx, CancellationToken.None);
@@ -90,8 +101,19 @@ public sealed class DocumentProfileAiTests
         // The OBO-downloaded stream is handed to the reused profiling method (which owns the field
         // mapping + UpdateDocumentAsync write) — no mapping is duplicated in the facade.
         _analysis.Verify(a => a.AnalyzeDocumentFromStreamAsync(
-            documentId, FileName, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+            documentId, FileName, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>(),
+            It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
         delegatedStream.Should().BeSameAs(stream);
+
+        // Round-7b root-cause fix — full parity with the proven app-only AnalyzeDocumentAsync path:
+        //   • the document-profile playbook is named EXPLICITLY (not null → the run must load the
+        //     "Document Profile" playbook, not rely on the default coincidentally matching), and
+        //   • the SPE pointers are forwarded so a node-based playbook's DeliverToIndex-style node
+        //     does not hard-fail (a single failed node aborts the whole run, skipping the field-write).
+        delegatedPlaybook.Should().Be(IAppOnlyAnalysisService.DefaultPlaybookName);
+        delegatedPlaybook.Should().NotBeNull("passing null instead of the playbook name was the round-7b regression");
+        delegatedDriveId.Should().Be(DriveId);
+        delegatedItemId.Should().Be(ItemId);
     }
 
     // ── Skip cleanly (no download, no profiling) when the record has no SPE pointer ─────────────
@@ -108,7 +130,8 @@ public sealed class DocumentProfileAiTests
         _spe.Verify(s => s.DownloadFileAsUserAsync(
             It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         _analysis.Verify(a => a.AnalyzeDocumentFromStreamAsync(
-            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>(),
+            It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
     }
 
     // ── A null OBO download degrades to Failed (best-effort), never throws ──────────────────────
@@ -126,7 +149,8 @@ public sealed class DocumentProfileAiTests
         result.Success.Should().BeFalse();
         result.FailureReason.Should().NotBeNullOrEmpty();
         _analysis.Verify(a => a.AnalyzeDocumentFromStreamAsync(
-            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>(),
+            It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
     }
 
     // ── Best-effort: a throwing profiling step is swallowed into a Failed result (never propagates) ─
@@ -142,7 +166,8 @@ public sealed class DocumentProfileAiTests
             .ReturnsAsync(stream);
         _analysis
             .Setup(a => a.AnalyzeDocumentFromStreamAsync(
-                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(), It.IsAny<string?>()))
             .ThrowsAsync(new InvalidOperationException("playbook exploded"));
 
         var act = async () => await CreateSut().ProfileDocumentAsUserAsync(documentId, new DefaultHttpContext(), CancellationToken.None);

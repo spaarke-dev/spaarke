@@ -108,10 +108,24 @@ public sealed class DocumentProfileAi : IDocumentProfileAi
             }
 
             // 3) Reuse the EXISTING profiling pipeline unchanged (extract → playbook → field-map →
-            //    UpdateDocumentAsync). AnalyzeDocumentFromStreamAsync is the stream-based entry the
-            //    email path already uses when the file is in hand — here the hand is OBO.
+            //    UpdateDocumentAsync). This is now a FAITHFUL mirror of the proven app-only
+            //    AnalyzeDocumentAsync path (the Document Upload path), differing ONLY in the download
+            //    identity (OBO stream vs app-only download):
+            //      • the SAME document-profile playbook is named EXPLICITLY (DefaultPlaybookName =
+            //        "Document Profile") rather than passed as null, and
+            //      • the SAME SPE pointers (drive + item) are forwarded into DocumentContext.Metadata
+            //        so a node-based profile playbook's DeliverToIndex-style node has what it needs.
+            //    Without the pointers that node hard-fails, and a single failed node aborts the whole
+            //    run (no ContinueOnError — GitHub #233), which returns failure BEFORE the profile
+            //    field-write — the round-7b blank-profile bug.
             var result = await _analysis.AnalyzeDocumentFromStreamAsync(
-                    documentId, fileName, stream, playbookName: null, cancellationToken)
+                    documentId,
+                    fileName,
+                    stream,
+                    playbookName: IAppOnlyAnalysisService.DefaultPlaybookName,
+                    cancellationToken,
+                    graphDriveId: document.GraphDriveId,
+                    graphItemId: document.GraphItemId)
                 .ConfigureAwait(false);
 
             if (result.IsSuccess)
