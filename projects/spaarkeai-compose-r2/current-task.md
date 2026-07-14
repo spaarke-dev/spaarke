@@ -15,6 +15,14 @@
 | **Master merge** | HELD (branch 66 ahead / 34 behind origin/master; ~47 unpushed) |
 | **Next Action** | **AWAITING OWNER RE-UAT (round-8)** — #1 multiple Compose tabs open simultaneously; #2 no 429 during drafting; #3 Draft-alternative targets the CURRENT selection. PLUS decide: supersession keeps ONE pending draft-alternative (drafting B discards kept A) — accumulate independent redlines? (#8 dedup spun out to projects/sdap-file-duplication-detector-r1.) |
 
+### Round-9 active-document seam DEPLOYED (2026-07-14) — `c08b0a6aa`
+Multi-tab exposed the Compose↔Assistant active-doc seam (chat never consumed `session.ActiveDocument`):
+- **#1** "summarize this document" summarized ALL session files → BFF `ResolveTargetFiles` 3-way rule (explicit fileIds → active doc → FR-08 all). Manifest marks active file. BFF deployed (SHA-256 4/4, 46.62 MB).
+- **#2** Browse-opened file in a cold Workspaces-menu tab invisible to Assistant → `ConversationPane` lazily creates the chat session (race-guarded) so bytes upload as a ChatSessionFile. Client published.
+- Gates: BFF unit 8232/0 · seam/contract/eval 53 · SpaarkeAi jest 422. No assertions weakened.
+- **compose-r3** OOXML fidelity findings (E1/E2/E3) captured + seed reconciled (`b03b3bfd9`); design.md next.
+- **Pane-UI redesign** = separate project AFTER compose-r2 merges (freeze the seam first).
+
 ### Round-8 UAT fixes DEPLOYED (2026-07-14), tree clean
 - **#1** multi-instance Compose tabs — `b0d845b5c` (WorkspacePane instance-key reuse + per-tab keep-alive + tab-scoped active-doc). Was a regression from Bug B unify singleton.
 - **#2** compose 429 — `b0d845b5c` (5 endpoints re-bucketed off 5/min ai-upload: reads→ai-context 60/min, SPE-writes→ai-persist 20/min). BFF deployed, SHA-256 4/4 verified.
