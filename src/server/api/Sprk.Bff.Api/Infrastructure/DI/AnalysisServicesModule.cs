@@ -316,7 +316,7 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.NotificationService>();
 
         // B4 — IChatDataverseRepository + ChatDataverseRepository
-        // (deps: IGenericEntityService, IFieldMappingDataverseService, ILogger — all unconditional).
+        // (deps: IGenericEntityService, ILogger — all unconditional).
         services.AddScoped<IChatDataverseRepository, ChatDataverseRepository>();
 
         // B4 — ChatSessionManager (deps: IDistributedCache, IChatDataverseRepository,
