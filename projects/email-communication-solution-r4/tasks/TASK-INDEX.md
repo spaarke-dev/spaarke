@@ -10,8 +10,8 @@
 
 | # | Title | Wave | Tags | FR | Deps | Blocks | Parallel-safe | Rigor | Status |
 |---|---|---|---|---|---|---|---|---|---|
-| 001 | `sprk_communication` schema pass (reply-thread + association columns) | W0 | dataverse, schema | FR-01 | — | 006,011,015,042 | true | STANDARD | 🔲 |
-| 002 | Add `Suggested`/`Ambiguous` option-set values (verify integers via MCP) | W0 | dataverse, schema | FR-02 | 001 | 015,042 | true | STANDARD | 🔲 |
+| 001 | `sprk_communication` schema pass (reply-thread + association columns) | W0 | dataverse, schema | FR-01 | — | 006,011,015,042 | true | STANDARD | ✅ |
+| 002 | Add `Suggested`/`Ambiguous` option-set values (verify integers via MCP) | W0 | dataverse, schema | FR-02 | 001 | 015,042 | true | STANDARD | ✅ |
 | 003 | Author `sprk_servicerequest` schema doc + wire association target | W0 | dataverse, schema, docs | FR-03 | 001 | 012,013 | true | STANDARD | 🔲 |
 | 004 | Add `sprk_event` to catalog/priority; correct org → `sprk_organization` | W0 | dataverse, bff-api | FR-04 | 001 | 012,013 | true | FULL | 🔲 |
 | 005 | Author **ADR-045** Communication ADR (concise + full) | W0 | adr, docs | FR-05 | — | 006,010,016 | **false** (`.claude/`) | STANDARD | ✅ |

@@ -2,7 +2,8 @@
   <metadata>
     <title>`sprk_communication` schema pass — R3 reply-thread + R4 association columns</title>
     <phase>Wave 0 — Shared foundation (schema · ADR · server send-changes · retire OOB-email)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-07-14</completed>
     <estimated-hours>3</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>006, 011, 015, 042</blocks>

@@ -2,7 +2,8 @@
   <metadata>
     <title>Add `Suggested` + `Ambiguous` values to the `sprk_associationstatus` option set (verify integers via MCP)</title>
     <phase>Wave 0 — Shared foundation (schema · ADR · server send-changes · retire OOB-email)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-07-14</completed>
     <estimated-hours>2</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>015, 042</blocks>

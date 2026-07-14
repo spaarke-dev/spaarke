@@ -6,26 +6,24 @@
 
 ## Active Task
 
-- **Task**: 001 — `sprk_communication` schema pass
-- **Status**: in-progress (discovery done; live mutation pending — CHECKPOINTED before mutating)
-- **Wave**: W0 Foundation (W0-A)
-- **Env**: spaarkedev1 (pac active profile [3])
-- **Next Action**: Execute the 4 schema ops below via `dataverse-create-schema` (Web API MetadataService + PowerShell; pac token). Read `.claude/skills/dataverse-create-schema/SKILL.md` first.
+- **Task**: none active — W0-A complete (001, 002, 005 ✅)
+- **Status**: ready for W0 remainder
+- **Wave**: W0 Foundation → next: W0-B (003, 004) + W0-C (006, 007); W2 task 020 also unblocked (needs 001✅)
+- **Next Action**: Run the next W0 wave. Available (deps satisfied): **003, 004** (need 001✅), **006** (needs 001✅+005✅), **007** (needs 005✅). 006/007 are BFF → `/conflict-check` before PR.
 
-## Progress (task 001)
-- ✅ Step 1–3 (discovery, read-only): described live `sprk_communication` + `sprk_servicerequest`.
-- ⏳ Step 4 (mutation): NOT YET RUN — 4 ops below.
+## Completed (W0-A, this session)
+- ✅ **005** — ADR-045 authored (both forms + INDEXes).
+- ✅ **001** — schema pass on `sprk_communication` (live spaarkedev1): created `sprk_inreplyto`, `sprk_associationprovenance`, `sprk_regardingservicerequest`; widened `sprk_internetmessageid` 100→1000 (owner-approved); confirmed `sprk_receiveddate` + `sprk_associationstatus`. Data-model doc updated (§1.2 drift closed). **Solution-export for prod promotion = deploy-time follow-up (ADR-027), not done here.**
+- ✅ **002** — added `sprk_associationstatus` values **Suggested (100000003)** + **Ambiguous (100000004)**; avoided the `100000002` collision (legacy "Unresolved"). Reconciliation documented (Unresolved→Pending Review).
 
-### EXACT execution plan (decision-locked)
-Live `sprk_communication` verified 2026-07-14. Ops:
-1. **WIDEN** `sprk_internetmessageid`: currently `NVARCHAR(100)` → set MaxLength **255** + `IsSearchable=true` (indexed). *(Owner decision: widen, not keep — non-destructive.)* Verify current IsSearchable first.
-2. **CREATE** `sprk_inreplyto`: String, MaxLength 255, `IsSearchable=true`. (Holds parent Internet-Message-Id string — NOT a lookup.)
-3. **CREATE** `sprk_associationprovenance`: Memo (multiline text) — JSON provenance.
-4. **CREATE** `sprk_regardingservicerequest`: Lookup → `sprk_servicerequest` (target table CONFIRMED exists).
-Then: re-`describe` to verify all 6; update `docs/data-model/sprk_communication.md` (close §1.2 drift); solution export if added; mark 001 ✅.
+### Decisions
+- 2026-07-14: Widened `sprk_internetmessageid` (owner-approved) — long RFC-2822 Message-IDs would truncate at 100 in the W1 thread rung. Columns came out at NVARCHAR(1000) (≥ spec 255; fine).
+- 2026-07-14: Retain legacy `Unresolved (100000002)`; R4 engine (task 015) treats it as `Pending Review` (no data migration).
 
-### Decisions this task
-- 2026-07-14: Widen `sprk_internetmessageid` 100→255 + index (owner-approved) rather than keep-at-100 — long RFC-2822 Message-IDs would truncate in the W1 thread rung.
+### FYIs for later tasks (DO NOT lose)
+- **Task 003**: `sprk_servicerequest` has reverse lookup `sprk_regardingcommunication → sprk_communication`; forward lookup now added — relationship is bidirectional (note in schema doc + wire `RegardingLookupMap`/catalog/priority).
+- **Task 004**: `sprk_communication.sprk_regardingorganization` **already targets `sprk_organization`** — 004's "correct org target" is about the sender-domain MATCH CODE writing `account`, NOT this column.
+- **Task 015**: implement the `Unresolved`→`Pending Review` equivalence.
 
 ### FYIs surfaced (for later tasks — DO NOT lose)
 - **Task 002**: `sprk_associationstatus` option `100000002` is ALREADY "Unresolved" — DEC-5's tentative Suggested/Ambiguous integers collide. Use `100000003/4`. Also reconcile legacy "Unresolved" vs R4 "Pending Review" semantics (002/015).
