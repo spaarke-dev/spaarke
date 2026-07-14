@@ -928,6 +928,7 @@ public sealed class CommunicationService
         ["sprk_budget"] = ("sprk_regardingbudget", "sprk_budgets"),
         ["sprk_invoice"] = ("sprk_regardinginvoice", "sprk_invoices"),
         ["sprk_workassignment"] = ("sprk_regardingworkassignment", "sprk_workassignments"),
+        ["sprk_servicerequest"] = ("sprk_regardingservicerequest", "sprk_servicerequests"),
     };
 
     /// <summary>
