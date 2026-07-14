@@ -12,7 +12,7 @@
     <parallel-group>W1-serial-spine</parallel-group>
     <parallel-safe>false</parallel-safe>
     <fr-refs>FR-09</fr-refs>
-    <model-tier>sonnet</model-tier>
+    <model-tier>opus</model-tier>
     <effort>xhigh</effort>
   </metadata>
 

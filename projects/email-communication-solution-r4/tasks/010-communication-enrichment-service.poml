@@ -12,7 +12,7 @@
     <parallel-group>W1-spine-entry</parallel-group>
     <parallel-safe>true</parallel-safe>
     <fr-refs>FR-08</fr-refs>
-    <model-tier>sonnet</model-tier>
+    <model-tier>opus</model-tier>
     <effort>high</effort>
   </metadata>
 

@@ -13,7 +13,7 @@
     <parallel-group>W5</parallel-group>
     <parallel-safe>true</parallel-safe>
     <fr-refs>FR-18</fr-refs>
-    <model-tier>sonnet</model-tier>
+    <model-tier>opus</model-tier>
     <effort>xhigh</effort>
   </metadata>
 

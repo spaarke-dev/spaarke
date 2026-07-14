@@ -2,7 +2,8 @@
   <metadata>
     <title>Author ADR-045 — Communication ADR (client canonical send + server Association Engine + enrichment + channel seams)</title>
     <phase>Wave 0 — Shared foundation (schema · ADR · server send-changes · retire OOB-email)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-07-14</completed>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>006, 010, 016</blocks>

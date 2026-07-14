@@ -14,7 +14,7 @@
 | 002 | Add `Suggested`/`Ambiguous` option-set values (verify integers via MCP) | W0 | dataverse, schema | FR-02 | 001 | 015,042 | true | STANDARD | 🔲 |
 | 003 | Author `sprk_servicerequest` schema doc + wire association target | W0 | dataverse, schema, docs | FR-03 | 001 | 012,013 | true | STANDARD | 🔲 |
 | 004 | Add `sprk_event` to catalog/priority; correct org → `sprk_organization` | W0 | dataverse, bff-api | FR-04 | 001 | 012,013 | true | FULL | 🔲 |
-| 005 | Author **ADR-045** Communication ADR (concise + full) | W0 | adr, docs | FR-05 | — | 006,010,016 | **false** (`.claude/`) | STANDARD | 🔲 |
+| 005 | Author **ADR-045** Communication ADR (concise + full) | W0 | adr, docs | FR-05 | — | 006,010,016 | **false** (`.claude/`) | STANDARD | ✅ |
 | 006 | BFF send-path: `AttachmentDriveItemIds` rename + `Internet-Message-Id` capture | W0 | bff-api, communication | FR-06 | 001,005 | 012,022,060 | true | FULL | 🔲 |
 | 007 | **Retire OOB-`email` subsystem** + publish-size delta | W0 | bff-api, deletion | FR-07 | 005 | — | true | FULL | 🔲 |
 | 010 | `ICommunicationEnrichmentService` (both directions; outbound RAG) | W1 | bff-api, communication | FR-08 | 005,006 | 011,052 | true | FULL | 🔲 |
@@ -75,6 +75,8 @@
 | **W8** | 080, 081, 082 | W1–W7 substantially complete | Per-file doc targets parallel |
 
 **Max concurrency**: 6 agents/wave. `.claude/`-touching tasks (005) + gate (050) + wrap-up (090) run main-session, sequential.
+
+**Model tiers (per CLAUDE.md §8.5)**: default **sonnet @ high**. **opus** on the architectural / high-blast-radius tasks: **005** (ADR authoring), **010** (enrichment architecture), **011** (engine refactor over normalized envelope — serial spine), **051 / 052** (edit shared `Services/Ai/` internals via PublicContracts). **effort: xhigh** on brownfield/high-consequence: **007** (retire OOB), **011**, **015** (auto-file), **051**, **052**. All others sonnet @ high.
 
 ## Critical Path
 `001 → 005 → 006 → 010 → 011 → 012 → 015 → 030/031 → 050(gate) → 051 → 052 → 054 → 080 → 090`
