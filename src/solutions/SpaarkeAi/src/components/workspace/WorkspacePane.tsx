@@ -113,6 +113,70 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
+// Compose instance-key derivation (spaarkeai-compose-r2 — multi-Compose-tab)
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive a STABLE per-document instance key from a compose open's `widgetData`.
+ *
+ * Compose is no longer a hard singleton: a DIFFERENT document opens a NEW tab, while the SAME
+ * document reuses its existing tab. This key is the identity used to decide reuse-vs-new. It
+ * prefers a durable id over a filename per source door:
+ *   - draft   → `draft:<bindingId>` — the ledgerRef's `@t<turn>` suffix is STRIPPED so successive
+ *               turns of the SAME drafting binding (e.g. `b1@t1`, `b1@t2`) map to ONE tab
+ *               (DEF-08 single-tab reuse across re-drafts).
+ *   - upload  → `upload:<sessionFileId>`
+ *   - stored  → `stored:<speDriveItemId>` (or `<sprkDocumentId>` fallback)
+ *   - name    → `name:<fileName>` — only when no stable id exists.
+ *
+ * Returns `undefined` when there is no `compose` seed at all (a source-only re-activation), OR the
+ * seed carries no identifiable document (a Part-B inline-html draft, or an empty `{ upload: {} }`
+ * / blank open) — the caller distinguishes those cases (source-only reuse vs blank new tab).
+ *
+ * The key is RE-DERIVED from the existing tab's persisted `compose` seed on every reuse decision
+ * (see {@link composeTabInstanceKey}) rather than stored on `widgetData` — that keeps the seed
+ * clean (its shape is asserted verbatim by tests + consumed by `buildLaunchFromSeed`) and Just
+ * Works for tabs restored from persistence, which never carried a stored key.
+ */
+export function deriveComposeInstanceKey(widgetData: unknown): string | undefined {
+  if (widgetData === null || typeof widgetData !== "object") return undefined;
+  const compose = (widgetData as { compose?: unknown }).compose;
+  if (compose === null || typeof compose !== "object") return undefined;
+  const c = compose as {
+    draft?: { ledgerRef?: string; fileName?: string; html?: string };
+    upload?: { sessionFileId?: string; fileName?: string };
+    speDriveItemId?: string;
+    sprkDocumentId?: string;
+    fileName?: string;
+  };
+
+  if (typeof c.draft?.ledgerRef === "string" && c.draft.ledgerRef.length > 0) {
+    // `<bindingId>@t<turn>` → strip the per-turn suffix so re-drafts of the SAME binding reuse.
+    return `draft:${c.draft.ledgerRef.replace(/@t\d+$/i, "")}`;
+  }
+  if (typeof c.upload?.sessionFileId === "string" && c.upload.sessionFileId.length > 0) {
+    return `upload:${c.upload.sessionFileId}`;
+  }
+  if (typeof c.speDriveItemId === "string" && c.speDriveItemId.length > 0) {
+    return `stored:${c.speDriveItemId}`;
+  }
+  if (typeof c.sprkDocumentId === "string" && c.sprkDocumentId.length > 0) {
+    return `stored:${c.sprkDocumentId}`;
+  }
+  const fn = c.upload?.fileName ?? c.draft?.fileName ?? c.fileName;
+  if (typeof fn === "string" && fn.length > 0) {
+    return `name:${fn}`;
+  }
+  // A compose object with no durable identity (Part-B inline html, or an empty seed) → no key.
+  return undefined;
+}
+
+/** The document instance key of an existing compose tab, re-derived from its persisted seed. */
+function composeTabInstanceKey(tab: { widgetData?: unknown }): string | undefined {
+  return deriveComposeInstanceKey(tab.widgetData);
+}
+
+// ---------------------------------------------------------------------------
 // WorkspacePane
 // ---------------------------------------------------------------------------
 
@@ -971,19 +1035,45 @@ export function WorkspacePane(): React.JSX.Element {
           }
         };
 
-        // Reuse the single existing 'compose' tab if one is open (re-seed +
-        // activate). A fresh draft picks up if the editor hadn't loaded yet; a
-        // loaded editor's draft effect status-gate prevents clobbering unsaved
-        // edits.
-        const existingComposeTab = manager
-          .getSnapshot()
-          .tabs.find((t) => t.widgetType === "compose");
-        if (existingComposeTab) {
+        // ── Instance-keyed reuse (spaarkeai-compose-r2 — multi-Compose-tab) ────
+        // Compose is no longer a hard singleton. Decide reuse-vs-new by DOCUMENT
+        // IDENTITY, not by widgetType:
+        //   • the open carries an identity key AND an existing compose tab has the
+        //     SAME key → REUSE that tab (relaunch/restore of the same doc; a
+        //     re-draft of the same binding across turns);
+        //   • a source-only / seedless re-activation (no new `compose` seed, no
+        //     identity — e.g. the add-to-DMS `{source}` marker, issue #572 1d) →
+        //     REUSE the ACTIVE compose tab (else any existing one) so add-to-DMS
+        //     keeps working without minting a blank tab;
+        //   • an identity key with NO match, OR an explicit blank open (the
+        //     Workspaces-menu "Compose" layout load) → fall through to a NEW tab.
+        const instanceKey = deriveComposeInstanceKey(widgetData);
+        const hasComposeSeed =
+          widgetData != null &&
+          typeof widgetData === "object" &&
+          typeof (widgetData as { compose?: unknown }).compose === "object" &&
+          (widgetData as { compose?: unknown }).compose !== null;
+
+        const snapshot0 = manager.getSnapshot();
+        const composeTabs = snapshot0.tabs.filter((t) => t.widgetType === "compose");
+        let reuseTab: (typeof composeTabs)[number] | undefined;
+        if (instanceKey) {
+          reuseTab = composeTabs.find((t) => composeTabInstanceKey(t) === instanceKey);
+        } else if (!hasComposeSeed && !isComposeLayoutLoad) {
+          // Seedless source-only re-activation — reuse the ACTIVE compose tab, else the first open
+          // one. Never mints a duplicate (source-only opens carry no new document). A blank menu
+          // "Compose" open (isComposeLayoutLoad) is EXCLUDED here so it mints a new tab below.
+          reuseTab =
+            composeTabs.find((t) => t.id === snapshot0.activeTabId) ?? composeTabs[0];
+        }
+
+        if (reuseTab) {
+          const existingComposeTab = reuseTab;
           const existingData = (existingComposeTab.widgetData ?? {}) as {
             filename?: string;
-            compose?: unknown;
+            compose?: Record<string, unknown>;
           };
-          const newData = (widgetData ?? {}) as { compose?: unknown };
+          const newData = (widgetData ?? {}) as { compose?: Record<string, unknown> };
           const existingFilename = existingData.filename;
           const mergedFilename = seedFilename ?? existingFilename;
           // UAT round-7 #1 seed-merge: a seedless re-activation (e.g. an
@@ -992,7 +1082,9 @@ export function WorkspacePane(): React.JSX.Element {
           // OVERWRITING the tab's reloadable `compose` seed with nothing — so a
           // later remount had nothing to reload. Preserve the existing seed when
           // the re-activation brings none (merge, don't overwrite); a genuine
-          // new seed (fresh draft/upload) still wins.
+          // new seed (fresh draft/upload) still wins. The tab's stable identity
+          // is re-derived from this seed on the next reuse decision, so nothing
+          // extra is stamped onto it (keeps the seed shape clean).
           const mergedCompose = newData.compose ?? existingData.compose;
           const reuseWidgetData: Record<string, unknown> = {
             ...(widgetData ?? {}),
@@ -1014,9 +1106,11 @@ export function WorkspacePane(): React.JSX.Element {
           return;
         }
 
-        // No existing Compose tab — add one and lazily resolve the DIRECT
+        // No matching Compose tab — add a NEW one and lazily resolve the DIRECT
         // 'compose' widget (ComposeDirectWidget) from the registry. Hoist the
         // seed's filename to a top-level `filename` (R3 server-readable contract).
+        // The tab's stable identity is re-derived from its seed on later reuse
+        // decisions, so nothing extra is stamped onto widgetData.
         const composeWidgetData = seedFilename
           ? { ...(widgetData ?? {}), filename: seedFilename }
           : widgetData;

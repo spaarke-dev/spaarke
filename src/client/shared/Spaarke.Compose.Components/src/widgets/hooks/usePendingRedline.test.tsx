@@ -530,6 +530,57 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
     expect(result.current.pending).toHaveLength(0);
     editor.destroy();
   });
+
+  // UAT 2026-07-14 #3: a second "Draft alternative" (same binding, NOT accepted — only "kept")
+  // superseded the first, and stripRedlineMarks relocated the live selection onto the FIRST range,
+  // so the not-found fallback anchored the NEW redline on the FIRST selection instead of the user's
+  // current one. The fix snapshots the intended selection BEFORE supersession and remaps it through
+  // the strip (which also shifts positions, since the first redline's inserted text is dropped).
+  it('not_found fallback anchors on the CURRENT selection, not the superseded prior redline (remapped)', () => {
+    const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    // Draft A on "quick" → resolvable; leave it KEPT (do NOT accept — stays pending).
+    act(() => {
+      result.current.materialize(
+        { target_text: 'quick', new_text: 'SWIFT', match_mode: 'strict' },
+        { ledgerRef: 'b1@t1', bindingId: 'b1', turn: 1 }
+      );
+    });
+    expect(editor.getHTML()).toContain('SWIFT');
+
+    // User now selects a DIFFERENT region ("lazy") — computed against the CURRENT doc, which already
+    // contains A's inserted "SWIFT" (so B sits to the RIGHT of what the strip will remove).
+    const textNow = editor.state.doc.textContent;
+    const bStart = textNow.indexOf('lazy') + 1; // single paragraph → doc pos = textOffset + 1
+    const bEnd = bStart + 'lazy'.length;
+    act(() => {
+      editor.commands.setTextSelection({ from: bStart, to: bEnd });
+    });
+
+    // Draft B: SAME binding (supersedes + strips A), different ledgerRef, and a target the model
+    // echoed non-verbatim → not_found → fallback must use selection B.
+    let status: string | undefined;
+    act(() => {
+      status = result.current.materialize(
+        { target_text: 'a paraphrase not present verbatim', new_text: 'INDOLENT', match_mode: 'strict' },
+        { ledgerRef: 'b1@t2', bindingId: 'b1', turn: 2 }
+      );
+    });
+
+    expect(status).toBe('applied');
+    const html = editor.getHTML();
+    // New alternative applied to the user's ACTUAL selection B ("lazy" struck), NOT A ("quick").
+    expect(html).toContain('INDOLENT');
+    expect(html).toMatch(/data-compose-mark="deletion"[^>]*>lazy</);
+    expect(html).not.toMatch(/data-compose-mark="deletion"[^>]*>quick</);
+    // A's superseded redline is gone: inserted "SWIFT" removed, "quick" restored to plain text.
+    expect(html).not.toContain('SWIFT');
+    // Only the new redline is pending.
+    expect(result.current.pending).toHaveLength(1);
+    expect(result.current.pending[0].ledgerRef).toBe('b1@t2');
+    editor.destroy();
+  });
 });
 
 // ---------------------------------------------------------------------------

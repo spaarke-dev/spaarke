@@ -50,7 +50,10 @@ public static class ComposeEndpoints
         group.MapPost("/upload", Upload)
             .WithName("ComposeUpload")
             .WithSummary("Serve a session-uploaded file's retained bytes for a transient Compose mount (FR-03)")
-            .RequireRateLimiting("ai-upload")
+            // Read-shaped: a deterministic Redis serve of already-retained bytes (NOT an SPE upload).
+            // Belongs on the read bucket like sibling Load (2), not the 5/min ai-upload ingest bucket —
+            // sharing ai-upload caused interactive drafting to 429 (UAT 2026-07-14).
+            .RequireRateLimiting("ai-context")
             .Produces<ComposeUploadResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -72,7 +75,8 @@ public static class ComposeEndpoints
         group.MapPost("/documents/{documentSpeId}/save", Save)
             .WithName("ComposeSaveDocument")
             .WithSummary("Save DOCX bytes to SPE (idempotent first-Save promotion per FR-06)")
-            .RequireRateLimiting("ai-upload")
+            // SPE persistence → ai-persist (20/min) per its documented purpose, not the 5/min upload bucket.
+            .RequireRateLimiting("ai-persist")
             .Produces<SaveComposeDocumentResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -90,7 +94,8 @@ public static class ComposeEndpoints
         group.MapPost("/documents/create-on-save", CreateOnSave)
             .WithName("ComposeCreateOnSaveDocument")
             .WithSummary("Create a new sprk_document from a transient Compose draft in the client-resolved BU container (FR-05)")
-            .RequireRateLimiting("ai-upload")
+            // SPE persistence → ai-persist (20/min), not the 5/min upload bucket.
+            .RequireRateLimiting("ai-persist")
             .Produces<SaveComposeDocumentResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -149,7 +154,8 @@ public static class ComposeEndpoints
         group.MapPost("/document/{documentSpeId}/push-annotations", PushAnnotations)
             .WithName("ComposePushAnnotations")
             .WithSummary("Render accepted Compose annotations as native Word track-changes + comments and push to SPE with If-Match")
-            .RequireRateLimiting("ai-upload")
+            // SPE persistence → ai-persist (20/min), not the 5/min upload bucket.
+            .RequireRateLimiting("ai-persist")
             .Produces<PushAnnotationsResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -287,7 +293,9 @@ public static class ComposeEndpoints
         group.MapPost("/sessions/{sessionId}/annotations", SaveAnnotations)
             .WithName("ComposeSaveAnnotations")
             .WithSummary("Persist a Compose session's anchored annotations + defined-terms (FR-29)")
-            .RequireRateLimiting("ai-upload")
+            // Mutable session UI state in Redis (no SPE/Graph, no AI dispatch) → read/context bucket,
+            // not the 5/min ai-upload ingest bucket.
+            .RequireRateLimiting("ai-context")
             .Produces<ComposeAnnotationsResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)

@@ -146,7 +146,14 @@ export function buildLaunchFromSeed(
 // with bffBaseUrl sourced from useAiSession() (no SectionFactoryContext here).
 // ---------------------------------------------------------------------------
 
-const ComposeDirectMount: React.FC = () => {
+interface ComposeDirectMountProps {
+  /** spaarkeai-compose-r2 (multi-Compose-tab): the workspace tab id this editor is mounted in. */
+  workspaceTabId?: string;
+  /** spaarkeai-compose-r2 (multi-Compose-tab): whether this tab is the active (visible) tab. */
+  isActiveTab?: boolean;
+}
+
+const ComposeDirectMount: React.FC<ComposeDirectMountProps> = ({ workspaceTabId, isActiveTab = true }) => {
   const { bffBaseUrl } = useAiSession();
   const composeLaunch = useComposeLaunch();
   // FR-13: forward the Assistant serial-dispatch queue ONLY when the bridge is
@@ -194,6 +201,10 @@ const ComposeDirectMount: React.FC = () => {
     initialDraftRef: composeLaunch?.draft ?? null,
     initialSessionId: "",
     enqueueComposeAction: bridge?.hasDispatcher ? bridge.enqueue : undefined,
+    // spaarkeai-compose-r2 (multi-Compose-tab): thread the tab id + active flag so this editor
+    // tab-scopes its active-document registration and only the ACTIVE tab claims the session doc.
+    workspaceTabId,
+    isActiveTab,
   });
 };
 
@@ -210,10 +221,15 @@ const ComposeDirectMount: React.FC = () => {
  */
 export const ComposeDirectWidget: React.FC<WorkspaceWidgetProps<ComposeWidgetData>> = ({
   data,
+  tabId,
+  isActiveTab,
 }) => {
   const styles = useStyles();
   const launch = buildLaunchFromSeed(data?.compose);
-  const mount = React.createElement(ComposeDirectMount);
+  const mount = React.createElement(ComposeDirectMount, {
+    workspaceTabId: tabId,
+    isActiveTab,
+  });
   const inner = launch
     ? React.createElement(ComposeLaunchContext.Provider, { value: launch }, mount)
     : mount;

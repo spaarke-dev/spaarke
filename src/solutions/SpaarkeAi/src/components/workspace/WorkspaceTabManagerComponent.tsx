@@ -424,9 +424,19 @@ async function launchEditWizardForTab(
 interface ActiveWidgetContentProps {
   tab: WorkspaceTab;
   styles: ReturnType<typeof useStyles>;
+  /**
+   * spaarkeai-compose-r2 (multi-Compose-tab): whether this tab is the ACTIVE (visible) tab.
+   * Defaults to `true`. Forwarded to the widget so keep-alive widgets (Compose) mounted-hidden
+   * while inactive can suppress "I am the active surface" side effects (active-document claim).
+   */
+  isActiveTab?: boolean;
 }
 
-function ActiveWidgetContent({ tab, styles }: ActiveWidgetContentProps): React.JSX.Element {
+function ActiveWidgetContent({
+  tab,
+  styles,
+  isActiveTab = true,
+}: ActiveWidgetContentProps): React.JSX.Element {
   // Loading — registry promise not yet resolved.
   if (tab.isLoading || tab.Component === null) {
     return (
@@ -454,6 +464,8 @@ function ActiveWidgetContent({ tab, styles }: ActiveWidgetContentProps): React.J
           data={tab.widgetData}
           widgetType={tab.widgetType}
           isLoading={false}
+          tabId={tab.id}
+          isActiveTab={isActiveTab}
         />
       </WidgetErrorBoundary>
     </div>
@@ -485,22 +497,23 @@ export function WorkspaceTabManagerComponent({
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
 
   // ---------------------------------------------------------------------------
-  // Compose keep-alive (UAT round-7 #1)
+  // Compose keep-alive (UAT round-7 #1; multi-tab — spaarkeai-compose-r2)
   //
-  // The single Compose DIRECT tab (widgetType 'compose', allowMultiple:false)
-  // is kept MOUNTED across tab switches and toggled hidden when it is not the
-  // active tab. Rendering only the active tab (the default for every other tab
-  // type) UNMOUNTS ComposeWorkspace on a Daily Briefing ↔ Compose switch,
-  // destroying its live local reducer state (the loaded doc). Keeping it
-  // mounted-hidden preserves that state with zero re-fetch.
+  // EVERY Compose DIRECT tab (widgetType 'compose') is kept MOUNTED across tab
+  // switches and toggled hidden when it is not the active tab. Rendering only
+  // the active tab (the default for every other tab type) UNMOUNTS
+  // ComposeWorkspace on a switch, destroying its live local reducer state (the
+  // loaded doc). Keeping each mounted-hidden preserves that state with zero
+  // re-fetch.
   //
-  // Scoped to 'compose' ONLY — every other inactive tab still unmounts (the
-  // memory/connection design for multi-instance widgets is unchanged). Only
-  // one compose tab can exist, so this keeps at most one extra widget mounted.
+  // Multiple Compose tabs can now be open simultaneously — one keep-alive host
+  // per compose tab, ALL mounted, only the active one visible. Scoped to
+  // 'compose' ONLY: every other inactive tab still unmounts (the memory/
+  // connection design for multi-instance widgets is unchanged).
   // ---------------------------------------------------------------------------
-  const composeTab = tabs.find((t) => t.widgetType === "compose") ?? null;
+  const composeTabs = tabs.filter((t) => t.widgetType === "compose");
   const activeIsCompose =
-    activeTab !== null && composeTab !== null && activeTab.id === composeTab.id;
+    activeTab !== null && activeTab.widgetType === "compose";
 
   // R2 UAT §3.3 (2026-07-03): after gear-icon edit wizard closes with a save,
   // close the affected tab and dispatch a fresh widget_load so the tab
@@ -786,26 +799,36 @@ export function WorkspaceTabManagerComponent({
           </div>
         ) : null}
 
-        {/* Compose keep-alive host (UAT round-7 #1). Mounted whenever a compose
-            tab exists; hidden (display:none, aria-hidden) when it is not the
-            active tab so ComposeWorkspace's live state survives tab switches.
-            When compose IS the active tab this host is the visible surface —
-            the active-tab branch below renders nothing for it (no double-mount). */}
-        {composeTab !== null ? (
-          <div
-            className={mergeClasses(
-              styles.composeKeepAlive,
-              !activeIsCompose && styles.composeKeepAliveHidden,
-            )}
-            data-testid="workspace-compose-keepalive"
-            aria-hidden={!activeIsCompose}
-          >
-            <ActiveWidgetContent tab={composeTab} styles={styles} />
-          </div>
-        ) : null}
+        {/* Compose keep-alive hosts (UAT round-7 #1; multi-tab — spaarkeai-compose-r2).
+            One host PER compose tab, ALL mounted; each hidden (display:none,
+            aria-hidden) when it is not the active tab so every ComposeWorkspace's
+            live reducer state survives tab switches. The active compose tab's host
+            is the visible surface — the active-tab branch below renders nothing for
+            a compose active tab (no double-mount). */}
+        {composeTabs.map((composeTab) => {
+          const isActiveComposeTab = composeTab.id === activeTabId;
+          return (
+            <div
+              key={composeTab.id}
+              className={mergeClasses(
+                styles.composeKeepAlive,
+                !isActiveComposeTab && styles.composeKeepAliveHidden,
+              )}
+              data-testid="workspace-compose-keepalive"
+              data-tab-id={composeTab.id}
+              aria-hidden={!isActiveComposeTab}
+            >
+              <ActiveWidgetContent
+                tab={composeTab}
+                styles={styles}
+                isActiveTab={isActiveComposeTab}
+              />
+            </div>
+          );
+        })}
 
         {activeTab !== null && !activeIsCompose ? (
-          <ActiveWidgetContent tab={activeTab} styles={styles} />
+          <ActiveWidgetContent tab={activeTab} styles={styles} isActiveTab />
         ) : activeTab === null ? (
           <div className={styles.errorState}>
             <WarningRegular className={styles.errorIcon} />

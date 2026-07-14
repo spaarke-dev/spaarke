@@ -327,6 +327,27 @@ export interface ComposeWorkspaceProps {
    * `ComposeActionEnqueue`.
    */
   enqueueComposeAction?: ComposeActionEnqueue;
+
+  /**
+   * spaarkeai-compose-r2 (multi-Compose-tab) — the id of the WORKSPACE TAB this editor is
+   * mounted in, when hosted as a keep-alive workspace tab (SpaarkeAi). Multiple Compose tabs
+   * can be mounted simultaneously (each hidden except the active one); this id lets THIS instance
+   * tab-scope its active-document re-registration to `tab_change` events that target THIS tab —
+   * so two mounted editors never fight over the session's active document. Omitted on the
+   * standalone / layout-door single-instance mounts (the legacy widgetType/seed discriminant is
+   * used then).
+   */
+  workspaceTabId?: string;
+
+  /**
+   * spaarkeai-compose-r2 (multi-Compose-tab) — whether THIS editor's workspace tab is the ACTIVE
+   * (visible) tab. Defaults to `true` (standalone / single-instance mounts are always "active").
+   * When `false`, this instance suppresses the load-time active-document auto-registrations and
+   * the visibility-conduit visible=true register, so only the ACTIVE tab's document is the
+   * session's active document. The becoming-active re-registration flows through the tab-scoped
+   * `tab_change` effect.
+   */
+  isActiveTab?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -409,9 +430,20 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     onComposeUnmount,
     className,
     enqueueComposeAction,
+    workspaceTabId,
+    isActiveTab = true,
   } = props;
 
   const [state, dispatch] = React.useReducer(composeWorkspaceReducer, INITIAL_STATE);
+
+  // spaarkeai-compose-r2 (multi-Compose-tab): keep the latest active-tab flag in a ref so the
+  // async load effects + the single-slot visibility conduit handler (both of which capture their
+  // closure at mount / dep-change time) can read whether THIS instance is the active tab WITHOUT
+  // re-subscribing. Only the ACTIVE tab's instance may claim the session's active document.
+  const isActiveTabRef = React.useRef<boolean>(isActiveTab);
+  React.useEffect(() => {
+    isActiveTabRef.current = isActiveTab;
+  }, [isActiveTab]);
 
   // FR-05 (task 100): keep the latest host-resolved BU container id in a ref so the Browse
   // handler + upload effect (whose closures would otherwise capture a stale prop) always thread
@@ -1551,6 +1583,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     (visible: boolean): void => {
       if (state.status !== 'loaded' && state.status !== 'saving') return;
       if (!state.docxBytes) return;
+      // spaarkeai-compose-r2 (multi-Compose-tab): the visibility conduit is single-slot (the bridge
+      // holds ONE editor handler; the last-mounted instance wins the slot). Guard the REGISTER
+      // (visible=true) so an INACTIVE instance holding the slot cannot claim the session's active
+      // document when WorkspacePane drives visible=true for a DIFFERENT active Compose tab — the
+      // active tab registers via the tab-scoped tab_change effect below. A WITHDRAW (visible=false,
+      // switch to a non-document tab) is session-level and safe from any instance, so it is allowed
+      // through regardless of active state.
+      if (visible && isActiveTabRef.current === false) return;
       void registerActiveDocumentRef.current?.({
         docxBytes: state.docxBytes,
         fileName: state.documentRef?.fileName,
@@ -1633,6 +1673,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     if (!speDriveItemId) return;
     if (!state.docxBytes) return;
     if (sharedActiveDocumentKeyRef.current === speDriveItemId) return; // once per stored document
+    // spaarkeai-compose-r2 (multi-Compose-tab): only the ACTIVE tab's instance auto-claims the
+    // session's active document on load. An INACTIVE instance finishing its load (e.g. a second
+    // Compose tab opened over this one, or a background load race) must NOT steal active-doc from
+    // the tab the user is viewing. When this tab later becomes active the tab-scoped tab_change
+    // effect below re-registers it. (Guard skips WITHOUT setting the once-ref so a later activation
+    // still registers.)
+    if (isActiveTabRef.current === false) return;
     sharedActiveDocumentKeyRef.current = speDriveItemId;
     void registerActiveDocumentRef.current?.({
       docxBytes: state.docxBytes,
@@ -1661,16 +1708,25 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     if (event.type !== 'tab_change' && event.type !== 'active_widget_changed') return;
     if (state.status !== 'loaded' && state.status !== 'saving') return;
     if (!state.sessionId || !state.docxBytes) return;
-    const wd = event.widgetData as { compose?: unknown; layoutName?: string } | null | undefined;
-    // spaarkeai-compose-r2: a first-class DIRECT 'compose' tab is recognized by
-    // its widgetType regardless of the widgetData seed shape (an upload/draft/
-    // stored seed, or none at all after a re-activation). The legacy LAYOUT-door
-    // discriminant (compose seed / layoutName) is retained for the standalone
-    // ribbon compose-launch path (widgetType 'workspace').
-    const activeTabIsCompose =
-      event.widgetType === 'compose' ||
-      (wd != null && (wd.compose != null || wd.layoutName === 'Compose'));
-    if (!activeTabIsCompose) return;
+    // spaarkeai-compose-r2 (multi-Compose-tab): when this instance knows its OWN workspace tab id
+    // (SpaarkeAi keep-alive mount), re-register ONLY when the newly-active tab is THIS tab. Multiple
+    // Compose editors are mounted at once (each hidden except the active one); without this scope
+    // EVERY mounted editor would re-register on ANY compose tab activation and fight over the
+    // session's active document (most-recent-active-wins would resolve to whichever effect ran last,
+    // not the tab the user is viewing). Comparing the event's target tab id is deterministic — it
+    // does not depend on the `isActiveTab` prop having re-rendered before the synchronous dispatch.
+    if (workspaceTabId) {
+      if (event.tabId !== workspaceTabId) return;
+    } else {
+      // Standalone / layout-door single-instance mount (no tab id): recognize a Compose tab by its
+      // DIRECT widgetType regardless of seed shape, or the legacy LAYOUT discriminant (compose seed
+      // / layoutName === 'Compose') for the ribbon compose-launch path (widgetType 'workspace').
+      const wd = event.widgetData as { compose?: unknown; layoutName?: string } | null | undefined;
+      const activeTabIsCompose =
+        event.widgetType === 'compose' ||
+        (wd != null && (wd.compose != null || wd.layoutName === 'Compose'));
+      if (!activeTabIsCompose) return;
+    }
     void registerActiveDocumentRef.current?.({
       docxBytes: state.docxBytes,
       fileName: state.documentRef?.fileName,
@@ -1758,11 +1814,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // chat session (narrated as prose instead of redlined). `requestUploadMount` already set
         // state.sessionId to `uploadRef.sessionId`; thread that same id. The host dedups the upload
         // (pointer-only re-assert; no duplicate ChatSessionFile). No-op on a standalone mount.
-        void registerActiveDocumentRef.current?.({
-          docxBytes: bytes.buffer,
-          fileName: payload.fileName ?? uploadRef.fileName,
-          documentSessionId: uploadRef.sessionId,
-        });
+        // spaarkeai-compose-r2 (multi-Compose-tab): only the ACTIVE tab's instance auto-claims the
+        // session's active document — an inactive instance finishing its upload load must not steal
+        // active-doc from the viewed tab; it re-registers via the tab_change effect on activation.
+        if (isActiveTabRef.current !== false) {
+          void registerActiveDocumentRef.current?.({
+            docxBytes: bytes.buffer,
+            fileName: payload.fileName ?? uploadRef.fileName,
+            documentSessionId: uploadRef.sessionId,
+          });
+        }
       } catch (err) {
         if (ac.signal.aborted) return;
         const message = err instanceof Error ? err.message : String(err);

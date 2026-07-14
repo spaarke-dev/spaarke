@@ -36,6 +36,7 @@
  */
 import * as React from 'react';
 import type { Editor } from '@tiptap/core';
+import type { Mapping } from '@tiptap/pm/transform';
 import type { ComposeDraftPayload, ComposeDraftProvenance } from '../ComposeEditor';
 
 /** How the client resolves `target_text` in the document (adeu `match_mode`, Spike 2). */
@@ -298,15 +299,26 @@ function buildInsertionHtml(newText: string, bindingId: string, ledgerRef: strin
   );
 }
 
-/** Remove every mark (both halves) for `ledgerRef` from the document without committing/reverting content decisions — used on supersession. */
-function stripRedlineMarks(editor: Editor, ledgerRef: string): void {
+/**
+ * Remove every mark (both halves) for `ledgerRef` from the document without committing/reverting
+ * content decisions — used on supersession. Returns the transaction's position {@link Mapping} so a
+ * caller can remap positions it captured BEFORE the strip (e.g. the user's intended selection):
+ * dropping the inserted text shifts every later position left, and the strip also relocates the
+ * editor's live selection onto the stripped range (UAT 2026-07-14 #3).
+ */
+function stripRedlineMarks(editor: Editor, ledgerRef: string): Mapping {
   const insRanges = collectMarkedRanges(editor, INSERTION, ledgerRef).sort((a, b) => b.from - a.from);
   const delRanges = collectMarkedRanges(editor, DELETION, ledgerRef);
-  let chain = editor.chain();
-  // Superseding a prior suggestion discards it: drop inserted text, restore struck text to normal.
-  for (const r of delRanges) chain = chain.setTextSelection(r).unsetMark(DELETION);
-  for (const r of insRanges) chain = chain.deleteRange(r);
-  chain.run();
+  const tr = editor.state.tr;
+  const delMark = editor.state.schema.marks[DELETION];
+  // Superseding a prior suggestion discards it: restore struck text to normal (remove the deletion
+  // mark), then drop the inserted alternative text. High→low + mapping so positions stay valid.
+  if (delMark) {
+    for (const r of delRanges) tr.removeMark(r.from, r.to, delMark);
+  }
+  for (const r of insRanges) tr.delete(tr.mapping.map(r.from), tr.mapping.map(r.to));
+  if (tr.steps.length > 0) editor.view.dispatch(tr);
+  return tr.mapping;
 }
 
 /**
@@ -336,10 +348,23 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
         return 'already_present';
       }
 
+      // Capture the user's INTENDED selection BEFORE supersession mutates the document. Superseding a
+      // prior KEPT redline strips its marks (stripRedlineMarks), which both shifts later positions and
+      // relocates the editor's live selection onto the stripped range — so the not-found fallback
+      // below must NOT re-read the live selection (UAT 2026-07-14 #3: a second "Draft alternative"
+      // landed on the FIRST selection). Remap the snapshot through each strip so it keeps pointing at
+      // the text the user actually selected.
+      let intendedFrom = editor.state.selection.from;
+      let intendedTo = editor.state.selection.to;
+
       // Supersession (FR-17 alignment): a newer output for the same binding replaces any prior
       // pending suggestion for that binding — the superseded one MUST NOT stay rendered.
       const superseded = pending.filter(p => p.bindingId === bindingId && p.ledgerRef !== ledgerRef);
-      for (const prior of superseded) stripRedlineMarks(editor, prior.ledgerRef);
+      for (const prior of superseded) {
+        const mapping = stripRedlineMarks(editor, prior.ledgerRef);
+        intendedFrom = mapping.map(intendedFrom);
+        intendedTo = mapping.map(intendedTo);
+      }
 
       const targetText = payload?.target_text ?? '';
       const hasTarget = targetText.length > 0;
@@ -357,10 +382,9 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
           // revise — a range implies they haven't clicked away during the round-trip), anchor the
           // redline there instead of dead-ending. Only for `not_found`: `ambiguous` keeps its
           // "appears N times, reselect" banner (guessing among real matches would be worse).
-          const sel = editor.state.selection;
-          const hasLiveSelection = !sel.empty && sel.to > sel.from;
-          if (resolved.kind === 'not_found' && hasLiveSelection) {
-            spans = [{ from: sel.from, to: sel.to }];
+          const hasIntendedSelection = intendedTo > intendedFrom;
+          if (resolved.kind === 'not_found' && hasIntendedSelection) {
+            spans = [{ from: intendedFrom, to: intendedTo }];
           } else {
             // FR-19 "do not guess": surface the ambiguity/not-found; render nothing for this entry.
             setError({ ledgerRef, kind: resolved.kind, targetText, matchCount: resolved.matchCount });
@@ -404,7 +428,9 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
           return 'noop';
         }
         const insertionHtml = buildInsertionHtml(newText, bindingId, ledgerRef);
-        const at = editor.state.selection.to;
+        // Insert at the caret captured BEFORE supersession (remapped), not the post-strip live
+        // selection which a strip may have relocated (UAT 2026-07-14 #3).
+        const at = intendedTo;
         editor.chain().insertContentAt(at, insertionHtml).run();
       }
 
