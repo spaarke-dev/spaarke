@@ -167,6 +167,70 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
     }
 
     /// <summary>
+    /// Multi-Compose-tab (UAT 2026-07-14): switching tabs fires the newly-active tab's register
+    /// (visible:true) AND the hidden tab's WITHDRAW (visible:false). A withdraw MUST NOT re-pin the
+    /// withdrawing document as active — the server previously had no `visible` property (it was dropped
+    /// on deserialization), so a hidden tab's withdraw re-asserted itself as active, leaving the
+    /// Assistant stuck on the first document after every tab switch. A withdraw clears ActiveDocument
+    /// ONLY if it still points at THAT document; a stale withdraw of a non-active tab is a no-op.
+    /// </summary>
+    [Fact]
+    public async Task PostActiveDocument_WithdrawOfNonActiveDocument_DoesNotClobberActiveDocument()
+    {
+        // Arrange — a session with TWO compose-direct files (two open Compose tabs).
+        var sessionId = Guid.NewGuid().ToString("N");
+        const string fileA = "compose-file-a";
+        const string fileB = "compose-file-b";
+        const string docType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        var seeded = new ChatSession(
+            SessionId: sessionId,
+            TenantId: ComposeActiveDocumentFixture.TenantId,
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>(),
+            HostContext: null,
+            AdditionalDocumentIds: null,
+            UploadedFiles: new[]
+            {
+                new ChatSessionFile(fileA, "a.docx", docType, 256, $"{fileA}_s_0", DateTimeOffset.UtcNow),
+                new ChatSessionFile(fileB, "b.docx", docType, 256, $"{fileB}_s_0", DateTimeOffset.UtcNow),
+            });
+        await _fixture.Sessions.UpdateSessionCacheAsync(seeded);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        // Act — tab A active, then switch to tab B (B registers as active).
+        (await client.PostAsJsonAsync("/api/compose/active-document",
+            new { sessionId, sessionFileId = fileA, source = ActiveDocumentIdentity.SourceComposeDirect }))
+            .EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync("/api/compose/active-document",
+            new { sessionId, sessionFileId = fileB, source = ActiveDocumentIdentity.SourceComposeDirect }))
+            .EnsureSuccessStatusCode();
+
+        // The now-hidden tab A withdraws (visible:false) — the bug re-pinned A as active here.
+        var withdrawA = await client.PostAsJsonAsync("/api/compose/active-document",
+            new { sessionId, sessionFileId = fileA, source = ActiveDocumentIdentity.SourceComposeDirect, visible = false });
+        withdrawA.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Assert — the active document is STILL B (A's stale withdraw did not clobber it).
+        var afterWithdrawA = await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, sessionId);
+        afterWithdrawA!.ActiveDocument.Should().NotBeNull(
+            because: "a stale withdraw of the non-active tab must neither clear nor change the active document");
+        afterWithdrawA.ActiveDocument!.SessionFileId.Should().Be(fileB,
+            because: "tab B is the active tab; the hidden tab A's withdraw must NOT re-pin A as active (UAT stuck-on-first-doc)");
+
+        // Withdrawing the ACTIVE tab (B) clears the active document (nothing is active).
+        (await client.PostAsJsonAsync("/api/compose/active-document",
+            new { sessionId, sessionFileId = fileB, source = ActiveDocumentIdentity.SourceComposeDirect, visible = false }))
+            .EnsureSuccessStatusCode();
+        var afterWithdrawB = await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, sessionId);
+        afterWithdrawB!.ActiveDocument.Should().BeNull(
+            because: "withdrawing the currently-active document clears it — there is no active tab");
+    }
+
+    /// <summary>
     /// Wave 3 (DEF-11 TEXT-path close): the client now threads the Compose tab's document session id
     /// as <c>documentSessionId</c>. This drives the REAL route with it and asserts (1) the response
     /// echoes it and (2) the persisted <see cref="ActiveDocumentIdentity.DocumentSessionId"/> is set —

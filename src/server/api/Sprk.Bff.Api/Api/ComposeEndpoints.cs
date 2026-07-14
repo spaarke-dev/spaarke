@@ -1703,6 +1703,36 @@ public static class ComposeEndpoints
                     DocumentSessionId: body.DocumentSessionId);
             }
 
+            // R3 WITHDRAW (spaarkeai-compose-r2 multi-Compose-tab): visible:false means "this document is
+            // no longer the active tab" (its tab was hidden / another Compose tab became active). A
+            // withdraw must NEVER set ActiveDocument to the withdrawing identity — that is the bug that
+            // left the Assistant pinned to the first document after a tab switch (the hidden tab's
+            // withdraw re-asserted itself as active). Clear ActiveDocument ONLY if it STILL points at
+            // THIS document; if a newer tab already took over, leave it untouched. This makes the
+            // register/withdraw pair that fires on every switch ORDER-INDEPENDENT and race-safe.
+            if (body.Visible == false)
+            {
+                var current = session.ActiveDocument;
+                var stillActive = current is not null && (
+                    (hasSessionFile && string.Equals(current.SessionFileId, body.SessionFileId, StringComparison.Ordinal)) ||
+                    (hasDocument && string.Equals(current.SprkDocumentId, body.DocumentId, StringComparison.Ordinal)));
+                if (stillActive)
+                {
+                    await sessionManager.UpdateSessionCacheAsync(session with { ActiveDocument = null }, ct).ConfigureAwait(false);
+                }
+                logger.LogInformation(
+                    "Compose active-document WITHDRAW: tenant={TenantId} session={SessionKey} kind={Kind} clearedActive={Cleared} TraceId={TraceId}",
+                    tenantId, sessionKey, hasSessionFile ? "session-file" : "stored", stillActive, httpContext.TraceIdentifier);
+                return Results.Ok(new ComposeActiveDocumentResponse(
+                    SessionId: body.SessionId,
+                    Source: identity.Source,
+                    SessionFileId: identity.SessionFileId,
+                    DocumentId: identity.SprkDocumentId,
+                    FileName: identity.FileName,
+                    CorrelationId: httpContext.TraceIdentifier,
+                    DocumentSessionId: identity.DocumentSessionId));
+            }
+
             var updated = session with { ActiveDocument = identity };
             await sessionManager.UpdateSessionCacheAsync(updated, ct).ConfigureAwait(false);
 
@@ -1882,7 +1912,13 @@ public sealed record ComposeActiveDocumentRequest(
     [property: JsonPropertyName("fileName")] string? FileName = null,
     [property: JsonPropertyName("speDriveItemId")] string? SpeDriveItemId = null,
     [property: JsonPropertyName("speDriveId")] string? SpeDriveId = null,
-    [property: JsonPropertyName("documentSessionId")] string? DocumentSessionId = null);
+    [property: JsonPropertyName("documentSessionId")] string? DocumentSessionId = null,
+    // R3 visibility (spaarkeai-compose-r2 multi-Compose-tab): false = WITHDRAW this document from the
+    // session's active document (the tab was hidden / another Compose tab became active). Omitted/true
+    // = register as active. The client has always sent this; the server previously had no property for
+    // it, so it was silently dropped and EVERY post — including a hidden tab's withdraw — re-pinned that
+    // document as active, leaving the Assistant stuck on the first doc after a tab switch (UAT 2026-07-14).
+    [property: JsonPropertyName("visible")] bool? Visible = null);
 
 /// <summary>Response shape for <c>POST /api/compose/active-document</c> (task 113) — echoes the
 /// registered active-document pointer. <see cref="DocumentSessionId"/> added DEF-11 (spaarkeai-compose-r2).</summary>
