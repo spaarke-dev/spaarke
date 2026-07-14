@@ -18,7 +18,7 @@
 ### Round-8 UAT fixes DEPLOYED (2026-07-14), tree clean
 - **#1** multi-instance Compose tabs — `b0d845b5c` (WorkspacePane instance-key reuse + per-tab keep-alive + tab-scoped active-doc). Was a regression from Bug B unify singleton.
 - **#2** compose 429 — `b0d845b5c` (5 endpoints re-bucketed off 5/min ai-upload: reads→ai-context 60/min, SPE-writes→ai-persist 20/min). BFF deployed, SHA-256 4/4 verified.
-- **#3** draft-alternative stale selection — `b0d845b5c` (snapshot+remap intended selection before supersession strip). Regression test added.
+- **#3** draft-alternative stale selection — `b0d845b5c` (snapshot+remap intended selection before supersession strip) + **accumulation** `a55834bbf` (range-scope supersession to the drafted section: keep A when drafting a DIFFERENT B; only re-draft of same/overlapping section supersedes). Owner-confirmed accumulate. 32 redline / 184 compose tests.
 - Gates: BFF unit 8230/0 · compose jest 183 · SpaarkeAi jest 419. Client `sprk_spaarkeai` published.
 - Bug A (draft-alt 404) confirmed FIXED by owner UAT step 7.
 
