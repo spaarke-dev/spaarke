@@ -300,6 +300,26 @@ function buildInsertionHtml(newText: string, bindingId: string, ledgerRef: strin
 }
 
 /**
+ * The union span `[from,to]` covering every mark (both halves) of `ledgerRef` in the current doc,
+ * or `null` if none are present. Used to decide whether a NEW draft's selection addresses the SAME
+ * region as a prior pending redline (→ supersede) or a DIFFERENT one (→ accumulate).
+ */
+function redlineSpan(editor: Editor, ledgerRef: string): { from: number; to: number } | null {
+  const ranges = [
+    ...collectMarkedRanges(editor, INSERTION, ledgerRef),
+    ...collectMarkedRanges(editor, DELETION, ledgerRef),
+  ];
+  if (ranges.length === 0) return null;
+  let from = Infinity;
+  let to = -Infinity;
+  for (const r of ranges) {
+    if (r.from < from) from = r.from;
+    if (r.to > to) to = r.to;
+  }
+  return { from, to };
+}
+
+/**
  * Remove every mark (both halves) for `ledgerRef` from the document without committing/reverting
  * content decisions — used on supersession. Returns the transaction's position {@link Mapping} so a
  * caller can remap positions it captured BEFORE the strip (e.g. the user's intended selection):
@@ -351,15 +371,26 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
       // Capture the user's INTENDED selection BEFORE supersession mutates the document. Superseding a
       // prior KEPT redline strips its marks (stripRedlineMarks), which both shifts later positions and
       // relocates the editor's live selection onto the stripped range — so the not-found fallback
-      // below must NOT re-read the live selection (UAT 2026-07-14 #3: a second "Draft alternative"
-      // landed on the FIRST selection). Remap the snapshot through each strip so it keeps pointing at
-      // the text the user actually selected.
+      // below must NOT re-read the live selection (UAT 2026-07-14 #3). Remap the snapshot through each
+      // strip so it keeps pointing at the text the user actually selected.
       let intendedFrom = editor.state.selection.from;
       let intendedTo = editor.state.selection.to;
+      const hasSelection = intendedTo > intendedFrom;
 
-      // Supersession (FR-17 alignment): a newer output for the same binding replaces any prior
-      // pending suggestion for that binding — the superseded one MUST NOT stay rendered.
-      const superseded = pending.filter(p => p.bindingId === bindingId && p.ledgerRef !== ledgerRef);
+      // Supersession (FR-17 alignment), RANGE-SCOPED (UAT 2026-07-14 #3, owner: accumulate):
+      // a newer output for the same binding replaces a prior pending suggestion ONLY when it
+      // addresses the SAME region. When the user redlines one section and then drafts a DIFFERENT
+      // section, the prior redline MUST be preserved so independent redlines accumulate across the
+      // document — ONLY a re-draft of the same/overlapping selection supersedes. With no live
+      // selection (ledger replay / retraction / insertion-at-caret) we cannot range-scope, so keep
+      // the full-binding supersession those paths rely on (FR-17 retraction, refresh-durability).
+      const sameBinding = pending.filter(p => p.bindingId === bindingId && p.ledgerRef !== ledgerRef);
+      const superseded = hasSelection
+        ? sameBinding.filter(p => {
+            const span = redlineSpan(editor, p.ledgerRef);
+            return span !== null && span.from < intendedTo && intendedFrom < span.to; // interval overlap
+          })
+        : sameBinding;
       for (const prior of superseded) {
         const mapping = stripRedlineMarks(editor, prior.ledgerRef);
         intendedFrom = mapping.map(intendedFrom);

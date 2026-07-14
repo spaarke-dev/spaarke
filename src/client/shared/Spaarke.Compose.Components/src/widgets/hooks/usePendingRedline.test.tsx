@@ -531,12 +531,12 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
     editor.destroy();
   });
 
-  // UAT 2026-07-14 #3: a second "Draft alternative" (same binding, NOT accepted — only "kept")
-  // superseded the first, and stripRedlineMarks relocated the live selection onto the FIRST range,
-  // so the not-found fallback anchored the NEW redline on the FIRST selection instead of the user's
-  // current one. The fix snapshots the intended selection BEFORE supersession and remaps it through
-  // the strip (which also shifts positions, since the first redline's inserted text is dropped).
-  it('not_found fallback anchors on the CURRENT selection, not the superseded prior redline (remapped)', () => {
+  // UAT 2026-07-14 #3 (owner: ACCUMULATE): redline section A, then draft a DIFFERENT section B.
+  // (1) The new redline must land on B — NOT on A. (Previously the supersession strip relocated the
+  //     live selection onto A and the not-found fallback anchored B's redline there.)
+  // (2) A's redline must be PRESERVED — drafting a different section accumulates (range-scoped
+  //     supersession); only a re-draft of the same/overlapping section supersedes (next test).
+  it('draft on a DIFFERENT section anchors on the current selection AND keeps the prior redline (accumulate)', () => {
     const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
     const { result } = renderHook(() => usePendingRedline(editor));
 
@@ -549,8 +549,7 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
     });
     expect(editor.getHTML()).toContain('SWIFT');
 
-    // User now selects a DIFFERENT region ("lazy") — computed against the CURRENT doc, which already
-    // contains A's inserted "SWIFT" (so B sits to the RIGHT of what the strip will remove).
+    // User now selects a DIFFERENT, non-overlapping region ("lazy").
     const textNow = editor.state.doc.textContent;
     const bStart = textNow.indexOf('lazy') + 1; // single paragraph → doc pos = textOffset + 1
     const bEnd = bStart + 'lazy'.length;
@@ -558,8 +557,8 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
       editor.commands.setTextSelection({ from: bStart, to: bEnd });
     });
 
-    // Draft B: SAME binding (supersedes + strips A), different ledgerRef, and a target the model
-    // echoed non-verbatim → not_found → fallback must use selection B.
+    // Draft B: SAME binding, different ledgerRef, a target the model echoed non-verbatim → not_found
+    // → fallback must use selection B, and A (a different section) must NOT be superseded.
     let status: string | undefined;
     act(() => {
       status = result.current.materialize(
@@ -573,10 +572,46 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
     // New alternative applied to the user's ACTUAL selection B ("lazy" struck), NOT A ("quick").
     expect(html).toContain('INDOLENT');
     expect(html).toMatch(/data-compose-mark="deletion"[^>]*>lazy</);
-    expect(html).not.toMatch(/data-compose-mark="deletion"[^>]*>quick</);
-    // A's superseded redline is gone: inserted "SWIFT" removed, "quick" restored to plain text.
-    expect(html).not.toContain('SWIFT');
-    // Only the new redline is pending.
+    // A ACCUMULATES: its insertion "SWIFT" is still present and "quick" is still struck.
+    expect(html).toContain('SWIFT');
+    expect(html).toMatch(/data-compose-mark="deletion"[^>]*>quick</);
+    // BOTH redlines pending, independently addressable.
+    expect(result.current.pending).toHaveLength(2);
+    expect(result.current.pending.map(p => p.ledgerRef).sort()).toEqual(['b1@t1', 'b1@t2']);
+    editor.destroy();
+  });
+
+  // Complement: re-drafting the SAME (overlapping) section DOES supersede — the prior redline over
+  // that region is replaced, not stacked.
+  it('re-draft of the SAME section supersedes the prior redline (range overlap)', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize(
+        { target_text: 'quick', new_text: 'nimble', match_mode: 'strict' },
+        { ledgerRef: 'b1@t1', bindingId: 'b1', turn: 1 }
+      );
+    });
+
+    // Re-select the SAME region (the "quick"→"nimble" redline) and re-draft it.
+    const span = editor.getHTML();
+    expect(span).toContain('nimble');
+    // Select across the struck "quick" + inserted "nimble" (the redline sits early in the doc).
+    act(() => {
+      editor.commands.setTextSelection({ from: 4, to: 16 });
+    });
+
+    act(() => {
+      result.current.materialize(
+        { target_text: 'still not verbatim', new_text: 'swift', match_mode: 'strict' },
+        { ledgerRef: 'b1@t2', bindingId: 'b1', turn: 2 }
+      );
+    });
+
+    const html = editor.getHTML();
+    expect(html).toContain('swift');
+    expect(html).not.toContain('nimble'); // prior over the SAME region superseded
     expect(result.current.pending).toHaveLength(1);
     expect(result.current.pending[0].ledgerRef).toBe('b1@t2');
     editor.destroy();
