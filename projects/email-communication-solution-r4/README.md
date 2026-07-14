@@ -1,5 +1,7 @@
 # Email Communication Solution R4
 
+> **Portfolio**: [Project #642](https://github.com/spaarke-dev/spaarke/issues/642) · Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431) · [Board #2](https://github.com/users/spaarke-dev/projects/2)
+
 > **Status**: Technical review + assessment + plan (pre-spec). No implementation authorized from these documents.
 > **Date**: 2026-07-14
 > **Type**: Architecture assessment + design charter (feeds `/design-to-spec` → `/project-pipeline`)
