@@ -918,12 +918,26 @@ export function WorkspacePane(): React.JSX.Element {
           .getSnapshot()
           .tabs.find((t) => t.widgetType === "compose");
         if (existingComposeTab) {
-          const existingFilename = (existingComposeTab.widgetData as { filename?: string } | null)
-            ?.filename;
+          const existingData = (existingComposeTab.widgetData ?? {}) as {
+            filename?: string;
+            compose?: unknown;
+          };
+          const newData = (widgetData ?? {}) as { compose?: unknown };
+          const existingFilename = existingData.filename;
           const mergedFilename = seedFilename ?? existingFilename;
-          const reuseWidgetData = mergedFilename
-            ? { ...(widgetData ?? {}), filename: mergedFilename }
-            : widgetData;
+          // UAT round-7 #1 seed-merge: a seedless re-activation (e.g. an
+          // add-to-DMS `source`-only marker) carries NO new `compose` seed.
+          // The prior implementation spread ONLY the new event's widgetData,
+          // OVERWRITING the tab's reloadable `compose` seed with nothing — so a
+          // later remount had nothing to reload. Preserve the existing seed when
+          // the re-activation brings none (merge, don't overwrite); a genuine
+          // new seed (fresh draft/upload) still wins.
+          const mergedCompose = newData.compose ?? existingData.compose;
+          const reuseWidgetData: Record<string, unknown> = {
+            ...(widgetData ?? {}),
+            ...(mergedCompose !== undefined ? { compose: mergedCompose } : {}),
+            ...(mergedFilename ? { filename: mergedFilename } : {}),
+          };
           manager.updateTab(existingComposeTab.id, reuseWidgetData);
           manager.setActiveTab(existingComposeTab.id);
           syncState();

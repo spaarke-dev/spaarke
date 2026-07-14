@@ -419,6 +419,21 @@ public sealed record SaveComposeDocumentRequest
     /// <summary>Optional display name used only on first-Save promotion (Path B initial
     /// row creation) and as the created drive-item's file name.</summary>
     public string? DisplayName { get; init; }
+
+    /// <summary>
+    /// Redline/comment save fidelity (spaarkeai-compose-r2 UAT-R7 #2/#3/#4): accepted-as-pending
+    /// track-change insertions/deletions + comments to materialize as NATIVE Word markup
+    /// (<c>w:ins</c>/<c>w:del</c>/<c>w:comment</c>) via <see cref="DocxAnnotationWriter"/> BEFORE
+    /// persisting. The client sends (a) <see cref="Content"/> as a clean BASELINE <c>.docx</c> — the
+    /// document with pending redlines reduced to their committed (reject-state) text and accepted
+    /// edits already baked in — and (b) this list; <see cref="IComposeService.SaveAsync"/> re-applies
+    /// them on top so the saved <c>.docx</c> carries real tracked changes + comments instead of the
+    /// flattened plain text the client <c>tipTapToDocxBytes</c> writer (which has no track-change
+    /// branch) would otherwise produce. Null/empty → the baseline is persisted byte-identical (a plain
+    /// no-redline Save is unchanged; FR-06a byte fidelity preserved). Same <see cref="DocxAnnotation"/>
+    /// shape the push-annotations path uses (reuse, not a parallel contract).
+    /// </summary>
+    public IReadOnlyList<DocxAnnotation>? Annotations { get; init; }
 }
 
 /// <summary>Save outcome — new SPE version id + resolved <c>sprk_documentid</c>.</summary>

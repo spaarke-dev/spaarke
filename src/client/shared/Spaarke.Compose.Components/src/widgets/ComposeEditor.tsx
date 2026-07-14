@@ -97,7 +97,9 @@ import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighl
 // resolve). Same rationale as ComposeWorkspace.tsx above.
 import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widgets/events';
 
-import { docxToTipTapHtml, tipTapToDocxBytes } from '../utils/docxBridge';
+import { docxToTipTapHtml, tipTapToDocxBytes, tipTapJsonToDocxBytes, buildRejectBaselineJson, type TipTapNode } from '../utils/docxBridge';
+// Redline → Word save fidelity (UAT-R7 #2/#3/#4): the redline→annotation bridge + its wire type.
+import { redlineMarksToDocxAnnotations, type DocxAnnotationInput } from './useComposeWordShuttle';
 
 // ---------------------------------------------------------------------------
 // Wave 6 (UAT-R4, DEF-G) — non-docx reference-only guard
@@ -394,6 +396,21 @@ export interface ComposeEditorHandle {
    * @throws  Error if no editor is mounted or if docx packing fails.
    */
   serialize(): Promise<ArrayBuffer>;
+
+  /**
+   * Redline → Word save fidelity (UAT-R7 #2/#3/#4). Serialize a clean BASELINE `.docx` (the
+   * document as if every PENDING redline were REJECTED — proposed insertions dropped, struck
+   * originals kept as normal text — with ACCEPTED edits already committed) AND the
+   * redline→annotation bridge ({@link DocxAnnotationInput}[]) mapping the current pending
+   * insertion/deletion marks. The host sends both to the BFF Save endpoint, which re-applies the
+   * annotations as NATIVE `w:ins`/`w:del` via `DocxAnnotationWriter`. This replaces the mark-blind
+   * `serialize()` for a redlined Save (which flattened both original + AI text to plain body text).
+   * Resets the dirty flag on success like {@link serialize}.
+   */
+  serializeForSave(): Promise<{ baselineBytes: ArrayBuffer; redlineAnnotations: DocxAnnotationInput[] }>;
+
+  /** True when the editor currently holds one or more PENDING redlines (drives the Save path). */
+  hasPendingRedlines(): boolean;
 
   /**
    * Live character + word counters from the TipTap CharacterCount extension.
@@ -1080,6 +1097,25 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onDirtyChange?.(false);
           return bytes;
         },
+        // UAT-R7 #2/#3/#4 — baseline (reject-state) bytes + the redline→annotation bridge. The BFF
+        // re-applies the annotations as native w:ins/w:del so pending redlines save as real Word
+        // tracked-changes instead of the mark-blind flatten `serialize()` produced.
+        serializeForSave: async () => {
+          if (!editor) {
+            throw new Error('ComposeEditor: cannot serialize for save — editor not mounted');
+          }
+          const json = editor.getJSON();
+          const redlineAnnotations = redlineMarksToDocxAnnotations(
+            json,
+            'Spaarke Assistant',
+            new Date().toISOString()
+          );
+          const baselineBytes = await tipTapJsonToDocxBytes(buildRejectBaselineJson(json as TipTapNode));
+          dirtyRef.current = false;
+          onDirtyChange?.(false);
+          return { baselineBytes, redlineAnnotations };
+        },
+        hasPendingRedlines: () => redline.pending.length > 0,
         getCounts: () => {
           if (!editor) return { characters: 0, words: 0 };
           // The CharacterCount extension hangs storage off editor.storage.

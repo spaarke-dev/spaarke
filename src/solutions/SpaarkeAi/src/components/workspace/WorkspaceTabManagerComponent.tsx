@@ -261,6 +261,23 @@ const useStyles = makeStyles({
     height: "100%",
     width: "100%",
   },
+
+  // UAT round-7 #1 — keep-alive host for the single Compose tab. Fills the
+  // content area like a direct ActiveWidgetContent child (flex column) so the
+  // mounted ComposeWorkspace lays out identically whether it is the active tab
+  // or a hidden keep-alive. The hidden variant collapses it via display:none
+  // while KEEPING it mounted, so ComposeWorkspace's local reducer state
+  // (docxBytes/seedHtml/sessionId/editor) survives a tab switch with no
+  // re-fetch or remount.
+  composeKeepAlive: {
+    flex: 1,
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+  },
+  composeKeepAliveHidden: {
+    display: "none",
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -493,6 +510,24 @@ export function WorkspaceTabManagerComponent({
 
   // Resolve the active tab record.
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
+
+  // ---------------------------------------------------------------------------
+  // Compose keep-alive (UAT round-7 #1)
+  //
+  // The single Compose DIRECT tab (widgetType 'compose', allowMultiple:false)
+  // is kept MOUNTED across tab switches and toggled hidden when it is not the
+  // active tab. Rendering only the active tab (the default for every other tab
+  // type) UNMOUNTS ComposeWorkspace on a Daily Briefing ↔ Compose switch,
+  // destroying its live local reducer state (the loaded doc). Keeping it
+  // mounted-hidden preserves that state with zero re-fetch.
+  //
+  // Scoped to 'compose' ONLY — every other inactive tab still unmounts (the
+  // memory/connection design for multi-instance widgets is unchanged). Only
+  // one compose tab can exist, so this keeps at most one extra widget mounted.
+  // ---------------------------------------------------------------------------
+  const composeTab = tabs.find((t) => t.widgetType === "compose") ?? null;
+  const activeIsCompose =
+    activeTab !== null && composeTab !== null && activeTab.id === composeTab.id;
 
   // R2 UAT §3.3 (2026-07-03): after gear-icon edit wizard closes with a save,
   // close the affected tab and dispatch a fresh widget_load so the tab
@@ -785,14 +820,32 @@ export function WorkspaceTabManagerComponent({
           </div>
         ) : null}
 
-        {activeTab !== null ? (
+        {/* Compose keep-alive host (UAT round-7 #1). Mounted whenever a compose
+            tab exists; hidden (display:none, aria-hidden) when it is not the
+            active tab so ComposeWorkspace's live state survives tab switches.
+            When compose IS the active tab this host is the visible surface —
+            the active-tab branch below renders nothing for it (no double-mount). */}
+        {composeTab !== null ? (
+          <div
+            className={mergeClasses(
+              styles.composeKeepAlive,
+              !activeIsCompose && styles.composeKeepAliveHidden,
+            )}
+            data-testid="workspace-compose-keepalive"
+            aria-hidden={!activeIsCompose}
+          >
+            <ActiveWidgetContent tab={composeTab} styles={styles} />
+          </div>
+        ) : null}
+
+        {activeTab !== null && !activeIsCompose ? (
           <ActiveWidgetContent tab={activeTab} styles={styles} />
-        ) : (
+        ) : activeTab === null ? (
           <div className={styles.errorState}>
             <WarningRegular className={styles.errorIcon} />
             <Text size={300}>No active tab</Text>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

@@ -1303,6 +1303,8 @@ public static class ComposeEndpoints
             TenantId = body.TenantId,
             DocumentRecordId = body.DocumentRecordId,
             DisplayName = body.DisplayName,
+            // UAT-R7 #2/#3/#4: pending redlines + comments the server re-applies as native OOXML.
+            Annotations = body.Annotations,
         };
 
         return await ExecuteSaveAsync(request, documentSpeId, composeService, logger, httpContext, ct).ConfigureAwait(false);
@@ -1352,6 +1354,8 @@ public static class ComposeEndpoints
             TenantId = body.TenantId,
             DocumentRecordId = null,
             DisplayName = body.DisplayName,
+            // UAT-R7 #2/#3/#4: pending redlines + comments the server re-applies as native OOXML.
+            Annotations = body.Annotations,
         };
 
         return await ExecuteSaveAsync(request, documentSpeId: null, composeService, logger, httpContext, ct).ConfigureAwait(false);
@@ -1432,6 +1436,25 @@ public static class ComposeEndpoints
                 detail: "This document changed since you opened it — reload and reapply your changes. " +
                         "Nothing was overwritten.",
                 type: "https://tools.ietf.org/html/rfc7232#section-4.2");
+        }
+        catch (DocxAnnotationException ex)
+        {
+            // UAT-R7 #2/#3/#4: a redline/comment batch could not be rendered onto the baseline.
+            // Malformed baseline → 400; a tracked-change target span not found in the baseline → 422
+            // (mirrors the push-annotations mapping). Nothing partially wrote — Annotate runs BEFORE
+            // the SPE write in ComposeService.SaveAsync.
+            logger.LogWarning(ex, "Compose save: annotation render failed ({Kind}). TraceId={TraceId}", ex.Kind, httpContext.TraceIdentifier);
+            return ex.Kind == DocxAnnotationErrorKind.TargetNotFound
+                ? Results.Problem(
+                    statusCode: StatusCodes.Status422UnprocessableEntity,
+                    title: "Annotation Target Not Found",
+                    detail: "A tracked change could not be located in the document to save. Reload the document and reapply your changes.",
+                    type: "https://tools.ietf.org/html/rfc4918#section-11.2")
+                : Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Invalid Document",
+                    detail: "The document could not be annotated for save (its content is not a readable .docx).",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
         catch (Exception ex)
         {
@@ -1813,7 +1836,13 @@ public sealed record SaveComposeDocumentBody(
     /// businessunit.sprk_containerid). Required when there is no drive-item yet; ignored on replace.</summary>
     [property: JsonPropertyName("containerId")] string? ContainerId = null,
     [property: JsonPropertyName("documentRecordId")] Guid? DocumentRecordId = null,
-    [property: JsonPropertyName("displayName")] string? DisplayName = null);
+    [property: JsonPropertyName("displayName")] string? DisplayName = null,
+    /// <summary>Redline/comment save fidelity (UAT-R7 #2/#3/#4): accepted pending track-change
+    /// insertions/deletions + comments to materialize as native <c>w:ins</c>/<c>w:del</c>/
+    /// <c>w:comment</c> via <c>DocxAnnotationWriter</c> on top of the baseline <c>content</c> before
+    /// persisting (see <see cref="SaveComposeDocumentRequest.Annotations"/>). Absent/empty on a plain
+    /// no-redline Save — the baseline is then persisted unchanged. Same shape the push path uses.</summary>
+    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation>? Annotations = null);
 
 /// <summary>Request body for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentBody(

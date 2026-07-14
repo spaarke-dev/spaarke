@@ -112,6 +112,7 @@ import {
   useComposeCheckChanges,
   anchoredAnnotationsToPriorAnchors,
   anchoredAnnotationsToDocxAnnotations,
+  type DocxAnnotationInput,
 } from './useComposeWordShuttle';
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
 import { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHeartbeatGate } from './hooks';
@@ -947,7 +948,38 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // no original bytes were retained) pays the regeneration cost via the EXISTING
       // `tipTapToDocxBytes` path — that path is otherwise unchanged.
       const editorIsDirty = editorRef.current.isDirty();
-      const bytes = editorIsDirty || !state.docxBytes ? await editorRef.current.serialize() : state.docxBytes;
+
+      // UAT-R7 #2/#3/#4 — redline→Word save fidelity. When the editor holds PENDING redlines OR the
+      // session has anchored COMMENT annotations (DEF-13 edit-reason / DEF-11 review flags), Save
+      // must NOT go through the mark-blind `serialize()` (which flattens insertion/deletion marks to
+      // plain body text and drops comments). Instead send a clean BASELINE (pending redlines reduced
+      // to their reject-state text; accepted edits already baked in) + a structured annotation list;
+      // the BFF re-applies them as native w:ins/w:del/w:comment via DocxAnnotationWriter.
+      // This is also the #3 dirty-flag fix: any accept/reject/redline/comment op forces the
+      // annotation path, so accepted edits are never discarded in favor of pristine original bytes.
+      // `?.()` guards an older mounted editor build without the redline-save handle (defensive,
+      // mirroring the materializeComposeDraft guard) — it degrades to the plain serialize path.
+      const hasRedlines = editorRef.current.hasPendingRedlines?.() ?? false;
+      const commentAnnotations = composeDocxAnnotations; // anchoredAnnotationsToDocxAnnotations(anchoredAnnotations)
+      const needsAnnotationSave =
+        (hasRedlines || commentAnnotations.length > 0) &&
+        typeof editorRef.current.serializeForSave === 'function';
+
+      let bytes: ArrayBuffer;
+      let saveAnnotations: DocxAnnotationInput[] = [];
+      if (needsAnnotationSave) {
+        const forSave = await editorRef.current.serializeForSave();
+        bytes = forSave.baselineBytes;
+        // Redlines first, then comments — DocxAnnotationWriter emits comments before track-changes
+        // regardless of list order (EDGE-1), so the concat order only affects the ins/del sequence
+        // the bridge already ordered correctly (Insertion-before-Deletion per pair).
+        saveAnnotations = [...forSave.redlineAnnotations, ...commentAnnotations];
+      } else {
+        // FR-06a fidelity (no redlines, no comments): an unedited mount persists the pristine
+        // ORIGINAL bytes byte-identical; a genuinely dirty editor (or a defensive missing-original)
+        // regenerates via the EXISTING tipTapToDocxBytes path.
+        bytes = editorIsDirty || !state.docxBytes ? await editorRef.current.serialize() : state.docxBytes;
+      }
 
       // FR-05 (task 100): the create-on-save route carries no id in the path (the draft has no
       // drive-item yet) and sends `containerId`; the replace route carries the SPE id + driveId.
@@ -966,6 +998,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       }
       const base64Content = btoa(binary);
 
+      // UAT-R7 #2/#3/#4: carry the redline + comment annotations so the BFF re-applies them onto the
+      // baseline as native Word markup. Empty on a plain no-redline Save → the server persists the
+      // baseline unchanged (FR-06a byte fidelity preserved).
       const requestBody = isTransientCreate
         ? {
             containerId: saveContainerId,
@@ -973,6 +1008,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             sessionId: state.sessionId,
             content: base64Content,
             displayName: state.documentRef.fileName ?? null,
+            annotations: saveAnnotations,
           }
         : {
             driveId: effectiveDriveId,
@@ -981,6 +1017,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             content: base64Content,
             documentRecordId: state.documentRef.sprkDocumentId ?? null,
             displayName: state.documentRef.fileName ?? null,
+            annotations: saveAnnotations,
           };
 
       const response = await authenticatedFetch(url, {
@@ -1076,6 +1113,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     effectiveDriveId,
     tenantId,
     onCreateOnSaveComplete,
+    composeDocxAnnotations,
   ]);
 
   // FIX #1b — publish the editor's Save into the cross-pane bridge so the Assistant's "Add the
