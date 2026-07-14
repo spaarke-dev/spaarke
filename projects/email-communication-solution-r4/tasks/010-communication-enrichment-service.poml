@@ -1,0 +1,156 @@
+<task id="010" project="email-communication-solution-r4">
+  <metadata>
+    <title>`ICommunicationEnrichmentService` — direction-agnostic enrichment for inbound AND outbound (+ missing outbound RAG)</title>
+    <phase>Wave 1 — Server: enrichment + deterministic engine</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <dependencies>005, 006</dependencies>
+    <blocks>011, 052</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates new service in `Sprk.Bff.Api/Services/Communication`; wires it into two live pipelines (inbound processor + outbound send); adds a BFF surface with DI registration; must respect ADR-010 / ADR-013 / ADR-028 / ADR-045 and the binding `.claude/constraints/bff-extensions.md` governance checklist.</rigor-reason>
+    <parallel-group>W1-spine-entry</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-08</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Create `ICommunicationEnrichmentService` — a single, direction-agnostic orchestrator with the signature `EnrichAsync(Guid communicationId, CommunicationDirection direction, NormalizedMessage message, Guid? archivedDocumentId, CancellationToken ct)`. It is invoked by BOTH `IncomingCommunicationProcessor` (inbound path) AND the outbound creator(s) in `CommunicationService` (post-send), giving inbound and outbound communications identical treatment. This closes the two current outbound gaps: outbound sends are neither auto-associated nor RAG-indexed today.
+
+    The service owns, IN ORDER: (1) association (delegates to the Association Engine — in W1 task 011 this is the refactored resolver; for task 010, delegate to the existing `IncomingAssociationResolver` seam so the entry point lands first), (2) categorization (new content-class + urgency signals), (3) AI analysis enqueue (`EnqueueDocumentAnalysisAsync`), (4) RAG indexing via `IPostUploadIndexingEnqueuer` — this ADDS the missing OUTBOUND half so both directions index, (5) Responsive-Intelligence trigger (emit a `communication_assessed` assessment event; the consumer wiring lands in W5 — task 010 emits, does not consume).
+
+    Every step is BEST-EFFORT and NON-FATAL: a failure in any step MUST NOT fail the send or the inbound-capture path (NFR-06). Preserve that invariant exactly as the current inbound processor does.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/`. Fluent in ADR-010 (DI minimalism via `CommunicationModule`), ADR-013 (AI PublicContracts facade — no direct AI-internal injection into CRUD code), ADR-028 (central `TokenCredential`/`IGraphClientFactory`; never `new` a credential), ADR-045 (the new Communication ADR authored in task 005), and the binding `.claude/constraints/bff-extensions.md` governance checklist for BFF additions.
+  </role>
+
+  <goal>
+    A new `ICommunicationEnrichmentService` + implementation exists in `Services/Communication/`, registered via `CommunicationModule`. `IncomingCommunicationProcessor` calls it on the inbound path; `CommunicationService` outbound send calls it post-send. Both directions now run association → categorization → AI analysis → RAG indexing → assessment-event emission, in that order, best-effort and non-fatal. Outbound communications auto-associate and RAG-index for the first time. Build clean; `dotnet test` green; publish-size + CVE + bff-extensions Placement Justification reported in the PR.
+  </goal>
+
+  <context>
+    <background>
+      Today the inbound pipeline (`IncomingCommunicationProcessor`) performs association + analysis + indexing, but the outbound send path (`CommunicationService.SendAsync` and its record creators) does neither — outbound `sprk_communication` rows are created without association and their `.eml`/attachments are never RAG-indexed (spec §FR-08, requirement #6). R4 fixes this by hoisting the shared logic into ONE direction-agnostic service invoked from both paths (direction symmetry, per project MUST rules).
+
+      `NormalizedMessage` is the normalized envelope the Association Engine consumes (fully defined in task 011: `{ direction, from, to[], cc[], subject, bodyText, bodyHtml, internetMessageId, inReplyTo, references[], conversationId, sentAt, attachments[] }`). Task 010 introduces the type (or a minimal version of it) and the enrichment entry point; task 011 refactors the resolver to operate over it. Order matters: 010 lands the service + wiring + envelope skeleton; 011 depends on 010.
+
+      RAG indexing already exists for the inbound/upload path via `IPostUploadIndexingEnqueuer` (`Services/Ai/IPostUploadIndexingEnqueuer.cs`). Task 010 calls it for outbound too, using `archivedDocumentId` (the `.eml`/attachment document id) when present.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationDirection.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IPostUploadIndexingEnqueuer.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PostUploadIndexingEnqueuer.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-08: signature MUST be direction-agnostic `(communicationId, direction, NormalizedMessage, archivedDocumentId?)`; MUST be invoked by BOTH `IncomingCommunicationProcessor` and the `CommunicationService` outbound creators.</constraint>
+    <constraint source="project">Order is fixed: association → categorization → AI analysis (`EnqueueDocumentAnalysisAsync`) → RAG indexing (`IPostUploadIndexingEnqueuer`) → Responsive-Intelligence trigger (emit assessment event).</constraint>
+    <constraint source="NFR-06">Best-effort, non-fatal: any enrichment step failing MUST NOT fail the send or inbound-capture path. Wrap each step; log and continue.</constraint>
+    <constraint source="project">RAG indexing MUST cover OUTBOUND (the currently-missing half) as well as inbound — both directions index.</constraint>
+    <constraint source="ADR-010">Register via `CommunicationModule` only. No DI registration outside that module.</constraint>
+    <constraint source="ADR-013">Use the `Services/Ai/PublicContracts/` facade for AI capability; do NOT inject `IOpenAiClient`/`IPlaybookService` or other AI-internal types directly into this Communication-layer service.</constraint>
+    <constraint source="ADR-028">Inject central `TokenCredential`/`IGraphClientFactory`/canonical Dataverse interfaces; never `new` a credential or `ConfidentialClientApplication`.</constraint>
+    <constraint source="ADR-045">Enrichment service is codified in ADR-045; confirm this implementation aligns with the ADR authored in task 005.</constraint>
+    <constraint source="project">W5 consumes the emitted assessment event; task 010 EMITS only (no `EventRulesService` wiring here — that is task 052, gated by 050).</constraint>
+    <constraint source="project">bff-extensions Placement Justification REQUIRED in the PR (per CLAUDE.md §10), even though the answer is "stays in Services/Communication".</constraint>
+    <constraint source="project">Publish-size delta MUST be reported (baseline ~49.63 MB incl. PDBs, 2026-07-08; ceiling ≤60 MB). This task adds no packages; delta expected ≈ 0.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>docs/architecture/email-processing-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Best-effort non-fatal enrichment" location="src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs">
+        Each side-effect (association, analysis, indexing) is wrapped so a failure is logged and swallowed without failing the capture path. Mirror this exactly for outbound.
+      </pattern>
+      <pattern name="Post-upload RAG enqueue" location="src/server/api/Sprk.Bff.Api/Services/Ai/PostUploadIndexingEnqueuer.cs">
+        Existing inbound/upload indexing enqueue seam; reuse for the outbound half rather than a new indexer.
+      </pattern>
+      <pattern name="bff-extensions placement decision" location=".claude/constraints/bff-extensions.md">
+        State placement decision explicitly in the PR, citing decision criteria, even when the answer is "stays in BFF Services/Communication".
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `IncomingCommunicationProcessor.cs` to map the exact inbound sequence (association → analysis → indexing) and the best-effort wrapping idiom currently used.</step>
+    <step order="2">Read `CommunicationService.cs` to locate the outbound send + `sprk_communication` record creator(s) — the post-send point where enrichment must be invoked.</step>
+    <step order="3">Read `IPostUploadIndexingEnqueuer.cs` + `PostUploadIndexingEnqueuer.cs` to confirm the enqueue signature and how `archivedDocumentId` maps to it.</step>
+    <step order="4">Read `.claude/constraints/bff-extensions.md` (§F test obligation, §F.1 asymmetric-registration, §G hot-path) and `.claude/adr/ADR-013` PublicContracts facade rule before designing the AI-analysis hop.</step>
+    <step order="5">Define `NormalizedMessage` (minimal envelope skeleton with the FR-09 fields) and `ICommunicationEnrichmentService.EnrichAsync(Guid communicationId, CommunicationDirection direction, NormalizedMessage message, Guid? archivedDocumentId, CancellationToken ct)` in `Services/Communication/`. Note in an XML doc comment that task 011 finalizes the envelope shape.</step>
+    <step order="6">Implement `CommunicationEnrichmentService`: the five ordered steps, EACH wrapped best-effort/non-fatal (try/catch → log warning → continue). Step 1 delegates association to the existing `IncomingAssociationResolver` seam (task 011 swaps this for the Engine); step 3 uses `EnqueueDocumentAnalysisAsync`; step 4 uses `IPostUploadIndexingEnqueuer` for BOTH directions; step 5 emits a `communication_assessed` assessment event (emit-only — no consumer here).</step>
+    <step order="7">Wire the entry point into `IncomingCommunicationProcessor` (inbound) and `CommunicationService` outbound creator (post-send). Inbound may replace the inline sequence with a delegated call to preserve identical behavior; confirm no behavior change on the inbound path.</step>
+    <step order="8">Register `ICommunicationEnrichmentService` → `CommunicationEnrichmentService` in `CommunicationModule` (ADR-010). Unconditional registration (endpoint/processor consume it unconditionally per ADR-032).</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` — confirm clean. Then `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication` — existing tests green (new enrichment/direction-symmetry tests are added in task 017).</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/r4-010-publish/`; report compressed size + delta vs ~49.63 MB baseline (state the PDB convention). Expected ≈ 0.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: invoke `code-review` on the diff; invoke `adr-check` against `spec.md` (focus ADR-010/013/028/045 + NFR-06). Address Critical findings; cite the bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before opening the PR (BFF hot-path; confirm no overlap with `Services/Ai/` owners on the RAG/analysis seams — consume PublicContracts, do not fork).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (010 ✅) and `current-task.md` per task-execute protocol; advance to next pending task; record decisions (e.g., envelope-skeleton-now vs full-in-011).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect processor, service, indexer, DI module</tool>
+    <tool name="edit">Add interface + impl + wiring + DI registration</tool>
+    <tool name="bash">Build, test, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ICommunicationEnrichmentService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/NormalizedMessage.cs (NEW — envelope skeleton; finalized in 011)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs (UPDATED — delegates to enrichment)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (UPDATED — outbound post-send enrichment call)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — DI registration)</output>
+    <output type="docs">PR description with bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ICommunicationEnrichmentService.EnrichAsync` exists with signature `(Guid communicationId, CommunicationDirection direction, NormalizedMessage message, Guid? archivedDocumentId, CancellationToken)`.</criterion>
+    <criterion testable="true">`IncomingCommunicationProcessor` invokes `EnrichAsync` on the inbound path; inbound behavior is unchanged (existing tests pass).</criterion>
+    <criterion testable="true">`CommunicationService` outbound send invokes `EnrichAsync` post-send.</criterion>
+    <criterion testable="true">Enrichment executes the five steps in order: association → categorization → AI analysis → RAG indexing → assessment-event emission.</criterion>
+    <criterion testable="true">Outbound path now enqueues RAG indexing via `IPostUploadIndexingEnqueuer` (the previously-missing outbound half).</criterion>
+    <criterion testable="true">Each step is best-effort: a thrown exception in any step is caught, logged, and does not fail the send or inbound-capture path (NFR-06).</criterion>
+    <criterion testable="true">Service is registered in `CommunicationModule` (unconditional); no DI registration added elsewhere.</criterion>
+    <criterion testable="true">No AI-internal types injected directly (ADR-013 PublicContracts facade honored); no `new` credential (ADR-028).</criterion>
+    <criterion testable="true">`dotnet build` clean; Communication unit tests pass; publish-size delta ≈ 0 reported; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Task 010 lands the entry point + wiring FIRST so task 011 (Association Engine refactor) can plug the Engine into step 1. The `NormalizedMessage` type introduced here is finalized (all FR-09 fields + provenance) in task 011.
+
+    Per-direction + per-step tests (including direction-symmetry) are authored in task 017 — this task's acceptance criteria reference behavior verified there; task 010 implements, task 017 verifies.
+
+    The assessment event is EMIT-ONLY here. The `EventRulesService.FireAsync("communication_assessed")` consumer wiring is task 052 (W5), gated by the 050 coordination gate with `spaarke-ai-architecture-redesign-r2`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor per `rigor-hint` — Step 9.5 quality gates (code-review + adr-check) REQUIRED. Per CLAUDE.md §10: publish-size delta + CVE scan + bff-extensions Placement Justification ALL required in the PR. Run `/conflict-check` before the PR (BFF hot-path). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

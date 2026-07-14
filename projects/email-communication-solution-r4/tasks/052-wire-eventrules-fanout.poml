@@ -1,0 +1,129 @@
+<task id="052" project="email-communication-solution-r4">
+  <metadata>
+    <title>Wire enrichment assessment → `EventRulesService.FireAsync("communication_assessed")` → ordered Bindings/Actions → OutputRouter → CreateEvent / CreateTask / CreateNotification</title>
+    <phase>Wave 5 — Responsive Intelligence</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>050, 051, 010</dependencies>
+    <blocked-by>050</blocked-by>
+    <blocks>054</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Wires enrichment → EventRules fan-out across `Services/Ai/` (r2-core-coordinated per gate 050) + `Services/Communication/`; brownfield integration reusing EventRules gates; BFF governance + FULL Step 9.5 gates required.</rigor-reason>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-19</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Wire the enrichment assessment (task 010's `ICommunicationEnrichmentService`) to fire `EventRulesService.FireAsync("communication_assessed")`, which drives ordered Bindings/Actions through the OutputRouter (completed in task 051) to create the rule-configured artifacts: `CreateEvent` → `sprk_event`, `CreateTask` → `task`, `CreateNotification` → `appnotification` (surfacing in Daily Briefing). REUSE the existing EventRules deterministic gates — cost cap, opt-out, explicit-command supersede, and the M4 confidence gate — do NOT reinvent them. Privilege is only **flagged**, never decided (ADR-015).
+
+    Implement per the gate-050 boundary: consume `Services/Ai/PublicContracts/` seams; do NOT fork `Services/Ai/` internals. The rule *configuration* (Binding rows + `sprk_matchconditions`) + tests are task 054; this task lands the firing + fan-out plumbing and reuse of the gates.
+  </prompt>
+
+  <role>
+    Spaarke BFF/AI integration engineer. Authoritative on `EventRulesService.FireAsync`, the ordered Binding/Action fan-out, the `CreateEvent`/`CreateTask`/`CreateNotification` node executors, and the DailyBriefing notification path. Works within the r2-core-coordinated boundary + BFF hygiene governance.
+  </role>
+
+  <goal>
+    An assessed communication (from `ICommunicationEnrichmentService`) fires `EventRulesService.FireAsync("communication_assessed")`; matching Bindings/Actions route through OutputRouter's now-complete `record`/`notification` legs to create `sprk_event` (CreateEvent), `task` (CreateTask), and `appnotification` (CreateNotification → Daily Briefing). All existing EventRules gates (cost cap, opt-out, explicit-command supersede, M4 confidence) are enforced (reused, not reimplemented); privilege is flagged only. Build clean; tests green; publish-size + CVE reported; `/conflict-check` clean; Placement Justification stated.
+  </goal>
+
+  <context>
+    <background>
+      FR-19: assessed communications feed Responsive Intelligence. Task 010 owns the enrichment pipeline (association → categorization → AI analysis → RAG → Responsive-Intelligence trigger). This task adds the trigger's fan-out via EventRules, reusing the existing deterministic gates so the new event source behaves like every other EventRules consumer. The best-effort/non-fatal invariant (NFR-06) MUST hold — fan-out failures do not fail enrichment or the send/inbound path.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EventRulesService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/</file>
+      <file>projects/email-communication-solution-r4/notes/w5-ai-coordination.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">GATE: gate 050 cleared first; implement per `notes/w5-ai-coordination.md`. Run `/conflict-check` before PR.</constraint>
+    <constraint source="ADR-013">Consume `Services/Ai/PublicContracts/` seams; do NOT fork `Services/Ai/` internals; do NOT inject AI-internal types into Communication code.</constraint>
+    <constraint source="FR-19">Reuse EventRules deterministic gates — cost cap, opt-out, explicit-command supersede, M4 confidence gate. Do NOT reimplement them.</constraint>
+    <constraint source="ADR-015">Privilege is only FLAGGED for downstream review, never auto-decided by the fan-out.</constraint>
+    <constraint source="NFR-06">Best-effort, non-fatal — fan-out failure MUST NOT fail enrichment or the send/inbound capture path.</constraint>
+    <constraint source="NFR-08 / ADR-032">Tests in `tests/unit/Sprk.Bff.Api.Tests/`; feature-gated services use ADR-032 Null-Object; unconditional mapping → unconditional registration.</constraint>
+    <constraint source="root §10">Report publish-size + CVE; state Placement Justification (new fan-out wiring into BFF `Services/`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/notes/w5-ai-coordination.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-privilege-flag-only.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+    <patterns>
+      <pattern name="EventRules fire + ordered fan-out" location="src/server/api/Sprk.Bff.Api/Services/Ai/EventRulesService.cs">
+        `FireAsync(eventName)` evaluates ordered Bindings/Actions with the deterministic gates; route matched dispositions via OutputRouter.
+      </pattern>
+      <pattern name="CreateEvent/CreateTask/CreateNotification executors" location="src/server/api/Sprk.Bff.Api/Services/Ai/">
+        Node executors that create `sprk_event`/`task`/`appnotification`; CreateNotification feeds the Daily Briefing path.
+      </pattern>
+      <pattern name="Best-effort non-fatal enrichment" location="spec NFR-06">
+        Wrap fan-out so failures log + continue; never throw into the enrichment/send/inbound path.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `notes/w5-ai-coordination.md` + `EventRulesService.cs` — confirm `FireAsync` signature, the gate set (cost cap, opt-out, explicit-command supersede, M4 confidence), and the seam for firing.</step>
+    <step order="2">Run `/conflict-check` scoped to `Services/Ai/`.</step>
+    <step order="3">Read task 010's `ICommunicationEnrichmentService` to locate the Responsive-Intelligence trigger point where `communication_assessed` should fire.</step>
+    <step order="4">Wire the trigger: on assessment completion, call `EventRulesService.FireAsync("communication_assessed")` (via the agreed seam) with the assessment payload (category, urgency, confidence, matter/regarding context, privilege flag).</step>
+    <step order="5">Confirm the ordered Bindings/Actions route through OutputRouter's `record`/`notification` legs (task 051) to `CreateEvent`/`CreateTask`/`CreateNotification`; add any missing plumbing so the executors receive the correct payload.</step>
+    <step order="6">Verify the existing gates fire unchanged (cost cap, opt-out, explicit-command supersede, M4 confidence) — reuse, do not duplicate. Ensure privilege is passed as a flag only (ADR-015).</step>
+    <step order="7">Wrap the fan-out best-effort/non-fatal (NFR-06): failures log + continue, never fail enrichment/send/inbound.</step>
+    <step order="8">Add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`: fire → gate enforcement → CreateEvent/Task/Notification produced; non-fatal on executor failure; privilege flagged-not-decided (deeper end-to-end fan-out + gate tests are task 054).</step>
+    <step order="9">Run `dotnet build` + `dotnet test --filter EventRules`; then `dotnet publish -c Release ... -o deploy/api-publish/` (report size + delta vs ~49.63 MB) + `dotnet list package --vulnerable --include-transitive` (no new HIGH CVE).</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff; `adr-check` against `spec.md` (ADR-013/015/032; NFR-06). Address Critical findings. `/conflict-check` clean before PR.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 052 ✅; confirm 054 unblocked (needs 052+053). Update `current-task.md` (record the fire seam + gate reuse; advance).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect EventRulesService, executors, enrichment trigger, gate note</tool>
+    <tool name="edit">Wire fire + fan-out plumbing</tool>
+    <tool name="bash">Build, test, publish-size, CVE scan</tool>
+    <tool name="conflict-check">Pre-PR overlap scan on Services/Ai/</tool>
+    <tool name="code-review">FULL-rigor gate</tool>
+    <tool name="adr-check">FULL-rigor gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Enrichment trigger → `EventRulesService.FireAsync("communication_assessed")` wiring (Services/Communication + Services/Ai seam)</output>
+    <output type="code">OutputRouter → CreateEvent/CreateTask/CreateNotification fan-out plumbing (reusing existing gates)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (fire → gates → artifacts; non-fatal; privilege-flag)</output>
+    <output type="docs">PR description: Placement Justification + publish-size delta + CVE + seams consumed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Assessment completion fires `EventRulesService.FireAsync("communication_assessed")` via the gate-050 seam.</criterion>
+    <criterion testable="true">Matching rules create `sprk_event` (CreateEvent), `task` (CreateTask), and `appnotification` (CreateNotification → Daily Briefing) through OutputRouter's record/notification legs.</criterion>
+    <criterion testable="true">Existing EventRules gates (cost cap, opt-out, explicit-command supersede, M4 confidence) are enforced and reused (not reimplemented) — verifiable by test + grep.</criterion>
+    <criterion testable="true">Privilege is passed as a flag only; no path auto-decides privilege (ADR-015).</criterion>
+    <criterion testable="true">Fan-out is best-effort/non-fatal — a forced executor failure does not fail enrichment (test).</criterion>
+    <criterion testable="true">Build clean; tests green; publish-size delta + CVE reported; `/conflict-check` clean; Placement Justification in PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Rule *configuration* (Binding rows + `sprk_matchconditions`) and the end-to-end gate-enforcement tests are task 054 — this task lands the plumbing + gate reuse. Task 053 adds the Triage summary/checklist in parallel.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Blocked until gate 050 clears. Load all `&lt;knowledge&gt;&lt;files&gt;` incl. gate note. FULL rigor — Step 9.5 REQUIRED. BFF governance: publish-size + CVE + `/conflict-check` + Placement Justification. Reuse gates; consume seams; never fork internals. Preserve NFR-06 non-fatal invariant.
+    </protocol>
+  </execution>
+</task>

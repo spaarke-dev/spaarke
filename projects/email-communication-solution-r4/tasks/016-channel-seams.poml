@@ -1,0 +1,144 @@
+<task id="016" project="email-communication-solution-r4">
+  <metadata>
+    <title>Channel seams — define `ICommunicationChannelSender` + `ICommunicationArchiver` (email is the only R4 impl)</title>
+    <phase>Wave 1 — Server: enrichment + deterministic engine</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks></blocks>
+    <tags>bff-api, architecture</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Introduces two channel-extensibility seam interfaces + refactors the existing email send/archive into the first implementations behind them; establishes the NFR-04 "no-change-to-add-a-channel" boundary; respects ADR-010 / ADR-045 + bff-extensions governance.</rigor-reason>
+    <parallel-group>W1-seams</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>NFR-04</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    DEFINE (not fully implement for other channels) the two channel-extensibility seams that let future channels plug in without touching the engine, enrichment, regarding model, or review UI (NFR-04):
+
+    • **`ICommunicationChannelSender`** — dispatch `SendAsync` by `CommunicationType`; the EMAIL implementation wraps the existing Graph send path in `CommunicationService`.
+    • **`ICommunicationArchiver`** — `GenerateEml`/archive; the EMAIL implementation wraps the existing `.eml` generation (`EmlGenerationService`/`GraphMessageToEmlConverter`).
+
+    Email is the ONLY R4 implementation of each. The seams must be shaped so that adding a channel = adding a new sender/archiver adapter + a normalizer to the envelope — the Association Engine, `ICommunicationEnrichmentService`, the regarding model, and the review UI MUST NOT change to add a channel. Do NOT build Teams/Slack/Gmail/SMS code (MUST NOT per project rules). Provide the interfaces, an email impl behind each, and a `CommunicationType`-keyed dispatch/registration that resolves the email impl today and is ready for more later.
+  </prompt>
+
+  <role>
+    Spaarke BFF architect for the Communication subsystem. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/`. Fluent in ADR-010 (DI minimalism via `CommunicationModule`), ADR-045 (Communication ADR — channel seams), NFR-04 (channel extensibility), §11 Component Justification, and `.claude/constraints/bff-extensions.md`.
+  </role>
+
+  <goal>
+    `ICommunicationChannelSender` (dispatch by `CommunicationType`) and `ICommunicationArchiver` (`GenerateEml`/archive) exist, with a single email implementation behind each wrapping the current Graph send + `.eml` generation. A `CommunicationType`-keyed dispatch resolves the email sender/archiver. The engine, enrichment, regarding model, and review surface are unchanged by (and would remain unchanged for) a future channel. Build clean; seam + dispatch tests pass; publish-size + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      R4 ships ONLY the email channel but must be channel-extensible by construction (NFR-04, DEC-11). Today, send and `.eml` archival are email-specific code inside `CommunicationService` + `EmlGenerationService`/`GraphMessageToEmlConverter`. This task hoists them behind two seams so the rest of the intelligence layer is channel-agnostic — the Association Engine already operates over the normalized envelope (task 011), so the remaining channel-specific surfaces are exactly "send" and "archive," which these two interfaces isolate.
+
+      Component Justification (§11): the two new interfaces are justified because the concrete failure mode without them is that adding any future channel forces edits into the engine/enrichment/regarding/review surfaces (violating NFR-04) — the seams are the boundary that prevents that. Cost-of-doing-nothing is a named contract failure (NFR-04), not "future flexibility."
+
+      Scope discipline: this is seams + email impl ONLY. No Teams/Slack/Gmail/SMS implementations (explicit MUST NOT). Keep the email impls as thin wrappers over existing, working code — behavior for email must be unchanged.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/EmlGenerationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/GraphMessageToEmlConverter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-04">Define (not implement other channels) `ICommunicationChannelSender` + `ICommunicationArchiver`; email is the only R4 impl. Association Engine, enrichment service, regarding model, and review UI MUST NOT change to add a future channel.</constraint>
+    <constraint source="project">MUST NOT build Teams/Slack/Gmail/SMS channel code — seams only (DEC-11).</constraint>
+    <constraint source="project">Email impls are thin wrappers over the existing Graph send + `.eml` generation; email behavior unchanged.</constraint>
+    <constraint source="project">Dispatch keyed by `CommunicationType`; the email impl resolves for the email type today; registration is ready for more channels without engine changes.</constraint>
+    <constraint source="ADR-010">Register seams + email impls via `CommunicationModule` only; keep DI unconditional (ADR-032).</constraint>
+    <constraint source="ADR-045">Channel seams are codified in ADR-045 (task 005); confirm the interface shapes match the ADR.</constraint>
+    <constraint source="project">§11 Component Justification: state the concrete NFR-04 failure mode prevented by each new interface in the PR.</constraint>
+    <constraint source="project">bff-extensions Placement Justification in the PR; publish-size delta (baseline ~49.63 MB incl. PDBs); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Type-keyed dispatch" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs">
+        Resolve the sender/archiver by `CommunicationType`; email resolves the Graph impl. New channel = new keyed registration, no dispatch-site change.
+      </pattern>
+      <pattern name="Thin adapter over working code" location="src/server/api/Sprk.Bff.Api/Services/Communication/EmlGenerationService.cs">
+        Wrap the existing `.eml` generation behind `ICommunicationArchiver` without altering its behavior.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `CommunicationService.cs` (Graph send path) + `EmlGenerationService.cs`/`GraphMessageToEmlConverter.cs` (`.eml` generation) + `CommunicationType.cs` to identify the exact email-specific surfaces to isolate.</step>
+    <step order="2">Read `.claude/constraints/bff-extensions.md` §F + §11 Component Justification + the ADR-045 channel-seam section before defining interfaces.</step>
+    <step order="3">Define `ICommunicationChannelSender` (`Task&lt;...&gt; SendAsync(...)`, plus a `CommunicationType SupportedType` or equivalent for keyed dispatch) and `ICommunicationArchiver` (`GenerateEml`/archive) in `Services/Communication/`.</step>
+    <step order="4">Implement `EmailChannelSender` wrapping the existing Graph send in `CommunicationService`, and `EmailArchiver` wrapping `.eml` generation — thin adapters, email behavior unchanged.</step>
+    <step order="5">Add `CommunicationType`-keyed dispatch (a small resolver/factory or keyed DI) that returns the email impl for the email type; shape it so a future channel is a new registration, not a dispatch-site edit.</step>
+    <step order="6">Refactor `CommunicationService` send + archive call sites to route through the seams (email path only). Confirm the Association Engine / enrichment / regarding / review surfaces are untouched.</step>
+    <step order="7">Register seams + email impls + dispatch in `CommunicationModule` (ADR-010), unconditional.</step>
+    <step order="8">Write tests: email send routes through `ICommunicationChannelSender`; `.eml` archive routes through `ICommunicationArchiver`; dispatch resolves the email impl by `CommunicationType`; a fake second channel type could register without touching the dispatch site (extensibility assertion).</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm existing send/archive tests still pass (email behavior unchanged).</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/r4-016-publish/`; report compressed size + delta vs ~49.63 MB baseline. Expected ≈ 0.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff; `adr-check` against `spec.md` (focus NFR-04 seam boundary + §11 justification + ADR-010). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (016 ✅) + `current-task.md`; record decisions (interface shapes, dispatch mechanism, keyed-DI vs factory).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect send path, `.eml` generation, communication type</tool>
+    <tool name="edit">Define seams; implement email impls; keyed dispatch; DI</tool>
+    <tool name="bash">Build, seam/dispatch tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/ICommunicationChannelSender.cs (NEW — seam)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/ICommunicationArchiver.cs (NEW — seam)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailChannelSender.cs + EmailArchiver.cs (NEW — the only R4 impls)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (UPDATED — route send/archive through seams)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — seam + dispatch registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (seam routing + type-keyed dispatch + extensibility tests)</output>
+    <output type="docs">PR description with §11 Component Justification (NFR-04 failure mode) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ICommunicationChannelSender` and `ICommunicationArchiver` interfaces exist in `Services/Communication/`.</criterion>
+    <criterion testable="true">Exactly one implementation of each exists (email); no Teams/Slack/Gmail/SMS code is present.</criterion>
+    <criterion testable="true">Email send routes through `ICommunicationChannelSender`; `.eml` archival routes through `ICommunicationArchiver`; email behavior is unchanged (existing tests pass).</criterion>
+    <criterion testable="true">Dispatch resolves the email impl by `CommunicationType`; a test shows a second channel type could register without editing the dispatch site (NFR-04).</criterion>
+    <criterion testable="true">The Association Engine, `ICommunicationEnrichmentService`, regarding model, and review surface are untouched by this task (grep/diff-verifiable).</criterion>
+    <criterion testable="true">Seams + impls registered via `CommunicationModule`, unconditional.</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta ≈ 0; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends only on ADR-045 (task 005) for the interface shapes; can run any time after 005 (not on the 010→011→rungs→015 serial spine). `blocks` is empty — it is an independent W1 seam task.
+
+    Strict scope: seams + email impl only. If a future-channel need seems to demand an engine/enrichment change, that is a signal the seam is mis-shaped — fix the seam, do not leak channel specifics into the engine (NFR-04). No new-channel implementation code (MUST NOT).
+
+    W7 add-in work and W2 client send both continue to call the BFF send endpoint; this task is server-internal refactoring behind that endpoint — the send contract is unchanged.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED. Per CLAUDE.md §10 + §11: publish-size delta + CVE + bff-extensions Placement Justification + Component Justification (NFR-04 failure mode) in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,123 @@
+<task id="043" project="email-communication-solution-r4">
+  <metadata>
+    <title>Deploy Communication Code Page + UI tests (dark-mode + channel-type rendering + review loop)</title>
+    <phase>Wave 4 — Channel-aware Communication Code Page</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>040, 041, 042</dependencies>
+    <blocks>060</blocks>
+    <tags>code-page, deploy, e2e-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Deploys a user-visible Code Page (Form Component Control swap) to Dataverse and runs browser-based UI tests; regression-risk surface; FULL Step 9.5 gates required.</rigor-reason>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>NFR-07</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Deploy the channel-aware Communication Code Page (tasks 040–042) to Dataverse via the `code-page-deploy` skill, then run browser-based UI tests via the `ui-test` skill covering: (1) ADR-021 dark-mode rendering, (2) channel-type rendering (email interactive vs Teams/SMS/Notification read-only, keyed on `sprk_communicationtype`), (3) the review loop (suggestion pre-fill → 1-click accept → override with reason), and (4) all five composer modes (compose/view/reply/forward/draft). Confirm the Form Component Control swap opens the Code Page and the standard form remains as an admin fallback.
+  </prompt>
+
+  <role>
+    Spaarke deployment + QA engineer. Fluent with the `code-page-deploy` skill (build + web-resource import) and the `ui-test` skill (Chrome-integration browser testing of model-driven apps and Code Pages). Knows ADR-021 dark-mode requirements.
+  </role>
+
+  <goal>
+    The Communication Code Page is deployed to the dev environment as the `sprk_communication` Form Component Control host. A UI-test pass confirms: dark-mode renders correctly (ADR-021); the layout switches by `sprk_communicationtype` (email interactive, others read-only); all five modes resolve from the URL contract; the review loop accepts a suggestion in ≤1 click and captures an override reason; and the standard form is still reachable as an admin fallback. All UI tests pass or documented deferrals are filed.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 040 (shell), 041 (composer mount + FCC swap), 042 (review surface + view) built the page. This task deploys it and verifies end-to-end in a real browser. This is the higher-risk Surface 2 (FCC swap changes default record-open behavior — reference §7.4), so verification + a confirmed fallback path are the acceptance bar.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/CommunicationPage/</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-07">Verify the review surface + "Communications Awaiting Association" view are matter-level auth-scoped in the deployed environment (ADR-003/008); confirm AI privilege appears as a flag only (ADR-015).</constraint>
+    <constraint source="ADR-021">Dark-mode rendering MUST be tested (Fluent v9 theme); both light and dark verified.</constraint>
+    <constraint source="ADR-026">Deploy as a single self-contained HTML web resource via `code-page-deploy` conventions.</constraint>
+    <constraint source="project">Build with `npm run build:prod` before deploy (FAILURE-MODES AP-1).</constraint>
+    <constraint source="project">The standard OOB `sprk_communication` form MUST remain reachable post-deploy (reversibility) — verify, do not delete.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code Page deploy" location="code-page-deploy skill">
+        Build single-file HTML → import as Dataverse web resource → verify FCC host renders it.
+      </pattern>
+      <pattern name="Browser UI testing" location="ui-test skill">
+        Drive the deployed page in Chrome; assert rendering, mode resolution, dark-mode, review-loop interactions.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build the Code Page with `npm run build:prod`; confirm a single self-contained artifact.</step>
+    <step order="2">Deploy via the `code-page-deploy` skill: import the web resource, confirm the Form Component Control host points at it, publish.</step>
+    <step order="3">Invoke the `ui-test` skill and execute the `&lt;ui-tests&gt;` suite below.</step>
+    <step order="4">Verify the standard OOB form remains reachable (admin fallback) and that navigating to a `sprk_communication` record opens the Code Page by default.</step>
+    <step order="5">Record results; file any failures as deferred issues (project notes + GitHub Issue) if not fixable in-task; do not silently pass.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on any deploy-script/config diffs; `adr-check` against `spec.md` (ADR-021/026/003/008/015). Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 043 ✅; confirm 060 unblocked. Update `current-task.md` (record deploy target + UI-test outcome; advance). Run `context-handoff` after deployment per CLAUDE.md §5.</step>
+  </steps>
+
+  <ui-tests>
+    <ui-test id="UT-043-1" name="Dark-mode rendering">Load the Code Page under the dark Fluent theme; assert composer, review surface, and action bar render with correct contrast/tokens (ADR-021). Repeat under light theme.</ui-test>
+    <ui-test id="UT-043-2" name="Channel-type rendering — email interactive">Open an email `sprk_communication` record; assert the interactive `&lt;EmailComposer />` mounts.</ui-test>
+    <ui-test id="UT-043-3" name="Channel-type rendering — non-email read-only">Open a Teams/SMS/Notification-typed record (seeded); assert a read-only renderer mounts and the composer does NOT mount (layout keyed on `sprk_communicationtype`).</ui-test>
+    <ui-test id="UT-043-4" name="Mode resolution">Launch the page with `data=mode=compose`, `mode=view&amp;id=`, `mode=reply&amp;id=`, `mode=forward&amp;id=`, `mode=draft&amp;id=`; assert each renders the correct composer state per reference §7.5.</ui-test>
+    <ui-test id="UT-043-5" name="Review loop — 1-click accept">Open a `Suggested`-status record; assert the RegardingResolver is pre-filled with the top suggestion + confidence + provenance rationale; click accept; assert status → `Resolved` and the regarding lookup is written.</ui-test>
+    <ui-test id="UT-043-6" name="Review loop — override reason">Pick a target other than the top suggestion; assert an override-reason prompt appears and the reason persists as a feedback signal.</ui-test>
+    <ui-test id="UT-043-7" name="Awaiting-Association view + auth scope">Open the "Communications Awaiting Association" view; assert it lists only `Suggested`/`Pending Review`/`Ambiguous` and is matter-level auth-scoped (a non-privileged user sees only in-scope rows).</ui-test>
+    <ui-test id="UT-043-8" name="FCC swap + fallback">Assert navigating to a `sprk_communication` record opens the Code Page (FCC); assert the standard form is still reachable via admin form-selector.</ui-test>
+  </ui-tests>
+
+  <tools>
+    <tool name="bash">npm run build:prod</tool>
+    <tool name="code-page-deploy">Deploy the Code Page web resource</tool>
+    <tool name="ui-test">Browser-based UI testing</tool>
+    <tool name="code-review">FULL-rigor gate</tool>
+    <tool name="adr-check">FULL-rigor gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Deployed `sprk_communication` Communication Code Page (FCC host) in dev</output>
+    <output type="test">UI-test results for UT-043-1..8 (pass/fail + evidence)</output>
+    <output type="docs">Task notes + any deferred-issue filings for failures</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Code Page deployed and set as the `sprk_communication` FCC host; publish succeeds.</criterion>
+    <criterion testable="true">UT-043-1 (dark + light mode) passes.</criterion>
+    <criterion testable="true">UT-043-2/3 (channel-type interactive vs read-only) pass.</criterion>
+    <criterion testable="true">UT-043-4 (all five modes) passes.</criterion>
+    <criterion testable="true">UT-043-5/6 (accept + override) pass.</criterion>
+    <criterion testable="true">UT-043-7 (view + matter-level auth scope) passes.</criterion>
+    <criterion testable="true">UT-043-8 (FCC swap + standard-form fallback reachable) passes.</criterion>
+    <criterion testable="true">Any failing UI test is either fixed or filed as a deferred issue with a link in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This closes Wave 4. Task 060 (W6 caller migration) depends on the deployed page. Report the deploy target env + web-resource name so downstream tasks can reference it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 REQUIRED. Deploy via `code-page-deploy`; test via `ui-test`. Run `context-handoff` after deployment.
+    </protocol>
+  </execution>
+</task>

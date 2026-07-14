@@ -1,0 +1,114 @@
+<task id="081" project="email-communication-solution-r4">
+  <metadata>
+    <title>Update `sprk_communication.md` + processing/service arch docs; mark OOB-`email` + fragmented-send docs RETIRED</title>
+    <phase>Wave 8 — Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001, 006, 007, 011, 015, 060, 061, 062</dependencies>
+    <blocks></blocks>
+    <tags>docs</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Updates three existing docs (data model + two architecture) to match shipped R4 code and marks legacy docs RETIRED with ADR cross-refs. No code/ADR authoring. STANDARD rigor — Step 9.5 skipped, source-of-truth rule binding. Uses `docs-data-model` + `docs-architecture` skills.</rigor-reason>
+    <parallel-group>W8</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Updates existing docs disjoint from the NEW doc (080) and the Triage doc (082). Per-file parallel. Depends on the schema (001), send-path (006), OOB retire (007), engine (011/015), and caller migration (060–062) being complete.</parallel-reason>
+    <fr-refs>FR-27</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Update the existing communication docs to match the shipped R4 system and retire the legacy ones:
+
+    1. **`docs/data-model/sprk_communication.md`** — reflect the R4 schema pass (FR-01): new reply-thread columns (`sprk_inreplyto`, `sprk_internetmessageid`), association columns (`sprk_associationprovenance` JSON, `sprk_regardingservicerequest` lookup), the `Suggested`/`Ambiguous` option-set values (FR-02, verified integers), and the corrected org target (`sprk_organization`). Close the §1.2 doc-drift called out in FR-01.
+
+    2. **`docs/architecture/email-processing-architecture.md`** — update to the R4 inbound flow (Association Engine over normalized envelope, confidence→status + auto-file, enrichment service). Point to the new `communication-intelligence-architecture.md` (task 080) as the canonical reference. Mark the OOB-`email`-activity content RETIRED.
+
+    3. **`docs/architecture/communication-service-architecture.md`** — update the send path (`AttachmentDriveItemIds` canonical rename, `Internet-Message-Id` capture, canonical `<EmailComposer />` client consolidation) and mark the fragmented-send narrative RETIRED. Point to 080 + ADR-045.
+
+    Add ADR cross-references (ADR-045 canonical; ADR-024/028/018 as relevant) and clearly mark RETIRED sections so no reader treats them as current.
+  </prompt>
+
+  <role>
+    Spaarke docs maintainer authoritative on the `sprk_communication` data model and the communication architecture docs. Uses `docs-data-model` + `docs-architecture` skills; follows the code-wins source-of-truth rule.
+  </role>
+
+  <goal>
+    `sprk_communication.md`, `email-processing-architecture.md`, and `communication-service-architecture.md` match shipped R4 code; OOB-`email` and fragmented-send content is explicitly marked RETIRED and points to the canonical `communication-intelligence-architecture.md` + ADR-045.
+  </goal>
+
+  <context>
+    <background>
+      R4 changes the schema, inbound flow, and send path substantially and retires the OOB-`email` subsystem. The three existing docs still describe the pre-R4 world (including the retired OOB-`email` activity model and the fragmented client-send narrative). This task reconciles them and marks the dead content RETIRED, deferring the full narrative to the new task-080 doc.
+    </background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication.md</file>
+      <file>docs/architecture/email-processing-architecture.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>docs/architecture/communication-intelligence-architecture.md (canonical — task 080)</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-27">Update `sprk_communication.md`, `email-processing-architecture.md`, `communication-service-architecture.md`; mark OOB-`email` + fragmented-send docs RETIRED; docs match code.</constraint>
+    <constraint source="root §2 source-of-truth">Verify each schema/flow claim against shipped code + solution before documenting.</constraint>
+    <constraint source="project">RETIRED sections must be clearly labeled and point to the canonical task-080 doc + ADR-045; do not delete history silently — mark it.</constraint>
+    <constraint source="project">Verified option-set integers (from task 002) must be recorded accurately in the data-model doc.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>docs/data-model + architecture</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/skills/docs-data-model/SKILL.md</file>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/communication-intelligence-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Load knowledge">Read spec FR-01/02/04/06/07/27, ADR-045, task-080 doc, and the three target docs.</step>
+    <step order="2" name="Verify schema">Read the shipped `sprk_communication` schema / solution + task 002 verified integers; confirm columns + option-set values.</step>
+    <step order="3" name="Update data-model doc">Update `sprk_communication.md` with R4 columns, option-set values, corrected org target; close §1.2 drift.</step>
+    <step order="4" name="Update processing arch">Update `email-processing-architecture.md` to the R4 inbound flow; mark OOB-`email` RETIRED; point to task-080 doc.</step>
+    <step order="5" name="Update service arch">Update `communication-service-architecture.md` send path (canonical rename, Internet-Message-Id, `<EmailComposer />` consolidation); mark fragmented-send RETIRED; point to task-080 + ADR-045.</step>
+    <step order="6" name="Cross-refs">Add ADR cross-references (045/024/028/018).</step>
+    <step order="7" name="Self-check">Verify every claim matches code/solution; ensure RETIRED labels are unambiguous.</step>
+    <step order="8" name="Update tracking">Mark task 081 ✅ in `tasks/TASK-INDEX.md`.</step>
+    <step order="9" name="Reset state">Update `current-task.md`: status → completed; advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect schema/solution + target docs</tool>
+    <tool name="docs-data-model">Update the data-model doc</tool>
+    <tool name="docs-architecture">Update the architecture docs</tool>
+    <tool name="edit">Apply doc updates + RETIRED labels</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/data-model/sprk_communication.md (UPDATED — R4 columns + option-set + org target)</output>
+    <output type="docs">docs/architecture/email-processing-architecture.md (UPDATED — R4 inbound flow; OOB-email RETIRED)</output>
+    <output type="docs">docs/architecture/communication-service-architecture.md (UPDATED — R4 send path; fragmented-send RETIRED)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_communication.md` documents the R4 reply-thread + association columns, the verified `Suggested`/`Ambiguous` integers, and the `sprk_organization` org target; §1.2 drift closed.</criterion>
+    <criterion testable="true">`email-processing-architecture.md` reflects the R4 inbound flow, marks OOB-`email` RETIRED, and points to the task-080 doc.</criterion>
+    <criterion testable="true">`communication-service-architecture.md` reflects the R4 send path, marks fragmented-send RETIRED, and points to task-080 + ADR-045.</criterion>
+    <criterion testable="true">All three docs carry ADR cross-references and match shipped code.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    STANDARD rigor — source-of-truth rule binding. Depends on the schema/send/engine/migration tasks being complete so the docs reflect shipped reality.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load `&lt;knowledge&gt;&lt;files&gt;`. Apply STANDARD rigor — Step 9.5 SKIPPED. Verify against shipped code/solution before writing; mark RETIRED content unambiguously.
+    </protocol>
+  </execution>
+</task>

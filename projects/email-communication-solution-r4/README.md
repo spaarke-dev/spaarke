@@ -2,7 +2,7 @@
 
 > **Portfolio**: [Project #642](https://github.com/spaarke-dev/spaarke/issues/642) · Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431) · [Board #2](https://github.com/users/spaarke-dev/projects/2)
 
-> **Status**: Technical review + assessment + plan (pre-spec). No implementation authorized from these documents.
+> **Status**: 🚀 Ready for implementation — spec + plan + 45 tasks generated (`/design-to-spec` → `/project-pipeline`, 2026-07-14). Begin with Wave 0 task 001 via `task-execute`.
 > **Date**: 2026-07-14
 > **Type**: Architecture assessment + design charter (feeds `/design-to-spec` → `/project-pipeline`)
 > **Author**: Senior platform review (Claude Code, with 4 parallel code/research audits)
@@ -38,6 +38,8 @@ Where R2 unified the server-side communication pipeline, R4 (now including R3's 
 
 ## Next step
 
-Review `design.md`, resolve the Open Decisions (§8), then run `/design-to-spec`.
+Pipeline complete. Artifacts: [`spec.md`](spec.md) (27 FRs, 8 NFRs) · [`plan.md`](plan.md) (8-wave WBS) · [`CLAUDE.md`](CLAUDE.md) · [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) (45 tasks).
+
+Begin execution: say **"work on task 001"** (or "continue"). W0 blocks all waves; W1‖W2 run in parallel after W0; **W5 is gated on task 050** (Services/Ai coordination with `spaarke-ai-architecture-redesign-r2`). Run `/conflict-check` before every BFF PR.
 </content>
 </invoke>

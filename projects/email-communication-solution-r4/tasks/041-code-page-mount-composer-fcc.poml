@@ -1,0 +1,125 @@
+<task id="041" project="email-communication-solution-r4">
+  <metadata>
+    <title>Mount `&lt;EmailComposer />` for email compose + Form Component Control swap (standard form retained as admin fallback)</title>
+    <phase>Wave 4 — Channel-aware Communication Code Page</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>020, 040</dependencies>
+    <blocks>043</blocks>
+    <tags>code-page, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Wires the shared-lib `&lt;EmailComposer />` engine into the Code Page (`.tsx`) and performs a Form Component Control swap changing default record-open behavior for `sprk_communication`; ADR-026/028/012/021 apply; FULL Step 9.5 gates required.</rigor-reason>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-16</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Mount the canonical `&lt;EmailComposer />` engine (from task 020, `@spaarke/ui-components`) into the channel-aware Communication Code Page's **email** layout branch (task 040's interactive-email seam), then perform the **Form Component Control swap** so navigating to a `sprk_communication` record opens this Code Page instead of the auto-generated Dataverse standard form. The standard OOB form is **retained as a hidden / admin-only fallback** (reversibility — do NOT delete it).
+
+    The composer is the channel-specific renderer mounted by the page for `sprk_communicationtype == Email`. Use the `&lt;SendEmailPage />` wrapper (mount='page') per reference §5.1.1, driven by the `mode` + `id` URL parameters parsed in task 040. Wire the URL contract per reference §7 exactly (compose | view | reply | forward | draft).
+  </prompt>
+
+  <role>
+    Spaarke front-end + Dataverse customization engineer. Fluent UI v9 + React 19 Code Pages + `@spaarke/ui-components` consumer. Knows the Form Component Control registration pattern and how to retain a fallback form for reversibility.
+  </role>
+
+  <goal>
+    The Communication Code Page's email branch mounts `&lt;SendEmailPage mode={modeFromUrl} communicationId={idFromUrl} authenticatedFetch={...} bffBaseUrl={...} associations={...} onSent={...} onClose={...} />`. All five modes (compose/view/reply/forward/draft) resolve from the URL contract and render correctly. The `sprk_communication` main form is swapped to a Form Component Control hosting this Code Page as the default user-visible form; the standard auto-generated form is retained as an admin/debug fallback (not deleted). Build is clean via `npm run build:prod`.
+  </goal>
+
+  <context>
+    <background>
+      Task 040 built the channel-aware shell with a stubbed interactive-email seam. Task 020 (W2) built the canonical `&lt;EmailComposer />` engine + `SendEmailStep`/`SendEmailDialog`/`SendEmailPage` wrappers in `@spaarke/ui-components`. This task connects the two and makes the Code Page the default `sprk_communication` form.
+
+      Per reference §7.4, the Form Component Control (Surface 2) is the higher-risk entry point because it changes default record-open behavior. The standard form MUST remain available as a fallback (NFR-07 reversibility / design decision 2026-06-05).
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/CommunicationPage/src/index.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPage.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-16: mount the channel-specific composer for email compose via the `&lt;SendEmailPage />` wrapper; layout stays keyed on `sprk_communicationtype`, not "email" string.</constraint>
+    <constraint source="project">Retain the standard OOB `sprk_communication` form as a hidden/admin fallback — do NOT delete it (reversibility, design decision 2026-06-05).</constraint>
+    <constraint source="project">URL contract per reference §7.3/§7.5 exactly: `mode` (compose|view|reply|forward|draft), `id`, pre-fill params, `associatedTo`.</constraint>
+    <constraint source="ADR-012">Consume `&lt;EmailComposer />`/`&lt;SendEmailPage />` from `@spaarke/ui-components`; do NOT fork or reimplement.</constraint>
+    <constraint source="ADR-028">Inject `authenticatedFetch` + `bffBaseUrl` (host only, no `/api`) into the wrapper per props; no direct `@spaarke/auth` import inside shared-lib components.</constraint>
+    <constraint source="ADR-026">Standalone Code Page hosted via Form Component Control; single self-contained HTML artifact.</constraint>
+    <constraint source="ADR-021">Fluent v9 page-mount visual variant per reference §5.10 (first-class entity-form look).</constraint>
+    <constraint source="project">Build with `npm run build:prod`; `npm install --legacy-peer-deps --no-audit --no-fund`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="SendEmailPage wrapper usage" location="reference §5.1.1 / §7.6">
+        `&lt;SendEmailPage mode={modeFromUrl} communicationId={id} authenticatedFetch={...} bffBaseUrl={cfg.bffBaseUrl} associations={fromUrl} onSent={openForm} onClose={close} />`.
+      </pattern>
+      <pattern name="Form Component Control swap + fallback" location="reference §7.4 (Surface 2)">
+        Register the Code Page as the FCC-hosted main form; keep the standard form as a hidden admin fallback for reversibility.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 020's `&lt;EmailComposer />` engine + `SendEmailPage.tsx` wrapper to confirm the exact prop contract (`mode`, `communicationId`, `authenticatedFetch`, `bffBaseUrl`, `associations`, `onSent`, `onClose`).</step>
+    <step order="2">Read reference §5.4 (props), §5.10 (page-mount visual variant), §7.5 (mode→action table), §7.6 (bootstrap render).</step>
+    <step order="3">In `CommunicationPage/src/index.tsx`, replace task 040's interactive-email seam with `&lt;SendEmailPage />`, wiring `mode` + `communicationId` + pre-fill + `associatedTo`→`associations` from the parsed URL, `authenticatedFetch` + `bffBaseUrl` from the bootstrap, `onSent`→`Xrm.Navigation.openForm`, `onClose`→close.</step>
+    <step order="4">Confirm all five modes resolve: compose (blank), view (read record), reply (`Re:` + prefill to/inReplyTo), forward (`Fwd:`), draft (editable draft). The non-email `sprk_communicationtype` branches remain read-only (task 040) — do NOT mount the composer for them.</step>
+    <step order="5">Author the Form Component Control registration: create/point a `sprk_communication` main form to a Form Component Control hosting the Code Page web resource; keep the existing standard form as a hidden/admin fallback (do NOT delete). Document the exact form GUIDs / names touched in task notes for reversibility.</step>
+    <step order="6">Run `npm run build:prod` — confirm single self-contained artifact; fix any bundling regression.</step>
+    <step order="7">Manual dev smoke (documented, not deployed here — deploy is task 043): confirm the wrapper renders for each mode against seeded records; note any gaps for 043 UI tests.</step>
+    <step order="9.5">FULL-rigor quality gates: invoke `code-review` on the diff; invoke `adr-check` against `spec.md` (ADR-026/028/012/021). Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 041 ✅; confirm 043 unblocked (needs 040+041+042). Update `current-task.md` (record the FCC form GUIDs + fallback-retention decision; advance to next task).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect SendEmailPage wrapper + reference §5/§7</tool>
+    <tool name="edit">Mount composer into the Code Page email branch</tool>
+    <tool name="bash">npm build:prod</tool>
+    <tool name="code-review">FULL-rigor gate</tool>
+    <tool name="adr-check">FULL-rigor gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/CommunicationPage/src/index.tsx (UPDATED — mounts `&lt;SendEmailPage />` in the email branch)</output>
+    <output type="config">Dataverse Form Component Control registration for `sprk_communication` (standard form retained as admin fallback)</output>
+    <output type="docs">Task notes recording touched form GUIDs/names + fallback-retention for reversibility</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Code Page email branch mounts `&lt;SendEmailPage />` from `@spaarke/ui-components` (grep confirms no forked composer).</criterion>
+    <criterion testable="true">All five modes (compose/view/reply/forward/draft) resolve from the URL `mode` param and render the correct composer state.</criterion>
+    <criterion testable="true">`associatedTo` URL param maps to `associations` passed to the wrapper.</criterion>
+    <criterion testable="true">Non-email `sprk_communicationtype` values do NOT mount the composer (remain read-only from task 040).</criterion>
+    <criterion testable="true">A Form Component Control hosting the Code Page is registered as the default `sprk_communication` form.</criterion>
+    <criterion testable="true">The standard OOB form still exists (hidden/admin) — verifiable in the solution; not deleted.</criterion>
+    <criterion testable="true">`npm run build:prod` produces a single self-contained artifact.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Deploy + UI tests are task 043. This task lands the wiring + FCC registration; smoke observations feed 043's `&lt;ui-tests&gt;`.
+
+    Reversibility is a hard requirement — the standard form is the escape hatch if the FCC swap misbehaves. Record the exact form identifiers so 043/rollback can flip back without guesswork.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 REQUIRED. Build with `npm run build:prod`. Consume the composer from the shared lib; never fork.
+    </protocol>
+  </execution>
+</task>

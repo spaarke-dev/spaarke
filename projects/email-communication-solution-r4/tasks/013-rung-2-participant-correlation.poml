@@ -1,0 +1,145 @@
+<task id="013" project="email-communication-solution-r4">
+  <metadata>
+    <title>Rung 2 — participant correlation (from/to → matter contacts, teams, counsel; `sprk_organization` by sender domain)</title>
+    <phase>Wave 1 — Server: enrichment + deterministic engine</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>015, 030</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements deterministic participant-correlation rung in the live engine; extends `QueryContactByEmailAsync` to membership + org resolution; must write the correct `sprk_organization` target (not `account`) per DEC-3/FR-04; respects ADR-024 / ADR-045 + bff-extensions governance.</rigor-reason>
+    <parallel-group>W1-rungs</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-10</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Implement Rung 2 — participant correlation — as an `IAssociationRung` over the `NormalizedMessage` envelope. Correlate the message participants (`from`, `to[]`, `cc[]`) to Spaarke records:
+    • sender/recipient email → matter contacts, project team members, and counsel;
+    • sender EMAIL DOMAIN → `sprk_organization` (NOT `account`, NOT OOB `organization` — DEC-3/FR-04).
+
+    Extend the existing `QueryContactByEmailAsync` to also resolve membership (matter-contact / project-team / counsel roles) and organization-by-domain. Rung 2 is medium-confidence deterministic: emit `RungMatch` results in the 0.60–0.85 confidence band, with per-match provenance citing which participant + which membership/domain rule matched. Runs for inbound AND outbound (direction symmetry).
+
+    Do NOT implement the confidence→status ladder (task 015) — emit `RungMatch` with confidence + provenance; task 015 maps to status. The org target MUST be `sprk_organization` — verify no path writes `account`.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer, Association Engine rung author. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/` and the Dataverse contact/organization/membership model. Fluent in ADR-024 (regarding family), the engine/rung contract from task 011, ADR-045, and `.claude/constraints/bff-extensions.md`.
+  </role>
+
+  <goal>
+    Rung 2 correlates participants (from/to/cc) to matter contacts, project teams, counsel, and `sprk_organization` (by sender domain), extending `QueryContactByEmailAsync` to membership + org resolution. Matches land in the 0.60–0.85 confidence band with provenance, symmetric across directions. The org association target is `sprk_organization` on every path — no path writes `account`. Build clean; per-rung + symmetry tests pass; publish-size + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      Task 011 delivered the engine + `IAssociationRung`/`RungMatch`. Task 013 owns rung 2 (participant correlation), a deterministic medium-confidence signal: who is on the message tells us which matter/project/org it relates to. `QueryContactByEmailAsync` currently resolves a contact from an email; R4 extends it to also surface that contact's memberships (matter contact, project team, counsel) and to resolve the sender's organization by email domain.
+
+      Critical correctness fix (DEC-3 / FR-04, W0 task 004): the org association target is `sprk_organization`, not the OOB `account` the current sender-domain match writes, and not OOB `organization`. W0 task 004 wires `sprk_organization` into the catalog/priority; rung 2 MUST resolve to it via `sprk_regardingorganization`.
+
+      Confidence band 0.60–0.85 places rung-2 matches in the `Suggested` tier under task 015's ladder (below the ≥0.85 auto-file threshold) unless combined with a higher rung — task 015 owns that arithmetic.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/IAssociationRung.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/NormalizedMessage.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+      <file>projects/email-communication-solution-r4/notes/011-resolver-behavior-contract.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-10: rung 2 participant correlation (from/to → matter contacts, project teams, counsel, and `sprk_organization` by sender domain); per-match provenance; direction symmetry.</constraint>
+    <constraint source="project">Extend `QueryContactByEmailAsync` to membership + org-by-domain resolution (do not fork it).</constraint>
+    <constraint source="project">Confidence band 0.60–0.85 for rung-2 matches.</constraint>
+    <constraint source="DEC-3">Org association target MUST be `sprk_organization` (via `sprk_regardingorganization`); NO path may write `account` or OOB `organization` for org association (FR-04).</constraint>
+    <constraint source="ADR-024">Write typed regarding lookups + denormalized fields; extend the catalog/map/priority only — no new regarding mechanism.</constraint>
+    <constraint source="project">Do NOT implement the confidence→status ladder (task 015). Emit `RungMatch` with confidence + provenance only.</constraint>
+    <constraint source="project">Preserve engine contract + task-011 characterization baseline (no regression).</constraint>
+    <constraint source="ADR-045">Rung model codified in ADR-045; confirm alignment.</constraint>
+    <constraint source="project">Register the rung via `CommunicationModule` (ADR-010), unconditional (ADR-032). bff-extensions Placement Justification in the PR; publish-size delta (baseline ~49.63 MB incl. PDBs); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/data-model/sprk_communication.md</file>
+      <file>docs/architecture/email-processing-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Contact-by-email + membership resolution" location="src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs">
+        Extend `QueryContactByEmailAsync` to return memberships (matter-contact/project-team/counsel) and org-by-domain rather than a bare contact.
+      </pattern>
+      <pattern name="Org target = sprk_organization" location="projects/email-communication-solution-r4/spec.md">
+        FR-04/DEC-3: sender-domain org match writes `sprk_regardingorganization` → `sprk_organization`; never `account`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the task-011 engine contract + `IAssociationRung`/`RungMatch`; read the current `QueryContactByEmailAsync` to see the existing contact-resolution path.</step>
+    <step order="2">Read the W0 task-004 catalog/priority extension confirming `sprk_organization` (+ `sprk_event`) targets are wired; confirm `sprk_regardingorganization` is the correct field.</step>
+    <step order="3">Read `.claude/constraints/bff-extensions.md` §F + ADR-024 before writing rung output.</step>
+    <step order="4">Extend `QueryContactByEmailAsync` (or add a focused query alongside it) to resolve, for a participant email: (a) matched contact(s), (b) memberships — matter contact, project team member, counsel; and add org-by-domain resolution mapping sender domain → `sprk_organization`.</step>
+    <step order="5">Implement `ParticipantCorrelationRung` (rung 2): iterate `from`/`to[]`/`cc[]`; for each, run the extended query; emit `RungMatch` results (matter/project/counsel-contact/organization targets) in the 0.60–0.85 band with provenance citing participant + membership/domain rule. Ensure org matches target `sprk_organization` via `sprk_regardingorganization`.</step>
+    <step order="6">Register the rung in `CommunicationModule` after rungs 0/1, before rung 3.</step>
+    <step order="7">Write per-rung unit tests + direction-symmetry tests + an explicit test asserting the org match writes `sprk_regardingorganization`→`sprk_organization` and NEVER `account`. Coordinate suite scope with task 017.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm task-011 characterization tests still pass.</step>
+    <step order="8.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/r4-013-publish/`; report compressed size + delta vs ~49.63 MB baseline. Expected ≈ 0.</step>
+    <step order="8.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff; `adr-check` against `spec.md` (focus FR-10 rung 2 + FR-04 org target + ADR-024). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; 012/014 are parallel siblings — confirm no overlapping engine-file edits).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (013 ✅) + `current-task.md`; record decisions (membership query shape, domain-match rules, org-target verification).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect engine contract, contact query, catalog/priority</tool>
+    <tool name="edit">Extend contact query; implement rung 2; DI registration</tool>
+    <tool name="bash">Build, per-rung + symmetry tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ParticipantCorrelationRung.cs (NEW — rung 2)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs (UPDATED — `QueryContactByEmailAsync` extended to membership + org-by-domain)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — rung registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (rung 2 unit + symmetry + org-target-is-sprk_organization tests)</output>
+    <output type="docs">PR description with bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Rung 2 correlates `from`/`to`/`cc` participants to matter contacts, project team members, and counsel, emitting `RungMatch` with provenance citing the participant + membership rule.</criterion>
+    <criterion testable="true">Sender email domain resolves to `sprk_organization` via `sprk_regardingorganization`; a test asserts NO path writes `account` for org association (FR-04/DEC-3).</criterion>
+    <criterion testable="true">`QueryContactByEmailAsync` is extended (not forked) to resolve membership + org-by-domain.</criterion>
+    <criterion testable="true">Rung-2 matches land in the 0.60–0.85 confidence band.</criterion>
+    <criterion testable="true">Rung runs symmetrically for inbound and outbound (direction-symmetry tests pass).</criterion>
+    <criterion testable="true">Rung registered in `CommunicationModule` after rungs 0/1, before rung 3; task-011 characterization tests still pass.</criterion>
+    <criterion testable="true">No confidence→status mapping here (task 015); `RungMatch` only.</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta ≈ 0; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel sibling of 012 (rungs 0/1) and 014 (rung 3). Keep the rung in its own `Engine/Rungs/*` file; the only shared file touched is `IncomingAssociationResolver.cs` (`QueryContactByEmailAsync`) + `CommunicationModule.cs` — coordinate edits with siblings via `/conflict-check`.
+
+    The `sprk_organization`-not-`account` correction is a named correctness goal (DEC-3/FR-04); the dedicated assertion test is the guard against regressing the current buggy `account` write.
+
+    Task 015 consumes these `RungMatch` results; conflicting high-confidence rung-2 org vs rung-1 matter matches feed the `Ambiguous` status logic in 015.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED. Per CLAUDE.md §10: publish-size delta + CVE + bff-extensions Placement Justification in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

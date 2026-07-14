@@ -1,0 +1,107 @@
+<task id="082" project="email-communication-solution-r4">
+  <metadata>
+    <title>Update `EMAIL-TRIAGE-MODULE-DESIGN.md` per DEC-10 (fix stale refs; point at R4 substrate; sequence after R4)</title>
+    <phase>Wave 8 — Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>011, 015, 051, 052, 053, 054, 080</dependencies>
+    <blocks></blocks>
+    <tags>docs</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Updates the downstream Triage-module design doc to reference only live R4 components and re-sequence after R4. No code/ADR. STANDARD rigor — Step 9.5 skipped, source-of-truth rule binding. Uses the `docs-architecture` skill.</rigor-reason>
+    <parallel-group>W8</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Updates only `EMAIL-TRIAGE-MODULE-DESIGN.md` — disjoint from tasks 080/081. Per-file parallel. Depends on the R4 substrate (engine 011/015, Responsive Intelligence 051–054) and the new arch doc (080) existing.</parallel-reason>
+    <fr-refs>FR-27</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Update `EMAIL-TRIAGE-MODULE-DESIGN.md` per DEC-10 so the downstream Email Triage Workbench design references only live components and is correctly sequenced relative to R4:
+
+    1. **Fix stale component references (§3.5)** — replace references to retired/renamed components (OOB-`email`, fragmented client-send, `EmailAssociationService`, and any pre-R4 names) with the live R4 equivalents.
+
+    2. **Point the classification ladder + disposition model at R4's substrate** — the Triage module's classification/disposition should consume R4's Association Engine (deterministic + semantic + JPS AI rungs) and the Responsive Intelligence substrate (OutputRouter record/notification legs, EventRules, DeliverComposite), NOT a parallel classifier. Reference the new `communication-intelligence-architecture.md` (task 080).
+
+    3. **Sequence Triage AFTER R4** — make explicit that the full Email Triage Workbench (queue UI, bulk disposition, SLA, Daily Briefing tile, MCP exposure) is downstream of R4 and builds on R4's substrate + seams; R4 ships only the minimum review surface, not the Workbench (per spec Out-of-Scope + DEC-10).
+
+    The doc must reference only live components after this update.
+  </prompt>
+
+  <role>
+    Spaarke architecture writer familiar with the Email Triage Workbench design and the R4 Communication Intelligence substrate. Uses the `docs-architecture` skill and the code-wins source-of-truth rule.
+  </role>
+
+  <goal>
+    `EMAIL-TRIAGE-MODULE-DESIGN.md` references only live R4 components (no retired names), points its classification ladder + disposition model at R4's Association Engine + Responsive Intelligence substrate (via the task-080 doc), and explicitly sequences the Triage Workbench after R4.
+  </goal>
+
+  <context>
+    <background>
+      The Triage Workbench is a downstream product (DEC-10) that consumes R4's substrate. Its design doc predates R4 and references components R4 retired/renamed, and it implies a parallel classifier. This update reconciles it so future Triage work builds on R4 rather than duplicating it. R4 ships only the minimum review surface (Code Page + add-in pane), not the Workbench.
+    </background>
+    <relevant-files>
+      <file>docs/**/EMAIL-TRIAGE-MODULE-DESIGN.md (locate exact path via glob)</file>
+      <file>docs/architecture/communication-intelligence-architecture.md (canonical R4 substrate — task 080)</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-27 / DEC-10">Update the Triage module doc: fix stale §3.5 refs, point classification ladder + disposition at R4's Association Engine + Responsive Intelligence, sequence Triage after R4; reference only live components.</constraint>
+    <constraint source="spec Out-of-Scope">The full Triage Workbench (queue UI, bulk disposition, SLA, Daily Briefing tile, MCP) is out of R4 scope — the doc must frame it as downstream.</constraint>
+    <constraint source="root §2 source-of-truth">Every referenced component must be live in the R4 codebase — verify before referencing.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>docs/triage-module</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/communication-intelligence-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Locate + load">Glob for `EMAIL-TRIAGE-MODULE-DESIGN.md`; read it in full + the task-080 canonical doc + spec DEC-10.</step>
+    <step order="2" name="Audit stale refs">Enumerate every component reference in the doc (esp. §3.5); classify each as live / retired / renamed against the R4 codebase.</step>
+    <step order="3" name="Fix §3.5 refs">Replace retired/renamed references with live R4 equivalents.</step>
+    <step order="4" name="Repoint ladder/disposition">Point the classification ladder + disposition model at R4's Association Engine + Responsive Intelligence; reference the task-080 doc.</step>
+    <step order="5" name="Sequence after R4">Add explicit sequencing: Triage Workbench is downstream of R4; R4 ships the minimum review surface only.</step>
+    <step order="6" name="Self-check">Verify no retired component remains referenced; confirm every referenced component is live.</step>
+    <step order="7" name="Update tracking">Mark task 082 ✅ in `tasks/TASK-INDEX.md`.</step>
+    <step order="8" name="Reset state">Update `current-task.md`: status → completed; advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="glob">Locate the Triage module doc</tool>
+    <tool name="read">Inspect the doc + R4 substrate doc</tool>
+    <tool name="grep">Audit component references against the codebase</tool>
+    <tool name="docs-architecture">Apply the doc update</tool>
+    <tool name="edit">Fix refs; repoint; sequence</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">EMAIL-TRIAGE-MODULE-DESIGN.md (UPDATED — live refs; R4 substrate; sequenced after R4)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">§3.5 (and elsewhere) references only live R4 components — no retired/renamed names remain (grep-verified against the codebase).</criterion>
+    <criterion testable="true">The classification ladder + disposition model point at R4's Association Engine + Responsive Intelligence and reference the task-080 doc.</criterion>
+    <criterion testable="true">The doc explicitly sequences the Triage Workbench after R4 and frames the full Workbench as downstream/out-of-R4-scope.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    STANDARD rigor — source-of-truth rule binding. DEC-10 scopes the Workbench out of R4; this doc keeps the downstream design honest about what R4 actually ships.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load `&lt;knowledge&gt;&lt;files&gt;`. Apply STANDARD rigor — Step 9.5 SKIPPED. Verify every referenced component is live before writing.
+    </protocol>
+  </execution>
+</task>

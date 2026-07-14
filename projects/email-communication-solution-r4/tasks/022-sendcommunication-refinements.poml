@@ -1,0 +1,134 @@
+<task id="022" project="email-communication-solution-r4">
+  <metadata>
+    <title>`sendCommunication()` refinements — `SendCommunicationError` + canonical `attachmentDriveItemIds`</title>
+    <phase>Wave 2 — Client: composer engine + wrappers</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>060</blocks>
+    <tags>frontend, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies the single typed client gateway (`communicationApi.ts`) that every send-email path depends on; introduces a new exported error class (uniform error contract replacing 3 divergent shapes) + canonical attachment field; ProblemDetails parsing per ADR-019; the changed file is a contract for the entire send-side surface. FULL.</rigor-reason>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Client-only TypeScript in `communicationApi.ts`; disjoint from the W1/W3 server track. Additive to a file the engine (020) imports — sequence it before or alongside 020's `send()` wiring. No cross-track shared files.</parallel-reason>
+    <fr-refs>FR-13</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Refine `src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts` to land the client half of the FR-06 DTO rename + the uniform error contract (FR-13):
+    (a) Add `attachmentDriveItemIds?: string[]` as the canonical attachment field on the request type — TSDoc: "Microsoft Graph `driveItem` IDs (NOT `sprk_document` GUIDs). Canonical per ADR-045."
+    (b) Mark `attachmentDocumentIds?: string[]` `@deprecated Use attachmentDriveItemIds. Removed in a future release.` — fires a `console.warn` ONCE per session (module-level flag, not per call) when populated.
+    (c) Add exported class `SendCommunicationError extends Error` with readonly `status`, `code`, `detail`, `correlationId`, parsed from the BFF's ProblemDetails (ADR-019) response — with a static `async fromResponse(response): Promise&lt;SendCommunicationError&gt;` that parses `{ type, title, status, detail, instance|traceId, correlationId? }` and falls back to a minimal error (status only) on non-JSON.
+    (d) `sendCommunication()` MUST throw `SendCommunicationError` on any non-2xx response (replaces the current thrown `Error`).
+    (e) Update docstrings on the request type + `sendCommunication()` to call out driveItem semantics, the throw of `SendCommunicationError`, and the deprecation.
+
+    Empirical Finding #2 (R4 CLAUDE.md): the file HAS `sendCommunication()` but is MISSING both `SendCommunicationError` and `attachmentDriveItemIds`. This is ADDITIVE — no breaking change to existing callers. Callers may still populate BOTH `attachmentDriveItemIds` and `attachmentDocumentIds`; do NOT drop/rename either client-side — the BFF mapping (task 006) resolves precedence server-side (canonical wins, alias logs a deprecation warning).
+  </prompt>
+
+  <role>
+    Spaarke shared-library engineer, authoritative on the `@spaarke/ui-components` `services/` layer and the auth-decoupling boundary (injected `authenticatedFetch`, no `@spaarke/auth` import). Familiar with ADR-019 ProblemDetails and ADR-028.
+  </role>
+
+  <goal>
+    `communicationApi.ts` exports `SendCommunicationError` (`status`/`code`/`detail`/`correlationId`) and accepts both `attachmentDriveItemIds` (canonical) + `attachmentDocumentIds` (deprecated, one-shot warn). `sendCommunication()` throws `SendCommunicationError` on non-2xx. Existing callers compile + send unchanged. No `@spaarke/auth` import. `npm run build:prod` + `npm run lint` clean; downstream-caller audit records no broken contract.
+  </goal>
+
+  <context>
+    <background>
+      `communicationApi.ts` is the single typed gateway between every Spaarke client surface and BFF `POST /api/communications/send`. FR-13's "one typed error path" hinges here: `SendCommunicationError` replaces the 3 inconsistent patterns (throw `Error` / return `{success, warning}` / push to `warnings[]`) the assessment found. The engine (task 020) imports `SendCommunicationError` and calls `sendCommunication()` from its `send()` handle.
+
+      BFF side (task 006, W0): `SendCommunicationRequest` gains `AttachmentDriveItemIds` (canonical) + `[Obsolete]` alias `AttachmentDocumentIds`; server normalizes both (canonical wins, alias logs a warning). This client task is the symmetric half. The `attachmentDriveItemIds` values come from `wizardContext.uploadedFiles[].driveItemId`; `DocumentEmailWizard.tsx:494`'s bug (shipping `sprk_document` GUIDs into the deprecated field) is fixed in W6 task 060.
+
+      Auth boundary (ADR-028): shared-lib code MUST NOT import `@spaarke/auth`. `authenticatedFetch` is a parameter. Preserve this.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (UPDATE)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/__tests__/ (unit tests land in task 023)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-13 is binding: `SendCommunicationError` + canonical `attachmentDriveItemIds`.</constraint>
+    <constraint source="project">Additive / non-breaking — existing callers using `attachmentDocumentIds` continue to send successfully; both fields may be sent (BFF task 006 resolves precedence).</constraint>
+    <constraint source="ADR-019">Parse ProblemDetails `{ type, title, status, detail, instance|traceId, correlationId? }`; fall back to a minimal error on non-JSON.</constraint>
+    <constraint source="ADR-028">`@spaarke/auth` MUST NOT be imported; `authenticatedFetch` injected via parameter (existing pattern).</constraint>
+    <constraint source="project">Deprecation warning fires ONCE per session (module-level flag), not per call.</constraint>
+    <constraint source="project">TSDoc explicitly states "Microsoft Graph `driveItem` IDs (NOT `sprk_document` GUIDs)."</constraint>
+    <constraint source="ADR-045">Aligns with the R4 Communication ADR canonical send pattern (authored in task 005).</constraint>
+    <constraint source="project">Client-only — no BFF publish-size / CVE obligation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md (§6 sendCommunication detail)</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+    </files>
+    <patterns>
+      <pattern name="Auth decoupling (injected fetch)" location="src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts">
+        `authenticatedFetch` is a function parameter; the file does not import `@spaarke/auth`. Preserve this.
+      </pattern>
+      <pattern name="ProblemDetails parsing" location=".claude/adr/ADR-019-problemdetails-error-responses.md">
+        try/catch around `await response.json()`; minimal fallback on non-JSON.
+      </pattern>
+      <pattern name="One-shot deprecation warning" location="projects/email-communication-solution-r4/reference/r3-send-side-design.md">
+        §6 — module-level `let _deprecationWarned = false;`; first use warns + flips; later uses skip.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `communicationApi.ts` end-to-end. Identify the request type, `sendCommunication()` shape, and current non-2xx handling (per empirical finding, a thrown `Error` — confirm). Read `reference/r3-send-side-design.md` §6 for the target shapes.</step>
+    <step order="2">Author `SendCommunicationError extends Error` in the same file: readonly `status`, `code?`, `detail?`, `correlationId?`; `name = 'SendCommunicationError'`; static `async fromResponse(response): Promise&lt;SendCommunicationError&gt;` (ProblemDetails parse + fallback).</step>
+    <step order="3">Add `attachmentDriveItemIds?: string[]` to the request type with driveItem-semantics TSDoc. Mark `attachmentDocumentIds?: string[]` `@deprecated`.</step>
+    <step order="4">Add module-level `let _deprecationWarned = false;`. In `sendCommunication()` after destructure: if `attachmentDocumentIds !== undefined &amp;&amp; !_deprecationWarned` → `console.warn('[Spaarke] attachmentDocumentIds is deprecated. Use attachmentDriveItemIds (ADR-045).')` + set flag.</step>
+    <step order="5">In `sendCommunication()`: after `authenticatedFetch(...)`, if `!response.ok` → `throw await SendCommunicationError.fromResponse(response);`. Confirm both fields flow through to the request body when populated (no client-side drop/rename).</step>
+    <step order="6">Update docstrings on the request type + `sendCommunication()` (driveItem semantics, error throw, deprecation).</step>
+    <step order="7">Run `npm run build:prod` + `npm run lint` in `@spaarke/ui-components` — clean.</step>
+    <step order="8">Downstream-caller audit: `Grep` for `sendCommunication` / `communicationApi` in `src/`. Skim each call site to confirm (a) no caller depends on a specific error MESSAGE string (message is informative, not contractual), (b) `instanceof Error` checks still pass (subclass), (c) no caller breaks from the additive field. Record findings in task notes.</step>
+    <step order="9.5">FULL-rigor quality gates: invoke `code-review` on the diff; invoke `adr-check` against ADR-019, ADR-028, ADR-045 + `spec.md`. Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 022 ✅; confirm 060 dependency satisfied.</step>
+    <step order="11">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending W2 task.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">communicationApi.ts + reference §6 + downstream callers</tool>
+    <tool name="edit">canonical field + deprecation + error class + throw</tool>
+    <tool name="grep">downstream-caller compatibility audit</tool>
+    <tool name="bash">npm run build:prod + npm run lint</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (UPDATED)</output>
+    <output type="docs">Task notes — downstream-caller audit results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SendCommunicationError` exported with `status`, `code`, `detail`, `correlationId`.</criterion>
+    <criterion testable="true">`SendCommunicationError.fromResponse(response)` parses ProblemDetails and returns a populated instance (fallback on non-JSON).</criterion>
+    <criterion testable="true">Request type has `attachmentDriveItemIds?: string[]` with driveItem-semantics TSDoc.</criterion>
+    <criterion testable="true">Request type still has `attachmentDocumentIds?: string[]` marked `@deprecated`; deprecation warn fires exactly once per session.</criterion>
+    <criterion testable="true">`sendCommunication()` throws `SendCommunicationError` on non-2xx.</criterion>
+    <criterion testable="true">`@spaarke/auth` is NOT imported in this file (NFR-03 / ADR-028).</criterion>
+    <criterion testable="true">`npm run build:prod` + `npm run lint` clean; downstream-caller audit confirms no broken contract.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Unit tests for `SendCommunicationError` parsing + one-shot deprecation warn land in task 023 (this task implements; 023 verifies). The `code` field maps to ProblemDetails extensions (e.g. `ATTACHMENT_TOO_LARGE`); leave nullable if the BFF does not always populate it. Engine (task 020) imports `SendCommunicationError` from here — do not define it twice.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 (code-review + adr-check) MANDATORY. The downstream-caller audit (step 8) is REQUIRED — this file is a contract for the entire send-side. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,136 @@
+<task id="075" project="email-communication-solution-r4">
+  <metadata>
+    <title>Index-config hardening — tokenize `AiSearch` index names + `AllowedIndexes`; consolidate read/write split-brain via `SearchIndexNameResolver`</title>
+    <phase>Wave 7 — Microsoft hardening + auth + index</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies></dependencies>
+    <blocks></blocks>
+    <tags>bff-api, config</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tokenizes deploy-config index names and consolidates a read/write split-brain (`AiSearch:KnowledgeIndexName` reads vs `Analysis:SharedIndexName` writes — FAILURE-MODES G-9) that routes all communication indexing through `SearchIndexNameResolver`. Config + service-routing change with cross-environment + data-correctness impact; `bff-api` + `config` tags trigger FULL rigor; BFF §10 governance applies.</rigor-reason>
+    <parallel-group>W7</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `appsettings.template.json` (AiSearch section) + `SearchIndexNameResolver` + indexing call sites — disjoint from other W7 tasks. Runs anytime after W0.</parallel-reason>
+    <fr-refs>FR-26</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Harden the AI Search index configuration:
+
+    1. **Tokenize** the `AiSearch` index names and the 8-entry `AllowedIndexes` list in `appsettings.template.json` (~lines 234–248) using the mirror `#{...}#` token convention, so deploy packages carry NO hardcoded index names (they resolve per-environment at deploy time).
+
+    2. **Consolidate the read/write split-brain** (FAILURE-MODES G-9): reads currently use `AiSearch:KnowledgeIndexName` while writes use `Analysis:SharedIndexName`, so read and write can silently target different indexes. Consolidate to a single read/write setting; deprecate/alias the redundant one.
+
+    3. **Route all communication indexing through `SearchIndexNameResolver`** — every communication index read/write goes through the resolver rather than reading a config key directly, so name resolution is centralized and consistent.
+
+    After this, deploy packages have no hardcoded index names, there is a single source of truth for the communication index name, and all indexing paths call the resolver.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer authoritative on `AiSearch`/`Analysis` configuration, `SearchIndexNameResolver`, the RAG/indexing call sites, and the `#{...}#` deploy-tokenization convention. Familiar with FAILURE-MODES G-9 and BFF §10 governance.
+  </role>
+
+  <goal>
+    `appsettings.template.json` AiSearch index names + `AllowedIndexes` are `#{...}#`-tokenized (no hardcoded names in deploy packages). The `KnowledgeIndexName`/`SharedIndexName` read/write split is consolidated to one setting. All communication indexing routes through `SearchIndexNameResolver`. Build + tests green; publish-size + CVE reported; placement justification stated.
+  </goal>
+
+  <context>
+    <background>
+      Deploy packages currently ship hardcoded index names, and a read/write split-brain (G-9) means a misconfiguration can silently index to one place and search another. `SearchIndexNameResolver` exists as the intended central resolver; this task makes it the single path and tokenizes the config so environments are parameterized.
+    </background>
+    <relevant-files>
+      <file>appsettings.template.json (AiSearch section ~234–248: index names + `AllowedIndexes`)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SearchIndexNameResolver.cs (central resolver — route all indexing through it)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ (indexing read/write call sites; `KnowledgeIndexName` reads / `SharedIndexName` writes)</file>
+      <file>.claude/FAILURE-MODES.md (G-9 split-brain)</file>
+      <file>.claude/constraints/bff-extensions.md (governance)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-26">Tokenize `AiSearch` index names + `AllowedIndexes` (`#{...}#`); consolidate the `KnowledgeIndexName`(reads)/`SharedIndexName`(writes) split-brain; route all communication indexing through `SearchIndexNameResolver`. Deploy packages carry no hardcoded index names; single read/write setting.</constraint>
+    <constraint source="FAILURE-MODES G-9">Read and write MUST resolve to the same index — eliminate the split-brain.</constraint>
+    <constraint source="project (§9 security)">Tokenized values resolve at deploy time; no secrets or environment-specific literals committed.</constraint>
+    <constraint source="project (§11)">Do NOT introduce a new resolver — extend/route through the existing `SearchIndexNameResolver`.</constraint>
+    <constraint source="NFR-08">Add/update tests proving read and write resolve to the same index and the resolver is the single path.</constraint>
+    <constraint source="project (§10)">Load `.claude/constraints/bff-extensions.md`; state Placement Justification; run `/conflict-check` before PR; report publish-size (baseline ~49.63 MB, ceiling 60 MB) + CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/aisearch-config</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Deploy tokenization" location="appsettings.template.json">
+        Mirror `#{TokenName}#` placeholders resolved per-environment at deploy time; no literals in the template's shipped values.
+      </pattern>
+      <pattern name="Central index-name resolution" location="src/server/api/Sprk.Bff.Api/Services/Ai/SearchIndexNameResolver.cs">
+        Single resolver for read + write index names; all indexing call sites route through it.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Context check">Check context usage; handoff + stop if &gt; 70%.</step>
+    <step order="2" name="Load knowledge">Read spec FR-26, FAILURE-MODES G-9, bff-extensions + azure-deployment constraints, and `SearchIndexNameResolver`.</step>
+    <step order="3" name="Conflict check">Run `/conflict-check` for `Services/Ai/**` + `appsettings.template.json` before editing (Services/Ai is a hot path — coordinate).</step>
+    <step order="4" name="Inventory">Enumerate the AiSearch index names + `AllowedIndexes` (8 entries) in the template (~234–248) and every read/write call site using `KnowledgeIndexName` / `SharedIndexName`.</step>
+    <step order="5" name="Tokenize">Replace hardcoded index names + `AllowedIndexes` entries with `#{...}#` tokens; confirm the deploy pipeline supplies matching token values.</step>
+    <step order="6" name="Consolidate split-brain">Collapse `KnowledgeIndexName`(reads)/`SharedIndexName`(writes) to a single setting; deprecate/alias the redundant key with a migration note.</step>
+    <step order="7" name="Route through resolver">Update all communication indexing call sites to obtain the index name from `SearchIndexNameResolver`; remove direct config-key reads.</step>
+    <step order="8" name="Tests">Add tests: read + write resolve to the SAME index; resolver is the single path; template has no hardcoded names.</step>
+    <step order="9" name="Build + test">`dotnet build` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Search` (or Ai). Fix failures.</step>
+    <step order="9.4" name="Publish-size + CVE">`dotnet publish -c Release ... -o deploy/api-publish/`; report absolute + delta vs ~49.63 MB (ceiling 60 MB). `dotnet list package --vulnerable --include-transitive`; no new HIGH CVE.</step>
+    <step order="9.5" name="FULL quality gates">Invoke `code-review`; invoke `adr-check` against spec.md. Address Critical findings.</step>
+    <step order="10" name="Update tracking">Mark task 075 ✅ in `tasks/TASK-INDEX.md`. PR carries Placement Justification + publish-size delta + CVE + template diff.</step>
+    <step order="11" name="Reset state">Update `current-task.md`: status → completed; advance; record decisions.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect template + resolver + call sites</tool>
+    <tool name="grep">Enumerate `KnowledgeIndexName`/`SharedIndexName` reads/writes + hardcoded names</tool>
+    <tool name="edit">Tokenize; consolidate; route through resolver</tool>
+    <tool name="bash">Build, test, publish-size, CVE scan</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Services/Ai)</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">appsettings.template.json (UPDATED — `#{...}#`-tokenized AiSearch names + `AllowedIndexes`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (indexing call sites route through `SearchIndexNameResolver`; single read/write setting)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (read/write same-index + resolver-single-path tests)</output>
+    <output type="docs">PR description with Placement Justification + publish-size delta + CVE + template diff</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`appsettings.template.json` AiSearch index names + all 8 `AllowedIndexes` entries are `#{...}#`-tokenized; no hardcoded index name remains in shipped template values.</criterion>
+    <criterion testable="true">The `KnowledgeIndexName`/`SharedIndexName` split is consolidated to one read/write setting (G-9 closed); a test proves read and write resolve to the same index.</criterion>
+    <criterion testable="true">All communication indexing routes through `SearchIndexNameResolver`; no direct config-key index reads remain.</criterion>
+    <criterion testable="true">`dotnet build` + `dotnet test` green; publish-size delta + CVE reported; ceiling ≤60 MB respected.</criterion>
+    <criterion testable="true">`adr-check` returns no violations.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    FAILURE-MODES G-9 is the concrete failure this closes. Services/Ai is a hot path owned by `spaarke-ai-architecture-redesign-r2` — run `/conflict-check` and coordinate before editing shared resolver/config surfaces.
+
+    BFF-touching: full §10 obligations apply.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 REQUIRED. Per root §10: bff-extensions checklist + Placement Justification + `/conflict-check` + publish-size + CVE all required in the PR.
+    </protocol>
+  </execution>
+</task>

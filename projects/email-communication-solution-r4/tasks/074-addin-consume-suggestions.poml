@@ -1,0 +1,126 @@
+<task id="074" project="email-communication-solution-r4">
+  <metadata>
+    <title>Outlook add-in save pane consumes Association Engine suggestions (show + accept/override)</title>
+    <phase>Wave 7 — Microsoft hardening + auth + index</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <dependencies>072, 012</dependencies>
+    <blocks></blocks>
+    <tags>office-addins</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Makes the add-in save pane a consumer of the server Association Engine — new client feature calling a BFF suggestion surface, rendering confidence + provenance, and applying an accepted/overridden association. `office-addins` tag + auth-gated BFF call trigger FULL rigor; must respect ADR-028 (NAA auth via task 072) and the review-surface auth-scoping (NFR-07).</rigor-reason>
+    <parallel-group>W7</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Depends on 072 (add-in NAA foundation) and 012 (deterministic rungs producing suggestions). Touches the add-in save pane only; runs after both land. Client feature over an existing BFF suggestion path.</parallel-reason>
+    <fr-refs>FR-25</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Make the Outlook add-in save task pane a consumer of the Association Engine (W1). When the user saves an email via the add-in, call the BFF (under NAA auth from task 072) to obtain the engine's association suggestions for that communication and render them in the save pane: suggested target record(s), confidence, and provenance rationale. The user can accept the top suggestion in one click or override by picking another target. The accepted/overridden association is applied to the resulting `sprk_communication` (via the same regarding machinery the Code Page review path uses — no new regarding mechanism).
+
+    This mirrors the W4 Code Page review surface (task 042) but inside Outlook. Reuse the engine's suggestion contract; do NOT re-implement association logic client-side. Respect matter-level auth scoping (NFR-07) — the pane only shows suggestions the caller is authorized to see; AI-flagged privilege is surfaced, never decided.
+  </prompt>
+
+  <role>
+    Spaarke Office Add-ins engineer authoritative on the Outlook save task pane, the `@spaarke/auth` `OfficeNaaStrategy` auth path (task 072), and the Association Engine suggestion contract (W1 tasks 011–012). Familiar with the regarding machinery (`RegardingResolver`/`PolymorphicResolverService`) reused on accept.
+  </role>
+
+  <goal>
+    The add-in save pane fetches and displays engine suggestions (target + confidence + provenance) for the saved email; the user accepts in one click or overrides by selecting another target; the chosen association is applied to the `sprk_communication`. Auth-scoped per NFR-07; privilege flagged not decided. Add-in builds + deploys via `office-addins-deploy`; the flow is smoke-tested in dev.
+  </goal>
+
+  <context>
+    <background>
+      Completes the FR-25 add-in track: task 072 wired NAA + manifest, task 073 protected the BFF Office endpoints, and this task turns the save pane into a review surface over the Association Engine so users can confirm/override associations without leaving Outlook. It parallels the Code Page review path (task 042) — same engine, same regarding machinery, different host.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/ (Outlook save task pane)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (Association Engine suggestion surface — W1 tasks 011–012)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts (regarding apply, reused on accept)</file>
+      <file>src/client/pcf/RegardingResolver/ (review/override pattern reference)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-25">Make the save task pane a consumer of the Association Engine — show suggestions + confidence, accept/override.</constraint>
+    <constraint source="ADR-028">All BFF calls use `@spaarke/auth` `OfficeNaaStrategy` / `authenticatedFetch` (from task 072); no self-built credential; no `accessToken` props.</constraint>
+    <constraint source="NFR-07">Suggestions are matter-level auth-scoped (ADR-003/008); AI flags privilege, never decides it (ADR-015).</constraint>
+    <constraint source="project (§11)">Do NOT re-implement association logic client-side; consume the engine's suggestion contract. Do NOT add a new regarding mechanism — reuse `RegardingResolver`/`PolymorphicResolverService`.</constraint>
+    <constraint source="ADR-021">Save-pane UI is Fluent UI v9.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>office-addins/association-review</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-015-ai-privilege-flagging.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/office-addins-deploy/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Regarding apply on accept" location="src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts">
+        `applyResolverFields` writes the ADR-024 typed regarding lookup + denormalized fields on accept.
+      </pattern>
+      <pattern name="Suggestion + confidence review" location="src/client/pcf/RegardingResolver/">
+        Show top suggestion + confidence + provenance; 1-click accept or pick another.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Context check">Check context usage; handoff + stop if &gt; 70%.</step>
+    <step order="2" name="Load knowledge">Read spec FR-25, ADR-028/024/015/021, and the W1 engine suggestion contract (tasks 011–012). Confirm task 072 NAA path is available.</step>
+    <step order="3" name="Locate suggestion surface">Identify the BFF endpoint/contract that returns engine suggestions for a communication (from W1). Confirm the response carries target(s) + confidence + provenance.</step>
+    <step order="4" name="Fetch in save pane">On save, call the suggestion surface via `authenticatedFetch` (NAA). Handle empty/pending states.</step>
+    <step order="5" name="Render suggestions">Render suggestions (Fluent v9): top target + confidence + provenance rationale; controls to accept (1-click) or override (pick another target). Surface any AI-flagged privilege as a flag.</step>
+    <step order="6" name="Apply on accept">On accept/override, apply the chosen association to the `sprk_communication` via `PolymorphicResolverService.applyResolverFields` (reuse; no new regarding mechanism).</step>
+    <step order="7" name="Auth scoping">Ensure only auth-scoped suggestions are shown (NFR-07); the pane never decides privilege.</step>
+    <step order="8" name="Build + deploy + smoke">Build + deploy via `office-addins-deploy`; smoke-test in dev: save an email, see suggestions, accept + override, verify the association is written.</step>
+    <step order="9.5" name="FULL quality gates">Invoke `code-review`; invoke `adr-check` against spec.md (ADR-028/024/015; NFR-07). Address Critical findings.</step>
+    <step order="10" name="Update tracking">Mark task 074 ✅ in `tasks/TASK-INDEX.md`.</step>
+    <step order="11" name="Reset state">Update `current-task.md`: status → completed; advance; record decisions.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect save pane + engine suggestion contract + resolver service</tool>
+    <tool name="edit">Add suggestion fetch + render + accept/override wiring</tool>
+    <tool name="office-addins-deploy">Build + deploy to SWA dev</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/ (UPDATED — save pane consumes engine suggestions; accept/override)</output>
+    <output type="docs">Dev smoke-test result recorded in task notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">On save, the pane fetches engine suggestions via NAA `authenticatedFetch` (no self-built credential).</criterion>
+    <criterion testable="true">Suggestions render with target + confidence + provenance rationale (Fluent v9).</criterion>
+    <criterion testable="true">User can accept the top suggestion in one click or override by picking another target.</criterion>
+    <criterion testable="true">Accepted/overridden association is applied via `PolymorphicResolverService.applyResolverFields` (no new regarding mechanism; no client-side association logic).</criterion>
+    <criterion testable="true">Suggestions are matter-level auth-scoped; AI-flagged privilege is surfaced, not decided (NFR-07 / ADR-015).</criterion>
+    <criterion testable="true">Add-in builds + deploys via `office-addins-deploy`; the flow is smoke-tested in dev (recorded).</criterion>
+    <criterion testable="true">`adr-check` returns no violations against ADR-028 / ADR-024 / ADR-015.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on the W1 deterministic rungs (task 012) producing suggestions and task 072's NAA foundation. Client-only feature over an existing BFF surface — no BFF code change here, so no publish-size / CVE obligations (the BFF suggestion surface is owned by W1).
+
+    Mirrors the Code Page review surface (task 042); reuse the same suggestion contract to avoid divergence.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 REQUIRED. Reuse the engine suggestion contract + regarding machinery; smoke-test the accept/override loop in dev.
+    </protocol>
+  </execution>
+</task>

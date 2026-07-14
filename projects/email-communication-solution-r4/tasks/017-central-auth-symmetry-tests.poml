@@ -1,0 +1,148 @@
+<task id="017" project="email-communication-solution-r4">
+  <metadata>
+    <title>Central-auth alignment + per-rung tests + direction-symmetry tests (inbound == outbound)</title>
+    <phase>Wave 1 — Server: enrichment + deterministic engine</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <dependencies>012, 013, 014, 015</dependencies>
+    <blocks></blocks>
+    <tags>bff-api, testing</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `tests/**` and touches auth wiring across the W1 engine surface — TEST-MODIFYING override makes code-review + adr-check UNCONDITIONAL (CLAUDE.md §8); enforces ADR-028 central-auth (no `new` credential) and the direction-symmetry invariant that is the load-bearing correctness guarantee of the whole engine.</rigor-reason>
+    <parallel-group>W1-tests</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>NFR-03, NFR-06, NFR-08</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Close out Wave 1 with the cross-cutting auth + test obligations:
+
+    • **Central-auth alignment (NFR-03/ADR-028)** — audit every W1 service (enrichment, engine, rungs 0–3, status/auto-file, channel seams) and ensure they inject central `TokenCredential` / `IGraphClientFactory` (`ForApp`/`ForUserAsync`) / canonical Dataverse interfaces; **never** `new` a credential or `ConfidentialClientApplication`. Fix any violation found.
+    • **Per-rung tests** — a test suite exercising each rung (0,1,2,3) independently: match/no-match, confidence band, provenance recorded, correct target entity.
+    • **Direction-symmetry tests** — for equivalent inbound and outbound envelopes, the engine produces IDENTICAL treatment (same matches, same confidence, same status, same provenance) — this is the load-bearing invariant of the whole R4 design.
+
+    Place tests in `tests/unit/Sprk.Bff.Api.Tests/`, and add vertical-slice-seam tests in `tests/integration/seam/**` where the enrichment→engine→status path is a dispatch-spine seam (ADR-038). Follow ADR-038 KEEP-path categories; ban `Mock&lt;HttpMessageHandler&gt;`, DI-registration, and ctor null-check tests.
+  </prompt>
+
+  <role>
+    Spaarke BFF test + auth engineer. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/` and the `tests/unit/Sprk.Bff.Api.Tests/` + `tests/integration/seam/**` suites. Fluent in ADR-028 (central auth), ADR-038 (testing strategy — KEEP-path categories, mock-boundary bans, `tests/integration/seam/**` vertical-slice category), ADR-032 (Null-Object), and `.claude/constraints/bff-extensions.md` §F test obligation.
+  </role>
+
+  <goal>
+    Every W1 Communication service injects central auth (no `new` credential/`ConfidentialClientApplication` anywhere in the W1 surface). A per-rung test suite covers rungs 0–3 (match/no-match, confidence band, provenance, target). A direction-symmetry suite proves inbound and outbound envelopes get identical engine treatment. Dispatch-spine seam tests live in `tests/integration/seam/**`. All tests follow ADR-038 KEEP-path categories and avoid the banned mock boundaries. Build + full test suite green; publish-size + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      Wave 1 built enrichment (010), the engine (011), rungs 0–3 (012–014), and the status/auto-file ladder (015). Each task authored its own focused tests, but two cross-cutting obligations need a dedicated closing task: (1) NFR-03 central-auth alignment across the whole W1 surface (a single audit + fix pass catches any `new`-credential drift the OOB-email retirement in W0 also targeted), and (2) the direction-symmetry invariant — the single most important correctness guarantee in R4, since the entire premise is that inbound and outbound get identical treatment through one engine.
+
+      ADR-038 governs: tests belong to the 7 KEEP-path categories; `tests/integration/seam/**` is the vertical-slice-seam category (DoD for dispatch-spine changes) — the enrichment→engine→status flow is exactly such a spine, so its end-to-end behavior gets a seam test. Ban `Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, and ctor null-check tests.
+
+      This is a TEST-MODIFYING task: per CLAUDE.md §8 the override row makes code-review + adr-check UNCONDITIONAL regardless of default rigor.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/*.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/*.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+      <file>tests/integration/seam/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-03">Server injects central `TokenCredential` + `IGraphClientFactory` (`ForApp`/`ForUserAsync`) + canonical Dataverse interfaces; NEVER `new` a credential or `ConfidentialClientApplication`. Audit + fix the whole W1 surface.</constraint>
+    <constraint source="NFR-08">PRs modifying `Sprk.Bff.Api/Services/` add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`; unconditionally-mapped endpoints have unconditional service registration (ADR-032 Null-Object for feature-gated).</constraint>
+    <constraint source="project">Direction-symmetry: equivalent inbound and outbound envelopes MUST produce identical matches, confidence, status, and provenance — assert this explicitly.</constraint>
+    <constraint source="ADR-038">Tests follow the 7 KEEP-path categories; add `tests/integration/seam/**` vertical-slice-seam tests for the enrichment→engine→status dispatch spine; BAN `Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, ctor null-check tests.</constraint>
+    <constraint source="project">Per-rung coverage for rungs 0–3: match/no-match, confidence band, provenance recorded, correct target entity. De-duplicate against tests already written in 012–014 (extend/consolidate, don't clone).</constraint>
+    <constraint source="ADR-032">Feature-gated services (e.g. auto-file kill-switch) use Null-Object so unconditional consumers stay registered.</constraint>
+    <constraint source="project">bff-extensions Placement Justification in the PR; publish-size delta (baseline ~49.63 MB incl. PDBs); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Central-auth injection" location=".claude/adr/ADR-028-spaarke-auth-architecture.md">
+        Inject `TokenCredential`/`IGraphClientFactory`/canonical Dataverse interfaces; grep the W1 surface for `new ConfidentialClientApplication`/`new ClientSecretCredential` and eliminate.
+      </pattern>
+      <pattern name="Direction-symmetry assertion" location="projects/email-communication-solution-r4/notes/011-resolver-behavior-contract.md">
+        Build equivalent inbound/outbound `NormalizedMessage` fixtures and assert identical engine output (matches/confidence/status/provenance).
+      </pattern>
+      <pattern name="Vertical-slice seam test" location="docs/adr/ADR-038-testing-strategy.md">
+        `tests/integration/seam/**` exercises the enrichment→engine→status spine end-to-end (real wiring, boundary fakes only) as the DoD for dispatch-spine changes.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep the W1 Communication surface for `new ConfidentialClientApplication`, `new ClientSecretCredential`, `new DefaultAzureCredential`, and token-snapshot patterns; list any violations.</step>
+    <step order="2">Fix each violation: inject central `TokenCredential`/`IGraphClientFactory`/canonical Dataverse interfaces via constructor (ADR-028). Register via `CommunicationModule` (ADR-010), unconditional.</step>
+    <step order="3">Read ADR-038 + `tests/CLAUDE.md` + `TEST-ARCHITECTURE.md` to confirm KEEP-path categories, the mock-boundary bans, and the `tests/integration/seam/**` category before writing tests.</step>
+    <step order="4">Inventory tests already written by 012/013/014/015; consolidate/extend into a coherent per-rung suite (rungs 0–3: match/no-match, confidence band, provenance, target entity) — do not clone.</step>
+    <step order="5">Author the direction-symmetry suite: for a set of scenarios, build equivalent inbound + outbound `NormalizedMessage` fixtures and assert identical engine output (matches, confidence, status, provenance). Cover at least one scenario per rung + the auto-file/kill-switch path.</step>
+    <step order="6">Add `tests/integration/seam/**` vertical-slice-seam tests exercising the enrichment→engine→status spine end-to-end (real wiring; only boundary fakes; no `Mock&lt;HttpMessageHandler&gt;`).</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + full `dotnet test tests/unit/Sprk.Bff.Api.Tests/` + `dotnet test tests/integration/seam/`; confirm all green, including 011 characterization + 012–015 tests.</step>
+    <step order="7.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/r4-017-publish/`; report compressed size + delta vs ~49.63 MB baseline. Expected ≈ 0.</step>
+    <step order="7.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL / TEST-MODIFYING quality gates (UNCONDITIONAL): `code-review` on the diff; `adr-check` against `spec.md` (focus NFR-03 central-auth + NFR-08 test obligation + ADR-038 KEEP-path + direction-symmetry). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (017 ✅) + `current-task.md`; note that Wave 1 is complete; record decisions (symmetry fixture strategy, seam-test scope, any auth fixes made).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect W1 services + existing tests + ADR-038</tool>
+    <tool name="grep">Find `new`-credential violations across the W1 surface</tool>
+    <tool name="edit">Fix auth wiring; author per-rung + symmetry + seam tests</tool>
+    <tool name="bash">Build, full unit + seam test run, publish-size, CVE scan</tool>
+    <tool name="code-review">UNCONDITIONAL quality gate (Step 9.5)</tool>
+    <tool name="adr-check">UNCONDITIONAL quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">W1 Communication services (UPDATED where any `new`-credential / non-central-auth was found and fixed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (consolidated per-rung suite for rungs 0–3)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (direction-symmetry suite: inbound == outbound)</output>
+    <output type="test">tests/integration/seam/ (enrichment→engine→status vertical-slice-seam tests)</output>
+    <output type="docs">PR description with central-auth audit result + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No `new ConfidentialClientApplication` / `new *Credential` in the W1 Communication surface (grep-clean); all services inject central `TokenCredential`/`IGraphClientFactory`/canonical Dataverse interfaces (NFR-03).</criterion>
+    <criterion testable="true">A per-rung suite covers rungs 0–3: match/no-match, confidence band, provenance recorded, correct target entity.</criterion>
+    <criterion testable="true">A direction-symmetry suite proves equivalent inbound and outbound envelopes yield identical matches, confidence, status, and provenance.</criterion>
+    <criterion testable="true">Vertical-slice-seam tests exist in `tests/integration/seam/**` for the enrichment→engine→status dispatch spine (real wiring, boundary fakes only).</criterion>
+    <criterion testable="true">All tests follow ADR-038 KEEP-path categories; no `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor null-check tests are added.</criterion>
+    <criterion testable="true">Full `dotnet test` (unit + seam) green, including 011 characterization + 012–015 tests.</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta ≈ 0; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    TEST-MODIFYING rigor override (CLAUDE.md §8): code-review + adr-check are UNCONDITIONAL here regardless of the default STANDARD-skip — this task modifies `tests/**` and carries the `testing` tag.
+
+    De-duplicate rather than clone: 012–015 already wrote focused tests; this task consolidates them into coherent per-rung + symmetry suites and adds the seam-level coverage they could not (cross-task, end-to-end).
+
+    Direction symmetry is THE load-bearing R4 invariant — if any scenario is asymmetric, that is a real bug in 010/011/012–015, not a test to weaken; escalate and fix the source.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. TEST-MODIFYING → code-review + adr-check UNCONDITIONAL at Step 9.5 (CLAUDE.md §8). Per CLAUDE.md §10: publish-size delta + CVE + bff-extensions Placement Justification in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

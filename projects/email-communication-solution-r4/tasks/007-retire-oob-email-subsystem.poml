@@ -1,0 +1,147 @@
+<task id="007" project="email-communication-solution-r4">
+  <metadata>
+    <title>Retire the OOB-`email` subsystem (`Services/Email/`, `/api/v1/emails/*`, `EmailAssociationService`) + report publish-size reduction</title>
+    <phase>Wave 0 — Shared foundation (schema · ADR · server send-changes · retire OOB-email)</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, deletion</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Brownfield deletion across `Sprk.Bff.Api` — removes services, endpoints, a webhook registration, and a self-built credential (ADR-028 drift point). High blast radius: must verify no live references remain + build/tests green. FULL per CLAUDE.md §8; Step 9.5 gates + publish-size + CVE + placement justification required.</rigor-reason>
+    <parallel-group>W0-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-07</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Retire the legacy OOB-`email`-activity subsystem entirely (DEC-2, FR-07). Delete:
+    - `src/server/api/Sprk.Bff.Api/Services/Email/` (async remnants: `EmailAssociationService`, `EmailToEmlConverter`, `EmailAttachmentProcessor`, `AttachmentFilterService`, `EmailProcessingStatsService` + their interfaces);
+    - `src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs` (the `/api/v1/emails/*` surface) and its mapping in `EndpointMappingExtensions.cs`;
+    - the `PrimaryEntityName == "email"` Dataverse-webhook registration/branch (DEC-2);
+    - the associated `Models/Email/` DTOs (`DataverseWebhookPayload`, `BatchProcessModels`) IF no live (non-retired) code references them;
+    - the DI registrations for the deleted services (in whichever module registers them).
+
+    Preserve ONLY the confidence-scoring *signal design* — the SCORING HEURISTIC/APPROACH, reimplemented later in W1 (task 014), NOT the code. Do not resurrect any deleted type in W0.
+
+    This removes an ADR-028 auth-drift point: `EmailAssociationService` (or a sibling) builds its own `ConfidentialClientApplication` instead of using the central credential — that self-built credential goes away with the deletion. Report the publish-size REDUCTION delta (this task should SHRINK the BFF).
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer doing disciplined brownfield removal. Authoritative on `Sprk.Bff.Api` endpoint mapping, DI modules, the Dataverse-webhook dispatch, and the distinction between the RETIRED OOB-`email` path and the LIVE `Services/Communication/` Graph path. Familiar with `.claude/constraints/bff-extensions.md`.
+  </role>
+
+  <goal>
+    All listed OOB-`email` types/endpoints/registrations are deleted; the `PrimaryEntityName=="email"` webhook branch is gone; the self-built `ConfidentialClientApplication` (ADR-028 drift) is removed with it; NO reference to any deleted type remains anywhere in `src/` or `tests/`; `dotnet build` + `dotnet test` are green; the publish-size REDUCTION is measured + reported. The live `Services/Communication/` Graph path is untouched.
+  </goal>
+
+  <context>
+    <background>
+      Spaarke's inbound email pipeline is 100% Graph via `Services/Communication/` (`IncomingCommunicationProcessor`/`IncomingAssociationResolver`). The parallel OOB-`email`-activity subsystem (`Services/Email/` + `/api/v1/emails/*` + the `PrimaryEntityName=="email"` webhook) is legacy dead weight from an earlier SSS-adjacent approach that R4's spec (Out of Scope + requirement #1) explicitly abandons. Retiring it shrinks the BFF (NFR-02 wants the delta reported) and removes a self-built-credential ADR-028 violation.
+
+      The ONLY thing worth keeping is the confidence-scoring signal DESIGN (how it weighted match signals) — reimplemented cleanly against the normalized envelope in W1 task 014, not copied. This task deletes; it does not reimplement.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/ (DELETE — whole dir)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs (DELETE)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (EDIT — remove email mapping)</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Email/ (DELETE if unreferenced by live code)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs (INSPECT — webhook branch)</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project (FR-07 / DEC-2)">Delete `Services/Email/`, `Api/EmailEndpoints.cs` + its mapping, `EmailAssociationService`, `EmailToEmlConverter`, and the `PrimaryEntityName=="email"` webhook registration. No references to retired types may remain.</constraint>
+    <constraint source="project">Preserve only the confidence-scoring *signal design* (reimplemented in W1 task 014) — NOT the code. Do NOT reimplement in W0.</constraint>
+    <constraint source="ADR-028">The self-built `ConfidentialClientApplication` in the deleted subsystem is an auth-drift point removed by this deletion. Confirm no OTHER live code depends on it; if the central credential must replace a live use, escalate (out of this task's delete-only scope).</constraint>
+    <constraint source="project">MUST NOT touch the live `Services/Communication/` Graph path (`IncomingCommunicationProcessor`/`IncomingAssociationResolver`/`CommunicationService`) except to remove the `email` webhook branch.</constraint>
+    <constraint source="ADR-032">If any deleted service was consumed by an unconditionally-mapped endpoint, remove BOTH the endpoint and the registration together (no asymmetric registration left behind).</constraint>
+    <constraint source="project (§10 / NFR-02)">Load `.claude/constraints/bff-extensions.md`; state Placement Justification (a removal still gets one); report the publish-size REDUCTION vs ~49.63 MB incl. PDBs; confirm no new HIGH CVE; run `/conflict-check` before PR.</constraint>
+    <constraint source="ADR-045">Task 005's ADR records the OOB-`email` retirement as a MUST NOT (no re-introduction of SSS/`email` activities) — this task realizes it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Reference-clean deletion" location=".claude/constraints/bff-extensions.md">
+        Delete leaves + up the graph: remove endpoint + its mapping + its DI registration together; then grep the whole solution for every deleted type name; build to catch stragglers; only then delete DTOs proven unreferenced.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load `.claude/constraints/bff-extensions.md`. Enumerate the retirement surface: `ls Services/Email/`, read `EmailEndpoints.cs`, grep for `EmailEndpoints`/`MapEmail` in `EndpointMappingExtensions.cs`, and grep for each `Services/Email/` type name across `src/` + `tests/` to map every reference site.</step>
+    <step order="2">Locate the `PrimaryEntityName == "email"` webhook branch (grep for `"email"` + `PrimaryEntityName` — likely `IncomingCommunicationProcessor.cs` and/or `Models/Email/DataverseWebhookPayload.cs`). Confirm it is the OOB branch, distinct from the Graph subscription path.</step>
+    <step order="3">Locate the self-built `ConfidentialClientApplication` inside the subsystem (grep `ConfidentialClientApplication` / `IConfidentialClientApplication` within `Services/Email/`). Confirm no LIVE (non-retired) code depends on it. If a live consumer exists, STOP + escalate (delete-only scope; central-credential migration of live code is not this task).</step>
+    <step order="4">Delete `Api/EmailEndpoints.cs` and remove its mapping call in `EndpointMappingExtensions.cs`.</step>
+    <step order="5">Delete the DI registrations for the `Services/Email/` services (whichever module registers them). Remove endpoint + registration together (ADR-032 — no asymmetric leftover).</step>
+    <step order="6">Delete the `Services/Email/` directory (all listed services + interfaces).</step>
+    <step order="7">Remove the `PrimaryEntityName=="email"` webhook branch/registration. Delete `Models/Email/` DTOs (`DataverseWebhookPayload`, `BatchProcessModels`) ONLY after grep + build prove no live reference remains.</step>
+    <step order="8">Grep the whole solution again for every deleted type name — confirm ZERO remaining references in `src/` + `tests/`. Delete or update any now-orphaned tests referencing the retired types (per ADR-038 — retired-surface tests are removed, not stubbed).</step>
+    <step order="9">`dotnet build src/server/api/Sprk.Bff.Api/` (clean) + `dotnet test` (green — fix/remove tests broken by deletion).</step>
+    <step order="10">`dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + REDUCTION delta vs ~49.63 MB (incl. PDBs). Reduction expected — quantify it.</step>
+    <step order="11">`dotnet list package --vulnerable --include-transitive` — confirm no new HIGH CVE (a deletion may also drop transitive CVEs — note any).</step>
+    <step order="11.5">FULL-rigor gates: `/conflict-check` (BFF PR gate); `code-review` on the diff (focus: no live-path breakage, no orphaned references); `adr-check` against `spec.md` (ADR-028 drift removal + ADR-032 symmetry). Address Critical findings.</step>
+    <step order="12">Update `tasks/TASK-INDEX.md`: mark task 007 ✅.</step>
+    <step order="13">Update `current-task.md` per task-execute: status → completed; record the publish-size reduction + the removed ADR-028 drift point in Decisions Made.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect the retirement surface + webhook branch</tool>
+    <tool name="grep">Map every reference site + prove zero remaining references</tool>
+    <tool name="bash">Delete files/dirs, build, test, publish-size, CVE scan</tool>
+    <tool name="edit">Remove mapping + DI registration + webhook branch</tool>
+    <tool name="conflict-check">BFF PR gate at 11.5</tool>
+    <tool name="code-review">FULL-rigor gate at 11.5</tool>
+    <tool name="adr-check">FULL-rigor gate at 11.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Email/ (DELETED)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs (DELETED)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (UPDATED — email mapping removed)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Email/ (DELETED if unreferenced) + `email` webhook branch removed</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (orphaned OOB-email tests removed per ADR-038)</output>
+    <output type="docs">PR description with Placement Justification + publish-size REDUCTION delta + ADR-028 drift-point removal note</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`Services/Email/`, `Api/EmailEndpoints.cs`, and the `/api/v1/emails/*` mapping are deleted.</criterion>
+    <criterion testable="true">The `PrimaryEntityName=="email"` webhook branch/registration is removed.</criterion>
+    <criterion testable="true">The self-built `ConfidentialClientApplication` in the subsystem is gone (ADR-028 drift point removed) — verified by grep.</criterion>
+    <criterion testable="true">Grep of `src/` + `tests/` finds ZERO references to any deleted type.</criterion>
+    <criterion testable="true">`dotnet build` clean; `dotnet test` green (orphaned tests removed, not stubbed).</criterion>
+    <criterion testable="true">The live `Services/Communication/` Graph path is unchanged (except the removed `email` webhook branch).</criterion>
+    <criterion testable="true">Publish-size REDUCTION quantified in the PR; no new HIGH CVE; `/conflict-check` run.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a delete-only task. If removing the self-built credential would break LIVE code (i.e., a non-retired consumer depends on it), that is a signal the boundary is wider than assumed — STOP and escalate rather than migrating live code to the central credential in W0.
+
+    The confidence-scoring signal DESIGN is preserved as a design idea for W1 task 014 (structural detectors), reimplemented against the normalized envelope. Do NOT copy the retired scoring code forward; capture the heuristic in task notes if useful for 014.
+
+    Publish-size should DROP — this is the one W0 task expected to reduce the BFF; the delta is a headline PR metric (NFR-02).
+
+    xhigh effort: brownfield removal with reference-cleanliness verification across the whole solution warrants deeper reasoning to avoid leaving orphaned references or breaking the live path.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor per `&lt;rigor-hint&gt;` at `xhigh` effort — Step 11.5 gates (conflict-check + code-review + adr-check) REQUIRED. Per §10: publish-size REDUCTION delta + CVE + Placement Justification all reportable in the PR. Live-code-dependency escalation (step 3) is REQUIRED behavior, not optional.
+    </protocol>
+  </execution>
+</task>

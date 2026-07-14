@@ -1,0 +1,157 @@
+<task id="015" project="email-communication-solution-r4">
+  <metadata>
+    <title>Confidence→status ladder + auto-file ≥0.85 (deterministic only) behind ADR-018 per-tenant kill-switch; provenance JSON</title>
+    <phase>Wave 1 — Server: enrichment + deterministic engine</phase>
+    <status>not-started</status>
+    <estimated-hours>9</estimated-hours>
+    <dependencies>002, 012, 013, 014</dependencies>
+    <blocks>030, 051</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements the confidence→status decision + auto-file behavior — the highest-consequence logic in the engine (an owner override of design DEC-4, ADR Tension Path A); gates auto-file behind an ADR-018 per-tenant kill-switch that must flip without redeploy; writes provenance JSON; respects ADR-018 / ADR-024 / ADR-045 + bff-extensions governance.</rigor-reason>
+    <parallel-group>W1-status</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-11</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Implement the confidence→status ladder that maps aggregated engine `RungMatch` results (from rungs 0–3, tasks 012–014; later rungs 4–5 in W3) to `sprk_associationstatus`, and the auto-file behavior:
+
+    • **≥0.85 AND deterministic (rungs 0–3 only)** → `Resolved` + **AUTO-FILE** (owner override of design DEC-4 — auto-file is ON at launch).
+    • **0.50–0.85, OR ANY AI rung (4–5) involved** → `Suggested`.
+    • **&lt;0.50 or no match** → `Pending Review`.
+    • **conflicting high-confidence matches** → `Ambiguous`.
+
+    Auto-file is gated by a per-tenant **ADR-018 kill-switch** (config, default-ON for deterministic ≥0.85) that flips the engine to suggest-only WITHOUT redeploy. **AI rungs NEVER auto-file** — even at high confidence they land as `Suggested`/`Ambiguous`. Write the full provenance (which rungs fired, per-attribute confidence, chosen status, auto-file decision) as JSON into `sprk_associationprovenance`.
+
+    This is an ADR Tension Path A (project-scoped exception): auto-file-ON deviates from the design's conservative default, but stays within ADR-018's kill-switch guardrail and §5.4's ≥0.85→`Resolved` ladder. Misfile is re-file (audited), never delete.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer owning the association decision layer. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/`. Fluent in ADR-018 (kill-switch config; per-tenant enable/disable without redeploy), ADR-024 (regarding family), ADR-032 (Null-Object for feature-gated services), ADR-045 (Communication ADR), and `.claude/constraints/bff-extensions.md`. Understands this is a high-consequence, owner-overridden behavior (ADR Tension Path A) demanding careful, testable logic.
+  </role>
+
+  <goal>
+    Aggregated engine results map to `sprk_associationstatus` via the ladder: deterministic ≥0.85 → `Resolved` + auto-file; 0.50–0.85 or any AI rung → `Suggested`; &lt;0.50/none → `Pending Review`; conflicting high → `Ambiguous`. Auto-file is governed by an ADR-018 per-tenant kill-switch (default-on for deterministic ≥0.85) that flips to suggest-only without redeploy. AI rungs never auto-file. Full provenance is persisted as JSON in `sprk_associationprovenance`. Build clean; ladder + kill-switch + AI-never-auto-file + provenance tests pass; publish-size + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      Rungs 0–3 (tasks 012–014) emit `RungMatch` results with per-attribute confidence + provenance. Task 015 is the decision layer that turns those into a status + an auto-file action. It is the single highest-consequence piece of Wave 1: auto-filing a communication to the wrong matter is a real risk, mitigated by (a) restricting auto-file to DETERMINISTIC rungs only, (b) the ≥0.85 threshold, (c) the ADR-018 per-tenant kill-switch escape hatch (flip to suggest-only, no redeploy), and (d) misfile = re-file (audited), never delete (R-1).
+
+      Owner clarification (2026-07-14) + ADR Tension Path A: auto-file is ON at launch for deterministic ≥0.85 — a deliberate deviation from design DEC-4's "suggest-only first," within ADR-018's guardrail. This override is recorded in spec §ADR Tensions and CLAUDE.md.
+
+      W0 task 002 adds the `Suggested`/`Ambiguous` option-set values (integers verified via Dataverse MCP) — this task depends on those existing. The `sprk_associationprovenance` JSON column is added in W0 task 001.
+
+      AI rungs 4 (semantic, task 030) and 5 (LLM, task 031) land in W3 and MUST NEVER auto-file. Task 015's ladder must already encode "any AI rung ⇒ never `Resolved`/auto-file" so W3 needs no re-plumbing — it only registers higher rungs the ladder already treats as suggest-only.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/IAssociationRung.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationAssociation.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationStatus.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+      <file>projects/email-communication-solution-r4/notes/011-resolver-behavior-contract.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-11 ladder (exact): deterministic (rungs 0–3) ≥0.85 → `Resolved` + auto-file; 0.50–0.85 OR any AI rung → `Suggested`; &lt;0.50/none → `Pending Review`; conflicting high-confidence → `Ambiguous`.</constraint>
+    <constraint source="project">AI rungs (4–5) NEVER auto-file — always `Suggested`/`Ambiguous`, regardless of score. Encode this now so W3 needs no ladder change.</constraint>
+    <constraint source="ADR-018">Auto-file gated by a per-tenant kill-switch (config, default-ON for deterministic ≥0.85) that flips to suggest-only WITHOUT redeploy. No recompile/redeploy to disable.</constraint>
+    <constraint source="ADR Tension Path A">Auto-file-ON is a documented owner override of design DEC-4; stays within ADR-018 + §5.4 ladder. Misfile is re-file (audited), never delete (R-1).</constraint>
+    <constraint source="project">Persist full provenance (rungs fired, per-attribute confidence, chosen status, auto-file decision + reason) as JSON in `sprk_associationprovenance`.</constraint>
+    <constraint source="project">Depends on W0 task 002 `Suggested`/`Ambiguous` option-set integers (verified via Dataverse MCP) and task 001 `sprk_associationprovenance` column.</constraint>
+    <constraint source="ADR-024">Auto-file writes typed regarding lookups + denormalized fields; no new regarding mechanism.</constraint>
+    <constraint source="ADR-032">If the kill-switch is modeled as a feature-gated service, use the Null-Object pattern so unconditionally-mapped consumers stay registered.</constraint>
+    <constraint source="ADR-045">Status ladder + kill-switch codified in ADR-045; confirm alignment.</constraint>
+    <constraint source="project">bff-extensions Placement Justification in the PR; publish-size delta (baseline ~49.63 MB incl. PDBs); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-018-feature-flags-kill-switches.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/data-model/sprk_communication.md</file>
+    </files>
+    <patterns>
+      <pattern name="ADR-018 per-tenant kill-switch" location=".claude/adr/ADR-018-feature-flags-kill-switches.md">
+        Config-driven per-tenant flag; flips behavior at runtime without redeploy. Auto-file reads this flag; default-on for deterministic ≥0.85.
+      </pattern>
+      <pattern name="Provenance JSON" location="docs/data-model/sprk_communication.md">
+        `sprk_associationprovenance` stores the machine-readable trail: rungs fired, confidences, chosen status, auto-file decision + reason.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the task-011 engine contract + `RungMatch` aggregation; read `CommunicationStatus.cs` + confirm the W0 task-002 `Suggested`/`Ambiguous` option-set integers (via task-002 notes / Dataverse MCP) and the task-001 `sprk_associationprovenance` column.</step>
+    <step order="2">Read ADR-018 + ADR-032 to design the per-tenant kill-switch (config source, per-tenant resolution, runtime flip; Null-Object if feature-gated).</step>
+    <step order="3">Read `.claude/constraints/bff-extensions.md` §F/§F.1 + the ADR Tension Path A entry in `spec.md` so the auto-file override is implemented within its guardrail.</step>
+    <step order="4">Implement the confidence→status mapper: aggregate rung results (max/combined confidence + rung provenance); classify per the exact ladder; flag "any AI rung present ⇒ never auto-file"; detect conflicting high-confidence matches → `Ambiguous`.</step>
+    <step order="5">Implement the auto-file action for deterministic ≥0.85 → set `Resolved` + write regarding (ADR-024) — but ONLY when the ADR-018 per-tenant kill-switch is enabled; when disabled, downgrade to `Suggested` (suggest-only) without any code path change/redeploy.</step>
+    <step order="6">Serialize full provenance (rungs fired, per-attribute confidence, chosen status, auto-file decision + reason incl. "kill-switch off ⇒ suggested") to JSON and persist to `sprk_associationprovenance`.</step>
+    <step order="7">Wire the mapper into the engine/enrichment output so status + provenance are written for both inbound and outbound. Register any new service via `CommunicationModule` (unconditional / Null-Object per ADR-032).</step>
+    <step order="8">Write tests covering: each ladder band; deterministic ≥0.85 auto-files to `Resolved`; kill-switch OFF ⇒ same match becomes `Suggested` (no redeploy); AI-rung match at ≥0.85 ⇒ `Suggested`/`Ambiguous`, NEVER auto-file; conflicting high ⇒ `Ambiguous`; provenance JSON shape. Seed fixtures across the ladder.</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm rung tests (012–014) + task-011 characterization tests still pass.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/r4-015-publish/`; report compressed size + delta vs ~49.63 MB baseline. Expected ≈ 0.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff; `adr-check` against `spec.md` (focus FR-11 ladder + ADR-018 kill-switch + ADR Tension Path A + AI-never-auto-file). Address Critical findings; cite the ADR Tension Path A rationale + bff-extensions Placement Justification in the PR.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (015 ✅) + `current-task.md`; unblock 030/051; record decisions (confidence-aggregation rule, conflict-detection heuristic, kill-switch config key, provenance schema).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect engine, status models, option-set integers, provenance column</tool>
+    <tool name="edit">Implement ladder + auto-file + kill-switch + provenance; DI</tool>
+    <tool name="bash">Build, ladder/kill-switch/AI-never tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs (NEW — confidence→status ladder)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AutoFileGate.cs (NEW — ADR-018 per-tenant kill-switch gate)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs (UPDATED — status + provenance write)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/*.cs + appsettings.template.json (UPDATED — auto-file kill-switch config)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — DI)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (ladder bands + kill-switch flip + AI-never-auto-file + provenance tests)</output>
+    <output type="docs">PR description with ADR Tension Path A rationale + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Deterministic (rungs 0–3) match ≥0.85 → status `Resolved` + auto-file (regarding written) when kill-switch enabled.</criterion>
+    <criterion testable="true">Same deterministic ≥0.85 match with the ADR-018 per-tenant kill-switch DISABLED → `Suggested` (suggest-only), with no redeploy/code change (config flip only).</criterion>
+    <criterion testable="true">Match in 0.50–0.85, or ANY match involving an AI rung, → `Suggested`.</criterion>
+    <criterion testable="true">An AI-rung match at ≥0.85 is `Suggested`/`Ambiguous` and NEVER auto-files.</criterion>
+    <criterion testable="true">No match / &lt;0.50 → `Pending Review`; conflicting high-confidence matches → `Ambiguous`.</criterion>
+    <criterion testable="true">Full provenance (rungs fired, per-attribute confidence, chosen status, auto-file decision + reason) is written as JSON to `sprk_associationprovenance`.</criterion>
+    <criterion testable="true">`Suggested`/`Ambiguous` statuses use the W0 task-002 verified option-set integers (no collision).</criterion>
+    <criterion testable="true">Status + provenance are written identically for inbound and outbound (direction symmetry); rung + characterization tests still pass.</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta ≈ 0; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task carries the ADR Tension Path A override (auto-file ON at launch) — the PR MUST cite the ADR Tension entry in `spec.md` and CLAUDE.md, and code review MUST explicitly approve it per CLAUDE.md §6.5. The kill-switch is the escape hatch; misfile = re-file (audited), never delete (R-1).
+
+    Encode "any AI rung ⇒ never auto-file" NOW (rungs 4/5 do not exist until W3) so tasks 030/031 only register higher rungs and inherit suggest-only treatment with zero ladder change.
+
+    Depends on W0 task 002 (option-set integers, MCP-verified) + task 001 (`sprk_associationprovenance` column). If either is not yet merged, block and escalate rather than hardcoding integers.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED; ADR Tension Path A demands explicit code-review approval (CLAUDE.md §6.5). Per CLAUDE.md §10: publish-size delta + CVE + bff-extensions Placement Justification in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `xhigh` (highest-consequence, fully-specified decision logic).
+    </protocol>
+  </execution>
+</task>
