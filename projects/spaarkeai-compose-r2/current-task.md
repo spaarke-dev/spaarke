@@ -13,11 +13,11 @@
 | **Status** | in-progress |
 | **Deployed** | spaarkedev1: round-6 (bridge+profile+index+crash fixes) + round-7 Waves A/B/C(#6/#7). BFF `spaarke-bff-dev`, client web resource `sprk_spaarkeai`. |
 | **Master merge** | HELD (branch 66 ahead / 34 behind origin/master; ~47 unpushed) |
-| **Next Action** | (1) When bug-B agent `ab70870cc4410bf94` (unify Compose on Direct widget) completes → gate (SpaarkeAi jest + build) → commit. (2) Gate + deploy **bug A (BFF)** + **bug B (SpaarkeAi)** together → owner re-UAT. (3) Await owner **#8** shape decision → build #8. |
+| **Next Action** | (1) Full gate (BFF unit + SpaarkeAi/Compose jest). (2) Deploy **bug A** (BFF, `pwsh scripts/Deploy-BffApi.ps1`) + **bug B** (SpaarkeAi rebuild+deploy) together → owner re-UAT (verify draft-alternative works + Email-tab keeps the file). (3) Await owner **#8** shape → build #8. |
 
-### Uncommitted / in-flight
-- **Bug A committed** = `bd3d1eb90` (draft-alternative /dispatch 404 fix). BFF-only; **NOT yet deployed**.
-- **Bug B BUILDING** (agent `ab70870cc4410bf94`): unify ribbon `composeMode=editor` + "Compose" layout-menu → Direct `'compose'` widget so the #1 keep-alive protects every Compose mount (fixes "Email tab open loses the file"). Client-only; uncommitted on completion.
+### Both bug fixes COMMITTED (not yet deployed), tree clean
+- **Bug A** = `bd3d1eb90` (draft-alternative /dispatch 404 — RegisterActiveDocument creates resolvable doc session; BFF).
+- **Bug B** = `e14b9dc32` (unify all Compose entries on Direct `'compose'` widget — fixes Email-tab-loses-file; SpaarkeAi client).
 
 ### Critical Context
 Deploy — BFF: `pwsh scripts/Deploy-BffApi.ps1` (hash-verify). Client: `rm -rf src/solutions/SpaarkeAi/dist src/solutions/SpaarkeAi/node_modules/.vite .vite && npm --prefix src/solutions/SpaarkeAi run build && pwsh scripts/Deploy-SpaarkeAi.ps1`. **App Insights for runtime diagnosis** (use it FIRST — it works): appId `6a76b012-46d9-412f-b4ab-4905658a9559` (spe-insights-dev-67e2xz), `az monitor app-insights query --app <id> --analytics-query "..."`. **Playbook engine is being decommissioned** → run Actions via `IActionResolver`→`IActionRunner` (ADR-043), mirror `AnalysisEndpoints.ExecuteDocumentProfilePipelineAsync`. Bug-A/B fixes both carry E2E-DoD (bug A has a real through-the-wire seam test).
