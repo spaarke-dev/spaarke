@@ -636,6 +636,16 @@ public static class AnalysisServicesModule
         services.AddScoped<IAnalysisOrchestrationService, AnalysisOrchestrationService>();
         services.AddScoped<IAppOnlyAnalysisService, AppOnlyAnalysisService>();
 
+        // spaarkeai-compose-r2 (UAT #7b): OBO-capable document-profile facade. ComposeService
+        // (CRUD) injects ONLY this PublicContracts facade (ADR-013); the impl downloads the
+        // user-OBO-written SPE file under OBO (mirroring the RAG indexing step) and delegates the
+        // extract → classify → summarize → field-map → write pipeline to IAppOnlyAnalysisService
+        // unchanged. Scoped: depends on the scoped IAppOnlyAnalysisService + runs in the OBO
+        // request scope. See ADR Tensions in projects/spaarkeai-compose-r2/design.md (§6.5 path A —
+        // stand-in until the paused ai-architecture-redesign-r2 core IDocumentProfileAi ships).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IDocumentProfileAi,
+                           Sprk.Bff.Api.Services.Ai.PublicContracts.DocumentProfileAi>();
+
         // DailyBriefingNarrator — the platform's first `coded` composite workflow
         // (FR-P3-04, ai-architecture-redesign-r1 task 043; ICodedWorkflow retrofit in
         // task 007). Dispatched exclusively by class reference from its Action row

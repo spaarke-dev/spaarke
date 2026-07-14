@@ -64,10 +64,11 @@ public sealed class ComposeServiceCreateOnSaveTests
     private readonly Mock<IGenericEntityService> _dataverse = new(MockBehavior.Strict);
     private readonly Mock<IPostUploadIndexingEnqueuer> _indexing = new(MockBehavior.Strict);
     private readonly Mock<ChatSessionManager> _sessions;
-    // FR-05 Fork C (compose-r2): the profile step now ENQUEUES an AppOnlyDocumentAnalysis job
-    // (SubmitJobAsync is virtual precisely for this override). Loose so un-arranged calls return a
-    // completed Task; profile-focused tests capture the submitted JobContract.
-    private readonly Mock<JobSubmissionService> _jobSubmission;
+    // FR-05 Fork C (compose-r2, UAT #7b): the profile step now runs INLINE under OBO via the
+    // IDocumentProfileAi facade (Services/Ai/PublicContracts) — the module boundary ComposeService
+    // consumes for profiling. Loose so un-arranged calls fall through to the default success setup
+    // below; profile-focused tests override it.
+    private readonly Mock<IDocumentProfileAi> _documentProfile = new();
 
     public ComposeServiceCreateOnSaveTests()
     {
@@ -83,11 +84,11 @@ public sealed class ComposeServiceCreateOnSaveTests
             .Setup(s => s.GetSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ChatSession?)null);
 
-        _jobSubmission = new Mock<JobSubmissionService>(
-            MockBehavior.Loose,
-            Options.Create(new ServiceBusOptions()),
-            Mock.Of<ILogger<JobSubmissionService>>(),
-            new Mock<ServiceBusClient>().Object);
+        // Default: profiling succeeds (fields written under OBO) → profile step is terminal Completed.
+        // Individual tests override this to capture args, simulate a skip/failure, or throw.
+        _documentProfile
+            .Setup(p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DocumentProfileOutcome.Succeeded());
     }
 
     private ComposeService CreateSut() => new(
@@ -97,7 +98,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         new DocxAnnotationWriter(),
         _indexing.Object,
         NullLogger<ComposeService>.Instance,
-        jobSubmission: _jobSubmission.Object);
+        documentProfileAi: _documentProfile.Object);
 
     private static ReadOnlyMemory<byte> DocxBytes() =>
         new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x14, 0x00 }; // DOCX ZIP signature
@@ -179,27 +180,31 @@ public sealed class ComposeServiceCreateOnSaveTests
         StateOf(completion, ComposeService.StepContainer).Should().Be(JobAwareState.Completed);
         StateOf(completion, ComposeService.StepRecord).Should().Be(JobAwareState.Completed);
         StateOf(completion, ComposeService.StepIndexing).Should().Be(JobAwareState.Completed);
-        // profile-analysis deferred → non-terminal → aggregate Partial (record exists, downstream pending).
-        completion.Aggregate.Should().Be(JobAwareState.Partial);
+        // profile-analysis now runs INLINE under OBO and succeeded → terminal Completed → the record
+        // lands as a complete DMS record and the aggregate reaches full Completed.
+        StateOf(completion, ComposeService.StepProfileAnalysis).Should().Be(JobAwareState.Completed);
+        completion.Aggregate.Should().Be(JobAwareState.Completed);
         ComposeService.IsInterimCreateOnSaveSuccess(completion).Should().BeTrue();
     }
 
-    // ── Acceptance (Fork C, compose-r2): profile-analysis ENQUEUES a background profile job ─────
+    // ── Acceptance (Fork C, compose-r2, UAT #7b): profile runs INLINE under OBO for the created doc ─
     [Fact]
-    public async Task SaveAsync_TransientDraft_EnqueuesProfileJobForCreatedDocument()
+    public async Task SaveAsync_TransientDraft_ProfilesCreatedDocumentUnderOboInline()
     {
         ArrangeContainerCreate();
         var recordId = Guid.NewGuid();
         ArrangeNoExistingRecordThenCreate(recordId);
         ArrangeIndexing(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
 
-        JobContract? submitted = null;
-        _jobSubmission
-            .Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
-            .Callback<JobContract, CancellationToken>((j, _) => submitted = j)
-            .Returns(Task.CompletedTask);
+        Guid? profiledDocId = null;
+        HttpContext? profiledCtx = null;
+        _documentProfile
+            .Setup(p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, HttpContext, CancellationToken>((id, ctx, _) => { profiledDocId = id; profiledCtx = ctx; })
+            .ReturnsAsync(DocumentProfileOutcome.Succeeded());
 
         var sut = CreateSut();
+        var httpContext = new DefaultHttpContext();
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
@@ -209,37 +214,35 @@ public sealed class ComposeServiceCreateOnSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, httpContext, CancellationToken.None);
 
-        // The SAME AppOnlyDocumentAnalysis job the Office save path enqueues — keyed to the created
-        // sprk_document id, idempotency analysis-{docId}-documentprofile, so the app-only/MI worker
-        // resolves the SPE pointers from Dataverse and profiles the file.
-        _jobSubmission.Verify(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()), Times.Once);
-        submitted.Should().NotBeNull();
-        submitted!.JobType.Should().Be(AppOnlyDocumentAnalysisJobHandler.JobTypeName);
-        submitted.SubjectId.Should().Be(recordId.ToString());
-        submitted.IdempotencyKey.Should().Be($"analysis-{recordId}-documentprofile");
-        submitted.Payload!.RootElement.GetProperty("DocumentId").GetGuid().Should().Be(recordId);
+        // The facade is invoked once, for the newly-created sprk_document, in the OBO request scope
+        // (same HttpContext the save runs under) — this is what lets it download the user-written file
+        // that a background MI job would 403 on.
+        _documentProfile.Verify(
+            p => p.ProfileDocumentAsUserAsync(recordId, httpContext, It.IsAny<CancellationToken>()),
+            Times.Once);
+        profiledDocId.Should().Be(recordId);
+        profiledCtx.Should().BeSameAs(httpContext);
 
-        // The profile step is non-terminal (Queued — enqueued, worker not yet run); aggregate stays Partial.
+        // Success → terminal Completed profile step → aggregate Completed.
         var profile = result.CompletionState!.Steps.Single(s => s.StepName == ComposeService.StepProfileAnalysis);
-        profile.State.Should().Be(JobAwareState.Queued);
-        profile.Detail.Should().Contain("enqueued");
-        result.CompletionState!.Aggregate.Should().Be(JobAwareState.Partial);
+        profile.State.Should().Be(JobAwareState.Completed);
+        result.CompletionState!.Aggregate.Should().Be(JobAwareState.Completed);
     }
 
-    // ── Acceptance (best-effort): a profile-enqueue failure NEVER fails the save ────────────────
+    // ── Acceptance (best-effort): a profiling failure NEVER fails the save ──────────────────────
     [Fact]
-    public async Task SaveAsync_WhenProfileEnqueueThrows_SaveStillSucceeds_ProfileNonTerminal()
+    public async Task SaveAsync_WhenProfilingThrows_SaveStillSucceeds_ProfileNonTerminal()
     {
         ArrangeContainerCreate();
         var recordId = Guid.NewGuid();
         ArrangeNoExistingRecordThenCreate(recordId);
         ArrangeIndexing(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
 
-        _jobSubmission
-            .Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Service Bus unavailable"));
+        _documentProfile
+            .Setup(p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("OBO exchange failed"));
 
         var sut = CreateSut();
         var request = new SaveComposeDocumentRequest
@@ -253,11 +256,45 @@ public sealed class ComposeServiceCreateOnSaveTests
 
         var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
 
-        // Save is unaffected: record created + indexed → interim success; profile degrades to Queued.
+        // Save is unaffected: record created + indexed → interim success; profile degrades to a
+        // non-terminal step (never terminal Failed — profiling is best-effort, must not fail the save).
         result.DocumentRecordId.Should().Be(recordId);
         var profile = result.CompletionState!.Steps.Single(s => s.StepName == ComposeService.StepProfileAnalysis);
         profile.State.Should().Be(JobAwareState.Queued);
-        profile.Detail.Should().Contain("failed");
+        profile.Detail.Should().Contain("threw");
+        result.CompletionState!.Aggregate.Should().NotBe(JobAwareState.Failed);
+        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+    }
+
+    // ── Acceptance (best-effort): a profiling skip/failure result degrades gracefully ───────────
+    [Fact]
+    public async Task SaveAsync_WhenProfilingReportsFailure_SaveStillSucceeds_ProfileNonTerminal()
+    {
+        ArrangeContainerCreate();
+        var recordId = Guid.NewGuid();
+        ArrangeNoExistingRecordThenCreate(recordId);
+        ArrangeIndexing(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        _documentProfile
+            .Setup(p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DocumentProfileOutcome.Failed("OBO SPE download returned null"));
+
+        var sut = CreateSut();
+        var request = new SaveComposeDocumentRequest
+        {
+            DocumentSpeId = null,
+            ContainerId = ContainerId,
+            Content = DocxBytes(),
+            SessionId = Guid.NewGuid().ToString(),
+            TenantId = Tenant,
+        };
+
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        var profile = result.CompletionState!.Steps.Single(s => s.StepName == ComposeService.StepProfileAnalysis);
+        profile.State.Should().Be(JobAwareState.Queued, "a best-effort profile miss is non-terminal, never Failed");
+        profile.Detail.Should().Contain("best-effort");
+        result.CompletionState!.Aggregate.Should().NotBe(JobAwareState.Failed);
         ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
     }
 

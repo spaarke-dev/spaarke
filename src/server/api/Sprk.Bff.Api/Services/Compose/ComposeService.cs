@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Xrm.Sdk;
@@ -10,7 +9,6 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
-using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Jobs;
 
@@ -85,16 +83,18 @@ public class ComposeService : IComposeService
     private readonly IPostUploadIndexingEnqueuer _indexing;
     private readonly ILogger<ComposeService> _logger;
     private readonly ComposePushSaveStatusStore? _pushSaveStatusStore;
-    // FR-05 Fork C (compose-r2): the ADR-013-safe profile seam is the Service-Bus job ENQUEUE
-    // — the SAME AppOnlyDocumentAnalysis job the Office-Add-in save path enqueues via
-    // UploadFinalizationWorker.QueueNextStageAsync. ComposeService injects ONLY the generic
-    // JobSubmissionService (Services/Jobs — NOT an AI-internal type; no IOpenAiClient /
-    // IPlaybookService / IAppOnlyAnalysisService reach). The background ProfileSummary/AppOnly
-    // worker runs app-only/MI and reads the doc's SPE pointers (sprk_graphdriveid +
-    // sprk_graphitemid, set on the promoted record) from Dataverse to fetch + profile the file.
-    // Optional + defaults null (same rationale as _pushSaveStatusStore below) so existing 6-arg
-    // test constructors keep compiling; DI resolves the real singleton in every non-test host.
-    private readonly JobSubmissionService? _jobSubmission;
+    // FR-05 Fork C (compose-r2, UAT #7b): the ADR-013-safe profile seam is the OBO-capable
+    // IDocumentProfileAi facade (Services/Ai/PublicContracts). ComposeService injects ONLY this
+    // facade — NOT IAppOnlyAnalysisService / IOpenAiClient / IPlaybookService / IConsumerRoutingService
+    // (ADR013_ComposeFacadeTests). The facade downloads the user-OBO-written SPE file UNDER OBO
+    // (the same identity + SPE call the RAG indexing step already uses — MI 403s on it) and reuses
+    // the existing extract → classify → summarize → field-map → UpdateDocumentAsync pipeline
+    // unchanged. Runs INLINE in the request scope (best-effort, non-blocking), exactly like indexing;
+    // this REPLACES the round-6 AppOnlyDocumentAnalysis Service-Bus enqueue, which silently 403'd on
+    // the user-written file (the bug UAT #7b reported). Optional + defaults null (same rationale as
+    // _pushSaveStatusStore below) so existing 6-arg test constructors keep compiling; DI resolves the
+    // real scoped facade in every non-test host.
+    private readonly IDocumentProfileAi? _documentProfileAi;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -104,7 +104,7 @@ public class ComposeService : IComposeService
         IPostUploadIndexingEnqueuer indexing,
         ILogger<ComposeService> logger,
         IDistributedCache? cache = null,
-        JobSubmissionService? jobSubmission = null)
+        IDocumentProfileAi? documentProfileAi = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -112,7 +112,7 @@ public class ComposeService : IComposeService
         _annotationWriter = annotationWriter;
         _indexing = indexing;
         _logger = logger;
-        _jobSubmission = jobSubmission;
+        _documentProfileAi = documentProfileAi;
         // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
         // Optional + defaults null so existing 6-arg test constructors (sibling task suites
         // 013/050/060/062/102) keep compiling unchanged; DI (AddScoped<IComposeService,
@@ -428,19 +428,23 @@ public class ComposeService : IComposeService
             .ConfigureAwait(false);
 
         // ────────────────────────────────────────────────────────────────────────────
-        // STEP 3 — profile-analysis (FR-05 Fork C, compose-r2). The promoted sprk_document now
-        // carries sprk_hasfile=true + sprk_graphdriveid (+ sprk_graphitemid), so the app-only MI
-        // worker CAN fetch + profile the file. ENQUEUE the same AppOnlyDocumentAnalysis job the
-        // Office save path enqueues (UploadFinalizationWorker.QueueNextStageAsync) — best-effort,
-        // fire-and-forget: the synchronous save is NEVER blocked on profiling, and an enqueue
-        // failure degrades to a non-terminal (Queued) profile step, never poisoning the save
-        // aggregate. Idempotency (analysis-{docId}-documentprofile) dedups re-saves at the worker.
+        // STEP 3 — profile-analysis (FR-05 Fork C, compose-r2, UAT #7b). The Compose user wrote the
+        // file, so profiling MUST run inline in the OBO request scope (Pattern 4) — exactly like
+        // indexing above. A background AppOnlyDocumentAnalysis (MI) job would 403 on the download
+        // (that was the round-6 bug: profile fields silently never populated). The OBO-capable
+        // IDocumentProfileAi facade downloads the file as the user and reuses the existing
+        // extract → classify → summarize → field-map → UpdateDocumentAsync pipeline unchanged.
+        // Best-effort: it never throws (swallowed + logged), so the save is NEVER blocked or failed
+        // by profiling; a failure/skip degrades to a non-terminal profile step, never poisoning the
+        // save aggregate. On success the step is terminal Completed → the record lands as a complete
+        // DMS record (aggregate can reach Completed once container + record + indexing + profile all
+        // succeed).
         // ────────────────────────────────────────────────────────────────────────────
         var profileSignal = promotion.DocumentRecordId.HasValue
-            ? await EnqueueProfileAnalysisAsync(
-                    promotion.DocumentRecordId.Value, httpContext.TraceIdentifier, cancellationToken)
+            ? await ProfileDocumentAsync(
+                    promotion.DocumentRecordId.Value, httpContext, cancellationToken)
                 .ConfigureAwait(false)
-            : ProfileNotAttemptedSignal("no sprk_document record id resolved — profile not enqueued");
+            : ProfileNotAttemptedSignal("no sprk_document record id resolved — profile not attempted");
 
         // ────────────────────────────────────────────────────────────────────────────
         // Project per-step states (container → record → profile-analysis[enqueued] → indexing)
@@ -619,21 +623,22 @@ public class ComposeService : IComposeService
     // FR-05 create-on-save backbone — helpers (per-step job-aware projection).
     //
     // The four steps container → record → profile-analysis → indexing are projected through the
-    // shared JobAwareCompletionStateProjector (store-before-render, ADR-040). profile-analysis is
-    // DEFERRED: the only profile seam (IAppOnlyAnalysisService) trips the ADR-013 NetArchTest
-    // facade rule AND runs under MI (which 403s on the OBO-written file). Core owns the
-    // Services/Ai/PublicContracts/IDocumentProfileAi facade (redesign-r2, notes/HANDOFF-…). Until
-    // it ships, profile emits a non-terminal deferred state and the aggregate stays Partial on the
-    // happy path — record exists + indexed, downstream profile pending (the ingestion-parity signal).
+    // shared JobAwareCompletionStateProjector (store-before-render, ADR-040). profile-analysis now
+    // runs INLINE under OBO via the ADR-013-safe IDocumentProfileAi facade (compose-r2, UAT #7b) —
+    // the same request-scope OBO pattern indexing uses, because a background MI job 403s on the
+    // user-OBO-written file. On success profile is terminal Completed; on failure/skip it degrades to
+    // a non-terminal signal so the aggregate never reads Failed on a best-effort profile miss.
     // =========================================================================
 
     /// <summary>
     /// The interim R5-E success bar for FR-05 create-on-save (documented exception, 2026-07-09):
-    /// a record is interim-successful ONLY when the <c>container</c>, <c>record</c>, AND
-    /// <c>indexing</c> steps all reached terminal success — a record with no SPE file OR no index
-    /// is NEVER a success. <c>profile-analysis</c> is excluded (deferred to core's
-    /// <c>IDocumentProfileAi</c>); the FULL R5-E bar (aggregate == <see cref="JobAwareState.Completed"/>,
-    /// which requires profile too) is restored when core ships the facade.
+    /// a record is interim-successful when the <c>container</c>, <c>record</c>, AND <c>indexing</c>
+    /// steps all reached terminal success — a record with no SPE file OR no index is NEVER a success.
+    /// <c>profile-analysis</c> is intentionally EXCLUDED from this bar so a best-effort profile miss
+    /// never demotes an otherwise-good save; the FULL success bar (aggregate ==
+    /// <see cref="JobAwareState.Completed"/>) is reached when profile also lands terminal-success,
+    /// which the inline OBO profile path (<see cref="IDocumentProfileAi"/>) now achieves on the happy
+    /// path.
     /// </summary>
     public static bool IsInterimCreateOnSaveSuccess(JobAwareCompletionState state)
     {
@@ -664,82 +669,79 @@ public class ComposeService : IComposeService
     };
 
     /// <summary>
-    /// FR-05 Fork C (compose-r2): enqueues the background document-profile job for a newly-created
-    /// (or idempotently-resolved) <c>sprk_document</c> and returns the resulting profile-analysis
-    /// step signal. This is the SAME <see cref="AppOnlyDocumentAnalysisJobHandler"/> job the Office
-    /// save path enqueues (see <c>UploadFinalizationWorker.QueueNextStageAsync</c>) — the doc's SPE
-    /// pointers (<c>sprk_graphdriveid</c> + <c>sprk_graphitemid</c>) let the app-only/MI worker
-    /// fetch + profile the file; only the <c>DocumentId</c> travels in the payload (the worker
-    /// resolves the rest from Dataverse, exactly as the Office path does).
+    /// FR-05 Fork C (compose-r2, UAT #7b): profiles a newly-created (or idempotently-resolved)
+    /// <c>sprk_document</c> INLINE under the caller's OBO identity via the ADR-013-safe
+    /// <see cref="IDocumentProfileAi"/> facade, and returns the resulting profile-analysis step
+    /// signal. The facade downloads the user-OBO-written SPE file as the user (a background MI job
+    /// would 403 — the round-6 bug) and reuses the existing extract → classify → summarize →
+    /// field-map → UpdateDocumentAsync pipeline. Mirrors the inline-OBO indexing step above.
     /// </summary>
     /// <remarks>
-    /// Best-effort by design: a null enqueuer (test host) or a Service-Bus failure returns a
-    /// NON-terminal (Queued) signal with a diagnostic detail, never a terminal Failed — the
-    /// synchronous save is not blocked on profiling and its aggregate is never poisoned by a
-    /// profile-enqueue miss (idempotency <c>analysis-{docId}-documentprofile</c> lets the next save
-    /// re-enqueue). ADR-013: this method injects NO AI-internal type; it submits a job and the
-    /// background worker does the AI.
+    /// Best-effort by design: a null facade (test host) or any profiling failure returns a
+    /// NON-terminal signal with a diagnostic detail, never a terminal Failed — the synchronous save
+    /// is not blocked on profiling and its aggregate is never demoted to Failed by a profile miss.
+    /// The facade itself never throws (swallows + logs); the extra try/catch here is belt-and-braces.
+    /// ADR-013: this method injects NO AI-internal type — it calls the PublicContracts facade only.
     /// </remarks>
-    private async Task<StoredStepSignal> EnqueueProfileAnalysisAsync(
-        Guid documentId, string correlationId, CancellationToken cancellationToken)
+    private async Task<StoredStepSignal> ProfileDocumentAsync(
+        Guid documentId, HttpContext httpContext, CancellationToken cancellationToken)
     {
-        if (_jobSubmission is null)
+        if (_documentProfileAi is null)
         {
             return ProfileNotAttemptedSignal(
-                "profile enqueuer unavailable (no JobSubmissionService injected) — profile not enqueued");
+                "profile facade unavailable (no IDocumentProfileAi injected) — profile not attempted");
         }
-
-        var idempotencyKey = $"analysis-{documentId}-documentprofile";
-        var job = new JobContract
-        {
-            JobId = Guid.NewGuid(),
-            JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
-            SubjectId = documentId.ToString(),
-            CorrelationId = string.IsNullOrWhiteSpace(correlationId) ? Guid.NewGuid().ToString() : correlationId,
-            IdempotencyKey = idempotencyKey,
-            Attempt = 1,
-            MaxAttempts = 3,
-            CreatedAt = DateTimeOffset.UtcNow,
-            Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
-            {
-                DocumentId = documentId,
-                Source = "ComposeCreateOnSave",
-                EnqueuedAt = DateTimeOffset.UtcNow,
-            })),
-        };
 
         try
         {
-            await _jobSubmission.SubmitJobAsync(job, cancellationToken).ConfigureAwait(false);
+            var result = await _documentProfileAi
+                .ProfileDocumentAsUserAsync(documentId, httpContext, cancellationToken)
+                .ConfigureAwait(false);
 
             _logger.LogInformation(
-                "Compose create-on-save: enqueued {JobType} profile job {JobId} for document {DocumentId} (idempotency {IdempotencyKey})",
-                AppOnlyDocumentAnalysisJobHandler.JobTypeName, job.JobId, documentId, idempotencyKey);
+                "Compose create-on-save: OBO profile for document {DocumentId} — success={Success} " +
+                "(failure={Failure} skip={Skip})",
+                documentId, result.Success, result.FailureReason ?? "(none)", result.SkipReason ?? "(none)");
 
-            // Enqueued, not yet picked up by the worker → Started=false, no stored outcome → Queued.
-            return new StoredStepSignal
-            {
-                StepName = StepProfileAnalysis,
-                StoredStatus = null,
-                Started = false,
-                Detail = $"enqueued: {AppOnlyDocumentAnalysisJobHandler.JobTypeName} job {job.JobId} " +
-                         $"submitted for document {documentId} (background app-only/MI profiling; idempotency {idempotencyKey})",
-            };
+            return ProfileSignal(result);
         }
         catch (Exception ex)
         {
-            // Best-effort: log + degrade to a non-terminal signal. The save has already succeeded on
-            // its own terms (SPE + record + indexing); profiling re-enqueues on the next save.
+            // Belt-and-braces: the facade already swallows, but never let profiling fail the save.
             _logger.LogWarning(ex,
-                "Compose create-on-save: failed to enqueue profile job for document {DocumentId} — best-effort, save unaffected; will retry on next save.",
+                "Compose create-on-save: OBO profile threw for document {DocumentId} — best-effort, save unaffected.",
                 documentId);
-            return ProfileNotAttemptedSignal($"profile enqueue failed (best-effort; retries on next save): {ex.Message}");
+            return ProfileNotAttemptedSignal($"profile threw (best-effort; save unaffected): {ex.Message}");
         }
     }
 
-    /// <summary>A non-terminal (Queued) profile-analysis signal for when the profile job was NOT
-    /// enqueued (container/record step never produced a record, no enqueuer, or a best-effort
-    /// enqueue failure). Non-terminal so it never poisons the create-on-save aggregate.</summary>
+    /// <summary>Maps the OBO profile outcome to a stored step signal: success → terminal Completed
+    /// (the profile fields were written — a complete DMS record); failure/skip → non-terminal (no
+    /// stored outcome) so a best-effort profile miss never demotes the create-on-save aggregate to
+    /// Failed. Mirrors <see cref="IndexingSignal"/>'s success mapping, but treats a profile miss as
+    /// non-terminal rather than terminal-Failed because profiling is explicitly best-effort.</summary>
+    private static StoredStepSignal ProfileSignal(DocumentProfileOutcome result)
+    {
+        if (result.Success)
+        {
+            return new StoredStepSignal { StepName = StepProfileAnalysis, StoredStatus = JobStatus.Completed, Started = true };
+        }
+
+        var detail = result.FailureReason is not null
+            ? $"profile failed (best-effort; save unaffected): {result.FailureReason}"
+            : $"profile skipped: {result.SkipReason}";
+        return new StoredStepSignal
+        {
+            StepName = StepProfileAnalysis,
+            StoredStatus = null,
+            Started = false,
+            Detail = detail,
+        };
+    }
+
+    /// <summary>A non-terminal profile-analysis signal for when the profile was NOT attempted
+    /// (container/record step never produced a record, or no facade injected). Non-terminal so it
+    /// never poisons the create-on-save aggregate.</summary>
     private static StoredStepSignal ProfileNotAttemptedSignal(string detail) => new()
     {
         StepName = StepProfileAnalysis,
