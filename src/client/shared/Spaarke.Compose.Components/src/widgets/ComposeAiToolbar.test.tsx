@@ -231,6 +231,57 @@ describe('ComposeAiToolbar — task 111 layout fix (single Toolbar + divider con
 });
 
 // ---------------------------------------------------------------------------
+// 1c. FIX #9 (UAT) — bubble restyle: icons-only, elevated grey surface,
+//     vertical overflow, tooltip names.
+// ---------------------------------------------------------------------------
+
+describe('ComposeAiToolbar — FIX #9 bubble restyle', () => {
+  it('primary action buttons + Email + overflow are ICON-ONLY (no tool WORDS on the bubble)', () => {
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    renderToolbar({ editor });
+    const toolbar = screen.getByTestId('compose-ai-toolbar');
+
+    // No visible label text on the primary buttons (icon-only). The names live in
+    // the hover Tooltip + aria-label, not as button text.
+    expect(within(toolbar).queryByText('Explain')).not.toBeInTheDocument();
+    expect(within(toolbar).queryByText('Compare to playbook')).not.toBeInTheDocument();
+    expect(within(toolbar).queryByText('Draft alternative')).not.toBeInTheDocument();
+    expect(within(toolbar).queryByText('Email')).not.toBeInTheDocument();
+
+    // Each still renders its icon (an svg) and keeps its accessible name.
+    const explain = screen.getByTestId('compose-ai-toolbar-compose-explain-clause');
+    expect(explain.querySelector('svg')).not.toBeNull();
+    expect(explain.textContent).toBe('');
+    expect(screen.getByLabelText('Explain')).toBeInTheDocument();
+    expect(screen.getByLabelText('Email')).toBeInTheDocument();
+    // Overflow trigger renders an icon (vertical three-dots) with no text.
+    const more = screen.getByTestId('compose-ai-toolbar-more');
+    expect(more.querySelector('svg')).not.toBeNull();
+    expect(more.textContent).toBe('');
+  });
+
+  it('the bubble Toolbar carries a full-width elevated surface (background + shadow) so it spans all items', () => {
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    renderToolbar({ editor });
+    const toolbar = screen.getByTestId('compose-ai-toolbar');
+    const style = getComputedStyle(toolbar);
+    // Griffel-injected (real CSS, not a class-name guess): the elevated surface now
+    // lives on the Toolbar itself (FIX #9) — a background + a shadow are present.
+    expect(style.backgroundColor).not.toBe('');
+    expect(style.boxShadow).not.toBe('');
+  });
+
+  it('hovering a primary button surfaces a Tooltip naming the tool', async () => {
+    const user = userEvent.setup();
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    renderToolbar({ editor });
+
+    await user.hover(screen.getByTestId('compose-ai-toolbar-compose-explain-clause'));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Explain');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 2. Dark mode (ADR-021) — semantic tokens, no hardcoded hex
 // ---------------------------------------------------------------------------
 

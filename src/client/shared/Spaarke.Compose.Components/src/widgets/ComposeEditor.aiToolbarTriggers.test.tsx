@@ -84,23 +84,32 @@ function getEditorInstance(container: HTMLElement): Editor {
   return dom.editor;
 }
 
-describe('ComposeEditor — top formatting toolbar owns the relocated inline controls (task 111)', () => {
-  it('renders the persistent ComposeFormatToolbar with block controls AND the relocated Bold/Italic/Underline/Strikethrough/Link', async () => {
-    const { container } = renderComposeEditor();
+describe('ComposeEditor — consolidated single-row ComposeFormatToolbar (FIX #5)', () => {
+  it('renders the labelled dropdown triggers (Body / Paragraph / Font) + always-visible Undo/Redo', async () => {
+    renderComposeEditor();
     await screen.findByRole('textbox'); // editor mounted
 
     const formatToolbar = screen.getByTestId('compose-format-toolbar');
     expect(formatToolbar).toBeInTheDocument();
-    // Existing block controls (no regression).
-    expect(within(formatToolbar).getByTestId('compose-format-bullet-list')).toBeInTheDocument();
+    // FIX #5: block + character controls are now grouped behind dropdowns; the
+    // row shows the labelled triggers + right-aligned Undo/Redo.
+    expect(within(formatToolbar).getByTestId('compose-format-heading-menu')).toBeInTheDocument();
+    expect(within(formatToolbar).getByTestId('compose-format-paragraph-menu')).toBeInTheDocument();
+    expect(within(formatToolbar).getByTestId('compose-format-font-menu')).toBeInTheDocument();
     expect(within(formatToolbar).getByTestId('compose-format-undo')).toBeInTheDocument();
-    // Relocated inline character-format controls — now fully reachable from the
-    // top toolbar (owner decision; task 111).
-    expect(within(formatToolbar).getByTestId('compose-format-bold')).toBeInTheDocument();
-    expect(within(formatToolbar).getByTestId('compose-format-italic')).toBeInTheDocument();
-    expect(within(formatToolbar).getByTestId('compose-format-underline')).toBeInTheDocument();
-    expect(within(formatToolbar).getByTestId('compose-format-strike')).toBeInTheDocument();
-    expect(within(formatToolbar).getByTestId('compose-format-link')).toBeInTheDocument();
+  });
+
+  it('the Font dropdown still exposes the relocated Bold/Italic/Underline/Strikethrough/Link controls', async () => {
+    renderComposeEditor();
+    await screen.findByRole('textbox');
+
+    fireEvent.click(screen.getByTestId('compose-format-font-menu'));
+
+    expect(await screen.findByTestId('compose-format-bold')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-italic')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-underline')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-strike')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-link')).toBeInTheDocument();
   });
 });
 

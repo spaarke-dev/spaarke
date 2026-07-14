@@ -81,7 +81,7 @@ import CharacterCount from '@tiptap/extension-character-count';
 import TextAlign from '@tiptap/extension-text-align';
 
 import { makeStyles, mergeClasses, tokens, Spinner, Text, Button } from '@fluentui/react-components';
-import { Checkmark16Regular, Dismiss16Regular, DocumentProhibited24Regular } from '@fluentui/react-icons';
+import { ArrowDown20Regular, Checkmark16Regular, Dismiss16Regular, DocumentProhibited24Regular } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
 import { InsertionMark } from './marks/InsertionMark';
@@ -379,6 +379,34 @@ export interface ComposeEditorProps {
    * host's serial queue. Optional — see `ComposeActionEnqueue`.
    */
   enqueueComposeAction?: ComposeActionEnqueue;
+
+  // ---------------------------------------------------------------------------
+  // FIX #5 (UAT) — Word + Save command handlers, forwarded to the consolidated
+  // ComposeFormatToolbar's "Word" dropdown + right-aligned Save button. The HOST
+  // (ComposeWorkspace) still OWNS the binding (Open-in-Word via `useDocumentActions`,
+  // Save via `triggerSave`, Push via the annotations shuttle) — the editor is a
+  // pure forwarder, so the shared lib stays decoupled from `@spaarke/document-operations`.
+  // All optional: the Word dropdown / Save button render only when their handlers
+  // are threaded (standalone/library mounts omit them).
+  // ---------------------------------------------------------------------------
+  /** Open the current document in Word for the Web. */
+  onOpenInWord?: () => void;
+  /** Open the current document in the Word desktop app. */
+  onOpenInWordDesktop?: () => void;
+  /** Render accepted annotations into the .docx as native Word track-changes + comments. */
+  onPushToWord?: () => void;
+  /** Disables the two Open-in-Word items (no persisted document, or an action in flight). */
+  wordActionsDisabled?: boolean;
+  /** True when there is something to push (persisted doc + ≥1 accepted annotation). */
+  canPushToWord?: boolean;
+  /** True while a push-to-Word is in flight. */
+  isPushingToWord?: boolean;
+  /** Save handler (create-on-save first Save, or update). Renders the Save button when set. */
+  onSave?: () => void;
+  /** True when Save should be enabled (unsaved edit OR unpersisted transient draft). */
+  canSave?: boolean;
+  /** True while a save is in flight. */
+  isSaving?: boolean;
 }
 
 /**
@@ -515,9 +543,26 @@ const useStyles = makeStyles({
     boxSizing: 'border-box',
     overflow: 'hidden',
   },
+  // FIX #9 — the scroll region that wraps the editor surface + the floating
+  // "scroll for more" FAB. `position: relative` anchors the absolutely-positioned
+  // FAB; it does NOT itself scroll (the inner `editorSurface` does).
+  editorScrollWrap: {
+    position: 'relative',
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
   editorSurface: {
     flex: 1,
     overflow: 'auto',
+    // FIX #9 — hide the native scrollbar while remaining scrollable. The floating
+    // down-arrow FAB is the progressive-scroll affordance instead of a visible
+    // scrollbar. Layout/visibility only (no color) — ADR-021-neutral.
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': {
+      display: 'none',
+    },
     padding: tokens.spacingHorizontalL,
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
@@ -641,6 +686,29 @@ const useStyles = makeStyles({
   contextMenuPopup: {
     position: 'fixed',
     zIndex: 1000,
+  },
+  // FIX #9 — layout-only wrapper for the AI selection bubble + right-click popup.
+  // The elevated light-grey SURFACE (background + shadow + radius) now lives on
+  // `ComposeAiToolbar`'s own Toolbar so it spans the whole menu (was previously on
+  // `bubbleMenu`, which produced the partial-background UAT finding). This wrapper
+  // only positions/sizes the popup; it carries no surface of its own so there is
+  // no double background. (`bubbleMenu` below is retained for the redline
+  // accept/reject popover, whose buttons still need a surface.)
+  aiBubbleWrap: {
+    display: 'flex',
+    alignItems: 'center',
+    maxWidth: '100vw',
+  },
+  // FIX #9 — floating circular "scroll for more" button, pinned bottom-center of
+  // the editor scroll region. Elevated (shadow) so it reads above the page; shown
+  // only when the surface is not scrolled to the bottom. Semantic tokens only.
+  scrollDownFab: {
+    position: 'absolute',
+    bottom: tokens.spacingVerticalL,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: 2,
+    boxShadow: tokens.shadow16,
   },
   // DEF-12 — label inside the per-change on-click accept/reject popover (task 033/FR-16 rationale
   // shown truncated, Tier-3-safe). Semantic tokens only (ADR-021 dark-mode-correct). The former
@@ -831,6 +899,15 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onDirtyChange,
       onImportWarnings,
       enqueueComposeAction,
+      onOpenInWord,
+      onOpenInWordDesktop,
+      onPushToWord,
+      wordActionsDisabled,
+      canPushToWord,
+      isPushingToWord,
+      onSave,
+      canSave,
+      isSaving,
     } = props;
 
     const styles = useStyles();
@@ -859,6 +936,25 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // is NO selection (a caret / point-insertion), per task 111 requirement 2.
     const [contextMenuAnchor, setContextMenuAnchor] = React.useState<{ x: number; y: number } | null>(null);
     const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
+
+    // ----- FIX #9 — hidden-scrollbar editor surface + "scroll for more" FAB ----
+    // The editor scroll region hides its native scrollbar (see `editorSurface`
+    // style: `scrollbarWidth: none` + `::-webkit-scrollbar { display: none }`)
+    // while staying scrollable (`overflow: auto`). To keep the "there is more
+    // below" affordance a docx editor needs, a floating circular down-arrow button
+    // appears at the bottom whenever the surface is NOT scrolled to the end; it
+    // scrolls the content down one viewport-ish on click. (This is the
+    // progressive-scroll interpretation of the UAT "lazy load" note — a docx
+    // editor loads its whole document into ProseMirror; there is no paged data to
+    // lazily fetch, so the affordance is a scroll cue, not a data pager.)
+    const editorScrollRef = React.useRef<HTMLDivElement | null>(null);
+    const [showScrollDown, setShowScrollDown] = React.useState<boolean>(false);
+
+    const scrollEditorDown = React.useCallback((): void => {
+      const el = editorScrollRef.current;
+      if (!el) return;
+      el.scrollBy({ top: Math.round(el.clientHeight * 0.8), behavior: 'smooth' });
+    }, []);
 
     // ----- DEF-12 — per-change on-click accept/reject affordance ------------
     // The cramped fixed `compose-redline-controls` bar (scroll-hidden, no reason-wrap) was REMOVED
@@ -1082,6 +1178,33 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // ----- FR-35 Doc Q&A ephemeral highlight (task 072, stretch) -----------
     const qaHighlight = useDocQaHighlight(editor);
 
+    // ----- FIX #9 — track whether the editor surface has more content below ---
+    // Show the down-arrow FAB only when NOT scrolled to the bottom. Re-measure on
+    // scroll, on content-size changes (ResizeObserver — guarded for jsdom), and on
+    // editor transactions (typing/import grows the doc). A small epsilon avoids a
+    // flickering button at the exact bottom.
+    React.useEffect(() => {
+      const el = editorScrollRef.current;
+      if (!el) return;
+      const measure = (): void => {
+        const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+        setShowScrollDown(remaining > 8);
+      };
+      measure();
+      el.addEventListener('scroll', measure, { passive: true });
+      let ro: ResizeObserver | undefined;
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(measure);
+        ro.observe(el);
+      }
+      if (editor) editor.on('transaction', measure);
+      return () => {
+        el.removeEventListener('scroll', measure);
+        ro?.disconnect();
+        if (editor) editor.off('transaction', measure);
+      };
+    }, [editor, referenceOnly, isImporting]);
+
     // ----- Imperative handle ----------------------------------------------
     React.useImperativeHandle(
       ref,
@@ -1196,9 +1319,21 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             they are ONLY reachable via the selection-triggered AI-actions
             popup's host, the BubbleMenu below, which task 111 made AI-actions
             ONLY — this is a known, flagged trade-off, not a silent removal). */}
-        <ComposeFormatToolbar editor={editor} disabled={isImporting} />
+        <ComposeFormatToolbar
+          editor={editor}
+          disabled={isImporting}
+          onOpenInWord={onOpenInWord}
+          onOpenInWordDesktop={onOpenInWordDesktop}
+          onPushToWord={onPushToWord}
+          wordActionsDisabled={wordActionsDisabled}
+          canPushToWord={canPushToWord}
+          isPushingToWord={isPushingToWord}
+          onSave={onSave}
+          canSave={canSave}
+          isSaving={isSaving}
+        />
         {editor ? (
-          <BubbleMenu editor={editor} tippyOptions={{ duration: 100, placement: 'top' }} className={styles.bubbleMenu}>
+          <BubbleMenu editor={editor} tippyOptions={{ duration: 100, placement: 'top' }} className={styles.aiBubbleWrap}>
             {/* ===================================================================
                 AI TOOLBAR MOUNT — task 030 (FR-14), AI-actions-ONLY per task 111
                 (UAT-R2 layout fix): the sibling formatting Toolbar that used to
@@ -1232,7 +1367,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         {contextMenuAnchor ? (
           <div
             ref={contextMenuRef}
-            className={mergeClasses(styles.bubbleMenu, styles.contextMenuPopup)}
+            className={mergeClasses(styles.aiBubbleWrap, styles.contextMenuPopup)}
             style={{ left: contextMenuAnchor.x, top: contextMenuAnchor.y }}
             data-testid="compose-ai-context-menu"
           >
@@ -1341,7 +1476,28 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             <Text size={200}>Importing document…</Text>
           </div>
         ) : null}
-        <EditorContent editor={editor} className={styles.editorSurface} />
+        {/* FIX #9 — scroll region: native scrollbar hidden (see `editorSurface`
+            style), with a floating circular down-arrow FAB that appears only when
+            more content sits below the fold and scrolls the surface down on click.
+            The FAB is a sibling of the scroller (not inside it) so it stays pinned
+            at the bottom instead of scrolling away with the content. */}
+        <div className={styles.editorScrollWrap}>
+          <div ref={editorScrollRef} className={styles.editorSurface} data-testid="compose-editor-surface">
+            <EditorContent editor={editor} />
+          </div>
+          {showScrollDown ? (
+            <Button
+              appearance="primary"
+              shape="circular"
+              size="large"
+              className={styles.scrollDownFab}
+              icon={<ArrowDown20Regular />}
+              aria-label="Scroll down for more"
+              onClick={scrollEditorDown}
+              data-testid="compose-editor-scroll-down"
+            />
+          ) : null}
+        </div>
       </div>
     );
   }

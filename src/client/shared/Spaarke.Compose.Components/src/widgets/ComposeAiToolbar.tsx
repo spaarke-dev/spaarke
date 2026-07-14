@@ -125,7 +125,7 @@ import {
   Info24Regular,
   ArrowSwapRegular,
   DocumentEdit24Regular,
-  MoreHorizontal20Regular,
+  MoreVertical20Regular,
   Mail24Regular,
   Open24Regular,
   Send24Regular,
@@ -410,19 +410,30 @@ export interface ComposeAiToolbarProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  // DEF-17 (UAT-R3): the inline AI bubble must render on ONE line. `flexWrap:
-  // 'nowrap'` (superseding task 111's `'wrap'`) keeps the primary buttons +
-  // in-context divider + overflow (⋯) trigger on a single row; any action that
-  // does not fit belongs in the "More actions…" overflow menu (placement:
-  // 'overflow'), NOT on a second wrapped row. This is also the extension seam
-  // for DEF-18 (a later task adding 1-3 non-AI functions): register them with
-  // `placement: 'overflow'` and they land in the ⋯ menu with zero layout
-  // change; promote at most a couple to `placement: 'primary'` only if the
-  // popup width comfortably holds them. `whiteSpace: 'nowrap'` guards against a
-  // multi-word label (e.g. "Compare to playbook") wrapping inside its button.
+  // DEF-17 (UAT-R3): the inline AI bubble renders on ONE line. `flexWrap: 'nowrap'`
+  // keeps the primary buttons + in-context divider + overflow (⋯) trigger on a
+  // single row; any action that does not fit belongs in the "More actions…"
+  // overflow menu (placement: 'overflow'), NOT on a second wrapped row.
+  //
+  // FIX #9 (UAT): the elevated SURFACE now lives on THIS Toolbar (previously on
+  // ComposeEditor's `bubbleMenu` wrapper, which produced the partial-background
+  // finding). Putting the background + shadow on the Toolbar makes it span the
+  // WHOLE menu — every item sits on the one surface. A light-grey elevated neutral
+  // (`colorNeutralBackground3`) reads clearly on the white page and stays legible
+  // in dark mode (the token flips); `shadow16` keeps the elevation. `columnGap`
+  // gives a comfortable, even spacing between the icon-only buttons — not cramped,
+  // not spread. Semantic tokens only (ADR-021 dark-mode-correct).
   toolbar: {
+    display: 'flex',
+    alignItems: 'center',
     flexWrap: 'nowrap',
     whiteSpace: 'nowrap',
+    columnGap: tokens.spacingHorizontalS,
+    backgroundColor: tokens.colorNeutralBackground3,
+    boxShadow: tokens.shadow16,
+    borderRadius: tokens.borderRadiusMedium,
+    paddingInline: tokens.spacingHorizontalS,
+    paddingBlock: tokens.spacingVerticalXS,
   },
 });
 
@@ -592,8 +603,10 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   // context (see file header "TASK 111" note).
   return (
     <Toolbar size="small" className={styles.toolbar} aria-label="AI actions" data-testid="compose-ai-toolbar">
+      {/* FIX #9 — ICON-ONLY primary buttons (the tool WORDS were removed); the
+          hover Tooltip names each tool. Names come from `action.label`. */}
       {primaryActions.map(action => (
-        <Tooltip key={action.id} content={action.tooltip} relationship="description" withArrow>
+        <Tooltip key={action.id} content={action.label} relationship="description" withArrow>
           <ToolbarButton
             appearance="subtle"
             icon={actionIcon(action.id)}
@@ -601,9 +614,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
             aria-label={action.label}
             data-testid={`compose-ai-toolbar-${action.id}`}
             onClick={() => handleActionClick(action)}
-          >
-            {action.label}
-          </ToolbarButton>
+          />
         </Tooltip>
       ))}
 
@@ -614,14 +625,14 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           the EmailStubWidget tab (see handleEmailAction). */}
       <Menu positioning="below-end">
         <MenuTrigger disableButtonEnhancement>
-          <ToolbarButton
-            appearance="subtle"
-            icon={<Mail24Regular />}
-            aria-label="Email"
-            data-testid="compose-ai-toolbar-email"
-          >
-            Email
-          </ToolbarButton>
+          <Tooltip content="Email" relationship="description" withArrow>
+            <ToolbarButton
+              appearance="subtle"
+              icon={<Mail24Regular />}
+              aria-label="Email"
+              data-testid="compose-ai-toolbar-email"
+            />
+          </Tooltip>
         </MenuTrigger>
         <MenuPopover>
           <MenuList>
@@ -647,12 +658,15 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
 
       <Menu positioning="below-end">
         <MenuTrigger disableButtonEnhancement>
-          <ToolbarButton
-            appearance="subtle"
-            icon={<MoreHorizontal20Regular />}
-            aria-label="More actions"
-            data-testid="compose-ai-toolbar-more"
-          />
+          <Tooltip content="More actions" relationship="description" withArrow>
+            <ToolbarButton
+              appearance="subtle"
+              // FIX #9 — VERTICAL three-dots overflow affordance.
+              icon={<MoreVertical20Regular />}
+              aria-label="More actions"
+              data-testid="compose-ai-toolbar-more"
+            />
+          </Tooltip>
         </MenuTrigger>
         <MenuPopover>
           <MenuList>

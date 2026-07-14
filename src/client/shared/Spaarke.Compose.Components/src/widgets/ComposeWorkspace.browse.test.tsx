@@ -79,12 +79,18 @@ jest.mock('./ComposeToolbar', () => ({
 // (redline) vs a misrouted INFORMATIONAL prose card (Wave 2 / UAT-R3 Test #3).
 const editorDocxBytes: { current: ArrayBuffer | null | undefined } = { current: undefined };
 const editorSessionId: { current: string | undefined } = { current: undefined };
+// FIX #5 (UAT): the standalone ComposeToolbar row was folded into the consolidated
+// ComposeFormatToolbar inside ComposeEditor; the workspace now threads Save state
+// (`canSave`) to ComposeEditor. Capture it here to assert the transient-draft
+// "first Save is reachable" signal that previously rode `ComposeToolbar.isDirty`.
+const editorCanSave: { current: boolean | undefined } = { current: undefined };
 jest.mock('./ComposeEditor', () => {
   const ReactLib = require('react');
   return {
-    ComposeEditor: ReactLib.forwardRef((props: { docxBytes: ArrayBuffer | null; sessionId?: string }, ref: React.Ref<unknown>) => {
+    ComposeEditor: ReactLib.forwardRef((props: { docxBytes: ArrayBuffer | null; sessionId?: string; canSave?: boolean }, ref: React.Ref<unknown>) => {
       editorDocxBytes.current = props.docxBytes;
       editorSessionId.current = props.sessionId;
+      editorCanSave.current = props.canSave;
       ReactLib.useImperativeHandle(ref, () => ({
         serialize: async () => new ArrayBuffer(0),
         getCounts: () => ({ characters: 0, words: 0 }),
@@ -134,6 +140,7 @@ beforeEach(() => {
   });
   editorDocxBytes.current = undefined;
   editorSessionId.current = undefined;
+  editorCanSave.current = undefined;
   toolbarProps.current = {};
 });
 
@@ -194,8 +201,11 @@ describe('ComposeWorkspace — FR-01 Browse transient mount', () => {
     const fileInput = screen.getByTestId('compose-workspace-browse-file-input') as HTMLInputElement;
     fireEvent.change(fileInput, { target: { files: [makeDocxFile()] } });
 
-    await waitFor(() => expect(screen.getByTestId('compose-toolbar-stub')).toBeInTheDocument());
-    expect(toolbarProps.current.isDirty).toBe(true);
+    await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+    // FIX #5: the transient Browse draft makes Save reachable (create-on-save first
+    // Save) — surfaced now via the `canSave` prop threaded to ComposeEditor's
+    // consolidated toolbar, replacing the old `ComposeToolbar.isDirty` signal.
+    expect(editorCanSave.current).toBe(true);
   });
 
   it('establishes a NON-EMPTY document session id on a Browse mount (Wave 2 / UAT-R3 Test #3)', async () => {

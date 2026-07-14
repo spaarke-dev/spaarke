@@ -97,7 +97,15 @@ import { authenticatedFetch, ApiError } from '@spaarke/auth';
 // not a dispatch).
 import { createXrmNavigationService, createXrmDataService, RichFilePreviewDialog, type LookupResult } from '@spaarke/ui-components';
 
-import { ComposeToolbar } from './ComposeToolbar';
+// FIX #5 (UAT): the separate `ComposeToolbar` command bar (Open-in-Word + Save +
+// Push) was folded into the consolidated single-row `ComposeFormatToolbar` that
+// lives inside `ComposeEditor`. ComposeWorkspace still OWNS the handler binding —
+// it resolves Open-in-Word here via `useDocumentActions` and threads the bound
+// callbacks (+ Save / Push) down to `ComposeEditor`, which forwards them to the
+// toolbar's "Word" dropdown + right-aligned Save button. `ComposeToolbar.tsx` is
+// retained for its own standalone tests + potential reuse, but is no longer
+// rendered here (one toolbar row, not two).
+import { useDocumentActions } from '@spaarke/document-operations';
 import { ComposeEmptyState } from './ComposeEmptyState';
 import { ComposeConflictDialog } from './ComposeConflictDialog';
 // Return-from-Word re-anchor UX (task 054 — BUILT; mounted here by task 103, gap 3.5).
@@ -746,6 +754,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const { push: pushAnnotations, pushing: isPushingToWord } = useComposePushAnnotations({ bffBaseUrl });
   const { pull: pullAnnotations } = useComposePullAnnotations({ bffBaseUrl });
   const { checkChanges } = useComposeCheckChanges({ bffBaseUrl });
+
+  // FIX #5 (UAT): Open-in-Word (Web + Desktop) handlers for the consolidated
+  // toolbar's "Word" dropdown. Bound HERE (the host) and threaded to ComposeEditor
+  // so the shared-lib editor stays decoupled from `@spaarke/document-operations`.
+  // Safe to call at mount — the hook only allocates `useState`/`useCallback`; the
+  // authenticated fetch fires lazily on click.
+  const { openInWeb, openInDesktop, isActing: isWordActing } = useDocumentActions({ bffBaseUrl });
 
   const [reanchorPanelOpen, setReanchorPanelOpen] = React.useState(false);
   const [pulledAnnotationCount, setPulledAnnotationCount] = React.useState(0);
@@ -1927,6 +1942,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     !!state.documentRef &&
     !state.documentRef.speDriveItemId;
 
+  // FIX #5 (UAT): derived enable/disable state for the consolidated toolbar's Word
+  // dropdown + Save button (was previously computed inside ComposeToolbar). Same
+  // rules as before: Open-in-Word needs a real persisted document id + bffBaseUrl
+  // and is suppressed while saving or while another doc action is in flight; Save
+  // is available when there is unsaved work (an edit OR an unpersisted transient
+  // draft) and not mid-save.
+  const isSavingNow = state.status === 'saving';
+  const hasWordDocument = toolbarDocumentId.length > 0 && bffBaseUrl.length > 0;
+  const wordActionsDisabled = isSavingNow || !hasWordDocument || isWordActing;
+  const canSaveNow = !isSavingNow && bffBaseUrl.length > 0 && (isDirty || hasTransientDraft);
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
@@ -1999,30 +2025,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       {/* Loaded / Saving — toolbar + editor + banners */}
       {showEditor ? (
         <>
-          <div className={styles.toolbarSlot}>
-            <ComposeToolbar
-              documentId={toolbarDocumentId}
-              bffBaseUrl={bffBaseUrl}
-              disabled={state.status === 'saving'}
-              onSaveRequested={() => {
-                void triggerSave();
-              }}
-              isDirty={isDirty}
-              hasTransientDraft={hasTransientDraft}
-              isSaving={state.status === 'saving'}
-              // gap 3.1 — only offer Push-to-Word for a persisted document (a transient draft has
-              // no SPE drive-item to write native annotations into yet).
-              onPushToWordRequested={
-                state.documentRef?.speDriveItemId
-                  ? () => {
-                      void handlePushToWord();
-                    }
-                  : undefined
-              }
-              canPushToWord={canPushToWord}
-              isPushingToWord={isPushingToWord}
-            />
-          </div>
+          {/* FIX #5 (UAT): the separate ComposeToolbar command-bar row was removed — its
+              Open-in-Word / Save / Push actions now live in the consolidated single-row
+              ComposeFormatToolbar inside ComposeEditor (handlers threaded below). */}
 
           {/* gap 3.5 — return-from-Word re-anchor summary banner (task 054 component, mounted here). */}
           <ComposeReanchorBanner
@@ -2074,6 +2079,30 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               onDirtyChange={handleDirtyChange}
               onImportWarnings={handleImportWarnings}
               enqueueComposeAction={enqueueComposeAction}
+              // FIX #5 (UAT): Word + Save actions folded into the consolidated toolbar.
+              onOpenInWord={() => {
+                if (!wordActionsDisabled) void openInWeb(toolbarDocumentId);
+              }}
+              onOpenInWordDesktop={() => {
+                if (!wordActionsDisabled) void openInDesktop(toolbarDocumentId);
+              }}
+              // gap 3.1 — only offer Push-to-Word for a persisted document (a transient
+              // draft has no SPE drive-item to write native annotations into yet).
+              onPushToWord={
+                state.documentRef?.speDriveItemId
+                  ? () => {
+                      void handlePushToWord();
+                    }
+                  : undefined
+              }
+              wordActionsDisabled={wordActionsDisabled}
+              canPushToWord={canPushToWord}
+              isPushingToWord={isPushingToWord}
+              onSave={() => {
+                void triggerSave();
+              }}
+              canSave={canSaveNow}
+              isSaving={isSavingNow}
             />
           </div>
         </>
