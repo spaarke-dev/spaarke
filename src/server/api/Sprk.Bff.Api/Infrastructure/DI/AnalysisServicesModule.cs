@@ -637,12 +637,17 @@ public static class AnalysisServicesModule
         services.AddScoped<IAppOnlyAnalysisService, AppOnlyAnalysisService>();
 
         // spaarkeai-compose-r2 (UAT #7b): OBO-capable document-profile facade. ComposeService
-        // (CRUD) injects ONLY this PublicContracts facade (ADR-013); the impl downloads the
-        // user-OBO-written SPE file under OBO (mirroring the RAG indexing step) and delegates the
-        // extract → classify → summarize → field-map → write pipeline to IAppOnlyAnalysisService
-        // unchanged. Scoped: depends on the scoped IAppOnlyAnalysisService + runs in the OBO
-        // request scope. See ADR Tensions in projects/spaarkeai-compose-r2/design.md (§6.5 path A —
-        // stand-in until the paused ai-architecture-redesign-r2 core IDocumentProfileAi ships).
+        // (CRUD) injects ONLY this PublicContracts facade (ADR-013). The impl invokes the
+        // "Document Profiler" Action (ACT-011) directly on the ADR-043 completion-engine spine —
+        // IActionResolver (document-profile Binding) → IDocumentTextSource (OBO download) →
+        // IActionRunner (ActionRunner) → DocumentProfileOutputMapper → UpdateDocumentFieldsAsync —
+        // NOT the retired playbook/node engine. Registered here inside the compound AI gate
+        // alongside AddLinearConsumers, so its (optional) AI execution seams resolve to real impls;
+        // the seams are nullable ctor params (ADR-032 optional-via-null-tolerance) so a compound-OFF
+        // host resolves ComposeService's optional IDocumentProfileAi to null and skips profiling
+        // cleanly. Scoped: runs in the OBO request scope. See ADR Tensions in
+        // projects/spaarkeai-compose-r2/design.md (§6.5 path A — stand-in until the paused
+        // ai-architecture-redesign-r2 core IDocumentProfileAi ships).
         services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IDocumentProfileAi,
                            Sprk.Bff.Api.Services.Ai.PublicContracts.DocumentProfileAi>();
 

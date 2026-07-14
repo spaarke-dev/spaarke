@@ -1006,14 +1006,6 @@ public static class AnalysisEndpoints
         // sprk_documenttype + a computed search profile).
         var fields = BuildDocumentProfileFields(aiOutput, docText.FileName, parentEntity, logger);
 
-        // sprk_filetype is deterministic (comes from the file extension) — don't ask the
-        // LLM for it. Column is 10 chars; extension without leading dot, upper-cased.
-        var extension = Path.GetExtension(docText.FileName)?.TrimStart('.').ToUpperInvariant();
-        if (!string.IsNullOrWhiteSpace(extension))
-        {
-            fields["sprk_filetype"] = extension.Length > 10 ? extension[..10] : extension;
-        }
-
         logger.LogInformation(
             "Document {DocumentId} profile — mapped {FieldCount} fields for update: {Fields}",
             documentId, fields.Count, string.Join(",", fields.Keys));
@@ -1134,85 +1126,7 @@ public static class AnalysisEndpoints
         string fileName,
         ParentEntityContext? parentEntity,
         ILogger logger)
-    {
-        var fields = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        if (root.ValueKind != JsonValueKind.Object) return fields;
-
-        // Sibling dict of stringified outputs used for BuildSearchProfile below.
-        var stringOutputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var prop in root.EnumerateObject())
-        {
-            var name = prop.Name;
-            var kind = prop.Value.ValueKind;
-
-            switch (kind)
-            {
-                case JsonValueKind.Null:
-                case JsonValueKind.Undefined:
-                    continue;
-
-                case JsonValueKind.String:
-                    {
-                        var stringValue = prop.Value.GetString();
-                        if (string.IsNullOrWhiteSpace(stringValue)) continue;
-
-                        if (name.Equals("sprk_documenttype", StringComparison.OrdinalIgnoreCase))
-                        {
-                            var optionValue = DocumentTypeMapper.ToDataverseValue(stringValue);
-                            if (optionValue.HasValue)
-                            {
-                                // Dataverse SDK Choice/OptionSet attributes require OptionSetValue,
-                                // not a raw int. R5 Doc 06 Choice-field coercion pattern.
-                                fields[name] = new OptionSetValue(optionValue.Value);
-                                stringOutputs[name] = stringValue;
-                            }
-                            else
-                            {
-                                logger.LogWarning(
-                                    "Could not coerce documentType='{DocType}' to a Dataverse Choice value; dropping the field",
-                                    stringValue);
-                            }
-                        }
-                        else
-                        {
-                            fields[name] = stringValue;
-                            stringOutputs[name] = stringValue;
-                        }
-                        break;
-                    }
-
-                case JsonValueKind.Array:
-                case JsonValueKind.Object:
-                    {
-                        var jsonBlob = prop.Value.GetRawText();
-                        fields[name] = jsonBlob;
-                        stringOutputs[name] = jsonBlob;
-                        break;
-                    }
-
-                default:
-                    {
-                        var raw = prop.Value.GetRawText();
-                        fields[name] = raw;
-                        stringOutputs[name] = raw;
-                        break;
-                    }
-            }
-        }
-
-        var searchProfile = DocumentProfileFieldMapper.BuildSearchProfile(
-            stringOutputs,
-            parentEntityName: parentEntity?.EntityName,
-            parentEntityType: parentEntity?.EntityType,
-            fileName: fileName);
-        if (!string.IsNullOrWhiteSpace(searchProfile))
-        {
-            fields["sprk_searchprofile"] = searchProfile;
-        }
-
-        return fields;
-    }
+        => DocumentProfileOutputMapper.BuildFields(root, fileName, parentEntity, logger);
 }
 
 /// <summary>

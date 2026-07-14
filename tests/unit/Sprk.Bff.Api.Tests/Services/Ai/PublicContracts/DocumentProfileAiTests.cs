@@ -1,22 +1,25 @@
-// spaarkeai-compose-r2 (UAT #7b) — unit tests for the OBO document-profile facade.
+// spaarkeai-compose-r2 — unit tests for the OBO document-profile facade.
 //
-// The facade's ONE job is to fix the round-6 bug: a document saved from Compose is written to SPE
-// under the user's OBO identity, so the app-only (Managed Identity) profiling path 403s on the
-// download and the profile fields silently never populate. The facade downloads under OBO instead,
-// then delegates the (unchanged) extract → classify → summarize → field-map → UpdateDocumentAsync
-// pipeline to IAppOnlyAnalysisService. These are BEHAVIOR tests of that boundary:
-//   • Does it download via the OBO path (DownloadFileAsUserAsync), NOT the app-only path
-//     (DownloadFileAsync) that caused the bug?
-//   • Does it delegate the downloaded stream to the reused profiling method (which owns the field
-//     mapping + Dataverse write)?
+// The facade invokes the "Document Profiler" Action (ACT-011) directly on the ADR-043
+// completion-engine spine (IActionResolver → IDocumentTextSource(OBO) → IActionRunner →
+// DocumentProfileOutputMapper → UpdateDocumentFieldsAsync) — NOT the retired playbook/node engine.
+// These are BEHAVIOR tests of that boundary:
+//   • Does it resolve the "Document Profiler" Action via the document-profile Binding
+//     (IActionResolver.ResolveAsync(ConsumerTypes.DocumentProfile))?
+//   • Does it run the Action via IActionRunner (the completion engine) — and NEVER touch a playbook
+//     orchestrator (there is no such dependency)?
+//   • Does it map the Action's structured output onto sprk_document columns and persist via
+//     UpdateDocumentFieldsAsync?
+//   • Does it extract text under OBO (IDocumentTextSource, which downloads via OBO)?
 //   • Is it best-effort (never throws; skips/fails degrade to a result)?
 //
 // Mocking boundary (ADR-038 §4 module-boundary mocks — not banned collaborator mocking): every mock
-// here is a genuine external boundary — IDocumentDataverseService (Dataverse), ISpeFileOperations
-// (SPE/Graph facade, ADR-007), IAppOnlyAnalysisService (the reused AI profiling seam).
+// here is a genuine seam — IDocumentDataverseService (Dataverse), IActionResolver / IActionRunner
+// (the AI execution spine), IDocumentTextSource (SPE download + extraction).
 
 using System;
-using System.IO;
+using System.Collections.Generic;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -24,8 +27,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
@@ -38,11 +41,16 @@ public sealed class DocumentProfileAiTests
     private const string FileName = "draft.docx";
 
     private readonly Mock<IDocumentDataverseService> _documents = new(MockBehavior.Strict);
-    private readonly Mock<ISpeFileOperations> _spe = new(MockBehavior.Strict);
-    private readonly Mock<IAppOnlyAnalysisService> _analysis = new(MockBehavior.Strict);
+    private readonly Mock<IActionResolver> _actionResolver = new(MockBehavior.Strict);
+    private readonly Mock<IDocumentTextSource> _textSource = new(MockBehavior.Strict);
+    private readonly Mock<IActionRunner> _actionRunner = new(MockBehavior.Strict);
 
     private DocumentProfileAi CreateSut() => new(
-        _documents.Object, _spe.Object, _analysis.Object, NullLogger<DocumentProfileAi>.Instance);
+        _documents.Object,
+        NullLogger<DocumentProfileAi>.Instance,
+        _actionResolver.Object,
+        _textSource.Object,
+        _actionRunner.Object);
 
     private void ArrangeDocument(string? driveId = DriveId, string? itemId = ItemId)
     {
@@ -58,67 +66,87 @@ public sealed class DocumentProfileAiTests
             });
     }
 
-    // ── The fix: downloads under OBO (not app-only) and delegates to the reused profiling pipeline ─
+    private static AnalysisAction ProfilerAction() => new()
+    {
+        Id = Guid.NewGuid(),
+        Name = "Document Profiler",
+        SystemPrompt = "profile the document",
+        OutputSchemaJson = "{\"type\":\"object\"}",
+    };
+
+    private void ArrangeText() =>
+        _textSource
+            .Setup(t => t.ExtractFromDocumentIdAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentText
+            {
+                DocumentId = Guid.NewGuid(),
+                FileName = FileName,
+                ExtractedText = "extracted body text",
+                GraphDriveId = DriveId,
+                GraphItemId = ItemId,
+            });
+
+    private static JsonElement Output(string json) => JsonDocument.Parse(json).RootElement.Clone();
+
+    // ── Happy path: resolves the Document Profiler Action, runs it via the completion engine,
+    //    maps output → columns, and writes via UpdateDocumentFieldsAsync. No playbook engine. ──────
     [Fact]
-    public async Task ProfileDocumentAsUserAsync_DownloadsUnderObo_DelegatesToProfiling_ReturnsSuccess()
+    public async Task ProfileDocumentAsUserAsync_ResolvesProfilerAction_RunsViaActionRunner_MapsAndWrites()
     {
         var documentId = Guid.NewGuid();
         ArrangeDocument();
+        ArrangeText();
 
-        var ctx = new DefaultHttpContext();
-        using var stream = new MemoryStream(new byte[] { 1, 2, 3 });
-        _spe
-            .Setup(s => s.DownloadFileAsUserAsync(ctx, DriveId, ItemId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(stream);
+        var action = ProfilerAction();
+        _actionResolver
+            .Setup(r => r.ResolveAsync(ConsumerTypes.DocumentProfile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(action);
 
-        Stream? delegatedStream = null;
-        string? delegatedPlaybook = null;
-        string? delegatedDriveId = null;
-        string? delegatedItemId = null;
-        _analysis
-            .Setup(a => a.AnalyzeDocumentFromStreamAsync(
-                documentId, FileName, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>(),
-                It.IsAny<string?>(), It.IsAny<string?>()))
-            .Callback<Guid, string, Stream, string?, CancellationToken, string?, string?>(
-                (_, _, s, playbook, _, driveId, itemId) =>
-                {
-                    delegatedStream = s;
-                    delegatedPlaybook = playbook;
-                    delegatedDriveId = driveId;
-                    delegatedItemId = itemId;
-                })
-            .ReturnsAsync(AppOnlyDocumentAnalysisResult.Success(documentId, profileUpdate: null));
+        AnalysisAction? ranAction = null;
+        _actionRunner
+            .Setup(r => r.RunAsync(It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+                It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()))
+            .Callback<AnalysisAction, DocumentText, LinearRunContext, CancellationToken>(
+                (a, _, _, _) => ranAction = a)
+            .ReturnsAsync(Output(
+                "{\"sprk_filesummary\":\"A summary\",\"sprk_filetldr\":\"tldr\",\"sprk_documenttype\":\"contract\"}"));
 
-        var result = await CreateSut().ProfileDocumentAsUserAsync(documentId, ctx, CancellationToken.None);
+        Dictionary<string, object?>? written = null;
+        _documents
+            .Setup(d => d.UpdateDocumentFieldsAsync(
+                documentId.ToString(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Dictionary<string, object?>, CancellationToken>((_, f, _) => written = f)
+            .Returns(Task.CompletedTask);
+
+        var result = await CreateSut().ProfileDocumentAsUserAsync(documentId, new DefaultHttpContext(), CancellationToken.None);
 
         result.Success.Should().BeTrue();
 
-        // The bug fix: the OBO download path is used with the record's pointers + the request context;
-        // the app-only path (which 403s on user-written files) is NEVER used.
-        _spe.Verify(s => s.DownloadFileAsUserAsync(ctx, DriveId, ItemId, It.IsAny<CancellationToken>()), Times.Once);
-        _spe.Verify(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        // Resolved the Document Profiler Action via the document-profile Binding (single routing surface).
+        _actionResolver.Verify(r => r.ResolveAsync(ConsumerTypes.DocumentProfile, It.IsAny<CancellationToken>()), Times.Once);
 
-        // The OBO-downloaded stream is handed to the reused profiling method (which owns the field
-        // mapping + UpdateDocumentAsync write) — no mapping is duplicated in the facade.
-        _analysis.Verify(a => a.AnalyzeDocumentFromStreamAsync(
-            documentId, FileName, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>(),
-            It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
-        delegatedStream.Should().BeSameAs(stream);
+        // Ran the Action via the ADR-043 completion engine (IActionRunner) — the SAME action instance.
+        _actionRunner.Verify(r => r.RunAsync(It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+            It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()), Times.Once);
+        ranAction.Should().BeSameAs(action);
 
-        // Round-7b root-cause fix — full parity with the proven app-only AnalyzeDocumentAsync path:
-        //   • the document-profile playbook is named EXPLICITLY (not null → the run must load the
-        //     "Document Profile" playbook, not rely on the default coincidentally matching), and
-        //   • the SPE pointers are forwarded so a node-based playbook's DeliverToIndex-style node
-        //     does not hard-fail (a single failed node aborts the whole run, skipping the field-write).
-        delegatedPlaybook.Should().Be(IAppOnlyAnalysisService.DefaultPlaybookName);
-        delegatedPlaybook.Should().NotBeNull("passing null instead of the playbook name was the round-7b regression");
-        delegatedDriveId.Should().Be(DriveId);
-        delegatedItemId.Should().Be(ItemId);
+        // Text was extracted under OBO (IDocumentTextSource takes the HttpContext for OBO exchange).
+        _textSource.Verify(t => t.ExtractFromDocumentIdAsync(documentId, It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        // Output mapped → sprk_document columns and written via the SDK field-update path.
+        _documents.Verify(d => d.UpdateDocumentFieldsAsync(
+            documentId.ToString(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()), Times.Once);
+        written.Should().NotBeNull();
+        written!.Should().ContainKey("sprk_filesummary");
+        written.Should().ContainKey("sprk_filetldr");
+        written.Should().ContainKey("sprk_documenttype");   // Choice-coerced (OptionSetValue)
+        written!["sprk_documenttype"].Should().BeOfType<Microsoft.Xrm.Sdk.OptionSetValue>();
+        written.Should().ContainKey("sprk_filetype");        // deterministic from extension (DOCX)
     }
 
-    // ── Skip cleanly (no download, no profiling) when the record has no SPE pointer ─────────────
+    // ── Skip cleanly (no action run, no write) when the record has no SPE pointer ────────────────
     [Fact]
-    public async Task ProfileDocumentAsUserAsync_WhenNoSpePointer_SkipsWithoutDownloadOrProfiling()
+    public async Task ProfileDocumentAsUserAsync_WhenNoSpePointer_SkipsWithoutRunningAction()
     {
         var documentId = Guid.NewGuid();
         ArrangeDocument(driveId: null, itemId: null);
@@ -127,53 +155,70 @@ public sealed class DocumentProfileAiTests
 
         result.Success.Should().BeFalse();
         result.SkipReason.Should().NotBeNullOrEmpty();
-        _spe.Verify(s => s.DownloadFileAsUserAsync(
-            It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        _analysis.Verify(a => a.AnalyzeDocumentFromStreamAsync(
-            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>(),
-            It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
+        _actionResolver.Verify(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _actionRunner.Verify(r => r.RunAsync(It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+            It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()), Times.Never);
+        _documents.Verify(d => d.UpdateDocumentFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // ── A null OBO download degrades to Failed (best-effort), never throws ──────────────────────
+    // ── Skip when the AI execution seams are unavailable (compound AI gate OFF → null seams) ─────
     [Fact]
-    public async Task ProfileDocumentAsUserAsync_WhenOboDownloadReturnsNull_ReturnsFailed()
+    public async Task ProfileDocumentAsUserAsync_WhenAiSeamsNull_SkipsWithoutTouchingDataverse()
+    {
+        var sut = new DocumentProfileAi(_documents.Object, NullLogger<DocumentProfileAi>.Instance);
+
+        var result = await sut.ProfileDocumentAsUserAsync(Guid.NewGuid(), new DefaultHttpContext(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.SkipReason.Should().NotBeNullOrEmpty();
+        _documents.Verify(d => d.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── Empty extracted text degrades to Failed (best-effort), no action run needed to write ─────
+    [Fact]
+    public async Task ProfileDocumentAsUserAsync_WhenNoExtractableText_ReturnsFailed()
     {
         var documentId = Guid.NewGuid();
         ArrangeDocument();
-        _spe
-            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), DriveId, ItemId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Stream?)null);
+        _actionResolver
+            .Setup(r => r.ResolveAsync(ConsumerTypes.DocumentProfile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ProfilerAction());
+        _textSource
+            .Setup(t => t.ExtractFromDocumentIdAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentText { DocumentId = documentId, FileName = FileName, ExtractedText = "" });
 
         var result = await CreateSut().ProfileDocumentAsUserAsync(documentId, new DefaultHttpContext(), CancellationToken.None);
 
         result.Success.Should().BeFalse();
         result.FailureReason.Should().NotBeNullOrEmpty();
-        _analysis.Verify(a => a.AnalyzeDocumentFromStreamAsync(
-            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>(),
-            It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
+        _actionRunner.Verify(r => r.RunAsync(It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+            It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()), Times.Never);
+        _documents.Verify(d => d.UpdateDocumentFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // ── Best-effort: a throwing profiling step is swallowed into a Failed result (never propagates) ─
+    // ── Best-effort: a throwing action run is swallowed into a Failed result (never propagates) ──
     [Fact]
-    public async Task ProfileDocumentAsUserAsync_WhenProfilingThrows_ReturnsFailedAndDoesNotThrow()
+    public async Task ProfileDocumentAsUserAsync_WhenActionRunThrows_ReturnsFailedAndDoesNotThrow()
     {
         var documentId = Guid.NewGuid();
         ArrangeDocument();
-
-        using var stream = new MemoryStream(new byte[] { 9 });
-        _spe
-            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), DriveId, ItemId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(stream);
-        _analysis
-            .Setup(a => a.AnalyzeDocumentFromStreamAsync(
-                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>(),
-                It.IsAny<string?>(), It.IsAny<string?>()))
-            .ThrowsAsync(new InvalidOperationException("playbook exploded"));
+        ArrangeText();
+        _actionResolver
+            .Setup(r => r.ResolveAsync(ConsumerTypes.DocumentProfile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ProfilerAction());
+        _actionRunner
+            .Setup(r => r.RunAsync(It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+                It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("llm exploded"));
 
         var act = async () => await CreateSut().ProfileDocumentAsUserAsync(documentId, new DefaultHttpContext(), CancellationToken.None);
 
         var result = await act.Should().NotThrowAsync();
         result.Subject.Success.Should().BeFalse();
         result.Subject.FailureReason.Should().NotBeNullOrEmpty();
+        _documents.Verify(d => d.UpdateDocumentFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }
