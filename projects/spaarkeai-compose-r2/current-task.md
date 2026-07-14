@@ -11,11 +11,11 @@
 |-------|-------|
 | **Round** | Round-7 = Compose-widget refinement (9 UAT items) + 2 follow-up bugs |
 | **Status** | in-progress |
-| **Deployed** | spaarkedev1: round-6 (bridge+profile+index+crash fixes) + round-7 Waves A/B/C(#6/#7). BFF `spaarke-bff-dev`, client web resource `sprk_spaarkeai`. |
+| **Deployed** | spaarkedev1: round-6 + round-7 Waves A/B/C(#6/#7) **+ bug A + bug B (2026-07-14)**. BFF `spaarke-bff-dev` (SHA-256 4/4 verified, health OK, 46.62 MB). Client web resource `sprk_spaarkeai` (5206a442…, published). |
 | **Master merge** | HELD (branch 66 ahead / 34 behind origin/master; ~47 unpushed) |
-| **Next Action** | (1) Full gate (BFF unit + SpaarkeAi/Compose jest). (2) Deploy **bug A** (BFF, `pwsh scripts/Deploy-BffApi.ps1`) + **bug B** (SpaarkeAi rebuild+deploy) together → owner re-UAT (verify draft-alternative works + Email-tab keeps the file). (3) Await owner **#8** shape → build #8. |
+| **Next Action** | **AWAITING OWNER RE-UAT** — verify (a) Draft-alternative works (no /dispatch 404), (b) opening Email tab keeps the Compose file loaded. Then await owner **#8** shape → build #8. |
 
-### Both bug fixes COMMITTED (not yet deployed), tree clean
+### Both bug fixes COMMITTED + DEPLOYED (2026-07-14), tree clean
 - **Bug A** = `bd3d1eb90` (draft-alternative /dispatch 404 — RegisterActiveDocument creates resolvable doc session; BFF).
 - **Bug B** = `e14b9dc32` (unify all Compose entries on Direct `'compose'` widget — fixes Email-tab-loses-file; SpaarkeAi client).
 
