@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
@@ -28,8 +29,10 @@ public sealed class PostUploadIndexingEnqueuerTests
 {
     private readonly Mock<IFileIndexingService> _fileIndexingMock = new();
     private readonly Mock<JobSubmissionService> _jobSubmissionMock;
+    private readonly Mock<IDocumentDataverseService> _documentServiceMock = new();
     private readonly Mock<ILogger<PostUploadIndexingEnqueuer>> _loggerMock = new();
     private readonly PostUploadIndexingOptions _options = new();
+    private readonly AnalysisOptions _analysisOptions = new() { SharedIndexName = "spaarke-files-index" };
 
     public PostUploadIndexingEnqueuerTests()
     {
@@ -48,7 +51,13 @@ public sealed class PostUploadIndexingEnqueuerTests
     }
 
     private PostUploadIndexingEnqueuer CreateSut() =>
-        new(_fileIndexingMock.Object, _jobSubmissionMock.Object, Options.Create(_options), _loggerMock.Object);
+        new(
+            _fileIndexingMock.Object,
+            _jobSubmissionMock.Object,
+            _documentServiceMock.Object,
+            Options.Create(_analysisOptions),
+            Options.Create(_options),
+            _loggerMock.Object);
 
     private static HttpContext CreateHttpContext() => new DefaultHttpContext();
 
@@ -98,6 +107,94 @@ public sealed class PostUploadIndexingEnqueuerTests
         _fileIndexingMock.Verify(
             s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task EnqueueIfApplicableAsync_SuccessWithDocumentId_StampsSearchIndexTrackingFields()
+    {
+        _fileIndexingMock
+            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileIndexingResult { Success = true, ChunksIndexed = 8 });
+
+        UpdateDocumentRequest? captured = null;
+        string? capturedId = null;
+        _documentServiceMock
+            .Setup(s => s.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<string, UpdateDocumentRequest, CancellationToken>((id, req, _) => { capturedId = id; captured = req; })
+            .Returns(Task.CompletedTask);
+
+        // Compose passes SearchIndexName=null → falls back to SharedIndexName default.
+        var result = await CreateSut().EnqueueIfApplicableAsync(
+            ValidRequest(searchIndexName: null),
+            CreateHttpContext(),
+            CancellationToken.None);
+
+        result.JobSubmitted.Should().BeTrue();
+        _documentServiceMock.Verify(
+            s => s.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        capturedId.Should().Be("doc-guid-123");
+        captured.Should().NotBeNull();
+        captured!.SearchIndexed.Should().BeTrue();
+        captured.SearchIndexCompletedOn.Should().NotBeNull();
+        captured.SearchIndexedOn.Should().NotBeNull();
+        captured.SearchIndexName.Should().Be("spaarke-files-index");
+    }
+
+    [Fact]
+    public async Task EnqueueIfApplicableAsync_SuccessWithExplicitIndexName_PrefersRequestIndexName()
+    {
+        _fileIndexingMock
+            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileIndexingResult { Success = true });
+
+        UpdateDocumentRequest? captured = null;
+        _documentServiceMock
+            .Setup(s => s.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<string, UpdateDocumentRequest, CancellationToken>((_, req, _) => captured = req)
+            .Returns(Task.CompletedTask);
+
+        await CreateSut().EnqueueIfApplicableAsync(
+            ValidRequest(searchIndexName: "custom-index"),
+            CreateHttpContext(),
+            CancellationToken.None);
+
+        captured!.SearchIndexName.Should().Be("custom-index");
+    }
+
+    [Fact]
+    public async Task EnqueueIfApplicableAsync_DataverseWriteThrows_StillReturnsSubmitted()
+    {
+        _fileIndexingMock
+            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileIndexingResult { Success = true });
+        _documentServiceMock
+            .Setup(s => s.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
+
+        var result = await CreateSut().EnqueueIfApplicableAsync(
+            ValidRequest(),
+            CreateHttpContext(),
+            CancellationToken.None);
+
+        // Non-fatal: a Dataverse write failure NEVER fails the index result.
+        result.JobSubmitted.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task EnqueueIfApplicableAsync_SuccessWithoutDocumentId_DoesNotCallDataverse()
+    {
+        _fileIndexingMock
+            .Setup(s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileIndexingResult { Success = true });
+
+        var request = ValidRequest() with { DocumentId = null };
+        var result = await CreateSut().EnqueueIfApplicableAsync(request, CreateHttpContext(), CancellationToken.None);
+
+        result.JobSubmitted.Should().BeTrue();
+        _documentServiceMock.Verify(
+            s => s.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -273,6 +370,14 @@ public sealed class PostUploadIndexingEnqueuerTests
         capturedJob.Should().NotBeNull();
         capturedJob!.IdempotencyKey.Should().Be("rag-index-drive-abc-item-xyz");
         capturedJob.MaxAttempts.Should().Be(3);
+
+        // Parity with the MI-written callers: the app-only path also stamps the tracking fields.
+        _documentServiceMock.Verify(
+            s => s.UpdateDocumentAsync(
+                "doc-guid-123",
+                It.Is<UpdateDocumentRequest>(r => r.SearchIndexed == true && r.SearchIndexCompletedOn != null),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
 
         // OBO path must NOT have been called for the app-only method
         _fileIndexingMock.Verify(

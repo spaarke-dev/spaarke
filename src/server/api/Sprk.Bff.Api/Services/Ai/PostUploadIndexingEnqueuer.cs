@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -71,17 +72,23 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
 
     private readonly IFileIndexingService _fileIndexingService;
     private readonly JobSubmissionService _jobSubmissionService;
+    private readonly IDocumentDataverseService _documentService;
+    private readonly AnalysisOptions _analysisOptions;
     private readonly IOptions<PostUploadIndexingOptions> _options;
     private readonly ILogger<PostUploadIndexingEnqueuer> _logger;
 
     public PostUploadIndexingEnqueuer(
         IFileIndexingService fileIndexingService,
         JobSubmissionService jobSubmissionService,
+        IDocumentDataverseService documentService,
+        IOptions<AnalysisOptions> analysisOptions,
         IOptions<PostUploadIndexingOptions> options,
         ILogger<PostUploadIndexingEnqueuer> logger)
     {
         _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
+        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
+        _analysisOptions = analysisOptions?.Value ?? throw new ArgumentNullException(nameof(analysisOptions));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -199,6 +206,11 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                     request.DocumentId ?? "(none)",
                     request.Source,
                     request.CorrelationId);
+
+                // Stamp the sprk_document index-status fields (dual-write transition contract).
+                // Non-fatal: a Dataverse write failure NEVER fails the index/save.
+                await WriteSearchIndexTrackingAsync(request, ct);
+
                 return PostUploadIndexingResult.Submitted(Guid.NewGuid());
             }
 
@@ -314,6 +326,10 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 job.JobId, request.FileName, request.DriveId, request.ItemId,
                 request.DocumentId ?? "(none)", request.Source);
 
+            // Stamp the sprk_document index-status fields (dual-write transition contract),
+            // for parity with the MI-written callers. Non-fatal.
+            await WriteSearchIndexTrackingAsync(request, ct);
+
             return PostUploadIndexingResult.Submitted(job.JobId);
         }
         catch (Exception ex)
@@ -322,6 +338,59 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 "[PostUploadIndexingEnqueuer] Failed to enqueue app-only RAG indexing for {FileName}: {Error}",
                 request.FileName, ex.Message);
             return PostUploadIndexingResult.Failed(ex.GetType().Name);
+        }
+    }
+
+    /// <summary>
+    /// Stamps the <c>sprk_document</c> search-index status fields after a successful index,
+    /// honoring the "Dual-write transition contract" (docs/data-model/sprk_document-search-index-lifecycle.md).
+    /// Mirrors <c>RagIndexingJobHandler</c> and <c>RagEndpoints.IndexFile</c>.
+    /// </summary>
+    /// <remarks>
+    /// Best-effort: a Dataverse write failure logs a warning and NEVER fails the index/save.
+    /// No-op when the caller supplied no DocumentId. Fixes the Compose-save STEP 4 path and
+    /// the 4 Create* wizards (Matter / Project / WorkAssignment / Event) that share this helper.
+    /// </remarks>
+    private async Task WriteSearchIndexTrackingAsync(PostUploadIndexingRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(request.DocumentId))
+        {
+            return;
+        }
+
+        // Prefer the caller-supplied index name; otherwise fall back to the shared default.
+        // Compose passes SearchIndexName=null and the resolver lands on the shared default
+        // (spaarke-files-index == SharedIndexName), matching the proven RAG paths.
+        var indexName = !string.IsNullOrEmpty(request.SearchIndexName)
+            ? request.SearchIndexName
+            : _analysisOptions.SharedIndexName;
+
+        try
+        {
+            var completedAt = DateTime.UtcNow;
+            var updateRequest = new UpdateDocumentRequest
+            {
+                // New canonical lifecycle marker (R3+)
+                SearchIndexCompletedOn = completedAt,
+                // Legacy dual-write (preserved during transition)
+                SearchIndexed = true,
+                SearchIndexedOn = completedAt,
+                // Index routing (unchanged)
+                SearchIndexName = indexName
+            };
+
+            await _documentService.UpdateDocumentAsync(request.DocumentId, updateRequest, ct);
+
+            _logger.LogInformation(
+                "Updated Dataverse search index tracking for document {DocumentId}: SearchIndexCompletedOn={CompletedAt}, SearchIndexed=true (dual-write), IndexName={IndexName}",
+                request.DocumentId, completedAt, indexName);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail - indexing succeeded, Dataverse update is non-critical.
+            _logger.LogWarning(ex,
+                "Failed to update Dataverse search index tracking for document {DocumentId}: {Error}. Indexing was successful.",
+                request.DocumentId, ex.Message);
         }
     }
 

@@ -88,7 +88,7 @@ import {
   useRegisterComposeSaveHandler,
   useComposeSaveCompleted,
 } from '../context/composeActionBridge';
-import { authenticatedFetch } from '@spaarke/auth';
+import { authenticatedFetch, ApiError } from '@spaarke/auth';
 // FR-02 (task 011): "Search for Document" opens the standard Dataverse lookup dialog
 // (Xrm.Utility.lookupObjects) scoped to `sprk_document`, then resolves the picked
 // record's SPE pointer via Xrm.WebApi.retrieveRecord — the SAME two Xrm primitives
@@ -1188,6 +1188,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // INTEGRATION HOOK #1). `@spaarke/auth` per ADR-028.
         const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/compose-outputs`;
         const response = await authenticatedFetch(url, { method: 'GET' });
+        // Defensive: authenticatedFetch throws ApiError on non-2xx (it never returns a
+        // non-ok Response), so a 404 lands in the catch below — not here. This guard is a
+        // safety net should that behaviour ever change.
         if (!response.ok) {
           if (response.status === 404) return; // no compose outputs yet — nothing to materialize
           setComposeDraftError(`Failed to load the drafted content (HTTP ${response.status}).`);
@@ -1245,6 +1248,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           });
         }
       } catch (err) {
+        // A 404 means the session has no compose outputs yet — a fresh document/upload mount
+        // with nothing drafted. authenticatedFetch throws ApiError on non-2xx (never returns a
+        // non-ok Response), so this "nothing to materialize" case lands here. It is a silent
+        // no-op: this callback also runs UNCONDITIONALLY on every 'loaded' transition
+        // (refresh-durability effect), where a plain file load legitimately has no draft. Only
+        // genuine failures (500, network) surface an error card.
+        if (err instanceof ApiError && err.status === 404) return;
         const message = err instanceof Error ? err.message : String(err);
         setComposeDraftError(`Failed to insert drafted content: ${message}`);
       }
@@ -1761,6 +1771,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       try {
         const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(draftSessionId)}/compose-outputs`;
         const response = await authenticatedFetch(url, { method: 'GET', signal: ac.signal });
+        // Defensive: authenticatedFetch throws ApiError on non-2xx (it never returns a
+        // non-ok Response), so a 404 lands in the catch below — not here. This guard is a
+        // safety net should that behaviour ever change.
         if (!response.ok) {
           dispatch({
             kind: 'loadFailed',
@@ -1808,6 +1821,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         setIsDirty(true);
       } catch (err) {
         if (ac.signal.aborted) return;
+        // This is a DRAFT-SEED mount — a draft IS expected. authenticatedFetch throws ApiError
+        // on non-2xx (never returns a non-ok Response), so a 404 (the drafted output isn't in
+        // the session — expired or never written) lands here. Surface the same soft, non-scary
+        // message the equivalent stored-doc path would; do NOT crash.
+        if (err instanceof ApiError && err.status === 404) {
+          dispatch({
+            kind: 'loadFailed',
+            errorMessage:
+              'The drafted document is no longer available (the session may have expired). Try drafting it again.',
+          });
+          return;
+        }
         const message = err instanceof Error ? err.message : String(err);
         dispatch({ kind: 'loadFailed', errorMessage: `Failed to load the drafted document: ${message}` });
       }
