@@ -65,6 +65,10 @@ import { WorkspacePaneMenu } from "./WorkspacePaneMenu";
 // Statically imported so the email branch resolves the component synchronously
 // (no WorkspaceWidgetRegistry round-trip).
 import { EmailStubWidget } from "./EmailStubWidget";
+// spaarkeai-compose-r2 UNIFY — the DIRECT 'compose' widget's seed shape. Used to
+// build the ribbon composeMode=editor launch seed (stored-doc pointer) that the
+// workspace handler's 'compose' branch consumes.
+import type { ComposeWidgetSeed } from "./composeWidgetData";
 import {
   logTelemetryError,
   TELEMETRY_TAB_RESTORE_LOAD_FAILURE,
@@ -490,25 +494,50 @@ export function WorkspacePane(): React.JSX.Element {
     isAuthenticated,
   });
 
-  // spaarkeai-compose-r1 task 092: when App.tsx was launched with
-  // `composeMode=editor` (ribbon Open-in-Compose modal path), override the
-  // BFF-default active layout with the "Compose" workspace layout (system
-  // row `sprk_workspacelayoutid=c09d26be-e173-f111-ab0e-7ced8ddc4a05` created
-  // by W1a-010). Resolved by NAME here so no client-side GUID pinning is
-  // required. Falls back to the BFF default when the Compose row is missing
-  // from the returned layouts (defensive — should never happen post-deploy).
+  // spaarkeai-compose-r2 UNIFY (completes the R1 flip): when App.tsx was
+  // launched with `composeMode=editor` (ribbon Open-in-Compose modal path), we
+  // NO LONGER install the "Compose" workspace LAYOUT tab (widgetType
+  // 'workspace'). Instead the compose-launch auto-install effect below opens a
+  // DIRECT 'compose' widget tab (widgetType 'compose'), so EVERY Compose mount
+  // is protected by the keep-mounted-hidden keep-alive
+  // (WorkspaceTabManagerComponent) and never unmounts on a tab switch (the
+  // transient/Browse doc survives). Non-compose default layouts (Daily
+  // Briefing, dashboards, …) still flow through the 'workspace' LAYOUT door.
   const composeLaunch = useComposeLaunch();
-  const layoutForAutoInstall = React.useMemo(() => {
-    if (composeLaunch?.composeMode === "editor") {
-      const composeRow = layouts.find((l) => l.name === "Compose");
-      if (composeRow) return composeRow;
-    }
-    return activeLayout;
-  }, [composeLaunch, layouts, activeLayout]);
+  const isComposeLaunch = composeLaunch?.composeMode === "editor";
+
+  // Build the DIRECT-widget seed from the launch context's stored document.
+  // main.tsx parses the ribbon URL params (sprkDocumentId / speDriveItemId /
+  // speDriveId / speFileName) into `composeLaunch.document` + `.driveId`; we map
+  // them onto the stored-document door of the compose seed. An empty seed (no
+  // document — should not happen for the ribbon path, which always carries a
+  // stored doc) opens the Compose empty state.
+  const composeLaunchSeed = React.useMemo<ComposeWidgetSeed>(() => {
+    if (!isComposeLaunch) return {};
+    const doc = composeLaunch?.document ?? null;
+    const driveId = composeLaunch?.driveId ?? "";
+    const seed: ComposeWidgetSeed = {};
+    if (doc?.speDriveItemId) seed.speDriveItemId = doc.speDriveItemId;
+    if (doc?.sprkDocumentId) seed.sprkDocumentId = doc.sprkDocumentId;
+    if (driveId) seed.speDriveId = driveId;
+    if (doc?.fileName) seed.fileName = doc.fileName;
+    return seed;
+  }, [isComposeLaunch, composeLaunch]);
+
+  // The NON-compose default layout still auto-installs through the 'workspace'
+  // LAYOUT door (unchanged). In compose-launch mode the layout auto-install
+  // effect early-returns so we don't open the BFF default BEHIND the Compose
+  // tab — the compose-Direct effect owns the mount.
+  const layoutForAutoInstall = activeLayout;
 
   const autoInstalledDefaultRef = React.useRef<boolean>(false);
   React.useEffect(() => {
     if (!isAuthenticated) return;
+    // spaarkeai-compose-r2 UNIFY: in compose-launch mode the DIRECT 'compose'
+    // tab is installed by the dedicated effect below — skip the layout
+    // auto-install entirely so we don't ALSO open the BFF default layout behind
+    // the Compose tab (the ribbon user must land ONLY on the editor).
+    if (isComposeLaunch) return;
     // R3-3 (2026-07-07): wait for the NFR-09 tab restore to settle so the
     // `alreadyOpen` check below sees the RESTORED tabs. Without this gate the
     // default-tab addTab raced restore, no-op'd it (hasNonHomeTab guard) and
@@ -533,47 +562,14 @@ export function WorkspacePane(): React.JSX.Element {
         const data = t.widgetData as { layoutId?: string } | null;
         return data?.layoutId === layoutForAutoInstall.id;
       });
-    if (existingTab) {
-      // Issue #572 Defect 1d: in compose-launch mode we must ACTIVATE the
-      // restored Compose tab, not just skip the install. NFR-09 restore
-      // honors the persisted activeTabId and never force-activates — so on
-      // a compose relaunch the restored session could land on a different
-      // tab, and with the tab strip hidden in compose-launch mode the user
-      // had no way to reach the Compose surface (relaunch showed the normal
-      // three-pane workspace instead of the editor). This mirrors the
-      // "always want the Compose layout on top" rule the pin-skip guard
-      // below already documents.
-      if (composeLaunch?.composeMode === "editor") {
-        manager.setActiveTab(existingTab.id);
-        syncState();
-        // Same macrotask deferral as the widget_load dispatch below — the
-        // tab_change subscribers (ContextPaneController) register in effects
-        // that may not have run yet on a fresh mount.
-        const activateTimerId = window.setTimeout(() => {
-          dispatch("workspace", {
-            type: "tab_change",
-            tabId: existingTab.id,
-            widgetType: existingTab.widgetType,
-            widgetData: existingTab.widgetData,
-          });
-        }, 0);
-        return () => {
-          window.clearTimeout(activateTimerId);
-        };
-      }
-      return;
-    }
+    if (existingTab) return;
 
     // Skip if the default is in the pinned list — the pin auto-open effect
-    // below will open it; we don't want to double-dispatch. This check does
-    // NOT apply in compose-launch mode: we always want the Compose layout on
-    // top so the user lands in the editor regardless of their pin list.
-    if (composeLaunch?.composeMode !== "editor") {
-      const isPinned = getPinnedWorkspaces().some(
-        (p) => p.layoutId === layoutForAutoInstall.id,
-      );
-      if (isPinned) return;
-    }
+    // below will open it; we don't want to double-dispatch.
+    const isPinned = getPinnedWorkspaces().some(
+      (p) => p.layoutId === layoutForAutoInstall.id,
+    );
+    if (isPinned) return;
 
     // Defer to a macrotask so usePaneEvent's subscription effect (declared
     // later in this component) has registered. Identical pattern to the pin
@@ -582,9 +578,7 @@ export function WorkspacePane(): React.JSX.Element {
     const timerId = window.setTimeout(() => {
       // eslint-disable-next-line no-console
       console.info(
-        `[WorkspacePane] Auto-installing ${
-          composeLaunch?.composeMode === "editor" ? "compose" : "default"
-        } workspace: ${layoutForAutoInstall.name} (${layoutForAutoInstall.id})`,
+        `[WorkspacePane] Auto-installing default workspace: ${layoutForAutoInstall.name} (${layoutForAutoInstall.id})`,
       );
       dispatch("workspace", {
         type: "widget_load",
@@ -604,7 +598,50 @@ export function WorkspacePane(): React.JSX.Element {
     // ready; the ref guard prevents re-runs on subsequent dependency changes
     // (e.g. refetch).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, tabRestoreSettled, layoutForAutoInstall]);
+  }, [isAuthenticated, isComposeLaunch, tabRestoreSettled, layoutForAutoInstall]);
+
+  // ---------------------------------------------------------------------------
+  // spaarkeai-compose-r2 UNIFY — compose-launch auto-install (DIRECT 'compose')
+  //
+  // The ribbon composeMode=editor launch now opens a widgetType:'compose' tab
+  // (not the "Compose" workspace LAYOUT tab). We dispatch a single 'compose'
+  // widget_load carrying the stored-document seed (composeLaunchSeed). The
+  // workspace handler's 'compose' branch REUSES the single existing compose tab
+  // (activating it — this covers the relaunch/restore case, issue #572 Defect
+  // 1d, since a restored compose tab is reused-and-activated) or creates one.
+  // Because every Compose mount is now widgetType 'compose', it is covered by
+  // the keep-mounted-hidden keep-alive and survives switching to the Email (or
+  // any) tab.
+  //
+  // Same macrotask deferral + tabRestoreSettled gate + run-once ref guard as
+  // the layout auto-install effect above.
+  // ---------------------------------------------------------------------------
+  const autoInstalledComposeRef = React.useRef<boolean>(false);
+  React.useEffect(() => {
+    if (!isComposeLaunch) return;
+    if (!isAuthenticated) return;
+    if (!tabRestoreSettled) return;
+    if (autoInstalledComposeRef.current) return; // run once per mount
+    autoInstalledComposeRef.current = true;
+
+    const timerId = window.setTimeout(() => {
+      // eslint-disable-next-line no-console
+      console.info("[WorkspacePane] Auto-installing compose (direct widget)");
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: "compose",
+        widgetData: { compose: composeLaunchSeed },
+        displayName: "Compose",
+      });
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+    // composeLaunchSeed is intentionally omitted from deps — the ref guard runs
+    // this once per mount; the seed is stable for the life of a compose launch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isComposeLaunch, isAuthenticated, tabRestoreSettled]);
 
   // ---------------------------------------------------------------------------
   // Auto-open pinned workspaces — task 092 / round 5 / task 101 fix
@@ -857,6 +894,23 @@ export function WorkspacePane(): React.JSX.Element {
       const displayName =
         event.displayName ?? meta?.displayName ?? widgetType;
 
+      // ── spaarkeai-compose-r2 UNIFY — "Compose" layout → Direct 'compose' ────
+      // A "Compose" workspace-LAYOUT load — the WorkspacePaneMenu "Compose"
+      // menu selection (WorkspacePaneMenu.handleLayoutSelect dispatches
+      // widgetType:'workspace' + layoutName:'Compose'), or any legacy
+      // Compose-layout dispatch — is RE-ROUTED here to the DIRECT 'compose'
+      // widget so it mounts as widgetType 'compose' and is protected by the
+      // keep-mounted-hidden keep-alive. Detected by the layout NAME "Compose";
+      // ALL other layouts (Daily Briefing, dashboards, …) keep the 'workspace'
+      // LAYOUT door and flow through the generic addTab path below, unchanged.
+      // The menu selection carries no document → empty Compose editor.
+      const isComposeLayoutLoad =
+        widgetType === "workspace" &&
+        ((widgetData as { layoutName?: string } | null)?.layoutName ===
+          "Compose" ||
+          event.displayName === "Compose");
+      const effectiveWidgetType = isComposeLayoutLoad ? "compose" : widgetType;
+
       // ── Compose DIRECT widget — single-tab reuse (spaarkeai-compose-r2) ─────
       // Compose is a first-class DIRECT workspace widget (widgetType 'compose' →
       // ComposeDirectWidget → ComposeWorkspace), NOT a LegalWorkspace LAYOUT tab.
@@ -868,7 +922,7 @@ export function WorkspacePane(): React.JSX.Element {
       // of stacking duplicates. Other layouts (Daily Briefing, Documents, …)
       // keep the 'workspace' LAYOUT door and flow through the generic addTab
       // path below, unchanged.
-      if (widgetType === "compose") {
+      if (effectiveWidgetType === "compose") {
         // FR-34 D-F3 (task 071): a CONTENT-bearing open carries a full-document
         // draft SEED (widgetData.compose.draft.ledgerRef — DEF-08 Part A). When
         // present, the ack is DEFERRED until ComposeWorkspace signals the draft
@@ -892,6 +946,7 @@ export function WorkspacePane(): React.JSX.Element {
           | {
               filename?: string;
               compose?: {
+                fileName?: string;
                 upload?: { fileName?: string };
                 draft?: { fileName?: string };
               };
@@ -900,6 +955,11 @@ export function WorkspacePane(): React.JSX.Element {
         const seedFilename =
           composeSeed?.compose?.upload?.fileName ??
           composeSeed?.compose?.draft?.fileName ??
+          // spaarkeai-compose-r2 UNIFY: the ribbon stored-doc seed carries its
+          // name at `compose.fileName` (speFileName) — hoist it too so the
+          // R3 server-readable top-level `filename` contract covers the ribbon
+          // Open-in-Compose path, not just upload/draft opens.
+          composeSeed?.compose?.fileName ??
           composeSeed?.filename;
 
         const ackComposeFrame = (): void => {
@@ -1266,7 +1326,7 @@ export function WorkspacePane(): React.JSX.Element {
   // can still be dispatched via `widget_load` PaneEventBus events; they
   // will render normally (the tab manager still creates tabs; only the tab
   // strip UI is hidden). See `hideTabBar` prop on WorkspaceTabManagerComponent.
-  const isComposeLaunchMode = composeLaunch?.composeMode === "editor";
+  const isComposeLaunchMode = isComposeLaunch;
 
   const header = (
     <PaneHeader
