@@ -624,6 +624,11 @@ public static class ChatEndpoints
                 // the ONE per-turn ContextEnvelope bind (fingerprint write, ADR-040) and consumes the bound
                 // envelope for the interactive prompt. The endpoint's separate bind below is retired.
                 ledgerOutputs: session.Outputs,
+                // spaarkeai-compose-r2 "summarize this document" reinforcement: forward the active
+                // document's session-file id so the Session Files manifest marks the active file and
+                // names it the default target when the LLM omits fileIds. Deterministic scoping lives
+                // in SessionDispatchOrchestrator.ResolveTargetFiles.
+                activeSessionFileId: session.ActiveDocument?.SessionFileId,
                 cancellationToken: cancellationToken);
 
             // Convert session history to AI framework messages for context

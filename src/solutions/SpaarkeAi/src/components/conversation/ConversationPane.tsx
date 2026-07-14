@@ -769,6 +769,52 @@ export function ConversationPane(): React.JSX.Element {
   // ChatSessionFile, no redundant upload). Cleared per-session by the session-created reset below.
   const activeDocUploadCacheRef = React.useRef<Map<string, string>>(new Map());
 
+  // spaarkeai-compose-r2 (cold Workspaces-menu Compose bug): lazily obtain the pane's chat session.
+  // A Compose tab opened COLD from the Workspaces menu (no prior Assistant interaction) has NO chat
+  // session, so a Browse-mounted file's `registerComposeActiveDocument` used to early-return and the
+  // bytes never became a ChatSessionFile — the Assistant could not see the file. This helper mints one
+  // ON DEMAND using the SAME mechanism `useCommandRouting.createNewSession` (task 097) + SprkChat's
+  // own first-message create use: POST /api/ai/chat/sessions (empty body) → `setChatSessionId`. That
+  // pushes the id into AiSessionProvider so the created session becomes the pane's ACTIVE session (the
+  // Assistant, SprkChat, every sibling read the SAME id) — NOT a throwaway. The in-flight promise ref
+  // dedups two near-simultaneous registrations into a SINGLE create. `chatSessionIdRef` is updated
+  // synchronously (ahead of the setChatSessionId-driven re-render) so the caller's subsequent
+  // upload + active-document POST — and any same-tick `getSessionId()` reader — see the new id at once.
+  const ensureSessionInFlightRef = React.useRef<Promise<string | null> | null>(null);
+  const ensureChatSession = React.useCallback(async (): Promise<string | null> => {
+    const existing = getSessionId();
+    if (existing) return existing;
+    if (ensureSessionInFlightRef.current) return ensureSessionInFlightRef.current;
+    if (!bffBaseUrl) return null;
+    const create = (async (): Promise<string | null> => {
+      try {
+        const response = await authenticatedFetch(`${bffBaseUrl}/api/ai/chat/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        if (!response.ok) return null;
+        const json = (await response.json()) as { sessionId?: string };
+        const newId =
+          typeof json?.sessionId === "string" && json.sessionId.length > 0 ? json.sessionId : null;
+        if (newId !== null) {
+          // Make it the pane's ACTIVE session: update the render-free session ref SYNCHRONOUSLY (so a
+          // same-tick getSessionId() sees it before the setChatSessionId re-render) and push it into
+          // AiSessionProvider so the remounting SprkChat + the Assistant continue with THIS session.
+          chatSessionIdRef.current = newId;
+          setChatSessionId(newId);
+        }
+        return newId;
+      } catch {
+        return null;
+      } finally {
+        ensureSessionInFlightRef.current = null;
+      }
+    })();
+    ensureSessionInFlightRef.current = create;
+    return create;
+  }, [getSessionId, bffBaseUrl, authenticatedFetch, setChatSessionId]);
+
   const registerComposeActiveDocument = React.useCallback(
     async ({
       docxBytes,
@@ -784,8 +830,19 @@ export function ConversationPane(): React.JSX.Element {
       // sibling server agent clears ChatSession.ActiveDocument).
       visible?: boolean;
     }): Promise<void> => {
-      const sessionId = getSessionId();
-      if (!sessionId || !bffBaseUrl) return;
+      if (!bffBaseUrl) return;
+      // spaarkeai-compose-r2 (cold Workspaces-menu Compose bug): a Compose tab opened COLD from the
+      // Workspaces menu has no chat session yet. Do NOT early-return (that left the Browse-mounted
+      // file invisible to the Assistant) — LAZILY create/obtain the pane's session BEFORE the upload +
+      // active-document POST so the bytes land as a ChatSessionFile the Assistant can see. The created
+      // session becomes the pane's ACTIVE session (ensureChatSession → setChatSessionId). A WITHDRAW
+      // (visible === false) has nothing to withdraw with no session → skip the create and return.
+      let sessionId = getSessionId();
+      if (!sessionId) {
+        if (visible === false) return;
+        sessionId = await ensureChatSession();
+        if (!sessionId) return;
+      }
       try {
         const name = fileName ?? "compose-document.docx";
         // Wave 3 Part 3: dedup the upload so tab_change re-registrations don't re-upload / duplicate.
@@ -842,7 +899,7 @@ export function ConversationPane(): React.JSX.Element {
         // Non-fatal: the direct upload just won't be chat-visible; the Compose Save path is unaffected.
       }
     },
-    [getSessionId, bffBaseUrl, authenticatedFetch]
+    [getSessionId, bffBaseUrl, authenticatedFetch, ensureChatSession]
   );
   useRegisterComposeActiveDocumentHandler(registerComposeActiveDocument);
   // ADR-015: structural signal only (queue depth + in-flight correlation id —

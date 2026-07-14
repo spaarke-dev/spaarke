@@ -168,6 +168,57 @@ public class SessionDispatchManifestProbeTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Active-document scoping (spaarkeai-compose-r2 "summarize this document" fix):
+    // with NO explicit fileIds, the default targets the session's ACTIVE document —
+    // not every file in the session. FR-08 default-all is preserved ONLY when no
+    // active document is registered.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DispatchAsync_NoFileIdsWithActiveDocument_ScopesToActiveFileOnly()
+    {
+        // Two files uploaded (A, B); the active document is B. A bare "summarize this
+        // document" carries no explicit fileIds, so it must resolve to [B] ONLY.
+        var session = BuildSessionWithActive(activeSessionFileId: "file-B", "file-A", "file-B");
+        var sessions = new SequencedChatSessionManager(session);
+        var (orchestrator, textSource) = BuildOrchestrator(sessions, probeAttempts: 3);
+
+        var chunks = await Drain(orchestrator.DispatchAsync(new SessionDispatchRequest(
+            TenantId, SessionId, BindingId, Args: null)));
+
+        chunks.Should().NotContain(c => c.Error != null);
+        textSource.Verify(
+            t => t.FetchAsync(
+                TenantId, SessionId,
+                It.Is<IReadOnlyList<ChatSessionFile>>(f => f.Count == 1 && f[0].FileId == "file-B"),
+                It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the default (no explicit fileIds) scopes to the session's ACTIVE document, not all files");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_NoFileIdsNoActiveDocument_ResolvesToAllFiles_Fr08Preserved()
+    {
+        // Same two files, but NO active document registered → FR-08 default-all: both files.
+        var session = BuildSessionWithActive(activeSessionFileId: null, "file-A", "file-B");
+        var sessions = new SequencedChatSessionManager(session);
+        var (orchestrator, textSource) = BuildOrchestrator(sessions, probeAttempts: 3);
+
+        var chunks = await Drain(orchestrator.DispatchAsync(new SessionDispatchRequest(
+            TenantId, SessionId, BindingId, Args: null)));
+
+        chunks.Should().NotContain(c => c.Error != null);
+        textSource.Verify(
+            t => t.FetchAsync(
+                TenantId, SessionId,
+                It.Is<IReadOnlyList<ChatSessionFile>>(f =>
+                    f.Count == 2 && f[0].FileId == "file-A" && f[1].FileId == "file-B"),
+                It.IsAny<CancellationToken>()),
+            Times.Once,
+            "with no active document, FR-08 default-all still resolves to the full manifest");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Builders
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -261,6 +312,9 @@ public class SessionDispatchManifestProbeTests
     }
 
     private static ChatSession BuildSession(params string[] fileIds)
+        => BuildSessionWithActive(activeSessionFileId: null, fileIds);
+
+    private static ChatSession BuildSessionWithActive(string? activeSessionFileId, params string[] fileIds)
     {
         var files = fileIds
             .Select(id => new ChatSessionFile(
@@ -277,7 +331,14 @@ public class SessionDispatchManifestProbeTests
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
-            UploadedFiles: files.Count > 0 ? files : null);
+            UploadedFiles: files.Count > 0 ? files : null)
+        {
+            ActiveDocument = string.IsNullOrEmpty(activeSessionFileId)
+                ? null
+                : new ActiveDocumentIdentity(
+                    Source: ActiveDocumentIdentity.SourceComposeDirect,
+                    SessionFileId: activeSessionFileId),
+        };
     }
 
     private static JsonElement? BuildArgs(params string[] fileIds)

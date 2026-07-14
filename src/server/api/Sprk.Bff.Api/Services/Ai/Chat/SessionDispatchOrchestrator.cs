@@ -559,7 +559,9 @@ public class SessionDispatchOrchestrator
     }
 
     /// <summary>
-    /// Resolve the FILE-operand path (the shipped summarize behavior): the FR-08 file subset, the G-P2
+    /// Resolve the FILE-operand path (the shipped summarize behavior): the target-file resolution
+    /// (explicit fileIds subset → else the session's ACTIVE document → else all files per FR-08;
+    /// see <see cref="ResolveTargetFiles"/>), the G-P2
     /// manifest readiness probe, the session-file text fetch, then a <see cref="ContextBinder"/> bind of
     /// the resolved <see cref="DocumentText"/> as a <see cref="OperandChannel.Document"/> operand (writing
     /// the context fingerprint). Extracted from the iterator so it can use try/catch + early returns; the
@@ -574,9 +576,15 @@ public class SessionDispatchOrchestrator
         int contextTurn,
         CancellationToken cancellationToken)
     {
-        // ── FR-08 file resolution: explicit args subset, else the full session manifest.
+        // ── File resolution (spaarkeai-compose-r2 "summarize this document" scoping fix):
+        // explicit args subset always wins; else scope to the session's ACTIVE document when
+        // one is registered; else the full session manifest (FR-08 default-all). Every Compose
+        // open-path registers session.ActiveDocument (most-recent-wins), so "summarize this
+        // document" with no explicit fileIds targets the tab the user is looking at, not every
+        // file in the session.
         var uploadedFiles = session.UploadedFiles ?? Array.Empty<ChatSessionFile>();
-        var targetFiles = ResolveTargetFiles(requestedFileIds, uploadedFiles);
+        var activeSessionFileId = session.ActiveDocument?.SessionFileId;
+        var targetFiles = ResolveTargetFiles(requestedFileIds, uploadedFiles, activeSessionFileId);
 
         // ── G-P2 UAT round-1 finding 4 (2026-07-06): manifest readiness probe at the
         // ONE dispatch seam (covers the loop's BindingCapabilityTool, chip clicks, and
@@ -610,7 +618,10 @@ public class SessionDispatchOrchestrator
                 }
                 session = refreshed;
                 uploadedFiles = session.UploadedFiles ?? Array.Empty<ChatSessionFile>();
-                targetFiles = ResolveTargetFiles(requestedFileIds, uploadedFiles);
+                // Re-read the active-document pointer off the refreshed session — a compose open
+                // registration can land in the same window the manifest write does.
+                activeSessionFileId = session.ActiveDocument?.SessionFileId;
+                targetFiles = ResolveTargetFiles(requestedFileIds, uploadedFiles, activeSessionFileId);
                 if (!IsResolutionIncomplete(requestedFileIds, targetFiles))
                 {
                     break;
@@ -868,21 +879,47 @@ public class SessionDispatchOrchestrator
             : targetFiles.Count == 0;
 
     /// <summary>
-    /// Resolve the effective target files: the explicit args subset filtered against the
-    /// session manifest (unknown ids ignored), else the full manifest (FR-08).
+    /// Resolve the effective target files. The default targets the session's ACTIVE document
+    /// when one is set; it falls back to all files only when no active document is registered
+    /// (FR-08); explicit fileIds are always honored. Three-way rule:
+    /// <list type="number">
+    ///   <item>Explicit <paramref name="requestedFileIds"/> (Count &gt; 0) → the subset filtered
+    ///     against the session manifest (unknown ids ignored). UNCHANGED.</item>
+    ///   <item>No explicit ids AND <paramref name="activeSessionFileId"/> non-empty → scope to
+    ///     THAT single file: the manifest entry whose <see cref="ChatSessionFile.FileId"/> equals
+    ///     it (a 1-element list), or an EMPTY list when it is not in the manifest yet (so the
+    ///     G-P2 readiness probe <see cref="IsResolutionIncomplete"/> waits for the manifest write).
+    ///     This is the "summarize this document" scoping fix — the default no longer summarizes
+    ///     every file in the session.</item>
+    ///   <item>No explicit ids AND no active document → the full manifest (FR-08 default-all).
+    ///     UNCHANGED.</item>
+    /// </list>
     /// </summary>
     private static IReadOnlyList<ChatSessionFile> ResolveTargetFiles(
         IReadOnlyList<string>? requestedFileIds,
-        IReadOnlyList<ChatSessionFile> uploadedFiles)
+        IReadOnlyList<ChatSessionFile> uploadedFiles,
+        string? activeSessionFileId)
     {
-        if (requestedFileIds is not { Count: > 0 })
+        // (1) Explicit subset — filter against the manifest (unknown ids ignored). UNCHANGED.
+        if (requestedFileIds is { Count: > 0 })
         {
-            return uploadedFiles;
+            return uploadedFiles
+                .Where(f => requestedFileIds.Contains(f.FileId, StringComparer.Ordinal))
+                .ToList();
         }
 
-        return uploadedFiles
-            .Where(f => requestedFileIds.Contains(f.FileId, StringComparer.Ordinal))
-            .ToList();
+        // (2) No explicit subset but an ACTIVE document is set — scope to that single file.
+        //     A one-element list when it is already in the manifest, else an empty list (the
+        //     probe treats empty as incomplete for the default case and waits for the write).
+        if (!string.IsNullOrEmpty(activeSessionFileId))
+        {
+            return uploadedFiles
+                .Where(f => string.Equals(f.FileId, activeSessionFileId, StringComparison.Ordinal))
+                .ToList();
+        }
+
+        // (3) No explicit subset AND no active document — full manifest (FR-08 default-all).
+        return uploadedFiles;
     }
 }
 

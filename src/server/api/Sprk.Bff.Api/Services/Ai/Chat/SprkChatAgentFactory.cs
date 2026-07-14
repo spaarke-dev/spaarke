@@ -315,6 +315,13 @@ public class SprkChatAgentFactory
     /// Default <c>null</c> for backward compatibility — pre-R5 sessions / call sites that
     /// omit the parameter behave exactly as before.
     /// </param>
+    /// <param name="activeSessionFileId">
+    /// spaarkeai-compose-r2 "summarize this document" reinforcement: the active document's
+    /// <see cref="ChatSessionFile.FileId"/> (<c>session.ActiveDocument?.SessionFileId</c>), or null.
+    /// Forwarded to <see cref="BuildSessionFilesManifestSuffix"/> so the Session Files manifest marks
+    /// the active file and tells the LLM it is the default target when no fileIds are passed. Prompt-only;
+    /// the deterministic scoping lives in <c>SessionDispatchOrchestrator.ResolveTargetFiles</c>.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
@@ -334,6 +341,7 @@ public class SprkChatAgentFactory
         IReadOnlyList<string>? previousTurnToolNames = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
         IReadOnlyList<SessionOutput>? ledgerOutputs = null,
+        string? activeSessionFileId = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -441,7 +449,7 @@ public class SprkChatAgentFactory
         {
             try
             {
-                var manifestSuffix = BuildSessionFilesManifestSuffix(files);
+                var manifestSuffix = BuildSessionFilesManifestSuffix(files, activeSessionFileId);
                 if (!string.IsNullOrEmpty(manifestSuffix))
                 {
                     // R6 task 068 — session-files manifest participates in the shared 8K
@@ -1115,8 +1123,19 @@ public class SprkChatAgentFactory
     /// </para>
     /// </remarks>
     /// <param name="uploadedFiles">Non-empty, non-null manifest list. Caller guarantees Count &gt; 0.</param>
+    /// <param name="activeSessionFileId">
+    /// spaarkeai-compose-r2 "summarize this document" reinforcement: the <see cref="ChatSessionFile.FileId"/>
+    /// of the session's ACTIVE document (<c>session.ActiveDocument?.SessionFileId</c>), or null when none is
+    /// registered. When it matches a usable manifest entry, that entry is marked " (active)" and a single
+    /// instruction line tells the LLM the active file is the default target for "this/the document"; to
+    /// target other or ALL files the LLM must pass their fileIds explicitly. Prompt-only reinforcement — the
+    /// DETERMINISTIC scoping lives in <c>SessionDispatchOrchestrator.ResolveTargetFiles</c>. ADR-015 preserved
+    /// (fileId + fileName only; never file content).
+    /// </param>
     /// <returns>The suffix beginning with two newlines, ready to concatenate onto a system prompt. Empty string when the manifest yields no usable entries (defensive — should not happen for Count &gt; 0).</returns>
-    internal static string BuildSessionFilesManifestSuffix(IReadOnlyList<ChatSessionFile> uploadedFiles)
+    internal static string BuildSessionFilesManifestSuffix(
+        IReadOnlyList<ChatSessionFile> uploadedFiles,
+        string? activeSessionFileId = null)
     {
         if (uploadedFiles is null || uploadedFiles.Count == 0)
         {
@@ -1134,7 +1153,15 @@ public class SprkChatAgentFactory
             return string.Empty;
         }
 
-        var fileNames = string.Join(", ", usable.Select(f => f.FileName));
+        // The active file (when its id is present in the usable manifest) gets a " (active)"
+        // marker on its name so the LLM can see WHICH file "this document" refers to (ADR-015:
+        // still just fileName — no content leaks).
+        var activeFile = string.IsNullOrEmpty(activeSessionFileId)
+            ? null
+            : usable.FirstOrDefault(f => string.Equals(f.FileId, activeSessionFileId, StringComparison.Ordinal));
+
+        var fileNames = string.Join(", ", usable.Select(f =>
+            ReferenceEquals(f, activeFile) ? $"{f.FileName} (active)" : f.FileName));
         var fileIds = string.Join(", ", usable.Select(f => f.FileId));
         var pluralSuffix = usable.Count == 1 ? string.Empty : "s";
 
@@ -1142,9 +1169,23 @@ public class SprkChatAgentFactory
         // not blend it into the preceding "### Active Capabilities" or entity enrichment.
         // Task 044: tool-agnostic wording — the deleted generic playbook dispatcher is no
         // longer named; capability tools accept the session file IDs via their declared
-        // fileIds argument (FR-08 default-all applies when omitted).
-        return $"\n\nSession Files: This chat session has {usable.Count} uploaded file{pluralSuffix} available for tool calls: {fileNames}. " +
+        // fileIds argument.
+        var suffix = $"\n\nSession Files: This chat session has {usable.Count} uploaded file{pluralSuffix} available for tool calls: {fileNames}. " +
                $"When a capability needs these files (e.g. summarize), pass their file IDs in the tool call's fileIds argument: {fileIds}.";
+
+        // spaarkeai-compose-r2: when an active document is set, tell the LLM it is the default
+        // target for "this/the document" (omitting fileIds), and that targeting other or ALL
+        // files requires passing their fileIds explicitly. Mirrors the deterministic default in
+        // SessionDispatchOrchestrator.ResolveTargetFiles.
+        if (activeFile is not null)
+        {
+            suffix +=
+                $" When the user says \"this document\"/\"the document\" or omits a file, the ACTIVE file " +
+                $"({activeFile.FileName}, fileId {activeFile.FileId}) is the default target; to summarize other " +
+                $"files or ALL files, pass their fileIds explicitly.";
+        }
+
+        return suffix;
     }
 
 
