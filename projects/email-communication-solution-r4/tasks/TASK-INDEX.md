@@ -16,7 +16,7 @@
 | 004 | Add `sprk_event` to catalog/priority; correct org → `sprk_organization` | W0 | dataverse, bff-api | FR-04 | 001 | 012,013 | true | FULL | 🔲 |
 | 005 | Author **ADR-045** Communication ADR (concise + full) | W0 | adr, docs | FR-05 | — | 006,010,016 | **false** (`.claude/`) | STANDARD | ✅ |
 | 006 | BFF send-path: `AttachmentDriveItemIds` rename + `Internet-Message-Id` capture | W0 | bff-api, communication | FR-06 | 001,005 | 012,022,060 | true | FULL | 🔲 |
-| 007 | **Retire OOB-`email` subsystem** + publish-size delta | W0 | bff-api, deletion | FR-07 | 005 | — | true | FULL | 🔲 |
+| 007 | **Retire OOB-`email` subsystem** + publish-size delta | W0 | bff-api, deletion | FR-07 | 005 | — | true | FULL | ✅ (partial — 3 shared-infra files retained; see current-task) |
 | 010 | `ICommunicationEnrichmentService` (both directions; outbound RAG) | W1 | bff-api, communication | FR-08 | 005,006 | 011,052 | true | FULL | 🔲 |
 | 011 | Refactor `IncomingAssociationResolver` → Engine over normalized envelope | W1 | bff-api, refactoring | FR-09 | 010 | 012,013,014 | false (serial in W1) | FULL | 🔲 |
 | 012 | Rungs 0–1 (explicit-ref + thread continuity) across 8 targets | W1 | bff-api, communication | FR-10 | 011 | 015,030 | true | FULL | 🔲 |
