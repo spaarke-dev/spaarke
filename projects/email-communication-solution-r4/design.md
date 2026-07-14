@@ -372,6 +372,20 @@ The send-side scope R4 absorbs (waves W2/W4/W6). Summarized here so this design 
 
 ---
 
+## 8.6 Hot-Path Declaration (per CLAUDE.md §10 / FR-C04)
+
+```xml
+<hot-path-declaration>
+  <bff>Y</bff>                 <!-- heavy: Services/Communication/**, Services/Ai/** (OutputRouter, EventRulesService, node executors, AppOnlyAnalysisService), Services/Email/** (RETIRE), Api/Office/OfficeEndpoints.cs, Api/EmailEndpoints.cs (retire) -->
+  <spaarke-ai>N</spaarke-ai>   <!-- src/solutions/SpaarkeAi/** not modified; notifications feed Daily Briefing as a CONSUMER only -->
+  <ci-workflows>N</ci-workflows>
+  <skill-directives>N</skill-directives> <!-- W0 authors ADR-045 in .claude/adr/ (main-session write boundary); not .claude/skills or .claude/constraints -->
+  <root-claude-md>N</root-claude-md>      <!-- W8 may add a §17 pointer row for the new architecture doc + ADR-045; treat as optional, not a hot-path edit -->
+</hot-path-declaration>
+```
+
+> **⚠️ HARD WARNING — BFF `Services/Ai/**` overlap with active peers.** W5 (Responsive Intelligence) modifies `Services/Ai/` internals (`OutputRouter`/`DispositionRoutability.cs`, `EventRulesService` wiring, `CreateNotification`/`CreateTask`/`DeliverComposite` executors). Per `projects/INDEX.md`, **`spaarke-ai-architecture-redesign-r2` is the declared sole owner of `Services/Ai/` internals**, and `spaarke-daily-update-service-r5` (`Nodes/UpdateRecordNodeExecutor`, `Services/Ai/Narrators/**`), `spaarkeai-compose-r2`, `chat-routing-redesign-r1`, and `spaarke-ai-platform-unification-r6` also touch `Services/Ai/`. **W5 MUST coordinate with r2-core via `/conflict-check` before each W5 wave, consume r2-core's published `Services/Ai/PublicContracts/` seams rather than forking internals, and MUST NOT begin until the OutputRouter `record`/`notification` disposition ownership is confirmed with r2-core.** W1/W3 (Communication engine, new detectors, JPS action) touch `Services/Communication/**` + add new files — low overlap. See §9 W5 note.
+
 ## 9. Plan — unified wave map (R3 + R4)
 
 One project, dependency-ordered waves. **[S] = server (C#), [C] = client (TS), [X] = Dataverse/config, [D] = docs.** The server/client split is the key parallelization axis. Effort is rough; `/task-create` produces the authoritative WBS + parallel-safe groups.
