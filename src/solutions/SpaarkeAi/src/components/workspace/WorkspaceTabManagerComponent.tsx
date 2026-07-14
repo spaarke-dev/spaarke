@@ -41,7 +41,6 @@ import { WidgetErrorBoundary } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import type { WorkspaceWidgetProps } from "@spaarke/ai-widgets";
 import { useDispatchPaneEvent } from "@spaarke/ai-widgets";
-import { AddToAssistantToggle } from "./AddToAssistantToggle";
 import { SPAARKEAI_TEMPLATE_FILTER } from "../../constants/workspaceTemplateFilter";
 import { resolveRuntimeConfig } from "@spaarke/auth";
 
@@ -213,8 +212,8 @@ const useStyles = makeStyles({
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
-    // R2 UAT §4.1 (2026-07-03) — small horizontal gap so the new gear icon
-    // sits comfortably to the left of the AddToAssistantToggle.
+    // FIX #6 (spaarkeai-compose-r2) — the "Visible to assistant" toggle was
+    // removed; this bar now holds only the workspace-layout edit gear.
     columnGap: tokens.spacingHorizontalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
@@ -293,30 +292,6 @@ export interface WorkspaceTabManagerComponentProps {
   onTabChange: (tabId: string) => void;
   /** Called when the user clicks the close button on a tab. */
   onTabClose: (tabId: string) => void;
-
-  /**
-   * Current chat session identifier. Required for the per-tab
-   * AddToAssistantToggle (R6 Pillar 9 / task 098) so the dispatched
-   * `workspace.tab_edited` PaneEventBus event is scoped to the active
-   * session per ADR-015.
-   *
-   * When null, the toggle is not rendered (no session = no visibility
-   * contract to project).
-   */
-  chatSessionId?: string | null;
-
-  /**
-   * Called when the user toggles the per-tab "Visible to assistant"
-   * switch. Receives the tabId and the NEW visibility value. The host
-   * (WorkspacePane) persists the change via PATCH to
-   * `/api/ai/chat/sessions/{id}/tabs/{tabId}` AND updates the local
-   * WorkspaceTabManager so the next system-prompt snapshot reflects
-   * the new flag.
-   *
-   * R6 Pillar 9 / task 098 — server projection already wired; this
-   * callback is the missing UI mount point.
-   */
-  onToggleVisibility?: (tabId: string, visibleToAssistant: boolean) => void;
 
   /**
    * When true, suppress the tab-bar strip and render only the active
@@ -501,8 +476,6 @@ export function WorkspaceTabManagerComponent({
   activeTabId,
   onTabChange,
   onTabClose,
-  chatSessionId,
-  onToggleVisibility,
   hideTabBar = false,
 }: WorkspaceTabManagerComponentProps): React.JSX.Element {
   const styles = useStyles();
@@ -778,45 +751,38 @@ export function WorkspaceTabManagerComponent({
       {/* Active tab content                                                   */}
       {/* ------------------------------------------------------------------ */}
       <div className={styles.content}>
-        {/* R6 Pillar 9 / task 098 — per-tab "Visible to assistant" toggle.
-            Rendered above the widget content (not inline in the tab strip —
-            tab labels stay clean). Only shows when:
-              - we have an active tab AND
-              - we have a chat session (need for ADR-015-scoped event) AND
-              - the host wired onToggleVisibility (otherwise it's read-only). */}
-        {activeTab !== null && chatSessionId && onToggleVisibility ? (
+        {/* FIX #6 (spaarkeai-compose-r2) — the per-tab "Visible to assistant"
+            toggle was REMOVED. The Assistant's active document now follows the
+            ACTIVE tab (WorkspacePane drives register/withdraw on tab activation
+            via the compose visibility conduit) — visibility is implicit, no UI.
+            What remains here is the workspace-LAYOUT edit gear (R2 UAT §4.1):
+            it opens the edit wizard for the active workspace layout. It is
+            shown ONLY for workspace-layout tabs (widgetType === "workspace")
+            with a resolvable layoutId — so it never appears on the Compose
+            surface (widgetType 'compose'), and the bar itself does not render
+            for compose tabs. */}
+        {activeTab !== null &&
+         activeTab.widgetType === "workspace" &&
+         (activeTab.widgetData as { layoutId?: string } | null)?.layoutId ? (
           <div className={styles.visibilityBar}>
-            {/* R2 UAT §4.1 (2026-07-03) — gear icon opens the edit wizard for
-                the active workspace layout at the Choose Layout step. Only
-                shown for workspace-layout tabs (widgetType === "workspace")
-                with a resolvable layoutId in widgetData. */}
-            {activeTab.widgetType === "workspace" &&
-             (activeTab.widgetData as { layoutId?: string } | null)?.layoutId ? (
-              <Tooltip content="Edit workspace layout" relationship="label" withArrow>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<Settings16Regular />}
-                  aria-label="Edit workspace layout"
-                  onClick={() =>
-                    handleGearIconClick(
-                      activeTab.id,
-                      (activeTab.widgetData as { layoutId: string }).layoutId,
-                      (activeTab.widgetData as { layoutName?: string }).layoutName
-                        ?? activeTab.displayName
-                        ?? "Workspace",
-                    )
-                  }
-                  data-testid="workspace-edit-gear"
-                />
-              </Tooltip>
-            ) : null}
-            <AddToAssistantToggle
-              tabId={activeTab.id}
-              sessionId={chatSessionId}
-              visibleToAssistant={activeTab.visibleToAssistant}
-              onChange={(next) => onToggleVisibility(activeTab.id, next)}
-            />
+            <Tooltip content="Edit workspace layout" relationship="label" withArrow>
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<Settings16Regular />}
+                aria-label="Edit workspace layout"
+                onClick={() =>
+                  handleGearIconClick(
+                    activeTab.id,
+                    (activeTab.widgetData as { layoutId: string }).layoutId,
+                    (activeTab.widgetData as { layoutName?: string }).layoutName
+                      ?? activeTab.displayName
+                      ?? "Workspace",
+                  )
+                }
+                data-testid="workspace-edit-gear"
+              />
+            </Tooltip>
           </div>
         ) : null}
 

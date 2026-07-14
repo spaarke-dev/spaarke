@@ -980,6 +980,30 @@ export function ConversationPane(): React.JSX.Element {
     }
   }, [sourceDocReadyToken, pendingReviseThisDocument, mountActiveSourceDocInCompose, injection]);
 
+  // FIX #7 (spaarkeai-compose-r2) — AUTO-LOAD an Assistant-uploaded file into Compose.
+  // Owner decision (settled): when the user uploads a file in the ASSISTANT (a chat attachment), it
+  // should open in the Compose tab automatically — no need to say "revise this document" and no chip
+  // click. When a chat upload finishes promoting, `handleSessionFileUploaded` back-fills
+  // `activeSourceDocRef` and bumps `sourceDocReadyToken`; this effect then dispatches the SAME compose
+  // upload-seed mount the "Open in Compose" / revise flows use (`mountActiveSourceDocInCompose` →
+  // `widget_load{widgetType:'compose', compose:{upload:{…}}}`), so the uploaded doc mounts in the
+  // single Compose tab (WorkspacePane reuses it + keeps it mounted-hidden per Wave A #1).
+  //
+  // Dedup by sessionFileId so repeated token bumps / re-registrations don't re-mount the same file; a
+  // genuinely new upload (new sessionFileId) mounts and the single-tab reuse handles the tab. This does
+  // NOT fight the race-safe revise buffering above: a buffered revise still fires its own mount + the
+  // document-session routing (an idempotent single-tab re-seed) — auto-load only guarantees the doc is
+  // on screen, and a subsequent "revise" still routes correctly through the doc session.
+  const autoLoadedSourceDocIdRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (sourceDocReadyToken === 0) return; // no upload has back-filled a source doc yet
+    const active = activeSourceDocRef.current;
+    if (!active?.sessionFileId) return;
+    if (autoLoadedSourceDocIdRef.current === active.sessionFileId) return; // already auto-loaded this file
+    autoLoadedSourceDocIdRef.current = active.sessionFileId;
+    mountActiveSourceDocInCompose();
+  }, [sourceDocReadyToken, mountActiveSourceDocInCompose]);
+
   // ── SprkChat session callbacks ────────────────────────────────────────────
   // R7 12.3a: clear the persisted id BEFORE SprkChat creates a fresh session.
   const handleSessionStale = React.useCallback(

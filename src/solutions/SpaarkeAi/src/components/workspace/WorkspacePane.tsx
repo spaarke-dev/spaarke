@@ -123,9 +123,10 @@ export function WorkspacePane(): React.JSX.Element {
   const styles = useStyles();
   const dispatch = useDispatchPaneEvent();
 
-  // R3 ("Visible to assistant") — the cross-pane conduit into the Compose editor's active-document
+  // FIX #6 (spaarkeai-compose-r2) — the cross-pane conduit into the Compose editor's active-document
   // register/withdraw. Null when no Compose editor is registered (no Compose tab open / standalone).
-  // Driven from `handleToggleVisibility` when the toggled tab is the Compose tab.
+  // Driven from the tab-activation effect below (visible=true when the Compose tab is active,
+  // visible=false when a non-compose tab is active) — replacing the removed manual toggle.
   const composeVisibility = useComposeVisibility();
 
   // ---------------------------------------------------------------------------
@@ -1150,61 +1151,38 @@ export function WorkspacePane(): React.JSX.Element {
   // Tab close handler — called by WorkspaceTabManagerComponent
   // ---------------------------------------------------------------------------
 
-  // R6 Pillar 9 / task 098 — per-tab visibility toggle handler.
-  // Updates the local tab record so the next system-prompt snapshot reflects
-  // the new flag, then PATCHes the BFF persistence layer. We don't roll back
-  // on PATCH failure (the local view stays in sync with the user's intent);
-  // background reconciliation on next workspace-state fetch corrects any
-  // drift if the server rejects.
-  const handleToggleVisibility = React.useCallback(
-    (tabId: string, visibleToAssistant: boolean): void => {
-      const manager = managerRef.current;
-      manager.setTabVisibility(tabId, visibleToAssistant);
-      syncState();
-
-      // R3 ("Visible to assistant") — for the COMPOSE tab the flag alone is inert (the doc's identity
-      // + extracted text never reach chat context). Drive the cross-pane conduit so ON registers the
-      // active Compose document (→ ChatSessionFile RAG + ActiveDocument; the Assistant can then answer
-      // "what file is loaded") and OFF withdraws it. No-op for non-Compose tabs / when no editor is
-      // registered. The tab flag + PATCH below remain the persisted state the server projection reads.
-      const toggledTab = manager.getSnapshot().tabs.find((t) => t.id === tabId);
-      if (toggledTab?.widgetType === "compose") {
-        composeVisibility?.(visibleToAssistant);
-      }
-
-      // Best-effort BFF persistence. Server projection already wired per R6
-      // Pillar 6a/9 — the endpoint accepts a partial PATCH on the tab record
-      // with the visibleToAssistant field.
-      if (chatSessionId && bffBaseUrl && isAuthenticated) {
-        // Issue #572 aggravator: this URL was previously built raw as
-        // `${bffBaseUrl}/ai/chat/...` — missing the `/api` prefix — so the
-        // per-tab request 404'd in production (App Insights). buildBffApiUrl
-        // adds the `/api` prefix idempotently, matching every other BFF call
-        // in this file.
-        void authenticatedFetch(
-          buildBffApiUrl(
-            bffBaseUrl,
-            `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs/${encodeURIComponent(tabId)}`,
-          ),
-          {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ visibleToAssistant }),
-          },
-        ).catch((err) => {
-          // Best-effort persistence — local view stays in sync with user
-          // intent. Background reconciliation on next workspace-state fetch
-          // corrects any drift if the server rejects.
-          // eslint-disable-next-line no-console
-          console.warn(
-            `[task-098] workspace visibility PATCH failed (tabId=${tabId}, sessionId=${chatSessionId}):`,
-            err,
-          );
-        });
-      }
-    },
-    [chatSessionId, bffBaseUrl, isAuthenticated, authenticatedFetch, syncState, composeVisibility],
-  );
+  // ---------------------------------------------------------------------------
+  // FIX #6 (spaarkeai-compose-r2) — the Assistant's active document FOLLOWS the
+  // active workspace tab. The manual "Visible to assistant" toggle + its
+  // handleToggleVisibility handler were REMOVED: the SELECTED Compose tab IS
+  // what the Assistant works with (implicit visibility).
+  //
+  // When the Compose tab is the active tab, register its document (identity +
+  // extracted text) as the session's active document by driving the editor's
+  // visibility conduit with visible=true (→ ComposeWorkspace.handleComposeVisibilityChange
+  // → registerActiveDocument → ChatSessionFile RAG + ActiveDocument, so the
+  // Assistant can answer "what file is loaded"). When ANY non-Compose tab is
+  // active (Daily Briefing / dashboard / other), withdraw it with visible=false
+  // so exactly one active doc = the selected Compose tab, and NONE when a
+  // non-document tab is active. Switching between compose docs re-seeds the
+  // single Compose tab, whose activation re-registers the new doc here.
+  //
+  // Reuses the SAME cross-pane conduit the removed toggle drove
+  // (useComposeVisibility) — no new bus/service (§11). `composeVisibility` is
+  // null until a Compose editor registers its handler (no Compose tab open /
+  // standalone mount) → no-op then. Because the single Compose tab is kept
+  // mounted-hidden across switches, the handler stays registered, so switching
+  // AWAY reliably withdraws and switching BACK re-registers. Re-fires if the
+  // handler registers while the Compose tab is already active (composeVisibility
+  // null→non-null) so the doc still registers on first mount.
+  // ---------------------------------------------------------------------------
+  React.useEffect(() => {
+    const activeTab = managerRef.current.getActiveTab();
+    composeVisibility?.(activeTab?.widgetType === "compose");
+    // tabState.activeTabId drives every activation path (click, compose reuse,
+    // close-restore, restore-from-persistence, auto-install); composeVisibility
+    // re-runs the sync when the editor's handler registers/unregisters.
+  }, [tabState.activeTabId, composeVisibility]);
 
   const handleTabClose = React.useCallback(
     (tabId: string): void => {
@@ -1331,9 +1309,6 @@ export function WorkspacePane(): React.JSX.Element {
         activeTabId={activeTabId}
         onTabChange={handleTabChange}
         onTabClose={handleTabClose}
-        // R6 Pillar 9 / task 098 — per-tab "Visible to assistant" toggle.
-        chatSessionId={chatSessionId}
-        onToggleVisibility={handleToggleVisibility}
         // spaarkeai-compose-r1 task 100 — suppress the tab strip in compose
         // mode; the Compose widget renders full-pane. See the block comment
         // above the header definition for rationale + widget-add contract.
