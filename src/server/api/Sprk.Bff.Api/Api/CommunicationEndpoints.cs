@@ -340,6 +340,7 @@ public static class CommunicationEndpoints
     private static async Task<IResult> HandleIncomingWebhookAsync(
         HttpRequest request,
         JobSubmissionService jobSubmissionService,
+        Services.Communication.GraphSubscriptionManager subscriptionManager,
         IOptions<CommunicationOptions> communicationOptions,
         ILogger<CommunicationService> logger,
         CancellationToken ct)
@@ -421,6 +422,7 @@ public static class CommunicationEndpoints
 
             var expectedClientStateBytes = Encoding.UTF8.GetBytes(expectedClientState);
             var enqueued = 0;
+            var lifecycleHandled = 0;
 
             foreach (var notification in notifications.Value)
             {
@@ -440,6 +442,36 @@ public static class CommunicationEndpoints
                         title: "Unauthorized",
                         detail: "Invalid clientState in notification",
                         statusCode: StatusCodes.Status401Unauthorized);
+                }
+
+                // ─── Step 4.5: Lifecycle notifications (FR-24) ───
+                // Lifecycle notifications carry a `lifecycleEvent` (reauthorizationRequired /
+                // subscriptionRemoved / missed) instead of a changed message. Route them to the
+                // subscription manager, which renews/recreates the subscription or triggers delta
+                // reconciliation. Handling is non-fatal and must not block the fast 202 response.
+                if (!string.IsNullOrEmpty(notification.LifecycleEvent))
+                {
+                    logger.LogInformation(
+                        "Received Graph lifecycle notification | LifecycleEvent={Event}, " +
+                        "SubscriptionId={SubscriptionId}, CorrelationId={CorrelationId}",
+                        notification.LifecycleEvent, notification.SubscriptionId, correlationId);
+
+                    try
+                    {
+                        await subscriptionManager.HandleLifecycleNotificationAsync(
+                            notification.LifecycleEvent, notification.SubscriptionId, notification.Resource, ct);
+                        lifecycleHandled++;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Non-fatal: log and acknowledge; the periodic management cycle is the backstop.
+                        logger.LogWarning(ex,
+                            "Lifecycle notification handling failed (non-fatal) | LifecycleEvent={Event}, " +
+                            "SubscriptionId={SubscriptionId}",
+                            notification.LifecycleEvent, notification.SubscriptionId);
+                    }
+
+                    continue;
                 }
 
                 // ─── Step 5: Deduplication ───
@@ -507,8 +539,8 @@ public static class CommunicationEndpoints
             // ─── Step 8: Return 202 Accepted quickly (Graph requires fast response) ───
             logger.LogInformation(
                 "Webhook processed: {Total} notifications received, {Enqueued} enqueued, " +
-                "CorrelationId={CorrelationId}",
-                notifications.Value.Length, enqueued, correlationId);
+                "{Lifecycle} lifecycle events handled, CorrelationId={CorrelationId}",
+                notifications.Value.Length, enqueued, lifecycleHandled, correlationId);
 
             return Results.Accepted(
                 value: new IncomingWebhookResponse

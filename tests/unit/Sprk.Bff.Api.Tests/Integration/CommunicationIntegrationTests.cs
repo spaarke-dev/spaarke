@@ -111,6 +111,33 @@ public class CommunicationIntegrationTests
         DefaultMailbox = "noreply@contoso.com"
     };
 
+    /// <summary>
+    /// Builds a no-op <see cref="MailboxDeltaReconciliationService"/> for GraphSubscriptionManager
+    /// construction in tests that only exercise subscription create/renew (not lifecycle/reconcile).
+    /// </summary>
+    private static MailboxDeltaReconciliationService CreateNoopReconciliation(CommunicationAccountService accountService)
+    {
+        var sbOptions = new Mock<IOptions<Sprk.Bff.Api.Configuration.ServiceBusOptions>>();
+        sbOptions.Setup(o => o.Value).Returns(new Sprk.Bff.Api.Configuration.ServiceBusOptions());
+        var jobSubmission = new Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>(
+            MockBehavior.Loose,
+            sbOptions.Object,
+            Mock.Of<ILogger<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>>(),
+            new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object).Object;
+
+        var deltaReader = new Mock<Sprk.Bff.Api.Services.Communication.GraphMailFolderDeltaReader>(
+            MockBehavior.Loose,
+            Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>(),
+            Mock.Of<ILogger<Sprk.Bff.Api.Services.Communication.GraphMailFolderDeltaReader>>()).Object;
+
+        return new MailboxDeltaReconciliationService(
+            deltaReader,
+            accountService,
+            jobSubmission,
+            Mock.Of<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
+            Mock.Of<ILogger<MailboxDeltaReconciliationService>>());
+    }
+
     private static SendCommunicationRequest CreateValidRequest(
         string[]? to = null,
         string subject = "Test Subject",
@@ -1562,6 +1589,7 @@ public class CommunicationIntegrationTests
             accountService,
             graphFactoryMock.Object,
             dataverseMock.Object,
+            CreateNoopReconciliation(accountService),
             commOpts,
             Mock.Of<ILogger<GraphSubscriptionManager>>());
 
@@ -1667,6 +1695,7 @@ public class CommunicationIntegrationTests
             accountService,
             graphFactoryMock.Object,
             dataverseMock.Object,
+            CreateNoopReconciliation(accountService),
             commOpts,
             Mock.Of<ILogger<GraphSubscriptionManager>>());
 

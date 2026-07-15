@@ -54,8 +54,23 @@ public static class CommunicationModule
         // Isolates email job processing from the shared sdap-jobs queue to prevent cross-domain failures.
         services.AddHostedService<CommunicationJobProcessor>();
 
-        // Background service: manages Graph webhook subscriptions for inbound email monitoring (ADR-001)
-        services.AddHostedService<GraphSubscriptionManager>();
+        // Delta-query reconciliation backstop (FR-24). The Graph seam + the reconciliation service are
+        // registered UNCONDITIONALLY (consumed unconditionally by the hosted service AND by
+        // GraphSubscriptionManager's `missed`-lifecycle path per ADR-032 — no feature gate). The
+        // reconciliation service is registered as a singleton AND as a hosted service via the same
+        // instance so the on-demand lifecycle trigger and the periodic timer share one object.
+        // GraphMailFolderDeltaReader is a concrete singleton (ADR-010 — no interface; virtual method
+        // provides the test seam).
+        services.AddSingleton<GraphMailFolderDeltaReader>();
+        services.AddSingleton<MailboxDeltaReconciliationService>();
+        services.AddHostedService(sp => sp.GetRequiredService<MailboxDeltaReconciliationService>());
+
+        // Background service: manages Graph webhook subscriptions + lifecycle notifications for inbound
+        // email monitoring (ADR-001, FR-24). Registered as a singleton AND as a hosted service via the
+        // same instance so the incoming-webhook endpoint can invoke HandleLifecycleNotificationAsync
+        // on the running manager.
+        services.AddSingleton<GraphSubscriptionManager>();
+        services.AddHostedService(sp => sp.GetRequiredService<GraphSubscriptionManager>());
 
         // Background service: backup polling for missed webhooks (ADR-001)
         services.AddHostedService<InboundPollingBackupService>();

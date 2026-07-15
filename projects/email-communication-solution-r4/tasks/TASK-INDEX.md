@@ -19,15 +19,15 @@
 | 007 | **Retire OOB-`email` subsystem** + publish-size delta | W0 | bff-api, deletion | FR-07 | 005 | — | true | FULL | ✅ (partial — 3 shared-infra files retained; see current-task) |
 | 010 | `ICommunicationEnrichmentService` (both directions; outbound RAG) | W1 | bff-api, communication | FR-08 | 005,006 | 011,052 | true | FULL | ✅ (6 escalations — E2/E3→011, E1/E5 owner, E4/E6 resolved) |
 | 011 | Refactor `IncomingAssociationResolver` → Engine over normalized envelope | W1 | bff-api, refactoring | FR-09 | 010 | 012,013,014 | false (serial in W1) | FULL | ✅ (R-7 preserved; envelope engine + rung abstraction + normalizer; gate clean) |
-| 012 | Rungs 0–1 (explicit-ref + thread continuity) across 8 targets | W1 | bff-api, communication | FR-10 | 011 | 015,030 | true | FULL | 🔲 |
+| 012 | Rungs 0–1 (explicit-ref + thread continuity) across 8 targets | W1 | bff-api, communication | FR-10 | 011 | 015,030 | true | FULL | ✅ (rung 0/1 + RegardingFieldMap; gate clean; W1 owner heads-up = subject-ref precedes thread) |
 | 013 | Rung 2 (participant correlation; org-by-domain) | W1 | bff-api, communication | FR-10 | 011 | 015,030 | true | FULL | 🔲 |
 | 014 | Rung 3 structural detectors (`Detectors/`) | W1 | bff-api, communication | FR-10 | 011 | 015 | true | FULL | 🔲 |
 | 015 | Confidence→status + **auto-file ≥0.85** (ADR-018 kill-switch) | W1 | bff-api, communication | FR-11 | 002,012,013,014 | 030,051 | true | FULL | 🔲 |
 | 016 | Channel seams (`ICommunicationChannelSender`/`ICommunicationArchiver`) | W1 | bff-api, architecture | NFR-04 | 005 | — | true | FULL | 🔲 |
 | 017 | Central auth + direction-symmetry + per-rung tests | W1 | bff-api, testing | NFR-03,06,08 | 012,013,014,015 | — | true | FULL | 🔲 |
 | 020 | `<EmailComposer />` engine + sub-components | W2 | frontend, fluent-ui | FR-12 | 001 | 021,041 | true | FULL | ✅ (18 smoke tests green in agent worktree; not re-run in main — node_modules) |
-| 021 | `SendEmailStep`/`SendEmailDialog`/`SendEmailPage` wrappers | W2 | frontend, fluent-ui | FR-12 | 020 | 060,061 | true | FULL | 🔲 |
-| 022 | `sendCommunication()` refinements (`SendCommunicationError`, driveItemIds) | W2 | frontend, communication | FR-13 | 006 | 060 | true | FULL | 🔲 |
+| 021 | `SendEmailStep`/`SendEmailDialog`/`SendEmailPage` wrappers | W2 | frontend, fluent-ui | FR-12 | 020 | 060,061 | true | FULL | ✅ (agent; new SendEmailDialog wins main barrel — old-API FilePreviewDialog migrates in 060) |
+| 022 | `sendCommunication()` refinements (`SendCommunicationError`) | W2 | frontend, communication | FR-13 | 006 | 060 | true | FULL | ✅ (agent; fromResponse + barrel export; no attachment rename) |
 | 023 | Composer + wrapper unit tests | W2 | frontend, testing | NFR-08 | 020,021,022 | — | true | TEST-MODIFYING | 🔲 |
 | 030 | Rung 4 — `RecordSearchService` semantic match | W3 | bff-api, ai | FR-14 | 012,013,015 | 032 | true | FULL | 🔲 |
 | 031 | Rung 5 — new JPS extract+classify Action → `AppOnlyAnalysisService` | W3 | bff-api, ai, jps | FR-15 | 015 | 032,053 | true | FULL | 🔲 |
@@ -44,8 +44,8 @@
 | 060 | Migrate SummarizeFilesDialog, FilePreviewDialog, DocumentEmailWizard | W6 | frontend, refactoring | FR-21 | 021,022,043 | 062 | true | FULL | 🔲 |
 | 061 | Migrate 5 create-record wizards + CreateMatter fork; fix cross-import | W6 | frontend, refactoring | FR-21 | 021 | 062 | true | FULL | 🔲 |
 | 062 | Retire `sprk_communication_send.js` after ribbon audit | W6 | dataverse, ribbon, deletion | FR-22 | 060,061 | — | true | FULL | 🔲 |
-| 070 | Graph compliance audit (`Mail-Advanced.*` 12-31; EWS 10-01) | W7 | bff-api, compliance | FR-23,NFR-01 | — | — | true | FULL | 🔲 |
-| 071 | Subscription lifecycle-notification + `delta` reconciliation backstop | W7 | bff-api, graph | FR-24 | — | — | true | FULL | 🔲 |
+| 070 | Graph compliance audit (`Mail-Advanced.*` 12-31; EWS 10-01) | W7 | bff-api, compliance | FR-23,NFR-01 | — | — | true | FULL | ✅ (agent; NO exposure — isRead exempt, zero EWS; findings note, no code change) |
+| 071 | Subscription lifecycle-notification + `delta` reconciliation backstop | W7 | bff-api, graph | FR-24 | — | — | true | FULL | ✅ (agent; lifecycle dispatch + MailboxDeltaReconciliationService; 10 tests; +0 ArchTest debt via ADR-010 Path C) |
 | 072 | Outlook add-in NAA/`@spaarke/auth` migration + unified manifest + org-URL | W7 | office-addins, auth | FR-25 | — | 074 | true | FULL | ✅ (build verified; live NAA smoke-test pending real Outlook+Azure+BFF) |
 | 073 | Apply stubbed BFF Office auth filters (`OfficeEndpoints`) | W7 | bff-api, auth | FR-25 | — | — | true | FULL | ✅ (all mapped Office endpoints wired; 401/403 tests; gate clean) |
 | 074 | Add-in save pane consumes Association Engine suggestions | W7 | office-addins | FR-25 | 072,012 | — | true | FULL | 🔲 |
