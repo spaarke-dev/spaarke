@@ -163,9 +163,7 @@ describe('useComposeToolbarActivation — activation (E2E DoD row 3)', () => {
     await user.click(screen.getByTestId('compose-ai-toolbar-more'));
     const definedTerms = await screen.findByTestId('compose-ai-toolbar-overflow-compose-defined-terms');
     expect(definedTerms).not.toHaveAttribute('aria-disabled', 'true');
-    expect(
-      screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')).not.toBeInTheDocument();
     // The non-matching capability was NOT turned into an action.
     expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize')).not.toBeInTheDocument();
     expect(within(screen.getByRole('menu')).queryByText('compose-summarize')).not.toBeInTheDocument();

@@ -185,7 +185,7 @@ describe('ComposeWorkspace — DEF-10 host document is shared with the Assistant
     );
 
     // Give any effects a chance to (not) fire again.
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise(r => setTimeout(r, 0));
     expect(registerActiveDocumentSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -419,9 +419,7 @@ describe('DEF-11: ComposeWorkspace materializes a flag-risks comments[] payload 
     await waitFor(() => {
       expect(workspaceRoot.getAttribute('data-compose-anchored-annotation-count')).toBe('2');
     });
-    expect(
-      document.querySelectorAll(`[data-compose-mark][data-ledger-ref^="${FLAG_LEDGER_REF}"]`).length
-    ).toBe(0); // no redline mark for a comment (flags carry no edit)
+    expect(document.querySelectorAll(`[data-compose-mark][data-ledger-ref^="${FLAG_LEDGER_REF}"]`).length).toBe(0); // no redline mark for a comment (flags carry no edit)
 
     // Idempotency: an explicit Flow-5 duplicate signal for the SAME stored output (exactly what
     // ConversationPane emits after dispatch) must NOT double-append the flags.

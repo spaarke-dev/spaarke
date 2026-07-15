@@ -109,6 +109,10 @@ public class ComposeService : IComposeService
     // below) so existing 6-arg test constructors keep compiling; the field is now the availability GATE
     // (null → nothing to dispatch), while the actual run resolves a FRESH facade from the detached scope.
     private readonly IDocumentProfileAi? _documentProfileAi;
+    // compose-r2 FR-30 (#629): durable Record-scope memory-capture facade (ADR-013). Optional + defaults
+    // null so existing test constructors keep compiling; DI resolves the real ComposeMemoryCapture in every
+    // non-test host. Null → the STEP 5 capture below is a clean no-op (best-effort availability gate).
+    private readonly IComposeMemoryCapture? _memoryCapture;
     // Fire-and-forget profile dispatch (compose-r2): a NEW DI scope is created per background profile so
     // the profile facade + its scoped deps never touch the disposing request scope. Optional + defaults
     // null so existing test constructors compile; DI always resolves it in every non-test host.
@@ -127,7 +131,8 @@ public class ComposeService : IComposeService
         IDistributedCache? cache = null,
         IDocumentProfileAi? documentProfileAi = null,
         IServiceScopeFactory? scopeFactory = null,
-        IHostApplicationLifetime? appLifetime = null)
+        IHostApplicationLifetime? appLifetime = null,
+        IComposeMemoryCapture? memoryCapture = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -138,6 +143,7 @@ public class ComposeService : IComposeService
         _documentProfileAi = documentProfileAi;
         _scopeFactory = scopeFactory;
         _appLifetime = appLifetime;
+        _memoryCapture = memoryCapture;
         // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
         // Optional + defaults null so existing 6-arg test constructors (sibling task suites
         // 013/050/060/062/102) keep compiling unchanged; DI (AddScoped<IComposeService,
@@ -493,6 +499,21 @@ public class ComposeService : IComposeService
             : ProfileNotAttemptedSignal("no sprk_document record id resolved — profile not attempted");
 
         // ────────────────────────────────────────────────────────────────────────────
+        // STEP 5 — durable memory capture (FR-30, compose-r2, deferral #629). Best-effort: distil the
+        // session's durable insights (defined terms today) into Record-scope MemoryItems keyed by the
+        // newly-saved sprk_document, via the ADR-013 IComposeMemoryCapture facade (shared IMemoryItemStore,
+        // no forked store). Runs ONLY when a sprk_document id was resolved. The untrusted-origin gate is
+        // DEFERRED to the memory-governance project (#629); TrustLevel is carried inert. This NEVER affects
+        // the returned Save result or the completion-state projection — a capture miss is silently logged.
+        // ────────────────────────────────────────────────────────────────────────────
+        if (promotion.DocumentRecordId.HasValue)
+        {
+            await CaptureDocumentMemoryAsync(
+                    promotion.DocumentRecordId.Value, request.TenantId, request.SessionId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        // ────────────────────────────────────────────────────────────────────────────
         // Project per-step states (container → record → profile-analysis → indexing)
         // through the shared JobAwareCompletionStateProjector. A fileless/unindexed record can
         // never be a success (aggregate Failed/Partial). The profile step is DISPATCHED to the
@@ -521,6 +542,97 @@ public class ComposeService : IComposeService
             WasPromotedThisSave = promotion.WasCreated,
             CompletionState = completion,
         };
+    }
+
+    /// <summary>
+    /// STEP 5 (FR-30, compose-r2, #629) — best-effort durable memory CAPTURE. Distils the bound session's
+    /// durable insights (defined terms today) into Record-scope memory keyed by the saved
+    /// <c>sprk_document</c>, via the ADR-013 <see cref="IComposeMemoryCapture"/> facade. The whole body is
+    /// guarded so a memory-capture failure NEVER throws — a Save must never be blocked or failed by it. A
+    /// no-op when the facade is unregistered (null gate) or no session is bound.
+    /// </summary>
+    private async Task CaptureDocumentMemoryAsync(
+        Guid documentId,
+        string tenantId,
+        string? sessionId,
+        CancellationToken ct)
+    {
+        // Availability gate + precondition: no facade (AI/persistence off in this host) or no bound
+        // session → nothing to capture. Both are clean no-ops, not failures.
+        if (_memoryCapture is null || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return;
+        }
+
+        try
+        {
+            var session = await _sessions.GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+            var definedTerms = session?.DefinedTermsTracking;
+            if (definedTerms is null || definedTerms.Count == 0)
+            {
+                return;
+            }
+
+            // DISTILL: a defined term is durable knowledge only when it carries BOTH a non-empty label
+            // (the fact Key) AND a definition (the fact Value). Guarding Term too avoids persisting an
+            // empty-key fact (two of which would collide on the store's hashed empty key).
+            var insights = new List<ComposeInsight>(definedTerms.Count);
+            foreach (var term in definedTerms)
+            {
+                if (string.IsNullOrWhiteSpace(term.Term) || string.IsNullOrWhiteSpace(term.Definition))
+                {
+                    continue;
+                }
+
+                insights.Add(new ComposeInsight(
+                    FactType: "defined-term",
+                    Key: term.Term,
+                    Value: term.Definition!,
+                    Origin: string.Equals(term.Source, "ai", StringComparison.OrdinalIgnoreCase)
+                        ? MemoryOrigin.AiDerived
+                        : MemoryOrigin.User,
+                    // Confidence null → the store default (1.0), which keeps AI-extracted terms above the
+                    // recall confidence gate so they DO surface in later sessions (the FR-30 point).
+                    // ConfirmedByUser=false (set in the facade) is the honest "unverified" marker; DefinedTerm
+                    // carries no per-term confidence signal to thread here.
+                    Confidence: null,
+                    BindingId: term.Provenance?.BindingId,
+                    LedgerRef: term.Provenance?.LedgerRef));
+            }
+
+            if (insights.Count == 0)
+            {
+                return;
+            }
+
+            var outcome = await _memoryCapture.CaptureRecordInsightsAsync(
+                    subjectType: "sprk_document",
+                    subjectId: documentId.ToString(),
+                    insights: insights,
+                    provenance: new ComposeMemoryProvenance
+                    {
+                        TenantId = tenantId,
+                        SessionId = sessionId,
+                        CreatedBy = null,   // caller identity not threaded here; envelope stays honest (null)
+                    },
+                    ct)
+                .ConfigureAwait(false);
+
+            _logger.LogDebug(
+                "Compose memory-capture (FR-30): document {DocumentId} — {Status} {Count} insight(s) (session={SessionId}).",
+                documentId, outcome.Status, outcome.Count, sessionId);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Honour cancellation quietly — the Save has already returned its result on its own terms.
+        }
+        catch (Exception ex)
+        {
+            // Best-effort: a memory-capture failure must never fail or block a Save (swallow + log).
+            _logger.LogWarning(ex,
+                "Compose memory-capture (FR-30): threw while capturing memory for document {DocumentId} — best-effort, Save unaffected.",
+                documentId);
+        }
     }
 
     /// <inheritdoc />
