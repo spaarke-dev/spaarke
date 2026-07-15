@@ -16,13 +16,21 @@ namespace Sprk.Bff.Api.Services.Communication.Engine;
 /// </remarks>
 public sealed record RungMatch
 {
-    /// <summary>The <c>sprk_communication</c> regarding lookup field to write (e.g. <c>sprk_regardingmatter</c>).</summary>
-    public required string RegardingFieldName { get; init; }
+    /// <summary>
+    /// The <c>sprk_communication</c> regarding lookup field to write (e.g. <c>sprk_regardingmatter</c>).
+    /// Null for a <b>metadata-only</b> match — a structural signal (rung 3) that carries
+    /// <see cref="Category"/>/<see cref="Obligations"/> without resolving a specific regarding entity.
+    /// </summary>
+    public string? RegardingFieldName { get; init; }
 
-    /// <summary>The typed lookup target (correct <c>LogicalName</c> + id) written to <see cref="RegardingFieldName"/>.</summary>
-    public required EntityReference Target { get; init; }
+    /// <summary>
+    /// The typed lookup target (correct <c>LogicalName</c> + id) written to <see cref="RegardingFieldName"/>.
+    /// Null for a metadata-only match. The engine writes a regarding lookup only when BOTH this and
+    /// <see cref="RegardingFieldName"/> are non-null.
+    /// </summary>
+    public EntityReference? Target { get; init; }
 
-    /// <summary>Match confidence in [0,1]. Deterministic exact matches (rungs 0–3) are 1.0 in task 011.</summary>
+    /// <summary>Match confidence in [0,1].</summary>
     public required double Confidence { get; init; }
 
     /// <summary>Human-readable provenance of the match (e.g. <c>thread:in-reply-to→parent</c>, <c>sender:domain→organization</c>).</summary>
@@ -30,4 +38,17 @@ public sealed record RungMatch
 
     /// <summary>The rung that produced this match.</summary>
     public RungKind Rung { get; init; }
+
+    /// <summary>
+    /// Optional content category resolved by a structural detector (rung 3) — e.g. <c>event</c>,
+    /// <c>invoice</c>, <c>esign-completion</c>, <c>court-notice</c>. Metadata for task 015 / W5
+    /// Responsive Intelligence; not persisted by the deterministic rungs.
+    /// </summary>
+    public string? Category { get; init; }
+
+    /// <summary>
+    /// Optional obligations resolved by a structural detector (rung 3) — e.g. <c>executed-document</c>,
+    /// <c>deadline-response</c>. Feed W5 Responsive Intelligence (FR-19); not persisted here.
+    /// </summary>
+    public IReadOnlyList<string> Obligations { get; init; } = Array.Empty<string>();
 }

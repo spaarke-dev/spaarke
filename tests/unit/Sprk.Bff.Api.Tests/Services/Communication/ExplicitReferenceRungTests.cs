@@ -42,9 +42,9 @@ public class ExplicitReferenceRungTests
 
         matches.Should().HaveCount(2);
         matches.Should().Contain(m => m.RegardingFieldName == "sprk_regardingmatter"
-            && m.Target.LogicalName == "sprk_matter" && m.Target.Id == matterId && m.Confidence == 1.0);
+            && m.Target!.LogicalName == "sprk_matter" && m.Target!.Id == matterId && m.Confidence == 1.0);
         matches.Should().Contain(m => m.RegardingFieldName == "sprk_regardingorganization"
-            && m.Target.LogicalName == "sprk_organization" && m.Target.Id == orgId);
+            && m.Target!.LogicalName == "sprk_organization" && m.Target!.Id == orgId);
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public class ExplicitReferenceRungTests
 
         matches.Should().ContainSingle()
             .Which.Should().Match<RungMatch>(m =>
-                m.RegardingFieldName == "sprk_regardingmatter" && m.Target.Id == matterId
+                m.RegardingFieldName == "sprk_regardingmatter" && m.Target!.Id == matterId
                 && m.Rung == RungKind.ExplicitReference);
     }
 
@@ -78,7 +78,7 @@ public class ExplicitReferenceRungTests
         var matches = await _rung.EvaluateAsync(
             Envelope(CommunicationDirection.Outgoing, "Re: MAT-99999 different matter"), ctx, CancellationToken.None);
 
-        matches.Should().ContainSingle().Which.Target.Id.Should().Be(callerMatterId);
+        matches.Should().ContainSingle().Which.Target!.Id.Should().Be(callerMatterId);
         _dv.Verify(d => d.QueryMatterByReferenceNumberAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -104,6 +104,6 @@ public class ExplicitReferenceRungTests
             Envelope(CommunicationDirection.Outgoing, "SPRK-12345"), new AssociationContext(), CancellationToken.None);
 
         inbound.Should().BeEquivalentTo(outbound);
-        inbound.Should().ContainSingle().Which.Target.Id.Should().Be(matterId);
+        inbound.Should().ContainSingle().Which.Target!.Id.Should().Be(matterId);
     }
 }

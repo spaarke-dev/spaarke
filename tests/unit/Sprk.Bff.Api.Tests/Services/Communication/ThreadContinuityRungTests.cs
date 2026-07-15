@@ -50,8 +50,8 @@ public class ThreadContinuityRungTests
             Envelope(inReplyTo: "<parent@x.com>"), new AssociationContext(), CancellationToken.None);
 
         matches.Should().HaveCount(2);
-        matches.Should().Contain(m => m.RegardingFieldName == "sprk_regardingmatter" && m.Target.Id == matterId);
-        matches.Should().Contain(m => m.RegardingFieldName == "sprk_regardingorganization" && m.Target.Id == orgId);
+        matches.Should().Contain(m => m.RegardingFieldName == "sprk_regardingmatter" && m.Target!.Id == matterId);
+        matches.Should().Contain(m => m.RegardingFieldName == "sprk_regardingorganization" && m.Target!.Id == orgId);
         matches.Should().OnlyContain(m => m.Rung == RungKind.ThreadContinuity && m.Confidence == 1.0);
     }
 
@@ -69,7 +69,7 @@ public class ThreadContinuityRungTests
         var matches = await _rung.EvaluateAsync(
             Envelope(references: new[] { "<old@x.com>", "<near@x.com>" }), new AssociationContext(), CancellationToken.None);
 
-        matches.Should().ContainSingle().Which.Target.Id.Should().Be(nearMatterId);
+        matches.Should().ContainSingle().Which.Target!.Id.Should().Be(nearMatterId);
         _dv.Verify(d => d.GetCommunicationByInternetMessageIdAsync("<old@x.com>", It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -105,6 +105,6 @@ public class ThreadContinuityRungTests
             Envelope(CommunicationDirection.Outgoing, "<parent@x.com>"), new AssociationContext(), CancellationToken.None);
 
         inbound.Should().BeEquivalentTo(outbound);
-        inbound.Should().ContainSingle().Which.Target.Id.Should().Be(matterId);
+        inbound.Should().ContainSingle().Which.Target!.Id.Should().Be(matterId);
     }
 }

@@ -2,6 +2,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Engine.Detectors;
 using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 
@@ -34,6 +35,13 @@ public static class CommunicationModule
         services.AddSingleton<IAssociationRung, ExplicitReferenceRung>();      // rung 0 — explicit reference
         services.AddSingleton<IAssociationRung, ThreadContinuityRung>();       // rung 1 — thread continuity
         services.AddSingleton<IAssociationRung, ParticipantCorrelationRung>(); // rung 2 — participant correlation
+        // rung 3 — structural detectors (NFR-04: adding a detector is a new IStructuralDetector
+        // registration; the rung + engine are unchanged).
+        services.AddSingleton<IStructuralDetector, CalendarInviteDetector>();
+        services.AddSingleton<IStructuralDetector, ESignCompletionDetector>();
+        services.AddSingleton<IStructuralDetector, InvoiceNumberDetector>();
+        services.AddSingleton<IStructuralDetector, CourtEFilingDetector>();
+        services.AddSingleton<IAssociationRung, StructuralDetectorRung>();     // rung 3 — structural detectors
         services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();
 

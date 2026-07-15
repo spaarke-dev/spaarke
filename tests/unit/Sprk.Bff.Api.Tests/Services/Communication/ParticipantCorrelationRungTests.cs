@@ -54,7 +54,7 @@ public class ParticipantCorrelationRungTests
         var matches = await _rung.EvaluateAsync(Envelope(from: "jane@acme.com"), new AssociationContext(), CancellationToken.None);
 
         matches.Should().ContainSingle(m => m.RegardingFieldName == "sprk_regardingperson"
-            && m.Target.Id == contactId && m.Confidence >= 0.60 && m.Confidence <= 0.85);
+            && m.Target!.Id == contactId && m.Confidence >= 0.60 && m.Confidence <= 0.85);
     }
 
     [Fact]
@@ -70,8 +70,8 @@ public class ParticipantCorrelationRungTests
         var matches = await _rung.EvaluateAsync(Envelope(from: "counsel@firm.com"), new AssociationContext(), CancellationToken.None);
 
         var matterMatch = matches.Should().ContainSingle(m => m.RegardingFieldName == "sprk_regardingmatter").Subject;
-        matterMatch.Target.Id.Should().Be(matterId);
-        matterMatch.Target.LogicalName.Should().Be("sprk_matter");
+        matterMatch.Target!.Id.Should().Be(matterId);
+        matterMatch.Target!.LogicalName.Should().Be("sprk_matter");
         matterMatch.Confidence.Should().BeInRange(0.60, 0.85);
         matterMatch.Provenance.Should().Contain("assignedAttorney");
     }
@@ -92,7 +92,7 @@ public class ParticipantCorrelationRungTests
         var matches = await _rung.EvaluateAsync(
             Envelope(from: "external@vendor.com", to: new[] { "teammate@firm.com" }), new AssociationContext(), CancellationToken.None);
 
-        matches.Should().ContainSingle(m => m.RegardingFieldName == "sprk_regardingproject" && m.Target.Id == projectId);
+        matches.Should().ContainSingle(m => m.RegardingFieldName == "sprk_regardingproject" && m.Target!.Id == projectId);
     }
 
     [Fact]
@@ -111,14 +111,14 @@ public class ParticipantCorrelationRungTests
 
         // Org association MUST target sprk_organization (DEC-3/FR-04) — never account.
         var org = matches.Should().ContainSingle(m => m.RegardingFieldName == "sprk_regardingorganization").Subject;
-        org.Target.LogicalName.Should().Be("sprk_organization");
-        org.Target.Id.Should().Be(orgId);
+        org.Target!.LogicalName.Should().Be("sprk_organization");
+        org.Target!.Id.Should().Be(orgId);
         // The account association is a SEPARATE, intentional lookup.
         var account = matches.Should().ContainSingle(m => m.RegardingFieldName == "sprk_regardingaccount").Subject;
-        account.Target.LogicalName.Should().Be("account");
-        account.Target.Id.Should().Be(accountId);
+        account.Target!.LogicalName.Should().Be("account");
+        account.Target!.Id.Should().Be(accountId);
         // No org-lookup match ever carries an account target.
-        matches.Should().NotContain(m => m.RegardingFieldName == "sprk_regardingorganization" && m.Target.LogicalName == "account");
+        matches.Should().NotContain(m => m.RegardingFieldName == "sprk_regardingorganization" && m.Target!.LogicalName == "account");
     }
 
     [Fact]

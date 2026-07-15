@@ -64,9 +64,11 @@ public sealed class ParticipantCorrelationRung : IAssociationRung
         // Dedup matches by (regarding field, target id); keep the highest confidence seen.
         var best = new Dictionary<(string Field, Guid Id), RungMatch>();
 
+        // This rung only ever offers target-bearing matches (field + target always set), so the
+        // null-forgiveness is valid — RungMatch's fields are nullable only for rung-3 metadata-only matches.
         void Offer(RungMatch match)
         {
-            var key = (match.RegardingFieldName, match.Target.Id);
+            var key = (match.RegardingFieldName!, match.Target!.Id);
             if (!best.TryGetValue(key, out var existing) || match.Confidence > existing.Confidence)
                 best[key] = match;
         }
