@@ -26,12 +26,12 @@
 | 014 | Binary anchor resolution (no threshold) | A | ✅ | 013 | 016 | FULL | sonnet/high | ❌ TldrSection/composite |
 | 015 | Groundedness guardrail (eval-only) | A | ✅ | none | — | STANDARD | sonnet/high | ✅ Group G |
 | 016 | Eval family — mixed-item corpus + gate | A | ✅ | 011,013,014 | 017 | STANDARD(TEST-MOD) | **opus**/xhigh | ❌ |
-| 017 | Phase A deploy + G-R5-A UAT + metering | A | 🔲 | 016 | 090 | FULL | sonnet/high | ❌ deploy |
+| 017 | Phase A deploy + G-R5-A UAT + metering | A | ✅ | 016 | 090 | FULL | sonnet/high | ✅ deployed + operator UAT 2026-07-10 |
 | 020 | Scaffold `/prototype` harness (cross-repo) | D | ✅ | none | 021 | FULL | sonnet/high | ❌ cross-repo |
 | 021 | Design iterations (UX params) | D | ✅ | 020 | 022 | FULL | **opus**/high | ❌ | (live design loop; operator-approved each step) |
-| 022 | Operator harness sign-off (GATE G-R5-D) | D | 🔲 | 021 | 023 | MINIMAL | sonnet/high | ❌ operator gate |
+| 022 | Operator harness sign-off (GATE G-R5-D) | D | ✅ | 021 | 023 | MINIMAL | sonnet/high | ✅ operator-approved in live design loop (task 021) |
 | 023 | Production port to shared lib | D | ✅ | 022,011 | 024 | FULL | sonnet/high | ❌ client lib | (redesign shipped to @spaarke/daily-briefing-components; on master; UAT'd 2026-07-09) |
-| 024 | Phase D deploy + G-R5-D UAT | D | 🔲 | 023 | 090 | STANDARD | sonnet/high | ❌ deploy |
+| 024 | Phase D deploy + G-R5-D UAT | D | ✅ | 023 | 090 | STANDARD | sonnet/high | ✅ deployed + operator UAT 2026-07-10 |
 | 030 | CoerceFieldValue String→Choice fix | B | ✅ | none | 032 | FULL | sonnet/xhigh | ❌ frozen-engine |
 | 031 | jps-validate Step 7.7 Choice check | B | ✅ | none | — | STANDARD | sonnet/high | ❌ `.claude/` main-session |
 | 032 | fieldMapping sweep + restore documenttype | B | ✅ | 030 | — | STANDARD | sonnet/high | ❌ | (audit + restore via MCP done + data-verified; round-trip EXECUTION verify = UAT @ 038) |
@@ -40,9 +40,9 @@
 | 035 | Client-helper jest tests | B | ✅ | none | — | STANDARD(TEST-MOD) | sonnet/high | ✅ Group H |
 | 036 | Collapse 7 QueryHighPriority* helpers | B | ✅ | 034 | 037 | STANDARD | sonnet/high | ❌ collector |
 | 037 | Promise-cache primary-contact + comment | B | ✅ | 036 | 038 | STANDARD | sonnet/high | ❌ collector |
-| 038 | Phase B deploy + G-R5-C UAT | B | 🔲 | 037,032,035 | 090 | STANDARD | sonnet/high | ❌ deploy |
+| 038 | Phase B deploy + G-R5-C UAT | B | ✅ | 037,032,035 | 090 | STANDARD | sonnet/high | ✅ deployed + operator UAT 2026-07-10 |
 | 040 | Deploy convention (master-sync-first) | E | ✅ | none | — | STANDARD | sonnet/high | ✅ Group F |
-| 090 | Project wrap-up | Wrap | 🔲 | 017,024,038,040 | — | FULL | sonnet/high | ❌ main-session |
+| 090 | Project wrap-up | Wrap | ✅ | 017,024,038,040 | — | FULL | sonnet/high | ✅ code-review + test-diet + defer + docs 2026-07-10 |
 
 ## Shared-file serialization (why so much is parallel-safe=false)
 
@@ -94,7 +94,8 @@ Most briefing tasks touch a small set of shared files; concurrent edits would co
 - **G-R5-D** (appearance) → operator sign-off at 022, browser UAT at 024
 - **G-R5-C** (hardening) → verified at 038 (collaborator smoke + Choice write)
 
-## Deferred (tracked at wrap-up 090 via `/defer`)
+## Deferred (filed as tracked issues at wrap-up 090 via `/defer` — see `notes/defer-issues.md`)
 
-- Monitored-For schema (D-3) — future round
-- EventDetailSidePane `@odata.bind` one-liner — side-pane not in use
+- DEF-001 — Monitored-For schema (D-3) — future round → [#650](https://github.com/spaarke-dev/spaarke/issues/650)
+- DEF-002 — EventDetailSidePane `@odata.bind` one-liner (D-5) — side-pane not in use → [#651](https://github.com/spaarke-dev/spaarke/issues/651)
+- DEF-003 — Email Briefing typed-note passthrough — operator-UAT fast-follow → [#652](https://github.com/spaarke-dev/spaarke/issues/652)

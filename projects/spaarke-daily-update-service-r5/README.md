@@ -1,12 +1,27 @@
 # Spaarke Daily Update Service R5
 
-> **Status**: Initialized — spec + plan + tasks generated (pipeline 2026-07-08); awaiting execution go-ahead
+> **Status**: ✅ **Complete** — 100% · shipped to master (PR #611, `bdf23f11e`) · operator-UAT confirmed 2026-07-10
 >
-> **Created**: 2026-07-01 · **Spec'd**: 2026-07-08
+> **Created**: 2026-07-01 · **Spec'd**: 2026-07-08 · **Completed**: 2026-07-10
 >
 > **Predecessor**: [`spaarke-daily-update-service-r4`](../spaarke-daily-update-service-r4/) (complete 2026-06-26)
 >
-> **Scope**: (1) accuracy by construction — deterministic item rows + deterministic-fact TL;DR, no groundedness threshold; (2) visual redesign via `/prototype`; (3) hardening sweep (Choice-coercion, collaborator-scope, de-dup, tests, OData doc). **Deferred**: Monitored-For schema, EventDetailSidePane fix. See [`design.md`](design.md) v0.2 · [`spec.md`](spec.md) · [`plan.md`](plan.md).
+> **Scope**: (1) accuracy by construction — deterministic item rows + deterministic-fact TL;DR, no groundedness threshold; (2) visual redesign via `/prototype`; (3) hardening sweep (Choice-coercion, collaborator-scope, de-dup, tests, OData doc). **Deferred** (filed as issues at close): Monitored-For schema ([#650](https://github.com/spaarke-dev/spaarke/issues/650)), EventDetailSidePane `@odata.bind` fix ([#651](https://github.com/spaarke-dev/spaarke/issues/651)), Email-briefing typed-note passthrough ([#652](https://github.com/spaarke-dev/spaarke/issues/652)). See [`design.md`](design.md) v0.2 · [`spec.md`](spec.md) · [`plan.md`](plan.md).
+
+## Outcome (2026-07-10)
+
+Shipped and operator-confirmed on spaarkedev1. Delivered across all three scope pillars plus an operator-UAT round:
+
+- **Accuracy by construction** — deterministic item rows (Matters/Documents/Projects/Tasks/To Dos) + deterministic-fact TL;DR. **Membership completeness fix** (removed `distinct='true'` FetchXml bug: 0 → 49 matters live) + contact-link resolution via `systemuser.sprk_primarycontact` (assigned-attorney/paralegal matters now surface).
+- **Appearance** — `/prototype`-harnessed redesign ported to `@spaarke/daily-briefing-components`; richer rows (description + "Updated {date}"), `{number}  {name}` titles, Documents + "Matters & Projects" stat tiles, file-preview modal (reused `RichFilePreviewDialog`), email-share (briefing + per-item), Settings windows wired end-to-end.
+- **Hardening** — `UpdateRecordNodeExecutor` Choice-coercion (500 fix), collaborator-scope fix, collector de-dup, `QueryHighPriority*` collapse, primary-contact cache, OData convention doc, client-helper + eval-corpus tests.
+
+**Close-out gates**: `/code-review` ship-clean (0 critical); `/test-diet` clean (11 files all MAINTAIN, 0 scaffolding) → [`notes/test-diet-report.md`](notes/test-diet-report.md); lessons in [`notes/lessons-learned.md`](notes/lessons-learned.md); deferrals in [`notes/defer-issues.md`](notes/defer-issues.md).
+
+### Changelog
+- **2026-07-10** — Project Complete. Merged PR #611; operator UAT confirmed; wrap-up gates run; 3 items deferred as issues #650/#651/#652.
+- **2026-07-09** — Operator-UAT round (email-share, membership completeness, richer rows, tiles, file-preview, titles, header) merged via PR #607 + #611.
+- **2026-07-08** — Spec + plan + tasks generated (pipeline); execution began.
 
 ## Purpose
 
@@ -24,9 +39,12 @@ See [`notes/inbound-from-r7/`](notes/inbound-from-r7/) for the full capture:
 | 4 | [Latent bugs](notes/inbound-from-r7/04-latent-bugs.md) | `EventDetailSidePane/TodoSection` mirrors the R7 W12 Add-to-ToDo bug |
 | 5 | [Deploy-safety governance](notes/inbound-from-r7/05-deploy-safety-governance.md) | Concurrent-deploy race with `spaarkeai-compose-r1`; sync-master-first rule |
 
-## Next step
+## Deferred follow-ups
 
-Author `design.md` from these notes when formalizing R5. The five documents above are intentionally scoped so each can become a spec Functional Requirement (FR) with minimal restructuring.
+Three items were deferred at close and filed as tracked issues (see [`notes/defer-issues.md`](notes/defer-issues.md)):
+- **DEF-001** — Monitored-For schema ([#650](https://github.com/spaarke-dev/spaarke/issues/650), next-round)
+- **DEF-002** — EventDetailSidePane `@odata.bind` casing fix ([#651](https://github.com/spaarke-dev/spaarke/issues/651), someday)
+- **DEF-003** — Email Briefing typed-note passthrough ([#652](https://github.com/spaarke-dev/spaarke/issues/652), next-round)
 
 ## Related projects
 
