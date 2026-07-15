@@ -1,6 +1,6 @@
 # Current Task State — Spaarke AI Architecture Redesign R2 (Core)
 
-> **Last Updated**: 2026-07-12 (pre-compact handoff for UAT continuation) — by context-handoff.
+> **Last Updated**: 2026-07-15 (UAT Part-A run + PromptShield activation + branch sync) — by session wrap-up.
 > **Recovery**: Read Quick Recovery first.
 
 ---
@@ -9,30 +9,37 @@
 
 | Field | Value |
 |---|---|
-| **Phase** | **All substantive r2 work COMPLETE + merged + deployed.** In the **live-UAT + defect-intake** stage — currently **BLOCKED (waiting on compose-r2)**: their DEF-UAT-1 part-2 + DEF-UAT-2 session-identity fixes + SpaarkeAi redeploy must land before UAT resumes. Core has nothing to do until their redeploy. |
-| **Deployed state (spaarkedev1)** | master `07aecc801` (both projects). BFF + SpaarkeAi live. **create-matter seeded live** (Action `63f086d3…` + Binding `89cd91f6…`; healthz Healthy). **DEF-UAT-1 part-1 fix deployed** (SpaarkeAi rebuilt+published `sprk_spaarkeai`). memory.write row Active; `memory-items`+`audit-partitioned` Cosmos live. |
-| **Next action on resume** | Continue **CONSOLIDATED-UAT-CHECKLIST** (`notes/CONSOLIDATED-UAT-CHECKLIST.md`): Parts A/B/C1/C3 ready NOW; **re-test "Open in Compose" host context** (part-1 fix just deployed — Assistant should know the host document); C2 (injection) waits on shield. Clean pass → ADR-041 + ADR-042 Accepted → 090 close. |
-| **Open PRs** | **#636** (Spaarke AI 101 surface-accuracy fixes) — OPEN, awaiting operator review/merge. #637 (DEF-UAT-1 part-1) — MERGED. #633/#635 merged. |
-| **Blocked on operator** | (1) **🔔 PromptShield activation infra decision** — NO ContentSafety resource on dev (only `spaarke-openai-dev` AIServices); needs endpoint choice + MI "Cognitive Services User" role grant; shield ships default-OFF. (2) **UAT run** + findings. (3) Optional: operator wants a written **"Linear vs Multistep / Action vs Binding vs Playbook" product-strategy statement** — offered, not yet requested. |
+| **Phase** | All substantive r2 work COMPLETE + merged + deployed. **Compose-r2 block CLEARED** — compose-r2 merged + **archived** to master (#644–#648; DEF-UAT-1 p2 + DEF-UAT-2 session-identity fixes shipped). **Live-UAT executed 2026-07-15 (Part A) → 4 open defects (A1/A2/A5/A6).** **ADR-041/042 NOT yet Accepted** (Part A did not pass). |
+| **Deployed state (spaarkedev1)** | BFF `spaarke-bff-dev` **Healthy** (carries compose round-9 session fixes, deployed 2026-07-14). **PromptShield ACTIVATED 2026-07-15**: `AiSafety__PromptShield__ChatPipelineEnabled=true`; endpoint → `spaarke-openai-dev` (AIServices, eastus — no new resource needed); MI `mi-bff-api-dev` already had **Cognitive Services User**; `shieldPrompt` API verified live. create-matter seed Active (Action `63f086d3…` + Binding `89cd91f6…`, re-verified). memory.write row Active; Cosmos live. NOTE: live build = compose-branch build (behind current master by other projects' work; not core-UAT-critical). |
+| **Prerequisites** | P1 ✅ healthy · P2 ✅ create-matter Active · P3 ✅ shield active · P4 ✅ memory · P5 = operator data. |
+| **Next action** | **Work the UAT defects** (`notes/UAT-defects-partA-2026-07-15.md`): decide **disposition (A)** patch chat creation vs **(B)** route structured create to a pre-seeded wizard (**recommend B** → `spaarkeai-assistant-enhancements-r1`). Fix A5/A6 (SpaarkeAi/compose surface). **Resolve record-bound launch** so Part B can run. Then re-run UAT → clean pass → ADR-041/042 Accepted → 090 close. |
+| **Open PRs** | **#636** (Spaarke AI 101 surface-accuracy fixes) — OPEN, awaiting operator review/merge. |
+| **Blocked on operator** | (1) ~~PromptShield~~ **DONE 2026-07-15**. (2) **Disposition A vs B** for chat create-task/create-matter (recommend B). (3) **Record-bound launch** verification (Part B blocked without it). (4) Optional: "Linear vs Multistep" product-strategy statement (offered). |
 
-### Live UAT defects (2026-07-12) — `notes/UAT-defects-launch-context-and-session-2026-07-12.md`
-- **DEF-UAT-1 part 1** (host-context param mismatch: launcher emits `entityLogicalName`, app read only `entityType`) — **FIXED (main.tsx reads either) + DEPLOYED + MERGED #637**.
-- **DEF-UAT-1 part 2** (Compose/host document TEXT not shared with Assistant — "summarize this document" fails) → **compose-r2** (session-identity surface). Handoff written.
-- **DEF-UAT-2** (chat session not context-scoped — home page shows Document's session; single global `sprk_ai2_chatSessionId` localStorage key in AiSessionProvider) → **compose-r2**. Handoff written (`spaarke-wt-spaarkeai-compose-r2/.../HANDOFF-from-core-uat-defects-launch-and-session-2026-07-12.md`).
+### UAT defects
+**Round 2026-07-12 (RESOLVED):** DEF-UAT-1 p1 (host-context param) fixed #637; DEF-UAT-1 p2 + DEF-UAT-2 (session-identity) **shipped by compose-r2** (DEF-10/UAT-1p2 + DEF-19/UAT-2; merged + archived).
 
-### Product-strategy alignment (playbooks) — resolved this session
-- Terminology: **Linear** (single-step prompted Action path = `Services/Ai/LinearConsumers/`, ActionRunner) vs **Multistep** (composite). (NOT "degenerate" — that was r7's transitional "degenerate 3-node playbook.")
-- Ratified (OQ-2, 2026-07-05, architecture doc §4.2): playbook node-graph engine **FROZEN** (Insights only, retired by attrition); **single-node/Linear wrappers dissolve**; dispatch = **Binding → prompted Action** directly (no wrapper); "playbook" = product language + composite container (new composites = `coded`); PlaybookBuilder → BA scope/prompt/Binding editor (no maker graphs).
-- **Build is transitional**: chat capabilities (summarize/classify/create-*) = direct Actions; legacy analysis/Insights playbooks (Document Profile, Email Analysis, matter-health, pre-fills, Document Summary, Summarize File) STILL on frozen engine (not yet migrated). Operator's "they moved off" = end-state, not current.
-- Not every Action needs a playbook wrapper (that was r7; walked back).
+**Round 2026-07-15 — Part A (OPEN) — `notes/UAT-defects-partA-2026-07-15.md`:**
+- **A1 / A2** — only one generic `create-task` capability exists (→ creates `sprk_event`); no `create-todo`; over-elicits; no association picker; assign-to-me + attach dropped. Fix direction: **(B) route to pre-seeded wizard** (`spaarkeai-assistant-enhancements-r1`). Data-layer bug (task→Event) needs an owner regardless.
+- **A5** — "delete task" also **closed the Compose tab** (SpaarkeAi/compose tab-lifecycle surface).
+- **A6** — "draft in Compose editor" **claimed opened but tab didn't open** (UI-action truthfulness; core-ack vs compose DEF-08 triage).
+- **create-matter (C1-adjacent)** — LLM resolving closed option-sets (practice area / matter type) **dead-ends**; fix = deterministic resolver + wizard hand-off (assistant-enhancements-r1).
+- **Part B BLOCKED** — record-bound launch not available/verified; memory cross-session scenarios can't run until resolved.
+
+Full failure analysis + resolutions (design input for the next project): `projects/spaarkeai-assistant-enhancements-r1/notes/uat-failure-analysis-2026-07-15.md`.
+
+### Product-strategy alignment (playbooks) — resolved
+- Terminology: **Linear** (single-step prompted Action path = `Services/Ai/LinearConsumers/`, ActionRunner) vs **Multistep** (composite). (NOT "degenerate.")
+- Ratified (OQ-2, 2026-07-05, architecture doc §4.2): playbook node-graph engine **FROZEN** (Insights only, retired by attrition); **single-node/Linear wrappers dissolve**; dispatch = **Binding → prompted Action** directly; "playbook" = product language + composite container (new composites = `coded`); PlaybookBuilder → BA scope/prompt/Binding editor.
+- **Build is transitional**: chat capabilities = direct Actions; legacy analysis/Insights playbooks STILL on frozen engine (not yet migrated).
 
 ### Spec-vs-built reconciliation (signed) — `notes/spec-vs-built-reconciliation-2026-07-10.md`
-65/65 FR/NFR dispositioned; 58 delivered. Agreed-out (operator-signed): #616 retrieval ACL (security project), memory hard-governance group-e (governance project), FR-B-03 memory review/delete UI (API-only), job-aware chat card (invariant delivered on Compose path; card agreed-out), #629 FR-30 (governance project), #592/#591/#612/#594/#617/#619a, Work IQ runtime, close-out groups a/b/c/d/f.
+65/65 FR/NFR dispositioned; 58 delivered. Agreed-out (operator-signed): #616 retrieval ACL, memory hard-governance (group-e), FR-B-03 review/delete UI (API-only), job-aware chat card, #629 FR-30 (delivered by compose-r2 2026-07-14, `0ac4c260c`), #592/#591/#612/#594/#617/#619a, Work IQ runtime, close-out groups a/b/c/d/f.
 
 ### Remaining to close (090)
-After UAT sign-off: flip 049/069 gate rows + 090; file named deferrals (groups a–f) via /defer; lessons-learned; test-diet already done; wrap-up PR citing the signed reconciliation; /repo-cleanup; /devops-project-sync completion.
+After UAT sign-off: flip 049/069 gate rows + 090; file named deferrals (groups a–f) via /defer; lessons-learned; test-diet already done; wrap-up PR citing the signed reconciliation; /repo-cleanup; /devops-project-sync completion. **BLOCKED until Part A defects worked + UAT re-run passes.**
 
 ### Coordination
-Compose-r2: joint deploy done (#632/#634); owns DEF-UAT-1 part 2 + DEF-UAT-2 + FR-30/#629 (governance project). Session-identity two-session model: core does NOT unify (confirmed). Deploy rule: merge worktree with master BEFORE any deploy; coordinate SpaarkeAi deploys.
+Compose-r2: **DONE — merged + archived** (#644–#648; FR-30 durable memory capture shipped). No further coordination needed. A5/A6 defects touch SpaarkeAi/compose surfaces — route to whoever owns the post-compose SpaarkeAi surface.
 
-*Resume: "continue" → UAT (Parts A/B/C1/C3 + re-test Open-in-Compose); intake findings; then shield decision + 090 close. Fable session; sub-agents can't write .claude/.*
+*Resume: "continue" → work Part-A defects (disposition B) + resolve record-bound + fix A5/A6, then re-run UAT. Fable session; sub-agents can't write .claude/.*
