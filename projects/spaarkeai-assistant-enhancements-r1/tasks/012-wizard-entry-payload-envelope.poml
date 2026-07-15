@@ -19,7 +19,7 @@
   </metadata>
 
   <prompt>
-    Define a typed wizard entry-payload envelope (files + resolved/proposed values + source metadata) that carries a draft-in-chat launch into a pre-seeded Create*Wizard. It rides the wizard_step set-field mechanism (NOT applyFieldMappings, which is record-sourced). Unify the 5-of-7 embedded wrappers onto this envelope and close the 2 gaps so every Create*Wizard can be launched pre-seeded.
+    Define a typed entry-payload envelope (files + resolved/proposed values + source metadata + TARGET SURFACE) that carries a draft-in-chat launch into a pre-seeded create surface. Per design §10.1 the envelope must launch BOTH (a) a pre-seeded custom Create*Wizard — riding wizard_step set-field (NOT applyFieldMappings, which is record-sourced) — AND (b) an OOB create form in a modal (Xrm.Navigation.navigateTo, e.g. the sprk_todo To Do form) pre-seeded via the OOB form's default-value/createFromEntity params. Consume the surface-launch routing metadata contract that task 002 defines. Unify the 5-of-7 embedded wrappers onto this envelope and close the 2 gaps.
   </prompt>
 
   <role>
@@ -41,8 +41,9 @@
   </context>
 
   <constraints>
-    <constraint source="project">Ride wizard_step set-field for pre-fill; do NOT use applyFieldMappings (record-sourced, wrong for chat-sourced seeds).</constraint>
-    <constraint source="project">Reuse the existing CreateMatterWizardWidget + wizard_step pattern as the canonical reference to mirror; do NOT invent a parallel launch mechanism (CLAUDE.md §11).</constraint>
+    <constraint source="project">Ride wizard_step set-field for custom-wizard pre-fill; do NOT use applyFieldMappings (record-sourced, wrong for chat-sourced seeds).</constraint>
+    <constraint source="project">The envelope carries the TARGET SURFACE (custom wizard vs OOB form modal) + pre-seed payload, consuming task 002's surface-launch routing contract. To Do routes to the OOB sprk_todo form in a modal (Xrm.Navigation.navigateTo per MODAL-DECISION-CRITERIA) — NOT a custom wizard (none exists).</constraint>
+    <constraint source="project">Reuse the existing CreateMatterWizardWidget + wizard_step pattern as the canonical reference for the custom-wizard branch; do NOT invent a parallel launch mechanism (CLAUDE.md §11).</constraint>
     <constraint source="ADR-021">Fluent v9 semantic tokens; dark-mode compliant.</constraint>
   </constraints>
 
@@ -97,7 +98,8 @@
 
   <acceptance-criteria>
     <criterion testable="true">All 7 Create*Wizard wrappers launch via the shared entry-payload envelope.</criterion>
-    <criterion testable="true">A handed-in file + seed values pre-fill the wizard on launch via wizard_step set-field (not applyFieldMappings).</criterion>
+    <criterion testable="true">A handed-in file + seed values pre-fill a custom wizard on launch via wizard_step set-field (not applyFieldMappings).</criterion>
+    <criterion testable="true">The envelope also launches the OOB sprk_todo create form in a modal, pre-seeded (default values), per the design §10.1 To Do route.</criterion>
     <criterion testable="true">Dark-mode compliant; npm run build:prod succeeds; tests pass.</criterion>
   </acceptance-criteria>
 
