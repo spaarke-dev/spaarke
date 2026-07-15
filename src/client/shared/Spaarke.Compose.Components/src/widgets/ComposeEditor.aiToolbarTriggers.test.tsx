@@ -153,14 +153,12 @@ describe('ComposeEditor — right-click AI-toolbar trigger (task 111 requirement
 
     await fireEvent.click(within(toolbar).getByTestId('compose-ai-toolbar-more'));
     expect(await screen.findByTestId('compose-ai-toolbar-overflow-compose-defined-terms')).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')).not.toBeInTheDocument();
 
-    // Divider is a child of the (single) Toolbar — has Toolbar context, not orphaned.
-    const divider = toolbar.querySelector('[role="separator"]');
-    expect(divider).not.toBeNull();
-    expect(toolbar.contains(divider)).toBe(true);
+    // ToolbarDividers were removed (compose-r2 UAT) to close the large Explain→Email icon gap —
+    // grouping is now carried by the distinct glyphs/tooltips. Assert the single Toolbar renders
+    // with NO separator rather than a divider-in-context.
+    expect(toolbar.querySelector('[role="separator"]')).toBeNull();
 
     // AI-actions ONLY — no formatting controls leaked into the popup.
     expect(within(popup).queryByLabelText('Bold')).not.toBeInTheDocument();

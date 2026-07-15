@@ -2,10 +2,11 @@
 //
 // Scope (per POML §acceptance-criteria + NFR-08): exercise the create-on-save backbone that
 // task 013 added to ComposeService.SaveAsync — client-supplied container (Fork A), transient
-// drive-item creation (Fork B), idempotent record promotion, sync-OBO indexing, deferred
-// profile-analysis (Fork C), and the per-step JobAwareCompletionState projection + interim
-// R5-E bar. These are BEHAVIOR tests (drive-item created? record created? each step's projected
-// state? interim success?), not wiring tests.
+// drive-item creation (Fork B), idempotent record promotion, sync-OBO indexing, FIRE-AND-FORGET
+// background profile-analysis (Fork C, compose-r2), and the per-step JobAwareCompletionState
+// projection + interim R5-E bar. These are BEHAVIOR tests (drive-item created? record created?
+// each step's projected state? profiling dispatched off the response path? interim success?),
+// not wiring tests.
 //
 // Mocking boundary (ADR-038 §4 "mock at module boundaries" — NOT the banned in-process-collaborator
 // mocking of §4 B5): every collaborator mocked here is a genuine external boundary —
@@ -31,6 +32,7 @@ using System.Threading.Tasks;
 using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -99,6 +101,87 @@ public sealed class ComposeServiceCreateOnSaveTests
         _indexing.Object,
         NullLogger<ComposeService>.Instance,
         documentProfileAi: _documentProfile.Object);
+
+    // Fire-and-forget SUT (compose-r2): profiling is DISPATCHED to a detached DI scope, not awaited.
+    // A real IServiceScopeFactory whose provider resolves the supplied gated fake facade lets us assert
+    // the background dispatch deterministically (gate the fake with a TCS — no real delays). The
+    // returned provider is disposed by the test once the background task has settled.
+    private ComposeService CreateSutWithBackgroundProfile(IDocumentProfileAi facade, out ServiceProvider provider)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
+        services.AddScoped<IDocumentProfileAi>(_ => facade);
+        provider = services.BuildServiceProvider();
+        var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
+
+        return new ComposeService(
+            _spe.Object,
+            _sessions.Object,
+            _dataverse.Object,
+            new DocxAnnotationWriter(),
+            _indexing.Object,
+            NullLogger<ComposeService>.Instance,
+            documentProfileAi: facade,   // non-null availability gate
+            scopeFactory: scopeFactory);
+    }
+
+    private static DefaultHttpContext HttpContextWithBearer(string authorization = "Bearer obo-user-token")
+    {
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Headers.Authorization = authorization;
+        return ctx;
+    }
+
+    /// <summary>
+    /// A gate-controlled <see cref="IDocumentProfileAi"/> fake for the fire-and-forget profile tests.
+    /// It records the document id + the (detached) HttpContext + its Authorization header on invocation,
+    /// signals <see cref="Started"/>, then blocks on a release gate before returning/throwing — so a
+    /// test can deterministically observe that SaveAsync returned WITHOUT awaiting profiling, then release
+    /// the gate. No real time is used (pure TCS gating, per tests/CLAUDE.md).
+    /// </summary>
+    private sealed class GatedProfileFake : IDocumentProfileAi
+    {
+        private readonly TaskCompletionSource _startedGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _finishedGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly DocumentProfileOutcome? _outcome;
+        private readonly Exception? _throw;
+
+        public GatedProfileFake(DocumentProfileOutcome? outcome = null, Exception? toThrow = null)
+        {
+            _outcome = outcome;
+            _throw = toThrow;
+        }
+
+        public Guid? InvokedDocumentId { get; private set; }
+        public HttpContext? InvokedContext { get; private set; }
+        public string? InvokedAuthorization { get; private set; }
+        public Task Started => _startedGate.Task;
+        public Task Finished => _finishedGate.Task;
+        public void Release() => _releaseGate.TrySetResult();
+
+        public async Task<DocumentProfileOutcome> ProfileDocumentAsUserAsync(
+            Guid documentId, HttpContext httpContext, CancellationToken cancellationToken)
+        {
+            InvokedDocumentId = documentId;
+            InvokedContext = httpContext;
+            InvokedAuthorization = httpContext.Request.Headers.Authorization.ToString();
+            _startedGate.TrySetResult();
+            try
+            {
+                await _releaseGate.Task.ConfigureAwait(false);
+                if (_throw is not null)
+                {
+                    throw _throw;
+                }
+                return _outcome ?? DocumentProfileOutcome.Succeeded();
+            }
+            finally
+            {
+                _finishedGate.TrySetResult();
+            }
+        }
+    }
 
     private static ReadOnlyMemory<byte> DocxBytes() =>
         new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x14, 0x00 }; // DOCX ZIP signature
@@ -180,31 +263,31 @@ public sealed class ComposeServiceCreateOnSaveTests
         StateOf(completion, ComposeService.StepContainer).Should().Be(JobAwareState.Completed);
         StateOf(completion, ComposeService.StepRecord).Should().Be(JobAwareState.Completed);
         StateOf(completion, ComposeService.StepIndexing).Should().Be(JobAwareState.Completed);
-        // profile-analysis now runs INLINE under OBO and succeeded → terminal Completed → the record
-        // lands as a complete DMS record and the aggregate reaches full Completed.
-        StateOf(completion, ComposeService.StepProfileAnalysis).Should().Be(JobAwareState.Completed);
-        completion.Aggregate.Should().Be(JobAwareState.Completed);
+        // profile-analysis is now FIRE-AND-FORGET (dispatched to a background scope, not awaited). This
+        // SUT has no scope factory, so the profile is not dispatched here → non-terminal (Queued); the
+        // dispatched (Running) path is exercised by the dedicated fire-and-forget tests below. Either
+        // way the profile step is non-terminal, so the SYNCHRONOUS aggregate reads Partial (record +
+        // index exist, profile pending) — never Completed-on-claim — and the interim R5-E bar holds.
+        StateOf(completion, ComposeService.StepProfileAnalysis).Should().Be(JobAwareState.Queued);
+        completion.Aggregate.Should().Be(JobAwareState.Partial);
         ComposeService.IsInterimCreateOnSaveSuccess(completion).Should().BeTrue();
     }
 
-    // ── Acceptance (Fork C, compose-r2, UAT #7b): profile runs INLINE under OBO for the created doc ─
+    // ── Acceptance (Fork C, compose-r2): profile is DISPATCHED fire-and-forget; the save returns
+    //    WITHOUT awaiting it, on a DETACHED context carrying the captured OBO bearer token ──────────
     [Fact]
-    public async Task SaveAsync_TransientDraft_ProfilesCreatedDocumentUnderOboInline()
+    public async Task SaveAsync_TransientDraft_DispatchesProfileFireAndForget_ReturnsWithoutAwaiting()
     {
         ArrangeContainerCreate();
         var recordId = Guid.NewGuid();
         ArrangeNoExistingRecordThenCreate(recordId);
         ArrangeIndexing(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
 
-        Guid? profiledDocId = null;
-        HttpContext? profiledCtx = null;
-        _documentProfile
-            .Setup(p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, HttpContext, CancellationToken>((id, ctx, _) => { profiledDocId = id; profiledCtx = ctx; })
-            .ReturnsAsync(DocumentProfileOutcome.Succeeded());
-
-        var sut = CreateSut();
-        var httpContext = new DefaultHttpContext();
+        // The fake blocks on its release gate; if SaveAsync awaited profiling, the await below would
+        // deadlock and the test would time out — so completing at all proves fire-and-forget.
+        var fake = new GatedProfileFake();
+        var sut = CreateSutWithBackgroundProfile(fake, out var provider);
+        var httpContext = HttpContextWithBearer("Bearer obo-user-token");
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
@@ -216,70 +299,42 @@ public sealed class ComposeServiceCreateOnSaveTests
 
         var result = await sut.SaveAsync(request, httpContext, CancellationToken.None);
 
-        // The facade is invoked once, for the newly-created sprk_document, in the OBO request scope
-        // (same HttpContext the save runs under) — this is what lets it download the user-written file
-        // that a background MI job would 403 on.
-        _documentProfile.Verify(
-            p => p.ProfileDocumentAsUserAsync(recordId, httpContext, It.IsAny<CancellationToken>()),
-            Times.Once);
-        profiledDocId.Should().Be(recordId);
-        profiledCtx.Should().BeSameAs(httpContext);
-
-        // Success → terminal Completed profile step → aggregate Completed.
-        var profile = result.CompletionState!.Steps.Single(s => s.StepName == ComposeService.StepProfileAnalysis);
-        profile.State.Should().Be(JobAwareState.Completed);
-        result.CompletionState!.Aggregate.Should().Be(JobAwareState.Completed);
-    }
-
-    // ── Acceptance (best-effort): a profiling failure NEVER fails the save ──────────────────────
-    [Fact]
-    public async Task SaveAsync_WhenProfilingThrows_SaveStillSucceeds_ProfileNonTerminal()
-    {
-        ArrangeContainerCreate();
-        var recordId = Guid.NewGuid();
-        ArrangeNoExistingRecordThenCreate(recordId);
-        ArrangeIndexing(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
-
-        _documentProfile
-            .Setup(p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("OBO exchange failed"));
-
-        var sut = CreateSut();
-        var request = new SaveComposeDocumentRequest
-        {
-            DocumentSpeId = null,
-            ContainerId = ContainerId,
-            Content = DocxBytes(),
-            SessionId = Guid.NewGuid().ToString(),
-            TenantId = Tenant,
-        };
-
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
-
-        // Save is unaffected: record created + indexed → interim success; profile degrades to a
-        // non-terminal step (never terminal Failed — profiling is best-effort, must not fail the save).
+        // Returned synchronously while the background profile is still blocked: record + index are the
+        // interim success bar; the profile step is the non-terminal "dispatched" (Running) signal, so
+        // the aggregate reads Partial (profile pending), not Completed.
         result.DocumentRecordId.Should().Be(recordId);
         var profile = result.CompletionState!.Steps.Single(s => s.StepName == ComposeService.StepProfileAnalysis);
-        profile.State.Should().Be(JobAwareState.Queued);
-        profile.Detail.Should().Contain("threw");
-        result.CompletionState!.Aggregate.Should().NotBe(JobAwareState.Failed);
+        profile.State.Should().Be(JobAwareState.Running);
+        profile.Detail.Should().Contain("background");
+        result.CompletionState!.Aggregate.Should().Be(JobAwareState.Partial);
         ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+
+        // The background profile runs on a DETACHED HttpContext (not the request one) carrying the
+        // captured OBO bearer token — proving the user assertion survives the response boundary (OBO).
+        await fake.Started.WaitAsync(TimeSpan.FromSeconds(5));
+        fake.InvokedDocumentId.Should().Be(recordId);
+        fake.InvokedContext.Should().NotBeSameAs(httpContext,
+            "the profile runs on a synthetic detached HttpContext, not the disposed request one");
+        fake.InvokedAuthorization.Should().Be("Bearer obo-user-token",
+            "the OBO user assertion is captured before the response and threaded into the detached context");
+
+        fake.Release();
+        await fake.Finished.WaitAsync(TimeSpan.FromSeconds(5));
+        provider.Dispose();
     }
 
-    // ── Acceptance (best-effort): a profiling skip/failure result degrades gracefully ───────────
+    // ── Acceptance (constraint #2): no bearer token on the save → do NOT dispatch a doomed OBO task ─
     [Fact]
-    public async Task SaveAsync_WhenProfilingReportsFailure_SaveStillSucceeds_ProfileNonTerminal()
+    public async Task SaveAsync_WhenNoBearerToken_DoesNotDispatchBackgroundProfile()
     {
         ArrangeContainerCreate();
         var recordId = Guid.NewGuid();
         ArrangeNoExistingRecordThenCreate(recordId);
         ArrangeIndexing(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
 
-        _documentProfile
-            .Setup(p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DocumentProfileOutcome.Failed("OBO SPE download returned null"));
-
-        var sut = CreateSut();
+        var fake = new GatedProfileFake();
+        var sut = CreateSutWithBackgroundProfile(fake, out var provider);
+        var httpContext = new DefaultHttpContext();   // no Authorization header
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
@@ -289,13 +344,54 @@ public sealed class ComposeServiceCreateOnSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, httpContext, CancellationToken.None);
 
+        // A background OBO download with no user token would 401 — so the profile is NOT dispatched;
+        // the step degrades to a non-terminal not-attempted signal and the fake is never invoked.
         var profile = result.CompletionState!.Steps.Single(s => s.StepName == ComposeService.StepProfileAnalysis);
-        profile.State.Should().Be(JobAwareState.Queued, "a best-effort profile miss is non-terminal, never Failed");
-        profile.Detail.Should().Contain("best-effort");
-        result.CompletionState!.Aggregate.Should().NotBe(JobAwareState.Failed);
+        profile.State.Should().Be(JobAwareState.Queued);
+        profile.Detail.Should().Contain("Authorization");
+        fake.Started.IsCompleted.Should().BeFalse("no dispatch occurred, so the facade was never invoked");
+        fake.InvokedDocumentId.Should().BeNull();
+        result.DocumentRecordId.Should().Be(recordId);
         ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+
+        provider.Dispose();
+    }
+
+    // ── Acceptance (constraint #4, best-effort): a THROWING background profile never affects the save
+    //    result and never crashes the process (unobserved-exception safe) ──────────────────────────
+    [Fact]
+    public async Task SaveAsync_WhenBackgroundProfileThrows_SaveResultUnaffected_ExceptionSwallowed()
+    {
+        ArrangeContainerCreate();
+        var recordId = Guid.NewGuid();
+        ArrangeNoExistingRecordThenCreate(recordId);
+        ArrangeIndexing(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        var fake = new GatedProfileFake(toThrow: new InvalidOperationException("OBO exchange failed"));
+        fake.Release();   // let it throw as soon as the background task reaches it
+        var sut = CreateSutWithBackgroundProfile(fake, out var provider);
+        var request = new SaveComposeDocumentRequest
+        {
+            DocumentSpeId = null,
+            ContainerId = ContainerId,
+            Content = DocxBytes(),
+            SessionId = Guid.NewGuid().ToString(),
+            TenantId = Tenant,
+        };
+
+        // SaveAsync completes normally — the background throw happens off the response path.
+        var result = await sut.SaveAsync(request, HttpContextWithBearer(), CancellationToken.None);
+
+        result.DocumentRecordId.Should().Be(recordId);
+        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+
+        // The background task runs, throws, and the exception is SWALLOWED by RunBackgroundProfileAsync
+        // (never rethrown) — awaiting Finished completes without faulting the test.
+        await fake.Started.WaitAsync(TimeSpan.FromSeconds(5));
+        await fake.Finished.WaitAsync(TimeSpan.FromSeconds(5));
+        provider.Dispose();
     }
 
     // ── Acceptance (negative): missing client container fails the container step honestly ───────

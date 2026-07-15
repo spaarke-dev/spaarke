@@ -1709,7 +1709,17 @@ public static class ComposeEndpoints
             // left the Assistant pinned to the first document after a tab switch (the hidden tab's
             // withdraw re-asserted itself as active). Clear ActiveDocument ONLY if it STILL points at
             // THIS document; if a newer tab already took over, leave it untouched. This makes the
-            // register/withdraw pair that fires on every switch ORDER-INDEPENDENT and race-safe.
+            // register/withdraw pair that fires on every switch ORDER-INDEPENDENT.
+            //
+            // NOTE (race-narrowed, NOT race-free): the session store (ChatSessionManager
+            // .UpdateSessionCacheAsync → ITenantCache.SetSlidingAsync) is last-writer-wins Redis with
+            // NO optimistic-concurrency primitive (no etag/version/CAS). The stillActive guard below
+            // reads session.ActiveDocument from the snapshot loaded at the top of THIS handler, so a
+            // concurrent register(B) that commits between our load and our write can still be clobbered
+            // by this withdraw's write (a classic read-modify-write lost update). The guard narrows the
+            // window and makes the common tab-switch ordering safe; it does not eliminate the race.
+            // Full safety would require a CAS/version on the session cache (out of scope — a
+            // pre-existing store limitation this withdraw only slightly widens).
             if (body.Visible == false)
             {
                 var current = session.ActiveDocument;

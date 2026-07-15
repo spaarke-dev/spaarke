@@ -30,8 +30,10 @@ import {
   ComposeAiToolbar,
   registerComposeAiToolbarAction,
   __resetComposeAiToolbarActionsForTests,
+  extractCleanDraftText,
   type ComposeAiToolbarAction,
 } from './ComposeAiToolbar';
+import type { TipTapNode } from '../utils/docxBridge';
 import type { DispatchPaneEvent } from '@spaarke/ai-widgets/events';
 import type { DispatchConsumer } from '@spaarke/ui-components';
 
@@ -168,12 +170,12 @@ describe('ComposeAiToolbar — render on selection', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 1b. Task 111 (UAT-R2 layout fix) — ONE Toolbar, divider in-context, no
-//     overflow, and `forceVisible` (right-click / point-insertion trigger).
+// 1b. Task 111 (UAT-R2 layout fix) — ONE Toolbar, single tightly-spaced row,
+//     and `forceVisible` (right-click / point-insertion trigger).
 // ---------------------------------------------------------------------------
 
-describe('ComposeAiToolbar — task 111 layout fix (single Toolbar + divider context + no overflow)', () => {
-  it('renders exactly ONE Toolbar with the divider as a direct child (Toolbar context) — no orphaned top-level divider', () => {
+describe('ComposeAiToolbar — task 111 layout fix (single Toolbar + tightly-spaced row + no overflow)', () => {
+  it('renders exactly ONE Toolbar (no second toolbar, no orphaned sibling) with no large-gap dividers', () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
     renderToolbar({ editor });
 
@@ -182,11 +184,10 @@ describe('ComposeAiToolbar — task 111 layout fix (single Toolbar + divider con
     const toolbar = toolbars[0];
     expect(toolbar).toBe(screen.getByTestId('compose-ai-toolbar'));
 
-    const divider = toolbar.querySelector('[role="separator"]');
-    expect(divider).not.toBeNull();
-    // "In context" — the divider is a DESCENDANT of the Toolbar (not a sibling
-    // rendered outside it), so it inherits Toolbar's size/orientation context.
-    expect(toolbar.contains(divider)).toBe(true);
+    // GAP FIX (UAT 2026-07-15): the ToolbarDividers were removed so every action
+    // sits in ONE tightly-spaced row at the single columnGap token — no large gap
+    // between the primary AI icons and the Email / overflow affordances.
+    expect(toolbar.querySelector('[role="separator"]')).toBeNull();
   });
 
   it('DEF-17: the Toolbar renders on a SINGLE line (flex-wrap: nowrap) — overflow goes to the ⋯ menu, not a second row', () => {
@@ -389,9 +390,7 @@ describe('ComposeAiToolbar — dispatch + extensibility', () => {
 
     const definedTerms = await screen.findByTestId('compose-ai-toolbar-overflow-compose-defined-terms');
     expect(definedTerms).toBeInTheDocument();
-    expect(
-      screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')).not.toBeInTheDocument();
 
     // Phase-4 stub: disabled until the seeded Binding GUID is registered
     // (button ENABLEMENT is E2E-pending on task 047).
@@ -405,5 +404,55 @@ describe('ComposeAiToolbar — dispatch + extensibility', () => {
 
     await user.click(screen.getByTestId('compose-ai-toolbar-more'));
     expect(await screen.findByTestId('compose-ai-toolbar-more-empty')).toBeInTheDocument();
+  });
+});
+
+describe('extractCleanDraftText — clean email body (FIX #10b)', () => {
+  it('drops struck (deletion-marked) originals and keeps AI insertions as accepted text', () => {
+    // A strike+replace pending redline: "old clause" struck, "new clause" inserted.
+    const doc: TipTapNode = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Keep this. ' },
+            { type: 'text', text: 'old clause', marks: [{ type: 'deletion' }] },
+            { type: 'text', text: 'new clause', marks: [{ type: 'insertion' }] },
+            { type: 'text', text: '.' },
+          ],
+        },
+      ],
+    };
+    // Garbled (what textBetween produced): "Keep this. old clausenew clause."
+    // Clean accepted view:
+    expect(extractCleanDraftText(doc)).toBe('Keep this. new clause.');
+  });
+
+  it('joins block paragraphs with newlines and trims', () => {
+    const doc: TipTapNode = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'First paragraph.' }] },
+        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'A Heading' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Second paragraph.' }] },
+      ],
+    };
+    expect(extractCleanDraftText(doc)).toBe('First paragraph.\nA Heading\nSecond paragraph.');
+  });
+
+  it('renders a fully chat-drafted (all-insertion) body as its accepted text (not empty)', () => {
+    // Every span is a pending insertion — the reject baseline would strip this to empty; the
+    // accept view (what an email of the draft must carry) keeps it.
+    const doc: TipTapNode = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'A drafted sentence.', marks: [{ type: 'insertion' }] }],
+        },
+      ],
+    };
+    expect(extractCleanDraftText(doc)).toBe('A drafted sentence.');
   });
 });

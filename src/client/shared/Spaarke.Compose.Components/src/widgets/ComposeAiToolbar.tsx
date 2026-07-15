@@ -97,8 +97,11 @@
  * (previously a Fragment of `<ToolbarDivider/>` + a second `<Toolbar>`, both
  * mounted as siblings inside the host's flex row — the divider had no Toolbar
  * context (collapsed/misaligned) and two Toolbars each imposed their own
- * padding). The divider now lives INSIDE this single Toolbar (between the
- * primary buttons and the overflow trigger) so it always has context. A new
+ * padding). (GAP FIX, UAT 2026-07-15: the in-Toolbar dividers were subsequently
+ * REMOVED — Fluent's ToolbarDivider `padding: 0 12px` produced a large visual gap
+ * between the primary AI icons and the trailing Email / overflow icons; every
+ * action now sits in one tightly-spaced row at the single `columnGap` token. See
+ * the "GAP FIX" note in the render body.) A new
  * `forceVisible` prop lets ComposeEditor's right-click (context-menu) trigger
  * render this toolbar even on a COLLAPSED selection (point-insertion) — see
  * `forceVisible` doc below; `handleActionClick`'s existing collapsed-selection
@@ -111,7 +114,6 @@ import { type Editor } from '@tiptap/react';
 import {
   Toolbar,
   ToolbarButton,
-  ToolbarDivider,
   Tooltip,
   Menu,
   MenuTrigger,
@@ -139,6 +141,39 @@ import {
 } from '@spaarke/ui-components';
 import type { DispatchPaneEvent, WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 import type { ComposeDocumentRef } from '../types/compose-contracts';
+import type { TipTapNode } from '../utils/docxBridge';
+
+/**
+ * spaarkeai-compose-r2 — clean-body extraction for the Email stub (FIX #10b).
+ *
+ * A plain `doc.textBetween(...)` concatenates BOTH halves of a pending redline — the struck original
+ * AND the proposed insertion — yielding a garbled email body ("old textnew text"). This walks the
+ * TipTap JSON and renders pending redlines as their ACCEPTED text: struck (deletion-marked) originals
+ * are DROPPED, AI insertions are kept as ordinary text, so the emailed draft matches what the author
+ * is composing. It is the ACCEPT-view, NOT the {@link buildRejectBaselineJson} reject baseline — an
+ * email of a chat-drafted document must carry the drafted content, which the reject baseline (which
+ * drops all insertions) would strip to empty. Textblocks are joined with newlines to keep paragraphs.
+ */
+export function extractCleanDraftText(doc: TipTapNode): string {
+  const TEXTBLOCK_TYPES = new Set(['paragraph', 'heading', 'blockquote', 'codeBlock']);
+  const blocks: string[] = [];
+  const inlineText = (n: TipTapNode): string => {
+    if (n.type === 'text') {
+      if (n.marks?.some(m => m.type === 'deletion')) return ''; // struck original — drop
+      return n.text ?? '';
+    }
+    return (n.content ?? []).map(inlineText).join('');
+  };
+  const walk = (n: TipTapNode): void => {
+    if (n.type && TEXTBLOCK_TYPES.has(n.type)) {
+      blocks.push(inlineText(n)); // textblock: collect its inline run, do not double-descend
+      return;
+    }
+    (n.content ?? []).forEach(walk);
+  };
+  walk(doc);
+  return blocks.join('\n').trim();
+}
 
 /**
  * FR-18 host-provided serialization seam (spaarkeai-compose-r2 tasks 030 + 032).
@@ -180,7 +215,7 @@ export type ComposeActionEnqueue = (request: {
    * not just a selection. The host uses it ONLY to pick the Assistant confirmation copy variant;
    * routing/materialize/Accept-all are unaffected (mirrors `ComposeActionRequest.revisionScope`).
    */
-  revisionScope?: "selection" | "whole-document";
+  revisionScope?: 'selection' | 'whole-document';
 }) => Promise<DispatchConsumerResult>;
 
 // ---------------------------------------------------------------------------
@@ -569,7 +604,9 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   const handleEmailAction = React.useCallback(
     (mode: 'open' | 'send'): void => {
       if (!editor) return;
-      const draftedText = editor.state.doc.textBetween(0, editor.state.doc.content.size, '\n');
+      // Clean the drafted body so pending redlines email as their ACCEPTED text, not the garbled
+      // struck-original + proposed-insertion concatenation `textBetween` produces.
+      const draftedText = extractCleanDraftText(editor.getJSON() as TipTapNode);
       const attachmentFileName = documentRef?.fileName ?? 'Untitled.docx';
       dispatch('workspace', {
         type: 'widget_load',
@@ -598,9 +635,13 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   const overflowActions = allActions.filter(a => a.placement === 'overflow');
 
   // Task 111 — SINGLE Toolbar (no wrapping Fragment, no orphaned top-level
-  // divider): the divider is a DIRECT CHILD of this Toolbar (between the
-  // primary buttons and the overflow trigger), so it always has Toolbar
-  // context (see file header "TASK 111" note).
+  // divider). GAP FIX (UAT, 2026-07-15): the two ToolbarDividers were removed.
+  // Fluent's ToolbarDivider ships `padding: 0 12px`, which (with the toolbar's
+  // columnGap on each side) produced a ~40px "large gap" between the primary AI
+  // icons and the trailing Email / overflow (⋮) affordances. Removing them lets
+  // every action sit in ONE tightly-spaced, evenly-spaced row at the single
+  // `columnGap` token — no large gap, all actions still reachable, all
+  // aria-labels preserved. Grouping is carried by distinct glyphs + tooltips.
   return (
     <Toolbar size="small" className={styles.toolbar} aria-label="AI actions" data-testid="compose-ai-toolbar">
       {/* FIX #9 — ICON-ONLY primary buttons (the tool WORDS were removed); the
@@ -617,8 +658,6 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           />
         </Tooltip>
       ))}
-
-      <ToolbarDivider />
 
       {/* FIX #10b — Email split-menu (STUB target). Consistent with the primary
           labelled buttons; both items dispatch a workspace/widget_load that opens
@@ -653,8 +692,6 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           </MenuList>
         </MenuPopover>
       </Menu>
-
-      <ToolbarDivider />
 
       <Menu positioning="below-end">
         <MenuTrigger disableButtonEnhancement>

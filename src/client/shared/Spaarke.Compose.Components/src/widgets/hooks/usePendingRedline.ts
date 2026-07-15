@@ -141,13 +141,33 @@ function normalizeMatchMode(mode: string | undefined): RedlineMatchMode {
  */
 const MATCH_FOLD: Readonly<Record<string, string>> = {
   // single quotes / apostrophes / prime → straight apostrophe
-  '‘': "'", '’': "'", '‚': "'", '‛': "'", '′': "'", 'ʼ': "'", '`': "'", '´': "'",
+  '‘': "'",
+  '’': "'",
+  '‚': "'",
+  '‛': "'",
+  '′': "'",
+  ʼ: "'",
+  '`': "'",
+  '´': "'",
   // double quotes / double prime → straight quote
-  '“': '"', '”': '"', '„': '"', '‟': '"', '″': '"',
+  '“': '"',
+  '”': '"',
+  '„': '"',
+  '‟': '"',
+  '″': '"',
   // non-breaking / thin / figure / narrow-no-break spaces → regular space
-  ' ': ' ', ' ': ' ', ' ': ' ', ' ': ' ',
+  ' ': ' ',
+  ' ': ' ',
+  ' ': ' ',
+  ' ': ' ',
   // hyphen / en / em / figure / horizontal-bar / non-breaking hyphen / minus → hyphen-minus
-  '‐': '-', '‑': '-', '‒': '-', '–': '-', '—': '-', '―': '-', '−': '-',
+  '‐': '-',
+  '‑': '-',
+  '‒': '-',
+  '–': '-',
+  '—': '-',
+  '―': '-',
+  '−': '-',
 };
 
 /** Fold one character to its match-normal form (1:1). */
@@ -360,10 +380,18 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
 
       // Idempotent: a re-signal for content already rendered (e.g. a duplicate Flow-5 event) is a no-op.
       if (isPresent(editor, ledgerRef)) {
+        // Reconstruct `hasDeletion` from the ACTUAL marks in the doc — a redline reconstructed here
+        // (e.g. after a refresh re-materialize hits already-present marks) carries a deletion half iff
+        // the doc still holds a deletion mark for this ledgerRef. Hardcoding false mislabeled every
+        // strike+replace redline as insertion-only.
+        const reconstructedHasDeletion = collectMarkedRanges(editor, DELETION, ledgerRef).length > 0;
         setPending(prev =>
           prev.some(p => p.ledgerRef === ledgerRef)
             ? prev
-            : [...prev, { ledgerRef, bindingId, turn, rationale: payload?.rationale, hasDeletion: false }]
+            : [
+                ...prev,
+                { ledgerRef, bindingId, turn, rationale: payload?.rationale, hasDeletion: reconstructedHasDeletion },
+              ]
         );
         return 'already_present';
       }
@@ -530,7 +558,9 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
         const insertionHtml = buildInsertionHtml(newText, bindingId, subRef);
         let chain = editor.chain();
         for (const span of resolved.spans) {
-          chain = chain.setTextSelection({ from: span.from, to: span.to }).setMark(DELETION, { binding: bindingId, ledgerRef: subRef });
+          chain = chain
+            .setTextSelection({ from: span.from, to: span.to })
+            .setMark(DELETION, { binding: bindingId, ledgerRef: subRef });
         }
         const insertPoints = resolved.spans.map(s => s.to).sort((a, b) => b - a);
         for (const at of insertPoints) chain = chain.insertContentAt(at, insertionHtml);
@@ -581,7 +611,14 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
     [editor]
   );
 
-  return { pending, error, materialize, materializeMany, accept, reject, clearError };
+  // Memoize the result object so consumers (ComposeEditor's useImperativeHandle keys on `redline`)
+  // get a STABLE reference across renders that don't change the underlying values — without this the
+  // fresh object literal rebuilt the editor handle every render. Identity changes only when `pending`
+  // / `error` (state) or a callback identity changes, which is exactly when the handle should refresh.
+  return React.useMemo(
+    () => ({ pending, error, materialize, materializeMany, accept, reject, clearError }),
+    [pending, error, materialize, materializeMany, accept, reject, clearError]
+  );
 }
 
 export default usePendingRedline;

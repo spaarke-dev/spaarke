@@ -95,7 +95,7 @@ import { authenticatedFetch, ApiError } from '@spaarke/auth';
 // `DataverseLookupField` and the 1c ribbon launcher (`DocumentComposeLaunch.ts`)
 // already use. No new lookup UI, no new BFF endpoint (ADR-039: this is a data query,
 // not a dispatch).
-import { createXrmNavigationService, createXrmDataService, RichFilePreviewDialog, type LookupResult } from '@spaarke/ui-components';
+import { createXrmNavigationService, createXrmDataService, type LookupResult } from '@spaarke/ui-components';
 
 // FIX #5 (UAT): the separate `ComposeToolbar` command bar (Open-in-Word + Save +
 // Push) was folded into the consolidated single-row `ComposeFormatToolbar` that
@@ -502,17 +502,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   // -------------------------------------------------------------------------
   // #1(b) — "Open preview" for the document persisted by the last Save
-  // -------------------------------------------------------------------------
-  // The "Add the document to the DMS" flow (create-on-save) previously saved but gave the user no
-  // way to open the created Document. We capture the server-minted `sprk_documentid` in triggerSave's
-  // success path (below) and surface an "Open preview" affordance on the Saved ✓ banner that opens the
-  // File Preview MODAL for that document (NOT a workspace mount) — reusing the shared
-  // `RichFilePreviewDialog` (`@spaarke/ui-components`) + the BFF `GET /api/documents/{id}/preview-url`
-  // endpoint the LegalWorkspace/SemanticSearch surfaces already use. `savedPreview` holds the id +
-  // display name; `previewOpen` gates the modal.
-  const [savedPreview, setSavedPreview] = React.useState<{ documentId: string; fileName?: string } | null>(null);
-  const [previewOpen, setPreviewOpen] = React.useState(false);
-
   // FIX #7a — the host (ConversationPane) save-completed conduit. When a Save persists a document,
   // we hand the persisted id + filename to the Assistant so it POSTs a PERSISTENT "Saved '{filename}'
   // to the DMS." chat message with an "Open preview" affordance (replacing the transient banner's
@@ -522,28 +511,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const notifyComposeSaveCompleted = useComposeSaveCompleted();
   const notifyComposeSaveCompletedRef = React.useRef(notifyComposeSaveCompleted);
   notifyComposeSaveCompletedRef.current = notifyComposeSaveCompleted;
-
-  // Xrm navigation service for the preview modal's "Open record" action (host-context; no BFF route).
-  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
-
-  // Fetch the ephemeral iframe preview URL for the saved document (RichFilePreview's fetchPreviewUrl
-  // contract). Same endpoint + shape as `DocumentApiService.getDocumentPreviewUrl`; ComposeWorkspace
-  // already holds `bffBaseUrl` + `authenticatedFetch`, so no new service is introduced (§11 reuse).
-  const fetchSavedPreviewUrl = React.useCallback(async (): Promise<string | null> => {
-    const docId = savedPreview?.documentId;
-    if (!docId || !bffBaseUrl) return null;
-    try {
-      const response = await authenticatedFetch(
-        `${bffBaseUrl}/api/documents/${encodeURIComponent(docId)}/preview-url`,
-        { method: 'GET' }
-      );
-      if (!response.ok) return null;
-      const data = (await response.json()) as { previewUrl?: string };
-      return data.previewUrl ?? null;
-    } catch {
-      return null; // non-fatal — the modal shows its own "preview not available" fallback
-    }
-  }, [savedPreview?.documentId, bffBaseUrl]);
 
   // -------------------------------------------------------------------------
   // FR-29 / FR-33 (R2, tasks 060/102) — anchored annotations + defined-terms +
@@ -1009,8 +976,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const hasRedlines = editorRef.current.hasPendingRedlines?.() ?? false;
       const commentAnnotations = composeDocxAnnotations; // anchoredAnnotationsToDocxAnnotations(anchoredAnnotations)
       const needsAnnotationSave =
-        (hasRedlines || commentAnnotations.length > 0) &&
-        typeof editorRef.current.serializeForSave === 'function';
+        (hasRedlines || commentAnnotations.length > 0) && typeof editorRef.current.serializeForSave === 'function';
 
       let bytes: ArrayBuffer;
       let saveAnnotations: DocxAnnotationInput[] = [];
@@ -1108,10 +1074,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         wasPromotedThisSave: boolean;
       };
 
-      // #1(b): remember the persisted document so the Saved ✓ banner can open its File Preview modal.
+      // #1(b): the persisted document id drives the Assistant's persistent "Saved to the DMS" chat
+      // affordance (FIX #7a below).
       const savedDocumentId = payload.documentRecordId ?? payload.documentId;
       if (savedDocumentId) {
-        setSavedPreview({ documentId: savedDocumentId, fileName: state.documentRef.fileName });
         // FIX #7a: report the completed Save to the Assistant so it posts a PERSISTENT confirmation
         // + "Open preview" chat message. No-op (null delegate) on a standalone mount. The transient
         // in-editor banner's preview link is dropped (below) now that the persistent affordance lives
@@ -1166,9 +1132,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // FIX #1b — publish the editor's Save into the cross-pane bridge so the Assistant's "Add the
   // document to the DMS" chip (ConversationPane) drives the SAME create-on-save / save-to-matter
   // flow (`triggerSave`) via a DIRECT call — no PaneEventBus discriminant. No-op outside the bridge
-  // provider (standalone LegalWorkspace mount). Effect-scoped re-registration keys on triggerSave's
-  // identity (it re-binds when its captured save state changes) so the chip always hits the latest.
-  useRegisterComposeSaveHandler(triggerSave);
+  // provider (standalone LegalWorkspace mount).
+  //
+  // spaarkeai-compose-r2 (multi-Compose-tab): the bridge Save slot is single-writer (last-mounted
+  // instance wins). Gate the bridge-facing wrapper so an INACTIVE tab's instance holding the slot
+  // does NOT save the WRONG document when the chip is issued while a DIFFERENT Compose tab is active —
+  // only the ACTIVE tab services the chip. The toolbar / Ctrl+S paths call `triggerSave` DIRECTLY and
+  // stay ungated (a hidden inactive tab has no reachable toolbar/focus, so those can only fire on the
+  // active tab anyway). The wrapper is stable identity (reads a ref) yet always dispatches the LATEST
+  // triggerSave, so the chip hits the current save state.
+  const triggerSaveRef = React.useRef(triggerSave);
+  triggerSaveRef.current = triggerSave;
+  const handleBridgeSave = React.useCallback((): void | Promise<void> => {
+    if (isActiveTabRef.current === false) return;
+    return triggerSaveRef.current();
+  }, []);
+  useRegisterComposeSaveHandler(handleBridgeSave);
 
   // Keyboard shortcut: Ctrl/Cmd+S → save.
   React.useEffect(() => {
@@ -1225,7 +1204,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // No accept/reject (flags carry no edit). Deduped by the ledger key + index so a re-materialize
   // (refresh / duplicate signal) never appends duplicates.
   const registerAiReviewComments = React.useCallback(
-    (comments: Array<{ target_text?: string; comment?: string }>, provenance: { ledgerRef: string; bindingId: string }): void => {
+    (
+      comments: Array<{ target_text?: string; comment?: string }>,
+      provenance: { ledgerRef: string; bindingId: string }
+    ): void => {
       const flags = comments
         .map((c, i) => ({ i, target: c?.target_text?.trim() ?? '', body: c?.comment?.trim() ?? '' }))
         .filter(c => c.target.length > 0 && c.body.length > 0);
@@ -1344,7 +1326,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         setComposeDraftError(`Failed to insert drafted content: ${message}`);
       }
     },
-    [state.status, state.sessionId, bffBaseUrl, lastMaterializedKey, registerAiEditReasonComment, registerAiReviewComments]
+    [
+      state.status,
+      state.sessionId,
+      bffBaseUrl,
+      lastMaterializedKey,
+      registerAiEditReasonComment,
+      registerAiReviewComments,
+    ]
   );
 
   // -------------------------------------------------------------------------
@@ -1397,7 +1386,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // through the EXISTING `usePendingRedline.accept` (via the editor handle). No-op outside the bridge
   // provider (standalone LegalWorkspace mount). Reject/Try-another do NOT route here — they are the
   // Assistant's durable ledger supersessions.
+  //
+  // spaarkeai-compose-r2 (multi-Compose-tab): the bridge Accept slot is single-writer (last-mounted
+  // instance wins). Gate so an INACTIVE tab's instance holding the slot does NOT commit a redline into
+  // a HIDDEN document when the chat Accept is issued while a DIFFERENT Compose tab is active — only the
+  // ACTIVE tab services it (standalone / single-instance mounts default isActiveTab=true, so unaffected).
   const handleBridgeAcceptRedline = React.useCallback((ledgerRef: string): void => {
+    if (isActiveTabRef.current === false) return;
     editorRef.current?.acceptPendingRedline(ledgerRef);
   }, []);
   useRegisterComposeRedlineAcceptHandler(handleBridgeAcceptRedline);
@@ -1624,12 +1619,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // per-change Accept/Reject popover + `usePendingRedline.accept/reject` handle it by ledgerRef.
   const chatInsertSeqRef = React.useRef(0);
   const handleInsertSuggestion = React.useCallback((content: string, messageId?: string): void => {
+    // spaarkeai-compose-r2 (multi-Compose-tab): the bridge Insert slot is single-writer (last-mounted
+    // instance wins). Gate so an INACTIVE tab's instance holding the slot does NOT materialize the
+    // Assistant suggestion into a HIDDEN document when "Insert into document" is issued while a
+    // DIFFERENT Compose tab is active — only the ACTIVE tab services it (standalone / single-instance
+    // mounts default isActiveTab=true, so unaffected).
+    if (isActiveTabRef.current === false) return;
     const editor = editorRef.current;
     if (!editor || typeof editor.materializeComposeDraft !== 'function') return;
     if (!content || content.trim().length === 0) return;
     const sel = lastSelectionRef.current;
-    const targetText =
-      sel && sel.to > sel.from && sel.selectionText.trim().length > 0 ? sel.selectionText : undefined;
+    const targetText = sel && sel.to > sel.from && sel.selectionText.trim().length > 0 ? sel.selectionText : undefined;
     const id = messageId && messageId.length > 0 ? messageId : String((chatInsertSeqRef.current += 1));
     const ledgerRef = `chat-insert:${id}`;
     editor.materializeComposeDraft(
@@ -1723,8 +1723,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // / layoutName === 'Compose') for the ribbon compose-launch path (widgetType 'workspace').
       const wd = event.widgetData as { compose?: unknown; layoutName?: string } | null | undefined;
       const activeTabIsCompose =
-        event.widgetType === 'compose' ||
-        (wd != null && (wd.compose != null || wd.layoutName === 'Compose'));
+        event.widgetType === 'compose' || (wd != null && (wd.compose != null || wd.layoutName === 'Compose'));
       if (!activeTabIsCompose) return;
     }
     void registerActiveDocumentRef.current?.({
@@ -2193,26 +2192,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         onResolve={handleReanchorResolve}
         onClose={() => setReanchorPanelOpen(false)}
       />
-
-      {/* #1(b): File Preview modal for the document persisted by "Add to DMS" / Save. Opened from the
-          Saved ✓ banner's "Open preview" link. Reuses the shared RichFilePreviewDialog + the BFF
-          preview-url endpoint (no workspace mount, no new component). Rendered only once a Save has
-          minted a document id. */}
-      {savedPreview ? (
-        <RichFilePreviewDialog
-          open={previewOpen}
-          documentId={savedPreview.documentId}
-          documentName={savedPreview.fileName ?? 'Document'}
-          onClose={() => setPreviewOpen(false)}
-          fetchPreviewUrl={fetchSavedPreviewUrl}
-          onOpenFile={() => undefined}
-          onEmailDocument={() => undefined}
-          onCopyLink={() => undefined}
-          onOpenRecord={() => {
-            void navigationService.openRecord('sprk_document', savedPreview.documentId);
-          }}
-        />
-      ) : null}
 
       {/* Error state — load failed; no document loaded */}
       {state.status === 'error' ? (

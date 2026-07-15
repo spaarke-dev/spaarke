@@ -37,7 +37,7 @@ import {
   MessageBarActions,
   Button,
 } from '@fluentui/react-components';
-import { Dismiss16Regular, DocumentRegular } from '@fluentui/react-icons';
+import { Dismiss16Regular } from '@fluentui/react-icons';
 
 import type { ComposeCheckoutLockedByInfo, ComposeCheckoutStatus } from './ComposeWorkspace.types';
 import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts';
@@ -55,22 +55,6 @@ export interface ComposeBannerStackProps {
    * MessageBar that auto-dismisses after {@link SAVE_SUCCESS_VISIBLE_MS}. 0 = no save yet.
    */
   saveSuccessToken?: number;
-
-  /**
-   * spaarkeai-compose-r2 #1(b) — the `sprk_documentid` of the document persisted by the last
-   * successful Save (create-on-save "Add to DMS" or a replace Save). When present alongside
-   * {@link onOpenPreview}, the Saved ✓ banner surfaces an "Open preview" affordance that opens the
-   * File Preview modal for THAT document (not a workspace mount). Undefined until a Save yields an id.
-   */
-  savedDocumentId?: string;
-
-  /**
-   * spaarkeai-compose-r2 #1(b) — invoked when the user clicks "Open preview" on the Saved ✓ banner.
-   * The parent (ComposeWorkspace, workspace-side) opens the File Preview modal for
-   * {@link savedDocumentId}. Absent → the affordance is not rendered (back-compat: pre-existing
-   * callers that only pass `saveSuccessToken` get the unchanged banner).
-   */
-  onOpenPreview?: () => void;
 }
 
 /** How long the transient "Saved ✓" confirmation stays up before auto-dismissing. */
@@ -97,8 +81,6 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     importWarnings,
     pendingAssistantInsert,
     saveSuccessToken = 0,
-    savedDocumentId,
-    onOpenPreview,
   } = props;
 
   // DEF-15 (UAT-R3): the "Document opened with N simplification(s)" warning is
@@ -148,8 +130,6 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
             <MessageBarTitle>Saved to matter files</MessageBarTitle>
             Your document was saved and is available in the matter&apos;s files.
           </MessageBarBody>
-          {/* #1(b): when the just-saved document's id is known, offer an "Open preview" link that
-              opens the File Preview modal for THAT document (parent-owned; not a workspace mount). */}
           <MessageBarActions
             containerAction={
               <Button
@@ -160,18 +140,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
                 onClick={() => setShowSaveSuccess(false)}
               />
             }
-          >
-            {onOpenPreview && savedDocumentId ? (
-              <Button
-                appearance="transparent"
-                icon={<DocumentRegular />}
-                data-testid="compose-workspace-save-success-open-preview"
-                onClick={onOpenPreview}
-              >
-                Open preview
-              </Button>
-            ) : null}
-          </MessageBarActions>
+          />
         </MessageBar>
       ) : null}
 

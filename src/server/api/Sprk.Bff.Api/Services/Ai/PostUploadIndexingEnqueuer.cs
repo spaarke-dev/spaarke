@@ -326,9 +326,13 @@ public sealed class PostUploadIndexingEnqueuer : IPostUploadIndexingEnqueuer
                 job.JobId, request.FileName, request.DriveId, request.ItemId,
                 request.DocumentId ?? "(none)", request.Source);
 
-            // Stamp the sprk_document index-status fields (dual-write transition contract),
-            // for parity with the MI-written callers. Non-fatal.
-            await WriteSearchIndexTrackingAsync(request, ct);
+            // NOTE: do NOT stamp the sprk_document search-index completion fields here. This is the
+            // app-only path — indexing has only been ENQUEUED, not performed. RagIndexingJobHandler
+            // stamps SearchIndexCompletedOn / SearchIndexed / SearchIndexedOn / SearchIndexName on
+            // REAL completion after the background job actually indexes the file. Stamping at enqueue
+            // time would leave a false "searchable" marker if the job later fails/poisons. (The OBO
+            // path in EnqueueIfApplicableAsync stamps correctly, AFTER synchronous IndexFileAsync
+            // returns Success — there is no async gap to mis-report there.)
 
             return PostUploadIndexingResult.Submitted(job.JobId);
         }

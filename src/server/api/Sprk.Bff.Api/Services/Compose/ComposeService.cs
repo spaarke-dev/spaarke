@@ -1,5 +1,8 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -89,12 +92,30 @@ public class ComposeService : IComposeService
     // (ADR013_ComposeFacadeTests). The facade downloads the user-OBO-written SPE file UNDER OBO
     // (the same identity + SPE call the RAG indexing step already uses — MI 403s on it) and reuses
     // the existing extract → classify → summarize → field-map → UpdateDocumentAsync pipeline
-    // unchanged. Runs INLINE in the request scope (best-effort, non-blocking), exactly like indexing;
-    // this REPLACES the round-6 AppOnlyDocumentAnalysis Service-Bus enqueue, which silently 403'd on
-    // the user-written file (the bug UAT #7b reported). Optional + defaults null (same rationale as
-    // _pushSaveStatusStore below) so existing 6-arg test constructors keep compiling; DI resolves the
-    // real scoped facade in every non-test host.
+    // unchanged. It REPLACES the round-6 AppOnlyDocumentAnalysis Service-Bus enqueue, which silently
+    // 403'd on the user-written file (the bug UAT #7b reported).
+    //
+    // FIRE-AND-FORGET / BACKGROUND (owner-approved, compose-r2): the profile leg is NO LONGER awaited
+    // in the create-on-save response path. The full extract → classify → summarize → field-map LLM
+    // pipeline runs ~15-40 s; awaiting it blocked the HTTP response for that entire time. SaveAsync now
+    // DISPATCHES the profile onto a detached DI scope (IServiceScopeFactory) and returns immediately;
+    // the 7 sprk_document profile fields populate shortly AFTER the save returns. OBO is preserved by
+    // capturing the caller's bearer token + claims BEFORE returning and threading them into a synthetic
+    // HttpContext resolved against the fresh scope (the profile path reads ONLY the Authorization header
+    // + User claims from HttpContext — see TokenHelper.ExtractBearerToken / GraphClientFactory.ForUserAsync;
+    // the user access token stays valid long enough to exchange after the response). Best-effort: the
+    // background task swallows + logs every failure, so a profile miss can never crash the process or
+    // affect the already-returned save. Optional + defaults null (same rationale as _pushSaveStatusStore
+    // below) so existing 6-arg test constructors keep compiling; the field is now the availability GATE
+    // (null → nothing to dispatch), while the actual run resolves a FRESH facade from the detached scope.
     private readonly IDocumentProfileAi? _documentProfileAi;
+    // Fire-and-forget profile dispatch (compose-r2): a NEW DI scope is created per background profile so
+    // the profile facade + its scoped deps never touch the disposing request scope. Optional + defaults
+    // null so existing test constructors compile; DI always resolves it in every non-test host.
+    private readonly IServiceScopeFactory? _scopeFactory;
+    // App-shutdown token for the detached profile task — NEVER the request CancellationToken (which
+    // cancels when the response completes). Optional; null → CancellationToken.None.
+    private readonly IHostApplicationLifetime? _appLifetime;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -104,7 +125,9 @@ public class ComposeService : IComposeService
         IPostUploadIndexingEnqueuer indexing,
         ILogger<ComposeService> logger,
         IDistributedCache? cache = null,
-        IDocumentProfileAi? documentProfileAi = null)
+        IDocumentProfileAi? documentProfileAi = null,
+        IServiceScopeFactory? scopeFactory = null,
+        IHostApplicationLifetime? appLifetime = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -113,6 +136,8 @@ public class ComposeService : IComposeService
         _indexing = indexing;
         _logger = logger;
         _documentProfileAi = documentProfileAi;
+        _scopeFactory = scopeFactory;
+        _appLifetime = appLifetime;
         // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
         // Optional + defaults null so existing 6-arg test constructors (sibling task suites
         // 013/050/060/062/102) keep compiling unchanged; DI (AddScoped<IComposeService,
@@ -448,29 +473,32 @@ public class ComposeService : IComposeService
             .ConfigureAwait(false);
 
         // ────────────────────────────────────────────────────────────────────────────
-        // STEP 3 — profile-analysis (FR-05 Fork C, compose-r2, UAT #7b). The Compose user wrote the
-        // file, so profiling MUST run inline in the OBO request scope (Pattern 4) — exactly like
-        // indexing above. A background AppOnlyDocumentAnalysis (MI) job would 403 on the download
-        // (that was the round-6 bug: profile fields silently never populated). The OBO-capable
-        // IDocumentProfileAi facade downloads the file as the user and reuses the existing
-        // extract → classify → summarize → field-map → UpdateDocumentAsync pipeline unchanged.
-        // Best-effort: it never throws (swallowed + logged), so the save is NEVER blocked or failed
-        // by profiling; a failure/skip degrades to a non-terminal profile step, never poisoning the
-        // save aggregate. On success the step is terminal Completed → the record lands as a complete
-        // DMS record (aggregate can reach Completed once container + record + indexing + profile all
-        // succeed).
+        // STEP 3 — profile-analysis (FR-05 Fork C, compose-r2, UAT #7b — now FIRE-AND-FORGET).
+        // The Compose user wrote the file, so profiling MUST run UNDER OBO (Pattern 4) — a background
+        // AppOnlyDocumentAnalysis (MI) job would 403 on the download (that was the round-6 bug: profile
+        // fields silently never populated). But awaiting the full extract → classify → summarize →
+        // field-map LLM pipeline (~15-40 s) INLINE blocked this HTTP response for that entire time.
+        //
+        // So the profile is now DISPATCHED to a detached DI scope and NOT awaited: SaveAsync returns
+        // immediately, and the OBO-capable IDocumentProfileAi facade runs the SAME pipeline in the
+        // background, writing the 7 sprk_document profile fields shortly AFTER this save returns. OBO is
+        // preserved by capturing the caller's bearer token + claims before returning (see
+        // DispatchBackgroundProfile). Best-effort: the background task swallows + logs every failure, so
+        // it can never fail or block the save. Because the outcome is not known synchronously, the
+        // returned profile step is a non-terminal "dispatched" (Running) signal — the record is a valid
+        // interim success (container + record + indexing) with the profile still in flight.
         // ────────────────────────────────────────────────────────────────────────────
         var profileSignal = promotion.DocumentRecordId.HasValue
-            ? await ProfileDocumentAsync(
-                    promotion.DocumentRecordId.Value, httpContext, cancellationToken)
-                .ConfigureAwait(false)
+            ? DispatchBackgroundProfile(promotion.DocumentRecordId.Value, httpContext)
             : ProfileNotAttemptedSignal("no sprk_document record id resolved — profile not attempted");
 
         // ────────────────────────────────────────────────────────────────────────────
-        // Project per-step states (container → record → profile-analysis[enqueued] → indexing)
+        // Project per-step states (container → record → profile-analysis → indexing)
         // through the shared JobAwareCompletionStateProjector. A fileless/unindexed record can
-        // never be a success (aggregate Failed/Partial); the enqueued profile step is non-terminal
-        // (Queued) until the background worker completes it (Fork C, compose-r2).
+        // never be a success (aggregate Failed/Partial). The profile step is DISPATCHED to the
+        // background above (fire-and-forget, not awaited): in the returned response it is a non-terminal
+        // "dispatched"/Running signal, so the synchronous aggregate reads Partial (record + index exist,
+        // profile pending) and never demotes to Failed on a best-effort profile (Fork C, compose-r2).
         // ────────────────────────────────────────────────────────────────────────────
         var completion = ProjectCreateOnSaveState(
             subjectId: effectiveSpeId,
@@ -643,11 +671,12 @@ public class ComposeService : IComposeService
     // FR-05 create-on-save backbone — helpers (per-step job-aware projection).
     //
     // The four steps container → record → profile-analysis → indexing are projected through the
-    // shared JobAwareCompletionStateProjector (store-before-render, ADR-040). profile-analysis now
-    // runs INLINE under OBO via the ADR-013-safe IDocumentProfileAi facade (compose-r2, UAT #7b) —
-    // the same request-scope OBO pattern indexing uses, because a background MI job 403s on the
-    // user-OBO-written file. On success profile is terminal Completed; on failure/skip it degrades to
-    // a non-terminal signal so the aggregate never reads Failed on a best-effort profile miss.
+    // shared JobAwareCompletionStateProjector (store-before-render, ADR-040). profile-analysis is
+    // DISPATCHED FIRE-AND-FORGET under OBO via the ADR-013-safe IDocumentProfileAi facade (compose-r2) —
+    // captured OBO token + fresh DI scope, because a background MI job 403s on the user-OBO-written file.
+    // In the synchronous response the profile step is a non-terminal "dispatched" (Running) signal, so
+    // the aggregate reads Partial (record + index exist, profile pending) and never reads Failed on a
+    // best-effort profile miss (which happens off-thread and is only logged).
     // =========================================================================
 
     /// <summary>
@@ -655,10 +684,11 @@ public class ComposeService : IComposeService
     /// a record is interim-successful when the <c>container</c>, <c>record</c>, AND <c>indexing</c>
     /// steps all reached terminal success — a record with no SPE file OR no index is NEVER a success.
     /// <c>profile-analysis</c> is intentionally EXCLUDED from this bar so a best-effort profile miss
-    /// never demotes an otherwise-good save; the FULL success bar (aggregate ==
-    /// <see cref="JobAwareState.Completed"/>) is reached when profile also lands terminal-success,
-    /// which the inline OBO profile path (<see cref="IDocumentProfileAi"/>) now achieves on the happy
-    /// path.
+    /// never demotes an otherwise-good save. Since the profile now runs FIRE-AND-FORGET in the
+    /// background (<see cref="DispatchBackgroundProfile"/>), the synchronous create-on-save response
+    /// carries a non-terminal "dispatched" profile step — so the interim bar (container + record +
+    /// indexing) is the operative success bar for the returned aggregate; the profile fields land
+    /// shortly after, off the response path.
     /// </summary>
     public static bool IsInterimCreateOnSaveSuccess(JobAwareCompletionState state)
     {
@@ -689,75 +719,160 @@ public class ComposeService : IComposeService
     };
 
     /// <summary>
-    /// FR-05 Fork C (compose-r2, UAT #7b): profiles a newly-created (or idempotently-resolved)
-    /// <c>sprk_document</c> INLINE under the caller's OBO identity via the ADR-013-safe
-    /// <see cref="IDocumentProfileAi"/> facade, and returns the resulting profile-analysis step
-    /// signal. The facade downloads the user-OBO-written SPE file as the user (a background MI job
-    /// would 403 — the round-6 bug) and reuses the existing extract → classify → summarize →
-    /// field-map → UpdateDocumentAsync pipeline. Mirrors the inline-OBO indexing step above.
+    /// FR-05 Fork C (compose-r2): DISPATCHES a best-effort OBO document-profile onto a detached DI
+    /// scope (fire-and-forget) for a newly-created (or idempotently-resolved) <c>sprk_document</c>, and
+    /// returns the non-terminal "dispatched" profile-analysis step signal WITHOUT awaiting the profile.
+    /// The background task (<see cref="RunBackgroundProfileAsync"/>) downloads the user-OBO-written SPE
+    /// file as the user (a background MI job would 403 — the round-6 bug) and reuses the existing
+    /// extract → classify → summarize → field-map → UpdateDocumentAsync pipeline; its 7 profile fields
+    /// land shortly AFTER the save returns.
     /// </summary>
     /// <remarks>
-    /// Best-effort by design: a null facade (test host) or any profiling failure returns a
-    /// NON-terminal signal with a diagnostic detail, never a terminal Failed — the synchronous save
-    /// is not blocked on profiling and its aggregate is never demoted to Failed by a profile miss.
-    /// The facade itself never throws (swallows + logs); the extra try/catch here is belt-and-braces.
-    /// ADR-013: this method injects NO AI-internal type — it calls the PublicContracts facade only.
+    /// <para>
+    /// <b>Why a detached scope (constraint #1):</b> the request DI scope disposes when the HTTP
+    /// response returns, so the background profile MUST resolve the facade from a FRESH
+    /// <see cref="IServiceScopeFactory.CreateScope"/> — never a service captured from the request scope.
+    /// </para>
+    /// <para>
+    /// <b>How OBO survives (constraint #2):</b> the profile path reads ONLY the <c>Authorization</c>
+    /// header (the OBO user assertion) + <c>User</c> claims + <c>TraceIdentifier</c> from
+    /// <see cref="HttpContext"/> (see <c>TokenHelper.ExtractBearerToken</c> /
+    /// <c>GraphClientFactory.ForUserAsync</c>). Those three are captured HERE, before the request scope
+    /// disposes, and threaded into a synthetic <see cref="DefaultHttpContext"/> in the background task —
+    /// the user access token stays valid long enough to exchange after the response. If the save request
+    /// carried no bearer token, a background OBO download would 401, so we DO NOT dispatch a doomed task:
+    /// we skip cleanly with a non-terminal not-attempted signal instead.
+    /// </para>
+    /// <para>
+    /// Best-effort by design: a null facade / scope factory (test host, AI-gate off) or a missing bearer
+    /// token returns a NON-terminal signal, and any background failure is swallowed + logged
+    /// (<see cref="RunBackgroundProfileAsync"/>) — the synchronous save is never blocked, and its
+    /// aggregate is never demoted to Failed by a profile miss. ADR-013: injects NO AI-internal type.
+    /// </para>
     /// </remarks>
-    private async Task<StoredStepSignal> ProfileDocumentAsync(
-        Guid documentId, HttpContext httpContext, CancellationToken cancellationToken)
+    private StoredStepSignal DispatchBackgroundProfile(Guid documentId, HttpContext httpContext)
     {
-        if (_documentProfileAi is null)
+        // Availability gate: no scope factory (unit-test host) or no facade registered (compound AI gate
+        // off) → nothing to dispatch. Report non-terminal not-attempted synchronously.
+        if (_scopeFactory is null || _documentProfileAi is null)
         {
             return ProfileNotAttemptedSignal(
-                "profile facade unavailable (no IDocumentProfileAi injected) — profile not attempted");
+                "profile facade unavailable (no IDocumentProfileAi / IServiceScopeFactory) — profile not dispatched");
         }
+
+        // Capture the OBO user assertion (raw Authorization header) BEFORE the request scope disposes.
+        // Non-throwing (unlike TokenHelper.ExtractBearerToken) so a token-less save degrades cleanly.
+        var authorizationHeader = httpContext.Request?.Headers.Authorization.ToString();
+        if (string.IsNullOrWhiteSpace(authorizationHeader)
+            || !authorizationHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            // No user token to detach — a background OBO download would 401. Never ship a broken detach.
+            _logger.LogWarning(
+                "Compose create-on-save: no bearer Authorization header on the save request for document {DocumentId} — background OBO profile not dispatched (best-effort skip).",
+                documentId);
+            return ProfileNotAttemptedSignal(
+                "no bearer Authorization header on the save request — background OBO profile not dispatched");
+        }
+
+        // Capture the remaining request-scoped context the profile facade reads. A ClaimsPrincipal is a
+        // plain object with no request-tied lifetime, so retaining the reference across the response is safe.
+        var user = httpContext.User;
+        var correlationId = httpContext.TraceIdentifier;
+
+        // Fire-and-forget: detach from the request scope AND the request CancellationToken (constraint #3).
+        // The task is unobserved by design; RunBackgroundProfileAsync owns its own try/catch so nothing
+        // faults the finalizer thread. The discard makes the intent explicit to reviewers + analyzers.
+        _ = Task.Run(() => RunBackgroundProfileAsync(documentId, authorizationHeader, user, correlationId));
+
+        return ProfileDispatchedSignal();
+    }
+
+    /// <summary>
+    /// The detached (fire-and-forget) body of the best-effort OBO document-profile. Creates a NEW DI
+    /// scope, rebuilds a minimal <see cref="HttpContext"/> from the captured OBO token + claims, resolves
+    /// the <see cref="IDocumentProfileAi"/> facade FROM THAT SCOPE, and runs the profile. NEVER throws —
+    /// a background profiling failure must not crash the process (unobserved-exception safe, constraint #4).
+    /// </summary>
+    private async Task RunBackgroundProfileAsync(
+        Guid documentId,
+        string authorizationHeader,
+        ClaimsPrincipal? user,
+        string correlationId)
+    {
+        // Constraint #3: use the app-shutdown token, NOT the (already-completed) request token. A profile
+        // in flight when the host stops is cut off cleanly; otherwise it runs to completion.
+        var ct = _appLifetime?.ApplicationStopping ?? CancellationToken.None;
 
         try
         {
-            var result = await _documentProfileAi
-                .ProfileDocumentAsUserAsync(documentId, httpContext, cancellationToken)
+            await using var scope = _scopeFactory!.CreateAsyncScope();
+
+            // Rebuild a minimal HttpContext carrying ONLY what the profile path reads: the OBO user
+            // assertion (Authorization header), the User claims (runContext.TenantId + tenant-cache
+            // scoping), and the correlation id. Backed by the fresh scope's provider so any
+            // RequestServices lookup resolves against the detached (non-disposed) scope.
+            var detachedContext = new DefaultHttpContext
+            {
+                RequestServices = scope.ServiceProvider,
+                TraceIdentifier = correlationId,
+            };
+            detachedContext.Request.Headers.Authorization = authorizationHeader;
+            if (user is not null)
+            {
+                detachedContext.User = user;
+            }
+
+            // Keep AnalysisDocumentLoader's IHttpContextAccessor-based tenant-cache scoping coherent
+            // (else it degrades to the documented "system" sentinel — acceptable, but this is tidier).
+            var accessor = scope.ServiceProvider.GetService<IHttpContextAccessor>();
+            if (accessor is not null)
+            {
+                accessor.HttpContext = detachedContext;
+            }
+
+            // Constraint #1: resolve the facade from the NEW scope — never the request-scope service.
+            var facade = scope.ServiceProvider.GetService<IDocumentProfileAi>();
+            if (facade is null)
+            {
+                _logger.LogWarning(
+                    "Compose background profile: IDocumentProfileAi did not resolve from the detached scope for document {DocumentId} (correlation={CorrelationId}) — skipped.",
+                    documentId, correlationId);
+                return;
+            }
+
+            _logger.LogInformation(
+                "Compose background profile: starting best-effort OBO profile for document {DocumentId} (correlation={CorrelationId}).",
+                documentId, correlationId);
+
+            var result = await facade.ProfileDocumentAsUserAsync(documentId, detachedContext, ct)
                 .ConfigureAwait(false);
 
             _logger.LogInformation(
-                "Compose create-on-save: OBO profile for document {DocumentId} — success={Success} " +
-                "(failure={Failure} skip={Skip})",
-                documentId, result.Success, result.FailureReason ?? "(none)", result.SkipReason ?? "(none)");
-
-            return ProfileSignal(result);
+                "Compose background profile: document {DocumentId} — success={Success} (failure={Failure} skip={Skip}) (correlation={CorrelationId}). Profile fields populate on the record now.",
+                documentId, result.Success, result.FailureReason ?? "(none)", result.SkipReason ?? "(none)", correlationId);
         }
         catch (Exception ex)
         {
-            // Belt-and-braces: the facade already swallows, but never let profiling fail the save.
-            _logger.LogWarning(ex,
-                "Compose create-on-save: OBO profile threw for document {DocumentId} — best-effort, save unaffected.",
-                documentId);
-            return ProfileNotAttemptedSignal($"profile threw (best-effort; save unaffected): {ex.Message}");
+            // Constraint #4: unobserved-exception safe. The save already returned on its own terms; a
+            // best-effort background profile failure is logged and swallowed, never rethrown.
+            _logger.LogError(ex,
+                "Compose background profile: threw while profiling document {DocumentId} (correlation={CorrelationId}) — best-effort, the save is unaffected.",
+                documentId, correlationId);
         }
     }
 
-    /// <summary>Maps the OBO profile outcome to a stored step signal: success → terminal Completed
-    /// (the profile fields were written — a complete DMS record); failure/skip → non-terminal (no
-    /// stored outcome) so a best-effort profile miss never demotes the create-on-save aggregate to
-    /// Failed. Mirrors <see cref="IndexingSignal"/>'s success mapping, but treats a profile miss as
-    /// non-terminal rather than terminal-Failed because profiling is explicitly best-effort.</summary>
-    private static StoredStepSignal ProfileSignal(DocumentProfileOutcome result)
+    /// <summary>Non-terminal (Running) profile-analysis signal for the fire-and-forget path: the profile
+    /// was DISPATCHED to a background scope and runs best-effort AFTER the save returns (the 7
+    /// sprk_document profile fields populate shortly after). <c>Started=true</c> + no stored status →
+    /// projects to <see cref="JobAwareState.Running"/>, so the returned aggregate reads Partial (record +
+    /// index exist, profile pending), never Completed-on-claim and never Failed.</summary>
+    private static StoredStepSignal ProfileDispatchedSignal() => new()
     {
-        if (result.Success)
-        {
-            return new StoredStepSignal { StepName = StepProfileAnalysis, StoredStatus = JobStatus.Completed, Started = true };
-        }
-
-        var detail = result.FailureReason is not null
-            ? $"profile failed (best-effort; save unaffected): {result.FailureReason}"
-            : $"profile skipped: {result.SkipReason}";
-        return new StoredStepSignal
-        {
-            StepName = StepProfileAnalysis,
-            StoredStatus = null,
-            Started = false,
-            Detail = detail,
-        };
-    }
+        StepName = StepProfileAnalysis,
+        StoredStatus = null,
+        Started = true,
+        Detail = "profile-analysis dispatched to background (best-effort); the profile fields populate shortly after the save returns",
+    };
 
     /// <summary>A non-terminal profile-analysis signal for when the profile was NOT attempted
     /// (container/record step never produced a record, or no facade injected). Non-terminal so it

@@ -371,17 +371,31 @@ public sealed class PostUploadIndexingEnqueuerTests
         capturedJob!.IdempotencyKey.Should().Be("rag-index-drive-abc-item-xyz");
         capturedJob.MaxAttempts.Should().Be(3);
 
-        // Parity with the MI-written callers: the app-only path also stamps the tracking fields.
-        _documentServiceMock.Verify(
-            s => s.UpdateDocumentAsync(
-                "doc-guid-123",
-                It.Is<UpdateDocumentRequest>(r => r.SearchIndexed == true && r.SearchIndexCompletedOn != null),
-                It.IsAny<CancellationToken>()),
-            Times.Once);
-
         // OBO path must NOT have been called for the app-only method
         _fileIndexingMock.Verify(
             s => s.IndexFileAsync(It.IsAny<FileIndexRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task EnqueueAppOnlyIfApplicableAsync_HappyPath_DoesNotStampCompletionAtEnqueueTime()
+    {
+        // Regression: the app-only path only ENQUEUES a Service Bus job — indexing has not happened yet.
+        // Stamping SearchIndexCompletedOn / SearchIndexed at enqueue time left a false "searchable"
+        // marker whenever the background RagIndexingJobHandler later failed/poisoned. Completion is
+        // stamped ONLY by the job on real completion, so the enqueuer must NOT write tracking fields here.
+        _jobSubmissionMock
+            .Setup(s => s.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var result = await CreateSut().EnqueueAppOnlyIfApplicableAsync(ValidRequest(), CancellationToken.None);
+
+        result.JobSubmitted.Should().BeTrue();
+        _documentServiceMock.Verify(
+            s => s.UpdateDocumentAsync(
+                It.IsAny<string>(),
+                It.IsAny<UpdateDocumentRequest>(),
+                It.IsAny<CancellationToken>()),
             Times.Never);
     }
 

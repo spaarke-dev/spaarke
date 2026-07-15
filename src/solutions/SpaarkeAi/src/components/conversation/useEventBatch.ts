@@ -332,6 +332,25 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
       if (openedAtRef.current === null) {
         openedAtRef.current = Date.now();
       }
+      // spaarkeai-compose-r2 (compose-ingest strand fix): `expectedRef` is SHARED with the chat
+      // attachment strip. If a concurrent chat gesture has a chip still 'extracting' (in `expectedRef`
+      // but not yet settled), `maybeFire` will keep WAITING and the compose promoted-file batch never
+      // fires. Arm the same fallback timer `queueDocumentUploadedEvent` uses so the promoted file is
+      // guaranteed to settle even when a stuck chat chip strands the shared expected set. (A fallback
+      // fire that accounts a still-extracting chat chip is safe — its later promotion re-opens a fresh
+      // batch, matching the existing chip-path fallback semantics.)
+      if (timerRef.current === null) {
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null;
+          // ADR-015: structural signal only.
+          console.warn(
+            "[ConversationPane] event batch fallback fired (promoted file) — settled:%d expected:%d",
+            pendingEventFilesRef.current.length,
+            expectedRef.current.size
+          );
+          fireRef.current();
+        }, EVENT_BATCH_FALLBACK_MS);
+      }
       maybeFire();
     },
     [maybeFire]

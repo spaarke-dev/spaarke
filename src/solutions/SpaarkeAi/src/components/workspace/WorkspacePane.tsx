@@ -38,7 +38,11 @@ import {
   getWorkspaceWidgetMetadata,
   useAiSession,
 } from "@spaarke/ai-widgets";
-import type { WorkspacePaneEvent, ConversationPaneEvent } from "@spaarke/ai-widgets";
+import type {
+  WorkspacePaneEvent,
+  ConversationPaneEvent,
+  WorkspaceWidgetComponent,
+} from "@spaarke/ai-widgets";
 // R6 Hotfix Wave B-G9c2 (2026-06-10): the previously-eager Summary tab
 // auto-install (R5 task 038) was removed. Each summarize invocation now
 // dispatches its own `workspace.widget_load` carrying the structured-
@@ -855,36 +859,18 @@ export function WorkspacePane(): React.JSX.Element {
   // initial effect picks up the early events via its own subscription.
   // ---------------------------------------------------------------------------
 
-  // Retained as a no-op ref so `handleTabChange` (manual override semantics)
-  // can continue to compare against the current Summary tab id when one is
-  // present. With the deferred-install model, this is `null` until a
-  // summarize run dispatches a `widget_load` AND we narrow the dispatched
-  // tab into this ref. For the current B-G9c2 implementation we no longer
-  // need the manual-override behavior to be Summary-specific (each run gets
-  // its own tab; the user can freely click between tabs without affecting
-  // future runs), so this ref stays `null` permanently. Removing the ref
-  // entirely would force a wider refactor of `handleTabChange` — keeping
-  // the variable as a benign null sentinel keeps the diff small.
-  const summaryTabIdRef = React.useRef<string | null>(null);
-
   // ---------------------------------------------------------------------------
   // R6 Hotfix Wave B-G9c2 — auto-focus is now NATURAL via `addTab`
   //
-  // The R5 task 038 streaming-started auto-focus block (removed here) is
-  // unnecessary in the deferred-install model: each summarize run dispatches
-  // a `workspace.widget_load`, the existing `widget_load` handler below
-  // calls `manager.addTab(...)` which AUTO-ACTIVATES the new tab (see
-  // WorkspaceTabManager.addTab line 378), so the new Summary tab is focused
-  // as soon as the run starts — no separate `streaming_started` focus
-  // handler required.
-  //
-  // The `streamFocusOverrideRef` is retained as a no-op sentinel so the
-  // existing manual-override checks in `handleTabChange` don't have to
-  // change. With each run owning its own tab, the override semantic is now
-  // mostly vestigial — kept for compatibility with downstream consumers.
+  // Each summarize run dispatches a `workspace.widget_load`; the existing
+  // `widget_load` handler below calls `manager.addTab(...)` which
+  // AUTO-ACTIVATES the new tab (see WorkspaceTabManager.addTab), so the new
+  // Summary tab is focused as soon as the run starts — no separate
+  // `streaming_started` focus handler required. (The R5 task 038 manual
+  // Summary-override refs were removed here: each run owns its own tab, so the
+  // override semantic was vestigial and its `handleTabChange` block was
+  // unreachable — `summaryTabIdRef` was permanently null.)
   // ---------------------------------------------------------------------------
-
-  const streamFocusOverrideRef = React.useRef<boolean>(false);
 
   // ---------------------------------------------------------------------------
   // PaneEventBus subscription — 'workspace' channel
@@ -927,8 +913,13 @@ export function WorkspacePane(): React.JSX.Element {
       if (widgetType === "email" || emailData?.layoutName === "Email") {
         const emailDisplayName = event.displayName ?? "Email";
         const emailTabId = manager.addTab("email", widgetData, emailDisplayName);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        manager.resolveTabComponent(emailTabId, EmailStubWidget as React.ComponentType<any>, emailDisplayName);
+        // Cast to the registry's WorkspaceWidgetComponent (matches the 'compose'
+        // registry path) — EmailStubWidget takes WorkspaceWidgetProps<EmailWidgetData>.
+        manager.resolveTabComponent(
+          emailTabId,
+          EmailStubWidget as unknown as WorkspaceWidgetComponent,
+          emailDisplayName,
+        );
         syncState();
         const emailSnapshot = manager.getSnapshot();
         dispatch("workspace", {
@@ -1269,24 +1260,6 @@ export function WorkspacePane(): React.JSX.Element {
       manager.setActiveTab(tabId);
       syncState();
 
-      // R5 task 038 — Manual override for the Summary tab auto-focus.
-      //
-      // When the user manually clicks a tab OTHER THAN Summary, set the
-      // override flag so subsequent `section_*` / `streaming_complete`
-      // events in the current stream cycle do NOT pull focus back to
-      // Summary. The override is reset on the NEXT `streaming_started`
-      // event (so the next stream can again auto-focus) AND on
-      // `streaming_complete` (defensive double-reset — see the auto-focus
-      // subscription above).
-      const summaryTabId = summaryTabIdRef.current;
-      if (summaryTabId && tabId !== summaryTabId) {
-        streamFocusOverrideRef.current = true;
-      } else if (tabId === summaryTabId) {
-        // User clicked back to Summary themselves — clear the override
-        // (no longer in "I want to be elsewhere" mode).
-        streamFocusOverrideRef.current = false;
-      }
-
       // Find the newly active tab to include widget info in the event.
       const activeTab = manager.getActiveTab();
 
@@ -1442,9 +1415,10 @@ export function WorkspacePane(): React.JSX.Element {
   );
 
   if (tabs.length === 0) {
-    // First-paint placeholder. With the Home tab installed in the mount
-    // effect, this branch is reachable only for the single render before the
-    // effect commits.
+    // First-paint placeholder (the Home tab was removed, so `tabs.length === 0`
+    // is genuinely reachable): rendered before any auto-install / restore /
+    // dispatched `widget_load` has committed a tab, and whenever the user closes
+    // every tab. Shows a spinner behind the header until a tab lands.
     return (
       <div className={styles.root} data-testid="workspace-first-paint">
         {header}

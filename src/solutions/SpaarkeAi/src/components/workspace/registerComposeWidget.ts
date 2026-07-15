@@ -12,14 +12,20 @@
  * section). This module registers Compose ALSO as a Direct `WorkspaceWidget`
  * (`widgetType: 'compose'`) so it becomes a first-class registry citizen with
  * its own agent-visibility contract — WITHOUT removing or migrating the layout
- * path. After this module loads, Compose still works exactly as before via:
- *   - the LegalWorkspace "Compose" layout row + workspace dropdown entry,
- *   - DEF-08 single-tab reuse (keyed on a `'workspace'` tab + layoutName "Compose"),
- *   - the active-layout override (`composeMode==='editor'`) in `WorkspacePane`,
- *   - the standalone LegalWorkspace mount.
- * Nothing here dispatches `widget_load{ widgetType:'compose' }`; the existing
- * open-paths are untouched. See the "Why here, not in @spaarke/ai-widgets" and
- * "Picker" notes below.
+ * path. Compose still works via the LegalWorkspace "Compose" layout row +
+ * workspace dropdown entry and the standalone LegalWorkspace mount.
+ *
+ * UPDATE (spaarkeai-compose-r2 UNIFY — the Direct `'compose'` widget is now the
+ * LIVE mount door): the earlier "nothing dispatches `widget_load{ widgetType:
+ * 'compose' }`" note is NO LONGER TRUE. Several open-paths now dispatch a
+ * `widget_load` for this Direct widget, and `WorkspacePane`'s `'compose'` branch
+ * mounts it (single-tab reuse, DEF-08):
+ *   - `WorkspacePane` compose-launch auto-install (ribbon `composeMode=editor`),
+ *   - `ConversationPane.mountActiveSourceDocInCompose` (Open in Compose / revise),
+ *   - `ConversationPane.handleDocAction` (the revise/draft doc-action chips),
+ *   - the compose layout-reroute in `WorkspacePane`.
+ * This registration is what makes those dispatches resolve a real component.
+ * See the "Why here, not in @spaarke/ai-widgets" and "Picker" notes below.
  *
  * ## Why here (SpaarkeAi), not in `@spaarke/ai-widgets/register-workspace-widgets.ts`
  *

@@ -14,13 +14,13 @@
  * the layout path) and sources `bffBaseUrl` from `useAiSession()` (there is no
  * `SectionFactoryContext` in the Direct path).
  *
- * NOTE (additive-coexistence, honest per plan §Wave 5 item 3): today NO
- * open-path dispatches `widget_load{ widgetType:'compose' }` — the layout path
- * remains the only mount door. This adapter makes the Direct registration a
- * genuine, mountable capability (so the registry entry is real, not a stub) and
- * confirms the Compose widget CAN receive what it needs on the Direct path when
- * the SpaarkeAi providers (`ComposeActionBridgeProvider`, auth/session) are in
- * the tree — it does NOT replace the layout mount.
+ * NOTE (spaarkeai-compose-r2 UNIFY — this IS now a live mount door): the earlier
+ * "today NO open-path dispatches `widget_load{ widgetType:'compose' }`" note is
+ * NO LONGER TRUE. `WorkspacePane`'s compose-launch auto-install (ribbon
+ * `composeMode=editor`), `ConversationPane`'s `mountActiveSourceDocInCompose` +
+ * `handleDocAction`, and the compose layout-reroute all dispatch a
+ * `widget_load{ widgetType:'compose' }` that mounts THIS adapter. It coexists
+ * with the LegalWorkspace layout mount (does NOT replace it).
  *
  * Standards: ADR-012 (shared components), ADR-021 (Fluent v9), ADR-028
  * (auth via `@spaarke/auth`; no token props). No AI-internal types, no new

@@ -769,6 +769,16 @@ export function ConversationPane(): React.JSX.Element {
   // ChatSessionFile, no redundant upload). Cleared per-session by the session-created reset below.
   const activeDocUploadCacheRef = React.useRef<Map<string, string>>(new Map());
 
+  // spaarkeai-compose-r2 (concurrent same-file dedup): `activeDocUploadCacheRef` is written only AFTER
+  // the `/documents` upload resolves, so two registrations for the SAME file firing in the SAME tick
+  // (this handler runs on load AND tab_change AND visibility toggles) both miss the cache → two POSTs
+  // → two distinct sessionFileIds → the once-per-file ceremony gate (keyed by sessionFileId) passes for
+  // each → DUPLICATE "I have your file" + duplicate classify. This in-flight map (keyed by the same
+  // `cacheKey`) collapses truly-concurrent same-file registrations into ONE upload promise — both
+  // callers await the SAME promise → resolve to the SAME sessionFileId → the ceremony Set dedups.
+  // Mirrors the `ensureSessionInFlightRef` single-create pattern. Cleared per-session below.
+  const activeDocUploadInFlightRef = React.useRef<Map<string, Promise<string | undefined>>>(new Map());
+
   // spaarkeai-compose-r2 (manual Browse ingest ceremony): a file mounted into Compose via Browse and
   // context-uploaded here must reach the SAME Assistant "ingest ceremony" as an Assistant-uploaded
   // file — (1) an "I have your file: X" loaded message and (2) a "Classified 'X' as <type> (N%)"
@@ -859,24 +869,40 @@ export function ConversationPane(): React.JSX.Element {
         const cacheKey = `${name}:${docxBytes.byteLength}`;
         let sessionFileId = activeDocUploadCacheRef.current.get(cacheKey);
         if (!sessionFileId) {
-          const form = new FormData();
-          form.append(
-            "file",
-            new Blob([docxBytes], {
-              type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            }),
-            name
-          );
-          form.append("filename", name);
-          const uploadResp = await authenticatedFetch(
-            `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents`,
-            { method: "POST", body: form }
-          );
-          if (!uploadResp.ok) return;
-          const uploaded = (await uploadResp.json()) as { documentId?: string };
-          sessionFileId = uploaded?.documentId;
+          // In-flight guard: collapse truly-concurrent same-file registrations into ONE upload so
+          // only a single POST /documents fires (see `activeDocUploadInFlightRef` rationale above).
+          const capturedSessionId = sessionId;
+          let uploadPromise = activeDocUploadInFlightRef.current.get(cacheKey);
+          if (!uploadPromise) {
+            uploadPromise = (async (): Promise<string | undefined> => {
+              try {
+                const form = new FormData();
+                form.append(
+                  "file",
+                  new Blob([docxBytes], {
+                    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                  }),
+                  name
+                );
+                form.append("filename", name);
+                const uploadResp = await authenticatedFetch(
+                  `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(capturedSessionId)}/documents`,
+                  { method: "POST", body: form }
+                );
+                if (!uploadResp.ok) return undefined;
+                const uploaded = (await uploadResp.json()) as { documentId?: string };
+                const id = uploaded?.documentId;
+                if (id) activeDocUploadCacheRef.current.set(cacheKey, id);
+                return id;
+              } finally {
+                // Drop the in-flight entry once settled; on failure a later re-register retries fresh.
+                activeDocUploadInFlightRef.current.delete(cacheKey);
+              }
+            })();
+            activeDocUploadInFlightRef.current.set(cacheKey, uploadPromise);
+          }
+          sessionFileId = await uploadPromise;
           if (!sessionFileId) return;
-          activeDocUploadCacheRef.current.set(cacheKey, sessionFileId);
 
           // spaarkeai-compose-r2 (manual Browse ingest ceremony): this is the FIRST successful upload
           // of this file into the session (the cache-miss branch runs once per (session, file)). Bring
@@ -898,6 +924,11 @@ export function ConversationPane(): React.JSX.Element {
             eventBatch.fireForPromotedFile(sessionFileId);
           }
         }
+        // Wave 3 Part 1: remember this as the session's ACTIVE source document so "Open in Compose"
+        // opens THAT document (compose.upload seed) rather than seeding the assistant message prose.
+        // Set BEFORE the active-document POST so a POST failure (chat-visibility loss) does NOT leave
+        // this pointing at a STALE prior file — the bytes are already uploaded (sessionFileId is real).
+        activeSourceDocRef.current = { sessionFileId, documentSessionId, fileName: name };
         // Wave 3 Part 2 (DEF-11 TEXT-path close): thread the tab's `documentSessionId` so the server
         // sets ChatSession.ActiveDocument.DocumentSessionId → BindingCapabilityTool routes a typed
         // revise/draft into THIS document session (redline in the open doc), not the chat session.
@@ -915,9 +946,6 @@ export function ConversationPane(): React.JSX.Element {
             visible: visible ?? true,
           }),
         });
-        // Wave 3 Part 1: remember this as the session's ACTIVE source document so "Open in Compose"
-        // opens THAT document (compose.upload seed) rather than seeding the assistant message prose.
-        activeSourceDocRef.current = { sessionFileId, documentSessionId, fileName: name };
         // Wave 4 (end-to-end revise): publish the document session id REACTIVELY so the named-intent
         // revise effect can fire the dispatch the moment the mount establishes the session (the chip
         // path reads the same value at click time). Only a registration carrying a real document
@@ -1119,6 +1147,7 @@ export function ConversationPane(): React.JSX.Element {
       // Wave 3: a fresh session has no active source document and no cached uploads.
       activeSourceDocRef.current = null;
       activeDocUploadCacheRef.current.clear();
+      activeDocUploadInFlightRef.current.clear();
       // spaarkeai-compose-r2: the ingest-ceremony guard is session-scoped (keyed by the session's
       // file ids) — a fresh session must re-run the ceremony for its own re-uploaded files.
       composeIngestCeremonyFiredRef.current.clear();

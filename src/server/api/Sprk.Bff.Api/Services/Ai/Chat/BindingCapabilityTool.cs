@@ -170,8 +170,9 @@ public sealed class BindingCapabilityTool : AIFunction
     /// full-document payload cannot render as an inline redline (that materialization is wired only
     /// to the client Click-path apply-leg), so it would be narrated as a rewrite in chat (the #2
     /// defect). Owner decision: editing lives in the EDITOR (highlight-to-edit) — the agent redirects.
+    /// Aliases the canonical <see cref="ConsumerTypes.ComposeReviseDocument"/> to avoid drift.
     /// </summary>
-    internal const string ComposeReviseDocumentConsumerType = "compose-revise-document";
+    internal const string ComposeReviseDocumentConsumerType = ConsumerTypes.ComposeReviseDocument;
 
     /// <inheritdoc />
     protected override async ValueTask<object?> InvokeCoreAsync(

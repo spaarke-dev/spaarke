@@ -197,7 +197,9 @@ function PaletteIconButton(props: {
   testId: string;
 }): React.JSX.Element {
   return (
-    <Tooltip content={props.label} relationship="label" withArrow>
+    // The Button carries the accessible NAME via `aria-label`; the Tooltip is therefore a
+    // `description` (not a second `label`) so the two do not both claim the accessible name.
+    <Tooltip content={props.label} relationship="description" withArrow>
       <Button
         appearance={props.active ? 'primary' : 'subtle'}
         size="small"
