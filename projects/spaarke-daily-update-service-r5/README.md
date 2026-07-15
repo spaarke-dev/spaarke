@@ -1,5 +1,7 @@
 # Spaarke Daily Update Service R5
 
+> **Portfolio**: [Project #653](https://github.com/spaarke-dev/spaarke/issues/653) · Epic [#421 SPAARKE AI](https://github.com/spaarke-dev/spaarke/issues/421) · Board [Project #2](https://github.com/users/spaarke-dev/projects/2)
+>
 > **Status**: ✅ **Complete** — 100% · shipped to master (PR #611, `bdf23f11e`) · operator-UAT confirmed 2026-07-10
 >
 > **Created**: 2026-07-01 · **Spec'd**: 2026-07-08 · **Completed**: 2026-07-10
