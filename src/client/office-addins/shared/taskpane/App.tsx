@@ -346,8 +346,16 @@ export const App: React.FC<AppProps> = ({
               console.log('Save complete:', docId, docUrl);
             }}
             onQuickCreate={(entityType, searchQuery) => {
-              // Quick Create - opens Dataverse form in new window
-              const baseUrl = 'https://spaarkedev1.crm.dynamics.com';
+              // Quick Create - opens Dataverse form in new window.
+              // Org URL (email-communication-solution-r4 task 072 / FR-25): config-driven,
+              // NOT hardcoded — the add-in must not be pinned to the dev org.
+              // Leave `ORG_URL` unset to disable Quick Create's Dataverse deep-link
+              // (a missing config value degrades to a no-op, not a broken window.open('')).
+              const baseUrl = process.env.ORG_URL;
+              if (!baseUrl) {
+                console.warn('[Spaarke] Quick Create disabled: ORG_URL is not configured.');
+                return;
+              }
               const entityMap: Record<string, string> = {
                 Matter: 'sprk_matter',
                 Project: 'sprk_project',

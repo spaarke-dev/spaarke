@@ -4,7 +4,14 @@ import { authService } from './AuthService';
  * API client for communicating with the Spaarke BFF API.
  *
  * Uses the access token from AuthService to make authenticated requests.
- * Per auth.md: Uses `.default` scope for BFF API calls.
+ *
+ * Auth v2 (email-communication-solution-r4 task 072 / FR-25): `AuthService` now
+ * delegates to `@spaarke/auth`'s `OfficeNaaStrategy`, which acquires a token for
+ * the single `bffApiScope` configured at `initialize()` time
+ * (`api://{BFF_API_CLIENT_ID}/user_impersonation`, per ADR-028). The `.default`-
+ * scope array built below is passed through for interface back-compat only —
+ * `AuthService.getAccessToken()` ignores it and always returns the token for the
+ * configured scope.
  */
 
 export interface IApiClient {

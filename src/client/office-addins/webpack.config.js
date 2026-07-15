@@ -37,6 +37,21 @@ const ENV_CONFIG = {
   // with launch-context query params. When unset, the ribbon action is hidden
   // / inert. Documented in .env.example.
   SMARTTODO_CODEPAGE_URL: process.env.SMARTTODO_CODEPAGE_URL || '',
+  // Optional: Dataverse org URL for the SaveView "Quick Create" deep link
+  // (email-communication-solution-r4 task 072 / FR-25). Config-driven, no
+  // hardcoded org — when unset, Quick Create degrades to a no-op.
+  ORG_URL: process.env.ORG_URL || '',
+  // Optional: fallback MSAL popup redirect URI used only when the Office host
+  // does not support NAA (`OfficeNaaStrategy`'s legacy-client fallback path).
+  // Defaults to `${origin}/auth-callback.html` inside AuthService when unset.
+  FALLBACK_REDIRECT_URI: process.env.FALLBACK_REDIRECT_URI || '',
+  // Base URL the unified manifest's runtime/ribbon `code.page` + icon URLs point
+  // at. Dev defaults to the local webpack-dev-server origin; production defaults
+  // to the deployed Azure Static Web App (office-addins-deploy skill resource
+  // reference) — override via ADDIN_BASE_URL for a custom domain.
+  ADDIN_BASE_URL:
+    process.env.ADDIN_BASE_URL ||
+    (isProduction ? 'https://icy-desert-0bfdbb61e.6.azurestaticapps.net' : 'https://localhost:3000'),
 };
 
 async function getHttpsOptions() {
@@ -143,27 +158,38 @@ module.exports = async (env, options) => {
       new CopyWebpackPlugin({
         patterns: [
           { from: './public/index.html', to: 'index.html' },
-          { from: './public/auth-dialog.html', to: 'auth-dialog.html' },
           {
-            // Standardized manifest files — parameterize resource URI and app IDs at build time
-            from: mode === 'production' ? './outlook/outlook-manifest.xml' : './outlook/manifest.json',
-            to: mode === 'production' ? 'outlook/manifest.xml' : 'outlook/manifest.json',
-            transform: mode !== 'production'
-              ? (content) => {
-                  let manifest = content.toString();
-                  // Replace hardcoded app ID in "id" and "webApplicationInfo.id"
-                  manifest = manifest.replace(
-                    /"id":\s*"c1258e2d-1688-49d2-ac99-a7485ebd9995"/g,
-                    `"id": "${ENV_CONFIG.ADDIN_CLIENT_ID}"`
-                  );
-                  // Replace hardcoded resource URI (api://{BFF_API_CLIENT_ID})
-                  manifest = manifest.replace(
-                    /"resource":\s*"api:\/\/[a-f0-9-]+"/,
-                    `"resource": "api://${ENV_CONFIG.BFF_API_CLIENT_ID}"`
-                  );
-                  return manifest;
-                }
-              : undefined,
+            // OfficeNaaStrategy's legacy-client fallback MSAL popup redirect target
+            // (replaces the deprecated self-built `auth-dialog.html` — task 072).
+            // Static, config-free — see the file's own header comment for why it
+            // deliberately does NOT instantiate its own MSAL client.
+            from: './public/auth-callback.html',
+            to: 'auth-callback.html',
+          },
+          {
+            // Unified JSON manifest (email-communication-solution-r4 task 072 / FR-25) —
+            // single source of truth for BOTH dev and production builds. Retires the
+            // divergent `outlook-manifest.xml` (XML v1.0.19) + orphaned `manifest.prod.json`
+            // (never referenced by this build). Parameterize app IDs + base URL at build time.
+            from: './outlook/manifest.json',
+            to: 'outlook/manifest.json',
+            transform: (content) => {
+              let manifest = content.toString();
+              // Replace hardcoded app ID in "id" and "webApplicationInfo.id"
+              manifest = manifest.replace(
+                /"id":\s*"c1258e2d-1688-49d2-ac99-a7485ebd9995"/g,
+                `"id": "${ENV_CONFIG.ADDIN_CLIENT_ID}"`
+              );
+              // Replace hardcoded resource URI (api://{BFF_API_CLIENT_ID})
+              manifest = manifest.replace(
+                /"resource":\s*"api:\/\/[a-f0-9-]+"/,
+                `"resource": "api://${ENV_CONFIG.BFF_API_CLIENT_ID}"`
+              );
+              // Replace the manifest's dev-authored base URL with the resolved
+              // per-mode ADDIN_BASE_URL (localhost for dev, deployed SWA for prod).
+              manifest = manifest.split('https://localhost:3000').join(ENV_CONFIG.ADDIN_BASE_URL);
+              return manifest;
+            },
           },
           {
             from: './word/word-manifest.xml',
@@ -182,6 +208,8 @@ module.exports = async (env, options) => {
         'process.env.BFF_API_CLIENT_ID': JSON.stringify(ENV_CONFIG.BFF_API_CLIENT_ID),
         'process.env.BFF_API_BASE_URL': JSON.stringify(ENV_CONFIG.BFF_API_BASE_URL),
         'process.env.SMARTTODO_CODEPAGE_URL': JSON.stringify(ENV_CONFIG.SMARTTODO_CODEPAGE_URL),
+        'process.env.ORG_URL': JSON.stringify(ENV_CONFIG.ORG_URL),
+        'process.env.FALLBACK_REDIRECT_URI': JSON.stringify(ENV_CONFIG.FALLBACK_REDIRECT_URI),
         'process.env.BUILD_DATE': JSON.stringify(BUILD_DATE),
       }),
       ...(mode === 'production'

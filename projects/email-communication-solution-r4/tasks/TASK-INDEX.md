@@ -46,7 +46,7 @@
 | 062 | Retire `sprk_communication_send.js` after ribbon audit | W6 | dataverse, ribbon, deletion | FR-22 | 060,061 | — | true | FULL | 🔲 |
 | 070 | Graph compliance audit (`Mail-Advanced.*` 12-31; EWS 10-01) | W7 | bff-api, compliance | FR-23,NFR-01 | — | — | true | FULL | 🔲 |
 | 071 | Subscription lifecycle-notification + `delta` reconciliation backstop | W7 | bff-api, graph | FR-24 | — | — | true | FULL | 🔲 |
-| 072 | Outlook add-in NAA/`@spaarke/auth` migration + unified manifest + org-URL | W7 | office-addins, auth | FR-25 | — | 074 | true | FULL | 🔲 |
+| 072 | Outlook add-in NAA/`@spaarke/auth` migration + unified manifest + org-URL | W7 | office-addins, auth | FR-25 | — | 074 | true | FULL | ✅ (build verified; live NAA smoke-test pending real Outlook+Azure+BFF) |
 | 073 | Apply stubbed BFF Office auth filters (`OfficeEndpoints`) | W7 | bff-api, auth | FR-25 | — | — | true | FULL | 🔲 |
 | 074 | Add-in save pane consumes Association Engine suggestions | W7 | office-addins | FR-25 | 072,012 | — | true | FULL | 🔲 |
 | 075 | Index-config tokenization + read/write consolidation | W7 | bff-api, config | FR-26 | — | — | true | FULL | 🔲 |

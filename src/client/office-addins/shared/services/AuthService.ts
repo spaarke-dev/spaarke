@@ -1,39 +1,42 @@
-import {
-  IPublicClientApplication,
-  AccountInfo,
-  AuthenticationResult,
-  createNestablePublicClientApplication,
-  PublicClientApplication,
-} from '@azure/msal-browser';
+import type { AccountInfo } from '@azure/msal-browser';
+import { SpaarkeAuthProvider, OfficeNaaStrategy, resolveConfig } from '@spaarke/auth';
 
 /**
  * Authentication service for Office Add-ins.
  *
- * Uses NAA (Nested App Authentication) as primary method (MSAL.js 3.x).
- * Falls back to Dialog API for older Office clients that don't support NAA.
+ * Auth v2 (email-communication-solution-r4 task 072 / FR-25): composes
+ * `@spaarke/auth`'s `SpaarkeAuthProvider` + `OfficeNaaStrategy` — the
+ * canonical NAA (Nested App Authentication) strategy for Office Add-ins per
+ * ADR-028. This class is a thin, host-agnostic wrapper that preserves the
+ * `IAuthService` surface consumed by `App.tsx`, `ApiClient.ts`, and both
+ * taskpane entry points (`outlook/taskpane/index.tsx`, `word/taskpane/index.tsx`)
+ * so call sites did not need to change.
  *
- * Per auth.md constraints:
- * - MUST use sessionStorage for tokens (not localStorage)
- * - MUST NOT use individual Graph scopes in OBO
- * - MUST use `.default` scope for BFF API calls
+ * Uses `SpaarkeAuthProvider`'s constructor directly (not the `initAuth()` /
+ * `getAuthProvider()` module-singleton convenience wrapper) because `initAuth()`
+ * does not currently accept a `strategy` override — only the `SpaarkeAuthProvider`
+ * class constructor does (`new SpaarkeAuthProvider(config, strategy)`). Both are
+ * public, documented `@spaarke/auth` exports; `SpaarkeAuthProvider`'s own JSDoc
+ * explicitly names `OfficeNaaStrategy` as the intended strategy for Office
+ * Add-ins, so this is a supported composition, not a workaround.
+ *
+ * MUST NOT `new PublicClientApplication` / `createNestablePublicClientApplication`
+ * directly here (ADR-028) — all MSAL construction lives inside `OfficeNaaStrategy`.
  */
-
-// Configuration - loaded from environment via webpack DefinePlugin
-const AUTH_CONFIG = {
-  clientId: process.env.ADDIN_CLIENT_ID || 'c1258e2d-1688-49d2-ac99-a7485ebd9995',
-  tenantId: process.env.TENANT_ID || 'a221a95e-6abc-4434-aecc-e48338a1b2f2',
-  bffApiClientId: process.env.BFF_API_CLIENT_ID || '1e40baad-e065-4aea-a8d4-4b7ab273458c',
-  bffApiBaseUrl: process.env.BFF_API_BASE_URL || 'https://spaarke-bff-dev.azurewebsites.net',
-  redirectUri: 'brk-multihub://localhost', // NAA broker redirect
-  fallbackRedirectUri: '', // https://{addin-domain}/taskpane.html - set for production
-};
 
 export interface IAuthService {
   initialize(config: AuthConfig): Promise<void>;
-  signIn(): Promise<AuthenticationResult | null>;
+  /** Resolves once a token has been acquired (or acquisition has failed). Callers check `isAuthenticated()` / `getAccessToken()` afterward. */
+  signIn(): Promise<void>;
   signOut(): Promise<void>;
   getAccount(): AccountInfo | null;
-  getAccessToken(scopes: string[]): Promise<string | null>;
+  /**
+   * @param scopes Accepted for backward compatibility with existing call sites.
+   * Ignored — `@spaarke/auth` acquires a token for the single `bffApiScope`
+   * configured at `initialize()` time (fixed per ADR-028's function-based
+   * contract; no per-call scope negotiation).
+   */
+  getAccessToken(scopes?: string[]): Promise<string | null>;
   isAuthenticated(): boolean;
 }
 
@@ -45,401 +48,77 @@ export interface AuthConfig {
   fallbackRedirectUri?: string;
 }
 
-// Storage keys for token persistence across add-in reloads
-const TOKEN_STORAGE_KEY = 'spaarke-auth-token';
-const TOKEN_EXPIRY_KEY = 'spaarke-auth-expiry';
-const ACCOUNT_STORAGE_KEY = 'spaarke-auth-account';
-
 class AuthService implements IAuthService {
-  private msalInstance: IPublicClientApplication | null = null;
-  private isNaaSupported: boolean = false;
-  private currentAccount: AccountInfo | null = null;
-  private cachedAccessToken: string | null = null;
-  private tokenExpiresAt: number | null = null; // Unix timestamp in milliseconds
-
-  /**
-   * Save token and account to sessionStorage for persistence across add-in reloads.
-   */
-  private saveToStorage(): void {
-    try {
-      if (this.cachedAccessToken && this.tokenExpiresAt) {
-        sessionStorage.setItem(TOKEN_STORAGE_KEY, this.cachedAccessToken);
-        sessionStorage.setItem(TOKEN_EXPIRY_KEY, this.tokenExpiresAt.toString());
-      }
-      if (this.currentAccount) {
-        sessionStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify(this.currentAccount));
-      }
-      console.log('[AuthService] Saved auth state to sessionStorage');
-    } catch (e) {
-      console.warn('[AuthService] Failed to save to sessionStorage:', e);
-    }
-  }
-
-  /**
-   * Load token and account from sessionStorage.
-   */
-  private loadFromStorage(): void {
-    try {
-      const token = sessionStorage.getItem(TOKEN_STORAGE_KEY);
-      const expiry = sessionStorage.getItem(TOKEN_EXPIRY_KEY);
-      const accountJson = sessionStorage.getItem(ACCOUNT_STORAGE_KEY);
-
-      if (token && expiry) {
-        const expiryTime = parseInt(expiry, 10);
-        const now = Date.now();
-        const bufferMs = 5 * 60 * 1000; // 5 minutes
-
-        // Only restore if token is still valid (with buffer)
-        if (expiryTime - bufferMs > now) {
-          this.cachedAccessToken = token;
-          this.tokenExpiresAt = expiryTime;
-          console.log(
-            '[AuthService] Restored token from storage (expires in',
-            Math.round((expiryTime - now) / 1000 / 60),
-            'minutes)'
-          );
-        } else {
-          console.log('[AuthService] Stored token expired, will need re-auth');
-          this.clearStorage();
-        }
-      }
-
-      if (accountJson) {
-        this.currentAccount = JSON.parse(accountJson) as AccountInfo;
-        console.log('[AuthService] Restored account from storage:', this.currentAccount.username);
-      }
-    } catch (e) {
-      console.warn('[AuthService] Failed to load from sessionStorage:', e);
-    }
-  }
-
-  /**
-   * Clear stored auth state from sessionStorage.
-   */
-  private clearStorage(): void {
-    try {
-      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
-      sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
-      sessionStorage.removeItem(ACCOUNT_STORAGE_KEY);
-      console.log('[AuthService] Cleared auth state from sessionStorage');
-    } catch (e) {
-      console.warn('[AuthService] Failed to clear sessionStorage:', e);
-    }
-  }
+  private provider: SpaarkeAuthProvider | null = null;
+  private strategy: OfficeNaaStrategy | null = null;
 
   async initialize(config: AuthConfig): Promise<void> {
-    const mergedConfig = { ...AUTH_CONFIG, ...config };
+    const bffApiClientId = config.bffApiClientId || '1e40baad-e065-4aea-a8d4-4b7ab273458c';
 
-    // Check if NAA is supported
-    this.isNaaSupported = await this.checkNaaSupport();
+    const resolved = resolveConfig({
+      clientId: config.clientId,
+      bffApiScope: `api://${bffApiClientId}/user_impersonation`,
+      proactiveRefresh: true,
+      ...(config.tenantId ? { tenantId: config.tenantId } : {}),
+      ...(config.redirectUri ? { redirectUri: config.redirectUri } : {}),
+    });
 
-    if (this.isNaaSupported) {
-      // Use NAA (Nested App Authentication) - preferred method
-      this.msalInstance = await createNestablePublicClientApplication({
-        auth: {
-          clientId: mergedConfig.clientId,
-          authority: `https://login.microsoftonline.com/${mergedConfig.tenantId}`,
-          supportsNestedAppAuth: true,
-        },
-        cache: {
-          cacheLocation: 'sessionStorage', // MUST use sessionStorage per auth.md
-          storeAuthStateInCookie: false,
-        },
-      });
-    } else {
-      // Fallback to standard MSAL with Dialog API
-      this.msalInstance = new PublicClientApplication({
-        auth: {
-          clientId: mergedConfig.clientId,
-          authority: `https://login.microsoftonline.com/${mergedConfig.tenantId}`,
-          redirectUri: mergedConfig.fallbackRedirectUri,
-        },
-        cache: {
-          cacheLocation: 'sessionStorage',
-          storeAuthStateInCookie: false,
-        },
-      });
+    this.strategy = new OfficeNaaStrategy(resolved, {
+      fallbackRedirectUri: config.fallbackRedirectUri || `${window.location.origin}/auth-callback.html`,
+    });
 
-      await this.msalInstance.initialize();
+    if (this.provider) {
+      this.provider.dispose();
     }
+    this.provider = new SpaarkeAuthProvider(resolved, this.strategy);
 
-    // Try to restore auth state from sessionStorage first (for add-in reloads)
-    this.loadFromStorage();
+    // Eagerly acquire (mirrors `initAuth()`'s warm-cache behavior) so
+    // `isAuthenticated()`/`getAccount()` reflect a signed-in state immediately
+    // after `initialize()` when a cached account/session is available (silent
+    // acquisition only — never prompts on startup).
+    await this.provider.getAccessToken();
 
-    // If no stored account, check MSAL for existing accounts
-    if (!this.currentAccount) {
-      const accounts = this.msalInstance.getAllAccounts();
-      if (accounts.length > 0 && accounts[0]) {
-        this.currentAccount = accounts[0];
-        console.log('[AuthService] Found existing MSAL account:', this.currentAccount.username);
-      }
-    }
+    console.info(`[AuthService] Initialized via @spaarke/auth (naa=${this.strategy.isNaaActive()})`);
   }
 
-  async signIn(): Promise<AuthenticationResult | null> {
-    if (!this.msalInstance) {
+  /**
+   * Trigger token acquisition. `OfficeNaaStrategy.acquire()` tries silent
+   * acquisition first, then `acquireTokenPopup` (routed through the Office
+   * broker under NAA — not a real popup; a genuine popup only under the
+   * legacy-client fallback path).
+   */
+  async signIn(): Promise<void> {
+    if (!this.provider) {
       throw new Error('AuthService not initialized');
     }
-
-    const scopes = [`api://${AUTH_CONFIG.bffApiClientId}/user_impersonation`];
-
-    // When NAA is disabled, use Dialog API exclusively
-    // MSAL's acquireTokenSilent still tries NAA internally in Office context, so skip it
-    if (!this.isNaaSupported) {
-      // Check if we already have an authenticated account from a previous dialog session
-      if (this.currentAccount) {
-        console.log('[AuthService] Already authenticated via Dialog API, account:', this.currentAccount.username);
-        // Return a minimal result - the token will be fetched via getAccessToken when needed
-        return {
-          account: this.currentAccount,
-          accessToken: '', // Token fetched separately via dialog
-          scopes,
-          expiresOn: null,
-          tenantId: AUTH_CONFIG.tenantId,
-          uniqueId: this.currentAccount.localAccountId,
-          authority: `https://login.microsoftonline.com/${AUTH_CONFIG.tenantId}`,
-          idToken: '',
-          idTokenClaims: {},
-          fromCache: true,
-          tokenType: 'Bearer',
-          correlationId: '',
-        } as AuthenticationResult;
-      }
-
-      // No cached account, open dialog for authentication
-      console.log('[AuthService] No cached account, opening auth dialog');
-      try {
-        return await this.signInWithDialog(scopes);
-      } catch (error) {
-        console.error('Sign in failed:', error);
-        return null;
-      }
-    }
-
-    // NAA path (currently disabled but kept for future use)
-    try {
-      // Try silent first with NAA
-      if (this.currentAccount) {
-        try {
-          console.log('[AuthService] Attempting silent token acquisition for cached account');
-          const result = await this.msalInstance.acquireTokenSilent({
-            scopes,
-            account: this.currentAccount,
-          });
-          console.log('[AuthService] Silent auth succeeded - no dialog needed');
-          return result;
-        } catch (silentError) {
-          console.log('[AuthService] Silent auth failed, falling back to interactive:', silentError);
-        }
-      }
-
-      // Interactive auth with NAA
-      const result = await this.msalInstance.acquireTokenPopup({
-        scopes,
-      });
-      this.currentAccount = result.account;
-      return result;
-    } catch (error) {
-      console.error('Sign in failed:', error);
-      return null;
-    }
+    this.provider.clearCache();
+    await this.provider.getAccessToken();
   }
 
   async signOut(): Promise<void> {
-    // Clear cached auth state
-    this.currentAccount = null;
-    this.cachedAccessToken = null;
-    this.tokenExpiresAt = null;
-
-    // Clear persisted storage
-    this.clearStorage();
-
-    if (!this.isNaaSupported) {
-      // For Dialog API, just clear local state - no MSAL logout needed
-      console.log('[AuthService] Signed out (Dialog API mode)');
+    if (!this.provider) {
       return;
     }
-
-    // NAA path - use MSAL logout
-    if (!this.msalInstance) {
-      return;
-    }
-
-    try {
-      await this.msalInstance.logoutPopup({
-        account: this.currentAccount,
-      });
-    } catch (error) {
-      console.error('Sign out failed:', error);
-    }
+    await this.provider.logout();
   }
 
   getAccount(): AccountInfo | null {
-    return this.currentAccount;
+    const msal = this.strategy?.getMsalInstance();
+    if (!msal) return null;
+    const accounts = msal.getAllAccounts();
+    return accounts.length > 0 ? (accounts[0] ?? null) : null;
   }
 
-  async getAccessToken(scopes: string[]): Promise<string | null> {
-    if (!this.currentAccount) {
+  async getAccessToken(_scopes?: string[]): Promise<string | null> {
+    if (!this.provider) {
       return null;
     }
-
-    // When NAA is disabled, use cached token from dialog auth
-    if (!this.isNaaSupported) {
-      // Check if token is still valid (with 5 minute buffer for clock skew)
-      const now = Date.now();
-      const bufferMs = 5 * 60 * 1000; // 5 minutes
-      const isTokenValid = this.cachedAccessToken && this.tokenExpiresAt && this.tokenExpiresAt - bufferMs > now;
-
-      if (isTokenValid) {
-        console.log(
-          '[AuthService] Returning cached access token (expires in',
-          Math.round((this.tokenExpiresAt! - now) / 1000 / 60),
-          'minutes)'
-        );
-        return this.cachedAccessToken;
-      }
-
-      // Token expired or missing - need to re-authenticate via dialog
-      if (this.cachedAccessToken && this.tokenExpiresAt) {
-        console.log('[AuthService] Token expired, triggering re-authentication');
-      } else {
-        console.log('[AuthService] No cached token, triggering dialog auth');
-      }
-      const result = await this.signInWithDialog(scopes);
-      return result?.accessToken || null;
-    }
-
-    // NAA path
-    if (!this.msalInstance) {
-      return null;
-    }
-
-    try {
-      // Try silent token acquisition first
-      const result = await this.msalInstance.acquireTokenSilent({
-        scopes,
-        account: this.currentAccount,
-      });
-      return result.accessToken;
-    } catch {
-      // Silent acquisition failed, try interactive
-      try {
-        const result = await this.msalInstance.acquireTokenPopup({
-          scopes,
-        });
-        return result.accessToken;
-      } catch (error) {
-        console.error('Token acquisition failed:', error);
-        return null;
-      }
-    }
+    const token = await this.provider.getAccessToken();
+    return token || null;
   }
 
   isAuthenticated(): boolean {
-    return this.currentAccount !== null;
-  }
-
-  private async checkNaaSupport(): Promise<boolean> {
-    // NAA (Nested App Authentication) DISABLED
-    //
-    // NAA requires dynamic broker redirect URIs in the format: brk-{GUID}://auth
-    // The GUID is dynamically generated by the Office host at runtime and varies
-    // per session/host. This GUID cannot be pre-registered in Azure AD because:
-    //   1. It's not the app's client ID - it's generated by Office
-    //   2. Each Office host instance generates different GUIDs
-    //   3. Azure AD requires exact redirect URI matches
-    //
-    // Error when attempting NAA:
-    //   AADSTS700046: Invalid Reply Address. Reply Address must have scheme
-    //   brk-{dynamic-guid}:// and be of Single Page Application type.
-    //
-    // Using Dialog API fallback instead, which works reliably across all Office hosts.
-    // Dialog API opens a popup window for auth, which is slightly more intrusive
-    // but works universally without Azure AD configuration issues.
-    //
-    // To re-enable NAA in the future, Microsoft would need to provide a way to
-    // register wildcard broker URIs or use a fixed broker URI format.
-    console.log('[AuthService] NAA disabled - using Dialog API fallback');
-    console.log('[AuthService] Reason: NAA requires dynamic broker URIs that cannot be pre-registered in Azure AD');
-    return false;
-  }
-
-  private async signInWithDialog(_scopes: string[]): Promise<AuthenticationResult | null> {
-    // Dialog API fallback for older Office clients
-    // This opens a dialog window for authentication
-    // Note: _scopes would be used in the dialog page to request tokens
-    return new Promise((resolve, reject) => {
-      Office.context.ui.displayDialogAsync(
-        `${window.location.origin}/auth-dialog.html`,
-        { height: 60, width: 40 },
-        result => {
-          if (result.status === Office.AsyncResultStatus.Failed) {
-            reject(new Error(result.error.message));
-            return;
-          }
-
-          const dialog = result.value;
-
-          dialog.addEventHandler(
-            Office.EventType.DialogMessageReceived,
-            (arg: { message?: string | object; error?: number }) => {
-              console.log('[AuthService] Dialog message received:', arg);
-              dialog.close();
-
-              if (arg.message) {
-                try {
-                  // Handle both string and object message formats
-                  // Outlook web returns object, desktop may return string
-                  const message = typeof arg.message === 'string' ? JSON.parse(arg.message) : arg.message;
-                  console.log('[AuthService] Parsed message:', message);
-                  if (message.success) {
-                    // Token received from dialog - construct proper AccountInfo
-                    this.currentAccount = {
-                      homeAccountId: message.account?.homeAccountId || '',
-                      environment: 'login.microsoftonline.com',
-                      tenantId: AUTH_CONFIG.tenantId,
-                      username: message.account?.username || '',
-                      localAccountId: message.account?.homeAccountId || '',
-                      name: message.account?.name,
-                    } as AccountInfo;
-                    // Cache the access token and expiration for later use
-                    this.cachedAccessToken = message.accessToken || null;
-                    // Parse expiration - message.expiresOn can be Date string or Unix timestamp
-                    if (message.expiresOn) {
-                      this.tokenExpiresAt =
-                        typeof message.expiresOn === 'number'
-                          ? message.expiresOn
-                          : new Date(message.expiresOn).getTime();
-                    } else {
-                      // Default to 1 hour from now if not provided
-                      this.tokenExpiresAt = Date.now() + 60 * 60 * 1000;
-                    }
-                    console.log('[AuthService] Account set:', this.currentAccount);
-                    console.log(
-                      '[AuthService] Access token cached, expires at:',
-                      new Date(this.tokenExpiresAt).toLocaleTimeString()
-                    );
-
-                    // Persist to sessionStorage for add-in reloads
-                    this.saveToStorage();
-
-                    resolve({
-                      ...message,
-                      account: this.currentAccount,
-                    } as AuthenticationResult);
-                  } else {
-                    reject(new Error(message.error));
-                  }
-                } catch (e) {
-                  console.error('[AuthService] Parse error:', e);
-                  reject(new Error('Failed to parse auth response'));
-                }
-              }
-            }
-          );
-        }
-      );
-    });
+    return this.provider?.isAuthenticated() ?? false;
   }
 }
 
