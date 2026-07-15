@@ -1,14 +1,14 @@
 <task id="043" project="email-communication-solution-r4">
   <metadata>
-    <title>Deploy Communication Code Page + UI tests (dark-mode + channel-type rendering + review loop)</title>
-    <phase>Wave 4 — Channel-aware Communication Code Page</phase>
+    <title>Deploy Communication PCFs (Connections + Actions) + OOB form config + pack "Awaiting Association" view + remove deployed Send ribbon; UI verification</title>
+    <phase>Wave 4 — OOB form + PCFs (deploy)</phase>
     <status>not-started</status>
     <estimated-hours>6</estimated-hours>
-    <dependencies>040, 041, 042</dependencies>
+    <dependencies>042, 044</dependencies>
     <blocks>060</blocks>
-    <tags>code-page, deploy, e2e-test</tags>
+    <tags>pcf, deploy, dataverse, e2e-test</tags>
     <rigor-hint>FULL</rigor-hint>
-    <rigor-reason>Deploys a user-visible Code Page (Form Component Control swap) to Dataverse and runs browser-based UI tests; regression-risk surface; FULL Step 9.5 gates required.</rigor-reason>
+    <rigor-reason>Deploys two user-visible PCFs to Dataverse, configures the OOB sprk_communication form, removes a deployed ribbon button, and runs browser UI tests; outward-facing regression surface; FULL Step 9.5 gates.</rigor-reason>
     <parallel-group>W4</parallel-group>
     <parallel-safe>true</parallel-safe>
     <fr-refs>NFR-07</fr-refs>
@@ -17,107 +17,97 @@
   </metadata>
 
   <prompt>
-    Deploy the channel-aware Communication Code Page (tasks 040–042) to Dataverse via the `code-page-deploy` skill, then run browser-based UI tests via the `ui-test` skill covering: (1) ADR-021 dark-mode rendering, (2) channel-type rendering (email interactive vs Teams/SMS/Notification read-only, keyed on `sprk_communicationtype`), (3) the review loop (suggestion pre-fill → 1-click accept → override with reason), and (4) all five composer modes (compose/view/reply/forward/draft). Confirm the Form Component Control swap opens the Code Page and the standard form remains as an admin fallback.
+    RE-TARGETED by the W4 pivot (2026-07-15 — see `notes/W4-architecture-pivot-oob-form-pcf.md`): this is no longer a Code Page deploy. Deploy the two PCFs built in W4 — **CommunicationConnections** (task 042, multi-association review) and **CommunicationActions** (task 044, Reply/Forward/Send/Save/Save-to-SharePoint) — to Dataverse and configure the OOB `sprk_communication` model-driven form:
+
+    1. **Build + package** both PCFs (`npm run build:prod` in each; already clean) into solution(s) — mirror the `RegardingResolver/Solution/` packaging pattern (solution.xml + customizations.xml + Controls/ + pack.ps1) or `pac solution` equivalent.
+    2. **Place both PCFs on the OOB form**: CommunicationConnections bound to `sprk_associationprovenance` (+ `sprk_associationstatus`) in the right ~34% "accessories" column (alongside the existing RegardingResolver); CommunicationActions bound to `sprk_communicationtype` in the form header/command area. Supply the Actions PCF auth-config inputs (apiBaseUrl / clientAppId / bffAppId) from Dataverse environment variables.
+    3. **Pack the "Communications Awaiting Association" view** authored in `src/client/pcf/CommunicationConnections/views/Communications-Awaiting-Association.md` (FetchXML + layoutXML → savedquery on `sprk_communication`).
+    4. **Remove the deployed Send web resource + ribbon button** (task 044c retired the source; this removes them from the target env via solution re-import of the emptied CommunicationRibbons OR admin deletion). Keep the Create-To-Do button.
+    5. Verify the OOB form still opens normally (reversibility) and both PCFs render.
   </prompt>
 
   <role>
-    Spaarke deployment + QA engineer. Fluent with the `code-page-deploy` skill (build + web-resource import) and the `ui-test` skill (Chrome-integration browser testing of model-driven apps and Code Pages). Knows ADR-021 dark-mode requirements.
+    Spaarke deployment + QA engineer. Fluent with `pac` (pcf push / solution import), model-driven form customization, and browser UI testing of PCFs on model-driven forms.
   </role>
 
   <goal>
-    The Communication Code Page is deployed to the dev environment as the `sprk_communication` Form Component Control host. A UI-test pass confirms: dark-mode renders correctly (ADR-021); the layout switches by `sprk_communicationtype` (email interactive, others read-only); all five modes resolve from the URL contract; the review loop accepts a suggestion in ≤1 click and captures an override reason; and the standard form is still reachable as an admin fallback. All UI tests pass or documented deferrals are filed.
+    Both PCFs deployed to the dev environment and placed on the OOB `sprk_communication` form (Connections in the accessories column, Actions in the command area); the "Communications Awaiting Association" view exists and is matter-level auth-scoped; the deployed Send web resource + ribbon button are removed (Create-To-Do retained); the OOB form opens correctly. UI verification confirms: Connections renders the review slots + confirm/primary/create-from-email; Actions renders Reply/Forward/Send/Save/Save-to-SharePoint and the composer opens; dark + light mode (ADR-021). Failures fixed or filed as deferrals.
   </goal>
 
   <context>
     <background>
-      Tasks 040 (shell), 041 (composer mount + FCC swap), 042 (review surface + view) built the page. This task deploys it and verifies end-to-end in a real browser. This is the higher-risk Surface 2 (FCC swap changes default record-open behavior — reference §7.4), so verification + a confirmed fallback path are the acceptance bar.
+      W4 pivot: enhance the OOB form with PCFs rather than replace it with a Code Page. 042 built CommunicationConnections (+ the view); 044 built CommunicationActions (+ the /{id}/archive endpoint) and retired the ribbon Send source. This task deploys both PCFs, wires the form, packs the view, and removes the deployed Send button — closing Wave 4. Higher-risk because it changes a live form + removes a deployed button; a confirmed OOB-form-still-opens fallback is the acceptance bar.
     </background>
     <relevant-files>
-      <file>src/client/code-pages/CommunicationPage/</file>
-      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+      <file>src/client/pcf/CommunicationConnections/ (042 — PCF + views/)</file>
+      <file>src/client/pcf/CommunicationActions/ (044 — PCF)</file>
+      <file>src/client/pcf/RegardingResolver/Solution/ (packaging pattern to mirror)</file>
+      <file>infrastructure/dataverse/ribbon/CommunicationRibbons/ (Send retired in 044c; deployed removal here)</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
     </relevant-files>
   </context>
 
   <constraints>
-    <constraint source="NFR-07">Verify the review surface + "Communications Awaiting Association" view are matter-level auth-scoped in the deployed environment (ADR-003/008); confirm AI privilege appears as a flag only (ADR-015).</constraint>
-    <constraint source="ADR-021">Dark-mode rendering MUST be tested (Fluent v9 theme); both light and dark verified.</constraint>
-    <constraint source="ADR-026">Deploy as a single self-contained HTML web resource via `code-page-deploy` conventions.</constraint>
-    <constraint source="project">Build with `npm run build:prod` before deploy (FAILURE-MODES AP-1).</constraint>
-    <constraint source="project">The standard OOB `sprk_communication` form MUST remain reachable post-deploy (reversibility) — verify, do not delete.</constraint>
+    <constraint source="NFR-07">Verify the review surface + "Communications Awaiting Association" view are matter-level auth-scoped in the deployed env (ADR-003/008); AI privilege appears as a flag only (ADR-015).</constraint>
+    <constraint source="ADR-021">Dark + light mode rendering MUST be verified for both PCFs (Fluent v9 theme).</constraint>
+    <constraint source="ADR-022">Deploy per PCF conventions (virtual controls, platform libraries); `npm run build:prod` before packaging (FAILURE-MODES AP-1).</constraint>
+    <constraint source="project">The OOB `sprk_communication` form MUST remain openable post-deploy (reversibility) — verify, do not break.</constraint>
+    <constraint source="project">Keep the Create-To-Do ribbon button (live feature); remove only the Send button/web resource.</constraint>
   </constraints>
 
   <knowledge>
     <files>
       <file>projects/email-communication-solution-r4/spec.md</file>
       <file>projects/email-communication-solution-r4/CLAUDE.md</file>
-      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+      <file>projects/email-communication-solution-r4/notes/W4-architecture-pivot-oob-form-pcf.md</file>
+      <file>projects/email-communication-solution-r4/notes/042-connections-pcf-completion.md</file>
+      <file>projects/email-communication-solution-r4/notes/044-communication-actions-completion.md</file>
       <file>.claude/adr/ADR-021-fluent-design-system.md</file>
       <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
     </files>
-    <patterns>
-      <pattern name="Code Page deploy" location="code-page-deploy skill">
-        Build single-file HTML → import as Dataverse web resource → verify FCC host renders it.
-      </pattern>
-      <pattern name="Browser UI testing" location="ui-test skill">
-        Drive the deployed page in Chrome; assert rendering, mode resolution, dark-mode, review-loop interactions.
-      </pattern>
-    </patterns>
   </knowledge>
 
   <steps>
-    <step order="1">Build the Code Page with `npm run build:prod`; confirm a single self-contained artifact.</step>
-    <step order="2">Deploy via the `code-page-deploy` skill: import the web resource, confirm the Form Component Control host points at it, publish.</step>
-    <step order="3">Invoke the `ui-test` skill and execute the `&lt;ui-tests&gt;` suite below.</step>
-    <step order="4">Verify the standard OOB form remains reachable (admin fallback) and that navigating to a `sprk_communication` record opens the Code Page by default.</step>
-    <step order="5">Record results; file any failures as deferred issues (project notes + GitHub Issue) if not fixable in-task; do not silently pass.</step>
-    <step order="9.5">FULL-rigor quality gates: `code-review` on any deploy-script/config diffs; `adr-check` against `spec.md` (ADR-021/026/003/008/015). Address Critical findings.</step>
-    <step order="10">Update `tasks/TASK-INDEX.md`: mark 043 ✅; confirm 060 unblocked. Update `current-task.md` (record deploy target + UI-test outcome; advance). Run `context-handoff` after deployment per CLAUDE.md §5.</step>
+    <step order="1">`npm run build:prod` both PCFs (confirm clean single bundles — already verified in 042/044).</step>
+    <step order="2">Package both PCFs into solution(s) mirroring `RegardingResolver/Solution/`; `pac solution import` (or `pac pcf push`) to the dev env.</step>
+    <step order="3">Configure the OOB `sprk_communication` form: place CommunicationConnections (bound to `sprk_associationprovenance` + `sprk_associationstatus`) in the accessories column; place CommunicationActions (bound to `sprk_communicationtype`) in the command area with auth-config inputs from env variables. Publish.</step>
+    <step order="4">Pack + import the "Communications Awaiting Association" savedquery (FetchXML/layoutXML from CommunicationConnections/views/).</step>
+    <step order="5">Remove the deployed Send web resource + ribbon button (re-import the emptied CommunicationRibbons solution or admin-delete). Keep Create-To-Do.</step>
+    <step order="6">UI verify (dark + light): Connections renders slots + confirm/primary/create-from-email; Actions renders the bar + opens the composer + Save-to-SharePoint calls /{id}/archive; the OOB form still opens. File failures as deferrals; do not silently pass.</step>
+    <step order="9.5">FULL-rigor gates: `code-review` on deploy/config diffs; `adr-check` (ADR-021/022/003/008/015 + §10). Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (043 ✅; confirm 060 unblocked) + `current-task.md` (record deploy env + control names). Run `context-handoff`.</step>
   </steps>
 
-  <ui-tests>
-    <ui-test id="UT-043-1" name="Dark-mode rendering">Load the Code Page under the dark Fluent theme; assert composer, review surface, and action bar render with correct contrast/tokens (ADR-021). Repeat under light theme.</ui-test>
-    <ui-test id="UT-043-2" name="Channel-type rendering — email interactive">Open an email `sprk_communication` record; assert the interactive `&lt;EmailComposer />` mounts.</ui-test>
-    <ui-test id="UT-043-3" name="Channel-type rendering — non-email read-only">Open a Teams/SMS/Notification-typed record (seeded); assert a read-only renderer mounts and the composer does NOT mount (layout keyed on `sprk_communicationtype`).</ui-test>
-    <ui-test id="UT-043-4" name="Mode resolution">Launch the page with `data=mode=compose`, `mode=view&amp;id=`, `mode=reply&amp;id=`, `mode=forward&amp;id=`, `mode=draft&amp;id=`; assert each renders the correct composer state per reference §7.5.</ui-test>
-    <ui-test id="UT-043-5" name="Review loop — 1-click accept">Open a `Suggested`-status record; assert the RegardingResolver is pre-filled with the top suggestion + confidence + provenance rationale; click accept; assert status → `Resolved` and the regarding lookup is written.</ui-test>
-    <ui-test id="UT-043-6" name="Review loop — override reason">Pick a target other than the top suggestion; assert an override-reason prompt appears and the reason persists as a feedback signal.</ui-test>
-    <ui-test id="UT-043-7" name="Awaiting-Association view + auth scope">Open the "Communications Awaiting Association" view; assert it lists only `Suggested`/`Pending Review`/`Ambiguous` and is matter-level auth-scoped (a non-privileged user sees only in-scope rows).</ui-test>
-    <ui-test id="UT-043-8" name="FCC swap + fallback">Assert navigating to a `sprk_communication` record opens the Code Page (FCC); assert the standard form is still reachable via admin form-selector.</ui-test>
-  </ui-tests>
-
   <tools>
-    <tool name="bash">npm run build:prod</tool>
-    <tool name="code-page-deploy">Deploy the Code Page web resource</tool>
-    <tool name="ui-test">Browser-based UI testing</tool>
+    <tool name="bash">npm run build:prod; pac solution / pac pcf push</tool>
     <tool name="code-review">FULL-rigor gate</tool>
     <tool name="adr-check">FULL-rigor gate</tool>
   </tools>
 
   <outputs>
-    <output type="deploy">Deployed `sprk_communication` Communication Code Page (FCC host) in dev</output>
-    <output type="test">UI-test results for UT-043-1..8 (pass/fail + evidence)</output>
-    <output type="docs">Task notes + any deferred-issue filings for failures</output>
+    <output type="deploy">Both PCFs deployed + placed on the OOB sprk_communication form; "Awaiting Association" view; Send button removed (Create-To-Do kept)</output>
+    <output type="test">UI verification results (pass/fail + evidence) + any deferred-issue filings</output>
+    <output type="docs">Task notes: deploy env, control names, form-config summary</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Code Page deployed and set as the `sprk_communication` FCC host; publish succeeds.</criterion>
-    <criterion testable="true">UT-043-1 (dark + light mode) passes.</criterion>
-    <criterion testable="true">UT-043-2/3 (channel-type interactive vs read-only) pass.</criterion>
-    <criterion testable="true">UT-043-4 (all five modes) passes.</criterion>
-    <criterion testable="true">UT-043-5/6 (accept + override) pass.</criterion>
-    <criterion testable="true">UT-043-7 (view + matter-level auth scope) passes.</criterion>
-    <criterion testable="true">UT-043-8 (FCC swap + standard-form fallback reachable) passes.</criterion>
-    <criterion testable="true">Any failing UI test is either fixed or filed as a deferred issue with a link in task notes.</criterion>
+    <criterion testable="true">Both PCFs are deployed and placed on the OOB `sprk_communication` form; publish succeeds.</criterion>
+    <criterion testable="true">CommunicationConnections renders the multi-association review (slots + confidence + confirm + primary + create-from-email) against a real record.</criterion>
+    <criterion testable="true">CommunicationActions renders Reply/Forward/Send/Save/Save-to-SharePoint; the composer opens; Save-to-SharePoint calls `/api/communications/{id}/archive`.</criterion>
+    <criterion testable="true">The "Communications Awaiting Association" view exists, lists only Suggested/Pending Review/Ambiguous, and is matter-level auth-scoped.</criterion>
+    <criterion testable="true">The deployed Send web resource + ribbon button are removed; the Create-To-Do button remains; the OOB form still opens.</criterion>
+    <criterion testable="true">Dark + light mode verified (ADR-021). Any failing check fixed or filed as a deferred issue linked in task notes.</criterion>
   </acceptance-criteria>
 
   <notes>
-    This closes Wave 4. Task 060 (W6 caller migration) depends on the deployed page. Report the deploy target env + web-resource name so downstream tasks can reference it.
+    Closes Wave 4 (OOB form + PCFs). Supersedes the pre-pivot Code-Page-deploy content. Task 060 (W6 caller migration) depends on this. This is an OUTWARD-FACING live deploy — it needs a target Dataverse environment + `pac` auth + a browser session; confirm the target + authorization before importing.
   </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>
-      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 REQUIRED. Deploy via `code-page-deploy`; test via `ui-test`. Run `context-handoff` after deployment.
+      Load all `knowledge`/`files`. FULL rigor — Step 9.5 REQUIRED. Package + deploy both PCFs; configure the OOB form; pack the view; remove the deployed Send button (keep Create-To-Do). Run `context-handoff` after deployment.
     </protocol>
   </execution>
 </task>
