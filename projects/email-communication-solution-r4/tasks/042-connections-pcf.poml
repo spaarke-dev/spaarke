@@ -2,7 +2,7 @@
   <metadata>
     <title>Connections PCF — multi-association review (typed slots + per-slot confidence/confirm + create-from-email) in the OOB form's accessories column</title>
     <phase>Wave 4 — OOB form + PCFs (association review)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>10</estimated-hours>
     <dependencies>001, 002, 015</dependencies>
     <blocks>043</blocks>
