@@ -6,9 +6,9 @@
 
 ## Active Task
 
-- **Task**: **011** — Refactor `IncomingAssociationResolver` → Association Engine over normalized envelope (opus @ xhigh, FULL). **IN PROGRESS** (main session, serial W1 spine).
-- **Status**: 010 ✅ merged. 020/072/076 ✅ merged. **073 dispatched as parallel worktree agent** (Office auth filters, Api/Office — disjoint). 011 running in main session.
-- **Next Action**: implement 011 per R-7 (characterization-tests-first). Then fan out next round (021/022 main-session TS; 070/071/075 after 011 lands + branch→master merge to kill stale-base tax).
+- **Task**: none active — **011 ✅ (`7e845f82f`) + 073 ✅ (`93a7a7149`) committed this round.** 13 of 45 tasks done.
+- **Status**: W1 spine head (011) landed → **012/013/014 unblocked** (rung content against `IAssociationRung`). W2 021/022 ready (need branch's 020). W7: 070/071/075 remain.
+- **Next Action (decision pending)**: **merge branch → master now** to eliminate the stale-base 3-way tax, so 012/013/014 (need 011's Engine/) and 021/022 (need 020) can fan out as clean worktree agents from a current master. If not merging, run 012/013/014 + 021/022 in main session serially. **Awaiting owner steer on merge-to-master.**
 - **Rigor Level**: FULL · **Model**: opus @ xhigh · **Step mode**: directional (R-7 order binding).
 - **011 scoping decision (directional)**: engine refactor is **inbound-only** in 011. Running the engine over OUTBOUND via `EnrichAsync` would change outbound behavior (client-supplied associations) and needs direction-aware rung content (012/013/015) — deferred there. 011 delivers: finalized envelope + rung abstraction + Graph→envelope normalizer + refactored inbound engine, behavior preserved. Enrichment `RunAssociationAsync` stays a documented seam (doc updated).
 

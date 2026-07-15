@@ -18,7 +18,7 @@
 | 006 | BFF send-path: attachment doc-fix (NO rename) + `Internet-Message-Id`/`In-Reply-To` capture | W0 | bff-api, communication | FR-06 | 001,005 | 012,022,060 | true | FULL | ✅ (capture needs dev smoke-test) |
 | 007 | **Retire OOB-`email` subsystem** + publish-size delta | W0 | bff-api, deletion | FR-07 | 005 | — | true | FULL | ✅ (partial — 3 shared-infra files retained; see current-task) |
 | 010 | `ICommunicationEnrichmentService` (both directions; outbound RAG) | W1 | bff-api, communication | FR-08 | 005,006 | 011,052 | true | FULL | ✅ (6 escalations — E2/E3→011, E1/E5 owner, E4/E6 resolved) |
-| 011 | Refactor `IncomingAssociationResolver` → Engine over normalized envelope | W1 | bff-api, refactoring | FR-09 | 010 | 012,013,014 | false (serial in W1) | FULL | 🔲 |
+| 011 | Refactor `IncomingAssociationResolver` → Engine over normalized envelope | W1 | bff-api, refactoring | FR-09 | 010 | 012,013,014 | false (serial in W1) | FULL | ✅ (R-7 preserved; envelope engine + rung abstraction + normalizer; gate clean) |
 | 012 | Rungs 0–1 (explicit-ref + thread continuity) across 8 targets | W1 | bff-api, communication | FR-10 | 011 | 015,030 | true | FULL | 🔲 |
 | 013 | Rung 2 (participant correlation; org-by-domain) | W1 | bff-api, communication | FR-10 | 011 | 015,030 | true | FULL | 🔲 |
 | 014 | Rung 3 structural detectors (`Detectors/`) | W1 | bff-api, communication | FR-10 | 011 | 015 | true | FULL | 🔲 |
@@ -47,7 +47,7 @@
 | 070 | Graph compliance audit (`Mail-Advanced.*` 12-31; EWS 10-01) | W7 | bff-api, compliance | FR-23,NFR-01 | — | — | true | FULL | 🔲 |
 | 071 | Subscription lifecycle-notification + `delta` reconciliation backstop | W7 | bff-api, graph | FR-24 | — | — | true | FULL | 🔲 |
 | 072 | Outlook add-in NAA/`@spaarke/auth` migration + unified manifest + org-URL | W7 | office-addins, auth | FR-25 | — | 074 | true | FULL | ✅ (build verified; live NAA smoke-test pending real Outlook+Azure+BFF) |
-| 073 | Apply stubbed BFF Office auth filters (`OfficeEndpoints`) | W7 | bff-api, auth | FR-25 | — | — | true | FULL | 🔲 |
+| 073 | Apply stubbed BFF Office auth filters (`OfficeEndpoints`) | W7 | bff-api, auth | FR-25 | — | — | true | FULL | ✅ (all mapped Office endpoints wired; 401/403 tests; gate clean) |
 | 074 | Add-in save pane consumes Association Engine suggestions | W7 | office-addins | FR-25 | 072,012 | — | true | FULL | 🔲 |
 | 075 | Index-config tokenization + read/write consolidation | W7 | bff-api, config | FR-26 | — | — | true | FULL | 🔲 |
 | 076 | Refresh `knowledge/work-iq` snapshot | W7 | docs, knowledge | DEC-7 | — | — | true | MINIMAL | ✅ |
