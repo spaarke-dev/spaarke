@@ -9,10 +9,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Progress** | **28 / 45 tasks done.** W1 (engine) + W2 (composer) COMPLETE. W4 mid-**architecture-pivot**. |
-| **Last commits** | email-r4 `cc68bcd96` (W4 pivot + POMLs) · prototype `cfe389a` (harness). Tree clean. |
-| **Status** | in-progress (design converged; POMLs formalized) |
-| **Next Action** | Execute **042** (Connections PCF — port the prototype `ConnectionsEditor` into a PCF on the OOB `sprk_communication` form) then **044** (Actions PCF — Reply/Send/Save over existing endpoints + `POST /{id}/archive`; retires ribbon `sprk_communication_send.js`). Both via `task-execute`. |
+| **Progress** | **29 / 45 tasks done.** W1 + W2 COMPLETE. **042 ✅ (Connections PCF, committed `bd773083a`).** W4 in progress. |
+| **Last commits** | email-r4 `bd773083a` (042 Connections PCF) · `cc68bcd96` (W4 pivot) · prototype `cfe389a`. Tree clean. |
+| **Status** | in-progress — 042 done; **044 next** (recon + conflict-check done; conflict-check CLEAR on CommunicationEndpoints.cs) |
+| **Next Action** | Execute **044** (Communication Actions PCF): (a) NEW thin `POST /api/communications/{id}/archive` over existing `EmailArchiver` (§10 BFF hygiene — publish-size + CVE + tests); (b) Actions PCF `src/client/pcf/CommunicationActions/` hosting `<SendEmailPage/>` + Reply/Forward/Send/Save/Save-to-SharePoint over existing `/api/communications/send`; (c) **⚠ RETIRE deployed `sprk_communication_send.js` ×2 + ribbon button — IRREVERSIBLE, verify Send equivalent FIRST, confirm with owner before deleting.** Via `task-execute`, FULL rigor. |
+
+### ⚠️ OPEN DECISION for owner (from 042, §6.5) — single vs multi regarding on sprk_communication
+042's write path assumes an email is regarding **MANY** records at once (additive typed-lookup writes, mirroring the task-015 engine's `RegardingFieldMap` multi-lookup write). The POML literally said "use `applyResolverFields`" (which is single-parent clear-and-set for `sprk_todo`) — I deviated to additive because clear-and-set would silently discard all-but-last association (code-review C1). **If you actually want a SINGLE regarding parent per communication, say so and 042's ConnectionsEditor switches to single-select + clear-and-set.** Full rationale: `notes/042-connections-pcf-completion.md`.
 
 ### 🔀 W4 ARCHITECTURE PIVOT (the big thing this session) — OOB form + PCFs, NOT a Code Page
 - **Decision (owner, 2026-07-15)**: keep the OOB `sprk_communication` model-driven form; enhance with PCFs (RELATED RECORD PCF v1.4.6 already proves the pattern). Full record + capability audit + ADR-026 Path-A: **`notes/W4-architecture-pivot-oob-form-pcf.md`**.
