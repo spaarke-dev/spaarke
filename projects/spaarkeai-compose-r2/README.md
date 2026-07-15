@@ -1,8 +1,10 @@
 # Spaarke Compose R2
 
-> **Last Updated**: 2026-07-08
+> **Portfolio**: [Project #647](https://github.com/spaarke-dev/spaarke/issues/647) · Epic [#421 SPAARKE AI](https://github.com/spaarke-dev/spaarke/issues/421) · [Board](https://github.com/users/spaarke-dev/projects/2)
+
+> **Last Updated**: 2026-07-15
 >
-> **Status**: In Progress (planning complete; implementation gated on core Phase A0 for AI-dependent tracks)
+> **Status**: ✅ Complete — merged to master. All 6 deferral issues (#601/#604/#605/#602/#615/#629) addressed; FR-30 durable-memory capability shipped (gate deferred to #629's governance project).
 
 ## Overview
 
