@@ -645,9 +645,9 @@ public static class AnalysisServicesModule
         // alongside AddLinearConsumers, so its (optional) AI execution seams resolve to real impls;
         // the seams are nullable ctor params (ADR-032 optional-via-null-tolerance) so a compound-OFF
         // host resolves ComposeService's optional IDocumentProfileAi to null and skips profiling
-        // cleanly. Scoped: runs in the OBO request scope. See ADR Tensions in
-        // projects/spaarkeai-compose-r2/design.md (§6.5 path A — stand-in until the paused
-        // ai-architecture-redesign-r2 core IDocumentProfileAi ships).
+        // cleanly. Scoped: runs in the OBO request scope. CANONICAL facade (not a stand-in) —
+        // resolved 2026-07-15 (#615 / PE-D4); redesign-r2 adopts this as-is if it resumes. See ADR
+        // Tensions in projects/spaarkeai-compose-r2/design.md.
         services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IDocumentProfileAi,
                            Sprk.Bff.Api.Services.Ai.PublicContracts.DocumentProfileAi>();
 

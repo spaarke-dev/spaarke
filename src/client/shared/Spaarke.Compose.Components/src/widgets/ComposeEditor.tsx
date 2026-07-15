@@ -81,7 +81,12 @@ import CharacterCount from '@tiptap/extension-character-count';
 import TextAlign from '@tiptap/extension-text-align';
 
 import { makeStyles, mergeClasses, tokens, Spinner, Text, Button } from '@fluentui/react-components';
-import { ArrowDown20Regular, Checkmark16Regular, Dismiss16Regular, DocumentProhibited24Regular } from '@fluentui/react-icons';
+import {
+  ArrowDown20Regular,
+  Checkmark16Regular,
+  Dismiss16Regular,
+  DocumentProhibited24Regular,
+} from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
 import { InsertionMark } from './marks/InsertionMark';
@@ -97,7 +102,13 @@ import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighl
 // resolve). Same rationale as ComposeWorkspace.tsx above.
 import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widgets/events';
 
-import { docxToTipTapHtml, tipTapToDocxBytes, tipTapJsonToDocxBytes, buildRejectBaselineJson, type TipTapNode } from '../utils/docxBridge';
+import {
+  docxToTipTapHtml,
+  tipTapToDocxBytes,
+  tipTapJsonToDocxBytes,
+  buildRejectBaselineJson,
+  type TipTapNode,
+} from '../utils/docxBridge';
 // Redline → Word save fidelity (UAT-R7 #2/#3/#4): the redline→annotation bridge + its wire type.
 import { redlineMarksToDocxAnnotations, type DocxAnnotationInput } from './useComposeWordShuttle';
 
@@ -1228,11 +1239,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             throw new Error('ComposeEditor: cannot serialize for save — editor not mounted');
           }
           const json = editor.getJSON();
-          const redlineAnnotations = redlineMarksToDocxAnnotations(
-            json,
-            'Spaarke Assistant',
-            new Date().toISOString()
-          );
+          const redlineAnnotations = redlineMarksToDocxAnnotations(json, 'Spaarke Assistant', new Date().toISOString());
           const baselineBytes = await tipTapJsonToDocxBytes(buildRejectBaselineJson(json as TipTapNode));
           dirtyRef.current = false;
           onDirtyChange?.(false);
@@ -1258,8 +1265,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         },
         materializePendingRedline: (draft, provenance) => redline.materialize(draft, provenance),
         materializeComposeEdits: (edits, provenance) => redline.materializeMany(edits, provenance),
-        acceptPendingRedline: (ledgerRef) => redline.accept(ledgerRef),
-        rejectPendingRedline: (ledgerRef) => redline.reject(ledgerRef),
+        acceptPendingRedline: ledgerRef => redline.accept(ledgerRef),
+        rejectPendingRedline: ledgerRef => redline.reject(ledgerRef),
         highlightCitedSpan: (sourceText, sectionLabel) => qaHighlight.highlight(sourceText, sectionLabel),
         clearCitedHighlight: () => qaHighlight.clear(),
       }),
@@ -1294,11 +1301,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           <div className={styles.referenceOnly} role="status" data-testid="compose-reference-only">
             <DocumentProhibited24Regular className={styles.referenceOnlyIcon} aria-hidden="true" />
             <Text weight="semibold">
-              {referenceOnly.fileName ? `“${referenceOnly.fileName}” can’t be edited in Compose` : "This file can’t be edited in Compose"}
+              {referenceOnly.fileName
+                ? `“${referenceOnly.fileName}” can’t be edited in Compose`
+                : 'This file can’t be edited in Compose'}
             </Text>
             <Text size={200} className={styles.referenceOnlyDetail}>
-              Only Word (.docx) documents can be edited here. This file is available to the Assistant
-              for reference — ask it to summarize, extract from, or answer questions about it.
+              Only Word (.docx) documents can be edited here. This file is available to the Assistant for reference —
+              ask it to summarize, extract from, or answer questions about it.
             </Text>
           </div>
         </div>
@@ -1333,7 +1342,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           isSaving={isSaving}
         />
         {editor ? (
-          <BubbleMenu editor={editor} tippyOptions={{ duration: 100, placement: 'top' }} className={styles.aiBubbleWrap}>
+          <BubbleMenu
+            editor={editor}
+            tippyOptions={{ duration: 100, placement: 'top' }}
+            className={styles.aiBubbleWrap}
+          >
             {/* ===================================================================
                 AI TOOLBAR MOUNT — task 030 (FR-14), AI-actions-ONLY per task 111
                 (UAT-R2 layout fix): the sibling formatting Toolbar that used to

@@ -560,4 +560,255 @@ public sealed class ComposeServiceCreateOnSaveTests
 
         await act.Should().ThrowAsync<ArgumentException>();
     }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // FR-30 durable memory-capture (compose-r2 task 063, deferral #629) — the STEP 5 capture leg
+    // of SaveAsync (ComposeService.CaptureDocumentMemoryAsync). These exercise the invariant +
+    // distillation logic at the SaveAsync INTEGRATION point — the facade-layer tests
+    // (ComposeMemoryCapture*) can't reach the SaveAsync seam that owns the "capture NEVER fails a
+    // Save" contract and the defined-term → ComposeInsight distillation. Reuses the harness above
+    // (SPE / Dataverse / indexing / session mocks + Arrange* helpers) — the session mock is extended
+    // (ArrangeBoundSession) to return a ChatSession carrying DefinedTermsTracking, which the base
+    // ctor setup returns as null.
+    //
+    // Banned-pattern compliance (tests/CLAUDE.md): each test names a concrete production behavior
+    // that breaks if deleted — the best-effort invariant (B-none: a real regression class), the
+    // distillation filter (Term+Definition), the origin mapping, and the provenance stamping. The
+    // memory store is mocked ONLY at its genuine module boundary (IComposeMemoryCapture, the ADR-013
+    // PublicContracts facade) — not the class-under-test's own collaborators (§4 B5 / B7).
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// A test double for the ADR-013 <see cref="IComposeMemoryCapture"/> module boundary. Records the
+    /// (subjectType, subjectId, insights, provenance) of the single expected capture call and returns a
+    /// <c>Captured(n)</c> outcome — or THROWS when constructed to, to prove the Save swallows it.
+    /// </summary>
+    private sealed class RecordingMemoryCapture : IComposeMemoryCapture
+    {
+        private readonly bool _throw;
+
+        public RecordingMemoryCapture(bool throwOnCapture = false) => _throw = throwOnCapture;
+
+        public int CallCount { get; private set; }
+        public string? SubjectType { get; private set; }
+        public string? SubjectId { get; private set; }
+        public IReadOnlyList<ComposeInsight>? Insights { get; private set; }
+        public ComposeMemoryProvenance? Provenance { get; private set; }
+
+        public Task<ComposeMemoryCaptureOutcome> CaptureRecordInsightsAsync(
+            string subjectType,
+            string subjectId,
+            IReadOnlyList<ComposeInsight> insights,
+            ComposeMemoryProvenance provenance,
+            CancellationToken ct = default)
+        {
+            CallCount++;
+            SubjectType = subjectType;
+            SubjectId = subjectId;
+            Insights = insights;
+            Provenance = provenance;
+            if (_throw)
+            {
+                throw new InvalidOperationException("memory store unavailable");
+            }
+            return Task.FromResult(ComposeMemoryCaptureOutcome.Captured(insights.Count));
+        }
+    }
+
+    // Same construction as CreateSut() (facade non-null availability gate, no scope factory so the
+    // fire-and-forget profile stays a no-op) plus the FR-30 memory-capture facade under test.
+    private ComposeService CreateSutWithMemoryCapture(IComposeMemoryCapture? memoryCapture) => new(
+        _spe.Object,
+        _sessions.Object,
+        _dataverse.Object,
+        new DocxAnnotationWriter(),
+        _indexing.Object,
+        NullLogger<ComposeService>.Instance,
+        documentProfileAi: _documentProfile.Object,
+        memoryCapture: memoryCapture);
+
+    // Extend the harness's session fake so the bound session carries DefinedTermsTracking. The base
+    // ctor setup returns null; CaptureDocumentMemoryAsync loads the session via this SAME
+    // GetSessionAsync(tenantId, sessionId, ct) call and reads its DefinedTermsTracking.
+    private void ArrangeBoundSession(ChatSession session) =>
+        _sessions
+            .Setup(s => s.GetSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(session);
+
+    private static ChatSession SessionWithTerms(string sessionId, params DefinedTerm[] terms) => new(
+        SessionId: sessionId,
+        TenantId: Tenant,
+        DocumentId: null,
+        PlaybookId: null,
+        CreatedAt: DateTimeOffset.UtcNow,
+        LastActivity: DateTimeOffset.UtcNow,
+        Messages: Array.Empty<ChatMessage>())
+    {
+        DefinedTermsTracking = terms,
+    };
+
+    private static DefinedTerm AiTerm(string term, string? definition, string? bindingId = null, string? ledgerRef = null) => new()
+    {
+        Term = term,
+        Definition = definition,
+        Source = "ai",
+        Provenance = bindingId is null
+            ? null
+            : new AnchoredAnnotationProvenance { BindingId = bindingId, LedgerRef = ledgerRef! },
+    };
+
+    private static DefinedTerm HumanTerm(string term, string? definition) => new()
+    {
+        Term = term,
+        Definition = definition,
+        Source = "human",
+    };
+
+    // ── FR-30 invariant: a THROWING memory capture NEVER fails a Save (the load-bearing contract) ──
+    [Fact]
+    public async Task SaveAsync_WhenMemoryCaptureThrows_SaveResultUnaffected()
+    {
+        ArrangeContainerCreate();
+        var recordId = Guid.NewGuid();
+        ArrangeNoExistingRecordThenCreate(recordId);
+        ArrangeIndexing(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+        var sessionId = Guid.NewGuid().ToString();
+        ArrangeBoundSession(SessionWithTerms(sessionId,
+            AiTerm("Confidential Information", "information marked confidential")));
+
+        var capture = new RecordingMemoryCapture(throwOnCapture: true);
+        var sut = CreateSutWithMemoryCapture(capture);
+        var request = new SaveComposeDocumentRequest
+        {
+            DocumentSpeId = null,
+            ContainerId = ContainerId,
+            Content = DocxBytes(),
+            SessionId = sessionId,
+            TenantId = Tenant,
+        };
+
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        // The load-bearing invariant: the promoted record + interim success stand even though the
+        // best-effort STEP 5 capture threw — CaptureDocumentMemoryAsync swallowed it, no exception
+        // reached the response path.
+        result.DocumentRecordId.Should().Be(recordId);
+        result.WasPromotedThisSave.Should().BeTrue();
+        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+        capture.CallCount.Should().Be(1, "capture was attempted (and threw) — proving the Save absorbed the failure");
+    }
+
+    // ── FR-30 distillation: only terms with BOTH a term AND a definition become Record-scope insights,
+    //    with correct origin mapping + provenance stamping ──────────────────────────────────────────
+    [Fact]
+    public async Task SaveAsync_DistillsDefinedTermsWithDefinitions_IntoRecordScopeCapture()
+    {
+        ArrangeContainerCreate();
+        var recordId = Guid.NewGuid();
+        ArrangeNoExistingRecordThenCreate(recordId);
+        ArrangeIndexing(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+        var sessionId = Guid.NewGuid().ToString();
+        ArrangeBoundSession(SessionWithTerms(sessionId,
+            AiTerm("Confidential Information", "information marked confidential", bindingId: "binding-1", ledgerRef: "binding-1@t2"), // (a) ai + definition
+            HumanTerm("Effective Date", "the date the agreement takes effect"),                                                     // (b) human + definition
+            HumanTerm("Undefined Term", definition: "   "),                                                                         // (c) whitespace definition → skipped
+            AiTerm("   ", "an orphan definition with no term")));                                                                    // (d) whitespace term → skipped
+
+        var capture = new RecordingMemoryCapture();
+        var sut = CreateSutWithMemoryCapture(capture);
+        var request = new SaveComposeDocumentRequest
+        {
+            DocumentSpeId = null,
+            ContainerId = ContainerId,
+            Content = DocxBytes(),
+            SessionId = sessionId,
+            TenantId = Tenant,
+        };
+
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        result.DocumentRecordId.Should().Be(recordId);
+
+        // Exactly one capture, keyed by the Record-scope subject = the promoted document.
+        capture.CallCount.Should().Be(1);
+        capture.SubjectType.Should().Be("sprk_document");
+        capture.SubjectId.Should().Be(recordId.ToString());
+
+        // Only (a) + (b) survive distillation; (c) and (d) are dropped.
+        capture.Insights.Should().HaveCount(2, "only terms carrying BOTH a term and a definition are durable");
+
+        var ai = capture.Insights!.Single(i => i.Key == "Confidential Information");
+        ai.FactType.Should().Be("defined-term");
+        ai.Value.Should().Be("information marked confidential", "Value maps from the term's Definition");
+        ai.Origin.Should().Be(MemoryOrigin.AiDerived, "an ai-sourced term is AiDerived");
+        ai.BindingId.Should().Be("binding-1", "provenance BindingId threads through from the term");
+        ai.LedgerRef.Should().Be("binding-1@t2", "provenance LedgerRef threads through from the term");
+
+        var human = capture.Insights!.Single(i => i.Key == "Effective Date");
+        human.Value.Should().Be("the date the agreement takes effect");
+        human.Origin.Should().Be(MemoryOrigin.User, "a human-sourced term is User origin");
+
+        // Provenance envelope carries the request tenant + originating session.
+        capture.Provenance!.TenantId.Should().Be(Tenant);
+        capture.Provenance!.SessionId.Should().Be(sessionId);
+    }
+
+    // ── FR-30 availability gate: no facade registered → Save succeeds, capture is a clean no-op ─────
+    [Fact]
+    public async Task SaveAsync_WhenNoMemoryCaptureRegistered_SaveSucceeds_NoOp()
+    {
+        ArrangeContainerCreate();
+        var recordId = Guid.NewGuid();
+        ArrangeNoExistingRecordThenCreate(recordId);
+        ArrangeIndexing(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+        var sessionId = Guid.NewGuid().ToString();
+        // A bound session WITH a durable term — proving the null gate (not an empty session) is what
+        // short-circuits capture.
+        ArrangeBoundSession(SessionWithTerms(sessionId,
+            AiTerm("Confidential Information", "information marked confidential")));
+
+        var sut = CreateSutWithMemoryCapture(memoryCapture: null); // default: no facade in this host
+        var request = new SaveComposeDocumentRequest
+        {
+            DocumentSpeId = null,
+            ContainerId = ContainerId,
+            Content = DocxBytes(),
+            SessionId = sessionId,
+            TenantId = Tenant,
+        };
+
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        result.DocumentRecordId.Should().Be(recordId);
+        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue(
+            "a missing memory-capture facade must never affect the Save");
+    }
+
+    // ── FR-30 precondition: a bound session with no defined terms → capture is never invoked ────────
+    [Fact]
+    public async Task SaveAsync_WhenSessionHasNoDefinedTerms_DoesNotCallCapture()
+    {
+        ArrangeContainerCreate();
+        var recordId = Guid.NewGuid();
+        ArrangeNoExistingRecordThenCreate(recordId);
+        ArrangeIndexing(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+        var sessionId = Guid.NewGuid().ToString();
+        ArrangeBoundSession(SessionWithTerms(sessionId)); // no terms
+
+        var capture = new RecordingMemoryCapture();
+        var sut = CreateSutWithMemoryCapture(capture);
+        var request = new SaveComposeDocumentRequest
+        {
+            DocumentSpeId = null,
+            ContainerId = ContainerId,
+            Content = DocxBytes(),
+            SessionId = sessionId,
+            TenantId = Tenant,
+        };
+
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        result.DocumentRecordId.Should().Be(recordId);
+        capture.CallCount.Should().Be(0, "no defined terms → nothing to distil → the facade is never invoked");
+    }
 }

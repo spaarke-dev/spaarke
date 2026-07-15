@@ -1,0 +1,8 @@
+Archived: 2026-07-15
+Final status: Completed
+Project Issue: #647 (closed) — https://github.com/spaarke-dev/spaarke/issues/647
+Parent Epic: #421 (SPAARKE AI)
+Closing PRs: #644 (#615 OBO facade canonicalization), #645 (#629 FR-30 durable-memory capability), #646 (close-out checkpoint)
+Deferral issues (all resolved): #601 #604 #605 (stale-fixed), #602 (dev provisioned; prod→runbook), #615 (canonicalized), #629 (capability shipped; untrusted-origin gate deferred to the memory-governance project — issue narrowed, stays open)
+Worktree: C:/code_files/spaarke-wt-spaarkeai-compose-r2 (PRESERVED — not removed by archive; clean up separately when truly done)
+Remote branch: work/spaarkeai-compose-r2 (retained on origin)

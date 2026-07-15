@@ -459,9 +459,10 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// FR-05 per-step create-on-save projection over the existing job pipeline
     /// (<see cref="JobAwareCompletionState"/>): the ordered steps
     /// <c>container → record → profile-analysis → indexing</c> with each step's state. The
-    /// <c>profile-analysis</c> step is DEFERRED (core-owned <c>IDocumentProfileAi</c> facade —
-    /// not implemented here), so the aggregate is <see cref="JobAwareState.Partial"/> on the
-    /// happy path (record exists + indexed, downstream profile pending). A record with no SPE
+    /// <c>profile-analysis</c> step runs in-process fire-and-forget under the caller's OBO identity
+    /// (best-effort enrichment via the canonical <c>IDocumentProfileAi</c> facade — #615 resolved),
+    /// so the synchronous aggregate is <see cref="JobAwareState.Partial"/> on the
+    /// happy path (record exists + indexed, profile dispatched off-thread). A record with no SPE
     /// file OR no index is never a success — see
     /// <see cref="ComposeService.IsInterimCreateOnSaveSuccess"/> for the interim R5-E bar. Null
     /// only for legacy callers that predate FR-05 (always populated by the current Save path).
