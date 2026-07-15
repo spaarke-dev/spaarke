@@ -34,7 +34,7 @@
 | 031 | Rung 5 — new JPS extract+classify Action → `AppOnlyAnalysisService` | W3 | bff-api, ai, jps | FR-15 | 015 | 032,053 | true | FULL | 🔲 |
 | 032 | Per-rung telemetry + rung 4/5 tests | W3 | bff-api, testing | NFR-05,08 | 030,031 | — | true | FULL | 🔲 |
 | 040 | Channel-aware Communication Code Page (view/record by type) | W4 | code-page, frontend | FR-16 | 001,020 | 041,042 | true | FULL | 🔲 |
-| 041 | Mount `<EmailComposer />`; Form Component Control swap | W4 | code-page, dataverse | FR-16 | 020,040 | 043 | true | FULL | 🔲 |
+| 041 | Mount `<EmailComposer />`; Form Component Control swap | W4 | code-page, dataverse | FR-16 | 020,040 | 043 | true | FULL | ✅ (agent `30dc9ebf4`; SendEmailPage mounted from shared lib [no fork], 5 modes, 042 seam intact; FCC plan documented [standard form retained hidden/admin for reversibility, GUIDs tabled for 043]; build:prod single-file clean; gates 0 Critical; initialCc→043 follow-up) |
 | 042 | Embed `RegardingResolver` review + "Awaiting Association" view + Field Mapping | W4 | code-page, pcf | FR-17 | 001,002,040 | 043 | true | FULL | 🔲 |
 | 043 | Code Page deploy + UI tests | W4 | code-page, deploy, e2e-test | NFR-07 | 040,041,042 | 060 | true | FULL | 🔲 |
 | 050 | ⛔ **[GATE]** Coordinate W5 with r2-core (Services/Ai ownership) | W5 | coordination, bff-api | — | 015 | 051,052,053,054 | **false** | STANDARD | ⛔ |
