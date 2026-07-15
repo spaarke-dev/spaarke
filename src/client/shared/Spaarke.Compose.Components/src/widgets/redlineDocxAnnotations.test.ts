@@ -59,18 +59,29 @@ describe('redlineMarksToDocxAnnotations — pending redline marks → DocxAnnota
 
   it('maps a pure insertion (no deletion half) to a single anchorless Insertion', () => {
     const json = doc(
-      para(text('Existing sentence.'), text(' Appended clause.', [{ type: 'insertion', ledgerRef: 'b2@t1', binding: 'b2' }]))
+      para(
+        text('Existing sentence.'),
+        text(' Appended clause.', [{ type: 'insertion', ledgerRef: 'b2@t1', binding: 'b2' }])
+      )
     );
 
     const result = redlineMarksToDocxAnnotations(json, AUTHOR, DATE);
 
     expect(result).toEqual([
-      { kind: DocxTrackChangeKind.Insertion, targetText: null, newText: ' Appended clause.', author: AUTHOR, date: DATE },
+      {
+        kind: DocxTrackChangeKind.Insertion,
+        targetText: null,
+        newText: ' Appended clause.',
+        author: AUTHOR,
+        date: DATE,
+      },
     ]);
   });
 
   it('maps a pure deletion to a single Deletion', () => {
-    const json = doc(para(text('Remove '), text('this clause', [{ type: 'deletion', ledgerRef: 'b3@t1' }]), text(' please.')));
+    const json = doc(
+      para(text('Remove '), text('this clause', [{ type: 'deletion', ledgerRef: 'b3@t1' }]), text(' please.'))
+    );
 
     const result = redlineMarksToDocxAnnotations(json, AUTHOR, DATE);
 

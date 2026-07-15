@@ -97,8 +97,7 @@ jest.mock('./ComposeEditor', () => {
         serialize: async () => new ArrayBuffer(0),
         getCounts: () => ({ characters: 0, words: 0 }),
         isDirty: () => false,
-        materializeComposeDraft: (draft: unknown, provenance: unknown) =>
-          materializeComposeDraftSpy(draft, provenance),
+        materializeComposeDraft: (draft: unknown, provenance: unknown) => materializeComposeDraftSpy(draft, provenance),
         materializePendingRedline: () => 'applied',
         materializeComposeEdits: () => [],
         acceptPendingRedline: () => undefined,

@@ -194,7 +194,7 @@ describe('ComposeWorkspace — Wave 3 Part 3: tab-scoped re-registration on tab_
     fireTabChange({ type: 'tab_change', widgetData: { layoutName: 'Daily Briefing' } });
 
     // Give any effects a chance to (not) fire.
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise(r => setTimeout(r, 0));
     expect(registerActiveDocumentSpy).toHaveBeenCalledTimes(1);
   });
 });
