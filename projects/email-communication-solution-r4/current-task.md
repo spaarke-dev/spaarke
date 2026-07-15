@@ -8,7 +8,8 @@
 
 - **Task**: none active — **011 ✅ (`7e845f82f`) + 073 ✅ (`93a7a7149`) committed this round.** 13 of 45 tasks done.
 - **Status**: W1 spine head (011) landed → **012/013/014 unblocked** (rung content against `IAssociationRung`). W2 021/022 ready (need branch's 020). W7: 070/071/075 remain.
-- **Next Action (decision pending)**: **merge branch → master now** to eliminate the stale-base 3-way tax, so 012/013/014 (need 011's Engine/) and 021/022 (need 020) can fan out as clean worktree agents from a current master. If not merging, run 012/013/014 + 021/022 in main session serially. **Awaiting owner steer on merge-to-master.**
+- **Merged to master ✅ (2026-07-15)**: `origin/master` fast-forwarded `240d0e5c5..fb4012cb3` — all 19 branch commits now on remote master. Future agent worktrees branch from `origin/master` (confirmed pattern: 073 branched from origin/master's value, not local master) → **stale-base 3-way tax eliminated.** (Local master ref in `C:/code_files/spaarke` left at `bcc15973a` — FF blocked by pre-existing untracked files there; cosmetic, does not affect agent branching.)
+- **Next Action**: next wave — **012→013→014 serial in main session** (all edit the engine's shared `_rungs` composition point; not cleanly parallel regardless of base) ‖ **021/022 (W2) + 070/071/075 (W7) as clean worktree agents** (now branch from current master).
 - **Rigor Level**: FULL · **Model**: opus @ xhigh · **Step mode**: directional (R-7 order binding).
 - **011 scoping decision (directional)**: engine refactor is **inbound-only** in 011. Running the engine over OUTBOUND via `EnrichAsync` would change outbound behavior (client-supplied associations) and needs direction-aware rung content (012/013/015) — deferred there. 011 delivers: finalized envelope + rung abstraction + Graph→envelope normalizer + refactored inbound engine, behavior preserved. Enrichment `RunAssociationAsync` stays a documented seam (doc updated).
 
