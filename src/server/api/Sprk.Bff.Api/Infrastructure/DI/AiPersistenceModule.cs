@@ -102,6 +102,13 @@ public static class AiPersistenceModule
             logger: sp.GetRequiredService<ILogger<MemoryItemStore>>(),
             auditLog: sp.GetRequiredService<IAuditLogService>()));
 
+        // compose-r2 FR-30 (#629): IComposeMemoryCapture — canonical ADR-013 facade that captures durable
+        // Record-scope insights (defined terms today) distilled from a Compose session into the SHARED
+        // IMemoryItemStore above. No forked store; the untrusted-origin gate (TrustLevel) is DEFERRED to
+        // the memory-governance project (#629), carried inert. Scoped: the store it delegates to is Scoped.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposeMemoryCapture,
+            Sprk.Bff.Api.Services.Ai.PublicContracts.ComposeMemoryCapture>();
+
         // AIR2-052: memory-governance authorization port (FR-B-03). Thin seam over the existing
         // IDataversePrivilegeChecker (record-read alignment — caller-derived, no parallel ACL) +
         // NotificationService (AAD oid → systemuserid). Scoped: both dependencies are Singletons, so
