@@ -22,7 +22,7 @@
 | 012 | Rungs 0–1 (explicit-ref + thread continuity) across 8 targets | W1 | bff-api, communication | FR-10 | 011 | 015,030 | true | FULL | ✅ (rung 0/1 + RegardingFieldMap; gate clean; W1 owner heads-up = subject-ref precedes thread) |
 | 013 | Rung 2 (participant correlation; org-by-domain) | W1 | bff-api, communication | FR-10 | 011 | 015,030 | true | FULL | ✅ (from/to/cc→contact+junction memberships+org/account; 0.60–0.85; gate clean, FR-04 org-target correct) |
 | 014 | Rung 3 structural detectors (`Detectors/`) | W1 | bff-api, communication | FR-10 | 011 | 015 | true | FULL | ✅ (4 detectors + IStructuralDetector + rung 3; metadata-only; gate PASS; W2→015 always-run-pass carry-forward) |
-| 015 | Confidence→status + **auto-file ≥0.85** (ADR-018 kill-switch) | W1 | bff-api, communication | FR-11 | 002,012,013,014 | 030,051 | true | FULL | 🔲 |
+| 015 | Confidence→status + **auto-file ≥0.85** (ADR-018 kill-switch) | W1 | bff-api, communication | FR-11 | 002,012,013,014 | 030,051 | true | FULL | ✅ (mapper ladder + noisy-OR reinforcement + AI-never-autofile + conflict→Ambiguous + AutoFileGate/IOptionsMonitor kill-switch + provenance JSON; engine now aggregates all det rungs; gates 0 Critical; 310 Comm tests; publish 45.28MB +0.01; Path A cited) |
 | 016 | Channel seams (`ICommunicationChannelSender`/`ICommunicationArchiver`) | W1 | bff-api, architecture | NFR-04 | 005 | — | true | FULL | 🔲 |
 | 017 | Central auth + direction-symmetry + per-rung tests | W1 | bff-api, testing | NFR-03,06,08 | 012,013,014,015 | — | true | FULL | 🔲 |
 | 020 | `<EmailComposer />` engine + sub-components | W2 | frontend, fluent-ui | FR-12 | 001 | 021,041 | true | FULL | ✅ (18 smoke tests green in agent worktree; not re-run in main — node_modules) |

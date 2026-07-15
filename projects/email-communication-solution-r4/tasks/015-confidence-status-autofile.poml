@@ -2,7 +2,7 @@
   <metadata>
     <title>Confidence→status ladder + auto-file ≥0.85 (deterministic only) behind ADR-018 per-tenant kill-switch; provenance JSON</title>
     <phase>Wave 1 — Server: enrichment + deterministic engine</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>9</estimated-hours>
     <dependencies>002, 012, 013, 014</dependencies>
     <blocks>030, 051</blocks>

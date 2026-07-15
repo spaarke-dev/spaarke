@@ -1254,6 +1254,7 @@ public class CommunicationIntegrationTests
                 },
                 dataverseMock.Object,
                 dataverseMock.Object,
+                Sprk.Bff.Api.Tests.Services.Communication.AssociationTestSupport.Mapper(),
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
             new GraphMessageNormalizer(),
             Mock.Of<IEmailAttachmentProcessor>(),

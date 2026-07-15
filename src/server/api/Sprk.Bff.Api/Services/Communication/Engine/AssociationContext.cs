@@ -24,4 +24,11 @@ public sealed record AssociationContext
     /// </summary>
     public IReadOnlyList<CommunicationAssociation> CallerSuppliedRegarding { get; init; } =
         Array.Empty<CommunicationAssociation>();
+
+    /// <summary>
+    /// Optional opaque tenant key for the ADR-018 per-tenant auto-file kill-switch (task 015). Null on
+    /// single-org deployments (the global <c>Communication:AutoFile</c> flag applies). A multi-tenant
+    /// deployment sets this so <see cref="AutoFileGate"/> can resolve a per-tenant override.
+    /// </summary>
+    public string? TenantKey { get; init; }
 }

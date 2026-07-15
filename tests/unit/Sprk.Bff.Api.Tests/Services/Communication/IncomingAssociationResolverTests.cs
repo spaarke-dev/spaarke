@@ -45,6 +45,7 @@ public class IncomingAssociationResolverTests
             rungs,
             _dataverseServiceMock.Object,
             _dataverseServiceMock.Object,
+            AssociationTestSupport.Mapper(),
             Mock.Of<ILogger<IncomingAssociationResolver>>());
     }
 
@@ -93,9 +94,12 @@ public class IncomingAssociationResolverTests
     // =========================================================================
 
     [Fact]
-    public async Task ResolveAsync_SenderMatch_LinksToContact()
+    public async Task ResolveAsync_SenderMatch_LinksToContact_AsSuggested()
     {
-        // Arrange: no thread match, but sender matches a contact
+        // R-7 evolution (task 015 / FR-11): the sender→contact regarding WRITE is preserved (the person
+        // lookup is still set), but the STATUS is now Suggested (100000003), not Resolved. A lone
+        // participant-correlation contact match carries confidence 0.70 (< the 0.85 auto-file threshold),
+        // so the confidence→status ladder correctly surfaces it for confirmation rather than auto-filing.
         var contactId = Guid.NewGuid();
         var contactEntity = new DataverseEntity("contact") { Id = contactId };
         contactEntity["fullname"] = "Jane Doe";
@@ -124,7 +128,7 @@ public class IncomingAssociationResolverTests
             It.Is<Dictionary<string, object>>(fields =>
                 fields.ContainsKey("sprk_regardingperson") &&
                 ((EntityReference)fields["sprk_regardingperson"]).Id == contactId &&
-                ((OptionSetValue)fields["sprk_associationstatus"]).Value == 100000000), // Resolved
+                ((OptionSetValue)fields["sprk_associationstatus"]).Value == 100000003), // Suggested (FR-11 ladder)
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -240,9 +244,15 @@ public class IncomingAssociationResolverTests
     // =========================================================================
 
     [Fact]
-    public async Task ResolveAsync_PriorityCascade_ThreadWinsOverSender()
+    public async Task ResolveAsync_ThreadAndSenderBothMatch_ThreadMatterWinsTheMatterField()
     {
-        // Arrange: both thread AND sender would match, but thread should win
+        // R-7 evolution (task 015 / FR-11 signal reinforcement): the engine now evaluates ALL
+        // deterministic rungs (no first-match short-circuit) so independent signals can reinforce and the
+        // always-run detector pass records category/obligations regardless of the association outcome.
+        // The WRITE CONTRACT is preserved — the thread's matter (confidence 1.0) is what fills the
+        // sprk_regardingmatter field; the sender-contact match now contributes the complementary
+        // sprk_regardingperson field rather than being suppressed. The old "sender query never called"
+        // assertion tested the removed short-circuit (an interaction-shape assertion) and no longer holds.
         var parentMatterId = Guid.NewGuid();
         var contactId = Guid.NewGuid();
 
@@ -274,13 +284,10 @@ public class IncomingAssociationResolverTests
             TestCommunicationId,
             It.Is<Dictionary<string, object>>(fields =>
                 fields.ContainsKey("sprk_regardingmatter") &&
-                ((EntityReference)fields["sprk_regardingmatter"]).Id == parentMatterId),
+                ((EntityReference)fields["sprk_regardingmatter"]).Id == parentMatterId &&
+                // thread confidence 1.0 ≥ threshold ⇒ auto-file Resolved
+                ((OptionSetValue)fields["sprk_associationstatus"]).Value == 100000000),
             It.IsAny<CancellationToken>()), Times.Once);
-
-        // Sender query should NOT have been called
-        _dataverseServiceMock.Verify(
-            d => d.QueryContactByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never);
     }
 
     // =========================================================================
@@ -327,6 +334,82 @@ public class IncomingAssociationResolverTests
                 fields.ContainsKey("sprk_regardingaccount") &&
                 ((EntityReference)fields["sprk_regardingaccount"]).LogicalName == "account" &&
                 ((EntityReference)fields["sprk_regardingaccount"]).Id == accountId),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // =========================================================================
+    // Task 015: provenance persistence + engine-level kill-switch
+    // =========================================================================
+
+    [Fact]
+    public async Task ResolveAsync_WritesProvenanceJson_ToAssociationProvenanceColumn()
+    {
+        // A thread match resolves the association; the engine must persist the decision trail as JSON.
+        var parentMatterId = Guid.NewGuid();
+        var parentComm = new DataverseEntity("sprk_communication");
+        parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
+
+        _dataverseServiceMock
+            .Setup(d => d.GetCommunicationByGraphMessageIdAsync("<p@contoso.com>", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(parentComm);
+        _dataverseServiceMock
+            .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var envelope = CreateEnvelope("Re: Test", "jane@external.com", inReplyTo: "<p@contoso.com>");
+
+        await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
+
+        _dataverseServiceMock.Verify(d => d.UpdateAsync(
+            "sprk_communication",
+            TestCommunicationId,
+            It.Is<Dictionary<string, object>>(fields =>
+                fields.ContainsKey("sprk_associationprovenance") &&
+                ((string)fields["sprk_associationprovenance"]).Contains("rungsFired") &&
+                ((string)fields["sprk_associationprovenance"]).Contains("autoFiled")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_KillSwitchOff_DowngradesResolvedToSuggested_NoRedeploy()
+    {
+        // Same strong (thread, 1.0) match, but with the ADR-018 kill-switch OFF: a config flip only —
+        // the same code path yields Suggested instead of Resolved (auto-file), and the matter is still
+        // surfaced as a suggestion.
+        var parentMatterId = Guid.NewGuid();
+        var parentComm = new DataverseEntity("sprk_communication");
+        parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
+
+        _dataverseServiceMock
+            .Setup(d => d.GetCommunicationByGraphMessageIdAsync("<p2@contoso.com>", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(parentComm);
+        _dataverseServiceMock
+            .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var suggestOnlyResolver = new IncomingAssociationResolver(
+            new IAssociationRung[]
+            {
+                new ExplicitReferenceRung(_dataverseServiceMock.Object),
+                new ThreadContinuityRung(_dataverseServiceMock.Object),
+                new ParticipantCorrelationRung(_dataverseServiceMock.Object),
+            },
+            _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object,
+            AssociationTestSupport.Mapper(enabled: false),
+            Mock.Of<ILogger<IncomingAssociationResolver>>());
+
+        var envelope = CreateEnvelope("Re: Test", "jane@external.com", inReplyTo: "<p2@contoso.com>");
+
+        await suggestOnlyResolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
+
+        _dataverseServiceMock.Verify(d => d.UpdateAsync(
+            "sprk_communication",
+            TestCommunicationId,
+            It.Is<Dictionary<string, object>>(fields =>
+                fields.ContainsKey("sprk_regardingmatter") &&
+                ((EntityReference)fields["sprk_regardingmatter"]).Id == parentMatterId &&
+                ((OptionSetValue)fields["sprk_associationstatus"]).Value == 100000003), // Suggested
             It.IsAny<CancellationToken>()), Times.Once);
     }
 

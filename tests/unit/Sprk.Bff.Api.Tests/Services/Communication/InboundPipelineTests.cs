@@ -227,6 +227,7 @@ public class InboundPipelineTests
                 },
                 _dataverseServiceMock.Object,
                 _dataverseServiceMock.Object,
+                AssociationTestSupport.Mapper(),
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
             new GraphMessageNormalizer(),
             _attachmentProcessorMock.Object,

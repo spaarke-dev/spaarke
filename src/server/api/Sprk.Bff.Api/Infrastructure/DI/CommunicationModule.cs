@@ -19,6 +19,10 @@ public static class CommunicationModule
         // Bind CommunicationOptions from "Communication" section
         services.Configure<CommunicationOptions>(configuration.GetSection(CommunicationOptions.SectionName));
 
+        // Auto-file kill-switch + threshold (ADR-018 / FR-11). Bound from "Communication:AutoFile" and
+        // consumed via IOptionsMonitor so a flag/threshold flip takes effect WITHOUT redeploy.
+        services.Configure<AutoFileOptions>(configuration.GetSection(AutoFileOptions.SectionName));
+
         // Core services (singleton: all dependencies are singleton or options)
         services.AddSingleton<CommunicationAccountService>();
         services.AddSingleton<ApprovedSenderValidator>();
@@ -42,6 +46,10 @@ public static class CommunicationModule
         services.AddSingleton<IStructuralDetector, InvoiceNumberDetector>();
         services.AddSingleton<IStructuralDetector, CourtEFilingDetector>();
         services.AddSingleton<IAssociationRung, StructuralDetectorRung>();     // rung 3 — structural detectors
+        // Confidence→status ladder + auto-file gate (FR-11 / ADR-018). Both unconditional (ADR-010):
+        // the gate is pure config resolution and the mapper is pure decision logic; no feature gate.
+        services.AddSingleton<AutoFileGate>();
+        services.AddSingleton<AssociationStatusMapper>();
         services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();
 
