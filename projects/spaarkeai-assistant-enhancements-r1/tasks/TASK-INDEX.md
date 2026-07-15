@@ -11,7 +11,7 @@
 | ID | Title | Phase | FR/NFR | Status | Deps | Blocks | Rigor | Model / Effort | Parallel |
 |----|-------|-------|--------|--------|------|--------|-------|----------------|----------|
 | 001 | Verify + record `sprk_userprofile` schema contract | 1 | FR-E1 | ✅ | none | 030,042 | STANDARD | sonnet / high | ✅ safe |
-| 002 | Author `create-todo` + `create-event` capabilities (Bindings/Actions/tooldescription/chips) | 1 | FR-A2, P4 | 🔲 | none | 010,012,021,050 | FULL | opus / high | ❌ catalog (main-session) |
+| 002 | Author `create-todo` + `create-event` capabilities (Bindings/Actions/tooldescription/chips) | 1 | FR-A2, P4 | ⛔ | none | 010,012,021,050 | FULL | opus / high | ❌ catalog (main-session) — **BLOCKED: see [BLOCKED.md](../BLOCKED.md) (as-built `create-task`→`sprk_event`, no wizard launch)** |
 | 003 | Add grounding-predicate column(s) to the Binding catalog | 1 | FR-H1 (schema) | 🔲 | none | 044 | STANDARD | sonnet / high | ❌ catalog (coord w/002) |
 | 010 | Constrained-field resolver primitive (`Services/Ai`) | 2 | FR-B1 | 🔲 | 002 | 011,013 | FULL | opus / xhigh | ❌ dispatch-adjacent (sequential) |
 | 011 | Exclude constrained fields from LLM arg-filling; incoherent-combo prevention | 2 | FR-B3, FR-B4 | 🔲 | 010 | — | FULL | opus / high | ❌ sequential (w/010) |

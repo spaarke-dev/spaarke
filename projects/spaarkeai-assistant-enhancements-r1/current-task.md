@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | none — **decomposition complete; awaiting owner review of the breakdown before execution** |
-| **Status** | 25 POML tasks generated across 7 phases (all XML-valid). [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) is the map. **Not yet executed.** |
-| **Next action** | Owner reviews [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md). To begin: "work on task 001" (or "continue" → first 🔲). **Do NOT auto-execute** — BFF hot-path + dispatch spine = high blast radius. |
-| **First task** | **001** — Verify + record the `sprk_userprofile` schema contract (no deps; parallel-safe). |
+| **Active task** | **002 — ⛔ BLOCKED** (escalated to owner; see [BLOCKED.md](BLOCKED.md)) |
+| **Status** | 001 ✅. 002 hit a material as-built conflict (shipped `create-task`→`sprk_event`(Task), not `sprk_todo`; shipped creates use direct `dataverse.create_record`, NOT a pre-seeded wizard). Awaiting owner decision on options A/B/C/D. |
+| **Next action** | Owner picks the create-flow resolution (BLOCKED.md). Unblocked alternatives to keep momentum: **030** (User Model producer) or **020** (action truthfulness) — both independent of the conflict. |
+| **Completed** | **001** ✅ — `notes/userprofile-schema-contract.md`. 2 owner-actionable findings: **F-1** `sprk_primaryrole` may be local (owner wanted global set); **F-2** alt-key name unreadable via MCP (confirm at task 042). |
 | **Branch** | `work/spaarkeai-assistant-enhancements-r1` (synced with origin/master 2026-07-15; clean; seams intact) |
 | **Scope** | R1 only. **R1.5 (proactive push / Azure SignalR) designed, NOT decomposed** — filed as a follow-on spec-pass at wrap-up (task 090). |
 
