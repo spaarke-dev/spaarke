@@ -1,0 +1,103 @@
+<task id="076" project="email-communication-solution-r4">
+  <metadata>
+    <title>Refresh `knowledge/work-iq` snapshot to GA (drop per-user-license assumption; flag Context API as future augmentation)</title>
+    <phase>Wave 7 — Microsoft hardening + auth + index</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies></dependencies>
+    <blocks></blocks>
+    <tags>docs, knowledge</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation-only refresh of a knowledge snapshot; no code, no ADR, no schema. MINIMAL rigor per the decision tree — quality gates skipped. Correctness matters (keeps future decisions grounded) but blast radius is a single knowledge doc.</rigor-reason>
+    <parallel-group>W7</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits only the `knowledge/work-iq` snapshot — disjoint from all other tasks. Runs anytime.</parallel-reason>
+    <fr-refs>DEC-7</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Refresh the `knowledge/work-iq` snapshot to reflect Work IQ's current GA state:
+
+    1. Drop the stale **per-user-license** assumption (update to the GA/consumption model — delegated-only, consumption-billed, prose-oriented).
+    2. Flag the **Context API** as a FUTURE user-facing augmentation only — NOT an app-only classifier.
+    3. Record explicitly that **Work IQ is OUT OF SCOPE as a classifier for R4** (per DEC-7 / spec requirement #12): it is not an app-only classification substrate; R4's Association Engine (deterministic + semantic + JPS AI rungs) is the classifier.
+
+    This is a knowledge-hygiene refresh so future projects do not mistakenly plan Work IQ as an app-only classifier. If current Work IQ GA specifics are unclear, use the `researcher` subagent to confirm before writing.
+  </prompt>
+
+  <role>
+    Spaarke knowledge-base maintainer familiar with the Microsoft Work IQ / Context API positioning and the R4 decision to exclude Work IQ as a classifier (DEC-7). Uses the `researcher` subagent for current Microsoft platform state.
+  </role>
+
+  <goal>
+    The `knowledge/work-iq` snapshot reflects GA (no per-user-license assumption), flags the Context API as future user-facing augmentation only, and states Work IQ is out of scope as an R4 classifier. Dated refresh entry recorded.
+  </goal>
+
+  <context>
+    <background>
+      Work IQ was evaluated during design and excluded as an app-only classifier (DEC-7): it is delegated-only, consumption-billed, and prose-oriented — a poor fit for deterministic app-only classification. The knowledge snapshot still carries stale assumptions (per-user license) that could mislead future planning. This refresh corrects the record.
+    </background>
+    <relevant-files>
+      <file>knowledge/work-iq/ (snapshot to refresh)</file>
+      <file>knowledge/ (refresh log / procedures)</file>
+      <file>projects/email-communication-solution-r4/spec.md (Out of Scope; DEC-7 / requirement #12)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec DEC-7">Work IQ is delegated-only, consumption-billed, prose-oriented — NOT an app-only classifier; out of scope for R4.</constraint>
+    <constraint source="project">Refresh the knowledge snapshot only; do not touch code, ADRs, or schema.</constraint>
+    <constraint source="project">Flag Context API as future user-facing augmentation only, not a classifier.</constraint>
+    <constraint source="knowledge-hygiene">Record a dated refresh entry per the knowledge refresh procedure.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>knowledge/work-iq</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>knowledge/work-iq/</file>
+      <file>knowledge/ (refresh log + procedures)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Load knowledge">Read spec Out-of-Scope + DEC-7, and the current `knowledge/work-iq` snapshot + refresh procedure.</step>
+    <step order="2" name="Confirm GA state">If Work IQ GA / Context API specifics are stale in context, use the `researcher` subagent to confirm current Microsoft positioning.</step>
+    <step order="3" name="Refresh snapshot">Update the snapshot: drop per-user-license assumption → GA/consumption model; flag Context API as future user-facing augmentation only; state Work IQ out of scope as an R4 classifier (Association Engine is the classifier).</step>
+    <step order="4" name="Log refresh">Add a dated refresh entry to the knowledge refresh log.</step>
+    <step order="5" name="Update tracking">Mark task 076 ✅ in `tasks/TASK-INDEX.md`.</step>
+    <step order="6" name="Reset state">Update `current-task.md`: status → completed; advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect current snapshot + refresh procedure</tool>
+    <tool name="researcher">Confirm current Work IQ / Context API GA state</tool>
+    <tool name="edit">Refresh the snapshot + log entry</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">knowledge/work-iq/ (REFRESHED — GA state; Context API flagged; classifier exclusion recorded)</output>
+    <output type="docs">knowledge/ refresh log (dated entry)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The snapshot no longer asserts a per-user-license model; it reflects GA/consumption (delegated-only, consumption-billed, prose-oriented).</criterion>
+    <criterion testable="true">The Context API is flagged as future user-facing augmentation only, not a classifier.</criterion>
+    <criterion testable="true">The snapshot states Work IQ is out of scope as an R4 classifier (Association Engine is the classifier).</criterion>
+    <criterion testable="true">A dated refresh entry is added to the knowledge log.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    MINIMAL rigor — no Step 9.5 gates. Knowledge-hygiene task; keeps future projects from planning Work IQ as an app-only classifier.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load `&lt;knowledge&gt;&lt;files&gt;`. Apply MINIMAL rigor — Step 9.5 gates SKIPPED. Confirm GA specifics via `researcher` before writing if uncertain.
+    </protocol>
+  </execution>
+</task>

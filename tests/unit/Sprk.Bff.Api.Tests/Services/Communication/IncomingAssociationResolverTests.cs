@@ -1,52 +1,40 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
-using Microsoft.Graph;
-using Microsoft.Graph.Models;
-using Microsoft.Kiota.Abstractions;
-using Microsoft.Kiota.Abstractions.Serialization;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
-using KiotaIParsable = Microsoft.Kiota.Abstractions.Serialization.IParsable;
 
 namespace Sprk.Bff.Api.Tests.Services.Communication;
 
 /// <summary>
-/// Unit tests for IncomingAssociationResolver.
-/// Tests the priority cascade: thread → sender → subject → mailbox context → pending review.
+/// Characterization tests for the Association Engine (IncomingAssociationResolver refactored in task
+/// 011 to operate over the NormalizedMessage envelope). These assert the SAME Dataverse write contract
+/// as the pre-011 resolver — the cascade thread → participant(sender) → subject → pending review, the
+/// ADR-024 resolver-field writes, and the task-004 org/account separation — proving R-7 preservation.
+/// Only the ARRANGE changed (envelope input instead of Microsoft.Graph.Message + a Graph header call);
+/// every Verify assertion is carried over verbatim from the baseline.
 /// </summary>
 public class IncomingAssociationResolverTests
 {
     private readonly Mock<IDataverseService> _dataverseServiceMock;
-    private readonly Mock<IGraphClientFactory> _graphClientFactoryMock;
     private readonly IncomingAssociationResolver _resolver;
 
     private static readonly Guid TestCommunicationId = Guid.NewGuid();
-    private const string TestMailbox = "shared@contoso.com";
-    private const string TestGraphMessageId = "AAMkAGQ=";
 
     public IncomingAssociationResolverTests()
     {
         _dataverseServiceMock = new Mock<IDataverseService>();
-        _graphClientFactoryMock = new Mock<IGraphClientFactory>();
 
-        // Default: Graph ForApp returns a mock client that returns no headers
-        // (loose mock — un-setup calls return null, causing thread matching to skip)
-        var mockGraphClient = new Mock<GraphServiceClient>(
-            MockBehavior.Loose, Mock.Of<IRequestAdapter>(), string.Empty);
-        _graphClientFactoryMock
-            .Setup(f => f.ForApp())
-            .Returns(mockGraphClient.Object);
-
+        // IDataverseService implements both ICommunicationDataverseService and IGenericEntityService.
+        // The engine no longer depends on IGraphClientFactory (In-Reply-To comes from the envelope).
         _resolver = new IncomingAssociationResolver(
             _dataverseServiceMock.Object,
             _dataverseServiceMock.Object,
-            _graphClientFactoryMock.Object,
             Mock.Of<ILogger<IncomingAssociationResolver>>());
     }
 
@@ -57,11 +45,9 @@ public class IncomingAssociationResolverTests
     [Fact]
     public async Task ResolveAsync_ThreadMatch_CopiesParentAssociations()
     {
-        // Arrange: Set up a request adapter that returns a message with In-Reply-To header
+        // Arrange: envelope carries an In-Reply-To parent id; parent has matter + organization.
         var parentMatterId = Guid.NewGuid();
         var parentOrgId = Guid.NewGuid();
-
-        SetupGraphClientWithInReplyToHeader("<parent-msg-id@contoso.com>");
 
         var parentComm = new DataverseEntity("sprk_communication");
         parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
@@ -75,10 +61,10 @@ public class IncomingAssociationResolverTests
             .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var message = CreateTestMessage("Re: Test Subject", "sender@external.com");
+        var envelope = CreateEnvelope("Re: Test Subject", "sender@external.com", inReplyTo: "<parent-msg-id@contoso.com>");
 
         // Act
-        await _resolver.ResolveAsync(TestCommunicationId, TestMailbox, TestGraphMessageId, message, null, CancellationToken.None);
+        await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
 
         // Assert: verify update was called with parent's associations and Resolved status
         _dataverseServiceMock.Verify(d => d.UpdateAsync(
@@ -93,7 +79,7 @@ public class IncomingAssociationResolverTests
     }
 
     // =========================================================================
-    // Priority 2: Sender matching
+    // Priority 2: Sender (participant) matching
     // =========================================================================
 
     [Fact]
@@ -116,10 +102,10 @@ public class IncomingAssociationResolverTests
             .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var message = CreateTestMessage("Hello", "jane@external.com");
+        var envelope = CreateEnvelope("Hello", "jane@external.com");
 
         // Act
-        await _resolver.ResolveAsync(TestCommunicationId, TestMailbox, TestGraphMessageId, message, null, CancellationToken.None);
+        await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
 
         // Assert: contact should be set as regarding person
         _dataverseServiceMock.Verify(d => d.UpdateAsync(
@@ -144,10 +130,10 @@ public class IncomingAssociationResolverTests
             .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var message = CreateTestMessage("Hello", "user@gmail.com");
+        var envelope = CreateEnvelope("Hello", "user@gmail.com");
 
         // Act
-        await _resolver.ResolveAsync(TestCommunicationId, TestMailbox, TestGraphMessageId, message, null, CancellationToken.None);
+        await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
 
         // Assert: account query should never be called for gmail.com
         _dataverseServiceMock.Verify(
@@ -187,10 +173,10 @@ public class IncomingAssociationResolverTests
             .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var message = CreateTestMessage(subject, "unknown@external.com");
+        var envelope = CreateEnvelope(subject, "unknown@external.com");
 
         // Act
-        await _resolver.ResolveAsync(TestCommunicationId, TestMailbox, TestGraphMessageId, message, null, CancellationToken.None);
+        await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
 
         // Assert: matter should be set as regarding matter
         _dataverseServiceMock.Verify(d => d.UpdateAsync(
@@ -222,10 +208,10 @@ public class IncomingAssociationResolverTests
             .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var message = CreateTestMessage("Random subject with no patterns", "someone@gmail.com");
+        var envelope = CreateEnvelope("Random subject with no patterns", "someone@gmail.com");
 
         // Act
-        await _resolver.ResolveAsync(TestCommunicationId, TestMailbox, TestGraphMessageId, message, null, CancellationToken.None);
+        await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
 
         // Assert: status should be Pending Review (100000001)
         _dataverseServiceMock.Verify(d => d.UpdateAsync(
@@ -250,9 +236,6 @@ public class IncomingAssociationResolverTests
         var parentMatterId = Guid.NewGuid();
         var contactId = Guid.NewGuid();
 
-        // Thread match setup
-        SetupGraphClientWithInReplyToHeader("<parent@contoso.com>");
-
         var parentComm = new DataverseEntity("sprk_communication");
         parentComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", parentMatterId);
 
@@ -270,10 +253,10 @@ public class IncomingAssociationResolverTests
             .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var message = CreateTestMessage("Re: Test", "jane@external.com");
+        var envelope = CreateEnvelope("Re: Test", "jane@external.com", inReplyTo: "<parent@contoso.com>");
 
         // Act
-        await _resolver.ResolveAsync(TestCommunicationId, TestMailbox, TestGraphMessageId, message, null, CancellationToken.None);
+        await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
 
         // Assert: thread match used (matter from parent), not sender match
         _dataverseServiceMock.Verify(d => d.UpdateAsync(
@@ -291,54 +274,62 @@ public class IncomingAssociationResolverTests
     }
 
     // =========================================================================
+    // Sender domain match: organization + account to SEPARATE lookups (task 004)
+    // =========================================================================
+
+    [Fact]
+    public async Task ResolveAsync_SenderDomainMatch_WritesOrganizationAndAccountToSeparateLookups()
+    {
+        // Regression (task 004 / DEC-3): a sender-domain match MUST write
+        // sprk_regardingorganization -> sprk_organization AND sprk_regardingaccount -> account,
+        // each to its OWN lookup. The prior bug wrote an account reference into the
+        // sprk_regardingorganization lookup (which targets sprk_organization). sprk_organization
+        // is the legal entity; account is a vendor/payment account — distinct, never mixed.
+        var orgId = Guid.NewGuid();
+        var accountId = Guid.NewGuid();
+
+        _dataverseServiceMock
+            .Setup(d => d.QueryContactByEmailAsync("ap@acme.com", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity?)null);
+        _dataverseServiceMock
+            .Setup(d => d.QueryOrganizationByDomainAsync("acme.com", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataverseEntity("sprk_organization") { Id = orgId });
+        _dataverseServiceMock
+            .Setup(d => d.QueryAccountByDomainAsync("acme.com", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataverseEntity("account") { Id = accountId });
+        _dataverseServiceMock
+            .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var envelope = CreateEnvelope("Invoice question", "ap@acme.com");
+
+        // Act
+        await _resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
+
+        // Assert: org -> sprk_organization lookup, account -> account lookup, correct types, no cross-stuffing
+        _dataverseServiceMock.Verify(d => d.UpdateAsync(
+            "sprk_communication",
+            TestCommunicationId,
+            It.Is<Dictionary<string, object>>(fields =>
+                fields.ContainsKey("sprk_regardingorganization") &&
+                ((EntityReference)fields["sprk_regardingorganization"]).LogicalName == "sprk_organization" &&
+                ((EntityReference)fields["sprk_regardingorganization"]).Id == orgId &&
+                fields.ContainsKey("sprk_regardingaccount") &&
+                ((EntityReference)fields["sprk_regardingaccount"]).LogicalName == "account" &&
+                ((EntityReference)fields["sprk_regardingaccount"]).Id == accountId),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // =========================================================================
     // Test Helpers
     // =========================================================================
 
-    private static Message CreateTestMessage(string subject, string fromEmail)
-    {
-        return new Message
+    private static NormalizedMessage CreateEnvelope(string subject, string fromEmail, string? inReplyTo = null)
+        => new()
         {
+            Direction = CommunicationDirection.Incoming,
             Subject = subject,
-            From = new Recipient
-            {
-                EmailAddress = new EmailAddress
-                {
-                    Address = fromEmail
-                }
-            }
+            From = fromEmail,
+            InReplyTo = inReplyTo,
         };
-    }
-
-    /// <summary>
-    /// Sets up the Graph mock to return a message with a specific In-Reply-To header value.
-    /// Uses Kiota's IRequestAdapter mock to intercept the Graph SDK call.
-    /// </summary>
-    private void SetupGraphClientWithInReplyToHeader(string inReplyToValue)
-    {
-        var responseMessage = new Message
-        {
-            InternetMessageHeaders = new List<InternetMessageHeader>
-            {
-                new() { Name = "In-Reply-To", Value = inReplyToValue }
-            }
-        };
-
-        var mockRequestAdapter = new Mock<IRequestAdapter>();
-        mockRequestAdapter.Setup(a => a.BaseUrl).Returns("https://graph.microsoft.com/v1.0");
-
-        // Mock SendAsync with the correct Kiota signature
-        mockRequestAdapter
-            .Setup(a => a.SendAsync(
-                It.IsAny<RequestInformation>(),
-                It.IsAny<ParsableFactory<Message>>(),
-                It.IsAny<Dictionary<string, ParsableFactory<KiotaIParsable>>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(responseMessage);
-
-        var graphClient = new GraphServiceClient(mockRequestAdapter.Object);
-
-        _graphClientFactoryMock
-            .Setup(f => f.ForApp())
-            .Returns(graphClient);
-    }
 }

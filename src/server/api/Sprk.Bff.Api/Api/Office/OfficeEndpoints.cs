@@ -169,8 +169,8 @@ public static class OfficeEndpoints
             .WithDescription("Submit email, attachment, or document for saving to Spaarke DMS")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Save)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
-                                    // TODO: Task 033 - .AddOfficeAuthFilter()
-                                    // TODO: Task 033 - .AddEntityAccessFilter()
+            .AddOfficeAuthFilter()   // Task 073 - baseline Office-caller authentication (sets HttpContext.Items[UserIdKey])
+            .AddEntityAccessFilter() // Task 073 - entity-scoped: caller must have access to SaveRequest.TargetEntity
             .Accepts<SaveRequest>("application/json")
             .Produces<SaveResponse>(StatusCodes.Status202Accepted)
             .Produces<SaveResponse>(StatusCodes.Status200OK) // For duplicate detection
@@ -468,8 +468,8 @@ public static class OfficeEndpoints
             .WithName("GetOfficeJobStatus")
             .WithDescription("Get the status of a processing job for polling-based updates")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Jobs)
-            // TODO: Task 033 - .AddOfficeAuthFilter()
-            // TODO: Task 033 - .AddJobOwnershipFilter()
+            .AddOfficeAuthFilter()   // Task 073 - baseline authentication (must precede JobOwnershipFilter)
+            .AddJobOwnershipFilter() // Task 073 - job-scoped: caller must own the job (403 otherwise)
             .Produces<JobStatusResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -487,8 +487,8 @@ public static class OfficeEndpoints
                 "Supports reconnection via Last-Event-ID header. " +
                 "Events: connected, progress, stage-update, job-complete, job-failed, heartbeat, error.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Jobs)
-            // TODO: Task 033 - .AddOfficeAuthFilter()
-            // TODO: Task 033 - .AddJobOwnershipFilter()
+            .AddOfficeAuthFilter()   // Task 073 - baseline authentication (must precede JobOwnershipFilter)
+            .AddJobOwnershipFilter() // Task 073 - job-scoped: caller must own the job (403 otherwise)
             .Produces(StatusCodes.Status200OK, contentType: "text/event-stream")
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -517,9 +517,11 @@ public static class OfficeEndpoints
         HttpContext context,
         CancellationToken cancellationToken)
     {
-        // TODO: Task 033 - UserId will be set by OfficeAuthFilter
-        // For now, get userId from claims directly
-        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        // Task 073 - OfficeAuthFilter has already set the userId in
+        // HttpContext.Items[OfficeAuthFilter.UserIdKey]; direct claim extraction is
+        // retained as a defensive fallback so the handler is safe if reused elsewhere.
+        var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
+            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? context.User.FindFirstValue("oid");
 
         logger.LogInformation(
@@ -598,9 +600,11 @@ public static class OfficeEndpoints
     {
         var traceId = context.TraceIdentifier;
 
-        // TODO: Task 033 - UserId will be set by OfficeAuthFilter
-        // For now, get userId from claims directly
-        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        // Task 073 - OfficeAuthFilter has already set the userId in
+        // HttpContext.Items[OfficeAuthFilter.UserIdKey]; direct claim extraction is
+        // retained as a defensive fallback so the handler is safe if reused elsewhere.
+        var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
+            ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? context.User.FindFirstValue("oid");
 
         // Get Last-Event-ID header for reconnection support
@@ -758,7 +762,7 @@ public static class OfficeEndpoints
             .WithSummary("Search for association target entities")
             .WithDescription("Searches for Matters, Projects, Invoices, Accounts, and Contacts. Supports typeahead (min 2 chars). Returns results within 500ms.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Search)
-            // TODO: Task 033 - .AddOfficeAuthFilter()
+            .AddOfficeAuthFilter() // Task 073 - baseline Office-caller authentication
             .Produces<EntitySearchResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -772,7 +776,7 @@ public static class OfficeEndpoints
             .WithSummary("Search for documents to share")
             .WithDescription("Search for documents to share from Outlook compose mode. Supports filtering by entity association, content type, date range, and container/folder. Only returns documents the user has permission to share.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Search)
-            // TODO: Task 033 - .AddOfficeAuthFilter()
+            .AddOfficeAuthFilter() // Task 073 - baseline Office-caller authentication
             .Produces<DocumentSearchResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -1123,7 +1127,7 @@ public static class OfficeEndpoints
             .WithDescription("Creates a new Matter, Project, Invoice, Account, or Contact with minimal required fields. Supports inline entity creation from the Office add-in when the user needs a new association target.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
-                                    // TODO: Task 033 - .AddOfficeAuthFilter()
+            .AddOfficeAuthFilter()  // Task 073 - baseline Office-caller authentication
             .Accepts<QuickCreateRequest>("application/json")
             .Produces<QuickCreateResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -1335,7 +1339,7 @@ public static class OfficeEndpoints
             .WithDescription("Generates shareable URLs for selected documents that resolve through Spaarke access controls. Optionally creates invitations for external recipients.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Share)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
-                                    // TODO: Task 033 - .AddOfficeAuthFilter()
+            .AddOfficeAuthFilter()  // Task 073 - baseline Office-caller authentication
             .Accepts<ShareLinksRequest>("application/json")
             .Produces<ShareLinksResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -1352,7 +1356,7 @@ public static class OfficeEndpoints
             .WithSummary("Package documents for email attachment")
             .WithDescription("Retrieves documents and packages them for attachment to Outlook compose emails. Returns download URLs (primary) or base64 content (fallback). Validates user share permission and size limits (25MB/file, 100MB total).")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Share)
-            // TODO: Task 033 - .AddOfficeAuthFilter()
+            .AddOfficeAuthFilter() // Task 073 - baseline Office-caller authentication
             .Accepts<ShareAttachRequest>("application/json")
             .Produces<ShareAttachResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -1643,7 +1647,7 @@ public static class OfficeEndpoints
             .WithName("GetOfficeRecent")
             .WithDescription("Get recently used association targets and documents for quick selection")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Recent)
-            // TODO: Task 033 - .AddOfficeAuthFilter()
+            .AddOfficeAuthFilter() // Task 073 - baseline Office-caller authentication
             .Produces<RecentDocumentsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);

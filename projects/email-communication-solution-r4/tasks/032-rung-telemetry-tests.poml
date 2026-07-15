@@ -1,0 +1,139 @@
+<task id="032" project="email-communication-solution-r4">
+  <metadata>
+    <title>Per-rung telemetry (DEC-8) + rung 4/5 tests</title>
+    <phase>Wave 3 — Server: semantic + AI rungs</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>030, 031</dependencies>
+    <blocks></blocks>
+    <tags>bff-api, testing, communication</tags>
+    <rigor-hint>TEST-MODIFYING</rigor-hint>
+    <rigor-reason>Modifies `tests/**` (rung 4/5 unit tests) AND adds telemetry emission to `Services/Communication` — per root §8 TEST-MODIFYING override, code-review + adr-check run UNCONDITIONALLY at Step 9.5. BFF Hygiene (§10) obligations apply to the telemetry code (publish-size, CVE, /conflict-check). ADR-038 KEEP-path categories; NFR-05 measurement invariant.</rigor-reason>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Aggregates rung 4 (030) + rung 5 (031) telemetry + tests; runs after both land — the W3 tail. Server-only; disjoint from client waves.</parallel-reason>
+    <fr-refs>NFR-05, NFR-08</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Add **per-rung telemetry** to the Association Engine and write the **rung 4 + rung 5 unit tests**. Telemetry (DEC-8) measures the deterministic-first ladder on real volume so the team can decide, post-launch, whether to broaden AI-rung usage or adjust the auto-file threshold — you cannot tune what you cannot see. The tests lock the two governing invariants: AI/semantic rungs fire ONLY on deterministic miss/ambiguity, and they NEVER auto-file.
+
+    Telemetry requirements (NFR-05 / DEC-8):
+    - Emit per-rung structured telemetry for every association attempt: rung id (0–5), fired vs skipped, latency, match count, resulting confidence + tier (`Resolved`/`Suggested`/`Ambiguous`/`Pending Review`), and for AI rungs (4/5) token/cost + cache hit/miss.
+    - Use the telemetry hooks exposed by tasks 030/031; route through the existing BFF telemetry/logging sink (no new telemetry framework — Component Justification §11).
+    - Make the deterministic-first invariant observable: a single dashboard-able signal per envelope showing which rung resolved it (or that it fell through to review).
+
+    Test requirements (NFR-08 / ADR-038 KEEP-path):
+    - Rung 4 (semantic): fires only when rungs 0–3 miss/are ambiguous; emits `Suggested` (never `Resolved`/auto-file); writes `matchReasons` to provenance; org→`sprk_organization`; consumes the normalized envelope.
+    - Rung 5 (AI/JPS): fires only when rungs 0–4 miss/are ambiguous; emits `Suggested`/`Ambiguous` with rationale (never auto-file); privilege flagged not decided (ADR-015); runs via the app-only PublicContracts seam (mocked at the boundary).
+    - Ladder integration: a seeded high-confidence deterministic match short-circuits before rung 4/5 fire (assert AI rungs NOT invoked); a deterministic miss escalates to rung 4 then rung 5.
+    - Telemetry: assert per-rung records are emitted with the expected fields for both fired + skipped rungs.
+    - Follow ADR-038 KEEP-path categories; mock at the boundary (search client, `AppOnlyAnalysisService` PublicContracts seam); no banned patterns.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer + test author; fluent in the Association Engine rung interface, the BFF telemetry/logging sink, `AppOnlyAnalysisService` boundary-mocking, and ADR-038 KEEP-path test classification.
+  </role>
+
+  <goal>
+    Per-rung telemetry emitted for every association attempt (rung id, fired/skipped, latency, match count, tier; tokens/cache for AI rungs), routed through the existing sink. Rung 4 + rung 5 unit tests green, locking the fire-gate (AI fires only on ambiguity/miss) and no-auto-file invariants + provenance/privilege behavior. Ladder short-circuit test proves deterministic high-confidence matches never invoke AI rungs. Build + tests green; publish-size delta + CVE reported; `/conflict-check` clean.
+  </goal>
+
+  <context>
+    <background>
+      NFR-05 mandates a deterministic-first ladder with AI rungs firing only on ambiguity/miss; DEC-8 requires real-volume measurement before broadening AI usage or moving the auto-file threshold. Rung 4 (task 030) + rung 5 (task 031) exposed telemetry hooks; this task consumes them and adds the tests that lock the invariants. The auto-file boundary (FR-11 owner override) is the highest-value thing to test: deterministic ≥0.85 auto-files; AI rungs never do.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (Association Engine + rung 4/5 from tasks 030/031; telemetry emission added here)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (NEW rung 4/5 + ladder + telemetry tests)</file>
+      <file>src/server/api/Sprk.Bff.Api/ (existing telemetry/logging sink — reuse)</file>
+      <file>projects/email-communication-solution-r4/spec.md (NFR-05, NFR-08, FR-11, DEC-8)</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">NFR-05 / DEC-8: per-rung telemetry (fired/skipped, latency, match count, tier; tokens+cache for AI rungs) so the ladder is measurable on real volume.</constraint>
+    <constraint source="project">NFR-08 / ADR-038: tests in `tests/unit/Sprk.Bff.Api.Tests/`; KEEP-path categories; no banned patterns (`Mock&lt;HttpMessageHandler&gt;`, DI-registration, ctor null-check).</constraint>
+    <constraint source="project">Tests MUST lock: AI rungs (4/5) fire only on deterministic miss/ambiguity, and NEVER auto-file.</constraint>
+    <constraint source="ADR-015">Rung-5 test asserts privilege is flagged, never decided.</constraint>
+    <constraint source="ADR-024">Rung-4/5 tests assert org candidates target `sprk_organization`.</constraint>
+    <constraint source="§11 Component Justification">Reuse the existing telemetry/logging sink — no new telemetry framework; mock at the boundary in tests.</constraint>
+    <constraint source="root §10 BFF Hygiene">Telemetry code touches BFF `Services/` — load `bff-extensions.md`; report publish-size delta (~49.63 MB baseline) + CVE; run `/conflict-check` before PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-015-ai-privilege.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+    <patterns>
+      <pattern name="Boundary mocking for AI/search" location=".claude/patterns/testing/mocking-patterns.md">
+        Mock the search client + `AppOnlyAnalysisService` PublicContracts seam at the boundary; run the real engine ladder + rung logic under test.
+      </pattern>
+      <pattern name="Vertical-slice-seam KEEP category" location="docs/adr/ADR-038-testing-strategy.md">
+        Ladder-integration tests (envelope in → rung sequence + tier out) belong to the seam KEEP category; assert the observable end-state, not internals.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/conflict-check` (BFF hot-path). Load `bff-extensions.md`. Read the rung 4/5 telemetry hooks (tasks 030/031) + the existing BFF telemetry/logging sink to confirm the emission surface.</step>
+    <step order="2">Implement per-rung telemetry emission in the engine: for each rung attempt emit rung id, fired/skipped, latency, match count, resulting confidence + tier; for rungs 4/5 add tokens/cost + cache hit/miss. Route through the existing sink. Add a single per-envelope "resolving rung" signal.</step>
+    <step order="3">Author rung 4 unit tests (fire-gate on deterministic miss; `Suggested`-only; `matchReasons` provenance; org→`sprk_organization`; envelope-only input) — mock the search client at the boundary.</step>
+    <step order="4">Author rung 5 unit tests (fire-gate on rung-0–4 miss; `Suggested`/`Ambiguous` with rationale; never auto-file; privilege flagged not decided; app-only via mocked PublicContracts seam).</step>
+    <step order="5">Author ladder-integration tests: (a) seeded deterministic ≥0.85 → `Resolved`/auto-file AND rung 4/5 NOT invoked; (b) deterministic miss → rung 4 fires → rung 5 fires; (c) conflicting high-confidence → `Ambiguous`.</step>
+    <step order="6">Author telemetry tests: assert per-rung records emitted with expected fields for both fired + skipped rungs (via a fake/spy sink).</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` (clean) + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication` (all green).</step>
+    <step order="8">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~49.63 MB. Run `dotnet list package --vulnerable --include-transitive` — no new HIGH CVE.</step>
+    <step order="9.5">TEST-MODIFYING quality gates (UNCONDITIONAL per root §8): invoke `code-review` on telemetry code + tests; invoke `adr-check` against ADR-038, ADR-015, ADR-024 + `spec.md`. Address Critical + High findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 032 ✅; W3 complete.</step>
+    <step order="11">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="conflict-check">BFF hot-path pre-PR</tool>
+    <tool name="read">rung 4/5 telemetry hooks + existing telemetry sink + ADR-038</tool>
+    <tool name="write">telemetry emission + rung 4/5 + ladder + telemetry tests</tool>
+    <tool name="bash">dotnet build / test / publish (size) / CVE scan</tool>
+    <tool name="code-review">Step 9.5 (unconditional)</tool>
+    <tool name="adr-check">Step 9.5 (unconditional)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (UPDATED — per-rung telemetry emission)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (NEW — rung 4, rung 5, ladder-integration, telemetry tests)</output>
+    <output type="docs">PR description — publish-size delta + CVE + /conflict-check outcome</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per-rung telemetry emitted for every attempt: rung id, fired/skipped, latency, match count, tier; rungs 4/5 also emit tokens/cost + cache hit/miss.</criterion>
+    <criterion testable="true">A per-envelope "resolving rung" signal is emitted (dashboard-able).</criterion>
+    <criterion testable="true">Rung 4 tests: fires only on deterministic miss; `Suggested`-only; `matchReasons` in provenance; org→`sprk_organization`.</criterion>
+    <criterion testable="true">Rung 5 tests: fires only on rung-0–4 miss; `Suggested`/`Ambiguous` with rationale; never auto-files; privilege flagged not decided.</criterion>
+    <criterion testable="true">Ladder test: deterministic ≥0.85 short-circuits — rung 4/5 NOT invoked; deterministic miss escalates 4→5.</criterion>
+    <criterion testable="true">Telemetry tests assert expected per-rung fields for fired + skipped rungs.</criterion>
+    <criterion testable="true">Tests use boundary mocks (search client, PublicContracts seam); no ADR-038 banned patterns.</criterion>
+    <criterion testable="true">Build + Communication tests green; publish-size delta + CVE reported; `/conflict-check` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Telemetry is the DEC-8 measurement substrate — the post-launch decision to broaden AI-rung usage or move the auto-file threshold depends on it. Keep the emission cheap (structured log/metric fields, not a new pipeline). Tests are MAINTAIN-class (invariant contracts) and survive the `/test-diet` gate. The AI-never-auto-file and deterministic-short-circuit assertions are the load-bearing ones — do not let them regress.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. TEST-MODIFYING → Step 9.5 (code-review + adr-check) runs UNCONDITIONALLY per root §8. Per root §10: publish-size + CVE + `/conflict-check` required for the telemetry code. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

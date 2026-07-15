@@ -70,6 +70,7 @@ public class CommunicationServiceTests
             null!, // SpeFileStore — not tested here
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
             _loggerMock.Object);
     }
@@ -154,6 +155,7 @@ public class CommunicationServiceTests
             null!, // SpeFileStore — not tested here
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
             _loggerMock.Object);
     }

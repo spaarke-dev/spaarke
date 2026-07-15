@@ -1,0 +1,112 @@
+<task id="080" project="email-communication-solution-r4">
+  <metadata>
+    <title>Author `docs/architecture/communication-intelligence-architecture.md`</title>
+    <phase>Wave 8 — Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010, 011, 012, 013, 014, 015, 030, 031, 051, 052, 053, 054, 072, 073</dependencies>
+    <blocks></blocks>
+    <tags>docs</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New architecture document synthesizing the delivered W1–W7 system; no code, no ADR authoring. STANDARD rigor — Step 9.5 gates skipped, but the doc must match shipped code (source-of-truth rule). Uses the `docs-architecture` skill.</rigor-reason>
+    <parallel-group>W8</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Authors a NEW file — disjoint from tasks 081/082 (which update different existing docs). All W8 doc targets are per-file parallel. Depends on W1–W7 being substantially complete so the doc describes real code.</parallel-reason>
+    <fr-refs>FR-27</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Author the new `docs/architecture/communication-intelligence-architecture.md` describing the R4 Communication Intelligence layer as-built, using the `docs-architecture` skill. Cover, grounded in the shipped code:
+
+    - The direction-agnostic `ICommunicationEnrichmentService` (both inbound + outbound; ordered pipeline: association → categorization → AI analysis → RAG indexing → Responsive-Intelligence trigger; best-effort/non-fatal invariant).
+    - The unified Association Engine over the normalized message envelope (never `Microsoft.Graph.Message`), the rung ladder (0 explicit-ref, 1 thread continuity, 2 participant correlation, 3 structural detectors, 4 semantic `RecordSearchService`, 5 JPS AI extract+classify), per-attribute confidence + provenance, eight target entities.
+    - Confidence→status mapping + auto-file (deterministic ≥0.85 → Resolved via ADR-018 kill-switch; AI rungs never auto-file → Suggested/Ambiguous).
+    - Channel seams (`ICommunicationChannelSender`/`ICommunicationArchiver`, email-only impl) and the NFR-04 extensibility contract.
+    - Responsive Intelligence (OutputRouter record/notification legs → EventRules → CreateEvent/Task/Notification + DeliverComposite Triage summary).
+    - Central auth (ADR-028), the Communication Code Page review surface + add-in save-pane consumer, and the retirement of the OOB-`email` subsystem.
+
+    Cross-reference ADR-045 (canonical Communication ADR) and the related ADRs (024/028/018/013/037/015). Keep it a design/rationale doc (WHY + structure), not implementation detail — pointers to code entry points, not code dumps.
+  </prompt>
+
+  <role>
+    Spaarke architecture writer authoritative on the R4 Communication Intelligence subsystem. Uses the `docs-architecture` skill and follows the repo's architecture-doc conventions (decisions + rationale, code entry-point pointers).
+  </role>
+
+  <goal>
+    `docs/architecture/communication-intelligence-architecture.md` exists and accurately describes the as-built R4 system (enrichment service, Association Engine + rung ladder, confidence/auto-file, channel seams, Responsive Intelligence, review surfaces, retirements), cross-referencing ADR-045 and related ADRs. The doc matches shipped code.
+  </goal>
+
+  <context>
+    <background>
+      R4 introduces a substantial new subsystem with no single architecture doc. This is the canonical architecture reference for Communication Intelligence, authored after W1–W7 land so it describes real code, not the plan. It anchors the W8 doc updates (081 updates the older processing/service docs to point here; 082 points the Triage module doc at this substrate).
+    </background>
+    <relevant-files>
+      <file>docs/architecture/communication-intelligence-architecture.md (NEW)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (enrichment service, Association Engine, Detectors/, channel seams)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ (OutputRouter, EventRulesService, DeliverComposite)</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md (Triage output pattern)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-27">Author `communication-intelligence-architecture.md`; docs must match code.</constraint>
+    <constraint source="root §2 source-of-truth">Code wins — verify each described behavior against shipped code before documenting it.</constraint>
+    <constraint source="docs conventions">Architecture doc = decisions + rationale + code entry-point pointers; NO implementation detail / code dumps.</constraint>
+    <constraint source="project">Cross-reference ADR-045 + related ADRs (024/028/018/013/037/015); do not restate ADR content verbatim.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>docs/architecture-authoring</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/design.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>docs/architecture/email-processing-architecture.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Load knowledge">Read spec FR-27, design.md, ADR-045, the `docs-architecture` skill, and the existing service/processing arch docs.</step>
+    <step order="2" name="Verify against code">Read the shipped W1/W3/W5/W7 code (enrichment service, Association Engine, rung ladder, OutputRouter legs, channel seams, review surfaces) to ground each section in real code.</step>
+    <step order="3" name="Draft">Author the doc via `docs-architecture`: overview → enrichment service → Association Engine + rungs → confidence/auto-file → channel seams → Responsive Intelligence → review surfaces → retirements → ADR cross-refs. Use code entry-point pointers.</step>
+    <step order="4" name="Cross-link">Cross-reference ADR-045 + related ADRs; link the Triage output pattern doc.</step>
+    <step order="5" name="Self-check">Verify every claim matches shipped code; remove anything speculative or plan-only.</step>
+    <step order="6" name="Update tracking">Mark task 080 ✅ in `tasks/TASK-INDEX.md`; add a pointer to the new doc from the CLAUDE.md §17 pointer table if appropriate (main session only for `.claude/`).</step>
+    <step order="7" name="Reset state">Update `current-task.md`: status → completed; advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect shipped code + existing arch docs</tool>
+    <tool name="docs-architecture">Author the new architecture doc</tool>
+    <tool name="write">Create the doc file</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/communication-intelligence-architecture.md (NEW)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`docs/architecture/communication-intelligence-architecture.md` exists.</criterion>
+    <criterion testable="true">It describes the enrichment service, Association Engine + 6-rung ladder, confidence/auto-file, channel seams, Responsive Intelligence, and review surfaces — each matching shipped code.</criterion>
+    <criterion testable="true">It cross-references ADR-045 and the related ADRs (024/028/018/013/037/015).</criterion>
+    <criterion testable="true">It is a design/rationale doc with code entry-point pointers, not implementation detail.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    STANDARD rigor — no Step 9.5 gates, but the source-of-truth rule (root §2) is binding: verify against code. Authored after W1–W7 so it reflects real code.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load `&lt;knowledge&gt;&lt;files&gt;`. Apply STANDARD rigor — Step 9.5 SKIPPED. Verify every documented behavior against shipped code before writing.
+    </protocol>
+  </execution>
+</task>

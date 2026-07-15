@@ -1,0 +1,121 @@
+<task id="051" project="email-communication-solution-r4">
+  <metadata>
+    <title>Complete OutputRouter `record` + `notification` dispositions (remove `NotSupportedException` in `DispositionRoutability.cs`)</title>
+    <phase>Wave 5 — Responsive Intelligence</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocked-by>050</blocked-by>
+    <blocks>052</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Edits `Services/Ai/` internals (r2-core-coordinated per gate 050); brownfield change removing `NotSupportedException` in a routing hot path; BFF governance (publish-size + CVE + conflict-check) + FULL Step 9.5 gates required.</rigor-reason>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-18</fr-refs>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Complete the OutputRouter `record` and `notification` dispositions by removing the `NotSupportedException` stubs in `DispositionRoutability.cs`, so an assessed communication can route to a record-creating leg (Event/Task) and a notification leg. Implement strictly per the boundary agreed in gate 050: **consume the `Services/Ai/PublicContracts/` seams** confirmed there; **do NOT fork `Services/Ai/` internals** beyond what the agreed boundary authorizes.
+
+    This task lands the routing capability only (the disposition legs resolve instead of throwing). The actual EventRules fan-out wiring is task 052; the Triage summary is 053. Keep this change surgical and seam-driven.
+  </prompt>
+
+  <role>
+    Spaarke BFF/AI engineer working within the r2-core-coordinated boundary. Authoritative on OutputRouter + `DispositionRoutability.cs`, and on the PublicContracts facade (ADR-013). Applies the BFF hygiene governance checklist (root §10) on every change.
+  </role>
+
+  <goal>
+    `DispositionRoutability.cs` routes the `record` and `notification` dispositions with no remaining `NotSupportedException` for those legs. Routing is implemented against the gate-050 PublicContracts seams (no internal fork). Build clean; existing OutputRouter tests pass; new/updated tests cover both dispositions routing. Publish-size + CVE reported; `/conflict-check` clean before PR; Placement Justification stated.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-18 (requirement #9), the OutputRouter has stubbed `record`/`notification` legs that throw `NotSupportedException`. R4's Responsive Intelligence needs both. Because `DispositionRoutability.cs` is an r2-core-owned file, gate 050 must have confirmed how R4 completes it (seam extension vs coordinated edit). This task executes that agreement.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter/DispositionRoutability.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>projects/email-communication-solution-r4/notes/w5-ai-coordination.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">GATE: gate 050 MUST be cleared first. Implement per the boundary recorded in `notes/w5-ai-coordination.md`.</constraint>
+    <constraint source="project">Run `/conflict-check` against `Services/Ai/` before opening the PR.</constraint>
+    <constraint source="ADR-013">Consume `Services/Ai/PublicContracts/` seams; do NOT inject AI-internal types directly; do NOT fork internals beyond the agreed boundary.</constraint>
+    <constraint source="FR-18">Remove `NotSupportedException` for the `record` + `notification` legs only; other dispositions unchanged.</constraint>
+    <constraint source="NFR-08 / ADR-032">Update tests in `tests/unit/Sprk.Bff.Api.Tests/`; feature-gated services use ADR-032 Null-Object; unconditionally-mapped endpoints have unconditional registration.</constraint>
+    <constraint source="root §10">Report publish-size (baseline ~49.63 MB incl. PDBs; ceiling ≤60 MB) + CVE scan; state Placement Justification in PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/notes/w5-ai-coordination.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-037-delivercomposite.md</file>
+    </files>
+    <patterns>
+      <pattern name="OutputRouter disposition routing" location="src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter/">
+        Route a disposition to its node executor; the `record`/`notification` legs currently throw — complete them via the agreed seam.
+      </pattern>
+      <pattern name="PublicContracts consumption" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/">
+        Consume the published facade for record/notification routing; never reach into internals.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `notes/w5-ai-coordination.md` (gate 050 output) — reconfirm the authorized boundary + the exact seams for record/notification routing.</step>
+    <step order="2">Run `/conflict-check` scoped to `Services/Ai/`; confirm no fresh overlapping PR since gate 050.</step>
+    <step order="3">Read `DispositionRoutability.cs` — locate the `record` + `notification` `NotSupportedException` legs and the surrounding routing switch.</step>
+    <step order="4">Implement the `record` disposition routing against the agreed seam (routes to the record-creating executor path — Event/Task consumed by 052). Implement the `notification` disposition routing (routes to the notification path — appnotification consumed by 052).</step>
+    <step order="5">Remove the `NotSupportedException` for both legs; keep any other unsupported dispositions unchanged.</step>
+    <step order="6">Update/add tests in `tests/unit/Sprk.Bff.Api.Tests/` covering both dispositions routing (ADR-038 KEEP-path categories; no `Mock&lt;HttpMessageHandler&gt;`/DI-registration/ctor-null tests).</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter OutputRouter` — confirm clean + green.</step>
+    <step order="8">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~49.63 MB baseline. Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH CVE.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff; `adr-check` against `spec.md` (ADR-013/032/037). Address Critical findings. Confirm `/conflict-check` clean before PR.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 051 ✅; confirm 052 unblocked. Update `current-task.md` (record the seam(s) consumed + publish-size delta; advance).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect DispositionRoutability.cs + PublicContracts + gate note</tool>
+    <tool name="edit">Complete record + notification routing</tool>
+    <tool name="bash">Build, test, publish-size, CVE scan</tool>
+    <tool name="conflict-check">Pre-PR overlap scan on Services/Ai/</tool>
+    <tool name="code-review">FULL-rigor gate</tool>
+    <tool name="adr-check">FULL-rigor gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter/DispositionRoutability.cs (UPDATED — record + notification legs routed, exceptions removed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (record + notification routing tests)</output>
+    <output type="docs">PR description: Placement Justification + publish-size delta + CVE result + seams consumed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No `NotSupportedException` remains for the `record` and `notification` dispositions in `DispositionRoutability.cs`.</criterion>
+    <criterion testable="true">Both dispositions route via the gate-050 PublicContracts seams; grep confirms no direct AI-internal type injection or unauthorized internal fork.</criterion>
+    <criterion testable="true">New/updated tests cover both dispositions routing and pass.</criterion>
+    <criterion testable="true">`dotnet build` clean; existing OutputRouter tests still green.</criterion>
+    <criterion testable="true">Publish-size delta reported (≤60 MB ceiling); no new HIGH CVE.</criterion>
+    <criterion testable="true">`/conflict-check` run clean before PR; Placement Justification in PR description.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the enabling step for 052 (fan-out) — keep it to routing capability. The actual `CreateEvent`/`CreateTask`/`CreateNotification` invocation wiring is task 052.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Blocked until gate 050 clears. Load all `&lt;knowledge&gt;&lt;files&gt;` incl. the gate note. Apply FULL rigor — Step 9.5 REQUIRED. BFF governance: publish-size + CVE + `/conflict-check` + Placement Justification. Consume seams; never fork internals.
+    </protocol>
+  </execution>
+</task>

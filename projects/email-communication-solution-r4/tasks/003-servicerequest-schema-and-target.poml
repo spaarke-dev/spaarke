@@ -1,0 +1,131 @@
+<task id="003" project="email-communication-solution-r4">
+  <metadata>
+    <title>Author `sprk_servicerequest` schema doc + wire it as an association target</title>
+    <phase>Wave 0 — Shared foundation (schema · ADR · server send-changes · retire OOB-email)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>012, 013</blocks>
+    <tags>dataverse, schema, docs</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Documentation authoring + additive wiring entries in existing `.cs` maps (no new mechanism, no new service). Extending existing regarding maps is modification-of-existing-surface; STANDARD per CLAUDE.md §8. The `.cs` edits are small additive dictionary/list entries, not logic changes.</rigor-reason>
+    <parallel-group>W0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-03</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Make `sprk_servicerequest` a first-class association target end-to-end. The entity already exists in Dataverse but has zero repo footprint — author its data-model doc and add it to the regarding machinery.
+
+    Two halves:
+    1. **Doc**: author `docs/data-model/sprk_servicerequest.md` documenting the entity (key columns, the `sprk_regardingservicerequest` lookup on `sprk_communication` created in task 001, its role as an association target).
+    2. **Wiring** (additive only — MUST NOT add a new regarding mechanism, per §11 + spec MUST NOT): add a `sprk_servicerequest` entry to
+       - `CommunicationService.RegardingLookupMap` (the outbound regarding-write map),
+       - `TODO_REGARDING_CATALOG` (the client-side catalog), and
+       - `IncomingAssociationResolver.RegardingFieldPriority` (the inbound resolution priority list),
+       so `sprk_servicerequest` resolves through the existing polymorphic regarding path exactly like matter/project/invoice.
+  </prompt>
+
+  <role>
+    Spaarke full-stack engineer fluent in the ADR-024 regarding family: `RegardingLookupMap`, `RegardingFieldPriority`, `PopulateResolverFieldsAsync`, `TODO_REGARDING_CATALOG`, and the `docs/data-model/` doc conventions.
+  </role>
+
+  <goal>
+    `docs/data-model/sprk_servicerequest.md` exists and documents the entity + its association-target role. `sprk_servicerequest` is resolvable end-to-end through the existing regarding machinery: `RegardingLookupMap`, `TODO_REGARDING_CATALOG`, and `RegardingFieldPriority` each have an additive `sprk_servicerequest` entry. Build clean; no new regarding mechanism introduced.
+  </goal>
+
+  <context>
+    <background>
+      R4 extends the Association Engine to eight targets (matter, project, invoice, service request, work assignment, event, contact, organization). `sprk_servicerequest` is one of two new targets (the other, `sprk_event`, is task 004). The entity is live in Dataverse but never documented or wired into Spaarke's regarding path. The `sprk_regardingservicerequest` lookup column is created by task 001; this task adds the doc + the code-side catalog/map/priority entries that make the lookup actually resolve.
+
+      Component Justification §11 + spec MUST NOT: extend the existing `RegardingResolver`/`RegardingLookupMap`/`TODO_REGARDING_CATALOG` — do NOT add a parallel mechanism.
+    </background>
+    <relevant-files>
+      <file>docs/data-model/sprk_servicerequest.md (NEW)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+      <file>docs/data-model/sprk_communication.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-03: `sprk_servicerequest` MUST be resolvable end-to-end through the regarding machinery (map + catalog + priority all wired).</constraint>
+    <constraint source="ADR-024">Extend the existing regarding family — additive entry in `RegardingLookupMap` + `RegardingFieldPriority` + `TODO_REGARDING_CATALOG`. Keep writing ADR-024 typed lookups + denormalized fields.</constraint>
+    <constraint source="project (§11 Component Justification)">MUST NOT add a new regarding mechanism, service, or abstraction. The three existing structures are extended with one entry each.</constraint>
+    <constraint source="project">The `sprk_regardingservicerequest` lookup column is created by task 001 — this task depends on it. Do NOT recreate the column.</constraint>
+    <constraint source="ADR-045">Task 005 codifies the Association Engine target contract; keep the new target consistent with it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/skills/docs-data-model/SKILL.md</file>
+      <file>docs/data-model/sprk_communication.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Regarding target extension" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs">
+        `RegardingLookupMap` (~lines 921-931 per spec) maps entity logical name → regarding lookup field. Add a `sprk_servicerequest` → `sprk_regardingservicerequest` entry. Mirror in `RegardingFieldPriority` (inbound priority) + `TODO_REGARDING_CATALOG` (client catalog).
+      </pattern>
+      <pattern name="Data-model doc authoring" location=".claude/skills/docs-data-model/SKILL.md">
+        Entity markdown: key columns, relationships, the lookup(s) referencing it, consumers. Follow existing `docs/data-model/*.md` shape.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `CommunicationService.cs` `RegardingLookupMap` (~921-931) + `IncomingAssociationResolver.cs` `RegardingFieldPriority` + `PopulateResolverFieldsAsync` to see the exact existing entry shape for one target (e.g. matter/invoice).</step>
+    <step order="2">Locate `TODO_REGARDING_CATALOG` (grep confirms it lives in both server + client surfaces) and identify the client entry shape.</step>
+    <step order="3">Verify `sprk_regardingservicerequest` column exists on `sprk_communication` (created by task 001) via Dataverse MCP `describe`. If absent, STOP — task 001 dependency not satisfied.</step>
+    <step order="4">Query `sprk_servicerequest` entity metadata via MCP `describe` — capture primary name column, key columns, and any status column, to document accurately.</step>
+    <step order="5">Author `docs/data-model/sprk_servicerequest.md`: entity overview, key columns, the `sprk_regardingservicerequest` lookup relationship from `sprk_communication`, and its role as association target #4. Cross-reference `sprk_communication.md`.</step>
+    <step order="6">Add the additive `sprk_servicerequest` entry to `RegardingLookupMap` (→ `sprk_regardingservicerequest`), `RegardingFieldPriority` (at the correct priority tier — mirror an existing target), and `TODO_REGARDING_CATALOG`.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` — confirm clean.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark task 003 ✅; confirm dependents 012/013 unblocked.</step>
+    <step order="9">Update `current-task.md` per task-execute: status → completed; record the wiring entries in Decisions Made.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect existing regarding maps + catalog</tool>
+    <tool name="dataverse-mcp">`describe` `sprk_servicerequest` + confirm the lookup column</tool>
+    <tool name="edit">Author the doc + add the three additive entries</tool>
+    <tool name="bash">`dotnet build` verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/data-model/sprk_servicerequest.md (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (UPDATED — `RegardingLookupMap` entry)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs (UPDATED — `RegardingFieldPriority` entry)</output>
+    <output type="code">`TODO_REGARDING_CATALOG` (UPDATED — `sprk_servicerequest` entry, server + client as applicable)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`docs/data-model/sprk_servicerequest.md` exists and documents the entity + the `sprk_regardingservicerequest` lookup + its association-target role.</criterion>
+    <criterion testable="true">`CommunicationService.RegardingLookupMap` maps `sprk_servicerequest` → `sprk_regardingservicerequest`.</criterion>
+    <criterion testable="true">`IncomingAssociationResolver.RegardingFieldPriority` includes `sprk_servicerequest` at a coherent priority tier.</criterion>
+    <criterion testable="true">`TODO_REGARDING_CATALOG` includes a `sprk_servicerequest` entry.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with no new errors/warnings.</criterion>
+    <criterion testable="true">No new regarding mechanism/service/abstraction introduced (only additive entries).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    `sprk_servicerequest` exists in Dataverse with zero repo footprint — this task gives it its first repo presence (doc + wiring). The lookup COLUMN is task 001's job; do not recreate it.
+
+    This is intentionally NOT a FULL-rigor task: the `.cs` edits are additive dictionary/list entries mirroring existing targets, not logic. If, during execution, resolving `sprk_servicerequest` requires more than additive entries (e.g., a special-case in `PopulateResolverFieldsAsync`), STOP and escalate — that would be scope beyond "extend existing".
+
+    Task 004 does the analogous wiring for `sprk_event` and also corrects the org target — kept separate because 004 touches BFF domain-match logic (FULL rigor) whereas this task is additive.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor per `&lt;rigor-hint&gt;` — Step 9.5 gates SKIPPED. If the wiring requires non-additive logic changes, escalate rather than expanding scope.
+    </protocol>
+  </execution>
+</task>

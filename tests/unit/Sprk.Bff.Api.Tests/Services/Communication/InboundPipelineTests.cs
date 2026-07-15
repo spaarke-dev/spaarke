@@ -18,6 +18,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
@@ -219,14 +220,15 @@ public class InboundPipelineTests
             new IncomingAssociationResolver(
                 _dataverseServiceMock.Object,
                 _dataverseServiceMock.Object,
-                _graphClientFactoryMock.Object,
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
+            new GraphMessageNormalizer(),
             _attachmentProcessorMock.Object,
             new GraphMessageToEmlConverter(),
             null!, // SpeFileStore — not used when ArchiveContainerId is null
             CreateMockJobSubmissionService(),
             Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(),
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
             CreateConfiguration(),
             Mock.Of<ILogger<IncomingCommunicationProcessor>>());

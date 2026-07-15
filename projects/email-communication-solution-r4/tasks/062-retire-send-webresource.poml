@@ -1,0 +1,128 @@
+<task id="062" project="email-communication-solution-r4">
+  <metadata>
+    <title>Retire `sprk_communication_send.js` webresource (~1,150 LOC × 2 copies) after ribbon audit</title>
+    <phase>Wave 6 — Client caller migration + retirements</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>060, 061</dependencies>
+    <blocks></blocks>
+    <tags>dataverse, ribbon, deletion</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Deletes a production-shipped Dataverse webresource (~2.3K LOC across two copies) + its Dataverse record and re-points ribbons. Incorrect audit could orphan a production ribbon entry point / break send. `deletion` + `ribbon` tags trigger FULL rigor; must confirm every entry surface is served by the W4 Communication Code Page before deleting.</rigor-reason>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs after 060 + 061 land (all in-app send surfaces migrated). Touches only ribbon/webresource artifacts — no overlap with other active tasks. Sequenced after the two migration tasks so no send surface still depends on the webresource.</parallel-reason>
+    <fr-refs>FR-22</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Retire the legacy `sprk_communication_send.js` webresource — the original client-side email-send implementation — now that all in-app send surfaces route through the canonical composer (tasks 060/061) and the channel-aware Communication Code Page (W4). Per empirical finding #6, the source exists in TWO copies (~1,150 LOC each, ~2.3K total):
+    - `src/client/webresources/js/sprk_communication_send.js`
+    - `infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_communication_send.js`
+
+    **AUDIT FIRST (gate).** Before deleting anything, use the `ribbon-edit` skill (solution export/import) to enumerate EVERY Dataverse entry point that references the webresource — ribbon buttons, command bars, form scripts, workflows — for `sprk_communication` views/forms/subgrids and any other entity. For each entry point, confirm it has been replaced by the W4 Code Page / canonical send surface (`Xrm.Navigation.navigateTo` to the Communication Code Page). If ANY entry point is NOT replaced, STOP, file a remediation note, and do not delete.
+
+    Once the audit verdict is "safe to proceed": re-point any residual ribbon references to the Code Page, delete both source copies + the Dataverse web resource record, re-import the ribbon solution, and verify send still works from every entry surface (ribbon "+ New Email", Communication views, subgrids).
+  </prompt>
+
+  <role>
+    Dataverse customization specialist authoritative on ribbon/command-bar XML, web resource lifecycle (source file vs Dataverse record), and the W4 Communication Code Page entry surfaces. Uses the `ribbon-edit` and `dataverse-deploy` skills.
+  </role>
+
+  <goal>
+    Both `sprk_communication_send.js` source copies and the Dataverse web resource record are deleted; no ribbon/command-bar/form-script references the webresource; all send entry surfaces are served by the canonical Code Page and verified working in dev. A short audit note in `notes/` records the enumerated entry points + replacement status + verdict.
+  </goal>
+
+  <context>
+    <background>
+      R4 consolidation of R3 Wave 6 tasks 080 (ribbon audit), 081/082 (delete source copies), 083 (delete Dataverse record). The webresource was the pre-composer send path and self-bootstrapped MSAL — retiring it removes an ADR-028 auth-drift point and ~2.3K LOC. The audit is the safety gate: deleting a still-referenced webresource orphans a production ribbon flow.
+    </background>
+    <relevant-files>
+      <file>src/client/webresources/js/sprk_communication_send.js (DELETE — copy 1)</file>
+      <file>infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_communication_send.js (DELETE — copy 2)</file>
+      <file>infrastructure/dataverse/ribbon/EmailRibbons/ (ribbon definitions to inspect + re-point)</file>
+      <file>src/client/code-pages/ (W4 Communication Code Page — replacement entry surface)</file>
+      <file>projects/email-communication-solution-r4/notes/062-webresource-entry-point-audit.md (NEW — audit output)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-22">Audit MUST enumerate every Dataverse entry point referencing `sprk_communication_send.js` and confirm each is replaced by the Code Page BEFORE deletion; webresource removed, ribbons re-pointed, send works from all entry surfaces.</constraint>
+    <constraint source="ADR-045">No self-bootstrapped MSAL client-send path may remain after retirement; all sends route through the canonical composer / Code Page.</constraint>
+    <constraint source="project">If any entry point is unreplaced, STOP and file remediation — do not delete.</constraint>
+    <constraint source="project">Delete BOTH source copies + the Dataverse web resource record (source-file delete alone does not remove the platform record).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/ribbon-webresource-retirement</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/x-email-communication-solution-r3/tasks/080-audit-dataverse-entry-points-for-webresource.poml</file>
+    </files>
+    <patterns>
+      <pattern name="Ribbon audit gate" location="projects/x-email-communication-solution-r3/tasks/080-audit-dataverse-entry-points-for-webresource.poml">
+        Enumerate every entry point; mark ✅ replaced / ⚠ not-replaced; produce an unambiguous verdict; block deletion if any ⚠.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Context check">Check context usage; handoff + stop if &gt; 70%.</step>
+    <step order="2" name="Load knowledge">Read spec FR-22, empirical finding #6, ribbon-edit + dataverse-deploy skills, and R3 task 080.</step>
+    <step order="3" name="Source-level grep">Grep the repo for `sprk_communication_send` across `*.js`, `*.xml`, `*.json`, ribbon definitions; list every match with file + context.</step>
+    <step order="4" name="Enumerate ribbon entry points">Use `ribbon-edit` (solution export) to enumerate live ribbon buttons / command bars / form scripts for `sprk_communication` (views, forms, subgrids) and any other entity referencing the webresource.</step>
+    <step order="5" name="Confirm replacement">For each entry point, confirm it is served by the W4 Communication Code Page (`navigateTo` to the Code Page / canonical send). Cross-check the W4 ribbon-button + Form Component Control deployment.</step>
+    <step order="6" name="Write audit + verdict">Author `notes/062-webresource-entry-point-audit.md`: every entry point, replacement status (✅/⚠), and an unambiguous verdict. If ANY ⚠, STOP and file remediation; do not proceed to deletion.</step>
+    <step order="7" name="Re-point residuals">If any ribbon still references the webresource, re-point it to the Code Page via `ribbon-edit`; re-import the ribbon solution.</step>
+    <step order="8" name="Delete sources + record">Delete both source copies (`rm`). Delete the Dataverse web resource record via `dataverse-deploy` / PAC. Re-import the solution.</step>
+    <step order="9" name="Verify send">Verify send works from every entry surface in dev (ribbon "+ New Email", Communication views, subgrids). Grep repo-wide: `sprk_communication_send` returns zero.</step>
+    <step order="9.5" name="FULL quality gates">Invoke `code-review` on the diff (ribbon XML + deletions); invoke `adr-check` (confirm no self-bootstrapped MSAL path remains, ADR-045/028). Address Critical findings.</step>
+    <step order="10" name="Update tracking">Mark task 062 ✅ in `tasks/TASK-INDEX.md`; report LOC removed (~2.3K) in PR description.</step>
+    <step order="11" name="Reset state">Update `current-task.md`: status → completed; advance; record decisions.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Enumerate source-level references</tool>
+    <tool name="ribbon-edit">Inspect + re-point live ribbon state</tool>
+    <tool name="dataverse-deploy">Solution export/import; delete web resource record</tool>
+    <tool name="bash">Delete source files; verification greps</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/webresources/js/sprk_communication_send.js (DELETED)</output>
+    <output type="code">infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_communication_send.js (DELETED)</output>
+    <output type="code">Dataverse web resource record `sprk_communication_send.js` (DELETED via solution)</output>
+    <output type="notes" ephemeral="true">projects/email-communication-solution-r4/notes/062-webresource-entry-point-audit.md (audit + verdict)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit note enumerates every Dataverse entry point referencing `sprk_communication_send.js` with explicit ✅/⚠ status and an unambiguous verdict.</criterion>
+    <criterion testable="true">Both source copies deleted; the Dataverse web resource record deleted; repo-wide grep `sprk_communication_send` returns zero.</criterion>
+    <criterion testable="true">No ribbon/command-bar/form-script references the webresource after re-import.</criterion>
+    <criterion testable="true">Send works from every entry surface in dev (ribbon "+ New Email", Communication views, subgrids).</criterion>
+    <criterion testable="true">No self-bootstrapped MSAL client-send path remains (ADR-045/028).</criterion>
+    <criterion testable="true">PR description reports ~2.3K LOC removed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Absorbed from R3 tasks 080–083. Empirical finding #6: two copies, ~1,150 LOC each. The audit is a HARD gate — under-auditing breaks production; over-auditing is acceptable.
+
+    Dataverse/ribbon task — no BFF surface touched; no publish-size / CVE obligations. `/conflict-check` optional (no BFF PR).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 REQUIRED. The Step 6 audit verdict is the binding gate; do NOT delete if any entry point is unreplaced.
+    </protocol>
+  </execution>
+</task>

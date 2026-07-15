@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@azure/msal-browser": "^3.10.0",
+    "@spaarke/auth": "file:../shared/Spaarke.Auth",
     "@fluentui/react-components": "^9.54.0",
     "@fluentui/react-icons": "^2.0.245",
     "@microsoft/office-js": "^1.1.89",

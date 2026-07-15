@@ -5,15 +5,17 @@
  * endpoint accepts the request shape defined in
  * `Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs`.
  *
- * IMPORTANT — `attachmentDocumentIds` semantics
- * ---------------------------------------------
- * The BFF field `AttachmentDocumentIds` is forwarded into
- * `CommunicationService.DownloadAndBuildAttachmentsAsync(...)` which calls
- * `SpeFileStore.GetFileMetadataAsync(driveId, itemId)` — i.e. the BFF
- * currently expects **SPE driveItem IDs**, not `sprk_document` Dataverse
- * GUIDs (despite the field name). Callers in the UI typically have the
- * `sprk_document` GUID at hand; the responsibility for translating that to
- * a driveItem id lives upstream of this wrapper (see DocumentEmailWizard).
+ * IMPORTANT — `attachmentDocumentIds` semantics (CORRECTED 2026-07-14, R4 W0)
+ * ----------------------------------------------------------------------------
+ * `AttachmentDocumentIds` correctly carries Dataverse **`sprk_document`
+ * GUIDs** — email attachments are always tracked Documents; the server
+ * resolves each Document to its backing SPE File internally. The prior R3
+ * assessment ("the BFF expects raw SPE driveItem IDs, not sprk_document
+ * GUIDs") was a misread of `DownloadAndBuildAttachmentsAsync` and has been
+ * retracted by the project owner (see `projects/email-communication-solution-r4/
+ * current-task.md` "Key W0 decisions" + `[[email-r4-attachment-id-semantics]]`).
+ * `DocumentEmailWizard` sending `sprk_document` GUIDs here is correct
+ * behavior, not a bug — **do not "fix" it and do not rename this field.**
  *
  * This wrapper is intentionally a thin pass-through and does no translation.
  *
@@ -24,6 +26,21 @@
  *   - Returns `{ communicationId }` extracted from the BFF's
  *     `SendCommunicationResponse` (which carries additional fields the UI
  *     does not currently consume).
+ *
+ * `SendCommunicationError` (task 020 boundary note)
+ * --------------------------------------------------
+ * Task 022 (FR-13, "sendCommunication() refinements") owns the full typed
+ * error contract per design §5.9 / ADR-019. Task 020 (`<EmailComposer />`)
+ * depends on `SendCommunicationError` existing here for its `send()` error
+ * contract and landed first, so this file additively defines the minimal
+ * ProblemDetails-parsing error class task 020 needs — per the task 020 POML's
+ * own guidance ("if 022 has not landed when this task runs, import against
+ * the interface and coordinate ... define the import boundary cleanly").
+ * Task 022 should verify/extend this shape rather than redefining it.
+ * NOTE: `attachmentDocumentIds` is NOT renamed here — R4 W0 (owner decision,
+ * 2026-07-14) confirmed the existing field name is correct (it carries
+ * Dataverse Document GUIDs, not raw driveItem ids as R3 assumed); task 022's
+ * FR-13 rename premise is stale and should not be reintroduced.
  */
 
 import type { AuthenticatedFetchFn } from './EntityCreationService';
@@ -68,8 +85,9 @@ export interface SendCommunicationOptions {
   /** Body content format. Default `'html'`. */
   bodyFormat?: CommunicationBodyFormat;
   /**
-   * SPE driveItem ids for files to attach. See file-level note above —
-   * these are **driveItem ids**, not `sprk_document` GUIDs. Max 150
+   * `sprk_document` GUIDs for files to attach. See file-level note above —
+   * despite historical confusion, this field correctly expects Dataverse
+   * Document GUIDs (the server resolves each to its SPE File). Max 150
    * attachments, 35 MB total (enforced server-side).
    */
   attachmentDocumentIds?: string[];
@@ -89,6 +107,67 @@ export interface SendCommunicationOptions {
 export interface SendCommunicationResult {
   /** GUID of the created `sprk_communication` record. */
   communicationId: string;
+}
+
+/**
+ * Typed error thrown by {@link sendCommunication} on any non-2xx response.
+ * Parses the BFF's RFC 7807 ProblemDetails body (ADR-019) so callers can
+ * branch on `status`/`code` instead of string-matching `message`.
+ *
+ * Canonical taxonomy note (task 020 / design §5.8-§5.9): `code` may also
+ * carry one of the composer's own canonical validation codes
+ * (`FROM_REQUIRED`, `FROM_NOT_APPROVED`) when the BFF rejects a send for a
+ * sender-identity reason the client cannot pre-validate — see
+ * `EmailComposer.types.ts` `ValidationErrorCode`.
+ */
+export class SendCommunicationError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly detail: string;
+  readonly correlationId?: string;
+
+  constructor(status: number, code: string, detail: string, correlationId?: string) {
+    super(`sendCommunication failed (${status}): ${detail}`);
+    this.name = 'SendCommunicationError';
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+    this.correlationId = correlationId;
+    // Restore the prototype chain (extending built-ins across ES5/ts-jest
+    // transpilation targets can otherwise break `instanceof` checks).
+    Object.setPrototypeOf(this, SendCommunicationError.prototype);
+  }
+}
+
+/** Shape of a parsed ProblemDetails body (RFC 7807 + BFF `errorCode`/`correlationId` extensions). */
+interface IProblemDetailsBody {
+  title?: string;
+  detail?: string;
+  status?: number;
+  errorCode?: string;
+  code?: string;
+  correlationId?: string;
+}
+
+/** Parses a non-OK Response into `SendCommunicationError` constructor args. */
+async function parseProblemDetails(
+  response: Response
+): Promise<{ code: string; detail: string; correlationId?: string }> {
+  try {
+    const ct = response.headers.get('content-type') ?? '';
+    if (ct.includes('application/problem+json') || ct.includes('application/json')) {
+      const body = (await response.json()) as IProblemDetailsBody;
+      return {
+        code: body.errorCode ?? body.code ?? `HTTP_${response.status}`,
+        detail: body.detail ?? body.title ?? `HTTP ${response.status}`,
+        correlationId: body.correlationId,
+      };
+    }
+    const text = await response.text();
+    return { code: `HTTP_${response.status}`, detail: text || `HTTP ${response.status}` };
+  } catch {
+    return { code: `HTTP_${response.status}`, detail: `HTTP ${response.status}` };
+  }
 }
 
 /** Dependencies for the wrapper (kept explicit for testability). */
@@ -125,21 +204,6 @@ function resolveUrl(base: string | undefined): string {
   return base.replace(/\/+$/, '') + path;
 }
 
-/** Attempt to extract a meaningful error message from a non-OK response. */
-async function extractErrorMessage(response: Response): Promise<string> {
-  try {
-    const ct = response.headers.get('content-type') ?? '';
-    if (ct.includes('application/problem+json') || ct.includes('application/json')) {
-      const body = (await response.json()) as { title?: string; detail?: string };
-      return body.detail ?? body.title ?? `HTTP ${response.status}`;
-    }
-    const text = await response.text();
-    return text || `HTTP ${response.status}`;
-  } catch {
-    return `HTTP ${response.status}`;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // sendCommunication
 // ---------------------------------------------------------------------------
@@ -159,7 +223,7 @@ async function extractErrorMessage(response: Response): Promise<string> {
  *     subject: 'Documents for review',
  *     body: '<p>Please see attached.</p>',
  *     bodyFormat: 'html',
- *     attachmentDocumentIds: ['<driveItemId-1>', '<driveItemId-2>'],
+ *     attachmentDocumentIds: ['<sprk_document-guid-1>', '<sprk_document-guid-2>'],
  *     associations: [{ entityType: 'sprk_matter', entityId: matterId }],
  *     sendMode: 'sharedMailbox',
  *   },
@@ -213,8 +277,8 @@ export async function sendCommunication(
   });
 
   if (!response.ok) {
-    const message = await extractErrorMessage(response);
-    throw new Error(`sendCommunication failed (${response.status}): ${message}`);
+    const { code, detail, correlationId } = await parseProblemDetails(response);
+    throw new SendCommunicationError(response.status, code, detail, correlationId);
   }
 
   // The BFF response (`SendCommunicationResponse`) carries multiple fields;

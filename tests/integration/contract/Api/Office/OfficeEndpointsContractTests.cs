@@ -608,6 +608,14 @@ public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
+        // Task 073 - lets tests exercise the unauthenticated path (RequireAuthorization /
+        // OfficeAuthFilter). Requests that do NOT send this header authenticate as usual,
+        // so existing tests are unaffected.
+        if (Request.Headers.ContainsKey("X-Test-Unauthenticated"))
+        {
+            return Task.FromResult(AuthenticateResult.Fail("Test: unauthenticated caller"));
+        }
+
         var claims = new[]
         {
             new Claim("oid", "test-user-oid"),

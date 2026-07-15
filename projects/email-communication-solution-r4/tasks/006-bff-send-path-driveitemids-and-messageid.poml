@@ -1,0 +1,140 @@
+<task id="006" project="email-communication-solution-r4">
+  <metadata>
+    <title>BFF send-path — `AttachmentDriveItemIds` non-breaking rename + `Internet-Message-Id` / `In-Reply-To` capture</title>
+    <phase>Wave 0 — Shared foundation (schema · ADR · server send-changes · retire OOB-email)</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>001, 005</dependencies>
+    <blocks>012, 022, 060</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.cs` in `Sprk.Bff.Api` — non-breaking DTO contract change + post-send Graph read + Dataverse stamp on the live send path. FULL per CLAUDE.md §8; Step 9.5 gates + publish-size + CVE + placement justification required.</rigor-reason>
+    <parallel-group>W0-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-06</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Two BFF send-path changes, both required by FR-06:
+
+    1. **Non-breaking `AttachmentDriveItemIds` rename.** Add `public string[]? AttachmentDriveItemIds { get; init; }` as the canonical attachment field on `SendCommunicationRequest`; mark the existing `AttachmentDocumentIds` `[Obsolete("Use AttachmentDriveItemIds")]`; normalize the two into one internal list at the entry of `CommunicationService.SendAsync()` (canonical wins when both set; alias use logs a deprecation warning). **Mirror the R3 task 002 implementation EXACTLY** — read `projects/x-email-communication-solution-r3/tasks/002-bff-dto-add-attachmentdriveitemids.poml` and apply the same pattern (obsolete attribute + scoped `#pragma warning disable CS0618` around the normalization read + structured warnings). Values are Microsoft Graph `driveItem` IDs, NOT `sprk_document` GUIDs — XML docs must say so.
+
+    2. **Thread-id capture.** After a successful send, capture the real RFC-2822 `Internet-Message-Id` from the Graph-sent message and stamp `sprk_internetmessageid` on the `sprk_communication` record. For `reply`/`forward` sends, stamp `sprk_inreplyto` with the parent message's `Internet-Message-Id`. Capture is best-effort and MUST NOT fail the send (NFR-06). These columns (task 001) feed the W1 thread-continuity rung (task 012).
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer authoritative on `Services/Communication/` — `CommunicationService.SendAsync()`, the Graph `SendMail`/OBO path, and the `sprk_communication` write. Familiar with ADR-010 (`CommunicationModule` DI), ADR-019 (ProblemDetails), ADR-028 (central credential), and `.claude/constraints/bff-extensions.md`.
+  </role>
+
+  <goal>
+    `SendCommunicationRequest` exposes canonical `AttachmentDriveItemIds` + obsolete `AttachmentDocumentIds`; `SendAsync()` normalizes both at entry (canonical wins + deprecation warning). Post-send, `sprk_internetmessageid` is stamped on the record; `reply`/`forward` also stamp `sprk_inreplyto`. Capture failures are non-fatal. Build clean; existing + new Communication tests pass; publish-size + CVE reported; placement justification stated.
+  </goal>
+
+  <context>
+    <background>
+      Empirical finding #3: `SendCommunicationRequest.cs` currently exposes ONLY `AttachmentDocumentIds`, a misleading name (values are Graph `driveItem` IDs). Empirical finding #4: `CommunicationService.cs` does NOT capture `Internet-Message-Id`. R3 designed the attachment rename (task 002, never executed); R4 executes it here AND adds the thread-id capture in the same send-path task since both edit `SendAsync()`.
+
+      The rename is non-breaking (FR-06 / NFR-05): both fields accepted; R4 does NOT delete the alias (a later release removes it after callers migrate). Task 022 (client) adopts `attachmentDriveItemIds`; task 060 migrates DocumentEmailWizard (which ships wrong IDs today). The thread-id capture feeds task 012's rung-1 thread-continuity matching.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>projects/x-email-communication-solution-r3/tasks/002-bff-dto-add-attachmentdriveitemids.poml</file>
+      <file>projects/x-email-communication-solution-r3/tasks/003-bff-internet-message-id-capture.poml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project (FR-06 / NFR-05)">Non-breaking: BOTH `AttachmentDriveItemIds` and `AttachmentDocumentIds` MUST be accepted. Do NOT delete the alias in R4. Existing callers compile + send unchanged.</constraint>
+    <constraint source="project">Mapping rule: alias-only → copy to canonical + deprecation warning; both set → canonical wins + warning. Mirror R3 task 002 exactly (scoped `#pragma warning disable CS0618`).</constraint>
+    <constraint source="project (NFR-06)">`Internet-Message-Id` / `In-Reply-To` capture is BEST-EFFORT — a capture/stamp failure MUST NOT fail the send. Wrap in try/catch, log, proceed.</constraint>
+    <constraint source="ADR-010">Communication services register via `CommunicationModule` only — add no DI registration outside it.</constraint>
+    <constraint source="ADR-028">Use the injected central `TokenCredential` / `IGraphClientFactory` for the post-send Graph read — MUST NOT `new` a credential or `ConfidentialClientApplication`.</constraint>
+    <constraint source="ADR-019">No new error path — normalize input at `SendAsync()` entry; validation failures stay ProblemDetails.</constraint>
+    <constraint source="ADR-045">Task 005's ADR codifies the canonical send contract — confirm this task aligns (canonical attachment field + thread-id stamping).</constraint>
+    <constraint source="project (§10)">Load `.claude/constraints/bff-extensions.md`; state Placement Justification in PR; report publish-size delta (baseline ~49.63 MB incl. PDBs, ≈0 expected); confirm no new HIGH CVE; run `/conflict-check` before PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+      <file>projects/x-email-communication-solution-r3/tasks/002-bff-dto-add-attachmentdriveitemids.poml</file>
+      <file>projects/x-email-communication-solution-r3/tasks/003-bff-internet-message-id-capture.poml</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="DTO field obsoletion (non-breaking)" location="projects/x-email-communication-solution-r3/tasks/002-bff-dto-add-attachmentdriveitemids.poml">
+        Mark old field `[Obsolete("Use X")]`; keep accepting it; normalize at single entry point; scoped `#pragma warning disable CS0618` around the read; structured deprecation warning on use.
+      </pattern>
+      <pattern name="Best-effort post-send Graph read" location="projects/x-email-communication-solution-r3/tasks/003-bff-internet-message-id-capture.poml">
+        After `SendMail`, fetch the sent message's `internetMessageId` via Graph (using the injected client); stamp Dataverse; try/catch so failure never blocks the send.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the R3 task 002 + 003 POMLs in full — this task executes their combined intent. Load `.claude/constraints/bff-extensions.md`.</step>
+    <step order="2">Read `SendCommunicationRequest.cs` (confirm only `AttachmentDocumentIds` present) + `CommunicationService.SendAsync()` (locate entry point + post-send site + the `sprk_communication` write).</step>
+    <step order="3">Edit `SendCommunicationRequest.cs`: add `AttachmentDriveItemIds` (init-only `string[]?`, XML doc "Microsoft Graph driveItem IDs — NOT `sprk_document` GUIDs; canonical per ADR-045"); mark `AttachmentDocumentIds` `[Obsolete("Use AttachmentDriveItemIds.")]` with updated XML doc.</step>
+    <step order="4">Edit `SendAsync()` entry: add the normalization block (alias-only → copy + warning; both set → canonical + warning) inside a scoped `#pragma warning disable CS0618`; replace downstream reads of `AttachmentDocumentIds` with the canonical local.</step>
+    <step order="5">Edit `SendAsync()` post-send: after a successful `SendMail`, fetch the sent message's `internetMessageId` via the injected Graph client; stamp `sprk_internetmessageid` on the record. If `mode` is `reply`/`forward`, resolve the parent's `Internet-Message-Id` and stamp `sprk_inreplyto`. Wrap the whole capture in try/catch — log + proceed on failure (NFR-06).</step>
+    <step order="6">Add/update unit tests in `tests/unit/Sprk.Bff.Api.Tests/`: (a) alias-only path logs deprecation + sends; (b) both-set path prefers canonical + warns; (c) post-send stamps `sprk_internetmessageid`; (d) capture failure does NOT throw from `SendAsync` (per NFR-08 test obligation).</step>
+    <step order="7">`dotnet build src/server/api/Sprk.Bff.Api/` (clean, no warnings outside the scoped pragma) + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication` (green).</step>
+    <step order="8">`dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~49.63 MB. Expected ≈ 0.</step>
+    <step order="9">`dotnet list package --vulnerable --include-transitive` — confirm no new HIGH CVE.</step>
+    <step order="9.5">FULL-rigor gates: `/conflict-check` (BFF PR gate); `code-review` on the diff; `adr-check` against `spec.md` (ADR-010/019/028/045). Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 006 ✅; confirm dependents 012/022/060 unblocked.</step>
+    <step order="11">Update `current-task.md` per task-execute: status → completed; record decisions (canonical-prefer-with-warning; best-effort capture).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect DTO + service + R3 exemplar POMLs</tool>
+    <tool name="edit">Add canonical field + obsolete alias + normalization + thread-id capture + tests</tool>
+    <tool name="bash">Build, test, publish-size, CVE scan</tool>
+    <tool name="conflict-check">BFF PR gate at 9.5</tool>
+    <tool name="code-review">FULL-rigor gate at 9.5</tool>
+    <tool name="adr-check">FULL-rigor gate at 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs (UPDATED — canonical field + obsolete alias)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (UPDATED — normalization shim + thread-id capture)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (attachment normalization + thread-id stamp + non-fatal-capture tests)</output>
+    <output type="docs">PR description with Placement Justification + publish-size delta (per §10)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SendCommunicationRequest.AttachmentDriveItemIds` exists (init-only `string[]?`) with XML doc stating "Microsoft Graph driveItem IDs".</criterion>
+    <criterion testable="true">`AttachmentDocumentIds` has `[Obsolete("Use AttachmentDriveItemIds...")]`; both fields are accepted (non-breaking).</criterion>
+    <criterion testable="true">`SendAsync()` normalizes both into one canonical list; alias-only + both-set paths each log the correct warning.</criterion>
+    <criterion testable="true">Post-send stamps `sprk_internetmessageid`; `reply`/`forward` also stamp `sprk_inreplyto`.</criterion>
+    <criterion testable="true">A capture/stamp failure does NOT fail the send (test-verified; NFR-06).</criterion>
+    <criterion testable="true">Post-send Graph read uses the injected credential/client — no `new` credential (ADR-028).</criterion>
+    <criterion testable="true">Build clean (no warnings outside the scoped pragma); Communication tests pass; publish-size delta + CVE reported; `/conflict-check` run; Placement Justification in PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Executes the combined intent of R3 tasks 002 (attachment rename) + 003 (message-id capture) in one send-path task — both edit `SendAsync()`, so splitting them would double the diff surface on the same method. Read both R3 POMLs first.
+
+    R4 does NOT delete `AttachmentDocumentIds` — the alias stays until callers migrate (later release). Task 060 fixes DocumentEmailWizard (line 494) which currently ships `sprk_document` GUIDs; the deprecation warning fires from there until then.
+
+    `sprk_internetmessageid` + `sprk_inreplyto` are text columns from task 001 (both String 255 indexed). Confirm they exist before stamping (task 001 dependency).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor per `&lt;rigor-hint&gt;` — Step 9.5 gates (conflict-check + code-review + adr-check) REQUIRED. Per §10: publish-size delta + CVE + Placement Justification all reportable in the PR.
+    </protocol>
+  </execution>
+</task>

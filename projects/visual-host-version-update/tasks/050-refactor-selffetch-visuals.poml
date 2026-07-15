@@ -1,0 +1,42 @@
+<task id="VHVU-050" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Refactor 3 self-fetch visuals to props-in + split ViewDataService</title>
+    <status>complete</status>
+    <phase>B3</phase>
+    <estimated-effort>1-1.5 days</estimated-effort>
+    <tags>refactor, visuals, dataverse, pcf</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+    <dependencies>VHVU-041</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>CalendarVisual, DueDateCard, and DueDateCardList currently fetch their own data (DueDateCardList reaches window.Xrm directly). To move them into the presentational @spaarke/visuals, invert the data flow: they accept already-fetched data via props, and a PCF-side container owns the fetch + FetchXML building. Behavior-preserving — same data rendered, drill-through unchanged.</prompt>
+  <role>Front-end engineer refactoring data-coupled components (root-cause, brownfield)</role>
+  <goal>The three visuals contain no webApi/window.Xrm/FetchXML; a PCF container fetches and passes data as props; ViewDataService is split (pure FetchXML helpers → @spaarke/visuals, WebAPI executors → PCF); rendered output + drill-through unchanged.</goal>
+  <constraints>
+    <constraint source="project">Behavior-preserving: change WHERE the fetch happens, not WHAT renders (owner-confirmed).</constraint>
+    <constraint source="NFR-05">Moved visuals must be free of Xrm/WebAPI/FetchXML.</constraint>
+    <constraint source="design">Use EventDueDateCard (already props-only) as the shape template.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/VisualHost/control/components/CalendarVisual.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/DueDateCard.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/DueDateCardList.tsx</file>
+      <file>src/client/pcf/VisualHost/control/services/ViewDataService.ts</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Split ViewDataService: pure FetchXML-string helpers (injectContextFilter, injectRequiredAttributes, applyMaxItems, substituteParameters) → @spaarke/visuals; WebAPI executors → PCF.</step>
+    <step id="2">Add a PCF-side container that fetches for Calendar/DueDate visuals and passes data as props.</step>
+    <step id="3">Refactor the three visuals to props-in (remove webApi + window.Xrm); move them into @spaarke/visuals.</step>
+    <step id="4">Add/adjust unit tests for the container + the now-pure visuals.</step>
+    <step id="5">Verify rendered data + drill-through are unchanged in dev.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>The three visuals contain no data-access calls; live in @spaarke/visuals.</criterion>
+    <criterion>PCF container owns the fetch; behavior unchanged.</criterion>
+    <criterion>ViewDataService split cleanly (pure vs executor).</criterion>
+  </acceptance-criteria>
+</task>

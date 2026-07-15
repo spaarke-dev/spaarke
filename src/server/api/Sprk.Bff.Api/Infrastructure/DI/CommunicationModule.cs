@@ -1,6 +1,7 @@
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -23,8 +24,21 @@ public static class CommunicationModule
         services.AddSingleton<EmlGenerationService>();
         services.AddSingleton<GraphMessageToEmlConverter>();
         services.AddSingleton<MailboxVerificationService>();
+
+        // Association Engine (ADR-045 / FR-09): the pure Graph→envelope boundary mapper + the
+        // envelope-only resolver. Both unconditional (consumed unconditionally by the inbound
+        // processor per ADR-032; no feature gate). Rung adapters are composed inside the resolver,
+        // so no per-rung registrations here (ADR-010 minimalism).
+        services.AddSingleton<GraphMessageNormalizer>();
         services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();
+
+        // Direction-agnostic enrichment orchestrator (ADR-045 / FR-08). Invoked by BOTH the inbound
+        // processor and the outbound send path so received and sent communications get identical
+        // treatment. Registered UNCONDITIONALLY (consumed unconditionally by both callers per ADR-032;
+        // no feature gate — no Null-Object peer required). Singleton mirrors IncomingCommunicationProcessor,
+        // which already injects the scoped IPostUploadIndexingEnqueuer via the same pattern.
+        services.AddSingleton<ICommunicationEnrichmentService, CommunicationEnrichmentService>();
 
         // Job handler: processes incoming email notifications from Graph webhooks (Task 072)
         // Extracts message details from Graph, creates sprk_communication record, handles attachments.

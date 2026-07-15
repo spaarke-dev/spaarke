@@ -135,7 +135,11 @@ public static class EndpointMappingExtensions
         // ComposeModule.AddComposeModule (called from Program.cs). R1 has no feature gates.
         app.MapComposeEndpoints();
 
-        app.MapEmailEndpoints();
+        // MapEmailEndpoints removed (email-communication-solution-r4 task 007, DEC-2/FR-07):
+        // the legacy OOB-`email`-activity subsystem (`/api/v1/emails/*`, the Dataverse
+        // `PrimaryEntityName=="email"` webhook, and the self-built ConfidentialClientApplication
+        // in EmailAssociationService) is retired. Inbound email is 100% Graph via
+        // Services/Communication/IncomingCommunicationProcessor. See ADR-045.
         app.MapOfficeEndpoints();
         // smart-todo-decoupling-r3 task 070a — Office-scoped sprk_communication lookups
         // for Outlook taskpane (Create To Do ribbon + linked-todos banner).

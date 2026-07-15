@@ -1,0 +1,139 @@
+<task id="071" project="email-communication-solution-r4">
+  <metadata>
+    <title>Subscription resilience — lifecycle-notification + `delta`-query reconciliation backstop in `GraphSubscriptionManager`</title>
+    <phase>Wave 7 — Microsoft hardening + auth + index</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies></dependencies>
+    <blocks></blocks>
+    <tags>bff-api, graph</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Adds a Microsoft-required subscription-resilience mechanism (lifecycle notifications + `delta` reconciliation) to a core BFF background service; missed-event handling has data-integrity implications for the inbound pipeline. `bff-api` + `graph` tags and new service logic trigger FULL rigor; must respect ADR-028 (central Graph auth) and BFF §10 governance.</rigor-reason>
+    <parallel-group>W7</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `GraphSubscriptionManager` + a reconciliation service under `Services/Communication/` — disjoint from other W7 tasks (add-in, Office endpoints, index config). Runs anytime after W0.</parallel-reason>
+    <fr-refs>FR-24</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Add the Microsoft-required belt-and-suspenders subscription resilience to `GraphSubscriptionManager`:
+
+    1. **Lifecycle-notification subscription** — subscribe to and handle Graph subscription lifecycle notifications (`reauthorizationRequired`, `subscriptionRemoved`, `missed`). On `reauthorizationRequired`/`subscriptionRemoved`, re-create/renew the subscription; on `missed`, trigger reconciliation.
+
+    2. **`delta`-query reconciliation backstop** — add a periodic `delta`-query reconciliation over the monitored mail folder that catches messages missed between notifications (today only partial polling backup exists, per R-5). Reconciliation feeds any newly-discovered messages into the same `IncomingCommunicationProcessor` path (idempotent — must not double-process already-captured messages; key on `internetMessageId`/Graph message id).
+
+    This closes the gap where a dropped/expired subscription silently loses inbound communications. The reconciliation must be demonstrable (a missed-event scenario is reconciled) and the lifecycle notifications handled without manual intervention.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer authoritative on `GraphSubscriptionManager`, the inbound `IncomingCommunicationProcessor` pipeline, Graph change-notification + `delta` APIs, and ADR-028 central Graph auth. Familiar with the binding `.claude/constraints/bff-extensions.md` governance checklist.
+  </role>
+
+  <goal>
+    `GraphSubscriptionManager` subscribes to lifecycle notifications and handles all three lifecycle event types; a `delta`-query reconciliation backstop periodically reconciles missed messages idempotently into `IncomingCommunicationProcessor`. Unit tests demonstrate a missed-event reconciliation and lifecycle-event handling. Build + tests green; publish-size + CVE reported; placement justification stated.
+  </goal>
+
+  <context>
+    <background>
+      R2 established Graph subscriptions for inbound mail. Microsoft explicitly recommends pairing change-notification subscriptions with lifecycle notifications AND a `delta` reconciliation query — the "belt and suspenders" pattern — because subscriptions can silently drop. Spaarke currently has only a partial polling backup (R-5). This task closes the resilience gap without changing the association/enrichment behavior.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs (PRIMARY)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs (reconciliation feeds this)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs (ADR-028 central auth)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (DI registration)</file>
+      <file>.claude/constraints/bff-extensions.md (governance checklist)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-24">Add lifecycle-notification subscription + `delta`-query reconciliation backstop; missed-event reconciliation demonstrable; lifecycle notifications handled.</constraint>
+    <constraint source="ADR-028">Use central `IGraphClientFactory` (`ForApp`) for subscription + `delta` calls; MUST NOT `new` a credential or `ConfidentialClientApplication`.</constraint>
+    <constraint source="NFR-06">Reconciliation is best-effort and non-fatal — a reconciliation failure MUST NOT crash the subscription manager or the inbound path.</constraint>
+    <constraint source="project">Reconciliation MUST be idempotent — key on `internetMessageId` / Graph message id; never double-process an already-captured message.</constraint>
+    <constraint source="ADR-010">Register any new reconciliation service via `CommunicationModule` only.</constraint>
+    <constraint source="NFR-08">Add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`; unconditionally-mapped work has unconditional registration (ADR-032 Null-Object if feature-gated).</constraint>
+    <constraint source="project (§10)">Load `.claude/constraints/bff-extensions.md`; state Placement Justification; run `/conflict-check` before PR; report publish-size (baseline ~49.63 MB incl. PDBs, ceiling 60 MB) + CVE scan.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>graph/subscriptions-delta</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/email-processing-architecture.md</file>
+      <file>knowledge/</file>
+    </files>
+    <patterns>
+      <pattern name="Central Graph auth" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs">
+        `ForApp` for app-only subscription + delta calls; never self-build a credential.
+      </pattern>
+      <pattern name="Idempotent inbound processing" location="src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs">
+        Reconciled messages enter the same processor; dedupe on message id / internetMessageId.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Context check">Check context usage; handoff + stop if &gt; 70%.</step>
+    <step order="2" name="Load knowledge">Read spec FR-24, bff-extensions.md, ADR-028/010/032, and current `GraphSubscriptionManager`. Consult `researcher`/`knowledge/` for current Graph lifecycle + `delta` API specifics if stale.</step>
+    <step order="3" name="Conflict check">Run `/conflict-check` for `Services/Communication/**` before designing the addition.</step>
+    <step order="4" name="Design">Design (a) the lifecycle subscription + handler and (b) the `delta` reconciliation service (interval, cursor persistence, idempotency key). State Placement Justification (stays in BFF).</step>
+    <step order="5" name="Implement lifecycle">Subscribe to lifecycle notifications; handle `reauthorizationRequired`/`subscriptionRemoved` (renew/recreate) and `missed` (trigger reconciliation) via central `IGraphClientFactory`.</step>
+    <step order="6" name="Implement delta reconciliation">Add the periodic `delta`-query reconciliation over the monitored folder; persist the delta cursor; feed new messages idempotently into `IncomingCommunicationProcessor`. Register via `CommunicationModule`.</step>
+    <step order="7" name="Tests">Add unit tests: a missed-event reconciliation is captured exactly once; each lifecycle event type is handled; reconciliation failure is non-fatal.</step>
+    <step order="8" name="Build + test">`dotnet build src/server/api/Sprk.Bff.Api/` and `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`. Fix failures.</step>
+    <step order="9" name="Publish-size + CVE">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report absolute + delta vs ~49.63 MB baseline (ceiling 60 MB). Run `dotnet list package --vulnerable --include-transitive`; confirm no new HIGH CVE.</step>
+    <step order="9.5" name="FULL quality gates">Invoke `code-review` on the diff; invoke `adr-check` against spec.md (ADR-028/010/032; NFR-06/08). Address Critical findings.</step>
+    <step order="10" name="Update tracking">Mark task 071 ✅ in `tasks/TASK-INDEX.md`. PR description carries Placement Justification + publish-size delta + CVE result.</step>
+    <step order="11" name="Reset state">Update `current-task.md`: status → completed; advance; record decisions.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect subscription manager + processor + Graph factory</tool>
+    <tool name="edit">Implement lifecycle handler + reconciliation service</tool>
+    <tool name="bash">Build, test, publish-size, CVE scan</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan</tool>
+    <tool name="researcher">Current Graph lifecycle + delta API specifics</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs (UPDATED — lifecycle subscription + handler)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/*Reconciliation*.cs (NEW — delta reconciliation backstop)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (missed-event reconciliation + lifecycle handling)</output>
+    <output type="docs">PR description with Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GraphSubscriptionManager` subscribes to lifecycle notifications and handles `reauthorizationRequired`, `subscriptionRemoved`, and `missed`.</criterion>
+    <criterion testable="true">A `delta`-query reconciliation backstop runs periodically and feeds missed messages into `IncomingCommunicationProcessor`.</criterion>
+    <criterion testable="true">Reconciliation is idempotent — a unit test proves a missed message is captured exactly once.</criterion>
+    <criterion testable="true">All Graph calls use central `IGraphClientFactory`; no self-built credential.</criterion>
+    <criterion testable="true">Reconciliation failure is non-fatal (NFR-06) — proven by test.</criterion>
+    <criterion testable="true">`dotnet build` + `dotnet test` green; publish-size delta + CVE result reported; ceiling ≤60 MB respected.</criterion>
+    <criterion testable="true">`adr-check` returns no violations against ADR-028 / ADR-010 / ADR-032.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    R-5 mitigation: today only partial polling backup exists. This is the Microsoft-recommended resilience pattern (lifecycle + delta), not a new feature surface.
+
+    BFF-touching: full §10 obligations apply — bff-extensions checklist, Placement Justification, `/conflict-check`, publish-size, CVE.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 REQUIRED. Per root §10: bff-extensions checklist + Placement Justification + `/conflict-check` + publish-size + CVE all required and reportable in the PR.
+    </protocol>
+  </execution>
+</task>

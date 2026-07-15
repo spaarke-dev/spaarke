@@ -88,6 +88,7 @@ public class DataverseRecordCreationTests
             speFileStore,
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
             _loggerMock.Object);
     }

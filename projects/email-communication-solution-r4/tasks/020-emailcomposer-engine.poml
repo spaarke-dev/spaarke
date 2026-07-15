@@ -1,0 +1,188 @@
+<task id="020" project="email-communication-solution-r4">
+  <metadata>
+    <title>Build the canonical `&lt;EmailComposer /&gt;` engine + sub-components in `@spaarke/ui-components`</title>
+    <phase>Wave 2 — Client: composer engine + wrappers</phase>
+    <status>not-started</status>
+    <estimated-hours>16</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>021, 041</blocks>
+    <tags>frontend, fluent-ui, react, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Engine implementation — the load-bearing centerpiece of the send-side consolidation; modifies `.tsx`/`.ts` in the shared library consumed by every email-send surface; architecture-level decisions (reducer state machine, imperative handle contract, mount-variant layout, single canonical recipient normalization replacing 5); blocks the wrappers (021) and the Code Page mount (041). ADR-021 (Fluent v9), ADR-028 (auth decoupling), ADR-012 (shared-lib rules), ADR-022 (React version) all bind. FULL is non-negotiable.</rigor-reason>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>All-client TypeScript in `src/client/shared/Spaarke.UI.Components/**`; disjoint by file and language from the concurrent W1 server (C#) track. Within W2 this is the serial root — 021/023 read the engine files — but it runs safely alongside W1/W3/W7.</parallel-reason>
+    <fr-refs>FR-12</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Build the canonical `&lt;EmailComposer /&gt;` engine AND its sub-components in `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/`. This is THE engine that replaces the 6 ad-hoc client send-email implementations, the 5 divergent recipient normalizations, and the 3 error contracts identified in the architecture assessment. Getting this right is the spine of the entire send-side (W2/W4/W6) work.
+
+    Authoring detail is in `reference/r3-send-side-design.md` §5 (component + wrapper design), §5.4 (props contract), §5.6 (sub-components), §5.8 (validation contract), §5.10 (mount variants). Reuse it heavily — this task is the R4 realization of R3's absorbed tasks 010–020.
+
+    Engine requirements (FR-12):
+    - 5 modes: `compose | view | reply | forward | draft`
+    - 3 mounts: `inline | dialog | page` — all 15 mode×mount combinations render and behave correctly
+    - Internal state via a SINGLE `useReducer` (NOT scattered `useState`); state machine in `EmailComposer.reducer.ts`
+    - Imperative handle via `forwardRef` + `useImperativeHandle` exposing `validate()`, `send()`, `saveDraft()`, `getState()` — wizard hosts drive these via `composerRef`
+    - React 18 only (per NFR / ADR-022 non-applicability — no PCF mounts the composer directly; the Code Page is React 18). Free use of `useId`, `useTransition`, etc.
+    - **No direct `@spaarke/auth` import** (ADR-028 / shared-lib decoupling). All network I/O goes through an injected `authenticatedFetch` prop, forwarded into `sendCommunication()` (task 022).
+    - **Fluent UI v9 only** (ADR-021) — `@fluentui/react-components` primitives + `makeStyles` + `tokens`; dark mode passes through the host `FluentProvider`. No hardcoded colors, no v8/v0.
+
+    Sub-components to build (rendered by the engine — `reference/r3-send-side-design.md` §5.6):
+    - `RecipientField` (To/Cc/Bcc) — accepts `;`/`,`-separated paste-from-Outlook input, resolves against the existing `searchUsersAndContacts` directory lookup, renders Fluent Tags, validates free-text email on commit. **This is the single canonical normalization that replaces the 5 existing implementations.**
+    - `BodyEditor` — HTML rich-text + PlainText modes with a format toggle; sends what was authored (no conversion).
+    - `AttachmentList` — one section per attachment source (`local | spe | related | wizard`); enforces caps **150 attachments / 35 MB total**, warns at 25 MB (per `CHAT-ATTACHMENT-POLICY.md` analog); source badge + remove per item; forward-mode selection checkboxes.
+    - `SendModeRadio` — rendered only when the host leaves `sendMode` unset; "Send from Spaarke" (sharedMailbox, default) vs "Send from my mailbox" (user OBO).
+    - `AssociationChips` — renders `associations[]` as read-only Fluent Tags (e.g. "Matter: Smith v. Jones").
+    - `ComposerActionBar` — rendered ONLY in `dialog` + `page` mounts (returns null on `inline`; the wizard frame owns navigation); Send / Save Draft / Cancel, plus view-mode Edit/Reply/Forward/Close.
+
+    Validation contract (§5.8): `validate(): IValidationResult` with canonical codes `TO_REQUIRED`, `TO_INVALID_EMAIL`, `TO_TOO_MANY`, `SUBJECT_REQUIRED`, `BODY_REQUIRED`, `ATTACHMENT_TOO_LARGE`, `ATTACHMENTS_TOO_MANY`, `ATTACHMENT_BLOCKED_TYPE`, `FROM_REQUIRED`, `FROM_NOT_APPROVED` — one canonical set used everywhere, never duplicated per caller.
+
+    Error contract (§5.9): `send()` throws `SendCommunicationError` (added in task 022) on non-2xx. Import it from `communicationApi.ts`; do NOT redefine.
+
+    Barrel: export the engine + all sub-component types from `EmailComposer/index.ts`; uncomment/add the `EmailComposer` line in the shared-lib `src/index.ts` barrel. Wrappers (task 021) and unit tests (task 023) build on top of this.
+  </prompt>
+
+  <role>
+    Senior React 18 + TypeScript developer fluent in Fluent UI v9 (`makeStyles`/`tokens`/`FluentProvider`) and state-machine modeling with `useReducer` + `forwardRef` + `useImperativeHandle`. Familiar with the existing `CreateRecordWizard` imperative-handle-from-host idiom and the `searchUsersAndContacts` directory lookup in the shared lib.
+  </role>
+
+  <goal>
+    `EmailComposer.tsx` + reducer + types + all six sub-components compile lint-clean and render correctly across all 15 mode×mount combinations. A single `useReducer` owns engine state. The engine `forwardRef`s `IEmailComposerHandle` (`validate`/`send`/`saveDraft`/`getState`). Recipient normalization is canonical (one implementation). Attachment caps (150 / 35 MB, warn 25 MB) enforced. Mount variants visible: `page` = full-width form chrome, `dialog` = ~600px compact, `inline` = no chrome. No `@spaarke/auth` import (grep-verified). `npm run build:prod` + `npm run lint` clean in `@spaarke/ui-components`; barrel exports `EmailComposer`.
+  </goal>
+
+  <context>
+    <background>
+      Empirical Finding #1 (R4 CLAUDE.md): `EmailComposer/` is absent — build from scratch. The engine is the only React component that may know email-send mechanics; the three wrappers (task 021) are ~30–60 LOC each and only lock the `mount` prop. Callers import wrappers, not the engine (design §5.1.2).
+
+      Imperative-handle pattern: wizard hosts hold `composerRef = useRef&lt;IEmailComposerHandle&gt;()` and call `composerRef.current.validate()` on step-change and `composerRef.current.send()` on Finish. This lets the wizard own its navigation while the composer stays chrome-agnostic. Mirror the existing `CreateRecordWizard` pattern.
+
+      Auth decoupling (ADR-028 / shared-lib rule): the engine MUST NOT `import` from `@spaarke/auth`. `authenticatedFetch` is injected via props and forwarded to `sendCommunication()`. Task 022 provides `sendCommunication()` + `SendCommunicationError`; if 022 has not landed when this task runs, import against the interface and coordinate — but 022 is a peer W2 task with no ordering dependency on 020's engine skeleton, so prefer sequencing 022 first or defining the import boundary cleanly.
+
+      Mount-variant styling is the demanding visual piece — the `page` variant must read as a first-class entity form (it replaces the OOB `sprk_communication` form in W4). Land it as the primary visual deliverable; `dialog` + `inline` are simpler derivatives sharing the same Fluent tokens.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/RecipientField.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/BodyEditor.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/SendModeRadio.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AssociationChips.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/ComposerActionBar.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (NEW — barrel)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (UPDATE — add EmailComposer barrel line)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (READ — `sendCommunication()` + `SendCommunicationError` from task 022)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/userLookup.ts (READ — `searchUsersAndContacts` for RecipientField)</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md (§5, §5.4, §5.6, §5.8, §5.10)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 ONLY (`@fluentui/react-components`); `makeStyles` + `tokens`; dark mode via host `FluentProvider`; no hardcoded colors; no v8/v0.</constraint>
+    <constraint source="ADR-028">Engine + sub-components MUST NOT import `@spaarke/auth`. Host injects `authenticatedFetch` via props; the engine forwards it to `sendCommunication()`.</constraint>
+    <constraint source="ADR-012">Shared-library component rules — engine lives in `@spaarke/ui-components`; no fork; export via the lib barrel; no cross-package source-path imports.</constraint>
+    <constraint source="ADR-022">React version — the composer is React 18 only; ADR-022 (PCF React 16) does NOT apply (no PCF mounts the composer directly). Do not add dual-target constraints.</constraint>
+    <constraint source="ADR-019">`send()` throws the typed `SendCommunicationError` on non-2xx — never returns `{success:false}` and never pushes to a `warnings[]` array.</constraint>
+    <constraint source="ADR-045">Single-engine constraint — this is the only React component that knows email-send mechanics; wrappers are thin. (ADR-045 is the R4 Communication ADR authored in task 005; supersedes the stale R3 "ADR-033" reference in the reference doc.)</constraint>
+    <constraint source="project">RecipientField is the SINGLE canonical recipient normalization — it replaces the 5 existing implementations. No caller-local splitting/parsing.</constraint>
+    <constraint source="project">AttachmentList caps: 150 attachments / 35 MB total (hard); 25 MB soft warning. Matches BFF enforcement + `CHAT-ATTACHMENT-POLICY.md` analog.</constraint>
+    <constraint source="project">State is a single `useReducer` source of truth; no scattered `useState` for engine state (refs / transient UI state excepted).</constraint>
+    <constraint source="project">`ComposerActionBar` returns null on `mount='inline'` — the wizard frame owns Send/Cancel.</constraint>
+    <constraint source="NFR-03 (spec)">Accessibility: semantic landmarks (`role="region"`, `aria-label`) per section; a live region for validation errors; full keyboard nav; focus management on mode transitions.</constraint>
+    <constraint source="project">No BFF publish-size / CVE obligations — this is client-only TypeScript (root §10 does not apply).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts</file>
+    </files>
+    <patterns>
+      <pattern name="forwardRef + useImperativeHandle" location="src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/">
+        Existing wizard idiom in the shared lib — host holds the ref and drives imperative methods. EmailComposer mirrors this so wrappers consume it identically.
+      </pattern>
+      <pattern name="Fluent v9 mount variants" location=".claude/skills/fluent-v9-component/SKILL.md">
+        `makeStyles` + `tokens`; three style objects keyed on mount (page/dialog/inline). Variants differ in layout density + chrome, NOT color/typography palette — keeps the theming pipeline intact.
+      </pattern>
+      <pattern name="Canonical recipient normalization" location="projects/email-communication-solution-r4/reference/r3-send-side-design.md">
+        §5.6.1 — one `RecipientField` doing separator parsing + directory resolve + Fluent Tags + regex-on-commit. Replaces the 5 caller-local variants.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `reference/r3-send-side-design.md` §5 in full (props contract §5.4, sub-components §5.6, validation §5.8, mount variants §5.10). Read `communicationApi.ts` to confirm the `sendCommunication()` signature + `SendCommunicationError` shape (from task 022) and how `authenticatedFetch` is parameterized. Read `userLookup.ts` for `searchUsersAndContacts`.</step>
+    <step order="2">Read ADR-021 + `fluent-v9-component/SKILL.md` for Fluent v9 `makeStyles`/`tokens`/theme conventions. Read the `CreateRecordWizard` `forwardRef`/`useImperativeHandle` exemplar for shape-mirroring.</step>
+    <step order="3">Author `EmailComposer.types.ts`: `EmailComposerMode`, `EmailComposerMount`, `EmailComposerBodyFormat`, `IComposerAssociation { entityName; recordId; primaryName? }`, `IComposerAttachmentSource { kind: 'local'|'spe'|'related'|'wizard'; config? }`, `IAttachmentItem`, `IRecipient`, `IValidationResult { ok; errors: { field; code; message }[] }`, `EmailComposerState`, `EmailComposerAction` (discriminated union: `SET_FIELD`, `SET_MODE`, `ADD_ATTACHMENT`, `REMOVE_ATTACHMENT`, `TOGGLE_ATTACHMENT_SELECTED`, `SET_VALIDATION_ERRORS`, `BEGIN_SEND`, `END_SEND`, `RESET`), `IEmailComposerProps` (per §5.4), `IEmailComposerHandle { validate; send; saveDraft; getState }`.</step>
+    <step order="4">Author `EmailComposer.reducer.ts`: `initialState(props)` deriving from mode/mount/initial* fields; `emailComposerReducer(state, action)` as a pure immutable switch; and the `validateState(state, { forSend })` helper implementing the canonical codes (§5.8).</step>
+    <step order="5">Author the six sub-components in `subcomponents/`: `RecipientField.tsx` (canonical normalization + `searchUsersAndContacts` + Fluent Tags + a11y labels), `BodyEditor.tsx` (HTML/PlainText toggle), `AttachmentList.tsx` (caps 150/35 MB, warn 25 MB, source badges, remove, forward checkbox), `SendModeRadio.tsx`, `AssociationChips.tsx`, `ComposerActionBar.tsx` (null on inline).</step>
+    <step order="6">Author `EmailComposer.tsx`: `forwardRef&lt;IEmailComposerHandle, IEmailComposerProps&gt;`, `useReducer(emailComposerReducer, props, initialState)`, `useImperativeHandle` wiring `validate`/`send`/`saveDraft`/`getState`, and mount-variant layout via three `makeStyles` objects (page/dialog/inline). Compose the sub-components into `role="region"` sections with a live region for validation errors. `send()` calls `sendCommunication(mapStateToRequest(state), { authenticatedFetch: props.authenticatedFetch, bffBaseUrl: props.bffBaseUrl })` and throws `SendCommunicationError` on failure.</step>
+    <step order="7">Wire mode pre-fill logic: `view` (read-only from record), `reply` (to=original from, `Re:` subject dedup, stamp `sprk_inreplyto`), `forward` (blank to, `Fwd:` dedup, wrap body, carry attachments selected, stamp `sprk_inreplyto`), `draft` (load from record; `mapStateToDraftUpdate`). Provide `dedupSubjectPrefix`, `deriveReplyState`, `deriveForwardState`, `deriveDraftState` as pure helpers (unit-tested in task 023).</step>
+    <step order="8">Author `EmailComposer/index.ts` barrel (engine + wrappers placeholder + all public types + sub-component prop types). Add `export * from './components/EmailComposer';` to shared-lib `src/index.ts`.</step>
+    <step order="9">Run `npm run build:prod` + `npm run lint` in `src/client/shared/Spaarke.UI.Components/` (use `npm install --legacy-peer-deps --no-audit --no-fund` if a fresh install is needed; do NOT use `npm ci`). Both MUST be clean. Grep-verify no `@spaarke/auth` import in `EmailComposer/**`.</step>
+    <step order="9.5">FULL-rigor quality gates: invoke `code-review` skill on the new files; invoke `adr-check` against ADR-021, ADR-028, ADR-012, ADR-019, ADR-045 + `spec.md`. Address Critical + High findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 020 ✅; confirm 021 + 041 dependencies satisfied.</step>
+    <step order="11">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending W2 task; record decisions (reducer shape, mount-variant token strategy).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">reference design §5 + communicationApi.ts + userLookup.ts + ADR-021 + CreateRecordWizard exemplar</tool>
+    <tool name="write">engine, reducer, types, six sub-components, barrel</tool>
+    <tool name="edit">shared-lib src/index.ts barrel</tool>
+    <tool name="bash">npm run build:prod + npm run lint + grep for @spaarke/auth</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">EmailComposer/EmailComposer.tsx (NEW)</output>
+    <output type="code">EmailComposer/EmailComposer.types.ts (NEW)</output>
+    <output type="code">EmailComposer/EmailComposer.reducer.ts (NEW)</output>
+    <output type="code">EmailComposer/subcomponents/{RecipientField,BodyEditor,AttachmentList,SendModeRadio,AssociationChips,ComposerActionBar}.tsx (NEW)</output>
+    <output type="code">EmailComposer/index.ts (NEW — barrel)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (UPDATED — barrel line)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`EmailComposer.tsx` compiles; renders without runtime error for all 15 mode×mount combinations (smoke-test via a temporary story/inline harness).</criterion>
+    <criterion testable="true">Engine `forwardRef`s `IEmailComposerHandle` exposing `validate`, `send`, `saveDraft`, `getState`.</criterion>
+    <criterion testable="true">Engine state is a SINGLE `useReducer` — no `useState` for engine state.</criterion>
+    <criterion testable="true">`RecipientField` performs the only recipient normalization (separator parse + directory resolve + Tags); grep confirms no caller-local parsing was added.</criterion>
+    <criterion testable="true">`AttachmentList` blocks &gt;150 attachments and &gt;35 MB total (ATTACHMENTS_TOO_MANY / ATTACHMENT_TOO_LARGE) and warns at 25 MB.</criterion>
+    <criterion testable="true">`ComposerActionBar` renders in dialog + page mounts and returns null in inline mount.</criterion>
+    <criterion testable="true">No `@spaarke/auth` import anywhere under `EmailComposer/**` (grep-verified).</criterion>
+    <criterion testable="true">Only `@fluentui/react-components` + `makeStyles` + `tokens` used for styling; no hardcoded colors (ADR-021).</criterion>
+    <criterion testable="true">Mount-variant styling visible: page = full-width form chrome; dialog = ~600px bounded; inline = no header/action chrome.</criterion>
+    <criterion testable="true">`npm run build:prod` + `npm run lint` clean in `@spaarke/ui-components`; shared-lib barrel exports `EmailComposer`.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wrappers land in task 021; unit tests (including the pure mode/validation helpers) in task 023; the Code Page mount in task 041 (W4). `SendCommunicationError` is defined in task 022 — import it, do not redefine.
+
+    The `page` variant is the highest-value visual deliverable (it replaces the OOB `sprk_communication` form in W4). Manually verify dark-mode rendering (ADR-021) with no hardcoded colors before closing.
+
+    Per R4 CLAUDE.md: this is the R4 realization of R3's absorbed engine tasks (010–020) collapsed into one; `reference/r3-send-side-design.md` is the authoring detail. Cite ADR-045 (not the stale R3 "ADR-033") in code comments and the PR.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor per `&lt;rigor-hint&gt;` — Step 9.5 (code-review + adr-check) MANDATORY. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

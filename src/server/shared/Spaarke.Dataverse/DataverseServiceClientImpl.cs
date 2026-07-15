@@ -2299,8 +2299,28 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             ColumnSet = new ColumnSet("accountid", "name"),
             TopCount = 1
         };
+        // Match on the sprk_domain field (exact). account + sprk_organization both carry sprk_domain
+        // (owner-added 2026-07-14); replaces the prior loose emailaddress1 substring match.
         query.Criteria.Conditions.Add(
-            new ConditionExpression("emailaddress1", ConditionOperator.Contains, domain));
+            new ConditionExpression("sprk_domain", ConditionOperator.Equal, domain));
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("statecode", ConditionOperator.Equal, 0)); // Active only
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities.Count > 0 ? results.Entities[0] : null;
+    }
+
+    public async Task<Entity?> QueryOrganizationByDomainAsync(string domain, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying sprk_organization by domain: {Domain}", domain);
+
+        var query = new QueryExpression("sprk_organization")
+        {
+            ColumnSet = new ColumnSet("sprk_organizationid", "sprk_organizationname"),
+            TopCount = 1
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("sprk_domain", ConditionOperator.Equal, domain));
         query.Criteria.Conditions.Add(
             new ConditionExpression("statecode", ConditionOperator.Equal, 0)); // Active only
 

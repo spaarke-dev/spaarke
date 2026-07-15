@@ -1,0 +1,144 @@
+<task id="061" project="email-communication-solution-r4">
+  <metadata>
+    <title>Migrate shared `SendEmailStep` (Project/Event/Todo/WorkAssignment) + CreateMatter fork; resolve cross-package import</title>
+    <phase>Wave 6 — Client caller migration + retirements</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>062</blocks>
+    <tags>frontend, refactoring, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Rewrites the shared `CreateRecordWizard/steps/SendEmailStep.tsx` body consumed by 4 create-record wizards at once, deletes the only true LegalWorkspace CreateMatter email-step fork, and resolves a cross-package source-path import. Behavior change fans out to 4+ downstream surfaces; `communication` tag triggers FULL rigor; must respect ADR-045 (canonical send), ADR-021 (Fluent v9), ADR-028 (shared-lib auth decoupling).</rigor-reason>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches the shared wizard step file, the CreateMatter fork, and WorkAssignmentWizardDialog — disjoint from task 060's three dialogs. Both W6 migration tasks run concurrently after W2 wrappers (021) land.</parallel-reason>
+    <fr-refs>FR-21</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Migrate the create-record wizards' email step to the canonical `&lt;EmailComposer /&gt;` (via the W2 `&lt;SendEmailStep /&gt;` wrapper), and retire the LegalWorkspace CreateMatter fork:
+
+    1. **Shared step (4 wizards in one edit)** — replace the BODY of `src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/SendEmailStep.tsx` with a thin layer that mounts the canonical `&lt;SendEmailStep /&gt;` wrapper. Per empirical finding #5/#12, this single shared file is the source for CreateProject, CreateEvent, CreateTodo, and CreateWorkAssignment — so one body rewrite migrates all four. Preserve the exported component's public prop API so the 4 callers compile unchanged. Remove all inline composer/validation/recipient-parsing/`fetch` logic.
+
+    2. **CreateMatter fork (the ONLY true LegalWorkspace fork)** — per empirical finding #5, `src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx` is the single genuine LegalWorkspace email-step fork (Project/Event/Todo/WorkAssignment dirs exist but have NO SendEmailStep). Point the CreateMatter caller at the canonical `&lt;SendEmailStep /&gt;` from `@spaarke/ui-components`, then delete the fork file. Also migrate the shared-lib `CreateMatterWizard/SendEmailStep.tsx` (if a separate per-Matter file exists) to the canonical wrapper.
+
+    3. **Cross-package import** — resolve `WorkAssignmentWizardDialog.tsx:31` (empirical finding #7): replace the relative source-path import `from '../CreateRecordWizard/steps/SendEmailStep'` with the package barrel import `from '@spaarke/ui-components'`. Re-grep to relocate the exact line; match the canonical export name.
+
+    After this task, no create-record wizard uses inline composer/`fetch` logic, no LegalWorkspace email-step fork remains, and no cross-package source-path import to the email step remains.
+  </prompt>
+
+  <role>
+    Spaarke frontend engineer authoritative on shared-library wizard step contracts, the `@spaarke/ui-components` public barrel (`src/index.ts`), the canonical `&lt;SendEmailStep /&gt;` wrapper (W2 task 021), and the LegalWorkspace solution structure.
+  </role>
+
+  <goal>
+    The shared `CreateRecordWizard/steps/SendEmailStep.tsx` is a thin transformation layer over the canonical wrapper; all 4 consuming wizards build with no behavior change. `src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx` is deleted and its caller imports from `@spaarke/ui-components`. `WorkAssignmentWizardDialog.tsx` imports `SendEmailStep` from the package barrel, not a relative path. `@spaarke/ui-components` and LegalWorkspace both build (`build:prod`) and lint clean.
+  </goal>
+
+  <context>
+    <background>
+      R4 consolidation of R3 Wave 5 tasks 071 (shared step), 072 (CreateMatter step), 073 (cross-package import), 074 (LegalWorkspace fork delete). Empirical finding #5 narrows the LegalWorkspace fork scope to a SINGLE file — the spec's "5 wizards fork" phrasing overstated it; do NOT attempt to delete non-existent Project/Event/Todo/WorkAssignment SendEmailStep files under LegalWorkspace. Rewriting one shared file migrates 4 wizards; the CreateMatter fork is the only genuine LegalWorkspace fork to delete.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/SendEmailStep.tsx (PRIMARY — body rewrite; source for 4 wizards)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateMatterWizard/SendEmailStep.tsx (if present — migrate to canonical)</file>
+      <file>src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx (DELETE — only true LegalWorkspace fork)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkAssignmentWizardDialog/WorkAssignmentWizardDialog.tsx (line ~31 cross-package import)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailStep.tsx (canonical wrapper — W2 task 021)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (public barrel)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">Wizard surfaces consume the canonical `&lt;SendEmailStep /&gt;` via the package barrel; no inline `fetch`, no LegalWorkspace email-component forks.</constraint>
+    <constraint source="ADR-021">Fluent v9 styling comes from the canonical wrapper; no inline styles added in the shared file.</constraint>
+    <constraint source="ADR-028">Shared-lib components MUST NOT import `@spaarke/auth` directly; `authenticatedFetch` flows via props.</constraint>
+    <constraint source="project">Public prop API of the shared step's exported component is preserved (4 callers compile without edits).</constraint>
+    <constraint source="project">Empirical narrowing (finding #5): only CreateMatter is a true LegalWorkspace fork; do NOT delete non-existent Project/Event/Todo/WorkAssignment forks.</constraint>
+    <constraint source="project">No cross-package source-path imports to the email step — use `@spaarke/ui-components` barrel.</constraint>
+    <constraint source="repo">`npm run build:prod` + `npm run lint` in shared lib and LegalWorkspace remain green.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/wizard-step-canonicalization</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>projects/x-email-communication-solution-r3/tasks/071-migrate-shared-sendemailstep-to-canonical-wrapper.poml</file>
+      <file>projects/x-email-communication-solution-r3/tasks/073-resolve-workassignmentwizarddialog-cross-package-import.poml</file>
+      <file>projects/x-email-communication-solution-r3/tasks/074-delete-legalworkspace-creatematter-fork.poml</file>
+    </files>
+    <patterns>
+      <pattern name="Shared-step body rewrite" location="projects/x-email-communication-solution-r3/tasks/071-migrate-shared-sendemailstep-to-canonical-wrapper.poml">
+        Keep export name + props identical; render the canonical wrapper internally; translate wizard-context props to the wrapper API; remove inline logic.
+      </pattern>
+      <pattern name="Fork delete + caller repoint" location="projects/x-email-communication-solution-r3/tasks/074-delete-legalworkspace-creatematter-fork.poml">
+        Repoint LegalWorkspace caller to `@spaarke/ui-components`, then delete the fork; rebuild to catch orphan imports.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Context check">Check context usage; handoff + stop if &gt; 70%.</step>
+    <step order="2" name="Load knowledge">Read spec FR-21, CLAUDE.md empirical findings #5/#7, and the three absorbed R3 POMLs.</step>
+    <step order="3" name="Catalog shared step">Read `CreateRecordWizard/steps/SendEmailStep.tsx`; catalog exported props + behavior contract. Grep the 4 wizard consumers and their passed prop shapes.</step>
+    <step order="4" name="Rewrite shared step">Replace the file body: keep export name + props; render canonical `&lt;SendEmailStep /&gt;`; translate wizard-context props; remove inline composer/validation/`fetch`.</step>
+    <step order="5" name="CreateMatter shared file">If `CreateMatterWizard/SendEmailStep.tsx` exists as a separate shared file, migrate it to the canonical wrapper the same way.</step>
+    <step order="6" name="Delete LegalWorkspace fork">Grep `src/solutions/LegalWorkspace/src/components/**/SendEmailStep.tsx` to confirm ONLY `CreateMatter/SendEmailStep.tsx` exists. Repoint its caller(s) to import `SendEmailStep` from `@spaarke/ui-components`; delete the fork file.</step>
+    <step order="7" name="Cross-package import">Grep `WorkAssignmentWizardDialog.tsx` for `../CreateRecordWizard/steps/SendEmailStep` (was line 31). Replace with `@spaarke/ui-components` barrel import; confirm the barrel exports `SendEmailStep`.</step>
+    <step order="8" name="Build + lint">Run `npm run build:prod` + `npm run lint` in `@spaarke/ui-components`; rebuild LegalWorkspace. Fix failures / orphan imports.</step>
+    <step order="9" name="Unit tests">Run wizard-step + WorkAssignmentWizardDialog + CreateMatter tests; update/remove assertions targeting removed internals or the deleted fork.</step>
+    <step order="9.5" name="FULL quality gates">Invoke `code-review` on the diff; invoke `adr-check` against spec.md. Address Critical findings.</step>
+    <step order="10" name="Update tracking">Mark task 061 ✅ in `tasks/TASK-INDEX.md`; confirm task 062 dependency satisfied.</step>
+    <step order="11" name="Reset state">Update `current-task.md`: status → completed; advance; record decisions.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Find wizard consumers, cross-package import, fork scope</tool>
+    <tool name="read">Inspect shared step, canonical wrapper, barrel</tool>
+    <tool name="edit">Rewrite shared step body; repoint imports</tool>
+    <tool name="bash">Delete fork (`rm`); `npm run build:prod`, `npm run lint`, `npm test`</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/SendEmailStep.tsx (REWRITTEN — thin canonical wrapper)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx (DELETED)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkAssignmentWizardDialog/WorkAssignmentWizardDialog.tsx (UPDATED — barrel import)</output>
+    <output type="test">Unit test updates where assertions targeted removed internals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Shared `CreateRecordWizard/steps/SendEmailStep.tsx` renders the canonical `&lt;SendEmailStep /&gt;` and contains no inline composer/validation/`fetch` logic.</criterion>
+    <criterion testable="true">Public prop API of the shared step is unchanged (Project/Event/Todo/WorkAssignment wizards compile without edits).</criterion>
+    <criterion testable="true">`src/solutions/LegalWorkspace/src/components/CreateMatter/SendEmailStep.tsx` does not exist; grep `src/solutions/LegalWorkspace/src/components/**/SendEmailStep.tsx` returns zero.</criterion>
+    <criterion testable="true">`WorkAssignmentWizardDialog.tsx` imports `SendEmailStep` from `@spaarke/ui-components`, not a relative `../CreateRecordWizard/...` path.</criterion>
+    <criterion testable="true">No shared-lib component imports `@spaarke/auth` directly.</criterion>
+    <criterion testable="true">`npm run build:prod` + `npm run lint` exit 0 in shared lib and LegalWorkspace.</criterion>
+    <criterion testable="true">`adr-check` returns no violations against ADR-045 / ADR-021 / ADR-028.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Absorbed from R3 tasks 071/072/073/074. Empirical finding #5 is load-bearing: only CreateMatter is a real LegalWorkspace fork. Reflect the narrowed scope in the PR description.
+
+    Client-only (TS); no BFF surface touched — no publish-size / CVE / conflict-check obligations.
+
+    Line ~31 for the cross-package import may have drifted; re-grep to relocate.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 (code-review + adr-check) REQUIRED. Verify the shared rewrite preserves the public prop API and no email-step fork or cross-package import remains.
+    </protocol>
+  </execution>
+</task>

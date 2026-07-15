@@ -1,0 +1,132 @@
+<task id="053" project="email-communication-solution-r4">
+  <metadata>
+    <title>New "Communication Triage" JPS Action (category / urgency / obligations / suggested actions / response checklist) → `DeliverComposite`</title>
+    <phase>Wave 5 — Responsive Intelligence</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <dependencies>050, 031</dependencies>
+    <blocked-by>050</blocked-by>
+    <blocks>054</blocks>
+    <tags>bff-api, ai, jps</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New JPS Action + playbook wiring delivering via `DeliverComposite` (ADR-037 section-name-keyed streaming) across `Services/Ai/` (r2-core-coordinated per gate 050); BFF governance + FULL Step 9.5 gates required.</rigor-reason>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-20</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Author a new "Communication Triage" JPS Action that produces structured output — **category, urgency, obligations[], suggested actions[], response checklist** — and deliver it via `DeliverComposite` (ADR-037 section-name-keyed streaming), following `docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md` (the two-layer orchestrator-template + PromptSchemaRenderer `## Input` pattern). Reuse task 031's rung-5 extract/classify Action as the input/reference where they overlap — do NOT duplicate classification logic.
+
+    Implement per the gate-050 boundary: consume `Services/Ai/PublicContracts/` seams; do NOT fork `Services/Ai/` internals. Use `jps-action-create` + `jps-validate` for the Action JSON. The rule config + tests are task 054.
+  </prompt>
+
+  <role>
+    Spaarke AI/JPS engineer. Authoritative on JPS Action authoring (`jps-action-create`, `jps-validate`), the playbook-driven LLM output pattern (Layer 1 orchestrator template + Layer 2 PromptSchemaRenderer `## Input`), and `DeliverComposite` section-name-keyed streaming (ADR-037). Works within the r2-core boundary + BFF hygiene governance.
+  </role>
+
+  <goal>
+    A validated "Communication Triage" JPS Action whose structured output (category, urgency, obligations[], suggested actions[], response checklist) is delivered via `DeliverComposite` with section-name-keyed sections per ADR-037, authored per `SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`. It runs through `AppOnlyAnalysisService` (app-only/MI; ADR-016 budget, ADR-014 cache) as an AI rung — so it emits `Suggested`/`Ambiguous` only and never auto-files. `jps-validate` passes; build clean; publish-size + CVE reported; `/conflict-check` clean; Placement Justification stated.
+  </goal>
+
+  <context>
+    <background>
+      FR-20: assessed communications emit a summary/checklist. This is the narrative-output consumer for Responsive Intelligence. `SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md` is required reading (Daily Briefing is the shipped reference; Insight Engine the worked example). The Triage Action reuses the rung-5 extract/classify Action (task 031) for the classification input rather than re-deriving category/urgency.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+      <file>docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md</file>
+      <file>projects/email-communication-solution-r4/notes/w5-ai-coordination.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">GATE: gate 050 cleared first; implement per `notes/w5-ai-coordination.md`. Run `/conflict-check` before PR.</constraint>
+    <constraint source="ADR-037">Deliver via `DeliverComposite` with section-name-keyed streaming; sections map to the structured output fields.</constraint>
+    <constraint source="project">Author per `SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md` (Layer 1 orchestrator template resolution + Layer 2 PromptSchemaRenderer `## Input`).</constraint>
+    <constraint source="ADR-013">Consume `Services/Ai/PublicContracts/` seams; run via `AppOnlyAnalysisService`; do NOT fork internals or inject AI-internal types.</constraint>
+    <constraint source="ADR-016 / ADR-014">Enforce AI budget + cache; the Triage Action is an AI rung — emits `Suggested`/`Ambiguous` only, NEVER auto-files (spec MUST).</constraint>
+    <constraint source="project">Reuse task 031's rung-5 Action for classification input; do NOT duplicate extract/classify logic (Component Justification §11).</constraint>
+    <constraint source="root §10">Report publish-size + CVE; state Placement Justification (new JPS Action adds AI surface to BFF).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/notes/w5-ai-coordination.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+      <file>docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-037-delivercomposite.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-ai-budget.md</file>
+      <file>.claude/adr/ADR-014-ai-cache.md</file>
+    </files>
+    <patterns>
+      <pattern name="JPS Action authoring" location="jps-action-create skill">
+        Author the Action JSON (instruction, output fields, scopes, template params, examples); validate with `jps-validate`.
+      </pattern>
+      <pattern name="Narrative output via DeliverComposite" location="docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md">
+        Two-layer pattern; DeliverComposite section-name-keyed streaming; Daily Briefing shipped reference.
+      </pattern>
+      <pattern name="AppOnlyAnalysisService AI rung" location="src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs">
+        Run app-only/MI with ADR-016 budget + ADR-014 cache; emits Suggested/Ambiguous only.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `notes/w5-ai-coordination.md` + `SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md` + `BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md` to lock the authoring pattern + the DeliverComposite delivery.</step>
+    <step order="2">Run `/conflict-check` scoped to `Services/Ai/`.</step>
+    <step order="3">Read task 031's rung-5 extract/classify Action to reuse its classification output as the Triage Action's input (category/urgency) rather than re-deriving.</step>
+    <step order="4">Author the "Communication Triage" JPS Action via `jps-action-create`: structured output fields category, urgency, obligations[], suggested actions[], response checklist; scopes + template params + examples. Map each output field to a DeliverComposite section name (ADR-037).</step>
+    <step order="5">Wire delivery through `DeliverComposite` per the two-layer pattern (Layer 1 orchestrator template + Layer 2 `## Input`); consume the gate-050 seam for the composite executor.</step>
+    <step order="6">Ensure it runs via `AppOnlyAnalysisService` (app-only/MI) with ADR-016 budget + ADR-014 cache; confirm it emits `Suggested`/`Ambiguous` only and never auto-files.</step>
+    <step order="7">Validate the Action JSON with `jps-validate` (schema + render). Fix any validation errors.</step>
+    <step order="8">Run `dotnet build` (if C# executor/registration touched); `dotnet publish -c Release ... -o deploy/api-publish/` (report size + delta vs ~49.63 MB) + `dotnet list package --vulnerable --include-transitive` (no new HIGH CVE).</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff; `adr-check` against `spec.md` (ADR-037/013/016/014; never-auto-file). Address Critical findings. `/conflict-check` clean before PR.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 053 ✅; confirm 054 unblocked. Update `current-task.md` (record Action name + section-name map + reuse of 031; advance).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect the output pattern, rung-5 Action, gate note</tool>
+    <tool name="jps-action-create">Author the Triage Action JSON</tool>
+    <tool name="jps-validate">Validate schema + render</tool>
+    <tool name="edit">Wire DeliverComposite delivery / registration</tool>
+    <tool name="bash">Build, publish-size, CVE scan</tool>
+    <tool name="conflict-check">Pre-PR overlap scan on Services/Ai/</tool>
+    <tool name="code-review">FULL-rigor gate</tool>
+    <tool name="adr-check">FULL-rigor gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">"Communication Triage" JPS Action JSON (structured output → DeliverComposite section-name-keyed)</output>
+    <output type="code">DeliverComposite delivery wiring / registration (via gate-050 seam)</output>
+    <output type="docs">PR description: Placement Justification + publish-size delta + CVE + reuse of task 031</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Communication Triage" JPS Action exists with structured output: category, urgency, obligations[], suggested actions[], response checklist.</criterion>
+    <criterion testable="true">Output is delivered via `DeliverComposite` with section-name-keyed sections per ADR-037.</criterion>
+    <criterion testable="true">Authored per `SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md` two-layer pattern; `jps-validate` passes (schema + render).</criterion>
+    <criterion testable="true">Runs via `AppOnlyAnalysisService` with ADR-016 budget + ADR-014 cache; emits `Suggested`/`Ambiguous` only, never auto-files.</criterion>
+    <criterion testable="true">Reuses task 031's classification input; grep confirms no duplicated extract/classify logic.</criterion>
+    <criterion testable="true">Consumes gate-050 PublicContracts seams (no internal fork); publish-size + CVE reported; `/conflict-check` clean; Placement Justification in PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the narrative half of Responsive Intelligence (052 is the record/notification half). The rule config binding these Actions to conditions + the end-to-end tests are task 054.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Blocked until gate 050 clears. Load all `&lt;knowledge&gt;&lt;files&gt;` incl. gate note + output pattern. FULL rigor — Step 9.5 REQUIRED. BFF governance: publish-size + CVE + `/conflict-check` + Placement Justification. Never auto-file; consume seams; reuse task 031.
+    </protocol>
+  </execution>
+</task>

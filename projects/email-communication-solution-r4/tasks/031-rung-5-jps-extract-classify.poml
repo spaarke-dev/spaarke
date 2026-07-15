@@ -1,0 +1,153 @@
+<task id="031" project="email-communication-solution-r4">
+  <metadata>
+    <title>Rung 5 — new JPS extract+classify Action run via `AppOnlyAnalysisService`</title>
+    <phase>Wave 3 — Server: semantic + AI rungs</phase>
+    <status>not-started</status>
+    <estimated-hours>9</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>032, 053</blocks>
+    <tags>bff-api, ai, jps, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Adds an LLM classification rung to the BFF: new JPS Action + wiring through `AppOnlyAnalysisService` (app-only/MI); touches `Services/Ai` consumer surface (sole-owned by r2-core — PublicContracts + coordination required); ADR-016 budget, ADR-014 cache, ADR-015 (privilege flag-only), ADR-013 (facade) all bind; BFF Hygiene (§10) obligations apply. FULL.</rigor-reason>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New JPS Action + a rung-5 consumer in `Services/Communication`, consuming `Services/Ai` via PublicContracts; disjoint files from rung 4 (task 030). Both feed task 032. Runs alongside 030 within W3. Coordinate the `Services/Ai` consumption with r2-core via `/conflict-check`.</parallel-reason>
+    <fr-refs>FR-15</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Implement **Rung 5** of the Association Engine: an LLM-backed extract+classify rung. Author a NEW JPS (JSON Prompt Schema) Action that, given the normalized message envelope, produces structured output — a `$choices`-constrained set of candidate record types plus `category`, `urgency`, `obligations[]`, and `suggested actions[]` — and run it via `AppOnlyAnalysisService` (app-only / managed identity; NOT OBO). It fires only when deterministic rungs 0–3 AND semantic rung 4 fail to yield a confident association.
+
+    Rung 5 emits **`Suggested`/`Ambiguous` ONLY, with rationale** — it NEVER auto-files (FR-11 + owner override: only deterministic rungs 0–3 ≥0.85 auto-file; AI rungs always suggest). The LLM rationale is written into `sprk_associationprovenance` so the W4 review surface (task 042) shows the reviewer why. AI may FLAG privilege but never DECIDE it (ADR-015).
+
+    Requirements (FR-15):
+    - Use the `jps-action-create` skill to author the Action JSON (instruction, `$choices`-constrained record-type output field, `category`/`urgency`/`obligations[]`/`suggestedActions[]` output fields, scopes, template params, examples). Validate with `jps-validate` before wiring.
+    - Run the Action via `AppOnlyAnalysisService` (app-only/MI runtime) — reuse `AppOnlyAnalysisService.AnalyzeEmailAsync` (or the nearest existing entry) rather than building a new analysis runner. Consume via `Services/Ai/PublicContracts/` — do NOT inject AI-internal types into Communication code (ADR-013).
+    - Enforce ADR-016 budget + ADR-014 cache; fire ONLY on rung-0–4 miss/ambiguity (NFR-05). Expose per-rung telemetry hooks for task 032.
+    - Map the classification output → engine matches: candidate record types → `Suggested` associations (targets per ADR-024, org → `sprk_organization`); category/urgency/obligations feed downstream W5 Responsive Intelligence (task 053 "Communication Triage" reuses this Action's output — hence the `blocks 053`).
+    - Component Justification §11: this is a NEW JPS Action (justified — no existing Action extracts+classifies communications for association); but it MUST reuse the existing `AppOnlyAnalysisService` runtime, not a new one. Answer the three-question template in the PR.
+  </prompt>
+
+  <role>
+    Spaarke BFF + AI engineer authoritative on JPS Action authoring (`jps-action-create`/`jps-validate`), `AppOnlyAnalysisService` (app-only/MI analysis), ADR-013 (PublicContracts facade), ADR-016/014 (budget/cache), ADR-015 (privilege flag-only), ADR-024 (regarding), and the `.claude/constraints/bff-extensions.md` governance checklist. Aware that `Services/Ai` internals are sole-owned by `spaarke-ai-architecture-redesign-r2`.
+  </role>
+
+  <goal>
+    A validated JPS extract+classify Action runs via `AppOnlyAnalysisService` as rung 5, firing only after rungs 0–4 miss/are ambiguous, producing `$choices`-constrained record-type candidates + category/urgency/obligations/suggestedActions with rationale. Rung 5 emits `Suggested`/`Ambiguous` only (never auto-files), writes rationale to provenance, flags (never decides) privilege. Consumes AI via PublicContracts; reuses `AppOnlyAnalysisService`. Build + tests green; publish-size delta + CVE reported; Placement Justification + `/conflict-check` (with r2-core coordination) in PR.
+  </goal>
+
+  <context>
+    <background>
+      Rung 5 is the deepest, most expensive rung — the last resort after deterministic rungs 0–3 (W1) and semantic rung 4 (task 030). The deterministic-first ladder (NFR-05) exists precisely so this LLM rung rarely fires. Its structured output does double duty: (a) as association suggestions here, and (b) as the substrate for W5's "Communication Triage" (task 053 reuses category/urgency/obligations/suggestedActions via `DeliverComposite`) — which is why this task blocks 053.
+
+      `AppOnlyAnalysisService.AnalyzeEmailAsync` already runs JPS Actions in the app-only/MI runtime for inbound email analysis (spec §Existing Patterns). Reuse it; do not build a parallel runner. Consume through `Services/Ai/PublicContracts/` — `Services/Ai` internals are sole-owned by `spaarke-ai-architecture-redesign-r2`; coordinate via `/conflict-check` and escalate if a needed seam is missing (do not fork internals).
+
+      Auto-file boundary (FR-11): rung 5 output is ALWAYS `Suggested`/`Ambiguous` regardless of model confidence. Privilege is flagged as signal only (ADR-015) — never a filing decision.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs (READ — reuse `AnalyzeEmailAsync` runtime)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (consume analysis capability here)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (rung 5 consumer + engine wiring)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (DI registration)</file>
+      <file>(JPS Action definition — author per `jps-action-create` skill output location)</file>
+      <file>projects/email-communication-solution-r4/spec.md (FR-15, FR-11, NFR-05)</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-15 binding: JPS extract+classify Action (`$choices`→record types; category, urgency, obligations[], suggestedActions[]) via `AppOnlyAnalysisService`.</constraint>
+    <constraint source="project">FR-11 / owner override: rung 5 emits `Suggested`/`Ambiguous` ONLY, with rationale — NEVER auto-files.</constraint>
+    <constraint source="ADR-015">AI may FLAG privilege, never DECIDE it — privilege captured as signal only.</constraint>
+    <constraint source="NFR-05">Rung 5 fires ONLY on rung-0–4 miss/ambiguity; ADR-014 cache + ADR-016 budget enforced; expose telemetry hooks for task 032.</constraint>
+    <constraint source="ADR-013">Consume analysis via `Services/Ai/PublicContracts/` facade — no AI-internal type injection into Communication code.</constraint>
+    <constraint source="NFR-03 / ADR-028">Runtime is app-only / managed identity — never `new` a credential or `ConfidentialClientApplication`; inject central `TokenCredential`/`IGraphClientFactory`.</constraint>
+    <constraint source="ADR-024">Candidate record types map to catalog targets; org → `sprk_organization` (never `account`).</constraint>
+    <constraint source="ADR-010 / ADR-032">Register the rung via `CommunicationModule`; feature-gated → ADR-032 Null-Object.</constraint>
+    <constraint source="hot-path (BINDING)">`Services/Ai` internals sole-owned by `spaarke-ai-architecture-redesign-r2` — consume PublicContracts, coordinate via `/conflict-check`; do NOT fork internals.</constraint>
+    <constraint source="root §10 BFF Hygiene">Load `bff-extensions.md`; state Placement Justification; report publish-size delta (~49.63 MB baseline) + CVE; run `/conflict-check` before PR.</constraint>
+    <constraint source="§11 Component Justification">NEW JPS Action justified; MUST reuse existing `AppOnlyAnalysisService` runtime — answer the three-question template in the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md (task 005)</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-ai-budget.md</file>
+      <file>.claude/adr/ADR-014-ai-cache.md</file>
+      <file>.claude/adr/ADR-015-ai-privilege.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+    </files>
+    <patterns>
+      <pattern name="JPS Action authoring" location=".claude/skills/jps-action-create/SKILL.md">
+        Author the Action JSON (instruction, output fields with `$choices` constraint, scopes, template params, examples); validate with `jps-validate` before wiring.
+      </pattern>
+      <pattern name="App-only analysis runtime" location="src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs">
+        Reuse `AnalyzeEmailAsync` (or nearest entry) to run the Action under app-only/MI; consume via PublicContracts.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/conflict-check` (BFF + `Services/Ai` hot-path) and coordinate with `spaarke-ai-architecture-redesign-r2` on the PublicContracts analysis seam. Load `bff-extensions.md`. Read the W1 rung interface + task-015 status mapping to confirm the contract rung 5 must satisfy.</step>
+    <step order="2">Read `AppOnlyAnalysisService` + the `Services/Ai/PublicContracts/` analysis facade to confirm the reuse entry point + how a JPS Action is dispatched app-only.</step>
+    <step order="3">Invoke `jps-action-create` to author the extract+classify Action JSON: instruction, `$choices`-constrained candidate-record-type field, `category`/`urgency`/`obligations[]`/`suggestedActions[]` fields, scopes, template params, examples. Follow `SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`. Validate with `jps-validate` — fix until clean.</step>
+    <step order="4">Implement the rung 5 consumer in `Services/Communication/` implementing the engine rung interface; fire ONLY when rungs 0–4 miss/are ambiguous. Dispatch the Action via `AppOnlyAnalysisService` through PublicContracts. Enforce ADR-016 budget + ADR-014 cache.</step>
+    <step order="5">Map classification output → engine matches: candidate record types → `Suggested` associations (ADR-024 catalog; org→`sprk_organization`); write LLM rationale to `sprk_associationprovenance`; capture privilege as a flag only (ADR-015). Ensure rung 5 output NEVER auto-files.</step>
+    <step order="6">Register via `CommunicationModule` (ADR-010); feature-gated → ADR-032 Null-Object. Expose per-rung telemetry hooks (fired/skipped, tokens, latency, cache hit) for task 032.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` (clean) + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication` (existing green; rung-5 unit tests land in task 032).</step>
+    <step order="8">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~49.63 MB. Run `dotnet list package --vulnerable --include-transitive` — no new HIGH CVE.</step>
+    <step order="9.5">FULL-rigor quality gates: invoke `code-review` on the diff + Action JSON; invoke `adr-check` against ADR-045, ADR-013, ADR-016, ADR-014, ADR-015, ADR-024, ADR-032, ADR-028 + `spec.md`. Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 031 ✅; confirm 032 + 053 dependencies satisfied.</step>
+    <step order="11">Update `current-task.md` per task-execute protocol: status → completed; record decisions (Action output schema, fire-gate, provenance rationale shape, r2-core coordination outcome).</step>
+  </steps>
+
+  <tools>
+    <tool name="conflict-check">BFF + Services/Ai hot-path; r2-core coordination</tool>
+    <tool name="jps-action-create">author the extract+classify Action JSON</tool>
+    <tool name="jps-validate">validate the Action before wiring</tool>
+    <tool name="read">AppOnlyAnalysisService + PublicContracts facade + W1 rung interface</tool>
+    <tool name="write">rung 5 consumer + Action JSON + DI registration</tool>
+    <tool name="bash">dotnet build / test / publish (size) / CVE scan</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">JPS extract+classify Action JSON (NEW — per jps-action-create output location)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (NEW rung 5 consumer + engine wiring)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — rung 5 registration)</output>
+    <output type="docs">PR description — Placement Justification + §11 answers + publish-size delta + CVE + /conflict-check + r2-core coordination outcome</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The JPS Action passes `jps-validate` (schema + render).</criterion>
+    <criterion testable="true">Action output includes `$choices`-constrained record types + `category` + `urgency` + `obligations[]` + `suggestedActions[]`.</criterion>
+    <criterion testable="true">Rung 5 runs via `AppOnlyAnalysisService` (app-only/MI) through `Services/Ai/PublicContracts/` — no AI-internal type injection, no new analysis runner.</criterion>
+    <criterion testable="true">Rung 5 fires ONLY when rungs 0–4 miss/are ambiguous (verified by test in task 032).</criterion>
+    <criterion testable="true">Rung 5 emits `Suggested`/`Ambiguous` only, with rationale in `sprk_associationprovenance` — NEVER auto-files.</criterion>
+    <criterion testable="true">Privilege is flagged as signal only, never a filing decision (ADR-015).</criterion>
+    <criterion testable="true">Org candidates target `sprk_organization` (never `account`); no `new` credential/`ConfidentialClientApplication`.</criterion>
+    <criterion testable="true">Build + existing Communication tests green; publish-size delta + CVE reported; `/conflict-check` clean with r2-core coordination noted; Placement Justification in PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Per-rung telemetry + rung-5 unit tests land in task 032 — expose hooks here. This Action's structured output is reused by W5 task 053 ("Communication Triage" → `DeliverComposite`) — design the output schema so it serves both association-suggestion (here) and triage-summary (053) without a second LLM call where avoidable. `Services/Ai` internals are sole-owned by r2-core: consume PublicContracts, coordinate via `/conflict-check`, escalate a missing seam rather than forking.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 (code-review + adr-check) MANDATORY. Use `jps-action-create` + `jps-validate` for the Action. Per root §10: publish-size + CVE + Placement Justification + `/conflict-check` (with r2-core coordination) ALL required. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

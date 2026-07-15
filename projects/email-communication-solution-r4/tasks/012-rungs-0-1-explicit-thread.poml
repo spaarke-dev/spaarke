@@ -1,0 +1,145 @@
+<task id="012" project="email-communication-solution-r4">
+  <metadata>
+    <title>Rung 0 (explicit-ref / caller-supplied regarding) + Rung 1 (thread continuity) across 8 targets</title>
+    <phase>Wave 1 — Server: enrichment + deterministic engine</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>015, 030</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Implements deterministic rung logic in the live Association Engine; reimplements retired `EmailAssociationService` thread-continuity design; touches association output for all 8 targets; must preserve engine contract from 011 and respect ADR-024 / ADR-045 + bff-extensions governance.</rigor-reason>
+    <parallel-group>W1-rungs</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-10</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Implement the two deterministic rungs on top of the Association Engine (task 011), each as an `IAssociationRung`, operating over the `NormalizedMessage` envelope, emitting per-attribute confidence + provenance, across all eight targets (matter, project, invoice, service request, work assignment, event, contact, organization):
+
+    • **Rung 0 — explicit reference / caller-supplied regarding.** A caller-supplied regarding (e.g. from the outbound send request or add-in save pane) is treated as rung 0 (highest determinism). Also extend the subject-line explicit-reference regex (matter/invoice/service-request identifiers) to resolve explicit tokens in the subject.
+
+    • **Rung 1 — thread continuity.** Using `inReplyTo` / `references[]` / `conversationId` from the envelope, find the parent `sprk_communication` and COPY its regarding to the new communication. Reimplement the `conversationindex` correlation logic from the RETIRED `EmailAssociationService` design (signal design only — reuse the algorithm, not the deleted code; the OOB-email subsystem is retired in W0 task 007).
+
+    Both rungs run for inbound AND outbound (direction symmetry). Do NOT implement rung 2/3 (tasks 013/014) or the confidence→status ladder (task 015) — emit `RungMatch` results with confidence + provenance; task 015 maps them to status.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer, Association Engine rung author. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/`. Fluent in ADR-024 (regarding family — write typed lookups + denormalized fields), the engine/rung contract from task 011, ADR-045, and `.claude/constraints/bff-extensions.md`.
+  </role>
+
+  <goal>
+    Rung 0 (explicit-ref + caller-supplied regarding) and Rung 1 (thread continuity via `inReplyTo`/`references`/`conversationId` → parent comm → copy regarding, reimplementing `conversationindex` logic) are implemented as ordered `IAssociationRung`s, resolving across all 8 targets, emitting confidence + provenance, running symmetrically for inbound + outbound. Build clean; per-rung + direction-symmetry tests pass (authored here or referenced from 017); publish-size + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      Task 011 delivered the Association Engine over the normalized envelope with an `IAssociationRung` abstraction and a `RungMatch` (target ref + per-attribute confidence + provenance). Tasks 012–014 fill in the deterministic rung content. Task 012 owns the two highest-determinism rungs.
+
+      Rung 0 has two sources: (a) an explicit caller-supplied regarding (outbound send request, add-in save pane), which is authoritative, and (b) explicit identifiers in the subject line (extend the existing subject regex). Rung 1 is thread continuity: mail threading headers (`inReplyTo`, `references`) plus Graph `conversationId` let us find the parent `sprk_communication` and inherit its regarding — this is the single highest-value deterministic signal for ongoing matters. The `conversationindex` correlation algorithm from the now-retired `EmailAssociationService` (deleted in W0 task 007) is reused as DESIGN only; reimplement it against the envelope.
+
+      Eight targets: matter, project, invoice, service request, work assignment, event, contact, organization — resolved through the ADR-024 regarding machinery (catalog/map/priority extended in W0 tasks 003/004).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/IAssociationRung.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/NormalizedMessage.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationAssociation.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+      <file>projects/email-communication-solution-r4/notes/011-resolver-behavior-contract.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-10: rung 0 (explicit-ref + caller-supplied) and rung 1 (thread continuity) implemented over the envelope; per-match provenance recorded; direction-symmetry (inbound + outbound identical).</constraint>
+    <constraint source="project">Rung 1 MUST use `inReplyTo`/`references[]`/`conversationId` from the envelope to find the parent `sprk_communication` and copy its regarding; reimplement `conversationindex` logic from the retired `EmailAssociationService` design (algorithm reuse, not deleted code).</constraint>
+    <constraint source="project">All 8 targets resolvable: matter, project, invoice, service request, work assignment, event, contact, organization — via the ADR-024 catalog/map/priority extended in W0.</constraint>
+    <constraint source="ADR-024">Write typed regarding lookups + denormalized fields; no new regarding mechanism (extend catalog/map/priority only).</constraint>
+    <constraint source="project">Do NOT implement rung 2/3 (013/014) or the confidence→status ladder (015). Emit `RungMatch` with confidence + provenance only.</constraint>
+    <constraint source="project">Preserve the engine contract + rungs 0–2 behavior baseline from task 011 (do not regress the characterization tests).</constraint>
+    <constraint source="ADR-045">Rung model codified in ADR-045; confirm alignment.</constraint>
+    <constraint source="project">Register any new rung services via `CommunicationModule` (ADR-010), unconditional (ADR-032). bff-extensions Placement Justification in the PR; publish-size delta (baseline ~49.63 MB incl. PDBs); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/email-processing-architecture.md</file>
+      <file>docs/data-model/sprk_communication.md</file>
+    </files>
+    <patterns>
+      <pattern name="Rung as IAssociationRung" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/IAssociationRung.cs">
+        Each rung is an ordered `IAssociationRung.EvaluateAsync(envelope, context, ct)` returning `RungMatch[]` with confidence + provenance; the Engine aggregates.
+      </pattern>
+      <pattern name="Thread-continuity via conversation headers" location="projects/email-communication-solution-r4/notes/011-resolver-behavior-contract.md">
+        Parent lookup by `internetMessageId`/`inReplyTo`/`references`/`conversationId`; copy parent regarding. Reuse the retired EmailAssociationService `conversationindex` algorithm as design.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the task-011 engine contract note + `IAssociationRung`/`RungMatch` to confirm the rung signature and provenance shape.</step>
+    <step order="2">Read the W0 catalog/map/priority extensions (service request, event, organization targets) so rung matches resolve all 8 targets through the ADR-024 machinery.</step>
+    <step order="3">Read `.claude/constraints/bff-extensions.md` §F + ADR-024 before writing rung output.</step>
+    <step order="4">Implement Rung 0: (a) accept a caller-supplied regarding (from the send request / add-in context) as an authoritative rung-0 match; (b) extend the subject explicit-reference regex to detect matter/invoice/service-request identifiers; emit `RungMatch` with high deterministic confidence + provenance citing the source (caller vs subject-token).</step>
+    <step order="5">Implement Rung 1 (thread continuity): from the envelope's `inReplyTo`/`references[]`/`conversationId`, query for the parent `sprk_communication`; if found, copy its regarding to the new communication. Reimplement the `conversationindex` correlation algorithm from the retired `EmailAssociationService` design. Emit `RungMatch` + provenance citing the parent comm id and the matched header(s).</step>
+    <step order="6">Register both rungs in `CommunicationModule` in the correct order (rung 0 before rung 1); confirm the Engine iterates them ahead of rungs 2/3.</step>
+    <step order="7">Write per-rung unit tests + direction-symmetry tests (inbound and outbound produce identical rung-0/rung-1 matches for equivalent envelopes) in `tests/unit/Sprk.Bff.Api.Tests/`. Coordinate scope with task 017 (which owns the cross-rung symmetry suite) to avoid duplication.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm the task-011 characterization tests still pass (no regression).</step>
+    <step order="8.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/r4-012-publish/`; report compressed size + delta vs ~49.63 MB baseline. Expected ≈ 0.</step>
+    <step order="8.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff; `adr-check` against `spec.md` (focus FR-10 rungs 0–1 + ADR-024 + direction symmetry). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; note 013/014 are parallel siblings — confirm no overlapping edits to shared engine files).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (012 ✅) + `current-task.md`; record decisions (subject-regex extensions, `conversationindex` reimplementation choices).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect engine contract, catalog/map, models</tool>
+    <tool name="edit">Implement rung 0 + rung 1; DI registration</tool>
+    <tool name="bash">Build, per-rung + symmetry tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs (NEW — rung 0)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ThreadContinuityRung.cs (NEW — rung 1)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — rung registration/order)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (rung 0/1 unit + direction-symmetry tests)</output>
+    <output type="docs">PR description with bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Rung 0 resolves a caller-supplied regarding as an authoritative match AND explicit subject-line identifiers (matter/invoice/service-request), emitting confidence + provenance.</criterion>
+    <criterion testable="true">Rung 1 finds the parent `sprk_communication` via `inReplyTo`/`references`/`conversationId` and copies its regarding to the new communication, with provenance citing the parent + matched header.</criterion>
+    <criterion testable="true">Both rungs resolve across all 8 targets through the ADR-024 catalog/map/priority; typed lookups + denormalized fields written.</criterion>
+    <criterion testable="true">Rungs run symmetrically for inbound and outbound (direction-symmetry tests pass).</criterion>
+    <criterion testable="true">Rungs are registered in `CommunicationModule` in order (0 before 1, ahead of rungs 2/3).</criterion>
+    <criterion testable="true">Task-011 characterization tests still pass (no regression of engine behavior).</criterion>
+    <criterion testable="true">No confidence→status mapping performed here (that is task 015); rungs emit `RungMatch` only.</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta ≈ 0; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel sibling of 013 (rung 2) and 014 (rung 3) — all three depend on 011 and touch the engine; coordinate on shared files via `/conflict-check` and keep new rungs in separate `Engine/Rungs/*` files to minimize overlap.
+
+    The `conversationindex` algorithm is reused from the RETIRED `EmailAssociationService` design (deleted in W0 task 007) — reimplement from the signal design, do not resurrect deleted code or the OOB-email dependency.
+
+    Task 015 consumes these `RungMatch` results and maps confidence → status + auto-file; task 030 (rung 4 semantic) builds on the same rung interface.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED. Per CLAUDE.md §10: publish-size delta + CVE + bff-extensions Placement Justification in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

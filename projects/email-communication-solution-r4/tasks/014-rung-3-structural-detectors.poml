@@ -1,0 +1,144 @@
+<task id="014" project="email-communication-solution-r4">
+  <metadata>
+    <title>Rung 3 — structural detectors (`Detectors/`): calendar-invite, e-sign completion, invoice #, court/e-filing</title>
+    <phase>Wave 1 — Server: enrichment + deterministic engine</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>015</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Adds a new `Detectors/` subsystem of deterministic structural detectors feeding the live engine; resolves category + invoice/event + obligations that downstream Responsive Intelligence consumes; respects ADR-024 / ADR-045 + bff-extensions governance.</rigor-reason>
+    <parallel-group>W1-rungs</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-10</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Implement Rung 3 — structural detectors — as an `IAssociationRung` backed by a NEW `Detectors/` folder under `Services/Communication/Engine/`. Each detector inspects the `NormalizedMessage` envelope (subject, body, attachments, headers) for a deterministic structural signal and emits a `RungMatch` plus resolved category/entity/obligation metadata in the 0.70–0.95 confidence band:
+
+    • **Calendar-invite detector** — iCal/`text/calendar` attachment or invite headers → resolves an `sprk_event` association + event category.
+    • **E-sign completion detector** — DocuSign/Adobe Sign "completed" signals → resolves category + obligation ("executed document").
+    • **Invoice-number detector** — invoice-number pattern in subject/body/attachment → resolves invoice association + `invoice` category.
+    • **Court / e-filing detector** — court/e-filing notice patterns → resolves category + obligation (deadline/response).
+
+    Detectors resolve category + invoice/event target + obligations (obligations[] feed W5 Responsive Intelligence). Runs for inbound AND outbound (direction symmetry). Do NOT implement the confidence→status ladder (task 015) — emit `RungMatch` + metadata with confidence + provenance; task 015 maps to status.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer, Association Engine rung author. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/`. Fluent in ADR-024 (regarding family), the engine/rung contract from task 011, ADR-045, and `.claude/constraints/bff-extensions.md`. Comfortable authoring a small, extensible detector abstraction (one detector per structural signal, easy to add more).
+  </role>
+
+  <goal>
+    A new `Detectors/` folder holds four structural detectors (calendar-invite, e-sign completion, invoice #, court/e-filing) behind a `IStructuralDetector` abstraction, aggregated by a rung-3 `IAssociationRung`. Detectors emit `RungMatch` in the 0.70–0.95 band plus resolved category + invoice/event target + obligations[] with provenance, symmetric across directions. Build clean; per-detector + symmetry tests pass; publish-size + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      Task 011 delivered the engine + `IAssociationRung`/`RungMatch`. Task 014 owns rung 3: deterministic structural signals that are stronger than participant correlation (rung 2) because they identify the KIND of communication (an invite, an executed contract, an invoice, a court notice) and often the exact related record. These signals also produce category + obligations metadata that W5 Responsive Intelligence turns into Events/Tasks/Notifications (FR-19) — so rung 3 is the deterministic feeder for the intelligence loop, complementing the AI rung 5 (task 031).
+
+      Component Justification (§11): a new `Detectors/` folder is justified because each detector is a distinct, independently-testable structural signal with a concrete failure mode if absent (e.g., calendar invites never auto-create `sprk_event`); the `IStructuralDetector` abstraction keeps them uniform and extensible (new channel/signal = new detector, per NFR-04) without touching the engine.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/IAssociationRung.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/NormalizedMessage.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+      <file>projects/email-communication-solution-r4/notes/011-resolver-behavior-contract.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-10: rung 3 structural detectors in a NEW `Detectors/` folder (calendar-invite, e-sign completion, invoice #, court/e-filing); per-match provenance; direction symmetry.</constraint>
+    <constraint source="project">Confidence band 0.70–0.95 for rung-3 matches.</constraint>
+    <constraint source="project">Detectors resolve category + invoice/event association + obligations[] (obligations feed W5 FR-19). Emit `RungMatch` + metadata only — no status mapping (task 015).</constraint>
+    <constraint source="ADR-024">Invoice/event associations write typed regarding lookups + denormalized fields; no new regarding mechanism.</constraint>
+    <constraint source="NFR-04">Detector abstraction MUST be channel-neutral (operates over the envelope) and extensible — adding a detector MUST NOT change the engine.</constraint>
+    <constraint source="project">Component Justification (§11): state the concrete cost-of-doing-nothing for the new `Detectors/` folder in the PR.</constraint>
+    <constraint source="project">Preserve engine contract + task-011 characterization baseline (no regression).</constraint>
+    <constraint source="ADR-045">Rung/detector model codified in ADR-045; confirm alignment.</constraint>
+    <constraint source="project">Register the rung + detectors via `CommunicationModule` (ADR-010), unconditional (ADR-032). bff-extensions Placement Justification in the PR; publish-size delta (baseline ~49.63 MB incl. PDBs); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/data-model/sprk_communication.md</file>
+    </files>
+    <patterns>
+      <pattern name="One detector per signal" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/IAssociationRung.cs">
+        `IStructuralDetector.Detect(envelope)` → optional structural match; the rung-3 `IAssociationRung` aggregates all registered detectors. New signal = new detector class, no engine change (NFR-04).
+      </pattern>
+      <pattern name="Obligations feed Responsive Intelligence" location="projects/email-communication-solution-r4/spec.md">
+        Detector-resolved obligations[] + category are consumed by W5 (FR-19) EventRules → CreateEvent/Task/Notification.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the task-011 engine contract + `IAssociationRung`/`RungMatch`; confirm how a rung aggregates multiple sub-results and where category/obligation metadata rides on the match.</step>
+    <step order="2">Read the envelope attachment sub-model (task 011) to confirm access to attachment content-type/name for iCal/e-sign/invoice detection.</step>
+    <step order="3">Read `.claude/constraints/bff-extensions.md` §F + §11 Component Justification + ADR-024 before writing detectors.</step>
+    <step order="4">Define `IStructuralDetector` (channel-neutral: `StructuralMatch? Detect(NormalizedMessage)`), the `StructuralMatch` metadata (category, target entity ref, obligations[], confidence, provenance), and the `Detectors/` folder.</step>
+    <step order="5">Implement four detectors: CalendarInvite (iCal/`text/calendar` attachment or invite headers → `sprk_event` + event category), ESignCompletion (DocuSign/Adobe "completed" → category + executed-document obligation), InvoiceNumber (invoice-number pattern → invoice target + `invoice` category), CourtEFiling (court/e-filing notice pattern → category + deadline/response obligation). Each in the 0.70–0.95 band with provenance.</step>
+    <step order="6">Implement `StructuralDetectorRung` (rung 3): run all registered detectors over the envelope, aggregate `RungMatch` results + category/obligation metadata. Register the rung + detectors in `CommunicationModule` after rung 2.</step>
+    <step order="7">Write per-detector unit tests (positive + negative fixtures) + direction-symmetry tests. Coordinate suite scope with task 017.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm task-011 characterization tests still pass.</step>
+    <step order="8.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/r4-014-publish/`; report compressed size + delta vs ~49.63 MB baseline. Expected ≈ 0.</step>
+    <step order="8.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff; `adr-check` against `spec.md` (focus FR-10 rung 3 + NFR-04 extensibility + §11 justification + ADR-024). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; 012/013 are parallel siblings — the new `Detectors/` files are isolated, but confirm `CommunicationModule.cs` edits don't collide).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (014 ✅) + `current-task.md`; record decisions (detector abstraction shape, detection heuristics, obligation vocabulary).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect engine contract, envelope attachments, catalog</tool>
+    <tool name="edit">Create `Detectors/` + four detectors + rung 3; DI registration</tool>
+    <tool name="bash">Build, per-detector + symmetry tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Detectors/IStructuralDetector.cs + StructuralMatch.cs (NEW — abstraction)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Detectors/{CalendarInvite,ESignCompletion,InvoiceNumber,CourtEFiling}Detector.cs (NEW — four detectors)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/StructuralDetectorRung.cs (NEW — rung 3)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — rung + detector registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (per-detector positive/negative + symmetry tests)</output>
+    <output type="docs">PR description with §11 Component Justification + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A new `Detectors/` folder exists with an `IStructuralDetector` abstraction and four detectors (calendar-invite, e-sign completion, invoice #, court/e-filing).</criterion>
+    <criterion testable="true">Calendar-invite detector resolves an `sprk_event` association + event category; invoice detector resolves an invoice target + `invoice` category.</criterion>
+    <criterion testable="true">E-sign and court/e-filing detectors resolve category + obligations[] (executed-document / deadline-response) with provenance.</criterion>
+    <criterion testable="true">Rung-3 matches land in the 0.70–0.95 confidence band with per-match provenance.</criterion>
+    <criterion testable="true">Adding a detector does not require engine changes (NFR-04 extensibility; verified by the aggregation design).</criterion>
+    <criterion testable="true">Rung + detectors registered in `CommunicationModule` after rung 2; runs symmetrically inbound + outbound.</criterion>
+    <criterion testable="true">No confidence→status mapping here (task 015); `RungMatch` + metadata only; task-011 characterization tests still pass.</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta ≈ 0; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel sibling of 012 (rungs 0/1) and 013 (rung 2). The new `Detectors/` files are isolated; the only shared edit is `CommunicationModule.cs` — coordinate via `/conflict-check`.
+
+    Detector-resolved category + obligations[] are the deterministic feeders for W5 Responsive Intelligence (FR-19); rung 5 (task 031, AI) covers the ambiguous/miss cases the detectors do not catch. Keep the obligation vocabulary aligned with what `EventRulesService` consumes (confirm with W5 scope; obligations are metadata, not yet rule execution).
+
+    Task 015 consumes these `RungMatch` results and maps confidence → status; a high-confidence detector match (≥0.85) is auto-file-eligible under the deterministic ladder.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED. Per CLAUDE.md §10: publish-size delta + CVE + bff-extensions Placement Justification + §11 Component Justification for the new `Detectors/` folder in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

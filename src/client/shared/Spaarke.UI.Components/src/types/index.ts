@@ -2,8 +2,9 @@ export * from './DatasetTypes';
 export * from './CommandTypes';
 export * from './ColumnRendererTypes';
 export * from './EntityConfigurationTypes';
-export * from './ChartDefinitionTypes';
-export * from './DrillInteractionTypes';
+// ChartDefinitionTypes + DrillInteractionTypes removed (VHVU-042): the canonical
+// VisualType / IChartDefinition / IChartData / IAggregatedDataPoint / DrillInteraction
+// now live in @spaarke/visuals. These were a stale, unused fork (0 consumers).
 export * from './FieldMappingTypes';
 export * from './EventTypeConfig';
 export * from './WebApiLike';

@@ -1,0 +1,136 @@
+<task id="040" project="email-communication-solution-r4">
+  <metadata>
+    <title>Channel-aware Communication Code Page (view/record surface generalized by `sprk_communicationtype`)</title>
+    <phase>Wave 4 — Channel-aware Communication Code Page</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>001, 020</dependencies>
+    <blocks>041, 042</blocks>
+    <tags>code-page, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New Code Page (`.tsx`) built from scratch with `@spaarke/auth` v2 bootstrap; cross-cuts ADR-026/021/022/028; FULL-rigor Step 9.5 quality gates required.</rigor-reason>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-16</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Build a **channel-aware Communication Code Page** that renders a single `sprk_communication` record and is generalized by the `sprk_communicationtype` option set — NOT hard-coded to email. This task lands the page shell, auth bootstrap, URL-parameter contract, `Xrm.WebApi` record read, and the type-driven layout switch. It does NOT yet mount `&lt;EmailComposer />` (task 041) or embed `RegardingResolver` (task 042) — those are layered on top of this shell.
+
+    The design principle (FR-16): the page keys its layout off `sprk_communicationtype`. Email is the only interactive channel at launch; Teams / SMS / Notification render **read-only** later via the same shell. The layout selection logic MUST branch on the communication *type*, never on the string literal "email". Adding a future channel = a new read-only renderer, no change to the shell contract.
+
+    Follow the code-page exemplar `src/client/code-pages/DocumentRelationshipViewer/` for structure, build tooling, and deploy conventions. Use Vite + `vite-plugin-singlefile` + React 19 per ADR-026. Bootstrap auth with `@spaarke/auth` v2 only (no self-bootstrapped MSAL).
+  </prompt>
+
+  <role>
+    Spaarke front-end engineer specializing in standalone React Code Pages. Fluent UI v9 + React 19 + `@spaarke/auth` v2. Authoritative on the `src/client/code-pages/` build/deploy pattern (Vite single-file inline bundle, Dataverse web-resource registration) and the Code Page URL-parameter contract.
+  </role>
+
+  <goal>
+    A deployable Code Page at `src/client/code-pages/CommunicationPage/` (name may follow the exemplar convention) that: (1) bootstraps `@spaarke/auth` v2 via `resolveRuntimeConfig()` + `initAuth()`; (2) parses the `data=` URL contract (`mode`, `id`, `to`, `cc`, `subject`, `body`, `associatedTo`, plus standard auth env vars); (3) reads the `sprk_communication` record via `Xrm.WebApi` when an `id` is present; (4) selects a layout renderer keyed on `sprk_communicationtype` (email → interactive placeholder slot for 041; Teams/SMS/Notification → read-only renderer); (5) builds clean via `npm run build:prod` producing a single self-contained HTML artifact. Component-mount points for 041 (`&lt;EmailComposer />`) and 042 (`RegardingResolver`) are stubbed with clear extension seams.
+  </goal>
+
+  <context>
+    <background>
+      R4 replaces the auto-generated Dataverse standard form for `sprk_communication` with a Spaarke Code Page. Where R3 designed an email-only "EmailComposer" Code Page (reference §7), R4 generalizes it: the surface is a **Communication** page whose layout is chosen by `sprk_communicationtype`. This makes the page channel-extensible (NFR-04) — the review UI and layout MUST NOT change to add a future channel.
+
+      Empirical finding (R3 pre-flight): the Code Page does NOT exist — build from scratch. Exemplar is `src/client/code-pages/DocumentRelationshipViewer/` (22 files).
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/DocumentRelationshipViewer/</file>
+      <file>src/client/code-pages/DocumentRelationshipViewer/src/index.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-16: layout keys off `sprk_communicationtype`, NOT the literal "email". Email is interactive; Teams/SMS/Notification render read-only later through the same shell.</constraint>
+    <constraint source="NFR-04">Channel extensibility — the page shell + layout contract MUST NOT change to add a future channel. New channel = new read-only renderer only.</constraint>
+    <constraint source="ADR-026">Full-page Custom Page standard — standalone Code Page (not embedded entity-form control); Vite + `vite-plugin-singlefile` single self-contained HTML artifact.</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 — bootstrap via `@spaarke/auth` (`resolveRuntimeConfig` + `initAuth` + `authenticatedFetch`). NEVER self-bootstrap MSAL; NEVER snapshot tokens or pass `accessToken` props.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 for all styling; dark-mode aware (verified in task 043 UI tests).</constraint>
+    <constraint source="ADR-022">This Code Page is React 19 (not a PCF); ADR-022's React-16 PCF rule does NOT apply — but confirm no PCF mounts this page directly.</constraint>
+    <constraint source="ADR-012">Consume shared components from `@spaarke/ui-components`; do NOT fork.</constraint>
+    <constraint source="project">Build with `npm run build:prod` (NOT `npm run build`) per CLAUDE.md §12 / FAILURE-MODES AP-1.</constraint>
+    <constraint source="project">Node installs: `npm install --legacy-peer-deps --no-audit --no-fund` (avoid raw `npm ci`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code Page structure + single-file bundle" location="src/client/code-pages/DocumentRelationshipViewer/">
+        React 19 `createRoot` entry, `@spaarke/auth` bootstrap, Vite + `vite-plugin-singlefile`, deployable single self-contained HTML web resource.
+      </pattern>
+      <pattern name="Code Page `data=` URL contract" location="projects/email-communication-solution-r4/reference/r3-send-side-design.md §7.3">
+        Parse `data=mode=...&amp;id=...&amp;associatedTo=&lt;entityType&gt;:&lt;guid&gt;` plus standard `@spaarke/auth` env vars (`bffBaseUrl`, `tenantId`, `scope`, `clientId`).
+      </pattern>
+      <pattern name="Type-driven layout switch" location="spec FR-16">
+        Select renderer by `sprk_communicationtype`; email interactive, others read-only; no "email" string branching.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the exemplar `src/client/code-pages/DocumentRelationshipViewer/` end to end — `src/index.tsx`, `index.html`, `vite.config.ts`, `package.json`, `tsconfig.json`, and any build/deploy script — to mirror its structure and tooling exactly.</step>
+    <step order="2">Read reference §7.3 (URL parameter contract) and §7.6 (auth bootstrap) to lock the `data=` contract and the `@spaarke/auth` bootstrap shape.</step>
+    <step order="3">Scaffold `src/client/code-pages/CommunicationPage/` (folder name per exemplar convention): `src/index.tsx`, `index.html`, `vite.config.ts` (with `vite-plugin-singlefile`), `package.json`, `tsconfig.json`. Install deps with `npm install --legacy-peer-deps --no-audit --no-fund`.</step>
+    <step order="4">Implement the `data=` URL parser: `mode` (compose|view|reply|forward|draft), `id` (`sprk_communication` GUID), `to`/`cc`/`subject`/`body`, `associatedTo` (`&lt;entityType&gt;:&lt;guid&gt;`), and standard auth env vars. Provide typed parse output with validation for missing required params.</step>
+    <step order="5">Implement `@spaarke/auth` v2 bootstrap: `resolveRuntimeConfig()` → `initAuth({ clientId, tenantId, bffBaseUrl, bffApiScope })` → obtain `authenticatedFetch`. NO self-MSAL, NO token snapshots.</step>
+    <step order="6">Implement the `Xrm.WebApi` read of the `sprk_communication` record (when `id` present) including `sprk_communicationtype`, subject, participants, status, and reply-thread columns from task 001.</step>
+    <step order="7">Implement the type-driven layout switch: a `renderByCommunicationType(type)` selector that returns an interactive-email slot (a stubbed extension seam for task 041's `&lt;EmailComposer />`) vs a read-only renderer for Teams/SMS/Notification. Branch on the option-set value, NEVER on the string "email". Add a clearly-commented mount seam for task 042's `RegardingResolver` review surface.</step>
+    <step order="8">Wire the `onSent` / `onClose` navigation callbacks (`Xrm.Navigation.openForm` on send success; close on cancel) as pass-through props so 041 can consume them.</step>
+    <step order="9">Run `npm run build:prod` — confirm a single self-contained HTML artifact is produced with no external asset references. Fix any bundle-splitting.</step>
+    <step order="9.5">FULL-rigor quality gates: invoke `code-review` on the diff; invoke `adr-check` against `spec.md` (focus ADR-026/028/021/022/012). Address any Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 040 ✅; confirm 041 + 042 unblocked. Update `current-task.md` per task-execute protocol (status → completed; record the folder name + layout-switch decision; advance to next pending task).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect exemplar Code Page + reference §7</tool>
+    <tool name="write">Scaffold Code Page files</tool>
+    <tool name="edit">Implement parser, bootstrap, layout switch</tool>
+    <tool name="bash">npm install + build:prod</tool>
+    <tool name="code-review">FULL-rigor gate at step 9.5</tool>
+    <tool name="adr-check">FULL-rigor gate at step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/CommunicationPage/src/index.tsx (NEW — entry + auth bootstrap + URL parse + type-driven layout switch)</output>
+    <output type="code">src/client/code-pages/CommunicationPage/index.html, vite.config.ts, package.json, tsconfig.json (NEW — build tooling per exemplar)</output>
+    <output type="docs">PR description noting the type-driven layout contract + extension seams for 041/042</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Code Page folder exists under `src/client/code-pages/` mirroring the DocumentRelationshipViewer structure.</criterion>
+    <criterion testable="true">`npm run build:prod` produces a single self-contained HTML artifact (no external asset URLs).</criterion>
+    <criterion testable="true">Auth bootstraps via `@spaarke/auth` (`resolveRuntimeConfig` + `initAuth`); grep shows no `new PublicClientApplication`/self-MSAL and no `accessToken` prop.</criterion>
+    <criterion testable="true">The `data=` parser handles `mode`, `id`, `to`, `cc`, `subject`, `body`, `associatedTo`, and auth env vars per reference §7.3.</criterion>
+    <criterion testable="true">Layout selection branches on `sprk_communicationtype` (option-set value), verifiable by grep showing NO `=== 'email'` string branch in the layout switch.</criterion>
+    <criterion testable="true">`sprk_communication` record read via `Xrm.WebApi` includes `sprk_communicationtype` + reply-thread columns from task 001.</criterion>
+    <criterion testable="true">Clearly-commented mount seams exist for task 041 (`&lt;EmailComposer />`) and task 042 (`RegardingResolver`).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task deliberately stops short of mounting the composer (041) and the resolver (042) so the shell + type contract land independently and are reviewable in isolation. Keep the layout switch dumb and declarative — it is the NFR-04 extensibility seam.
+
+    Reference §7 is the R3 email-only design; R4 generalizes "EmailComposer Code Page" → "Communication Code Page." Where §7 says "EmailComposer," read it as the email *branch* of this channel-aware page.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 (code-review + adr-check) REQUIRED. Build with `npm run build:prod`. Install with `--legacy-peer-deps`.
+    </protocol>
+  </execution>
+</task>

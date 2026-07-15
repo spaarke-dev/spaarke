@@ -2449,9 +2449,11 @@ If `aiSummaryField` is omitted, the toolbar shows no sparkle icon (legacy behavi
 
 ---
 
-## "+" Create Button Configuration (v1.4.32)
+## "+" Create Button Configuration (v1.4.36)
 
 The VisualHost toolbar can render a **"+" (add) icon** between the AI-sparkle icon and the "open" icon. Clicking it opens the appropriate Create wizard for the entity the visual represents, launched **auto-associated to the host record** (the wizard's Associate-To step is hidden — the created record is regarding the host with no extra clicks).
+
+> **Launch model (v1.4.36 — changed from v1.4.32):** the "+" now opens the wizard as a **standalone Code Page** via `Xrm.Navigation.navigateTo` (a webresource dialog, 60% × 70%) — the same mechanism the ribbon `sprk_wizard_commands.js` uses for every other Create wizard. It **no longer embeds the wizard inline** inside the PCF bundle. Two consequences for makers: (1) each wizard is deployed as its own web resource (`sprk_create{event|invoice|reportcard}wizard`) and must exist in the environment; (2) the wizard Code Page owns its own authentication (via `@spaarke/auth`) — **the PCF holds no auth**, which is why the "+" adds no auth surface to VisualHost.
 
 ### Schema
 
@@ -2478,11 +2480,22 @@ If `sprk_createwizardkey` is left blank, the control falls back to normalizing t
 
 ### Authoring Notes
 
-- Wizard chunks are lazy-loaded — the first "+" click on a given wizard type incurs a one-time code-split load; subsequent clicks on the same wizard type are instant.
-- The wizard dialog is sized to the repo-wide standard **60% × 70%** viewport (matching every other ribbon-launched Create wizard, e.g. "Create New Matter") — not the wizard component's own internal default.
+- The wizard opens as a `navigateTo` webresource dialog sized to the repo-wide standard **60% × 70%** viewport (matching every other ribbon-launched Create wizard, e.g. "Create New Matter").
+- The launch envelope carries `entityType`, `entityId` (normalized to a bare-lowercase GUID per **ADR-044** — never a braced/registry-format GUID), `recordName`, and `themeOption` (dark/light). The host record is pinned as the parent and the wizard's Associate-To step is hidden.
 - A single uploaded file in the Event or Invoice wizard's Add Files step creates one `sprk_document` visible in BOTH the host record's and the newly-created child record's Documents subgrids (dual-bind). The Report Card wizard has no Add Files step.
 - Each wizard's Next Steps offers Send Email / Add To Do / Assign Work follow-ons, each created regarding the just-created child record.
 
+### Adding a new "+" wizard target (dev task)
+
+The key set is intentionally **dev-defined** — adding a target is a small code change, not a Dataverse config. To wire a new wizard (say `contract`):
+
+1. **Build the wizard Code Page** under `src/solutions/Create{X}Wizard/` — copy an existing one (e.g. `CreateInvoiceWizard`); its `main.tsx` should use the shared `useWizardPageBootstrap()` hook and mount the corresponding shared wizard component. Deploy it as a web resource `sprk_create{x}wizard`.
+2. **Register the key → page mapping** in VisualHost's local resolver `WIZARD_KEY_TO_PAGE` in [`VisualHostRoot.tsx`](../../src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx) (e.g. `contract: 'sprk_createcontractwizard'`), and add an entity alias to `ENTITY_TO_WIZARD_KEY` if the entity-fallback name differs from a plain `sprk_`-strip. (This local map deliberately mirrors the shared `wizardRegistry.ts` resolution order but is kept in the PCF so the "+" cutover doesn't drag the wizard components — and their auth deps — back into the PCF bundle.)
+3. **Bump + redeploy VisualHost** (version in all 5 locations) and deploy the new Code Page web resource.
+4. **Author** a `sprk_chartdefinition` with `sprk_createwizardenabled = Yes` and `sprk_createwizardkey = contract`.
+
+No Dataverse choice/option-set change is needed — an unrecognized key just shows the graceful toast.
+
 ---
 
-*For architecture details and component reusability, see [VISUALHOST-ARCHITECTURE.md](VISUALHOST-ARCHITECTURE.md)*
+*For architecture details, component homes, and how to add a new **visual type**, see [VISUALHOST-ARCHITECTURE.md](VISUALHOST-ARCHITECTURE.md)*

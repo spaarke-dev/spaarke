@@ -82,6 +82,7 @@ public class AttachmentValidationTests
             null!, // SpeFileStore — not tested here
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
             _loggerMock.Object);
     }
