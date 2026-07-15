@@ -6,39 +6,32 @@
 
 ## Active Task
 
-- **Task**: none active — W0-A complete (001, 002, 005 ✅)
-- **Status**: ready for W0 remainder
-- **Wave**: W0 Foundation → next: W0-B (003, 004) + W0-C (006, 007); W2 task 020 also unblocked (needs 001✅)
-- **Next Action**: Run the next W0 wave. Available (deps satisfied): **003, 004** (need 001✅), **006** (needs 001✅+005✅), **007** (needs 005✅). 006/007 are BFF → `/conflict-check` before PR.
+- **Task**: none active — **W0 Foundation COMPLETE (001–007 all ✅)**
+- **Status**: W0 unblocks everything. Next: **W1** (serial spine, starts task 010 — opus tier) ‖ **W2** (task 020, client composer) ‖ **W7** (parallel hardening track).
+- **Next Action**: begin W1 task **010** (`ICommunicationEnrichmentService`, opus/xhigh) and/or W2 task **020** (client `<EmailComposer/>`). Run `/conflict-check` before each BFF PR. W5 remains gated on task 050 (Services/Ai r2-core coordination).
 
-## Completed (W0-A, this session)
-- ✅ **005** — ADR-045 authored (both forms + INDEXes).
-- ✅ **001** — schema pass on `sprk_communication` (live spaarkedev1): created `sprk_inreplyto`, `sprk_associationprovenance`, `sprk_regardingservicerequest`; widened `sprk_internetmessageid` 100→1000 (owner-approved); confirmed `sprk_receiveddate` + `sprk_associationstatus`. Data-model doc updated (§1.2 drift closed). **Solution-export for prod promotion = deploy-time follow-up (ADR-027), not done here.**
-- ✅ **002** — added `sprk_associationstatus` values **Suggested (100000003)** + **Ambiguous (100000004)**; avoided the `100000002` collision (legacy "Unresolved"). Reconciliation documented (Unresolved→Pending Review).
+## W0 Commits (this session)
+- **007** `051a098d2` — retire OOB-`email` (partial: 3 shared-infra files retained; −3.06 MB)
+- **003** `89e599293` — `sprk_servicerequest` association target (+ data-model doc)
+- **004 + 006** `bbffb4532` — `sprk_event` + org/account domain match; send-path thread-id capture
+- (001, 002, 005 committed earlier session)
 
-### Decisions
-- 2026-07-14: Widened `sprk_internetmessageid` (owner-approved) — long RFC-2822 Message-IDs would truncate at 100 in the W1 thread rung. Columns came out at NVARCHAR(1000) (≥ spec 255; fine).
-- 2026-07-14: Retain legacy `Unresolved (100000002)`; R4 engine (task 015) treats it as `Pending Review` (no data migration).
+## Key W0 decisions (owner-confirmed 2026-07-14)
+- **Attachment field: NO rename.** `AttachmentDocumentIds` correctly carries Dataverse **Document GUIDs** (email attachments are always tracked Documents; server resolves each to its SPE File). The R3 "rename to DriveItemIds" premise was a misread. DocumentEmailWizard is **correct**, not buggy. Ripples: FR-13 (022) + FR-21 (060) carry the same corrected premise — do NOT re-introduce the rename. See [[email-r4-attachment-id-semantics]].
+- **org vs account: distinct, never mixed.** `sprk_organization` = legal entity → `sprk_regardingorganization`; OOB `account` = vendor/payment → `sprk_regardingaccount`. Domain match writes both, each to its own lookup, matched by `sprk_domain` (owner added to both tables). See [[sprk-organization-vs-account]].
+- **007 partial retirement accepted.** 3 files in `Services/Email/` are live shared infra (Office worker + inbound pipeline + RAG) — retained by design.
 
-### FYIs for later tasks (DO NOT lose)
-- **Task 003**: `sprk_servicerequest` has reverse lookup `sprk_regardingcommunication → sprk_communication`; forward lookup now added — relationship is bidirectional (note in schema doc + wire `RegardingLookupMap`/catalog/priority).
-- **Task 004**: `sprk_communication.sprk_regardingorganization` **already targets `sprk_organization`** — 004's "correct org target" is about the sender-domain MATCH CODE writing `account`, NOT this column.
-- **Task 015**: implement the `Unresolved`→`Pending Review` equivalence.
+## Owner-created Dataverse fields (this session)
+- `sprk_communication`: `sprk_regardingservicerequest` (001), `sprk_regardingaccount`, `sprk_regardingevent`
+- `sprk_organization`: `sprk_domain`; `account`: `sprk_domain`
 
-### FYIs surfaced (for later tasks — DO NOT lose)
-- **Task 002**: `sprk_associationstatus` option `100000002` is ALREADY "Unresolved" — DEC-5's tentative Suggested/Ambiguous integers collide. Use `100000003/4`. Also reconcile legacy "Unresolved" vs R4 "Pending Review" semantics (002/015).
-- **Task 003**: `sprk_servicerequest` already has reverse lookup `sprk_regardingcommunication → sprk_communication`. Forward `sprk_communication.sprk_regardingservicerequest` is still correct (ADR-024 write-on-communication) but the relationship is bidirectional — note in the schema doc.
-- Existing regarding lookups on `sprk_communication` confirmed: matter/project/invoice/analysis/budget/**organization (sprk_organization ✓)**/person/workassignment. Note: org already targets `sprk_organization` here — task 004's "correct org target" fix is about the sender-domain MATCH CODE writing `account`, not this column.
-
-## Completed this session
-- ✅ **005** — ADR-045 authored (`.claude/adr/` + `docs/adr/` + both INDEXes). Root CLAUDE.md NOT edited (reachable via §17→INDEX; keeps root-claude-md hot-path = N). Full `/adr-check` deferred to W0 PR gate.
-- Model-tier bumps applied: 010/011/051/052 → opus (architectural/high-blast-radius per §8.5).
-
-## Parallel Execution
-- Active group: none
-- Agents in flight: none
+## Follow-ups / debts to carry
+- **006 dev smoke-test (REQUIRED before relying on threading):** the post-send Internet-Message-Id auto-capture uses a subject+recency Graph query (best-effort, non-fatal). Needs a dev-mailbox smoke-test to confirm hit-rate (R3 UQ3). Hardening path = correlationId extended property on send.
+- **Formal gates batched to W0 PR:** code-review + adr-check + publish-size measurement for 004/006 deferred to the W0 PR gate (changes add no packages → publish delta ~0; ADR self-check: ADR-024 additive, ADR-028 injected client, ADR-010 no new DI, ADR-019 no new error path).
+- **007 dead-code follow-ups (deferred, tracked):** orphaned `EmailProcessingOptions` props; `DeadLetterQueueService` lost its only consumer; ADR-045 background text slightly imprecise re Services/Email.
+- **Solution-export** of new sprk_communication columns into managed Spaarke solution (ADR-027) — deploy-time.
 
 ## Recovery Notes
 - Project initialized via `/design-to-spec` → `/project-pipeline` on 2026-07-14.
-- W0 blocks all waves. W1‖W2 run in parallel after W0. **W5 is gated on task 050 (r2-core coordination).**
-- Before any BFF PR: run `/conflict-check` (Services/Ai ownership — see CLAUDE.md).
+- W1‖W2‖W7 run after W0. **W5 gated on task 050 (r2-core Services/Ai coordination).**
+- Before any BFF PR: run `/conflict-check`.
