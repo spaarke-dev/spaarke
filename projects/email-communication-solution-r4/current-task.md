@@ -6,8 +6,11 @@
 
 ## Active Task
 
-- **Task**: none active — **011 ✅ (`7e845f82f`) + 073 ✅ (`93a7a7149`) committed this round.** 13 of 45 tasks done.
-- **Status**: W1 spine head (011) landed → **012/013/014 unblocked** (rung content against `IAssociationRung`). W2 021/022 ready (need branch's 020). W7: 070/071/075 remain.
+- **Task**: none active — **parallel wave complete: 012 ✅ (`6a1a513cb`), 021 ✅ (`9d5cffa17`), 022 ✅ (`4ded53c0a`), 070 ✅ (`747698ef0`), 071 ✅ (`f7067d6e2`).** **18 of 45 tasks done.**
+- **Status**: W1 rungs 0–1 (012) done → **013 (rung 2) unblocked, next in main session; then 014 (rung 3); then 015 (confidence→status + auto-file).** W2 client (020/021/022) done → unblocks 040/041/060/061. W7: only **075** remains (index-config, Services/Ai hot path — needs main-session /conflict-check with r2-core; NOT dispatched as agent).
+- **Next Action**: **013** (rung 2 — participant correlation: replace the kept `ParticipantCorrelationRung` adapter with real recipient-side + org-by-domain content, all 8 targets, direction-symmetric). Main session (shared engine edit point). Combined 011+012+071 Communication suite = 254 green.
+- **Rigor**: FULL · 013 = sonnet @ high · directional.
+- **Master**: `origin/master` at fb4012cb3 (through 076). Branch now well ahead (011/012/021/022/070/071 + tracking) — merge to master again before the NEXT agent wave to keep agents on a current base.
 - **Merged to master ✅ (2026-07-15)**: `origin/master` fast-forwarded `240d0e5c5..fb4012cb3` — all 19 branch commits now on remote master. Future agent worktrees branch from `origin/master` (confirmed pattern: 073 branched from origin/master's value, not local master) → **stale-base 3-way tax eliminated.** (Local master ref in `C:/code_files/spaarke` left at `bcc15973a` — FF blocked by pre-existing untracked files there; cosmetic, does not affect agent branching.)
 - **Next Action**: next wave — **012→013→014 serial in main session** (all edit the engine's shared `_rungs` composition point; not cleanly parallel regardless of base) ‖ **021/022 (W2) + 070/071/075 (W7) as clean worktree agents** (now branch from current master).
 - **Rigor Level**: FULL · **Model**: opus @ xhigh · **Step mode**: directional (R-7 order binding).
