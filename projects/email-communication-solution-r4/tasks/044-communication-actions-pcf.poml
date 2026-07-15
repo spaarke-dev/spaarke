@@ -1,0 +1,133 @@
+<task id="044" project="email-communication-solution-r4">
+  <metadata>
+    <title>Communication Actions PCF — Reply / Forward / Send / Save Draft / Save-to-SharePoint over existing endpoints (retires the 1,150-LOC ribbon send script)</title>
+    <phase>Wave 4 — OOB form + PCFs (actions)</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>020, 021, 022</dependencies>
+    <blocks>043, 062</blocks>
+    <tags>pcf, frontend, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New PCF driving send/archive over existing BFF endpoints and hosting the W2 EmailComposer for compose/reply/forward; replaces a deployed ribbon web-resource (behavior-preserving migration); cross-cuts ADR-022 (PCF), ADR-028 (auth via host), ADR-012 (consume shared composer). FULL Step 9.5 gates required.</rigor-reason>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-12, FR-13</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Build a **Communication Actions PCF** on the OOB `sprk_communication` form that provides the communication actions — **Reply, Forward, Send, Save Draft**, and **Save to SharePoint** — and hosts the W2 `<EmailComposer/>` for compose/reply/forward. This is part of the W4 pivot to OOB form + PCFs (see `notes/W4-architecture-pivot-oob-form-pcf.md`) and **replaces the deployed ribbon web-resource `sprk_communication_send.js`** (~1,150 LOC × 2 copies) — folding in task 062's retirement.
+
+    All server capability already exists — reuse it, do NOT re-implement:
+    • **Send** → `POST /api/communications/send` (+ `/send-bulk`) via `authenticatedFetch` (ADR-028; host context supplies auth). Same endpoint the ribbon script calls today.
+    • **Compose / Reply / Forward** → host the shared `<EmailComposer/>` / `SendEmailPage` (tasks 020/021) inside the PCF (or launch its dialog wrapper); wire mode + pre-fill from the record (reply → to/inReplyTo/`Re:`, forward → `Fwd:` + attachments).
+    • **Save Draft** → `communicationApi` draft update (task 022) + Xrm save.
+    • **Save to SharePoint** → archive the `.eml` + per-attachment Documents. The archival logic exists (`EmailArchiver`/`EmlGenerationService`; `IncomingCommunicationProcessor` per-attachment Document creation) but runs automatically on send/receive; expose it on-demand via a thin **`POST /api/communications/{id}/archive`** endpoint (NEW, small) that invokes the existing archiver, then the PCF button calls it.
+
+    Retire `sprk_communication_send.js` (both copies) + its ribbon button definition once the PCF's Send is verified equivalent (behavior-preserving). Record the ribbon-audit result in task notes (this is task 062's retirement, done here).
+  </prompt>
+
+  <role>
+    Spaarke PCF + BFF engineer. Fluent in PCF lifecycle (ADR-022), `@spaarke/ui-components` `<EmailComposer/>` consumption, `communicationApi` (send/draft/SendCommunicationError), the existing send/archival endpoints, and ribbon web-resource retirement.
+  </role>
+
+  <goal>
+    A PCF on the `sprk_communication` form exposing Reply/Forward/Send/Save-Draft/Save-to-SharePoint, hosting `<EmailComposer/>` for compose/reply/forward, calling the EXISTING `/api/communications/send` (+ a new thin `/{id}/archive`) via `authenticatedFetch`. The 1,150-LOC ribbon `sprk_communication_send.js` (both copies) + its button are retired with behavior preserved. PCF prod-builds clean; Step 9.5 gates pass; publish-size + CVE reported for the new `/archive` endpoint.
+  </goal>
+
+  <context>
+    <background>
+      W4 pivot (2026-07-15): enhance the OOB form with PCFs rather than replace it with a Code Page. Send + archival are fully built server-side (capability audit in the pivot note); the current UI trigger is the fragile 1,150-LOC ribbon script. This PCF consolidates the actions, retires the script, and reuses the W2 composer (which is otherwise used embedded in create-record wizards via SendEmailStep). Compose becomes PCF-hosted (or a launched dialog), not a Code Page.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (send endpoint; add /{id}/archive)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailArchiver.cs (existing archiver to expose on-demand)</file>
+      <file>src/client/webresources/js/sprk_communication_send.js (RETIRE — ribbon send)</file>
+      <file>infrastructure/dataverse/ribbon/CommunicationRibbons/ (ribbon button def to retire)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPage.tsx (host in PCF)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (send/draft)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="pivot">Actions live in a PCF on the OOB form; reuse existing endpoints — do NOT re-implement send/archival client-side.</constraint>
+    <constraint source="ADR-022">PCF platform-library React/Fluent; lifecycle (init/updateView/destroy); auth from host context.</constraint>
+    <constraint source="ADR-028">All BFF calls via `authenticatedFetch` (host-supplied); no self-built credential; no `accessToken` props.</constraint>
+    <constraint source="ADR-012">Host the shared `<EmailComposer/>`/`SendEmailPage` from `@spaarke/ui-components`; do NOT fork.</constraint>
+    <constraint source="project (§10)">The new `/{id}/archive` endpoint is a BFF addition: load `.claude/constraints/bff-extensions.md`, state Placement Justification, report publish-size delta + CVE, add tests in `tests/unit/Sprk.Bff.Api.Tests/`.</constraint>
+    <constraint source="project">Retiring `sprk_communication_send.js` is behavior-preserving — verify the PCF Send is equivalent before deleting the script + ribbon button (this is task 062's retirement).</constraint>
+    <constraint source="project">Build PCF with `npm run build:prod`; deploy per pcf-deploy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/notes/W4-architecture-pivot-oob-form-pcf.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Reuse send endpoint" location="src/client/webresources/js/sprk_communication_send.js">
+        The ribbon script's send payload/flow is the reference for the PCF's Send (same `/api/communications/send`), minus the 1,150-LOC cruft.
+      </pattern>
+      <pattern name="Compose host" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPage.tsx">
+        Host `<SendEmailPage/>` with mode + pre-fill + authenticatedFetch + onSent/onClose inside the PCF (or its dialog wrapper).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `sprk_communication_send.js` (send payload/flow) + `CommunicationEndpoints.cs` (send) + `EmailArchiver.cs` (archival) + `SendEmailPage.tsx` (composer host) to confirm the reuse contracts.</step>
+    <step order="2">Add the thin `POST /api/communications/{id}/archive` endpoint invoking the existing `EmailArchiver` (on-demand .eml + per-attachment Document archival); ProblemDetails errors (ADR-019); add BFF tests; §10 obligations (placement justification, publish-size, CVE).</step>
+    <step order="3">Scaffold the Actions PCF (`src/client/pcf/CommunicationActions/`): manifest bound to `sprk_communication` form; platform-library React/Fluent; React root.</step>
+    <step order="4">Render the action bar (Reply / Forward / Send / Save Draft / Save to SharePoint), status-aware (compose vs sent). Wire Send → `/api/communications/send`; Save Draft → `communicationApi` draft + Xrm save; Save to SharePoint → new `/{id}/archive`.</step>
+    <step order="5">Host `<SendEmailPage/>` (or its dialog) for compose/reply/forward; wire mode + pre-fill from the record (reply/forward), `authenticatedFetch` from host, onSent → refresh/navigate.</step>
+    <step order="6">Verify the PCF Send is equivalent to the ribbon script; then RETIRE `sprk_communication_send.js` (both copies) + the ribbon button definition. Record the ribbon-audit + equivalence in task notes (closes task 062).</step>
+    <step order="7">`npm run build:prod` the PCF (clean) + `dotnet build`/`dotnet test` for the `/archive` endpoint.</step>
+    <step order="7.1">Publish-size delta (baseline ~45.28 MB incl PDBs) + CVE for the `/archive` addition.</step>
+    <step order="9.5">FULL-rigor gates: `code-review` + `adr-check` (ADR-022/028/012/019 + §10 for the endpoint). Address Critical findings.</step>
+    <step order="10">`/conflict-check` (BFF hot-path for the endpoint). Update `tasks/TASK-INDEX.md` (044 ✅; 062 folded/closed) + `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Ribbon send script, send endpoint, archiver, composer host</tool>
+    <tool name="edit">/archive endpoint; scaffold + wire Actions PCF; retire ribbon script</tool>
+    <tool name="bash">PCF prod build; dotnet build/test; publish-size; CVE</tool>
+    <tool name="code-review">FULL-rigor gate</tool>
+    <tool name="adr-check">FULL-rigor gate</tool>
+    <tool name="conflict-check">Pre-PR hot-path (endpoint)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/CommunicationActions/ (NEW — actions PCF hosting the composer)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (UPDATED — POST /{id}/archive over existing EmailArchiver)</output>
+    <output type="deletion">src/client/webresources/js/sprk_communication_send.js (+ 2nd copy) + ribbon button def (RETIRED, behavior-preserving)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (archive endpoint)</output>
+    <output type="docs">PR: placement justification + publish-size + CVE + ribbon-audit equivalence</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A PCF (`src/client/pcf/CommunicationActions/`) bound to the `sprk_communication` form exposes Reply/Forward/Send/Save-Draft/Save-to-SharePoint; prod-builds via `npm run build:prod`.</criterion>
+    <criterion testable="true">Send calls the EXISTING `/api/communications/send` via `authenticatedFetch` (no re-implemented send, no self-built credential).</criterion>
+    <criterion testable="true">Compose/reply/forward host the shared `<SendEmailPage/>` (grep confirms no forked composer); reply/forward pre-fill from the record.</criterion>
+    <criterion testable="true">`POST /api/communications/{id}/archive` exists over the existing `EmailArchiver` (on-demand .eml + per-attachment Documents), with tests + ProblemDetails errors.</criterion>
+    <criterion testable="true">`sprk_communication_send.js` (both copies) + its ribbon button are removed, with the PCF Send verified equivalent (task 062 closed).</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta reported (≈ small for one endpoint); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    W4 pivot: OOB form + PCFs. Send + archival already exist server-side — this task is the client shell + one thin endpoint + retiring the ribbon script. The composer is reused, not rebuilt. Absorbs task 062 (ribbon `sprk_communication_send.js` retirement) — mark 062 accordingly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files`. FULL rigor — Step 9.5 REQUIRED. §10 for the `/archive` endpoint (placement justification + publish-size + CVE + tests + `/conflict-check`). PCF prod build. Reuse composer + send endpoint; retire the ribbon script behavior-preserving.
+    </protocol>
+  </execution>
+</task>

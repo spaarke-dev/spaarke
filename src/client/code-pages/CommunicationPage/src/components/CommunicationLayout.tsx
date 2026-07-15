@@ -15,7 +15,7 @@
  */
 
 import * as React from 'react';
-import { makeStyles, MessageBar, MessageBarBody, MessageBarTitle } from '@fluentui/react-components';
+import { makeStyles, tokens, MessageBar, MessageBarBody, MessageBarTitle } from '@fluentui/react-components';
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
 import {
   CommunicationType,
@@ -25,6 +25,12 @@ import {
 } from '../types/communication';
 import { EmailComposerSlot } from './EmailComposerSlot';
 import { ReadOnlyCommunicationView } from './ReadOnlyCommunicationView';
+import { CommunicationHeader } from './CommunicationHeader';
+import { ConnectionsEditor } from './ConnectionsEditor';
+import { parseProvenance } from './provenance';
+
+/** Prototype-only layout options for hosting the connections editor. */
+export type ReviewVariant = 'slim' | 'card' | 'rail';
 
 /** Everything a renderer might need, assembled once by the shell. */
 export interface ILayoutContext {
@@ -34,6 +40,8 @@ export interface ILayoutContext {
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl: string;
   nav: ICommunicationNavCallbacks;
+  /** Prototype-only: which association-review layout to render (harness comparison). */
+  reviewVariant?: ReviewVariant;
 }
 
 type ChannelKind = 'interactive' | 'read-only';
@@ -48,6 +56,36 @@ interface IChannelDescriptor {
 const useStyles = makeStyles({
   // Renderers own their own padding; the wrapper just fills the iframe height.
   fill: { height: '100%' },
+  // Composed record layout: header band + review panel + channel content, scrolls as one.
+  page: {
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: tokens.colorNeutralBackground2,
+    overflow: 'auto',
+  },
+  reviewWrap: { padding: tokens.spacingHorizontalXL, paddingBottom: 0 },
+  body: { flex: 1, minHeight: 0, padding: tokens.spacingHorizontalXL, paddingTop: tokens.spacingVerticalL },
+  bodyCard: {
+    height: '100%',
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusLarge,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    overflow: 'auto',
+  },
+  // Right-rail (variant B) two-column arrangement.
+  twoCol: { flex: 1, minHeight: 0, display: 'flex' },
+  mainCol: { flex: 1, minWidth: 0, overflow: 'auto' },
+  // ~34% "accessories" column, mirroring the OOB model-driven form's 66/34 split.
+  railCol: {
+    width: '34%',
+    minWidth: '340px',
+    maxWidth: '520px',
+    flexShrink: 0,
+    overflow: 'auto',
+    borderLeft: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
 });
 
 function renderInteractiveEmail(ctx: ILayoutContext): React.JSX.Element {
@@ -135,7 +173,49 @@ export function renderByCommunicationType(typeValue: number, ctx: ILayoutContext
 export function CommunicationLayout(props: ILayoutContext): React.JSX.Element {
   const styles = useStyles();
   const typeValue = resolveChannelValue(props.record, props.params);
-  return <div className={styles.fill}>{renderByCommunicationType(typeValue, props)}</div>;
+  const channelContent = renderByCommunicationType(typeValue, props);
+
+  // Compose (no persisted record): just the composer — no header/review chrome.
+  if (!props.record) {
+    return <div className={styles.fill}>{channelContent}</div>;
+  }
+
+  // Persisted record: composed entity-form layout — header + association review + content.
+  const provenance = parseProvenance(props.record.sprk_associationprovenance);
+  const variant: ReviewVariant = props.reviewVariant ?? 'slim';
+  const record = props.record;
+
+  // B — right context rail: email main + connections rail (header spans top).
+  if (variant === 'rail') {
+    return (
+      <div className={styles.page}>
+        <CommunicationHeader record={record} />
+        <div className={styles.twoCol}>
+          <div className={styles.mainCol}>{channelContent}</div>
+          <div className={styles.railCol}>
+            <ConnectionsEditor record={record} provenance={provenance} layout="rail" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // A — slim summary bar (edge-to-edge) / C — connections card, both above the email.
+  return (
+    <div className={styles.page}>
+      <CommunicationHeader record={record} />
+      {variant === 'slim' ? (
+        <ConnectionsEditor record={record} provenance={provenance} layout="summary" />
+      ) : (
+        <div className={styles.reviewWrap}>
+          <ConnectionsEditor record={record} provenance={provenance} layout="card" />
+        </div>
+      )}
+      <div className={styles.body}>
+        <div className={styles.bodyCard}>{channelContent}</div>
+      </div>
+    </div>
+  );
 }
 
 function MissingRecordNotice({ channelLabel }: { channelLabel: string }): React.JSX.Element {

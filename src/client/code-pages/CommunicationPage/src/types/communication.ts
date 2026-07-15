@@ -94,9 +94,39 @@ export interface ICommunicationRecord {
   sprk_sentat?: string | null;
   sprk_receiveddate?: string | null;
   sprk_associationstatus?: number | null;
+  /** Association Engine decision trail (task 015 JSON) — read by the review surface (FR-17). */
+  sprk_associationprovenance?: string | null;
+  /** Denormalized regarding (ADR-024) — present when Resolved. */
+  sprk_regardingrecordtype?: string | null;
+  sprk_regardingrecordname?: string | null;
   // task-001 reply-thread columns
   sprk_internetmessageid?: string | null;
   sprk_inreplyto?: string | null;
+}
+
+/**
+ * `sprk_associationstatus` option-set VALUES (task 002, verified via Dataverse MCP).
+ * Records in a REVIEW status flow through the association review surface (FR-17);
+ * `Resolved` is already filed (auto-filed or confirmed).
+ */
+export enum AssociationStatus {
+  Resolved = 100000000,
+  PendingReview = 100000001,
+  Unresolved = 100000002, // legacy → treated as Pending Review
+  Suggested = 100000003,
+  Ambiguous = 100000004,
+}
+
+/** Statuses that surface the review panel (need human confirm/correct). */
+export const REVIEW_STATUSES: readonly number[] = [
+  AssociationStatus.Suggested,
+  AssociationStatus.PendingReview,
+  AssociationStatus.Unresolved,
+  AssociationStatus.Ambiguous,
+] as const;
+
+export function isReviewStatus(status: number | null | undefined): boolean {
+  return status != null && REVIEW_STATUSES.includes(status);
 }
 
 /**
