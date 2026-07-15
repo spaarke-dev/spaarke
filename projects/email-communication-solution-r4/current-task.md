@@ -1,6 +1,34 @@
 # Current Task — email-communication-solution-r4
 
 > **Purpose**: Active task state tracker for context recovery. Reset by `task-execute` on each task transition.
+> **Last Updated**: 2026-07-15 (by context-handoff, pre-compaction)
+
+---
+
+## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Progress** | **28 / 45 tasks done.** W1 (engine) + W2 (composer) COMPLETE. W4 mid-**architecture-pivot**. |
+| **Last commits** | email-r4 `cc68bcd96` (W4 pivot + POMLs) · prototype `cfe389a` (harness). Tree clean. |
+| **Status** | in-progress (design converged; POMLs formalized) |
+| **Next Action** | Execute **042** (Connections PCF — port the prototype `ConnectionsEditor` into a PCF on the OOB `sprk_communication` form) then **044** (Actions PCF — Reply/Send/Save over existing endpoints + `POST /{id}/archive`; retires ribbon `sprk_communication_send.js`). Both via `task-execute`. |
+
+### 🔀 W4 ARCHITECTURE PIVOT (the big thing this session) — OOB form + PCFs, NOT a Code Page
+- **Decision (owner, 2026-07-15)**: keep the OOB `sprk_communication` model-driven form; enhance with PCFs (RELATED RECORD PCF v1.4.6 already proves the pattern). Full record + capability audit + ADR-026 Path-A: **`notes/W4-architecture-pivot-oob-form-pcf.md`**.
+- **Capability audit (grounded)**: send endpoint, `.eml`+per-attachment→Document archival, attachment entity+subgrid, EmailComposer — **all already built**. Net-new = **Connections PCF (042)** + small **Actions PCF (044)** + thin `POST /{id}/archive`.
+- **POMLs formalized**: 042→Connections PCF (`042-connections-pcf.poml`, old Code-Page 042 deleted); NEW `044-communication-actions-pcf.poml` (absorbs 062 ribbon retirement); 040/041 FCC-swap dropped (superseded-as-form-host); 043 re-targeted to PCF deploy; TASK-INDEX + spec.md ADR-Tensions (ADR-026 Path-A) updated.
+- **Design source to PORT into the PCF**: `src/client/code-pages/CommunicationPage/src/components/{ConnectionsEditor,provenance,CommunicationHeader}.tsx` (the converged multi-connection review: typed slots per entity + per-slot confidence/confirm + Accept-all + Link-another + create-from-email actions engine-suggested from task-014 signals). Chosen host layout = right-rail at OOB 66/34 (34% accessories column).
+- **Prototype harness**: `spaarke-prototype/projects/email-comm-r4-uat`, dev server **bgxvvu62m still running at localhost:5173** (restart: `cd c:/code_files/spaarke-prototype/projects/email-comm-r4-uat && SPAARKE_REPO_ROOT="c:/code_files/spaarke-wt-email-communication-solution-r4" npx vite --port 5173`).
+
+### Other open threads
+- **Coordination enquiries delivered to owner** (relay to r2-core): W5 non-SSE `communication_assessed` publish seam + OutputRouter record/notification dispositions; W3 `RecordSearchService`/JPS-Action stability; **075** now unblocked (multi-index-r2 done — needs merge-confirm + I reconcile). See prior turn's enquiry text.
+- **074** (add-in suggestions) needs the OUTBOUND suggestion path (not wired) — sequence after 042.
+- **W3 030/031/032, W5 050-054** coordination-blocked on r2-core replies.
+
+### Files Modified This Session (committed)
+- email-r4 `cc68bcd96`: `tasks/042-connections-pcf.poml` (new), `tasks/044-communication-actions-pcf.poml` (new), `tasks/042-code-page-review-regarding-resolver.poml` (deleted), `tasks/TASK-INDEX.md`, `spec.md`, `current-task.md`, `notes/W4-architecture-pivot-oob-form-pcf.md` (new), `CommunicationPage/src/components/{ConnectionsEditor,provenance,CommunicationHeader}.tsx` (new — design source), `CommunicationLayout.tsx` + `types/communication.ts`.
+- Earlier commits this session: `4154c5049` (015), `bf432e4be` (018 race fix), `09703c355` (017), `4c6594706` (023), `6440217b3` (016), `4eeaf860f` + `b1d5d79dc` + trackers.
 
 ---
 
