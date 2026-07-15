@@ -4,10 +4,9 @@ namespace Sprk.Bff.Api.Services.Communication.Engine;
 
 /// <summary>
 /// Ambient context passed to each <see cref="IAssociationRung"/> alongside the normalized envelope.
-/// Carries channel/mailbox context that is NOT part of the message itself. Deliberately minimal in
-/// task 011 (the current rungs use only the envelope); it exists so later rungs (e.g. mailbox-scoped
-/// or direction-aware correlation in tasks 012/013) can extend context WITHOUT changing the rung
-/// interface signature.
+/// Carries channel/mailbox/caller context that is NOT part of the message itself, so rungs stay pure
+/// over the envelope while still seeing authoritative caller signals (e.g. an outbound send request's
+/// regarding, or the add-in save-pane selection).
 /// </summary>
 public sealed record AssociationContext
 {
@@ -17,4 +16,12 @@ public sealed record AssociationContext
     /// available for future direction/mailbox-aware rungs.
     /// </summary>
     public CommunicationAccount? Account { get; init; }
+
+    /// <summary>
+    /// Caller-supplied regarding associations (rung 0, highest determinism): the authoritative
+    /// entities the caller explicitly linked — the outbound send request's <c>Associations</c>, or the
+    /// Outlook add-in save-pane selection. Empty on the plain inbound path (no caller signal).
+    /// </summary>
+    public IReadOnlyList<CommunicationAssociation> CallerSuppliedRegarding { get; init; } =
+        Array.Empty<CommunicationAssociation>();
 }

@@ -2,6 +2,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -25,11 +26,14 @@ public static class CommunicationModule
         services.AddSingleton<GraphMessageToEmlConverter>();
         services.AddSingleton<MailboxVerificationService>();
 
-        // Association Engine (ADR-045 / FR-09): the pure Graph→envelope boundary mapper + the
-        // envelope-only resolver. Both unconditional (consumed unconditionally by the inbound
-        // processor per ADR-032; no feature gate). Rung adapters are composed inside the resolver,
-        // so no per-rung registrations here (ADR-010 minimalism).
+        // Association Engine (ADR-045 / FR-09/FR-10): the pure Graph→envelope boundary mapper, the
+        // ordered rungs, and the envelope-only engine. All unconditional (consumed unconditionally by
+        // the inbound processor per ADR-032; no feature gate). Rungs are registered as IAssociationRung
+        // and the engine evaluates them by ascending Order — so registration order is cosmetic.
         services.AddSingleton<GraphMessageNormalizer>();
+        services.AddSingleton<IAssociationRung, ExplicitReferenceRung>();      // rung 0 — explicit reference
+        services.AddSingleton<IAssociationRung, ThreadContinuityRung>();       // rung 1 — thread continuity
+        services.AddSingleton<IAssociationRung, ParticipantCorrelationRung>(); // rung 2 — participant correlation
         services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();
 

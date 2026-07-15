@@ -5,6 +5,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
@@ -32,7 +33,16 @@ public class IncomingAssociationResolverTests
 
         // IDataverseService implements both ICommunicationDataverseService and IGenericEntityService.
         // The engine no longer depends on IGraphClientFactory (In-Reply-To comes from the envelope).
+        // Rungs are injected (DI in production); here we compose the real deterministic rungs (0/1/2)
+        // over the same Dataverse mock so the cascade is exercised end-to-end.
+        var rungs = new IAssociationRung[]
+        {
+            new ExplicitReferenceRung(_dataverseServiceMock.Object),
+            new ThreadContinuityRung(_dataverseServiceMock.Object),
+            new ParticipantCorrelationRung(_dataverseServiceMock.Object),
+        };
         _resolver = new IncomingAssociationResolver(
+            rungs,
             _dataverseServiceMock.Object,
             _dataverseServiceMock.Object,
             Mock.Of<ILogger<IncomingAssociationResolver>>());

@@ -41,6 +41,7 @@ public sealed class IncomingAssociationResolver
     private const int AssociationStatusPendingReview = 100000001;
 
     public IncomingAssociationResolver(
+        IEnumerable<IAssociationRung> rungs,
         ICommunicationDataverseService communicationService,
         IGenericEntityService genericEntityService,
         ILogger<IncomingAssociationResolver> logger)
@@ -49,15 +50,10 @@ public sealed class IncomingAssociationResolver
         _genericEntityService = genericEntityService;
         _logger = logger;
 
-        // Task-011 rung adapters wrapping the current inline logic. Composed internally to keep DI
-        // minimal (ADR-010); tasks 012–014 supply real rung content against IAssociationRung.
-        _rungs =
-        [
-            new ThreadContinuityRung(communicationService),
-            new ParticipantCorrelationRung(communicationService),
-            new SubjectReferenceRung(communicationService),
-        ];
-        _rungs = _rungs.OrderBy(r => r.Order).ToArray();
+        // Rungs are DI-registered (CommunicationModule) and evaluated in ascending Order
+        // (0 explicit-ref → 1 thread → 2 participant → 3 structural → 4/5 AI). Ordering is by the
+        // Order property, so registration order does not matter. Tasks 012–014 supply rung content.
+        _rungs = rungs.OrderBy(r => r.Order).ToArray();
     }
 
     /// <summary>
@@ -154,25 +150,6 @@ public sealed class IncomingAssociationResolver
     // ═════════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Entity-specific regarding fields in priority order for determining the primary record.
-    /// Business entities first (matter, project, etc.), then people/orgs.
-    /// </summary>
-    private static readonly (string FieldName, string EntityLogicalName)[] RegardingFieldPriority =
-    [
-        ("sprk_regardingmatter", "sprk_matter"),
-        ("sprk_regardingproject", "sprk_project"),
-        ("sprk_regardinginvoice", "sprk_invoice"),
-        ("sprk_regardingservicerequest", "sprk_servicerequest"),
-        ("sprk_regardingworkassignment", "sprk_workassignment"),
-        ("sprk_regardingevent", "sprk_event"),
-        ("sprk_regardingbudget", "sprk_budget"),
-        ("sprk_regardinganalysis", "sprk_analysis"),
-        ("sprk_regardingorganization", "sprk_organization"),
-        ("sprk_regardingaccount", "account"),
-        ("sprk_regardingperson", "contact"),
-    ];
-
-    /// <summary>
     /// In-memory cache for sprk_recordtype_ref lookups (entity logical name → GUID + display name).
     /// Populated lazily, lives for the lifetime of the singleton service.
     /// </summary>
@@ -192,11 +169,12 @@ public sealed class IncomingAssociationResolver
         Dictionary<string, object> fields,
         CancellationToken ct)
     {
-        // Find the primary regarding entity (highest priority field that was set)
+        // Find the primary regarding entity (highest priority field that was set). Priority order is the
+        // single source of truth in RegardingFieldMap.All (ADR-024) — the rungs write the same fields.
         EntityReference? primaryRef = null;
         string? primaryEntityLogicalName = null;
 
-        foreach (var (fieldName, entityLogicalName) in RegardingFieldPriority)
+        foreach (var (entityLogicalName, fieldName) in RegardingFieldMap.All)
         {
             if (fields.TryGetValue(fieldName, out var value) && value is EntityReference entityRef)
             {

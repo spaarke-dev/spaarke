@@ -19,6 +19,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
@@ -1218,6 +1219,12 @@ public class CommunicationIntegrationTests
             dataverseMock.Object,
             accountService,
             new IncomingAssociationResolver(
+                new IAssociationRung[]
+                {
+                    new ExplicitReferenceRung(dataverseMock.Object),
+                    new ThreadContinuityRung(dataverseMock.Object),
+                    new ParticipantCorrelationRung(dataverseMock.Object),
+                },
                 dataverseMock.Object,
                 dataverseMock.Object,
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
