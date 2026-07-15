@@ -1,40 +1,39 @@
 /**
  * INTERACTIVE EMAIL SLOT — the email branch of the channel-aware shell.
  *
- * This is the shell seam for the interactive email surface. It is reached ONLY
- * via the type-driven layout switch (`renderByCommunicationType`) for
- * `CommunicationType.Email`, plus `compose` mode (which is email at launch).
+ * Reached ONLY via the type-driven layout switch (`renderByCommunicationType`)
+ * for `CommunicationType.Email`, plus `compose` mode (which is email at launch).
+ * Non-email `sprk_communicationtype` channels never route here — they render
+ * read-only via `ReadOnlyCommunicationView` (task 040). The composer is the
+ * channel-specific renderer mounted ONLY for Email.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * ⛳ TASK 041 EXTENSION SEAM — mount `<EmailComposer />` / `<SendEmailPage />`
+ * TASK 041 — mounts the canonical `<SendEmailPage />` wrapper (task 021,
+ * `@spaarke/ui-components`). This is the ONLY email-composer surface; the engine
+ * is CONSUMED from the shared lib, never forked or reimplemented (ADR-012).
  * ─────────────────────────────────────────────────────────────────────────────
- * Task 040 lands the SHELL ONLY. Task 041 replaces the placeholder below with
- * the canonical composer from `@spaarke/ui-components` (reference §5 / §7.6):
  *
- *   import { SendEmailPage } from '@spaarke/ui-components';
- *   ...
- *   return (
- *     <SendEmailPage
- *       mode={props.mode}
- *       communicationId={props.record?.sprk_communicationid}
- *       authenticatedFetch={props.authenticatedFetch}   // ADR-028 function-based
- *       bffBaseUrl={props.bffBaseUrl}                    // host only, NO /api
- *       initialTo={props.initialTo}
- *       initialCc={props.initialCc}
- *       initialSubject={props.initialSubject}
- *       initialBody={props.initialBody}
- *       associations={props.associations}
- *       onSent={(id) => props.nav.onSent(id)}
- *       onClose={props.nav.onClose}
- *     />
- *   );
+ * URL contract → wrapper props (reference §7.5 / §7.6):
+ *   - `mode`            ← parsed `?mode=compose|view|reply|forward|draft`
+ *   - `communicationId` ← the loaded `sprk_communication` record's id
+ *                         (present for view/reply/forward/draft; undefined for compose)
+ *   - `initialTo` / `initialSubject` / `initialBody` ← URL pre-fill (or record fallback,
+ *                         resolved upstream in `CommunicationLayout`)
+ *   - `associations`    ← parsed `?associatedTo=<entityType>:<guid>` pairs
+ *   - `authenticatedFetch` + `bffBaseUrl` ← 040 auth bootstrap (ADR-028 —
+ *                         function-based transport + host base URL only, NO /api,
+ *                         NO accessToken prop)
+ *   - `onSent`  → `nav.onSent`  (Xrm.Navigation.openForm on the created/updated record)
+ *   - `onClose` → `nav.onClose` (leave the page)
  *
- * DO NOT pass an `accessToken` prop — only `authenticatedFetch` crosses this
- * boundary (ADR-028). Keep the prop shape below as the composer's input contract.
+ * The wrapper locks `mount='page'` (first-class entity-form chrome, ADR-021 /
+ * reference §5.10) and renders its own per-mode header + linked-record chips —
+ * the slot adds no duplicate chrome.
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, Title2, Body1, Caption1, Badge } from '@fluentui/react-components';
+import { makeStyles, tokens } from '@fluentui/react-components';
+import { SendEmailPage } from '@spaarke/ui-components';
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
 import type {
   CommunicationMode,
@@ -60,29 +59,13 @@ export interface IEmailComposerSlotProps {
 }
 
 const useStyles = makeStyles({
+  // Fill the iframe height and own the scroll; the `page`-mount composer
+  // supplies its own centered max-width layout + padding (reference §5.10).
   root: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
-    padding: tokens.spacingHorizontalXXL,
     height: '100%',
     overflowY: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-  },
-  seam: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    padding: tokens.spacingHorizontalL,
-    borderRadius: tokens.borderRadiusLarge,
-    border: `${tokens.strokeWidthThin} dashed ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-  },
-  meta: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: tokens.spacingHorizontalS,
   },
 });
 
@@ -91,40 +74,28 @@ export function EmailComposerSlot(props: IEmailComposerSlotProps): React.JSX.Ele
 
   return (
     <div className={styles.root}>
-      <div>
-        <Title2>Email</Title2>
-        <Caption1>
-          Interactive email surface · mode: <strong>{props.mode}</strong>
-        </Caption1>
-      </div>
-
       {/*
         ⛳ TASK 042 EXTENSION SEAM — RegardingResolver review surface.
         Task 042 embeds `RegardingResolver` here (reads sprk_associationprovenance
         + the regarding lookups from task 001) so the user can review/adjust the
         resolved associations before send. It does NOT introduce a new regarding
         mechanism — it renders the existing RegardingResolver over this record.
-        Until 042 lands, the parsed associations are shown read-only below.
+        The composer already shows the parsed associations read-only (via its
+        AssociationChips); 042 makes them reviewable/adjustable.
       */}
 
-      <section className={styles.seam} aria-label="Email composer placeholder">
-        <Body1>
-          <strong>Shell placeholder (task 040).</strong> The canonical
-          <code> &lt;SendEmailPage /&gt; </code> composer mounts here in task 041.
-        </Body1>
-        <Caption1>Pre-fill / record context wired and ready to hand to the composer:</Caption1>
-        <div className={styles.meta}>
-          {props.record && <Badge appearance="tint">record: {props.record.sprk_communicationid.slice(0, 8)}…</Badge>}
-          {props.initialTo.length > 0 && <Badge appearance="tint">to: {props.initialTo.length}</Badge>}
-          {props.initialCc.length > 0 && <Badge appearance="tint">cc: {props.initialCc.length}</Badge>}
-          {props.initialSubject && <Badge appearance="tint">subject ✓</Badge>}
-          {props.associations.map(a => (
-            <Badge key={`${a.entityType}:${a.entityId}`} appearance="outline">
-              {a.entityType}: {a.entityId.slice(0, 8)}…
-            </Badge>
-          ))}
-        </div>
-      </section>
+      <SendEmailPage
+        mode={props.mode}
+        communicationId={props.record?.sprk_communicationid}
+        authenticatedFetch={props.authenticatedFetch}
+        bffBaseUrl={props.bffBaseUrl}
+        initialTo={props.initialTo}
+        initialSubject={props.initialSubject}
+        initialBody={props.initialBody}
+        associations={props.associations}
+        onSent={communicationId => props.nav.onSent(communicationId)}
+        onClose={props.nav.onClose}
+      />
     </div>
   );
 }
