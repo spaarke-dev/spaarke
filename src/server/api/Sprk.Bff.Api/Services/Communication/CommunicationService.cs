@@ -1,9 +1,5 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
-using Microsoft.Graph;
-using Microsoft.Graph.Models;
-using Microsoft.Graph.Models.ODataErrors;
-using Microsoft.Graph.Users.Item.SendMail;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
@@ -11,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai.Jobs;
+using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -19,18 +16,19 @@ using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 namespace Sprk.Bff.Api.Services.Communication;
 
 /// <summary>
-/// Core communication service that validates requests, resolves approved senders,
-/// builds Graph Message payloads, sends email via GraphClientFactory.ForApp(),
-/// and creates a Dataverse sprk_communication tracking record (best-effort).
+/// Core communication service that validates requests, resolves approved senders, and orchestrates the
+/// send lifecycle (Dataverse tracking record, SPE archival, enrichment). Channel-specific transmit and
+/// archival are delegated to the channel seams (ADR-045 rule 4) via <see cref="CommunicationChannelDispatcher"/>,
+/// so this orchestrator is free of provider (Microsoft.Graph) types — a future channel is added by
+/// registering a new sender/archiver, with no change here (NFR-04).
 /// </summary>
 public sealed class CommunicationService
 {
-    private readonly IGraphClientFactory _graphClientFactory;
+    private readonly CommunicationChannelDispatcher _channelDispatcher;
     private readonly ApprovedSenderValidator _senderValidator;
     private readonly ICommunicationDataverseService _communicationService;
     private readonly IGenericEntityService _genericEntityService;
     private readonly IDocumentDataverseService _documentService;
-    private readonly EmlGenerationService _emlGenerationService;
     private readonly SpeFileStore _speFileStore;
     private readonly CommunicationAccountService _accountService;
     private readonly JobSubmissionService _jobSubmissionService;
@@ -39,12 +37,11 @@ public sealed class CommunicationService
     private readonly ILogger<CommunicationService> _logger;
 
     public CommunicationService(
-        IGraphClientFactory graphClientFactory,
+        CommunicationChannelDispatcher channelDispatcher,
         ApprovedSenderValidator senderValidator,
         ICommunicationDataverseService communicationService,
         IGenericEntityService genericEntityService,
         IDocumentDataverseService documentService,
-        EmlGenerationService emlGenerationService,
         SpeFileStore speFileStore,
         CommunicationAccountService accountService,
         JobSubmissionService jobSubmissionService,
@@ -52,12 +49,11 @@ public sealed class CommunicationService
         IOptions<CommunicationOptions> options,
         ILogger<CommunicationService> logger)
     {
-        _graphClientFactory = graphClientFactory;
+        _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
         _communicationService = communicationService;
         _genericEntityService = genericEntityService;
         _documentService = documentService;
-        _emlGenerationService = emlGenerationService;
         _speFileStore = speFileStore;
         _accountService = accountService;
         _jobSubmissionService = jobSubmissionService;
@@ -122,7 +118,7 @@ public sealed class CommunicationService
         ValidateRequest(request, correlationId);
 
         // Step 1b: Download and validate attachments (if any)
-        List<FileAttachment>? fileAttachments = null;
+        List<ChannelAttachment>? fileAttachments = null;
         if (request.AttachmentDocumentIds is { Length: > 0 })
         {
             fileAttachments = await DownloadAndBuildAttachmentsAsync(
@@ -183,33 +179,22 @@ public sealed class CommunicationService
                 });
         }
 
-        // Step 3: Build Graph message
-        var message = BuildGraphMessage(request, senderResult);
-
-        // Step 3b: Attach files to message (if any)
-        if (fileAttachments is { Count: > 0 })
-        {
-            message.Attachments = new List<Attachment>(fileAttachments);
-        }
-
-        // Step 4: Send via Graph API (app-only)
+        // Step 3+4: Send via the email channel seam (dispatch by CommunicationType — ADR-045 rule 4).
+        // The sender owns Graph message construction, transport, and provider-error mapping; a provider
+        // failure surfaces as SdapProblemException (GRAPH_SEND_FAILED) and propagates unchanged.
         try
         {
-            var graphClient = _graphClientFactory.ForApp();
-
-            await graphClient.Users[senderResult.Email].SendMail.PostAsync(
-                new SendMailPostRequestBody
+            var sendResult = await _channelDispatcher.ResolveSender(request.CommunicationType).SendAsync(
+                new ChannelSendRequest
                 {
-                    Message = message,
-                    SaveToSentItems = true
+                    Communication = request,
+                    FromAddress = senderResult.Email!,
+                    FromDisplayName = senderResult.DisplayName,
+                    UserMode = false,
+                    Attachments = fileAttachments,
+                    CorrelationId = correlationId
                 },
-                cancellationToken: cancellationToken);
-
-            _logger.LogInformation(
-                "Communication sent successfully | CorrelationId: {CorrelationId}, From: {From}, To: {RecipientCount}",
-                correlationId,
-                senderResult.Email,
-                request.To.Length);
+                cancellationToken);
 
             // Step 4b: Increment daily send count (best-effort — don't fail the send)
             if (senderAccount is not null)
@@ -241,12 +226,12 @@ public sealed class CommunicationService
                     correlationId);
             }
 
-            // Step 5b: Best-effort capture of the sent message's Internet-Message-Id (FR-06 — feeds W1 thread rung).
-            if (communicationId.HasValue)
+            // Step 5b: Persist the Internet-Message-Id the channel sender captured post-send (FR-06 —
+            // feeds W1 thread rung). Channel-agnostic Dataverse stamp; best-effort.
+            if (communicationId.HasValue && sendResult.ProviderMessageId is not null)
             {
-                await TryStampInternetMessageIdAsync(
-                    graphClient, userMode: false, senderResult.Email!, communicationId.Value,
-                    request.Subject, correlationId, cancellationToken);
+                await StampInternetMessageIdAsync(
+                    communicationId.Value, sendResult.ProviderMessageId, correlationId, cancellationToken);
             }
 
             // Step 6: Archive to SPE if requested (best-effort)
@@ -413,26 +398,6 @@ public sealed class CommunicationService
                 AttachmentRecordWarning = attachmentRecordWarning
             };
         }
-        catch (ODataError ex)
-        {
-            _logger.LogError(
-                ex,
-                "Graph sendMail failed | CorrelationId: {CorrelationId}, StatusCode: {StatusCode}, ErrorCode: {ErrorCode}",
-                correlationId,
-                ex.ResponseStatusCode,
-                ex.Error?.Code);
-
-            throw new SdapProblemException(
-                code: "GRAPH_SEND_FAILED",
-                title: "Email Send Failed",
-                detail: $"Graph API error: {ex.Error?.Message ?? ex.Message}",
-                statusCode: ex.ResponseStatusCode > 0 ? ex.ResponseStatusCode : 502,
-                extensions: new Dictionary<string, object>
-                {
-                    ["correlationId"] = correlationId,
-                    ["graphErrorCode"] = ex.Error?.Code ?? "unknown"
-                });
-        }
         catch (Exception ex) when (ex is not SdapProblemException)
         {
             _logger.LogError(
@@ -481,7 +446,7 @@ public sealed class CommunicationService
         }
 
         // Step 1c: Download and validate attachments (if any)
-        List<FileAttachment>? fileAttachments = null;
+        List<ChannelAttachment>? fileAttachments = null;
         if (request.AttachmentDocumentIds is { Length: > 0 })
         {
             fileAttachments = await DownloadAndBuildAttachmentsAsync(
@@ -520,53 +485,22 @@ public sealed class CommunicationService
             correlationId,
             userEmail);
 
-        // Step 3: Build Graph message (user as sender)
-        var message = new Message
-        {
-            Subject = request.Subject,
-            Body = new ItemBody
-            {
-                ContentType = request.BodyFormat == Models.BodyFormat.PlainText ? BodyType.Text : BodyType.Html,
-                Content = request.Body
-            },
-            ToRecipients = request.To.Select(email => new Recipient
-            {
-                EmailAddress = new EmailAddress { Address = email }
-            }).ToList(),
-            CcRecipients = (request.Cc ?? Array.Empty<string>()).Select(email => new Recipient
-            {
-                EmailAddress = new EmailAddress { Address = email }
-            }).ToList(),
-            BccRecipients = (request.Bcc ?? Array.Empty<string>()).Select(email => new Recipient
-            {
-                EmailAddress = new EmailAddress { Address = email }
-            }).ToList()
-        };
-
-        // Step 3b: Attach files to message (if any)
-        if (fileAttachments is { Count: > 0 })
-        {
-            message.Attachments = new List<Attachment>(fileAttachments);
-        }
-
-        // Step 4: Send via Graph API (OBO — /me/sendMail)
+        // Step 3+4: Send via the email channel seam in user (OBO) mode — dispatch by CommunicationType.
+        // The sender resolves the OBO Graph client and sends as /me; provider failures surface as
+        // SdapProblemException (GRAPH_SEND_FAILED, sendMode=User) and propagate unchanged.
         try
         {
-            var graphClient = await _graphClientFactory.ForUserAsync(httpContext, ct);
-
-            await graphClient.Me.SendMail.PostAsync(
-                new Microsoft.Graph.Me.SendMail.SendMailPostRequestBody
+            var sendResult = await _channelDispatcher.ResolveSender(request.CommunicationType).SendAsync(
+                new ChannelSendRequest
                 {
-                    Message = message,
-                    SaveToSentItems = true
+                    Communication = request,
+                    FromAddress = userEmail,
+                    UserMode = true,
+                    HttpContext = httpContext,
+                    Attachments = fileAttachments,
+                    CorrelationId = correlationId
                 },
-                cancellationToken: ct);
-
-            _logger.LogInformation(
-                "Communication sent as user (OBO) | CorrelationId: {CorrelationId}, From: {From}, To: {RecipientCount}",
-                correlationId,
-                userEmail,
-                request.To.Length);
+                ct);
 
             // Step 5: Create Dataverse communication record (best-effort)
             Guid? communicationId = null;
@@ -583,12 +517,12 @@ public sealed class CommunicationService
                     correlationId);
             }
 
-            // Step 5b: Best-effort capture of the sent message's Internet-Message-Id (FR-06 — feeds W1 thread rung).
-            if (communicationId.HasValue)
+            // Step 5b: Persist the Internet-Message-Id the channel sender captured post-send (FR-06 —
+            // feeds W1 thread rung). Channel-agnostic Dataverse stamp; best-effort.
+            if (communicationId.HasValue && sendResult.ProviderMessageId is not null)
             {
-                await TryStampInternetMessageIdAsync(
-                    graphClient, userMode: true, userEmail, communicationId.Value,
-                    request.Subject, correlationId, ct);
+                await StampInternetMessageIdAsync(
+                    communicationId.Value, sendResult.ProviderMessageId, correlationId, ct);
             }
 
             // Step 6: Archive to SPE if requested (best-effort)
@@ -753,27 +687,6 @@ public sealed class CommunicationService
                 AttachmentRecordWarning = attachmentRecordWarning
             };
         }
-        catch (ODataError ex)
-        {
-            _logger.LogError(
-                ex,
-                "Graph sendMail (OBO) failed | CorrelationId: {CorrelationId}, StatusCode: {StatusCode}, ErrorCode: {ErrorCode}",
-                correlationId,
-                ex.ResponseStatusCode,
-                ex.Error?.Code);
-
-            throw new SdapProblemException(
-                code: "GRAPH_SEND_FAILED",
-                title: "Email Send Failed",
-                detail: $"Graph API error (OBO): {ex.Error?.Message ?? ex.Message}",
-                statusCode: ex.ResponseStatusCode > 0 ? ex.ResponseStatusCode : 502,
-                extensions: new Dictionary<string, object>
-                {
-                    ["correlationId"] = correlationId,
-                    ["graphErrorCode"] = ex.Error?.Code ?? "unknown",
-                    ["sendMode"] = "User"
-                });
-        }
         catch (Exception ex) when (ex is not SdapProblemException)
         {
             _logger.LogError(
@@ -920,39 +833,6 @@ public sealed class CommunicationService
         }
     }
 
-    private static Message BuildGraphMessage(SendCommunicationRequest request, ApprovedSenderResult sender)
-    {
-        return new Message
-        {
-            Subject = request.Subject,
-            Body = new ItemBody
-            {
-                ContentType = request.BodyFormat == BodyFormat.PlainText ? BodyType.Text : BodyType.Html,
-                Content = request.Body
-            },
-            From = new Recipient
-            {
-                EmailAddress = new EmailAddress
-                {
-                    Address = sender.Email,
-                    Name = sender.DisplayName
-                }
-            },
-            ToRecipients = request.To.Select(email => new Recipient
-            {
-                EmailAddress = new EmailAddress { Address = email }
-            }).ToList(),
-            CcRecipients = (request.Cc ?? Array.Empty<string>()).Select(email => new Recipient
-            {
-                EmailAddress = new EmailAddress { Address = email }
-            }).ToList(),
-            BccRecipients = (request.Bcc ?? Array.Empty<string>()).Select(email => new Recipient
-            {
-                EmailAddress = new EmailAddress { Address = email }
-            }).ToList()
-        };
-    }
-
     /// <summary>
     /// Creates a Dataverse sprk_communication record to track the sent email.
     /// </summary>
@@ -1075,8 +955,10 @@ public sealed class CommunicationService
         Guid communicationId,
         CancellationToken ct)
     {
-        // 1. Generate .eml via EmlGenerationService
-        var emlResult = _emlGenerationService.GenerateEml(request, partialResponse);
+        // 1. Generate the archival artifact via the channel archiver seam (dispatch by
+        // CommunicationType — ADR-045 rule 4). Email resolves to .eml generation.
+        var emlResult = _channelDispatcher.ResolveArchiver(request.CommunicationType)
+            .GenerateEml(request, partialResponse);
 
         // 2. Upload to SPE at /communications/{commId:N}/{fileName}.eml
         var driveId = _options.ArchiveContainerId;
@@ -1270,13 +1152,13 @@ public sealed class CommunicationService
 
     /// <summary>
     /// Downloads files from SPE, validates attachment count and total size limits,
-    /// and builds a list of Graph FileAttachment objects for sendMail.
+    /// and builds a list of channel-neutral <see cref="Channels.ChannelAttachment"/> objects for the sender.
     /// </summary>
     /// <exception cref="SdapProblemException">
     /// Thrown when attachment count exceeds 150, total size exceeds 35MB,
     /// or an individual file download fails.
     /// </exception>
-    private async Task<List<FileAttachment>> DownloadAndBuildAttachmentsAsync(
+    private async Task<List<ChannelAttachment>> DownloadAndBuildAttachmentsAsync(
         string[] attachmentDocumentIds,
         string correlationId,
         CancellationToken ct)
@@ -1302,7 +1184,7 @@ public sealed class CommunicationService
         // matter), so each document carries its own sprk_graphdriveid (BU's
         // container) and sprk_graphitemid (file in that container).
         // The legacy _options.ArchiveContainerId is no longer used here.
-        var attachments = new List<FileAttachment>(attachmentDocumentIds.Length);
+        var attachments = new List<ChannelAttachment>(attachmentDocumentIds.Length);
         long totalSize = 0;
 
         for (var i = 0; i < attachmentDocumentIds.Length; i++)
@@ -1483,12 +1365,11 @@ public sealed class CommunicationService
                 contentBytes = ms.ToArray();
             }
 
-            attachments.Add(new FileAttachment
+            attachments.Add(new ChannelAttachment
             {
-                OdataType = "#microsoft.graph.fileAttachment",
-                Name = metadata.Name,
+                Name = metadata.Name ?? "attachment",
                 ContentType = InferContentType(metadata.Name),
-                ContentBytes = contentBytes
+                Content = contentBytes
             });
 
             _logger.LogDebug(
@@ -1540,61 +1421,19 @@ public sealed class CommunicationService
         => value.Length <= maxLength ? value : value[..maxLength];
 
     /// <summary>
-    /// Best-effort capture of the just-sent message's real RFC-2822 Internet-Message-Id (FR-06).
-    /// The message was saved to Sent Items (SaveToSentItems=true); we locate it by subject (newest
-    /// first) and stamp sprk_internetmessageid so inbound replies can thread-match (W1 rung).
+    /// Persists the RFC-2822 Internet-Message-Id that the channel sender captured post-send (FR-06),
+    /// so inbound replies can thread-match (W1 rung). Channel-agnostic Dataverse write — the Graph
+    /// Sent-Items lookup that produces the id lives in <see cref="Channels.EmailChannelSender"/>.
     /// MUST NOT fail the send — any error is logged and swallowed (NFR-06).
-    ///
-    /// NOTE (R3 UQ3 — dev-validation pending): retrieval is by subject + recency, which can
-    /// mis-select in a high-volume mailbox with duplicate subjects, and the message may not be
-    /// indexed in Sent Items the instant SendMail returns. A dev-mailbox smoke test should confirm
-    /// hit-rate; the hardening path is a correlationId extended property stamped on send.
     /// </summary>
-    private async Task TryStampInternetMessageIdAsync(
-        GraphServiceClient graphClient,
-        bool userMode,
-        string senderEmail,
+    private async Task StampInternetMessageIdAsync(
         Guid communicationId,
-        string subject,
+        string internetMessageId,
         string correlationId,
         CancellationToken ct)
     {
         try
         {
-            var safeSubject = subject.Replace("'", "''");
-            List<Message>? messages;
-            if (userMode)
-            {
-                var page = await graphClient.Me.MailFolders["sentitems"].Messages.GetAsync(rc =>
-                {
-                    rc.QueryParameters.Filter = $"subject eq '{safeSubject}'";
-                    rc.QueryParameters.Orderby = new[] { "sentDateTime desc" };
-                    rc.QueryParameters.Select = new[] { "internetMessageId", "sentDateTime" };
-                    rc.QueryParameters.Top = 3;
-                }, ct);
-                messages = page?.Value;
-            }
-            else
-            {
-                var page = await graphClient.Users[senderEmail].MailFolders["sentitems"].Messages.GetAsync(rc =>
-                {
-                    rc.QueryParameters.Filter = $"subject eq '{safeSubject}'";
-                    rc.QueryParameters.Orderby = new[] { "sentDateTime desc" };
-                    rc.QueryParameters.Select = new[] { "internetMessageId", "sentDateTime" };
-                    rc.QueryParameters.Top = 3;
-                }, ct);
-                messages = page?.Value;
-            }
-
-            var internetMessageId = messages?.FirstOrDefault()?.InternetMessageId;
-            if (string.IsNullOrWhiteSpace(internetMessageId))
-            {
-                _logger.LogWarning(
-                    "Internet-Message-Id not found in Sent Items for communication {CommunicationId} (subject match); reply-thread closure may be impaired | CorrelationId: {CorrelationId}",
-                    communicationId, correlationId);
-                return;
-            }
-
             await _genericEntityService.UpdateAsync(
                 "sprk_communication",
                 communicationId,
@@ -1609,7 +1448,7 @@ public sealed class CommunicationService
         {
             _logger.LogWarning(
                 ex,
-                "Internet-Message-Id capture failed (non-fatal) for communication {CommunicationId} | CorrelationId: {CorrelationId}",
+                "Internet-Message-Id stamp failed (non-fatal) for communication {CommunicationId} | CorrelationId: {CorrelationId}",
                 communicationId, correlationId);
         }
     }

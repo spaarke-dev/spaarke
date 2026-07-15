@@ -1,6 +1,7 @@
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Engine.Detectors;
 using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
@@ -30,6 +31,16 @@ public static class CommunicationModule
         services.AddSingleton<EmlGenerationService>();
         services.AddSingleton<GraphMessageToEmlConverter>();
         services.AddSingleton<MailboxVerificationService>();
+
+        // Channel seams (ADR-045 rule 4 / NFR-04). Email is the ONLY R4 implementation of each seam.
+        // Registered UNCONDITIONALLY (ADR-010 / ADR-032 — the dispatcher + CommunicationService consume
+        // them unconditionally; no feature gate). Adding a future channel (Teams/Slack/SMS) is purely
+        // additive: register a new ICommunicationChannelSender + ICommunicationArchiver keyed to its own
+        // CommunicationType here — the dispatcher resolves it by type with NO change to the dispatch site,
+        // the Association Engine, the enrichment service, the regarding model, or the review UI.
+        services.AddSingleton<ICommunicationChannelSender, EmailChannelSender>();
+        services.AddSingleton<ICommunicationArchiver, EmailArchiver>();
+        services.AddSingleton<CommunicationChannelDispatcher>();
 
         // Association Engine (ADR-045 / FR-09/FR-10): the pure Graph→envelope boundary mapper, the
         // ordered rungs, and the envelope-only engine. All unconditional (consumed unconditionally by

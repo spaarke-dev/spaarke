@@ -23,6 +23,7 @@ using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Tests.Services.Communication;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
@@ -189,12 +190,11 @@ public class CommunicationIntegrationTests
         var resolvedEntityService = entityServiceMock?.Object ?? Mock.Of<IGenericEntityService>();
 
         return new CommunicationService(
-            graphFactoryMock.Object,
+            CommunicationChannelTestFactory.CreateDispatcher(graphFactoryMock.Object),
             senderValidator,
             Mock.Of<ICommunicationDataverseService>(),
             resolvedEntityService,
             Mock.Of<IDocumentDataverseService>(),
-            null!, // EmlGenerationService - not used when ArchiveToSpe=false
             null!, // SpeFileStore - not used when ArchiveToSpe=false
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
