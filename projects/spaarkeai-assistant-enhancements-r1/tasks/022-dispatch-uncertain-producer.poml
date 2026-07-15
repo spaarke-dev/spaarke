@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>dispatchUncertain routing-confidence producer</title>
+    <phase>3: Action Truthfulness &amp; Risk Gate</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, ai, backend, integration-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Dispatch-spine change; ADR-043 seam-test DoD; feeds the Confirm When Uncertain tier.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Routing-confidence signal on the dispatch spine; must not become a second decider.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Dispatch-spine; sequential after 021.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the dispatchUncertain routing-confidence producer that feeds the Confirm When Uncertain tier: low-confidence dispatch triggers the gate; high-confidence does not. The signal derives from the existing single agent turn's routing confidence — NOT a new classifier/scorer.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in the SPAARKE dispatch spine and ADR-039 (one probabilistic decider).
+  </role>
+
+  <goal>
+    A dispatchUncertain signal derived from the existing dispatch decision is available to the gate. Low-confidence dispatch fires the Confirm When Uncertain gate; high-confidence does not. Covered by tests/integration/seam/** + unit tests. No second intent mechanism introduced.
+  </goal>
+
+  <context>
+    <background>
+      Completes the risk-gate wiring: 021 handles explicit sprk_risk tiers; this handles the confidence-driven tier. The confidence must come from the one decider, preserving ADR-039.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Gate/</file>
+      <file>tests/integration/seam/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">The confidence signal MUST derive from the single agent turn; MUST NOT introduce a second scorer/classifier/reranker.</constraint>
+    <constraint source="ADR-043">Dispatch-spine change → tests/integration/seam/** DoD mandatory.</constraint>
+    <constraint source="project">Reuse the shipped dispatch seam; no new endpoint.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-041-judgment-confirmation-completion-policy.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Identify the routing-confidence signal available from the single agent turn.</step>
+    <step order="2">Produce dispatchUncertain from it and feed the Confirm When Uncertain tier in the gate.</step>
+    <step order="3">Verify low-confidence fires the gate; high-confidence does not.</step>
+    <step order="4">Add seam + unit tests; assert no new scorer/classifier was introduced (FR-E4-adjacent).</step>
+    <step order="5">Build + publish-size. Update TASK-INDEX.md 022 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a usable confidence signal is not exposed by the existing agent turn, STOP and escalate rather than adding a second scoring stage (ADR-039).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build + test BFF (unit + seam)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (dispatchUncertain producer)</output>
+    <output type="test">tests/integration/seam/ + unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Low-confidence dispatch triggers the Confirm When Uncertain gate; high-confidence does not.</criterion>
+    <criterion testable="true">The confidence derives from the single agent turn; no second scorer/classifier exists (asserted).</criterion>
+    <criterion testable="true">tests/integration/seam/** cover the tier; publish-size ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-D2. Sequential after 021.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. /conflict-check before BFF PR. FULL-rigor Step 9.5. Seam-test DoD.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Grounding-predicate wiring (PreFilter branch + ChatHostContext thread)</title>
+    <phase>5: Assistant Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, ai, backend, integration-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Dispatch-spine change (AgentToolProjection.PreFilter + SprkChatAgentFactory); ADR-043 seam-test DoD.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Dispatch-spine predicate wiring + host-context threading; must stay a pure predicate — high blast radius.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Dispatch-spine; sequential/main-session; seam-test DoD.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Wire the grounding predicate (code half of FR-H1): add a new AgentToolFilterContext field for the host-context precondition, thread ChatHostContext from SprkChatAgentFactory, and add a new deterministic PreFilter branch that reads the grounding-predicate column (task 003). "Create matter" is hidden when already inside a matter — a pure predicate, no model call.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in AgentToolProjection.PreFilter, SprkChatAgentFactory host-context threading, and ADR-039 grounding (pure predicate).
+  </role>
+
+  <goal>
+    A new PreFilter branch removes capabilities whose grounding-predicate column precondition is not met, using a new AgentToolFilterContext field fed by ChatHostContext threaded from SprkChatAgentFactory. "Create matter" is hidden when already inside a matter. Covered by direct PreFilter-branch unit tests + tests/integration/seam/** (ADR-043 DoD). No model call; no hardcoded tool-name list.
+  </goal>
+
+  <context>
+    <background>
+      Schema half is task 003 (the predicate column). This is the code half: reads that column and evaluates it as a pure predicate against host context.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AgentToolProjection.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>tests/integration/seam/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Grounding is a pure predicate (removes-the-impossible). MUST NOT gate by hardcoded tool-name lists; MUST NOT introduce a model call in the PreFilter.</constraint>
+    <constraint source="ADR-043">Dispatch-spine change → tests/integration/seam/** DoD mandatory + direct PreFilter-branch unit tests.</constraint>
+    <constraint source="project">Read the exact predicate column logical name(s) from task 003; thread ChatHostContext, do not fetch host state inside PreFilter.</constraint>
+    <constraint source="bff-extensions">Measure publish-size; ≤60 MB.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="PreFilter predicate" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AgentToolProjection.cs">Existing PreFilter branches are the pattern to mirror for the new predicate.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add the AgentToolFilterContext field for the host-context precondition.</step>
+    <step order="2">Thread ChatHostContext (inside-a-matter / has-attached-record) from SprkChatAgentFactory into the filter context.</step>
+    <step order="3">Add a deterministic PreFilter branch reading the task-003 predicate column; remove capabilities whose precondition is unmet.</step>
+    <step order="4">Direct PreFilter-branch unit tests + tests/integration/seam/** (e.g. "Create matter" hidden inside a matter).</step>
+    <step order="5">Build + publish-size. Update TASK-INDEX.md 044 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If evaluating the predicate would require a model call or host-state fetch inside PreFilter, STOP and escalate — grounding must remain a pure predicate over threaded context (ADR-039).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build + test BFF (unit + seam)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">AgentToolProjection.PreFilter branch + AgentToolFilterContext field + SprkChatAgentFactory threading</output>
+    <output type="test">Direct PreFilter unit tests + tests/integration/seam/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Create matter" is hidden when already inside a matter (predicate-driven, no model call).</criterion>
+    <criterion testable="true">The PreFilter reads the task-003 column via threaded ChatHostContext; no hardcoded tool-name list.</criterion>
+    <criterion testable="true">Direct PreFilter-branch tests + tests/integration/seam/** pass; publish-size ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-H1 (code half). Schema half = task 003.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. /conflict-check before BFF PR. FULL-rigor Step 9.5. Seam-test DoD.</protocol>
+  </execution>
+</task>

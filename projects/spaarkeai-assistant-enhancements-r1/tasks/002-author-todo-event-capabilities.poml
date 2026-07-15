@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Author create-todo + create-event capabilities (Bindings, Actions, tooldescription, chips)</title>
+    <phase>1: Catalog &amp; Schema Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>010, 012, 021, 050</blocks>
+    <tags>dataverse, ai, solution, fields</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Dispatch-catalog authoring — Bindings/Actions drive grounded execution (ADR-039). Incorrect capability modeling breaks routing.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability modeling to real entities (sprk_todo vs sprk_event) is architectural judgment with correctness stakes for the single decider.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Dataverse catalog authoring — main-session; coordinate with 003 (same Binding table).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Model two distinct capabilities so "a To Do not an Event" routes correctly: create-todo (writes sprk_todo, ADR-024 11-entity regarding) and create-event (writes sprk_event). Author their Bindings + Actions + sprk_tooldescription + sprk_chiptransitions rows using the shipped catalog conventions. Author "To Do vs Event" as a §5 ambiguity resolved by high-confidence inference or one-tap pick — never text negotiation.
+  </prompt>
+
+  <role>
+    SPAARKE AI platform developer expert in the ADR-039 grounded-execution catalog (Bindings, Actions, tool descriptions, chip transitions) and JPS authoring.
+  </role>
+
+  <goal>
+    create-todo and create-event exist as distinct catalog capabilities: each with a Binding row, an Action (JPS) with a mirror-first input schema, a sprk_tooldescription, and sprk_chiptransitions rows. An explicit "To Do" utterance dispatches create-todo (sprk_todo); an explicit "Event" dispatches create-event (sprk_event); ambiguity resolves by inference or one-tap pick.
+  </goal>
+
+  <context>
+    <background>
+      R2 UAT UC-1…UC-3 showed create flows dead-ending or producing the wrong entity type. These two capabilities are the catalog foundation the resolver (010), wizard hand-off (012), and risk-gate (021) build on. ~80% of the NBA machinery already ships under ADR-039 — extend the catalog, do not build a new pipeline.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">ONE probabilistic decider; three entry paths; two closed catalogs; every output grounded. Do NOT introduce a second intent mechanism when authoring the ambiguity.</constraint>
+    <constraint source="ADR-024">create-todo writes sprk_todo with the polymorphic 11-entity regarding resolver — follow the resolver's exact field contract; do NOT hardcode a single regarding type.</constraint>
+    <constraint source="project">Reuse existing Create*Wizard entity contracts for sprk_todo/sprk_event; input schemas are mirror-first per the consumer-wiring guide. Author the ambiguity into tool descriptions only — not a classifier.</constraint>
+    <constraint source="project">Every catalog change adds/updates eval cases (NFR-06) — but the eval authoring itself is task 051; here, note which eval cases are owed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="consumer-wiring" location="docs/guides/ai-guide-consumer-wiring.md">Action + Binding authoring, mirror-first input schemas, all three entry paths.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the consumer-wiring guide + an existing shipped capability (e.g. create-matter) as the reference to mirror.</step>
+    <step order="2">Author the create-todo Binding + Action (JPS) with a mirror-first sprk_todo input schema; wire the ADR-024 regarding resolver contract.</step>
+    <step order="3">Author the create-event Binding + Action with a mirror-first sprk_event input schema.</step>
+    <step order="4">Author sprk_tooldescription for each, encoding the "To Do vs Event" disambiguation cue (explicit "to do"/"task" → todo; "meeting"/"event"/time-block → event).</step>
+    <step order="5">Author sprk_chiptransitions rows so each capability emits sensible next-step chips post-run.</step>
+    <step order="6">List the owed eval cases (for task 051) in notes; do not author eval cases here.</step>
+    <step order="7">Verify both capabilities are discoverable via the dispatch path (dry-run a describe). Update TASK-INDEX.md 002 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_event or the sprk_todo regarding contract differs from what ADR-024 / the wizard entity expects, STOP and escalate rather than inventing a field shape.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dataverse-mcp">Author/verify catalog rows</tool>
+    <tool name="dotnet">Build/verify BFF if contracts referenced in code</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">Catalog rows (Bindings/Actions/tooldescription/chiptransitions) for create-todo + create-event</output>
+    <output type="notes" ephemeral="true">projects/spaarkeai-assistant-enhancements-r1/notes/owed-eval-cases.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given "create a to-do", the dispatcher selects create-todo (writes sprk_todo); given "create an event", it selects create-event (writes sprk_event).</criterion>
+    <criterion testable="true">Entity-type ambiguity resolves by high-confidence inference or a one-tap pick, never multi-turn text negotiation.</criterion>
+    <criterion testable="true">create-todo carries the ADR-024 11-entity regarding contract (not a hardcoded single type).</criterion>
+    <criterion testable="true">Each capability has a Binding, Action (mirror-first input schema), sprk_tooldescription, and sprk_chiptransitions rows; owed eval cases are listed for task 051.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-A2 / P4. This is catalog authoring, not pipeline building. Maker-per-Binding; owner reviews content (FR-J1). Coordinate with 003 (adds a grounding-predicate column to the same Binding table).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist. /conflict-check before any BFF PR.</protocol>
+  </execution>
+</task>

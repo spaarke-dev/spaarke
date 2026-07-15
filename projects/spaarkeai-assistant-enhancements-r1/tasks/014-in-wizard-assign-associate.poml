@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>In-wizard assign-to-me + association picker; grounding-optional</title>
+    <phase>2: Structured Creation Core</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>012</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, typescript, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies Create*Wizard write-adjacent behavior (assignee + association); .tsx code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-patterned wizard field additions with a clear reference (envelope from 012); low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the same Create*Wizard family as 012; sequence after 012.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Honor in-wizard assign-to-me end-to-end (FR-B-06): "assign it to me" sets assignee = current user. Add an association picker (matter/project/invoice/none). Keep grounding optional: a simple to-do must not require a document/session content.
+  </prompt>
+
+  <role>
+    PCF/React developer expert in Fluent UI v9 and the SPAARKE Create*Wizard library.
+  </role>
+
+  <goal>
+    The wizard supports assign-to-me (sets assignee = current user) and an association picker (matter/project/invoice/none). Creating a to-do with no file succeeds without demanding session content.
+  </goal>
+
+  <context>
+    <background>
+      R2 UAT + P6: grounding-optional. Simple tasks were blocked by a document requirement. Assign-to-me and association were missing from the pre-seeded launch.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+      <file>src/solutions/SpaarkeAi/src/components/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Grounding is optional here — a create-to-do capability MUST NOT require an attached record/session content (P6 / FR-A5).</constraint>
+    <constraint source="project">assignee resolution uses the current-user identity already available to the client; do not add a new identity mechanism.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; dark-mode compliant.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add an assign-to-me control that sets assignee = current user in the wizard payload.</step>
+    <step order="2">Add an association picker (matter/project/invoice/none) surfaced from the envelope.</step>
+    <step order="3">Ensure create-to-do with no file/session content proceeds (grounding-optional).</step>
+    <step order="4">UI + unit tests incl. the no-file to-do path + dark-mode.</step>
+    <step order="5">npm run build:prod. Update TASK-INDEX.md 014 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test client</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Create*Wizard assign-to-me + association picker</output>
+    <output type="test">wizard assign/associate + no-file-to-do tests</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Assign-to-me + association">
+      <steps>
+        <step>Open a create-to-do via the wizard</step>
+        <step>Click assign-to-me; verify assignee = current user</step>
+        <step>Pick an association (matter); verify it is set</step>
+        <step>Submit with NO file; verify success (grounding-optional)</step>
+      </steps>
+      <expected>To-do created, assigned to current user, associated; no document required</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Toggle dark mode; verify semantic-token adaptation</step></steps>
+      <expected>Colors adapt correctly</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Assign it to me" sets assignee = current user end-to-end.</criterion>
+    <criterion testable="true">The association picker offers matter/project/invoice/none and sets the chosen association.</criterion>
+    <criterion testable="true">create-to-do with no file succeeds without demanding session content.</criterion>
+    <criterion testable="true">Dark-mode compliant; npm run build:prod passes; tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-A4 / FR-A5 / P6.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. Build with npm run build:prod. FULL-rigor Step 9.5 + Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

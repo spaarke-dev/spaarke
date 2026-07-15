@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Amend EnvelopeBudget.User + byte-stable render + eval re-baseline + caching</title>
+    <phase>4: User Model</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, ai, backend, config, integration-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Hot chat-path; changes a ratified constant + golden-utterance merge-gate (ADR-tension Path B); eval re-baseline.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Path-B ADR amendment with a merge-gate re-baseline + byte-stability determinism; correctness- and process-sensitive.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Hot chat-path; depends on 030; touches the eval baseline.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Amend EnvelopeBudget.User (currently 300 — a binding golden-utterance merge-gate) to accommodate the profile fragment; size from the actual rendered length (expected ~500-700). Render the fragment deterministically (ordinal-ordered multi-selects, canonicalized prefs JSON — no map-order nondeterminism). Re-baseline the golden-utterance gate + the eval prompt-cache prefix. Define a latency budget + caching decision for the second per-turn Dataverse read; soft-fail-to-null.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in the ContextEnvelope renderer, EnvelopeBudget, the golden-utterance eval gate, and the IdentityNormalizationService caching precedent.
+  </role>
+
+  <goal>
+    EnvelopeBudget.User raised to a value sized from the rendered fragment (code-review sign-off recorded per ADR-tension Path B). The fragment renders byte-stably (ContextEnvelopeRendererTests updated). The golden-utterance gate + eval prompt-cache prefix are re-baselined green. A latency budget + caching decision (cite or reject the IdentityNormalizationService Redis 10-min TTL) is documented, with soft-fail-to-null.
+  </goal>
+
+  <context>
+    <background>
+      ADR-tension #2 is Path B (project-scoped amendment): the 300 ceiling is intentionally raised, not silently squeezed. Byte-stability protects the prompt-cache prefix (NFR-02/04). The profile adds a systemuser→sprk_userprofile read on the hot bind path (NFR-03).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Context/</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ (ContextEnvelopeRendererTests)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">EnvelopeBudget.User is a ratified constant + golden-utterance merge-gate — the change is a documented Path-B amendment with code-review sign-off (CLAUDE.md §6.5), not a silent edit.</constraint>
+    <constraint source="ADR-042">Fragment renders stated profile only; canonicalize prefs JSON deterministically.</constraint>
+    <constraint source="project">Byte-stability: ordinal-ordered multi-selects, canonical JSON, no map-order nondeterminism. Update ContextEnvelopeRendererTests + re-baseline the eval prefix.</constraint>
+    <constraint source="project">Soft-fail-to-null on the profile read (NFR-07); document the latency budget + caching decision explicitly.</constraint>
+    <constraint source="bff-extensions">Measure publish-size; ≤60 MB.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-042-memory-architecture-governance.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Measure the rendered profile-fragment length from real profiles; choose the new EnvelopeBudget.User value.</step>
+    <step order="2">Make the render byte-stable (ordinal multi-selects, canonical prefs JSON); update ContextEnvelopeRendererTests.</step>
+    <step order="3">Change the constant; re-baseline the golden-utterance gate + eval prompt-cache prefix; record the code-review sign-off note (Path B).</step>
+    <step order="4">Decide caching (cite or reject IdentityNormalizationService Redis 10-min TTL) + a latency budget; implement soft-fail-to-null.</step>
+    <step order="5">Build + publish-size; run the eval baseline green. Update TASK-INDEX.md 032 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the sized budget or re-baseline would break unrelated golden-utterance cases, STOP and escalate (Path-B amendment scope must stay project-scoped, CLAUDE.md §6.5).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build + test BFF; run eval baseline</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">EnvelopeBudget.User amendment + byte-stable renderer + caching</output>
+    <output type="test">Updated ContextEnvelopeRendererTests + re-baselined eval</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">EnvelopeBudget.User is raised to a value sized from the rendered fragment, with a recorded code-review sign-off (Path B).</criterion>
+    <criterion testable="true">The fragment renders byte-stably; ContextEnvelopeRendererTests pass; the golden-utterance gate + eval prefix are green.</criterion>
+    <criterion testable="true">A latency budget + caching decision is documented; the profile read soft-fails to null.</criterion>
+    <criterion testable="true">Publish-size ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec NFR-01 / NFR-02 / NFR-03; ADR-tension #2 (Path B). Depends on 030's rendered fragment.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. /conflict-check before BFF PR. FULL-rigor Step 9.5; the constant change needs explicit code-review sign-off.</protocol>
+  </execution>
+</task>

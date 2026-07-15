@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Verify + record the sprk_userprofile schema contract</title>
+    <phase>1: Catalog &amp; Schema Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>030, 042</blocks>
+    <tags>dataverse, fields, schema</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New-file creation (contract record) + Dataverse schema verification; no hot-path code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical verification against a live schema with an explicit column list; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    The owner created the sprk_userprofile columns + sprk_systemuser lookup + alternate key + N:N to sprk_practicearea_ref manually in dev (spaarkedev1). Verify the live schema against spec FR-E1 and record an authoritative column contract so downstream POMLs (030 producer, 042 questionnaire) do not assume un-promoted columns.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with Dataverse metadata + solution-management expertise. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A committed contract file projects/spaarkeai-assistant-enhancements-r1/notes/userprofile-schema-contract.md enumerating every sprk_userprofile column (logical name, type, required, option-set/choice values where applicable), the sprk_systemuser lookup + alternate key name, and the N:N relationship schema name to sprk_practicearea_ref — each row marked verified-present against the live environment.
+  </goal>
+
+  <context>
+    <background>
+      FR-E1 says the columns are created. The spec (Owner Clarifications) mandates a verification step + recorded column contract. The global role choice set backs sprk_primaryrole (reusable beyond AI). Practice Areas are an N:N to sprk_practicearea_ref (not a multi-select choice).
+    </background>
+    <relevant-files>
+      <file>projects/spaarkeai-assistant-enhancements-r1/notes/userprofile-schema-contract.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-042">The typed sprk_userprofile is NOT a memory store; learned signals still route to User-scope MemoryItem. Record columns as stated-profile only.</constraint>
+    <constraint source="project">Do NOT create or alter any column in this task — verification + documentation only. If a spec'd column is missing, STOP and escalate (do not create it here).</constraint>
+    <constraint source="project">Record the exact global role choice-set logical name bound to sprk_primaryrole and the N:N relationship schema name — 030 and 042 depend on these exact strings.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-042-memory-architecture-governance.md</file>
+      <file>docs/data-model/</file>
+      <file>projects/spaarkeai-assistant-enhancements-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Use the Dataverse MCP describe tool on sprk_userprofile; capture all columns with types + required flags.</step>
+    <step order="2">Confirm sprk_primaryrole is bound to the existing GLOBAL role choice set; record the choice-set logical name + all option label/value pairs.</step>
+    <step order="3">Confirm the sprk_systemuser lookup → systemuser exists and record the alternate-key name (Option B keyed upsert).</step>
+    <step order="4">Confirm the N:N relationship sprk_userprofile ↔ sprk_practicearea_ref; record the relationship schema name + intersect entity.</step>
+    <step order="5">Describe sprk_practicearea_ref; record sprk_practiceareaname + sprk_practiceareacode.</step>
+    <step order="6">Write the contract file; mark each row verified-present or MISSING.</step>
+    <step order="7">If any spec'd column/relationship is MISSING, write a BLOCKED note and escalate. Otherwise update TASK-INDEX.md 001 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any FR-E1 column, the sprk_systemuser alternate key, or the N:N relationship is absent from the live schema, STOP and escalate per CLAUDE.md §6 — do NOT create schema in this task.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dataverse-mcp">Describe tables/columns/relationships (read-only)</tool>
+    <tool name="git">Commit the contract file</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r1/notes/userprofile-schema-contract.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the live spaarkedev1 environment, the contract file lists every sprk_userprofile column with type + required flag, each marked verified-present.</criterion>
+    <criterion testable="true">The global role choice-set logical name bound to sprk_primaryrole and its full option set are recorded.</criterion>
+    <criterion testable="true">The sprk_systemuser lookup, its alternate-key name, and the N:N relationship schema name to sprk_practicearea_ref are recorded.</criterion>
+    <criterion testable="true">If any spec'd element is missing, a BLOCKED note exists and the task did not fabricate schema.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-E1 + Owner Clarifications (relationship = Option B). This contract is the single source the profile producer (030) and questionnaire write-path (042) read column names from — get the exact logical names right.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

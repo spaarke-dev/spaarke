@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Wizard entry-payload envelope + hand-off (unify 5→7 wrappers)</title>
+    <phase>2: Structured Creation Core</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>013, 014</blocks>
+    <tags>frontend, react, typescript, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Cross-cutting change across the Create*Wizard family (5→7 wrappers); modifies the launch/hand-off contract.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting migration of the wizard-wrapper family onto a shared entry-payload envelope — high blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the shared Create*Wizard family — 013 and 014 build on it; keep serialized within the wizard chain.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Define a typed wizard entry-payload envelope (files + resolved/proposed values + source metadata) that carries a draft-in-chat launch into a pre-seeded Create*Wizard. It rides the wizard_step set-field mechanism (NOT applyFieldMappings, which is record-sourced). Unify the 5-of-7 embedded wrappers onto this envelope and close the 2 gaps so every Create*Wizard can be launched pre-seeded.
+  </prompt>
+
+  <role>
+    PCF/React developer expert in Fluent UI v9, the SPAARKE Create*Wizard library, and the wizard_step set-field pre-fill mechanism.
+  </role>
+
+  <goal>
+    A typed entry-payload envelope type + a single hand-off path used by all 7 Create*Wizard wrappers. A handed-in file + seed values pre-fill the target wizard on launch via wizard_step set-field. The 2 previously-unwired wrappers are brought onto the envelope.
+  </goal>
+
+  <context>
+    <background>
+      R2 UAT: draft-in-chat dead-ended because the launch could not carry files/values into the wizard. 5 of 7 wrappers already embed; 2 gaps remain. This envelope is the hand-off contract 013 (smart pre-seed) and 014 (assign/associate) depend on.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+      <file>src/solutions/SpaarkeAi/src/components/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Ride wizard_step set-field for pre-fill; do NOT use applyFieldMappings (record-sourced, wrong for chat-sourced seeds).</constraint>
+    <constraint source="project">Reuse the existing CreateMatterWizardWidget + wizard_step pattern as the canonical reference to mirror; do NOT invent a parallel launch mechanism (CLAUDE.md §11).</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; dark-mode compliant.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+    <patterns>
+      <pattern name="wizard set-field pre-fill" location="src/client/shared/Spaarke.UI.Components/src/components/Wizard/">CreateMatterWizardWidget + wizard_step set-field is the canonical pre-seed reference to mirror.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Inventory the 7 Create*Wizard wrappers; identify the 5 embedded + the 2 gaps and their current launch shape.</step>
+    <step order="2">Define the typed entry-payload envelope (files, resolved values, proposed values, source metadata).</step>
+    <step order="3">Implement the single hand-off path riding wizard_step set-field; mirror CreateMatterWizardWidget.</step>
+    <step order="4">Migrate the 5 embedded wrappers onto the envelope; wire the 2 gap wrappers.</step>
+    <step order="5">Add unit/UI tests: a file + seed values pre-fill the launched wizard; dark-mode check.</step>
+    <step order="6">npm run build:prod. Update TASK-INDEX.md 012 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the shared UI + SpaarkeAi</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ (envelope + hand-off)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/ (wrapper wiring)</output>
+    <output type="test">wizard hand-off unit/UI tests</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Pre-seeded wizard launch">
+      <steps>
+        <step>From the Assistant, draft a create action with a file + seed values</step>
+        <step>Launch the target Create*Wizard</step>
+        <step>Verify the file is attached and seed values are pre-filled on the first step</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Wizard opens pre-seeded; no dead-end; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Verify wizard colors adapt via semantic tokens</step>
+      </steps>
+      <expected>All colors use Fluent v9 semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 Create*Wizard wrappers launch via the shared entry-payload envelope.</criterion>
+    <criterion testable="true">A handed-in file + seed values pre-fill the wizard on launch via wizard_step set-field (not applyFieldMappings).</criterion>
+    <criterion testable="true">Dark-mode compliant; npm run build:prod succeeds; tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-A1 / FR-A3. The envelope is the hand-off contract for 013 + 014.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. Build with npm run build:prod (NOT npm run build). FULL-rigor Step 9.5 + Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

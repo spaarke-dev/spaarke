@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Quick Start modal (reuse the Create* wizard library)</title>
+    <phase>5: Assistant Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, frontend, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New client surface reusing GetStartedCardsWidget; well-patterned .tsx.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Modal reusing an existing widget; low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 040 (drop-down entry).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Quick Start opens a modal presenting the existing Create* wizard library (reuse GetStartedCardsWidget). Wizards launch from the modal via the shared entry-payload envelope (012).
+  </prompt>
+
+  <role>
+    PCF/React developer expert in Fluent UI v9 and the GetStartedCardsWidget wizard library.
+  </role>
+
+  <goal>
+    A Quick Start modal (opened from the drop-down) presents the Create* wizard library via GetStartedCardsWidget; selecting a card launches the corresponding wizard through the shared envelope. Dark-mode compliant.
+  </goal>
+
+  <context>
+    <background>
+      Reuses the shipped wizard library — no new wizard. The modal is a thin host over GetStartedCardsWidget.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Reuse GetStartedCardsWidget + the 012 envelope; do NOT build a parallel card/launch surface (CLAUDE.md §11).</constraint>
+    <constraint source="MODAL-DECISION-CRITERIA">Follow the modal decision criteria for the container choice.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; dark-mode compliant.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Wire the drop-down Quick Start entry (040) to open a modal hosting GetStartedCardsWidget.</step>
+    <step order="2">Selecting a card launches the wizard via the 012 envelope.</step>
+    <step order="3">UI + unit tests incl. dark-mode.</step>
+    <step order="4">npm run build:prod. Update TASK-INDEX.md 041 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test client</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/ (Quick Start modal)</output>
+    <output type="test">Quick Start UI/unit tests</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Quick Start launches a wizard">
+      <steps>
+        <step>Open the drop-down; click Quick Start</step>
+        <step>Verify the modal shows the wizard library</step>
+        <step>Select a card; verify the wizard launches</step>
+      </steps>
+      <expected>Wizard launches from the modal; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Toggle dark mode; verify adaptation</step></steps>
+      <expected>Colors adapt correctly</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Quick Start opens a modal presenting the Create* wizard library (GetStartedCardsWidget).</criterion>
+    <criterion testable="true">Selecting a card launches the corresponding wizard via the shared envelope.</criterion>
+    <criterion testable="true">Dark-mode compliant; npm run build:prod passes; tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-F2.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. Build with npm run build:prod. Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

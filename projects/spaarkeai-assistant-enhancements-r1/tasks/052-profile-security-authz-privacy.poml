@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Profile security / authZ / privacy (roles, OBO vs app-only, erasure, prompt-injection)</title>
+    <phase>6: Authoring, Eval &amp; Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, auth, ai, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Security-sensitive (auth, row security, PII/GDPR, prompt-injection into the stable prefix).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/auth-sensitive: OBO-vs-app-only row-security implications + prompt-injection stance on user-authored fields — high stakes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Harden the profile data path: Dataverse security roles for sprk_userprofile read/write; the OBO-vs-app-only choice for the producer (app-only bypasses row security — decide + justify); GDPR/erasure tier of the stated profile; and the prompt-injection stance on user-authored sprk_focusareas / sprk_assistantpreferences injected into the stable prefix.
+  </prompt>
+
+  <role>
+    SPAARKE security-minded .NET developer expert in Dataverse row security, OBO vs app-only Graph/Dataverse auth, and prompt-injection defense.
+  </role>
+
+  <goal>
+    Documented + implemented: security roles for sprk_userprofile read/write; the producer's OBO-vs-app-only decision with row-security rationale; the erasure/GDPR tier; and a prompt-injection mitigation for user-authored profile fields injected into the stable prefix.
+  </goal>
+
+  <context>
+    <background>
+      NFR-05. The profile producer (030) reads user-authored free-text (focus areas, preferences) into the stable prompt prefix — a prompt-injection surface. app-only reads bypass row security, which has authZ implications.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Context/</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">This is a §6 human-escalation-sensitive area (auth/secrets). Surface the OBO-vs-app-only decision + erasure tier for sign-off; do not silently choose app-only if it bypasses required row security.</constraint>
+    <constraint source="ADR-039">Prompt-injection: user-authored profile text must not be able to redirect the dispatch/grounding decision — it biases only, never grants (preference≠permission).</constraint>
+    <constraint source="ADR-028">Follow Spaarke Auth v2 for the identity/authZ path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Define Dataverse security roles for sprk_userprofile read/write.</step>
+    <step order="2">Decide OBO vs app-only for the producer; document the row-security rationale; escalate if app-only would bypass required security.</step>
+    <step order="3">Define the GDPR/erasure tier of the stated profile.</step>
+    <step order="4">Implement + test a prompt-injection mitigation (delimit/neutralize user-authored fields in the stable prefix); assert injection cannot flip dispatch.</step>
+    <step order="5">Build + publish-size. Update TASK-INDEX.md 052 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the producer requires app-only reads that bypass Dataverse row security, STOP and escalate per CLAUDE.md §6 (security-sensitive) before proceeding.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build + test BFF</tool>
+    <tool name="dataverse-mcp">Configure/verify security roles</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Producer authZ hardening + prompt-injection mitigation</output>
+    <output type="docs">Security/privacy decision record (roles, OBO vs app-only, erasure tier)</output>
+    <output type="test">Prompt-injection negative test</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Security roles for sprk_userprofile read/write are defined; the OBO-vs-app-only decision is documented with row-security rationale.</criterion>
+    <criterion testable="true">The GDPR/erasure tier is defined.</criterion>
+    <criterion testable="true">A prompt-injection test proves user-authored profile fields cannot flip the dispatch/grounding decision.</criterion>
+    <criterion testable="true">Publish-size ≤60 MB; tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec NFR-05. Depends on the 030 producer.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. /conflict-check before BFF PR. FULL-rigor Step 9.5; security decisions need human sign-off (§6).</protocol>
+  </execution>
+</task>

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Exclude constrained fields from LLM arg-filling; incoherent-combo prevention</title>
+    <phase>2: Structured Creation Core</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, ai, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies the capability input-schema path on the dispatch side; enforces the P1 invariant.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Touches how the single agent turn fills args; correctness-critical to the "LLM never emits a closed-set value" invariant.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential with 010 (consumes the resolver).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    In the capability sprk_inputschema path, exclude constrained (closed-set) fields from LLM arg-filling so they are resolved by the FR-B1 resolver, not free-text LLM args. Make incoherent proposals impossible to commit — a nonsensical practice-area × matter-type pair cannot pass the grounded picker.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in the SPAARKE dispatch input-schema path and ADR-039 grounded execution.
+  </role>
+
+  <goal>
+    Closed-set fields are marked/excluded so the agent turn does not free-text them; the resolver (010) supplies their values. A code/test assertion proves closed-set fields are resolved by FR-B1, not LLM args. An incoherent practice-area × matter-type pair is impossible through the grounded picker.
+  </goal>
+
+  <context>
+    <background>
+      Complements 010: the resolver provides deterministic values, and this task ensures the LLM is not asked to (and cannot) fill them. Directly closes UC-3-class failures.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+      <file>tests/integration/seam/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">MUST NOT let the LLM emit final closed-set values; closed-set fields resolved deterministically via the resolver only.</constraint>
+    <constraint source="project">Do NOT add a second intent mechanism. Exclusion is a declarative property of the input schema / a filter over args — not a classifier.</constraint>
+    <constraint source="ADR-038">Add unit + seam coverage; the negative (incoherent-combo) case is mandatory (NFR-06 will add the eval).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Locate where capability sprk_inputschema fields are presented to the agent for arg-filling.</step>
+    <step order="2">Mark closed-set fields (option-set/lookup) as resolver-owned; exclude them from the LLM-visible arg set.</step>
+    <step order="3">Route those fields through the 010 resolver at dispatch/pre-seed time.</step>
+    <step order="4">Add the guard that an unresolved/incoherent closed-set value cannot commit (fails to none/low → picker, never a silent bad write).</step>
+    <step order="5">Tests: assertion that closed-set fields are resolver-sourced; negative test that an incoherent practice-area × matter-type pair cannot commit.</step>
+    <step order="6">Build + publish-size. Update TASK-INDEX.md 011 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (input-schema arg-fill exclusion)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ + tests/integration/seam/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A test asserts closed-set fields are resolved by FR-B1, not by free-text LLM args.</criterion>
+    <criterion testable="true">A nonsensical practice-area × matter-type pair cannot commit via the grounded picker (negative test passes).</criterion>
+    <criterion testable="true">Publish-size ≤60 MB; all tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-B3 / FR-B4; NFR-06 negative eval is authored in task 051.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. /conflict-check before BFF PR. FULL-rigor Step 9.5.</protocol>
+  </execution>
+</task>

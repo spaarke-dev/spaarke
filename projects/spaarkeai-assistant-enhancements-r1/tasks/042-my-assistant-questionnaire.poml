@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>My Assistant questionnaire → keyed upsert + N:N + seed MemoryItem</title>
+    <phase>5: Assistant Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001, 040</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, frontend, fluent-ui, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Dataverse write path (keyed upsert + N:N associates) + seeds User-scope MemoryItem; correctness-sensitive.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Write path with keyed upsert (no find-then-create race) + N:N associates + memory seed; multiple failure modes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 001 (schema contract) + 040 (drop-down entry); write path.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    My Assistant questionnaire writes the stated profile (FR-E1) via a keyed upsert by sprk_systemuser (no find-then-create race), writes practice areas as N:N associates, and seeds a User-scope MemoryItem (source=user). The cold-start gate keys on sprk_profilecompletedon.
+  </prompt>
+
+  <role>
+    PCF/React developer expert in Fluent UI v9, Dataverse keyed upsert + N:N association writes, and the User-scope MemoryItem seed path.
+  </role>
+
+  <goal>
+    Completing the questionnaire upserts sprk_userprofile keyed by sprk_systemuser, associates the chosen sprk_practicearea_ref records (N:N), sets sprk_profilecompletedon, and seeds a User-scope MemoryItem (source=user). The cold-start gate shows the questionnaire until sprk_profilecompletedon is set.
+  </goal>
+
+  <context>
+    <background>
+      This is the write half of the User Model; 030 is the read half. Uses the exact column/relationship names from task 001's contract. Option B relationship = keyed upsert, 1:1 enforced.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/</file>
+      <file>projects/spaarkeai-assistant-enhancements-r1/notes/userprofile-schema-contract.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Keyed upsert by sprk_systemuser (Option B) — NO find-then-create race. Practice areas written as N:N associates.</constraint>
+    <constraint source="ADR-042">Seed a User-scope MemoryItem (source=user); do NOT create a second memory store. Stated &gt; learned unless the user confirms.</constraint>
+    <constraint source="project">Read exact column/relationship names from task 001's contract. Cold-start gate keys on sprk_profilecompletedon.</constraint>
+    <constraint source="DATA-ACCESS">Choose Xrm.WebApi vs BFF per the data-access decision criteria; document the choice.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; dark-mode compliant.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-042-memory-architecture-governance.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read task 001's contract for exact column + N:N relationship names.</step>
+    <step order="2">Build the questionnaire UI (role, practice areas, focus/office/preferences) in the drop-down's My Assistant entry.</step>
+    <step order="3">On submit: keyed upsert sprk_userprofile by sprk_systemuser; associate practice-area N:N records; set sprk_profilecompletedon.</step>
+    <step order="4">Seed a User-scope MemoryItem (source=user).</step>
+    <step order="5">Cold-start gate: show the questionnaire until sprk_profilecompletedon is set.</step>
+    <step order="6">Tests: write-path (upsert idempotency, N:N associates), memory seed, cold-start gate, dark-mode.</step>
+    <step order="7">npm run build:prod. Update TASK-INDEX.md 042 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the keyed upsert cannot enforce 1:1 by sprk_systemuser (alt-key missing/misconfigured), STOP and escalate to task 001 rather than falling back to find-then-create.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build/test client</tool>
+    <tool name="dataverse-mcp">Verify the written profile + associates</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/ (My Assistant questionnaire + write path)</output>
+    <output type="test">questionnaire write-path + cold-start tests</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Questionnaire writes profile + seeds memory">
+      <steps>
+        <step>Open My Assistant; complete role + practice areas + prefs</step>
+        <step>Submit; verify sprk_userprofile upserted + practice-area N:N associates + sprk_profilecompletedon set</step>
+        <step>Verify a User-scope MemoryItem was seeded</step>
+        <step>Reopen; verify the cold-start gate no longer forces the questionnaire</step>
+      </steps>
+      <expected>Profile written, memory seeded, cold-start satisfied</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Toggle dark mode; verify adaptation</step></steps>
+      <expected>Colors adapt correctly</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Completing the questionnaire upserts sprk_userprofile keyed by sprk_systemuser (idempotent, no duplicate) + associates practice-area N:N records.</criterion>
+    <criterion testable="true">A User-scope MemoryItem (source=user) is seeded; sprk_profilecompletedon is set.</criterion>
+    <criterion testable="true">The cold-start gate keys on sprk_profilecompletedon.</criterion>
+    <criterion testable="true">Dark-mode compliant; npm run build:prod passes; tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-F3. Write half of the User Model (030 = read half).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. Build with npm run build:prod. FULL-rigor Step 9.5 + Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

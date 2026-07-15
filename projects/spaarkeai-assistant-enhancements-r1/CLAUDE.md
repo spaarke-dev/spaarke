@@ -10,6 +10,10 @@ When executing any task in this project, you MUST invoke the **`task-execute`** 
 
 Reposition the Assistant into a grounded **dispatcher**. **R1 = reactive-first**: fix the broken create flows (draft-in-chat → pre-seeded wizard) + constrained-field resolver + action-truthfulness + User Model + tool drop-down + `sprk_risk` wiring + grounding-guard. **R1.5 (proactive push / Azure SignalR) is designed, NOT in this project's task set.** ~80% of the NBA machinery is shipped under ADR-039 — **extend the catalog, do not build a new pipeline.**
 
+## Task set (decomposed 2026-07-15 — 25 tasks, 7 phases)
+
+See [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) for the full map (deps, model-tier, effort, parallel waves). Phases: **1** catalog/schema (001–003) · **2** structured-creation core (010–014) · **3** truthfulness/risk (020–022) · **4** User Model (030–032) · **5** Assistant surface (040–044) · **6** authoring/eval/hardening (050–054) · **7** wrap-up (090). Start at **001**. **Do NOT auto-execute** (BFF hot-path + dispatch spine). Dispatch-spine tasks (010, 021, 022, 030, 044) are **sequential / main-session** (seam-test DoD). All waves **goal-eligible: NO**.
+
 ## Binding constraints (MUST / MUST NOT)
 
 - ✅ Resolve closed, system-owned value sets **deterministically against metadata** (the constrained-field resolver); ❌ NEVER let the LLM emit a final closed-set value.

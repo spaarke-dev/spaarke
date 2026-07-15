@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Smart pre-seed integration (assistant pre-resolves → wizard defaulted dropdowns)</title>
+    <phase>2: Structured Creation Core</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010, 012</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, frontend, ai, react</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Bridges the BFF resolver (010) to the client wizard envelope (012); crosses the dispatch/hand-off boundary.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Integration across the resolver + envelope seams; must preserve determinism and the picker-defaulting contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on both 010 and 012.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Wire smart pre-seed: before the wizard hand-off, the assistant pre-resolves LLM-proposed closed-set values through the FR-B1 resolver (010) and hands the wizard defaulted dropdowns via the entry-payload envelope (012). "Create a matter from this letter" opens the wizard with practice-area/matter-type dropdowns defaulted from resolved values.
+  </prompt>
+
+  <role>
+    Full-stack SPAARKE developer bridging the BFF Services/Ai resolver and the client Create*Wizard envelope.
+  </role>
+
+  <goal>
+    On a create dispatch, proposed closed-set values are resolved (010) and packed into the envelope (012) as resolved (pre-select) or top-candidate (picker default). The launched wizard shows defaulted dropdowns; a high-confidence resolve pre-selects, a low/none defaults the picker to the top candidate.
+  </goal>
+
+  <context>
+    <background>
+      Owner decision: smart pre-seed (not a thin hand-off). This is where 010 + 012 meet. Determinism from 010 must survive into the envelope unchanged.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>src/solutions/SpaarkeAi/src/components/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Values reaching the wizard come from the deterministic resolver, never from LLM free-text.</constraint>
+    <constraint source="project">Reuse the envelope (012) and resolver (010) contracts as-is; do not re-implement resolution client-side.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">At the create-dispatch point, collect LLM-proposed closed-set values.</step>
+    <step order="2">Call the 010 resolver for each; map results into the envelope (resolved vs top-candidate).</step>
+    <step order="3">Ensure the wizard renders pre-selected/defaulted dropdowns from the envelope.</step>
+    <step order="4">Tests: high-confidence → pre-select; low/none → picker defaulted to top candidate.</step>
+    <step order="5">Build (dotnet + npm run build:prod). Update TASK-INDEX.md 013 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build/test BFF</tool>
+    <tool name="npm">Build client</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">BFF dispatch pre-seed wiring + client envelope population</output>
+    <output type="test">smart pre-seed unit/UI tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Create a matter from this letter" opens the wizard with practice-area/matter-type defaulted from resolved values.</criterion>
+    <criterion testable="true">A high-confidence resolve pre-selects; a low/none defaults the picker to the top candidate.</criterion>
+    <criterion testable="true">No client-side re-implementation of resolution; all builds + tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-B2. Consumes 010 + 012.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. /conflict-check before BFF PR. FULL-rigor Step 9.5.</protocol>
+  </execution>
+</task>

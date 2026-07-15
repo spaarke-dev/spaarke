@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Assistant-pane tool drop-down (Fluent v9)</title>
+    <phase>5: Assistant Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>041, 042</blocks>
+    <tags>pcf, react, frontend, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New client surface with an explicit reference (ContextPaneMenu); .tsx code but well-patterned.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fluent v9 menu mirroring an existing component; low ambiguity with a concrete visual anchor.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a tool drop-down to the Assistant pane — a Fluent v9 menu mirroring ContextPaneMenu / WorkspacePaneMenu. It hosts Quick Start (041) and My Assistant (042). It must not disturb the three-pane layout.
+  </prompt>
+
+  <role>
+    PCF/React developer expert in Fluent UI v9 and the SPAARKE workspace pane-menu components.
+  </role>
+
+  <goal>
+    A tool drop-down renders in the Assistant pane, mirroring ContextPaneMenu, with slots for Quick Start + My Assistant, without disturbing the three-pane layout. Dark-mode compliant.
+  </goal>
+
+  <context>
+    <background>
+      The drop-down is the entry surface for the two questionnaire/library tools. Mirror the existing pane-menu component rather than inventing a new menu.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Mirror ContextPaneMenu / WorkspacePaneMenu — do NOT author a parallel menu component (CLAUDE.md §11).</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; dark-mode compliant.</constraint>
+    <constraint source="project">Must not disturb the three-pane layout / pane-width fractions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+    <patterns>
+      <pattern name="pane menu" location="src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/">ContextPaneMenu / WorkspacePaneMenu is the Fluent v9 menu to mirror.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Locate ContextPaneMenu/WorkspacePaneMenu; mirror its structure for the Assistant pane.</step>
+    <step order="2">Add drop-down entries for Quick Start + My Assistant (wired in 041/042).</step>
+    <step order="3">Verify the three-pane layout is unaffected.</step>
+    <step order="4">UI + unit tests incl. dark-mode.</step>
+    <step order="5">npm run build:prod. Update TASK-INDEX.md 040 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test client</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/ (Assistant tool drop-down)</output>
+    <output type="test">drop-down UI/unit tests</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Drop-down renders">
+      <steps>
+        <step>Open the Assistant pane</step>
+        <step>Verify the tool drop-down is present with Quick Start + My Assistant entries</step>
+        <step>Verify the three-pane layout is unchanged; check console</step>
+      </steps>
+      <expected>Drop-down present; layout intact; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Toggle dark mode; verify semantic-token adaptation</step></steps>
+      <expected>Colors adapt correctly</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Fluent v9 tool drop-down renders in the Assistant pane with Quick Start + My Assistant entries.</criterion>
+    <criterion testable="true">The three-pane layout is not disturbed.</criterion>
+    <criterion testable="true">Dark-mode compliant; npm run build:prod passes; tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-F1. Entry surface for 041/042.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. Build with npm run build:prod. Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

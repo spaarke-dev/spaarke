@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Eval cases per catalog change + negative profile-injection cases</title>
+    <phase>6: Authoring, Eval &amp; Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030, 050</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, integration-test, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>TEST-MODIFYING override; NFR-06 is a merge gate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Eval authoring against defined catalog changes + a clear negative-case spec; low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Every catalog change (tool descriptions, chip rows, new columns, ambiguities) adds/updates eval cases. Add negative cases proving profile injection does NOT flip dispatch decisions (operational proof of FR-E4). This is the NFR-06 merge gate.
+  </prompt>
+
+  <role>
+    SPAARKE eval engineer expert in the dispatch eval harness and the golden-utterance gate.
+  </role>
+
+  <goal>
+    Eval cases cover each R1 catalog change (create-todo/-event, ambiguity set, list-* Q&amp;A, grounding predicate). Negative eval cases prove that injecting a stated profile does not change dispatch decisions. The eval suite passes as the merge gate.
+  </goal>
+
+  <context>
+    <background>
+      Consumes the owed-eval-cases list from 002/050 and the profile producer from 030. This is the operational (not just unit) proof of preference≠permission.
+    </background>
+    <relevant-files>
+      <file>tests/</file>
+      <file>projects/spaarkeai-assistant-enhancements-r1/notes/owed-eval-cases.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">NFR-06 merge gate: every catalog change has eval coverage; the profile-injection negative case is mandatory.</constraint>
+    <constraint source="ADR-039">Negative cases must show profile injection does NOT flip dispatch (not-a-second-decider).</constraint>
+    <constraint source="ADR-038">Follow the eval/testing conventions; no banned test shapes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the owed-eval-cases list (from 002/050); author an eval case per catalog change.</step>
+    <step order="2">Author negative cases: same utterance with vs without an injected profile → identical dispatch decision.</step>
+    <step order="3">Author the incoherent-combo negative eval (practice-area × matter-type) referenced by 011.</step>
+    <step order="4">Run the eval suite; ensure green as the merge gate.</step>
+    <step order="5">Update TASK-INDEX.md 051 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run the eval suite</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">Eval cases (catalog + negative profile-injection + incoherent-combo)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each R1 catalog change has at least one eval case.</criterion>
+    <criterion testable="true">Negative cases prove profile injection does not flip dispatch decisions.</criterion>
+    <criterion testable="true">The incoherent practice-area × matter-type case cannot commit (eval).</criterion>
+    <criterion testable="true">The eval suite passes (NFR-06 merge gate).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec NFR-06. Depends on 030 (profile) + 050 (catalog authoring).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. FULL-rigor Step 9.5 (TEST-MODIFYING override).</protocol>
+  </execution>
+</task>

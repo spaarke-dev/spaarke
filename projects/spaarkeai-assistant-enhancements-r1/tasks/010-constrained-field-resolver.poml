@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Constrained-field resolver primitive (Services/Ai)</title>
+    <phase>2: Structured Creation Core</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>011, 013</blocks>
+    <tags>bff-api, ai, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF service on the chat/dispatch path; the field-value analogue of ADR-039 grounding; correctness-critical.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Dispatch-adjacent primitive on the critical path; deterministic match-ladder design with metadata sourcing — high blast radius.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Dispatch-adjacent; sequential/main-session. 011 and 013 depend on it.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build a deterministic constrained-field resolver — the field-value analogue of ADR-039 capability grounding — so the LLM never emits a final closed-set value. Contract: Input (entityLogicalName, attributeLogicalName, proposedValue, optional context) → Output { resolved?: optionValue|recordId, confidence: high|low|none, candidates[] }. Valid-set source = Dataverse metadata (choice label/value for option-sets; filtered candidate query for lookups — matter practice area resolves against sprk_practicearea_ref). Deterministic match ladder, cached per field, NO LLM call. Reuse existing option-set metadata helpers — the genuinely-new piece is the proposal→option matcher only.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in the SPAARKE BFF Services/Ai layer, Dataverse metadata retrieval, and ADR-039 grounded execution.
+  </role>
+
+  <goal>
+    A BFF service in Services/Ai exposing the resolver contract above, callable from the chat/dispatch path. Given a proposed closed-set value it returns high (exact/normalized match → pre-select), low/none (→ picker defaulted to top candidate), with candidates[] sourced from Dataverse metadata and cached per field. Fully unit-tested including the match-ladder tiers and the no-match path. No LLM call anywhere in the resolver.
+  </goal>
+
+  <context>
+    <background>
+      Owner decision 2026-07-15: smart pre-seed. R2 UAT UC-3 showed the LLM guessing system-owned values. This resolver is the deterministic guardrail; 011 excludes constrained fields from LLM arg-filling; 013 wires smart pre-seed into the wizard hand-off.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">MUST resolve closed, system-owned value sets deterministically against metadata; MUST NOT let the LLM emit final closed-set values; no second intent mechanism (no classifier/reranker/vector/lexicon in the matcher).</constraint>
+    <constraint source="project">Placement: a BFF service in Services/Ai callable from the dispatch path. Before building the picker/candidates rendering, VERIFY existing option-set metadata helpers and reuse them — the new code is the matcher only (CLAUDE.md §11 justification required).</constraint>
+    <constraint source="project">Match ladder is EXACTLY: exact case-insensitive → normalized (trim/punctuation/configured synonyms) → fuzzy above a configured similarity threshold → none. Confidence maps: exact/normalized→high, fuzzy→low, else none.</constraint>
+    <constraint source="ADR-032">Classify caching/absence as a quiet no-op where a field has no closed set (return none, do not throw).</constraint>
+    <constraint source="bff-extensions">Measure publish-size impact; ≤60 MB ceiling. No new NuGet expected.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Grep Services/Ai + the wizards for existing option-set/lookup metadata helpers; document the reuse in the justification (matcher is the only new surface).</step>
+    <step order="2">Define the resolver interface + result record in PublicContracts (or the correct seam per Placement Justification).</step>
+    <step order="3">Implement the metadata valid-set sources: option-set label/value; lookup filtered candidate query (practice area → sprk_practicearea_ref).</step>
+    <step order="4">Implement the deterministic match ladder + confidence mapping; per-field caching.</step>
+    <step order="5">Register in DI (unconditional registration if the dispatch path maps unconditionally — per §10 asymmetric-registration rule).</step>
+    <step order="6">Unit tests: each ladder tier, the none path, cache behavior, and a practice-area lookup resolve. Verify no LLM dependency is injected.</step>
+    <step order="7">Build + measure publish-size delta. Update TASK-INDEX.md 010 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the exact sprk_matter practice-area / matter-type field shapes differ from what the spec assumed (option-set vs ref), STOP and confirm the field shapes before coding the lookup query (spec FR-B1 leaves this to implementation-time confirmation).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="dataverse-mcp">Confirm sprk_matter field shapes + sprk_practicearea_ref</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (resolver service + contract)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ (resolver tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a valid practice-area proposal, the resolver returns high with the resolved recordId (pre-select).</criterion>
+    <criterion testable="true">Given a no-match/ambiguous proposal, it returns none/low with candidates[] defaulted to the top candidate (picker).</criterion>
+    <criterion testable="true">Every match-ladder tier (exact, normalized, fuzzy, none) has a passing unit test; the resolver has no LLM dependency.</criterion>
+    <criterion testable="true">A field with no closed set returns none without throwing (ADR-032 quiet no-op).</criterion>
+    <criterion testable="true">Publish-size measured and ≤60 MB; all unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-B1. Critical path. This is the "genuinely-new piece" — keep it to the matcher; reuse metadata rendering. 013 consumes it for smart pre-seed.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files before starting. /conflict-check before BFF PR. Follow task-execute FULL-rigor checklist incl. Step 9.5 gates.</protocol>
+  </execution>
+</task>

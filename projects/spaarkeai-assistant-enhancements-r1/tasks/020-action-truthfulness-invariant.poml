@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Action-outcome truthfulness invariant + no-collateral-teardown guard</title>
+    <phase>3: Action Truthfulness &amp; Risk Gate</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, react, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Existential UX invariant (P5); adopts the D-F3 ack contract; regression-critical (UC-4/UC-5).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Correctness-critical invariant across action reporting + pane/tab lifecycle; subtle failure modes (fabricated success, collateral teardown).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    R1 owns the action-outcome truthfulness invariant end-to-end (adopts + completes the D-F3 ack contract — no dependency on redesign-r2, which is merged). Every action claim is ack-gated on a client acknowledgment referencing the emitted action, or fails honestly. An orchestrated action must not cause collateral teardown of unrelated panes/tabs.
+  </prompt>
+
+  <role>
+    SPAARKE client developer expert in the Assistant action-reporting path, the ack contract, and pane/tab lifecycle (PaneEventBus).
+  </role>
+
+  <goal>
+    A UI action that does not complete yields an honest failure message, never a fabricated success (UC-5 regression green). A record delete does not close an unrelated Compose tab (UC-4 no-regress green). All action claims are ack-gated on a client acknowledgment referencing the emitted action.
+  </goal>
+
+  <context>
+    <background>
+      R2 UAT UC-5: the Assistant claimed success for actions that did not complete. UC-4: an action tore down unrelated panes/tabs. The D-F3 ack contract is the mechanism; R1 completes it for all Follow-Through actions.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-041">Ack-contract lineage (tier × risk × origin). Every action claim MUST be ack-gated on an acknowledgment referencing the emitted action, or fail honestly. MUST NOT make optimistic UI claims.</constraint>
+    <constraint source="ADR-040">Store-before-render for action outcomes (ledger); the claim follows the stored outcome, not an optimistic guess.</constraint>
+    <constraint source="project">No collateral teardown — an action targets only its own surface; unrelated panes/tabs (Compose) remain open.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-041-judgment-confirmation-completion-policy.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r1/notes/uat-failure-analysis-2026-07-15.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Trace the current action-claim path; identify where success is asserted optimistically (UC-5 root).</step>
+    <step order="2">Adopt the D-F3 ack contract: gate the success claim on a client ack referencing the emitted action id.</step>
+    <step order="3">On no-ack/failure, emit an honest failure message (no fabricated success).</step>
+    <step order="4">Audit the pane/tab teardown path; scope teardown to the action's own surface (UC-4).</step>
+    <step order="5">Regression tests: UC-5 (honest failure) + UC-4 (no collateral teardown).</step>
+    <step order="6">npm run build:prod. Update TASK-INDEX.md 020 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If completing the ack contract requires a change to the shipped dispatch endpoint or a BFF contract, STOP and escalate — R1 must reuse the shipped seam (no new dispatch endpoint).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build/test client</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Assistant action-reporting (ack-gated) + teardown-scoping guard</output>
+    <output type="test">UC-5 + UC-4 regression tests</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Honest failure (UC-5)">
+      <steps>
+        <step>Trigger an action that will not complete</step>
+        <step>Verify the Assistant reports an honest failure, not success</step>
+      </steps>
+      <expected>No fabricated success claim</expected>
+    </test>
+    <test name="No collateral teardown (UC-4)">
+      <steps>
+        <step>Open a Compose tab; trigger a record delete elsewhere</step>
+        <step>Verify the Compose tab stays open</step>
+      </steps>
+      <expected>Unrelated tab is not torn down</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">An incomplete UI action yields an honest failure message, never a fabricated success (UC-5).</criterion>
+    <criterion testable="true">A record delete does not close an unrelated Compose tab (UC-4).</criterion>
+    <criterion testable="true">Every action claim is ack-gated on an acknowledgment referencing the emitted action.</criterion>
+    <criterion testable="true">npm run build:prod passes; regression tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-C1 / FR-C2. Evidence: uat-failure-analysis-2026-07-15.md UC-4/UC-5.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. Build with npm run build:prod. FULL-rigor Step 9.5 + Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>User-scope stated-profile producer → ContextBinder.userFragment</title>
+    <phase>4: User Model</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>031, 032, 042, 051, 052</blocks>
+    <tags>bff-api, ai, backend, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Hot chat-bind path; new producer composed into userFragment; auth-sensitive (row security, OBO vs app-only).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Hot chat-path producer with identity resolution + soft-fail + null-object discipline; high blast radius on the one bind path.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Hot chat-path; sequential/main-session; 031/032/042/051/052 depend on it.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a User-scope stated-profile producer that renders a fragment composed into ContextBinder.userFragment (sibling to the MemoryItem fragment), soft-fail-to-null. Read path: CallerSystemUserResolver (oid→systemuserid) → keyed retrieve of sprk_userprofile by sprk_systemuser → render the sprk_primaryrole label, related sprk_practicearea_ref names (N:N), plus focus/office/preferences. Also fold in role/BU/team (FR-E5). An unprofiled/absent user degrades to no fragment, never fails the bind.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in ContextBinder, the memory-fragment sibling seam, CallerSystemUserResolver / IIdentityNormalizationService / IMembershipResolverService, and ADR-032 null-object discipline.
+  </role>
+
+  <goal>
+    A profiled user's turn carries a deterministic stated-profile fragment via ContextBinder.userFragment (rendering role label + N:N practice-area names + focus/office/prefs + role/BU/team). An unprofiled or absent profile yields no fragment and never fails the bind (P2 quiet no-op, ADR-032).
+  </goal>
+
+  <context>
+    <background>
+      The seam is ContextBinder.ResolveUserMemoryFragmentAsync → IMemoryItemStore.ToUserPromptFragmentAsync; this producer is its sibling. Reader = User-fragment path (NOT IOrganizationalContextProvider — that is deferred org-scope). Reads the exact column/relationship names from task 001's contract.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Context/ContextBinder.cs</file>
+      <file>projects/spaarkeai-assistant-enhancements-r1/notes/userprofile-schema-contract.md</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-042">The producer renders the STATED profile only; it is not a memory store. Learned signals still route to User-scope MemoryItem. Stated &gt; learned unless the user confirms.</constraint>
+    <constraint source="ADR-032">Classify as a P2 quiet no-op: profile absent = everyday default; soft-fail-to-null, never throw on the bind path.</constraint>
+    <constraint source="ADR-039">preference ≠ permission — the fragment biases the one agent turn only; MUST NOT feed AgentToolFilterContext or grant capability (grounding still gates). Enforced by test 031.</constraint>
+    <constraint source="project">Inject via ContextBinder.userFragment; MUST NOT implement IOrganizationalContextProvider (wrong scope; deferred).</constraint>
+    <constraint source="project">Read column/relationship logical names from task 001's schema-contract note — do not guess names.</constraint>
+    <constraint source="bff-extensions">Measure publish-size; ≤60 MB. State OBO-vs-app-only choice (row-security impact) — detailed hardening is task 052.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-042-memory-architecture-governance.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="memory fragment sibling" location="src/server/api/Sprk.Bff.Api/Services/Ai/Context/ContextBinder.cs">ResolveUserMemoryFragmentAsync → ToUserPromptFragmentAsync is the exact seam to mirror.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read task 001's schema-contract note for exact column + N:N relationship names.</step>
+    <step order="2">Implement the read path: CallerSystemUserResolver → keyed retrieve of sprk_userprofile by sprk_systemuser; retrieve N:N practice-area names + role/BU/team.</step>
+    <step order="3">Render a deterministic fragment (role label + practice-area names + focus/office/prefs); compose into ContextBinder.userFragment as a sibling to the memory fragment.</step>
+    <step order="4">Apply ADR-032 null-object: absent profile → no fragment; soft-fail-to-null on any read error.</step>
+    <step order="5">Unit tests: profiled → fragment present; unprofiled/absent → no fragment, bind succeeds. (Byte-stability + budget = task 032; negative preference≠permission = task 031.)</step>
+    <step order="6">Build + publish-size. Update TASK-INDEX.md 030 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If injecting the fragment appears to require touching AgentToolFilterContext or granting capability, STOP — that violates preference≠permission (ADR-039). Escalate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build + test BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Context/ (stated-profile producer + ContextBinder composition)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ (producer tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A profiled user's turn carries the stated-profile fragment (role label + N:N practice-area names + focus/office/prefs).</criterion>
+    <criterion testable="true">An unprofiled or absent profile degrades to no fragment and the bind still succeeds (ADR-032 quiet no-op).</criterion>
+    <criterion testable="true">The producer reads exact names from task 001's contract; it does not touch AgentToolFilterContext.</criterion>
+    <criterion testable="true">Publish-size ≤60 MB; unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-E2 / FR-E5. Byte-stability + budget amendment = task 032; negative test = 031; security hardening = 052.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. /conflict-check before BFF PR. FULL-rigor Step 9.5.</protocol>
+  </execution>
+</task>
