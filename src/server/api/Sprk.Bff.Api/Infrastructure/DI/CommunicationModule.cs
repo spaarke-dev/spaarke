@@ -26,6 +26,13 @@ public static class CommunicationModule
         services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();
 
+        // Direction-agnostic enrichment orchestrator (ADR-045 / FR-08). Invoked by BOTH the inbound
+        // processor and the outbound send path so received and sent communications get identical
+        // treatment. Registered UNCONDITIONALLY (consumed unconditionally by both callers per ADR-032;
+        // no feature gate — no Null-Object peer required). Singleton mirrors IncomingCommunicationProcessor,
+        // which already injects the scoped IPostUploadIndexingEnqueuer via the same pattern.
+        services.AddSingleton<ICommunicationEnrichmentService, CommunicationEnrichmentService>();
+
         // Job handler: processes incoming email notifications from Graph webhooks (Task 072)
         // Extracts message details from Graph, creates sprk_communication record, handles attachments.
         // JobType: "IncomingCommunication" — processed by dedicated CommunicationJobProcessor (not shared queue).

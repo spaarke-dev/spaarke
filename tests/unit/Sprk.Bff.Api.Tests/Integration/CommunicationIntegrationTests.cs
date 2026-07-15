@@ -169,6 +169,7 @@ public class CommunicationIntegrationTests
             null!, // SpeFileStore - not used when ArchiveToSpe=false
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
             Mock.Of<ILogger<CommunicationService>>());
     }
@@ -1226,6 +1227,7 @@ public class CommunicationIntegrationTests
             jobSubmissionService,
             Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(),
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
             config,
             Mock.Of<ILogger<IncomingCommunicationProcessor>>());

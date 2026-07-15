@@ -227,6 +227,7 @@ public class InboundPipelineTests
             CreateMockJobSubmissionService(),
             Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(),
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
             CreateConfiguration(),
             Mock.Of<ILogger<IncomingCommunicationProcessor>>());

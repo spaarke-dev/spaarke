@@ -25,6 +25,14 @@
 - `sprk_communication`: `sprk_regardingservicerequest` (001), `sprk_regardingaccount`, `sprk_regardingevent`
 - `sprk_organization`: `sprk_domain`; `account`: `sprk_domain`
 
+## W1 in progress
+- **010 ✅** (merged via 3-way onto W0 — worktree had stale master base, reconciled cleanly; build+239 tests green). Landed `ICommunicationEnrichmentService` + `NormalizedMessage` skeleton, wired into both send paths + inbound processor, delivered outbound RAG indexing. Escalation triage:
+  - **E2/E3 → task 011's job** (refactor `IncomingAssociationResolver`→engine over the envelope; centralize inbound so full direction-symmetry is atomic). Confirmed staging.
+  - **E4/E6 resolved** (E4: RAG needs SPE ids → extra sprk_document retrieve, done; E6: stale-worktree-base, merged correctly).
+  - **⛔ E1 (owner decision, non-blocking):** categorization (content-class + urgency) has NO schema home on `sprk_communication`. Options: add columns, OR accept it's subsumed by the FR-15 AI rung (which already outputs category+urgency) → step 2 redundant. Likely the latter.
+  - **⛔ E5 (owner/coordination, for gated task 052):** `IEventRulesService.FireAsync` is chat/SSE-shaped — wrong for a fire-and-forget `communication_assessed` emission. 052 must design a non-SSE publish seam under `Services/Ai/PublicContracts/` (coordinate w/ r2-core; don't fork). FR-19 as written doesn't match the current seam.
+- **Worktree-base lesson:** isolation:worktree agents branch from `master`, NOT my branch. Disjoint-file tasks (client/add-in/docs) merge clean; BFF-engine tasks that edit W0's files need a 3-way merge or should run in the **main session**. → Run 011+ (engine spine) in main session, serial.
+
 ## Follow-ups / debts to carry
 - **006 dev smoke-test (REQUIRED before relying on threading):** the post-send Internet-Message-Id auto-capture uses a subject+recency Graph query (best-effort, non-fatal). Needs a dev-mailbox smoke-test to confirm hit-rate (R3 UQ3). Hardening path = correlationId extended property on send.
 - **Formal gates batched to W0 PR:** code-review + adr-check + publish-size measurement for 004/006 deferred to the W0 PR gate (changes add no packages → publish delta ~0; ADR self-check: ADR-024 additive, ADR-028 injected client, ADR-010 no new DI, ADR-019 no new error path).

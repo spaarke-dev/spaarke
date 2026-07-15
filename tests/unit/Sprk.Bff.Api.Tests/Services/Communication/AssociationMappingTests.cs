@@ -102,6 +102,7 @@ public class AssociationMappingTests
             speFileStore,
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
             _loggerMock.Object);
     }

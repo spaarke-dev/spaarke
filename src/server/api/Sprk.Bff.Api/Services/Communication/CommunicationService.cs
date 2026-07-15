@@ -34,6 +34,7 @@ public sealed class CommunicationService
     private readonly SpeFileStore _speFileStore;
     private readonly CommunicationAccountService _accountService;
     private readonly JobSubmissionService _jobSubmissionService;
+    private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly CommunicationOptions _options;
     private readonly ILogger<CommunicationService> _logger;
 
@@ -47,6 +48,7 @@ public sealed class CommunicationService
         SpeFileStore speFileStore,
         CommunicationAccountService accountService,
         JobSubmissionService jobSubmissionService,
+        ICommunicationEnrichmentService enrichmentService,
         IOptions<CommunicationOptions> options,
         ILogger<CommunicationService> logger)
     {
@@ -59,9 +61,31 @@ public sealed class CommunicationService
         _speFileStore = speFileStore;
         _accountService = accountService;
         _jobSubmissionService = jobSubmissionService;
+        _enrichmentService = enrichmentService;
         _options = options.Value;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Builds the normalized envelope (ADR-045 / FR-09) for an outbound send, so enrichment operates
+    /// over <see cref="NormalizedMessage"/> — never a channel-specific type. Skeleton mapping for task 010;
+    /// task 011 finalizes the envelope shape.
+    /// </summary>
+    private static NormalizedMessage BuildOutboundEnvelope(SendCommunicationRequest request, string fromEmail)
+        => new()
+        {
+            Direction = CommunicationDirection.Outgoing,
+            From = fromEmail,
+            To = request.To ?? Array.Empty<string>(),
+            Cc = request.Cc ?? Array.Empty<string>(),
+            Subject = request.Subject,
+            BodyText = request.BodyFormat == BodyFormat.PlainText ? request.Body : null,
+            BodyHtml = request.BodyFormat == BodyFormat.PlainText ? null : request.Body,
+            // NOTE: reply-thread fields (InReplyTo/References/ConversationId) are left null here — the
+            // FR-06 send-path reply-thread columns are not present on this worktree branch (see ESCALATION
+            // E6). Task 011 finalizes the envelope; the Association Engine will populate thread rung (1) then.
+            SentAt = DateTimeOffset.UtcNow,
+        };
 
     /// <summary>
     /// Sends a communication via Microsoft Graph sendMail API.
@@ -350,6 +374,29 @@ public sealed class CommunicationService
                 _logger.LogWarning(
                     "Attachment record creation skipped because Dataverse record creation failed | CorrelationId: {CorrelationId}",
                     correlationId);
+            }
+
+            // Step 8: Direction-agnostic enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-06).
+            // Closes the previously-missing OUTBOUND RAG-indexing half; full association/analysis
+            // direction-symmetry lands in task 011. EnrichAsync is itself non-fatal; the guard is defense-in-depth.
+            if (communicationId.HasValue)
+            {
+                try
+                {
+                    await _enrichmentService.EnrichAsync(
+                        communicationId.Value,
+                        CommunicationDirection.Outgoing,
+                        BuildOutboundEnvelope(request, senderResult.Email!),
+                        archivedDocumentId,
+                        cancellationToken);
+                }
+                catch (Exception enrichEx)
+                {
+                    _logger.LogWarning(
+                        enrichEx,
+                        "Enrichment failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
+                        correlationId, communicationId.Value);
+                }
             }
 
             return new SendCommunicationResponse
@@ -667,6 +714,29 @@ public sealed class CommunicationService
                 _logger.LogWarning(
                     "Attachment record creation skipped because Dataverse record creation failed | CorrelationId: {CorrelationId}",
                     correlationId);
+            }
+
+            // Step 8: Direction-agnostic enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-06).
+            // Closes the previously-missing OUTBOUND RAG-indexing half; full association/analysis
+            // direction-symmetry lands in task 011. EnrichAsync is itself non-fatal; the guard is defense-in-depth.
+            if (communicationId.HasValue)
+            {
+                try
+                {
+                    await _enrichmentService.EnrichAsync(
+                        communicationId.Value,
+                        CommunicationDirection.Outgoing,
+                        BuildOutboundEnvelope(request, userEmail),
+                        archivedDocumentId,
+                        ct);
+                }
+                catch (Exception enrichEx)
+                {
+                    _logger.LogWarning(
+                        enrichEx,
+                        "Enrichment failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
+                        correlationId, communicationId.Value);
+                }
             }
 
             return new SendCommunicationResponse

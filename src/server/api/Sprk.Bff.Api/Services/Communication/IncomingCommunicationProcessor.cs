@@ -38,6 +38,7 @@ public sealed class IncomingCommunicationProcessor
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly IPostUploadIndexingEnqueuer _postUploadIndexingEnqueuer;
     private readonly NotificationService _notificationService;
+    private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly CommunicationOptions _options;
     private readonly IConfiguration _configuration;
     private readonly ILogger<IncomingCommunicationProcessor> _logger;
@@ -62,6 +63,7 @@ public sealed class IncomingCommunicationProcessor
         JobSubmissionService jobSubmissionService,
         IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
         NotificationService notificationService,
+        ICommunicationEnrichmentService enrichmentService,
         IOptions<CommunicationOptions> options,
         IConfiguration configuration,
         ILogger<IncomingCommunicationProcessor> logger)
@@ -77,6 +79,7 @@ public sealed class IncomingCommunicationProcessor
         _jobSubmissionService = jobSubmissionService;
         _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
         _notificationService = notificationService;
+        _enrichmentService = enrichmentService;
         _options = options.Value;
         _configuration = configuration;
         _logger = logger;
@@ -337,6 +340,30 @@ public sealed class IncomingCommunicationProcessor
                 ex,
                 "Email-received notification failed (non-fatal) | CommunicationId: {CommunicationId}, " +
                 "GraphMessageId: {GraphMessageId}",
+                communicationId, graphMessageId);
+        }
+
+        // ── Step 9: Direction-agnostic enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-06) ──
+        // Wires the SAME enrichment entry point invoked by the outbound send path (direction symmetry
+        // at the entry-point level for task 010). archivedDocumentId is passed null: the inbound .eml +
+        // attachments are ALREADY RAG-indexed + AI-analyzed inline above (steps 5–6), so EnrichAsync's
+        // RAG/analysis steps intentionally no-op for inbound in 010. Task 011 removes the inline sequence
+        // and routes BOTH directions fully through EnrichAsync. EnrichAsync is itself non-fatal; the guard
+        // is defense-in-depth.
+        try
+        {
+            await _enrichmentService.EnrichAsync(
+                communicationId,
+                CommunicationDirection.Incoming,
+                BuildInboundEnvelope(message),
+                archivedDocumentId: null,
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Enrichment failed (non-fatal) | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
                 communicationId, graphMessageId);
         }
 
@@ -847,4 +874,37 @@ public sealed class IncomingCommunicationProcessor
 
     private static string TruncateTo(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
+
+    /// <summary>
+    /// Builds the normalized envelope (ADR-045 / FR-09) for an inbound message, so enrichment operates
+    /// over <see cref="NormalizedMessage"/> — never <c>Microsoft.Graph.Message</c>. Skeleton mapping for
+    /// task 010; task 011 finalizes the envelope shape (thread headers, conversationId, attachment contract).
+    /// </summary>
+    private static NormalizedMessage BuildInboundEnvelope(Message message)
+    {
+        var to = message.ToRecipients?
+            .Where(r => r.EmailAddress?.Address is not null)
+            .Select(r => r.EmailAddress!.Address!)
+            .ToArray() ?? Array.Empty<string>();
+
+        var cc = message.CcRecipients?
+            .Where(r => r.EmailAddress?.Address is not null)
+            .Select(r => r.EmailAddress!.Address!)
+            .ToArray() ?? Array.Empty<string>();
+
+        var isHtml = message.Body?.ContentType == BodyType.Html;
+
+        return new NormalizedMessage
+        {
+            Direction = CommunicationDirection.Incoming,
+            From = message.From?.EmailAddress?.Address,
+            To = to,
+            Cc = cc,
+            Subject = message.Subject,
+            BodyText = isHtml ? null : message.Body?.Content,
+            BodyHtml = isHtml ? message.Body?.Content : null,
+            InternetMessageId = message.InternetMessageId,
+            SentAt = message.ReceivedDateTime,
+        };
+    }
 }
