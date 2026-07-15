@@ -35,6 +35,8 @@ import {
   Link20Regular,
   ChevronDown16Regular,
   ChevronUp16Regular,
+  Star16Filled,
+  Star16Regular,
 } from '@fluentui/react-icons';
 import { AssociationStatus, type ICommunicationRecord } from './types';
 import {
@@ -58,6 +60,13 @@ export interface ConnectionsCallbacks {
   onAcceptAll?: (conns: Connection[]) => void;
   /** Reviewer wants to change/override a slot (captures an override reason). */
   onChange?: (conn: Connection) => void;
+  /**
+   * Designate this (confirmed) slot as the PRIMARY regarding — the one whose
+   * target populates the denormalized `sprk_regardingrecord*` fields. An email is
+   * regarding many records (one per entity type), but exactly one is the primary
+   * shown in the Regarding Record fields (owner requirement, 2026-07-15).
+   */
+  onSetPrimary?: (conn: Connection) => void;
   /** Open the regarding picker to add a missing dimension. */
   onLinkAnother?: () => void;
   /** Launch a create-from-email flow (Event / To Do / Invoice). */
@@ -77,6 +86,12 @@ export interface ConnectionsEditorProps extends ConnectionsCallbacks {
    * "filed" (W1). Optional for the card/summary reuse hosts.
    */
   confirmedFields?: Set<string>;
+  /**
+   * The field currently designated PRIMARY (owns the denormalized Regarding
+   * Record fields). When omitted, the editor defaults the badge to the first
+   * confirmed slot in priority order.
+   */
+  primaryField?: string;
 }
 
 const ENTITY_ICON: Record<string, JSX.Element> = {
@@ -182,17 +197,21 @@ function confText(v: number): string {
 function ConnectionRow({
   conn,
   confirmed,
+  isPrimary,
   readOnly,
   busy,
   onConfirm,
   onChange,
+  onSetPrimary,
 }: {
   conn: Connection;
   confirmed: boolean;
+  isPrimary: boolean;
   readOnly: boolean;
   busy: boolean;
   onConfirm: (conn: Connection, chosen?: ProvenanceCandidate) => void;
   onChange: (conn: Connection) => void;
+  onSetPrimary: (conn: Connection) => void;
 }): JSX.Element {
   const s = useStyles();
   const isConfirmed = confirmed || conn.status === 'confirmed';
@@ -226,6 +245,25 @@ function ConnectionRow({
               <span className={s.confirmedTick}>
                 <CheckmarkCircle20Filled />
               </span>
+              {isPrimary ? (
+                <Badge appearance="tint" color="warning" icon={<Star16Filled />}>
+                  Primary
+                </Badge>
+              ) : (
+                !readOnly && (
+                  <Tooltip content="Show this record in the Regarding Record fields" relationship="label">
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      icon={<Star16Regular />}
+                      disabled={busy}
+                      onClick={() => onSetPrimary(conn)}
+                    >
+                      Primary
+                    </Button>
+                  </Tooltip>
+                )
+              )}
               {!readOnly && (
                 <Button
                   size="small"
@@ -325,9 +363,11 @@ function EditorBody({
   readOnly,
   busy,
   confirmedFields,
+  primaryField,
   onConfirm,
   onAcceptAll,
   onChange,
+  onSetPrimary,
   onLinkAnother,
   onCreate,
 }: {
@@ -336,9 +376,11 @@ function EditorBody({
   readOnly: boolean;
   busy: boolean;
   confirmedFields: Set<string>;
+  primaryField?: string;
   onConfirm: (conn: Connection, chosen?: ProvenanceCandidate) => void;
   onAcceptAll: (conns: Connection[]) => void;
   onChange: (conn: Connection) => void;
+  onSetPrimary: (conn: Connection) => void;
   onLinkAnother: () => void;
   onCreate: (action: CreateAction) => void;
 }): JSX.Element {
@@ -351,6 +393,14 @@ function EditorBody({
   const handleAcceptAll = () => {
     onAcceptAll(connections.filter(c => c.status === 'suggested'));
   };
+
+  const isSlotConfirmed = (c: Connection) => c.status === 'confirmed' || confirmedFields.has(c.field);
+  // Effective primary: the explicitly-designated field if it's confirmed, else
+  // the first confirmed slot in priority order (connections are SLOT_META-sorted).
+  const effectivePrimary =
+    primaryField && connections.some(c => c.field === primaryField && isSlotConfirmed(c))
+      ? primaryField
+      : connections.find(isSlotConfirmed)?.field;
 
   const toReview = connections.filter(c => c.status !== 'confirmed' && !confirmedFields.has(c.field)).length;
   const confirmedCount = connections.length - toReview;
@@ -383,10 +433,12 @@ function EditorBody({
           key={c.field}
           conn={c}
           confirmed={confirmedFields.has(c.field)}
+          isPrimary={c.field === effectivePrimary}
           readOnly={readOnly}
           busy={busy}
           onConfirm={onConfirm}
           onChange={onChange}
+          onSetPrimary={onSetPrimary}
         />
       ))}
 
@@ -426,9 +478,11 @@ export function ConnectionsEditor(props: ConnectionsEditorProps): JSX.Element | 
     readOnly,
     busy,
     confirmedFields: props.confirmedFields ?? new Set<string>(),
+    primaryField: props.primaryField,
     onConfirm: props.onConfirm ?? (() => undefined),
     onAcceptAll: props.onAcceptAll ?? (() => undefined),
     onChange: props.onChange ?? (() => undefined),
+    onSetPrimary: props.onSetPrimary ?? (() => undefined),
     onLinkAnother: props.onLinkAnother ?? (() => undefined),
     onCreate: props.onCreate ?? (() => undefined),
   };

@@ -164,6 +164,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   }, [provenance, status]);
 
   const [confirmedFields, setConfirmedFields] = React.useState<Set<string>>(new Set());
+  const [primaryField, setPrimaryField] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -303,6 +304,17 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     }
   }, []);
 
+  const handleSetPrimary = React.useCallback(
+    (conn: Connection): void => {
+      // The primary owns the denormalized Regarding Record fields. Re-filing the
+      // (already-confirmed) target is idempotent for its typed lookup and points
+      // the denorm fields at it — additive, so sibling associations are untouched.
+      setPrimaryField(conn.field);
+      void fileSelection(conn.field, connectionTarget(conn));
+    },
+    [fileSelection]
+  );
+
   const handleChange = React.useCallback((conn: Connection): void => {
     setOverrideConn(conn);
     setOverrideReason('');
@@ -341,9 +353,11 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
         readOnly={readOnly}
         busy={busy}
         confirmedFields={confirmedFields}
+        primaryField={primaryField ?? undefined}
         onConfirm={handleConfirm}
         onAcceptAll={handleAcceptAll}
         onChange={handleChange}
+        onSetPrimary={handleSetPrimary}
         onLinkAnother={handleLinkAnother}
         onCreate={handleCreate}
       />
