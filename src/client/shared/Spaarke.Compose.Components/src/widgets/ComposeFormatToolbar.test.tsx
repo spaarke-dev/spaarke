@@ -282,10 +282,7 @@ describe('ComposeFormatToolbar — Word dropdown (host-bound handlers)', () => {
     const onOpenInWord = jest.fn();
     const onOpenInWordDesktop = jest.fn();
     const onPushToWord = jest.fn();
-    renderFormatToolbar(
-      {},
-      { props: { onOpenInWord, onOpenInWordDesktop, onPushToWord, canPushToWord: true } }
-    );
+    renderFormatToolbar({}, { props: { onOpenInWord, onOpenInWordDesktop, onPushToWord, canPushToWord: true } });
 
     await user.click(screen.getByTestId('compose-format-word-menu'));
 

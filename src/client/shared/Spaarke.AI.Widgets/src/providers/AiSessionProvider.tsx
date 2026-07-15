@@ -95,9 +95,7 @@ export const AI_SESSION_PLAYBOOK_KEY = `${SESSION_KEY_PREFIX}playbookId`;
  * Deterministic + case-normalized so a GUID or logical name that differs only by case resolves
  * to one key (Dataverse GUIDs / logical names are case-insensitive).
  */
-export function chatSessionKeyForContext(
-  entityContext: EntityContext | null | undefined
-): string {
+export function chatSessionKeyForContext(entityContext: EntityContext | null | undefined): string {
   const entityType = entityContext?.entityType;
   const entityId = entityContext?.entityId;
   if (entityType && entityId) {
@@ -450,9 +448,7 @@ export function AiSessionProvider({
 
   // Initial state seeded via readSession() which performs the one-shot
   // sessionStorage → localStorage migration on first localStorage-aware load.
-  const [chatSessionId, setChatSessionIdState] = useState<string | null>(() =>
-    readSession(chatSessionKey)
-  );
+  const [chatSessionId, setChatSessionIdState] = useState<string | null>(() => readSession(chatSessionKey));
 
   // DEF-19: when the host context changes (e.g. navigating from a Document to the
   // unbound home), load THAT context's persisted session — never carry the previous

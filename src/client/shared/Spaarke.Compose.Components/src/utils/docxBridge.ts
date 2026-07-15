@@ -192,9 +192,7 @@ export function buildRejectBaselineJson(node: TipTapNode): TipTapNode {
       else delete next.marks;
     }
     if (n.content) {
-      next.content = n.content
-        .map(transform)
-        .filter((c): c is TipTapNode => c !== null);
+      next.content = n.content.map(transform).filter((c): c is TipTapNode => c !== null);
     }
     return next;
   };

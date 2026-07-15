@@ -7,6 +7,10 @@
 
 ## Quick Recovery (READ THIS FIRST)
 
+> **ACTIVE (2026-07-15)**: Executing **task 063** (FR-30 durable memory) — RE-SCOPED to the #615-style facade approach (gate deferred to #629). Verdict: NO blocker — durable store `IMemoryItemStore` (Cosmos `memory-items`) + recall (`GetForRecordAsync`, `GET /api/memory/records/{entity}/{id}`) already exist, decoupled from chat. Building `IComposeMemoryCapture` PublicContracts facade → delegates to `IMemoryItemStore.UpsertAsync`; distills session `DefinedTermsTracking` (AI-derived defined-term canon) into Record-scope MemoryItems keyed to the promoted `sprk_document`; wired best-effort in `ComposeService.SaveAsync` after `PromoteIfEphemeralAsync`. `TrustLevel` carried-inert (gate = #629, deferred). **Already merged this session**: #601/#604/#605 closed (stale-fixed); #602 closed (dev provisioned); #615 canonicalized (PR #644 merged). Next after 063: quality gates (code-review + adr-check) → commit → PR to master.
+
+
+
 | Field | Value |
 |-------|-------|
 | **Project** | spaarkeai-compose-r2 (AI-native Compose drafting workspace) |

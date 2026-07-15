@@ -87,19 +87,21 @@ const editorCanSave: { current: boolean | undefined } = { current: undefined };
 jest.mock('./ComposeEditor', () => {
   const ReactLib = require('react');
   return {
-    ComposeEditor: ReactLib.forwardRef((props: { docxBytes: ArrayBuffer | null; sessionId?: string; canSave?: boolean }, ref: React.Ref<unknown>) => {
-      editorDocxBytes.current = props.docxBytes;
-      editorSessionId.current = props.sessionId;
-      editorCanSave.current = props.canSave;
-      ReactLib.useImperativeHandle(ref, () => ({
-        serialize: async () => new ArrayBuffer(0),
-        getCounts: () => ({ characters: 0, words: 0 }),
-        isDirty: () => true,
-        materializeComposeDraft: () => undefined,
-        materializePendingRedline: () => 'applied',
-      }));
-      return <div data-testid="compose-editor-stub" />;
-    }),
+    ComposeEditor: ReactLib.forwardRef(
+      (props: { docxBytes: ArrayBuffer | null; sessionId?: string; canSave?: boolean }, ref: React.Ref<unknown>) => {
+        editorDocxBytes.current = props.docxBytes;
+        editorSessionId.current = props.sessionId;
+        editorCanSave.current = props.canSave;
+        ReactLib.useImperativeHandle(ref, () => ({
+          serialize: async () => new ArrayBuffer(0),
+          getCounts: () => ({ characters: 0, words: 0 }),
+          isDirty: () => true,
+          materializeComposeDraft: () => undefined,
+          materializePendingRedline: () => 'applied',
+        }));
+        return <div data-testid="compose-editor-stub" />;
+      }
+    ),
   };
 });
 
@@ -149,8 +151,8 @@ const PERSISTENCE_ROUTE_FRAGMENTS = ['create-on-save', '/save', '/upload', '/per
 
 /** Assert no fetch touched a persistence route (a read-only compose-outputs probe is allowed). */
 function expectNoPersistenceCalls(): void {
-  const persistenceCalls = authenticatedFetchMock.mock.calls.filter(([url]) =>
-    typeof url === 'string' && PERSISTENCE_ROUTE_FRAGMENTS.some(frag => (url as string).includes(frag))
+  const persistenceCalls = authenticatedFetchMock.mock.calls.filter(
+    ([url]) => typeof url === 'string' && PERSISTENCE_ROUTE_FRAGMENTS.some(frag => (url as string).includes(frag))
   );
   expect(persistenceCalls).toHaveLength(0);
 }

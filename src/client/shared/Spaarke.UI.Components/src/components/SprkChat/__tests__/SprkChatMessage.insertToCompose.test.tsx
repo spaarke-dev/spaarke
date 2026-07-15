@@ -42,10 +42,7 @@ describe('SprkChatMessage — R4 "Insert into document"', () => {
   it('does NOT render on user messages', () => {
     const onInsertToCompose = jest.fn();
     renderWithProvider(
-      <SprkChatMessage
-        message={{ ...assistantMessage, role: 'User' }}
-        onInsertToCompose={onInsertToCompose}
-      />
+      <SprkChatMessage message={{ ...assistantMessage, role: 'User' }} onInsertToCompose={onInsertToCompose} />
     );
     expect(screen.queryByTestId('insert-into-document')).not.toBeInTheDocument();
   });

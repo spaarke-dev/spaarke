@@ -12,10 +12,7 @@ import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { ComposeBannerStack, type ComposeBannerStackProps } from './ComposeBannerStack';
 
-function renderStack(
-  overrides: Partial<ComposeBannerStackProps> = {},
-  theme: typeof webLightTheme = webLightTheme
-) {
+function renderStack(overrides: Partial<ComposeBannerStackProps> = {}, theme: typeof webLightTheme = webLightTheme) {
   const props: ComposeBannerStackProps = {
     errorMessage: null,
     checkoutStatus: 'idle',

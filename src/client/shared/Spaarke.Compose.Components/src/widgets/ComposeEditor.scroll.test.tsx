@@ -36,7 +36,10 @@ function renderComposeEditor() {
 }
 
 /** Define read-only scroll geometry on an element (jsdom leaves these at 0). */
-function setScrollGeometry(el: HTMLElement, geo: { scrollHeight: number; clientHeight: number; scrollTop: number }): void {
+function setScrollGeometry(
+  el: HTMLElement,
+  geo: { scrollHeight: number; clientHeight: number; scrollTop: number }
+): void {
   Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => geo.scrollHeight });
   Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => geo.clientHeight });
   Object.defineProperty(el, 'scrollTop', { configurable: true, writable: true, value: geo.scrollTop });

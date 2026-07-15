@@ -679,9 +679,9 @@ describe('AiSessionProvider — DEF-19 context-scoped session key', () => {
     // Home and a document context are never the same key.
     expect(chatSessionKeyForContext(null)).not.toBe(chatSessionKeyForContext(DOC_CTX));
     // Two different documents get two different keys.
-    expect(
-      chatSessionKeyForContext({ entityType: 'sprk_document', entityId: 'A' })
-    ).not.toBe(chatSessionKeyForContext({ entityType: 'sprk_document', entityId: 'B' }));
+    expect(chatSessionKeyForContext({ entityType: 'sprk_document', entityId: 'A' })).not.toBe(
+      chatSessionKeyForContext({ entityType: 'sprk_document', entityId: 'B' })
+    );
   });
 
   it('a Document launch persists under its own key and does NOT write the global/home key', () => {
