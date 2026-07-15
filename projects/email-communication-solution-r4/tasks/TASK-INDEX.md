@@ -25,7 +25,7 @@
 | 015 | Confidence→status + **auto-file ≥0.85** (ADR-018 kill-switch) | W1 | bff-api, communication | FR-11 | 002,012,013,014 | 030,051 | true | FULL | 🔲 |
 | 016 | Channel seams (`ICommunicationChannelSender`/`ICommunicationArchiver`) | W1 | bff-api, architecture | NFR-04 | 005 | — | true | FULL | 🔲 |
 | 017 | Central auth + direction-symmetry + per-rung tests | W1 | bff-api, testing | NFR-03,06,08 | 012,013,014,015 | — | true | FULL | 🔲 |
-| 020 | `<EmailComposer />` engine + sub-components | W2 | frontend, fluent-ui | FR-12 | 001 | 021,041 | true | FULL | 🔲 |
+| 020 | `<EmailComposer />` engine + sub-components | W2 | frontend, fluent-ui | FR-12 | 001 | 021,041 | true | FULL | ✅ (18 smoke tests green in agent worktree; not re-run in main — node_modules) |
 | 021 | `SendEmailStep`/`SendEmailDialog`/`SendEmailPage` wrappers | W2 | frontend, fluent-ui | FR-12 | 020 | 060,061 | true | FULL | 🔲 |
 | 022 | `sendCommunication()` refinements (`SendCommunicationError`, driveItemIds) | W2 | frontend, communication | FR-13 | 006 | 060 | true | FULL | 🔲 |
 | 023 | Composer + wrapper unit tests | W2 | frontend, testing | NFR-08 | 020,021,022 | — | true | TEST-MODIFYING | 🔲 |

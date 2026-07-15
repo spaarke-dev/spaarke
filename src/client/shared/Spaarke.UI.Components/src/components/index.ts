@@ -194,3 +194,7 @@ export * from './WizardRegistry';
 // copies, removing the name collision that previously forced a curated re-export
 // here — so this is now a plain `export *`.
 export * from './WizardFollowOns';
+
+// EmailComposer - Canonical email-composer engine + sub-components (task 020,
+// FR-12, ADR-045). Replaces the 6 ad-hoc client send-email implementations.
+export * from './EmailComposer';
