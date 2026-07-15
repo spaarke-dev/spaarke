@@ -3,7 +3,8 @@
   <metadata>
     <title>Verify + record the sprk_userprofile schema contract</title>
     <phase>1: Catalog &amp; Schema Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-07-15</completed>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>030, 042</blocks>
@@ -85,6 +86,8 @@
 
   <notes>
     Spec FR-E1 + Owner Clarifications (relationship = Option B). This contract is the single source the profile producer (030) and questionnaire write-path (042) read column names from — get the exact logical names right.
+
+    COMPLETED 2026-07-15: All FR-E1 columns + sprk_systemuser lookup + sprk_practicearea_ref + N:N intersect (sprk_userprofile_sprk_practicearea_ref) verified present via MCP describe/search. Contract recorded at notes/userprofile-schema-contract.md. Two tooling-visibility gaps carried forward (NOT confirmed-absent, so no escalation): F-1 sprk_primaryrole global-vs-local binding (14 label/value pairs recorded regardless); F-2 alt-key name not readable via describe (handed to task 042's existing escalation trigger). No schema created.
   </notes>
 
   <execution>
