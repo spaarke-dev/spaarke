@@ -1,6 +1,7 @@
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -23,6 +24,12 @@ public static class CommunicationModule
         services.AddSingleton<EmlGenerationService>();
         services.AddSingleton<GraphMessageToEmlConverter>();
         services.AddSingleton<MailboxVerificationService>();
+
+        // Association Engine (ADR-045 / FR-09): the pure Graph→envelope boundary mapper + the
+        // envelope-only resolver. Both unconditional (consumed unconditionally by the inbound
+        // processor per ADR-032; no feature gate). Rung adapters are composed inside the resolver,
+        // so no per-rung registrations here (ADR-010 minimalism).
+        services.AddSingleton<GraphMessageNormalizer>();
         services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();
 

@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Jobs;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
@@ -32,6 +33,7 @@ public sealed class IncomingCommunicationProcessor
     private readonly IGenericEntityService _genericEntityService;
     private readonly CommunicationAccountService _accountService;
     private readonly IncomingAssociationResolver _associationResolver;
+    private readonly GraphMessageNormalizer _messageNormalizer;
     private readonly IEmailAttachmentProcessor _attachmentProcessor;
     private readonly GraphMessageToEmlConverter _emlConverter;
     private readonly SpeFileStore _speFileStore;
@@ -57,6 +59,7 @@ public sealed class IncomingCommunicationProcessor
         IGenericEntityService genericEntityService,
         CommunicationAccountService accountService,
         IncomingAssociationResolver associationResolver,
+        GraphMessageNormalizer messageNormalizer,
         IEmailAttachmentProcessor attachmentProcessor,
         GraphMessageToEmlConverter emlConverter,
         SpeFileStore speFileStore,
@@ -73,6 +76,7 @@ public sealed class IncomingCommunicationProcessor
         _genericEntityService = genericEntityService;
         _accountService = accountService;
         _associationResolver = associationResolver;
+        _messageNormalizer = messageNormalizer;
         _attachmentProcessor = attachmentProcessor;
         _emlConverter = emlConverter;
         _speFileStore = speFileStore;
@@ -206,7 +210,8 @@ public sealed class IncomingCommunicationProcessor
                 {
                     config.QueryParameters.Select = new[]
                     {
-                        "id", "internetMessageId", "from", "toRecipients", "ccRecipients",
+                        "id", "internetMessageId", "internetMessageHeaders", "conversationId",
+                        "from", "toRecipients", "ccRecipients",
                         "subject", "body", "uniqueBody",
                         "receivedDateTime", "hasAttachments"
                     };
@@ -246,11 +251,16 @@ public sealed class IncomingCommunicationProcessor
             "Direction: Incoming, GraphMessageId: {GraphMessageId}",
             communicationId, graphMessageId);
 
-        // ── Step 4.5: Resolve associations (non-fatal) ────────────────────────────
+        // ── Boundary normalization (FR-09) ───────────────────────────────────────
+        // Map the Graph message → channel-neutral envelope ONCE, here at the pipeline boundary.
+        // Downstream (Association Engine + enrichment) see only NormalizedMessage, never Graph types.
+        var envelope = _messageNormalizer.Normalize(message, CommunicationDirection.Incoming);
+
+        // ── Step 4.5: Resolve associations via the Association Engine (non-fatal) ──
         try
         {
             await _associationResolver.ResolveAsync(
-                communicationId, mailboxEmail, graphMessageId, message, account, ct);
+                communicationId, envelope, new AssociationContext { Account = account }, ct);
         }
         catch (Exception ex)
         {
@@ -345,17 +355,18 @@ public sealed class IncomingCommunicationProcessor
 
         // ── Step 9: Direction-agnostic enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-06) ──
         // Wires the SAME enrichment entry point invoked by the outbound send path (direction symmetry
-        // at the entry-point level for task 010). archivedDocumentId is passed null: the inbound .eml +
-        // attachments are ALREADY RAG-indexed + AI-analyzed inline above (steps 5–6), so EnrichAsync's
-        // RAG/analysis steps intentionally no-op for inbound in 010. Task 011 removes the inline sequence
-        // and routes BOTH directions fully through EnrichAsync. EnrichAsync is itself non-fatal; the guard
-        // is defense-in-depth.
+        // at the entry-point level). Reuses the SAME normalized envelope built at the boundary above
+        // (task 011). archivedDocumentId is passed null: the inbound .eml + attachments are ALREADY
+        // RAG-indexed + AI-analyzed inline above (steps 5–6), so EnrichAsync's RAG/analysis steps
+        // intentionally no-op for inbound (the enrichment service gates those to outbound). Consolidating
+        // the inbound inline sequence into EnrichAsync is out of scope for FR-09 (task 011) and tracked
+        // separately. EnrichAsync is itself non-fatal; the guard is defense-in-depth.
         try
         {
             await _enrichmentService.EnrichAsync(
                 communicationId,
                 CommunicationDirection.Incoming,
-                BuildInboundEnvelope(message),
+                envelope,
                 archivedDocumentId: null,
                 ct);
         }
@@ -874,37 +885,4 @@ public sealed class IncomingCommunicationProcessor
 
     private static string TruncateTo(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
-
-    /// <summary>
-    /// Builds the normalized envelope (ADR-045 / FR-09) for an inbound message, so enrichment operates
-    /// over <see cref="NormalizedMessage"/> — never <c>Microsoft.Graph.Message</c>. Skeleton mapping for
-    /// task 010; task 011 finalizes the envelope shape (thread headers, conversationId, attachment contract).
-    /// </summary>
-    private static NormalizedMessage BuildInboundEnvelope(Message message)
-    {
-        var to = message.ToRecipients?
-            .Where(r => r.EmailAddress?.Address is not null)
-            .Select(r => r.EmailAddress!.Address!)
-            .ToArray() ?? Array.Empty<string>();
-
-        var cc = message.CcRecipients?
-            .Where(r => r.EmailAddress?.Address is not null)
-            .Select(r => r.EmailAddress!.Address!)
-            .ToArray() ?? Array.Empty<string>();
-
-        var isHtml = message.Body?.ContentType == BodyType.Html;
-
-        return new NormalizedMessage
-        {
-            Direction = CommunicationDirection.Incoming,
-            From = message.From?.EmailAddress?.Address,
-            To = to,
-            Cc = cc,
-            Subject = message.Subject,
-            BodyText = isHtml ? null : message.Body?.Content,
-            BodyHtml = isHtml ? message.Body?.Content : null,
-            InternetMessageId = message.InternetMessageId,
-            SentAt = message.ReceivedDateTime,
-        };
-    }
 }

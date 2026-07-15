@@ -6,9 +6,19 @@
 
 ## Active Task
 
-- **Task**: none active — **W0 Foundation COMPLETE (001–007 all ✅)**
-- **Status**: W0 unblocks everything. Next: **W1** (serial spine, starts task 010 — opus tier) ‖ **W2** (task 020, client composer) ‖ **W7** (parallel hardening track).
-- **Next Action**: begin W1 task **010** (`ICommunicationEnrichmentService`, opus/xhigh) and/or W2 task **020** (client `<EmailComposer/>`). Run `/conflict-check` before each BFF PR. W5 remains gated on task 050 (Services/Ai r2-core coordination).
+- **Task**: **011** — Refactor `IncomingAssociationResolver` → Association Engine over normalized envelope (opus @ xhigh, FULL). **IN PROGRESS** (main session, serial W1 spine).
+- **Status**: 010 ✅ merged. 020/072/076 ✅ merged. **073 dispatched as parallel worktree agent** (Office auth filters, Api/Office — disjoint). 011 running in main session.
+- **Next Action**: implement 011 per R-7 (characterization-tests-first). Then fan out next round (021/022 main-session TS; 070/071/075 after 011 lands + branch→master merge to kill stale-base tax).
+- **Rigor Level**: FULL · **Model**: opus @ xhigh · **Step mode**: directional (R-7 order binding).
+- **011 scoping decision (directional)**: engine refactor is **inbound-only** in 011. Running the engine over OUTBOUND via `EnrichAsync` would change outbound behavior (client-supplied associations) and needs direction-aware rung content (012/013/015) — deferred there. 011 delivers: finalized envelope + rung abstraction + Graph→envelope normalizer + refactored inbound engine, behavior preserved. Enrichment `RunAssociationAsync` stays a documented seam (doc updated).
+
+## 011 implementation results (pre-commit — awaiting Step 9.5 gate)
+- **New**: `Engine/{RungKind,RungMatch,AssociationContext,IAssociationRung,GraphMessageNormalizer,ThreadContinuityRung,ParticipantCorrelationRung,SubjectReferenceRung}.cs`. **Refactored**: `IncomingAssociationResolver.cs` (engine over envelope; ADR-024 write path preserved verbatim; dropped `IGraphClientFactory`). **Updated**: `IncomingCommunicationProcessor.cs` (normalize at boundary, Select `internetMessageHeaders`+`conversationId`, reuse envelope for enrichment, removed `BuildInboundEnvelope`), `CommunicationEnrichmentService.cs` (association-seam doc), `CommunicationModule.cs` (+`GraphMessageNormalizer` singleton), `Models/NormalizedMessage.cs` (finalized). **Tests**: migrated `IncomingAssociationResolverTests` to envelope (assertions verbatim), new `GraphMessageNormalizerTests`, ctor fixes in `InboundPipelineTests` + `CommunicationIntegrationTests`.
+- **R-7**: baseline 10/10 green pre-refactor → **234 Communication tests green post-refactor** (identical write-contract assertions). Behavior contract: `notes/011-resolver-behavior-contract.md`.
+- **§10**: build clean (0 err); publish **45.25 MB compressed incl PDBs** (~0 delta vs ~49.63 baseline; ≤60 ceiling); CVE = 1 **pre-existing** High (`Microsoft.Kiota.Abstractions 1.21.2`, transitive via Graph, inherited from master — NOT introduced; 0 packages added). Placement Justification: refactor-in-place of existing `Services/Communication`, no new endpoints/packages, +1 unconditional DI reg (normalizer).
+
+## 073 (W7) — parallel agent DONE, patch staged for merge
+- Agent committed `d7411989a` (off stale master 240d0e5c5). Wired ALL mapped Office endpoints (9 baseline + 2 job-ownership + 1 entity-access; 0 `TODO: Task 033` left). 155 Office tests green; 0 Critical/0 ADR violations. Patch at `/c/tmp/073.patch` (3 files: OfficeEndpoints.cs + 2 tests) — apply via 3-way after 011 commit.
 
 ## W0 Commits (this session)
 - **007** `051a098d2` — retire OOB-`email` (partial: 3 shared-infra files retained; −3.06 MB)

@@ -18,6 +18,7 @@ using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
@@ -1219,8 +1220,8 @@ public class CommunicationIntegrationTests
             new IncomingAssociationResolver(
                 dataverseMock.Object,
                 dataverseMock.Object,
-                graphFactoryMock.Object,
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
+            new GraphMessageNormalizer(),
             Mock.Of<IEmailAttachmentProcessor>(),
             new GraphMessageToEmlConverter(),
             null!, // SpeFileStore - ArchiveContainerId not configured in tests, so archival path is skipped

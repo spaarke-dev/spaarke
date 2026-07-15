@@ -78,24 +78,22 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
 
     // ── Step 1: Association ──────────────────────────────────────────────────────
     /// <summary>
-    /// SEAM (task 011). The existing <see cref="IncomingAssociationResolver.ResolveAsync"/> requires
-    /// a <c>Microsoft.Graph.Message</c> + mailbox/graphMessageId, which ADR-045 forbids the engine from
-    /// consuming (the engine MUST operate over <see cref="NormalizedMessage"/> only). It is therefore
-    /// NOT signature-compatible with this entry point, so 010 does not delegate to it here.
-    /// <para>
-    /// Current association coverage is UNCHANGED by 010: inbound is resolved inline by
-    /// <see cref="IncomingCommunicationProcessor"/> (via the resolver) at capture time; outbound is
-    /// mapped from client-supplied associations at record-creation time
-    /// (<c>CommunicationService.MapAssociationFields</c>). Task 011 refactors the resolver into the
-    /// Association Engine over the envelope and plugs it in HERE, making association direction-symmetric.
-    /// </para>
+    /// SEAM. As of task 011 the <see cref="IncomingAssociationResolver"/> IS the Association Engine over
+    /// <see cref="NormalizedMessage"/> (envelope-only, ADR-045 / FR-09). For INBOUND, the processor
+    /// invokes the engine at the capture boundary (right after normalizing the Graph message), so this
+    /// step is intentionally a no-op — re-running it here would double-resolve. For OUTBOUND, associations
+    /// come from the client-supplied set at record-creation (<c>CommunicationService.MapAssociationFields</c>);
+    /// running the engine over the outbound envelope requires direction-aware rung content and would
+    /// overwrite the client's associations, so it is deferred to the direction-symmetry work
+    /// (tasks 012/013/015/017), NOT wired in 011.
     /// </summary>
     private Task RunAssociationAsync(
         Guid communicationId, CommunicationDirection direction, NormalizedMessage message, CancellationToken ct)
     {
         _logger.LogDebug(
-            "Enrichment[association] seam (task 011) | CommunicationId: {CommunicationId}, Direction: {Direction}. " +
-            "Association is currently handled at the capture/creation site; Association Engine over the envelope lands in task 011.",
+            "Enrichment[association] no-op | CommunicationId: {CommunicationId}, Direction: {Direction}. " +
+            "Inbound is resolved by the Association Engine at the capture boundary; outbound uses client-supplied " +
+            "associations. Direction-symmetric engine invocation via this seam is deferred to tasks 012/013/015/017.",
             communicationId, direction);
         return Task.CompletedTask;
     }
