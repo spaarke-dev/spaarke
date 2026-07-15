@@ -109,6 +109,22 @@ export interface SendCommunicationResult {
   communicationId: string;
 }
 
+/** Shape of a parsed ProblemDetails body (RFC 7807 + BFF `errorCode`/`correlationId` extensions). */
+interface IProblemDetailsBody {
+  /** RFC 7807 problem type URI. */
+  type?: string;
+  title?: string;
+  detail?: string;
+  status?: number;
+  /** RFC 7807 instance URI (used as a correlation fallback). */
+  instance?: string;
+  errorCode?: string;
+  code?: string;
+  correlationId?: string;
+  /** ASP.NET Core trace identifier (used as a correlation fallback). */
+  traceId?: string;
+}
+
 /**
  * Typed error thrown by {@link sendCommunication} on any non-2xx response.
  * Parses the BFF's RFC 7807 ProblemDetails body (ADR-019) so callers can
@@ -119,6 +135,10 @@ export interface SendCommunicationResult {
  * (`FROM_REQUIRED`, `FROM_NOT_APPROVED`) when the BFF rejects a send for a
  * sender-identity reason the client cannot pre-validate — see
  * `EmailComposer.types.ts` `ValidationErrorCode`.
+ *
+ * Construct instances from a failed {@link Response} via the async
+ * {@link SendCommunicationError.fromResponse} factory (task 022 / FR-13),
+ * which performs the ProblemDetails parse + non-JSON fallback.
  */
 export class SendCommunicationError extends Error {
   readonly status: number;
@@ -137,36 +157,35 @@ export class SendCommunicationError extends Error {
     // transpilation targets can otherwise break `instanceof` checks).
     Object.setPrototypeOf(this, SendCommunicationError.prototype);
   }
-}
 
-/** Shape of a parsed ProblemDetails body (RFC 7807 + BFF `errorCode`/`correlationId` extensions). */
-interface IProblemDetailsBody {
-  title?: string;
-  detail?: string;
-  status?: number;
-  errorCode?: string;
-  code?: string;
-  correlationId?: string;
-}
-
-/** Parses a non-OK Response into `SendCommunicationError` constructor args. */
-async function parseProblemDetails(
-  response: Response
-): Promise<{ code: string; detail: string; correlationId?: string }> {
-  try {
-    const ct = response.headers.get('content-type') ?? '';
-    if (ct.includes('application/problem+json') || ct.includes('application/json')) {
-      const body = (await response.json()) as IProblemDetailsBody;
-      return {
-        code: body.errorCode ?? body.code ?? `HTTP_${response.status}`,
-        detail: body.detail ?? body.title ?? `HTTP ${response.status}`,
-        correlationId: body.correlationId,
-      };
+  /**
+   * Build a {@link SendCommunicationError} from a non-OK {@link Response}.
+   *
+   * Parses the BFF's RFC 7807 ProblemDetails body per ADR-019
+   * (`{ type, title, status, detail, instance | traceId, correlationId? }`),
+   * mapping `errorCode`/`code` → {@link SendCommunicationError.code},
+   * `detail`/`title` → {@link SendCommunicationError.detail}, and
+   * `correlationId`/`traceId`/`instance` → {@link SendCommunicationError.correlationId}.
+   *
+   * Falls back to a minimal error (status only, `HTTP_<status>` code) when the
+   * body is absent, non-JSON, or unparseable — never throws while parsing.
+   */
+  static async fromResponse(response: Response): Promise<SendCommunicationError> {
+    const status = response.status;
+    try {
+      const ct = response.headers.get('content-type') ?? '';
+      if (ct.includes('application/problem+json') || ct.includes('application/json')) {
+        const body = (await response.json()) as IProblemDetailsBody;
+        const code = body.errorCode ?? body.code ?? `HTTP_${status}`;
+        const detail = body.detail ?? body.title ?? `HTTP ${status}`;
+        const correlationId = body.correlationId ?? body.traceId ?? body.instance;
+        return new SendCommunicationError(status, code, detail, correlationId);
+      }
+      const text = await response.text();
+      return new SendCommunicationError(status, `HTTP_${status}`, text || `HTTP ${status}`);
+    } catch {
+      return new SendCommunicationError(status, `HTTP_${status}`, `HTTP ${status}`);
     }
-    const text = await response.text();
-    return { code: `HTTP_${response.status}`, detail: text || `HTTP ${response.status}` };
-  } catch {
-    return { code: `HTTP_${response.status}`, detail: `HTTP ${response.status}` };
   }
 }
 
@@ -211,8 +230,16 @@ function resolveUrl(base: string | undefined): string {
 /**
  * Send a communication via the BFF.
  *
- * Throws on HTTP failures (including validation errors); callers should
- * wrap the call in a try/catch and surface failures to the user.
+ * Throws {@link SendCommunicationError} on any non-2xx response (including
+ * validation errors) — parsed from the BFF's ProblemDetails body per ADR-019,
+ * so callers can branch on `status`/`code` rather than string-matching the
+ * message. Callers should wrap the call in a try/catch and surface failures to
+ * the user. (Argument-shape guards before the request still throw a plain
+ * `Error`; both are `instanceof Error`.)
+ *
+ * `attachmentDocumentIds` carries Dataverse `sprk_document` GUIDs — see the
+ * file-level note; the field is NOT renamed and the server resolves each
+ * Document to its backing SPE File.
  *
  * @example
  * ```ts
@@ -277,8 +304,7 @@ export async function sendCommunication(
   });
 
   if (!response.ok) {
-    const { code, detail, correlationId } = await parseProblemDetails(response);
-    throw new SendCommunicationError(response.status, code, detail, correlationId);
+    throw await SendCommunicationError.fromResponse(response);
   }
 
   // The BFF response (`SendCommunicationResponse`) carries multiple fields;
