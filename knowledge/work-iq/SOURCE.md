@@ -181,6 +181,31 @@ Multiple snapshots reference "Microsoft Agent 365 SDK and CLI" at `/en-us/micros
 
 ---
 
+## Refresh 2026-07-14 (task 076 — `email-communication-solution-r4`, DEC-7)
+
+**Scope**: Narrow, task-driven refresh triggered by the R4 project's decision to exclude Work IQ as an app-only classifier (DEC-7 / spec requirement #12) — NOT the full monthly refresh described above (that remains due; see checklist, still unactioned since 2026-05-14). Refresher: Claude Code (`researcher` subagent for fetches) + task-execute (write-up); Ralph Schroeder review pending.
+
+**What changed**:
+- Confirmed **Work IQ GA on 2026-06-16** (was public preview at the 2026-05-14 curation date). Docs are mixed GA/preview — the overview + API-overview pages are GA-worded; the MCP overview, API quickstart, and Foundry-integration sub-pages still carried "(preview)" labels as of this refresh.
+- Confirmed billing moved to **usage-based / Copilot Credits**, decoupled from per-user M365 Copilot seat licensing, for custom/agent callers. Exact credit pricing not independently verified against `aka.ms/WorkIQ/licensing` (deferred to full refresh).
+- Confirmed **app-only/application auth is explicitly NOT supported** — delegated-only, OBO, scope `WorkIQAgent.Ask`, app ID URI `api://workiq.svc.cloud.microsoft` ([permissions page](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/work-iq/permissions)). This delegated-only constraint is the actual technical basis for DEC-7 (not licensing cost).
+- **Corrected a design-doc mischaracterization**: `email-communication-solution-r4/design.md` §4.2 described the "Context API" as a *future user-facing* augmentation. It is actually a **real, GA (2026-06-16), agent/server-facing** component of the Work IQ API surface (alongside Chat / Tools / Workspaces) — not future, not user-facing ([API overview](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/work-iq/api-overview)). It remains delegated-only, so R4's DEC-7 scope decision is unchanged — only the characterization was wrong. See `NOTES.md` § "Context API — GA component, agent-facing (correction, 2026-07-14)".
+- Updated `NOTES.md` (boundary statement, licensing prerequisites, preview/GA status, new Context API correction section) and `tool-catalog.md` (preview/licensing/R4 banner) accordingly.
+
+**Sources fetched this refresh** (via `researcher` subagent WebFetch — targeted lookups, not a full re-clone):
+- https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/work-iq/ (`ms.date: 2026-06-16`)
+- https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/work-iq/permissions
+- https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/work-iq/api-overview
+- https://www.microsoft.com/en-us/microsoft-365/blog/2026/06/02/announcing-the-new-work-iq-apis/ (confirmed live, no 404 — the source `design.md` originally cited)
+
+**Explicitly NOT done this refresh** (deferred to next full monthly cycle per `REFRESH-PROCEDURE.md`):
+- Per-server `mcp-server-reference/*` re-fetch — the Mail/Calendar/Teams tool tables in `tool-catalog.md` are unchanged and flagged unconfirmed-for-GA.
+- The 5 still-missing reference pages (SharePoint, OneDrive, User, Word, Dataverse) from the original 2026-05-14 GAP list — still outstanding.
+- Full re-clone/diff of the `copilot-camp` and `work-iq-mcp` repos.
+- Verbatim capture of the permissions page body (summary-level confirmation only — see `researcher` subagent findings for caveat).
+
+---
+
 ## Files in this folder
 
 ```

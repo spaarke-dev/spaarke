@@ -6,6 +6,17 @@ Format per entry: `## YYYY-MM-DD — <type>` where type is `Initial setup`, `Mon
 
 ---
 
+## 2026-07-14 — Interim update: `work-iq/` GA refresh (task 076, `email-communication-solution-r4`, DEC-7)
+
+Narrow, task-driven refresh of `knowledge/work-iq/` — not the full monthly cycle (still due; last full refresh was the 2026-05-14 initial curation). Driven by `email-communication-solution-r4` project's DEC-7 decision to exclude Work IQ as R4's app-only classifier.
+
+- **Confirmed Work IQ GA 2026-06-16** (was public preview at the 2026-05-14 curation); docs remain mixed GA/preview across sub-pages.
+- **Confirmed billing moved to usage-based/Copilot Credits**, decoupled from per-user M365 Copilot licensing for custom/agent callers — dropped the stale "per-user license required" assertion from `NOTES.md` and `tool-catalog.md`.
+- **Confirmed app-only/application auth is NOT supported** (delegated-only, `WorkIQAgent.Ask` scope) — the actual technical basis for DEC-7's classifier exclusion (not licensing cost).
+- **Corrected a design-doc mischaracterization**: `email-communication-solution-r4/design.md` §4.2 described the "Context API" as a future user-facing augmentation. It is actually a real, GA, **agent/server-facing** Work IQ API component today — not future, not user-facing. Still delegated-only, so R4's DEC-7 scope decision is unchanged; only the characterization was wrong. Documented in `work-iq/NOTES.md` and `work-iq/SOURCE.md`; flagged to the project so `design.md` can be corrected if desired (out of scope for this knowledge-only task).
+- Updated files: `work-iq/NOTES.md`, `work-iq/SOURCE.md`, `work-iq/tool-catalog.md`. Did NOT touch the 6 `docs/*.md` page snapshots (per-server tool tables remain unconfirmed-for-GA — flagged, deferred to next full monthly refresh) or re-clone source repos.
+- **Gap carried forward**: the 5 missing `mcp-server-reference/*` pages (SharePoint, OneDrive, User, Word, Dataverse) from the 2026-05-14 GAP list remain unfetched.
+
 ## 2026-05-26 — New topic: `fluent-ui-v9/` (Microsoft Fluent UI v9 + Fluent 2)
 
 Added a new top-level topic for **Microsoft Fluent UI React v9** + the broader **Fluent 2 design system**. Driver: Spaarke ships Fluent v9 across 10+ PCFs, 4+ Code Pages, the external SPA, and the Office add-ins; `Spaarke.UI.Components` is on `@fluentui/react-components ^9.73.2` while several PCFs are still on `^9.46.2` (drift candidate). Curation matches existing topic conventions (`SOURCE.md` + stub `NOTES.md` + `docs/` snapshots + `samples/`).

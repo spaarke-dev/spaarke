@@ -50,7 +50,7 @@
 | 073 | Apply stubbed BFF Office auth filters (`OfficeEndpoints`) | W7 | bff-api, auth | FR-25 | — | — | true | FULL | 🔲 |
 | 074 | Add-in save pane consumes Association Engine suggestions | W7 | office-addins | FR-25 | 072,012 | — | true | FULL | 🔲 |
 | 075 | Index-config tokenization + read/write consolidation | W7 | bff-api, config | FR-26 | — | — | true | FULL | 🔲 |
-| 076 | Refresh `knowledge/work-iq` snapshot | W7 | docs, knowledge | DEC-7 | — | — | true | MINIMAL | 🔲 |
+| 076 | Refresh `knowledge/work-iq` snapshot | W7 | docs, knowledge | DEC-7 | — | — | true | MINIMAL | ✅ |
 | 080 | Author `communication-intelligence-architecture.md` | W8 | docs | FR-27 | (W1–W7) | — | true | STANDARD | 🔲 |
 | 081 | Update data-model + processing/service arch docs; mark OOB RETIRED | W8 | docs | FR-27 | (W1–W7) | — | true | STANDARD | 🔲 |
 | 082 | Update `EMAIL-TRIAGE-MODULE-DESIGN.md` per DEC-10 | W8 | docs | FR-27 | (W1–W7) | — | true | STANDARD | 🔲 |
