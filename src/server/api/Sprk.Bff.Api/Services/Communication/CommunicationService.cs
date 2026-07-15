@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
@@ -60,6 +61,196 @@ public sealed class CommunicationService
         _enrichmentService = enrichmentService;
         _options = options.Value;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Archives an EXISTING communication on demand (task 044 — the "Save to SharePoint" action).
+    /// Reuses the same archival path as send/receive: generates the <c>.eml</c> via the channel
+    /// archiver seam, uploads it to SPE, and creates the archive <c>sprk_document</c> plus a
+    /// <c>sprk_document</c> for each attachment that does not already have one. Reconstructs the
+    /// <see cref="SendCommunicationRequest"/>/<see cref="SendCommunicationResponse"/> from the stored
+    /// record (there is no live Graph message on this path).
+    ///
+    /// Idempotent: if an email-archive Document already exists for this communication (the auto-archival
+    /// created it on send/receive), returns <see cref="ArchiveCommunicationResult.AlreadyArchived"/> = true
+    /// without creating duplicates. Attachment Documents are only created for attachments that lack one.
+    /// </summary>
+    public async Task<ArchiveCommunicationResult> ArchiveExistingAsync(Guid communicationId, CancellationToken ct)
+    {
+        // 1. Load the persisted communication.
+        DataverseEntity record;
+        try
+        {
+            record = await _genericEntityService.RetrieveAsync(
+                "sprk_communication",
+                communicationId,
+                new[] { "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_communicationtype", "sprk_sentat", "sprk_graphmessageid", "statuscode" },
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Communication {CommunicationId} not found for archive", communicationId);
+            throw new SdapProblemException(
+                code: "COMMUNICATION_NOT_FOUND",
+                title: "Communication not found",
+                detail: $"Communication with ID '{communicationId}' does not exist.",
+                statusCode: 404);
+        }
+
+        // 2. Idempotency — already archived? Return the existing archive Document, no duplicates.
+        var existingArchiveId = await FindExistingArchiveDocumentAsync(communicationId, ct);
+        if (existingArchiveId.HasValue)
+        {
+            _logger.LogInformation(
+                "Communication {CommunicationId} already archived (Document {DocumentId}); returning idempotently",
+                communicationId, existingArchiveId);
+            return new ArchiveCommunicationResult
+            {
+                CommunicationId = communicationId,
+                ArchiveDocumentId = existingArchiveId,
+                AlreadyArchived = true,
+                AttachmentDocumentsCreated = 0,
+            };
+        }
+
+        // 3. Reconstruct the request/response the archiver expects from the stored record.
+        var to = SplitRecipients(record.GetAttributeValue<string>("sprk_to"));
+        var cc = SplitRecipients(record.GetAttributeValue<string>("sprk_cc"));
+        var from = record.GetAttributeValue<string>("sprk_from") ?? string.Empty;
+        var typeValue = record.GetAttributeValue<OptionSetValue>("sprk_communicationtype")?.Value ?? (int)CommunicationType.Email;
+        var commType = Enum.IsDefined(typeof(CommunicationType), typeValue) ? (CommunicationType)typeValue : CommunicationType.Email;
+        var sentAtDt = record.GetAttributeValue<DateTime?>("sprk_sentat");
+        var sentAt = sentAtDt.HasValue
+            ? new DateTimeOffset(DateTime.SpecifyKind(sentAtDt.Value, DateTimeKind.Utc), TimeSpan.Zero)
+            : DateTimeOffset.UtcNow;
+        var statusValue = record.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? (int)CommunicationStatus.Draft;
+
+        var request = new SendCommunicationRequest
+        {
+            To = to.Length > 0 ? to : new[] { string.Empty },
+            Cc = cc.Length > 0 ? cc : null,
+            Subject = record.GetAttributeValue<string>("sprk_subject") ?? "(No Subject)",
+            Body = record.GetAttributeValue<string>("sprk_body") ?? string.Empty,
+            BodyFormat = BodyFormat.HTML,
+            FromMailbox = string.IsNullOrEmpty(from) ? null : from,
+            CommunicationType = commType,
+        };
+        var response = new SendCommunicationResponse
+        {
+            CommunicationId = communicationId,
+            GraphMessageId = record.GetAttributeValue<string>("sprk_graphmessageid") ?? string.Empty,
+            Status = Enum.IsDefined(typeof(CommunicationStatus), statusValue) ? (CommunicationStatus)statusValue : CommunicationStatus.Delivered,
+            SentAt = sentAt,
+            From = from,
+        };
+
+        // 4. Archive the .eml (reuses the same path as send-side archival; ADR-045 archiver seam).
+        Guid archiveDocumentId;
+        try
+        {
+            archiveDocumentId = await ArchiveToSpeAsync(request, response, communicationId, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new SdapProblemException(
+                code: "ARCHIVE_NOT_CONFIGURED",
+                title: "Archival not configured",
+                detail: ex.Message,
+                statusCode: 500);
+        }
+
+        // 5. Create a Document for each attachment that does not already have one.
+        var attachmentsCreated = await ArchiveExistingAttachmentsAsync(communicationId, ct);
+
+        return new ArchiveCommunicationResult
+        {
+            CommunicationId = communicationId,
+            ArchiveDocumentId = archiveDocumentId,
+            AlreadyArchived = false,
+            AttachmentDocumentsCreated = attachmentsCreated,
+        };
+    }
+
+    /// <summary>Split a Dataverse recipient string (";"- or ","-separated) into trimmed, non-empty addresses.</summary>
+    private static string[] SplitRecipients(string? raw) =>
+        string.IsNullOrWhiteSpace(raw)
+            ? Array.Empty<string>()
+            : raw.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>
+    /// Returns the id of an existing email-archive <c>sprk_document</c> for the communication, or null.
+    /// Used for idempotent on-demand archival (task 044).
+    /// </summary>
+    private async Task<Guid?> FindExistingArchiveDocumentAsync(Guid communicationId, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_document")
+        {
+            ColumnSet = new ColumnSet("sprk_documentid"),
+            TopCount = 1,
+            Criteria =
+            {
+                Conditions =
+                {
+                    new ConditionExpression("sprk_communication", ConditionOperator.Equal, communicationId),
+                    new ConditionExpression("sprk_isemailarchive", ConditionOperator.Equal, true),
+                },
+            },
+        };
+
+        var result = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+        return result.Entities.Count > 0 ? result.Entities[0].Id : null;
+    }
+
+    /// <summary>
+    /// Creates a <c>sprk_document</c> for each attachment of the communication that lacks one (has an SPE
+    /// item id but no linked document). Reuses <see cref="ArchiveOutboundAttachmentsAsync"/>. Returns the
+    /// number of attachments that were archived.
+    /// </summary>
+    private async Task<int> ArchiveExistingAttachmentsAsync(Guid communicationId, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_communicationattachment")
+        {
+            ColumnSet = new ColumnSet("sprk_name", "sprk_graphitemid", "sprk_document"),
+            Criteria =
+            {
+                Conditions = { new ConditionExpression("sprk_communication", ConditionOperator.Equal, communicationId) },
+            },
+        };
+
+        var attachments = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+
+        var itemIds = new List<string>();
+        var names = new List<string>();
+        foreach (var att in attachments.Entities)
+        {
+            // Skip attachments that already have a Document, or that were never uploaded to SPE.
+            if (att.GetAttributeValue<EntityReference>("sprk_document") is not null) continue;
+            var itemId = att.GetAttributeValue<string>("sprk_graphitemid");
+            if (string.IsNullOrEmpty(itemId)) continue;
+            itemIds.Add(itemId);
+            names.Add(att.GetAttributeValue<string>("sprk_name") ?? "Attachment");
+        }
+
+        if (itemIds.Count == 0) return 0;
+
+        var driveId = _options.ArchiveContainerId;
+        if (string.IsNullOrWhiteSpace(driveId))
+        {
+            _logger.LogWarning(
+                "ArchiveContainerId not configured; skipping per-attachment Document creation for {CommunicationId}",
+                communicationId);
+            return 0;
+        }
+
+        await ArchiveOutboundAttachmentsAsync(
+            communicationId,
+            itemIds.ToArray(),
+            names.ToArray(),
+            driveId,
+            Guid.NewGuid().ToString(),
+            ct);
+
+        return itemIds.Count;
     }
 
     /// <summary>

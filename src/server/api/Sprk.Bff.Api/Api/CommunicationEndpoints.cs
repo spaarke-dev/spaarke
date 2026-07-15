@@ -72,6 +72,14 @@ public static class CommunicationEndpoints
             .Produces<CommunicationStatusResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
 
+        group.MapPost("/{id:guid}/archive", ArchiveCommunicationAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("ArchiveCommunication")
+            .WithDescription("Archive an existing communication to SharePoint on demand (.eml Document + a Document per attachment). Idempotent — a communication already archived returns AlreadyArchived without duplicating.")
+            .Produces<ArchiveCommunicationResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
         group.MapPost("/accounts/{id:guid}/verify", VerifyCommunicationAccountAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("VerifyCommunicationAccount")
@@ -304,6 +312,15 @@ public static class CommunicationEndpoints
         };
 
         return TypedResults.Ok(response);
+    }
+
+    private static async Task<IResult> ArchiveCommunicationAsync(
+        Guid id,
+        CommunicationService communicationService,
+        CancellationToken ct)
+    {
+        var result = await communicationService.ArchiveExistingAsync(id, ct);
+        return TypedResults.Ok(result);
     }
 
     private static async Task<IResult> VerifyCommunicationAccountAsync(
