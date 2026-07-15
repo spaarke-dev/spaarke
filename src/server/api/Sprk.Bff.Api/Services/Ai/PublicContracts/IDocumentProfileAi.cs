@@ -36,11 +36,15 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// field mapping is duplicated.
 /// </para>
 /// <para>
-/// <b>ADR Tension (project-scoped exception, CLAUDE.md §6.5 path A):</b> the canonical
-/// <c>IDocumentProfileAi</c> is slated to be core-owned by the paused <c>spaarke-ai-architecture
-/// -redesign-r2</c> effort. This compose-r2 facade is a narrowly-scoped stand-in so a saved Compose
-/// document lands as a complete DMS record now; it should be reconciled with the core contract when
-/// that work resumes. Documented in <c>projects/spaarkeai-compose-r2/design.md</c> "ADR Tensions".
+/// <b>Ownership — CANONICAL (resolved 2026-07-15, compose-r2 deferral #615 / PE-D4):</b> this is the
+/// platform's canonical OBO document-profile facade, NOT a temporary stand-in. It lives in the
+/// sanctioned PublicContracts layer (ADR-013) and delegates to the SHARED "Document Profiler" Action
+/// (ACT-011) on the ADR-043 completion-engine spine (<c>IActionResolver</c> → <c>IActionRunner</c>) —
+/// the SAME Action the platform's canonical consumer <c>AnalysisEndpoints.ExecuteDocumentProfilePipelineAsync</c>
+/// runs — so it forks no AI logic. Authored under compose-r2 with owner sign-off as the PERMANENT
+/// contract: if the paused <c>spaarke-ai-architecture-redesign-r2</c> effort resumes it ADOPTS this
+/// facade as-is (no competing build, nothing to reconcile). Recorded as an accepted permanent facade
+/// in <c>projects/spaarkeai-compose-r2/design.md</c> "ADR Tensions".
 /// </para>
 /// </remarks>
 public interface IDocumentProfileAi
