@@ -13,6 +13,18 @@
 // Engine
 export { EmailComposer } from './EmailComposer';
 
+// Semantic wrappers (task 021, FR-12) — the caller-facing API. Callers import a
+// wrapper, NOT the engine directly (design §5.1.2 — direct engine use requires a
+// code-review-justified comment). Each locks one `mount` value.
+export { SendEmailStep } from './wrappers/SendEmailStep';
+export type { ISendEmailStepProps } from './wrappers/SendEmailStep';
+
+export { SendEmailDialog } from './wrappers/SendEmailDialog';
+export type { ISendEmailDialogProps } from './wrappers/SendEmailDialog';
+
+export { SendEmailPage } from './wrappers/SendEmailPage';
+export type { ISendEmailPageProps } from './wrappers/SendEmailPage';
+
 // Sub-components (exported for advanced/direct composition + task 023 unit tests)
 export { RecipientField } from './subcomponents/RecipientField';
 export type { IRecipientFieldProps } from './subcomponents/RecipientField';

@@ -195,6 +195,19 @@ export * from './WizardRegistry';
 // here — so this is now a plain `export *`.
 export * from './WizardFollowOns';
 
-// EmailComposer - Canonical email-composer engine + sub-components (task 020,
-// FR-12, ADR-045). Replaces the 6 ad-hoc client send-email implementations.
+// EmailComposer - Canonical email-composer engine + sub-components + the three
+// semantic wrappers (task 020/021, FR-12, ADR-045). Replaces the 6 ad-hoc client
+// send-email implementations.
 export * from './EmailComposer';
+
+// Name-collision disambiguation (task 021): the NEW canonical dialog wrapper
+// (`EmailComposer/wrappers/SendEmailDialog`, mount='dialog', onSent/onClose API)
+// wins the `SendEmailDialog` / `ISendEmailDialogProps` names on the main barrel
+// over the LEGACY single-caller `components/SendEmailDialog` (onSend API) per
+// design §5.1.1 — "becomes the canonical dialog wrapper". An explicit re-export
+// shadows the two `export *` sources so the resolution is deterministic (both
+// legacy `export * from './SendEmailDialog'` above and the engine star would
+// otherwise silently drop the ambiguous name). The legacy component file is
+// preserved and still reachable via the `pcf-safe` subpath + its explicit path
+// until task 060 (W6) migrates FilePreviewDialog off the old `onSend` API.
+export { SendEmailDialog, type ISendEmailDialogProps } from './EmailComposer';
