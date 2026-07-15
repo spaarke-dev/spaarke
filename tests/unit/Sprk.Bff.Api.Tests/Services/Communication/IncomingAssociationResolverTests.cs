@@ -291,6 +291,53 @@ public class IncomingAssociationResolverTests
     }
 
     // =========================================================================
+    // Sender domain match: organization + account to SEPARATE lookups (task 004)
+    // =========================================================================
+
+    [Fact]
+    public async Task ResolveAsync_SenderDomainMatch_WritesOrganizationAndAccountToSeparateLookups()
+    {
+        // Regression (task 004 / DEC-3): a sender-domain match MUST write
+        // sprk_regardingorganization -> sprk_organization AND sprk_regardingaccount -> account,
+        // each to its OWN lookup. The prior bug wrote an account reference into the
+        // sprk_regardingorganization lookup (which targets sprk_organization). sprk_organization
+        // is the legal entity; account is a vendor/payment account — distinct, never mixed.
+        var orgId = Guid.NewGuid();
+        var accountId = Guid.NewGuid();
+
+        _dataverseServiceMock
+            .Setup(d => d.QueryContactByEmailAsync("ap@acme.com", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity?)null);
+        _dataverseServiceMock
+            .Setup(d => d.QueryOrganizationByDomainAsync("acme.com", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataverseEntity("sprk_organization") { Id = orgId });
+        _dataverseServiceMock
+            .Setup(d => d.QueryAccountByDomainAsync("acme.com", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataverseEntity("account") { Id = accountId });
+        _dataverseServiceMock
+            .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var message = CreateTestMessage("Invoice question", "ap@acme.com");
+
+        // Act
+        await _resolver.ResolveAsync(TestCommunicationId, TestMailbox, TestGraphMessageId, message, null, CancellationToken.None);
+
+        // Assert: org -> sprk_organization lookup, account -> account lookup, correct types, no cross-stuffing
+        _dataverseServiceMock.Verify(d => d.UpdateAsync(
+            "sprk_communication",
+            TestCommunicationId,
+            It.Is<Dictionary<string, object>>(fields =>
+                fields.ContainsKey("sprk_regardingorganization") &&
+                ((EntityReference)fields["sprk_regardingorganization"]).LogicalName == "sprk_organization" &&
+                ((EntityReference)fields["sprk_regardingorganization"]).Id == orgId &&
+                fields.ContainsKey("sprk_regardingaccount") &&
+                ((EntityReference)fields["sprk_regardingaccount"]).LogicalName == "account" &&
+                ((EntityReference)fields["sprk_regardingaccount"]).Id == accountId),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // =========================================================================
     // Test Helpers
     // =========================================================================
 

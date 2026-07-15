@@ -265,14 +265,28 @@ public sealed class IncomingAssociationResolver
                     contact.Id, senderEmail);
             }
 
-            // Try account match by domain (skip common providers)
+            // Try organization + account match by sender domain (skip common providers).
+            // sprk_organization (legal entity) and OOB account (vendor/payment) are DISTINCT targets —
+            // each written to its OWN lookup, never mixed (owner-confirmed 2026-07-14). Both match on
+            // the sprk_domain field. This corrects the prior bug that wrote an account reference into
+            // the sprk_regardingorganization lookup (which targets sprk_organization).
             var domain = ExtractDomain(senderEmail);
             if (!string.IsNullOrEmpty(domain) && !CommonEmailProviders.Contains(domain))
             {
+                var organization = await _communicationService.QueryOrganizationByDomainAsync(domain, ct);
+                if (organization is not null)
+                {
+                    fields["sprk_regardingorganization"] = new EntityReference("sprk_organization", organization.Id);
+                    matched = true;
+
+                    _logger.LogDebug("Sender domain matched to sprk_organization {OrganizationId} for domain {Domain}",
+                        organization.Id, domain);
+                }
+
                 var account = await _communicationService.QueryAccountByDomainAsync(domain, ct);
                 if (account is not null)
                 {
-                    fields["sprk_regardingorganization"] = new EntityReference("account", account.Id);
+                    fields["sprk_regardingaccount"] = new EntityReference("account", account.Id);
                     matched = true;
 
                     _logger.LogDebug("Sender domain matched to account {AccountId} for domain {Domain}",
@@ -401,9 +415,11 @@ public sealed class IncomingAssociationResolver
         ("sprk_regardinginvoice", "sprk_invoice"),
         ("sprk_regardingservicerequest", "sprk_servicerequest"),
         ("sprk_regardingworkassignment", "sprk_workassignment"),
+        ("sprk_regardingevent", "sprk_event"),
         ("sprk_regardingbudget", "sprk_budget"),
         ("sprk_regardinganalysis", "sprk_analysis"),
         ("sprk_regardingorganization", "sprk_organization"),
+        ("sprk_regardingaccount", "account"),
         ("sprk_regardingperson", "contact"),
     ];
 

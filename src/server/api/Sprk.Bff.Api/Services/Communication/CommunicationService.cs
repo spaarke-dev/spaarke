@@ -217,6 +217,14 @@ public sealed class CommunicationService
                     correlationId);
             }
 
+            // Step 5b: Best-effort capture of the sent message's Internet-Message-Id (FR-06 — feeds W1 thread rung).
+            if (communicationId.HasValue)
+            {
+                await TryStampInternetMessageIdAsync(
+                    graphClient, userMode: false, senderResult.Email!, communicationId.Value,
+                    request.Subject, correlationId, cancellationToken);
+            }
+
             // Step 6: Archive to SPE if requested (best-effort)
             // Check ArchiveOutgoingOptIn on the sender's CommunicationAccount (default true if not set)
             Guid? archivedDocumentId = null;
@@ -528,6 +536,14 @@ public sealed class CommunicationService
                     correlationId);
             }
 
+            // Step 5b: Best-effort capture of the sent message's Internet-Message-Id (FR-06 — feeds W1 thread rung).
+            if (communicationId.HasValue)
+            {
+                await TryStampInternetMessageIdAsync(
+                    graphClient, userMode: true, userEmail, communicationId.Value,
+                    request.Subject, correlationId, ct);
+            }
+
             // Step 6: Archive to SPE if requested (best-effort)
             // For user mode, check ArchiveOutgoingOptIn via FromMailbox account if available (default true)
             Guid? archivedDocumentId = null;
@@ -767,6 +783,10 @@ public sealed class CommunicationService
         if (request.Bcc is { Length: > 0 })
             communication["sprk_bcc"] = string.Join("; ", request.Bcc);
 
+        // Reply-thread continuity (FR-06): stamp the parent's Internet-Message-Id when provided.
+        if (!string.IsNullOrWhiteSpace(request.InReplyToMessageId))
+            communication["sprk_inreplyto"] = request.InReplyToMessageId;
+
         // Set attachment fields if attachments were included
         if (request.AttachmentDocumentIds is { Length: > 0 })
         {
@@ -895,6 +915,10 @@ public sealed class CommunicationService
         if (request.Bcc is { Length: > 0 })
             communication["sprk_bcc"] = string.Join("; ", request.Bcc);
 
+        // Reply-thread continuity (FR-06): stamp the parent's Internet-Message-Id when provided.
+        if (!string.IsNullOrWhiteSpace(request.InReplyToMessageId))
+            communication["sprk_inreplyto"] = request.InReplyToMessageId;
+
         // Set attachment fields if attachments were included
         if (request.AttachmentDocumentIds is { Length: > 0 })
         {
@@ -929,6 +953,8 @@ public sealed class CommunicationService
         ["sprk_invoice"] = ("sprk_regardinginvoice", "sprk_invoices"),
         ["sprk_workassignment"] = ("sprk_regardingworkassignment", "sprk_workassignments"),
         ["sprk_servicerequest"] = ("sprk_regardingservicerequest", "sprk_servicerequests"),
+        ["sprk_event"] = ("sprk_regardingevent", "sprk_events"),
+        ["account"] = ("sprk_regardingaccount", "accounts"),
     };
 
     /// <summary>
@@ -1442,4 +1468,79 @@ public sealed class CommunicationService
 
     private static string TruncateTo(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
+
+    /// <summary>
+    /// Best-effort capture of the just-sent message's real RFC-2822 Internet-Message-Id (FR-06).
+    /// The message was saved to Sent Items (SaveToSentItems=true); we locate it by subject (newest
+    /// first) and stamp sprk_internetmessageid so inbound replies can thread-match (W1 rung).
+    /// MUST NOT fail the send — any error is logged and swallowed (NFR-06).
+    ///
+    /// NOTE (R3 UQ3 — dev-validation pending): retrieval is by subject + recency, which can
+    /// mis-select in a high-volume mailbox with duplicate subjects, and the message may not be
+    /// indexed in Sent Items the instant SendMail returns. A dev-mailbox smoke test should confirm
+    /// hit-rate; the hardening path is a correlationId extended property stamped on send.
+    /// </summary>
+    private async Task TryStampInternetMessageIdAsync(
+        GraphServiceClient graphClient,
+        bool userMode,
+        string senderEmail,
+        Guid communicationId,
+        string subject,
+        string correlationId,
+        CancellationToken ct)
+    {
+        try
+        {
+            var safeSubject = subject.Replace("'", "''");
+            List<Message>? messages;
+            if (userMode)
+            {
+                var page = await graphClient.Me.MailFolders["sentitems"].Messages.GetAsync(rc =>
+                {
+                    rc.QueryParameters.Filter = $"subject eq '{safeSubject}'";
+                    rc.QueryParameters.Orderby = new[] { "sentDateTime desc" };
+                    rc.QueryParameters.Select = new[] { "internetMessageId", "sentDateTime" };
+                    rc.QueryParameters.Top = 3;
+                }, ct);
+                messages = page?.Value;
+            }
+            else
+            {
+                var page = await graphClient.Users[senderEmail].MailFolders["sentitems"].Messages.GetAsync(rc =>
+                {
+                    rc.QueryParameters.Filter = $"subject eq '{safeSubject}'";
+                    rc.QueryParameters.Orderby = new[] { "sentDateTime desc" };
+                    rc.QueryParameters.Select = new[] { "internetMessageId", "sentDateTime" };
+                    rc.QueryParameters.Top = 3;
+                }, ct);
+                messages = page?.Value;
+            }
+
+            var internetMessageId = messages?.FirstOrDefault()?.InternetMessageId;
+            if (string.IsNullOrWhiteSpace(internetMessageId))
+            {
+                _logger.LogWarning(
+                    "Internet-Message-Id not found in Sent Items for communication {CommunicationId} (subject match); reply-thread closure may be impaired | CorrelationId: {CorrelationId}",
+                    communicationId, correlationId);
+                return;
+            }
+
+            await _genericEntityService.UpdateAsync(
+                "sprk_communication",
+                communicationId,
+                new Dictionary<string, object> { ["sprk_internetmessageid"] = internetMessageId },
+                ct);
+
+            _logger.LogInformation(
+                "Stamped Internet-Message-Id on communication {CommunicationId} | CorrelationId: {CorrelationId}",
+                communicationId, correlationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Internet-Message-Id capture failed (non-fatal) for communication {CommunicationId} | CorrelationId: {CorrelationId}",
+                communicationId, correlationId);
+        }
+    }
 }

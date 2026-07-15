@@ -77,9 +77,20 @@ public sealed record SendCommunicationRequest
     public bool ArchiveToSpe { get; init; } = false;
 
     /// <summary>
-    /// Optional array of SPE document IDs (driveItem IDs) to attach to the email.
-    /// Files are downloaded from SPE via SpeFileStore and included as base64-encoded FileAttachments
-    /// in the Graph sendMail payload. Max 150 attachments, 35MB total size.
+    /// Optional array of Dataverse <c>sprk_document</c> record GUIDs to attach.
+    /// These are DMS <b>Document record</b> IDs — NOT raw SPE driveItem/File IDs. The server
+    /// resolves each Document to its associated SPE File via the record's
+    /// <c>sprk_graphdriveid</c> + <c>sprk_graphitemid</c>, downloads it, and includes it as a
+    /// base64 <c>FileAttachment</c> in the Graph sendMail payload. Max 150 attachments, 35 MB total.
+    /// Email attachments are always tracked Documents in Spaarke's DMS (see ADR-045); the field
+    /// name is accurate — do not rename to "DriveItemIds".
     /// </summary>
     public string[]? AttachmentDocumentIds { get; init; }
+
+    /// <summary>
+    /// For reply/forward sends: the parent message's RFC-2822 <c>Internet-Message-Id</c>.
+    /// When provided, it is stamped onto <c>sprk_communication.sprk_inreplyto</c> to preserve
+    /// reply-thread continuity (feeds the W1 thread-continuity association rung). Optional.
+    /// </summary>
+    public string? InReplyToMessageId { get; init; }
 }

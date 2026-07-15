@@ -2436,6 +2436,12 @@ public class DataverseWebApiService : IDataverseService
             "QueryAccountByDomainAsync is implemented in DataverseServiceClientImpl.");
     }
 
+    public Task<Entity?> QueryOrganizationByDomainAsync(string domain, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryOrganizationByDomainAsync is implemented in DataverseServiceClientImpl.");
+    }
+
     public Task<Entity?> QueryMatterByReferenceNumberAsync(string referenceNumber, CancellationToken ct = default)
     {
         throw new NotImplementedException(
