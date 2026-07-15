@@ -9,7 +9,7 @@
 
 | Field | Value |
 |---|---|
-| **Phase** | **All substantive r2 work COMPLETE + merged + deployed.** In the **live-UAT + defect-intake** stage. Resuming: continue the browser UAT and address findings. |
+| **Phase** | **All substantive r2 work COMPLETE + merged + deployed.** In the **live-UAT + defect-intake** stage — currently **BLOCKED (waiting on compose-r2)**: their DEF-UAT-1 part-2 + DEF-UAT-2 session-identity fixes + SpaarkeAi redeploy must land before UAT resumes. Core has nothing to do until their redeploy. |
 | **Deployed state (spaarkedev1)** | master `07aecc801` (both projects). BFF + SpaarkeAi live. **create-matter seeded live** (Action `63f086d3…` + Binding `89cd91f6…`; healthz Healthy). **DEF-UAT-1 part-1 fix deployed** (SpaarkeAi rebuilt+published `sprk_spaarkeai`). memory.write row Active; `memory-items`+`audit-partitioned` Cosmos live. |
 | **Next action on resume** | Continue **CONSOLIDATED-UAT-CHECKLIST** (`notes/CONSOLIDATED-UAT-CHECKLIST.md`): Parts A/B/C1/C3 ready NOW; **re-test "Open in Compose" host context** (part-1 fix just deployed — Assistant should know the host document); C2 (injection) waits on shield. Clean pass → ADR-041 + ADR-042 Accepted → 090 close. |
 | **Open PRs** | **#636** (Spaarke AI 101 surface-accuracy fixes) — OPEN, awaiting operator review/merge. #637 (DEF-UAT-1 part-1) — MERGED. #633/#635 merged. |
