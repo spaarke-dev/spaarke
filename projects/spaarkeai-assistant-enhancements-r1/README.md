@@ -1,5 +1,7 @@
 # Spaarke AI Assistant Enhancements R1 — "Follow-Through"
 
+> **Portfolio**: [Project #649](https://github.com/spaarke-dev/spaarke/issues/649) · Parent [Epic #421 SPAARKE AI](https://github.com/spaarke-dev/spaarke/issues/421) · [Board (Project #2)](https://github.com/users/spaarke-dev/projects/2) · Type: AI · Status: Active (Planning)
+
 > **Status**: Planning complete — artifacts generated; **task decomposition pending** (run `/task-create` in a fresh session).
 > **Branch / worktree**: `work/spaarkeai-assistant-enhancements-r1` · `C:/code_files/spaarke-wt-spaarkeai-assistant-enhancements-r1`
 > **Created**: 2026-07-15
