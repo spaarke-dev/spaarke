@@ -75,6 +75,11 @@ public class CommunicationServiceArchiveTests
         entityService
             .Setup(s => s.RetrieveAsync("sprk_communication", communicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_communication", communicationId));
+        // No attachments to archive.
+        entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationattachment"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+        // An email-archive Document already exists.
         entityService
             .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_document"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity> { new("sprk_document", existingArchiveId) }));

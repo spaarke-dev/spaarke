@@ -84,7 +84,7 @@ public sealed class CommunicationService
             record = await _genericEntityService.RetrieveAsync(
                 "sprk_communication",
                 communicationId,
-                new[] { "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_communicationtype", "sprk_sentat", "sprk_graphmessageid", "statuscode" },
+                new[] { "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_communicationtype", "sprk_direction", "sprk_sentat", "sprk_graphmessageid", "statuscode" },
                 ct);
         }
         catch (Exception ex)
@@ -97,23 +97,29 @@ public sealed class CommunicationService
                 statusCode: 404);
         }
 
-        // 2. Idempotency — already archived? Return the existing archive Document, no duplicates.
+        // 2. Archive any attachments that lack a Document — run INDEPENDENTLY of the .eml
+        // gate so an attachment added after a prior archive is still picked up on a later
+        // call (code-review W3/S5). Each created Document is linked back onto its attachment.
+        var attachmentsCreated = await ArchiveExistingAttachmentsAsync(communicationId, ct);
+
+        // 3. Idempotency for the .eml archive — already archived? Return the existing archive
+        // Document (plus any newly-archived attachments above), no .eml duplicate.
         var existingArchiveId = await FindExistingArchiveDocumentAsync(communicationId, ct);
         if (existingArchiveId.HasValue)
         {
             _logger.LogInformation(
-                "Communication {CommunicationId} already archived (Document {DocumentId}); returning idempotently",
+                "Communication {CommunicationId} .eml already archived (Document {DocumentId}); returning idempotently",
                 communicationId, existingArchiveId);
             return new ArchiveCommunicationResult
             {
                 CommunicationId = communicationId,
                 ArchiveDocumentId = existingArchiveId,
                 AlreadyArchived = true,
-                AttachmentDocumentsCreated = 0,
+                AttachmentDocumentsCreated = attachmentsCreated,
             };
         }
 
-        // 3. Reconstruct the request/response the archiver expects from the stored record.
+        // 4. Reconstruct the request/response the archiver expects from the stored record.
         var to = SplitRecipients(record.GetAttributeValue<string>("sprk_to"));
         var cc = SplitRecipients(record.GetAttributeValue<string>("sprk_cc"));
         var from = record.GetAttributeValue<string>("sprk_from") ?? string.Empty;
@@ -124,6 +130,12 @@ public sealed class CommunicationService
             ? new DateTimeOffset(DateTime.SpecifyKind(sentAtDt.Value, DateTimeKind.Utc), TimeSpan.Zero)
             : DateTimeOffset.UtcNow;
         var statusValue = record.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? (int)CommunicationStatus.Draft;
+
+        // Map communication direction (Incoming=100000000) → archive-Document email direction
+        // (Received=100000000 / Sent=100000001) so an on-demand archive of an INBOUND email is
+        // not mislabeled "Sent" (code-review W1). Default (no direction / outbound) → Sent.
+        var directionValue = record.GetAttributeValue<OptionSetValue>("sprk_direction")?.Value;
+        var emailDirection = directionValue == 100000000 ? 100000000 : 100000001;
 
         var request = new SendCommunicationRequest
         {
@@ -144,11 +156,12 @@ public sealed class CommunicationService
             From = from,
         };
 
-        // 4. Archive the .eml (reuses the same path as send-side archival; ADR-045 archiver seam).
+        // 5. Archive the .eml (reuses the same path as send-side archival; ADR-045 archiver seam),
+        // stamping the correct direction on the archive Document.
         Guid archiveDocumentId;
         try
         {
-            archiveDocumentId = await ArchiveToSpeAsync(request, response, communicationId, ct);
+            archiveDocumentId = await ArchiveToSpeAsync(request, response, communicationId, ct, emailDirection);
         }
         catch (InvalidOperationException ex)
         {
@@ -158,9 +171,6 @@ public sealed class CommunicationService
                 detail: ex.Message,
                 statusCode: 500);
         }
-
-        // 5. Create a Document for each attachment that does not already have one.
-        var attachmentsCreated = await ArchiveExistingAttachmentsAsync(communicationId, ct);
 
         return new ArchiveCommunicationResult
         {
@@ -203,14 +213,16 @@ public sealed class CommunicationService
 
     /// <summary>
     /// Creates a <c>sprk_document</c> for each attachment of the communication that lacks one (has an SPE
-    /// item id but no linked document). Reuses <see cref="ArchiveOutboundAttachmentsAsync"/>. Returns the
-    /// number of attachments that were archived.
+    /// item id but no linked document), using the attachment's OWN drive id (code-review W2), links the
+    /// created Document back onto the attachment so a later archive skips it (idempotency, code-review W3),
+    /// and enqueues AI analysis for parity with the send path. Returns the number archived. Per-attachment
+    /// failures are non-fatal.
     /// </summary>
     private async Task<int> ArchiveExistingAttachmentsAsync(Guid communicationId, CancellationToken ct)
     {
         var query = new QueryExpression("sprk_communicationattachment")
         {
-            ColumnSet = new ColumnSet("sprk_name", "sprk_graphitemid", "sprk_document"),
+            ColumnSet = new ColumnSet("sprk_name", "sprk_graphitemid", "sprk_graphdriveid", "sprk_document"),
             Criteria =
             {
                 Conditions = { new ConditionExpression("sprk_communication", ConditionOperator.Equal, communicationId) },
@@ -218,39 +230,59 @@ public sealed class CommunicationService
         };
 
         var attachments = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+        var correlationId = Guid.NewGuid().ToString();
+        var created = 0;
 
-        var itemIds = new List<string>();
-        var names = new List<string>();
         foreach (var att in attachments.Entities)
         {
             // Skip attachments that already have a Document, or that were never uploaded to SPE.
             if (att.GetAttributeValue<EntityReference>("sprk_document") is not null) continue;
             var itemId = att.GetAttributeValue<string>("sprk_graphitemid");
             if (string.IsNullOrEmpty(itemId)) continue;
-            itemIds.Add(itemId);
-            names.Add(att.GetAttributeValue<string>("sprk_name") ?? "Attachment");
+
+            // Prefer the attachment's own drive id; fall back to the archive container.
+            var driveId = att.GetAttributeValue<string>("sprk_graphdriveid");
+            if (string.IsNullOrEmpty(driveId)) driveId = _options.ArchiveContainerId;
+            if (string.IsNullOrEmpty(driveId)) continue;
+
+            var fileName = att.GetAttributeValue<string>("sprk_name") ?? "Attachment";
+
+            try
+            {
+                var attachmentDoc = new DataverseEntity("sprk_document")
+                {
+                    ["sprk_documentname"] = TruncateTo(fileName, 200),
+                    ["sprk_filename"] = fileName, // AI analyzer reads this for file type detection
+                    ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
+                    ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
+                    ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+                    ["sprk_graphitemid"] = itemId,
+                    ["sprk_graphdriveid"] = driveId,
+                };
+
+                var documentId = await _genericEntityService.CreateAsync(attachmentDoc, ct);
+
+                // Link the Document back onto the attachment so a later archive skips it (W3).
+                await _genericEntityService.UpdateAsync(
+                    "sprk_communicationattachment",
+                    att.Id,
+                    new Dictionary<string, object> { ["sprk_document"] = new EntityReference("sprk_document", documentId) },
+                    ct);
+
+                // Enqueue AI analysis (parity with the send-side attachment archival).
+                await EnqueueDocumentAnalysisAsync(documentId, correlationId, ct);
+                created++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to archive attachment '{FileName}' for communication {CommunicationId} (non-fatal)",
+                    fileName, communicationId);
+            }
         }
 
-        if (itemIds.Count == 0) return 0;
-
-        var driveId = _options.ArchiveContainerId;
-        if (string.IsNullOrWhiteSpace(driveId))
-        {
-            _logger.LogWarning(
-                "ArchiveContainerId not configured; skipping per-attachment Document creation for {CommunicationId}",
-                communicationId);
-            return 0;
-        }
-
-        await ArchiveOutboundAttachmentsAsync(
-            communicationId,
-            itemIds.ToArray(),
-            names.ToArray(),
-            driveId,
-            Guid.NewGuid().ToString(),
-            ct);
-
-        return itemIds.Count;
+        return created;
     }
 
     /// <summary>
@@ -1144,7 +1176,8 @@ public sealed class CommunicationService
         SendCommunicationRequest request,
         SendCommunicationResponse partialResponse,
         Guid communicationId,
-        CancellationToken ct)
+        CancellationToken ct,
+        int emailDirection = 100000001) // default Sent — send-path callers are always outbound
     {
         // 1. Generate the archival artifact via the channel archiver seam (dispatch by
         // CommunicationType — ADR-045 rule 4). Email resolves to .eml generation.
@@ -1181,7 +1214,7 @@ public sealed class CommunicationService
             ["sprk_emailsubject"] = request.Subject,
             ["sprk_emailfrom"] = partialResponse.From,
             ["sprk_emailto"] = string.Join("; ", request.To),
-            ["sprk_emaildirection"] = new OptionSetValue(100000001), // Sent
+            ["sprk_emaildirection"] = new OptionSetValue(emailDirection), // 100000001 Sent (default) / 100000000 Received
             ["sprk_emaildate"] = partialResponse.SentAt.DateTime,
         };
 

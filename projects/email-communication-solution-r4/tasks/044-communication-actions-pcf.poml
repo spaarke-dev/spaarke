@@ -2,7 +2,7 @@
   <metadata>
     <title>Communication Actions PCF — Reply / Forward / Send / Save Draft / Save-to-SharePoint over existing endpoints (retires the 1,150-LOC ribbon send script)</title>
     <phase>Wave 4 — OOB form + PCFs (actions)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <dependencies>020, 021, 022</dependencies>
     <blocks>043, 062</blocks>

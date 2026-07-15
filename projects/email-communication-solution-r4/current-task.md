@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Progress** | **29 / 45 tasks done.** W1 + W2 COMPLETE. **042 ✅ (Connections PCF, committed `bd773083a`).** W4 in progress. |
-| **Last commits** | email-r4 `bd773083a` (042 Connections PCF) · `cc68bcd96` (W4 pivot) · prototype `cfe389a`. Tree clean. |
-| **Status** | in-progress — 042 done; **044 next** (recon + conflict-check done; conflict-check CLEAR on CommunicationEndpoints.cs) |
-| **Next Action** | Execute **044** (Communication Actions PCF): (a) NEW thin `POST /api/communications/{id}/archive` over existing `EmailArchiver` (§10 BFF hygiene — publish-size + CVE + tests); (b) Actions PCF `src/client/pcf/CommunicationActions/` hosting `<SendEmailPage/>` + Reply/Forward/Send/Save/Save-to-SharePoint over existing `/api/communications/send`; (c) **⚠ RETIRE deployed `sprk_communication_send.js` ×2 + ribbon button — IRREVERSIBLE, verify Send equivalent FIRST, confirm with owner before deleting.** Via `task-execute`, FULL rigor. |
+| **Progress** | **31 / 45 tasks done.** W1 + W2 COMPLETE. **042 ✅ + 044 ✅ + 062 ✅** (W4 PCFs). Next = **043 deploy**. |
+| **Last commits** | email-r4 `07fd904d7` (044a archive endpoint) · `ce5e56672` (042 primary) · `bd773083a` (042 PCF). 044b/044c + fixes committing now. |
+| **Status** | in-progress — 042 + 044 done (both PCFs build:prod clean, all tests green, gates 0 violations/0 Critical). **043 next.** |
+| **Next Action** | Execute **043** (PCF deploy + OOB form config): deploy CommunicationConnections + CommunicationActions PCFs; pack the "Communications Awaiting Association" view (`src/client/pcf/CommunicationConnections/views/`); configure the OOB `sprk_communication` form (place both PCFs in right column + auth-config env vars for Actions); **remove the deployed send web resource + ribbon button** (044c retired the source; deployed removal happens here). Then **074** (outbound suggestion path). W3 030-032 / W5 050-054 coordination-blocked on r2-core. |
 
 ### ✅ 042 owner decisions (2026-07-15) — RESOLVED
 - **Regarding model = MULTIPLE** (one per entity type; per-field slots enforce this), PLUS an explicit **"primary"** designation owning the denorm `Regarding Record` fields. **Both shipped** — additive write (commit `bd773083a`) + ★Primary badge/button (commit `ce5e56672`). Rationale: `notes/042-connections-pcf-completion.md`.

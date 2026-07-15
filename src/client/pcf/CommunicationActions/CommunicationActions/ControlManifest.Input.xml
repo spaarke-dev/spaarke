@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="CommunicationActions" version="1.0.0" display-name-key="Communication Actions" description-key="Virtual PCF: communication actions (Reply / Forward / Send / Save Draft / Save to SharePoint) on the OOB sprk_communication form. Hosts the shared EmailComposer for compose/reply/forward and calls the existing /api/communications/send + /{id}/archive via @spaarke/auth. Replaces the ribbon send script." control-type="virtual">
+    <external-service-usage enabled="true">
+      <domain>*.azurewebsites.net</domain>
+      <domain>login.microsoftonline.com</domain>
+    </external-service-usage>
+    <!-- PRIMARY bound: the channel value gates the action bar (Email is interactive; other channels read-only). -->
+    <property name="communicationType" display-name-key="Communication Type" description-key="Bound to sprk_communicationtype (option-set). Email enables the compose/send actions; other channels render read-only." of-type="OptionSet" usage="bound" required="true">
+      <value name="Email" display-name-key="Email" default="false">100000000</value>
+      <value name="TeamsMessage" display-name-key="Teams Message" default="false">100000001</value>
+      <value name="Sms" display-name-key="SMS" default="false">100000002</value>
+      <value name="Notification" display-name-key="Notification" default="false">100000003</value>
+    </property>
+    <!-- Auth config (resolved from Dataverse environment variables / form config; ADR-028). -->
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL" of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID" of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD application (client) ID for PCF MSAL authentication" of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF API application ID for OAuth scope construction" of-type="SingleLine.Text" usage="input" required="false" />
+    <!-- Version footer toggle. -->
+    <property name="showVersionFooter" display-name-key="Show Version Footer" description-key="When true (default), displays the PCF version footer." of-type="TwoOptions" usage="input" required="false" default-value="true" />
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="1" />
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+      <uses-feature name="Navigation" required="true" />
+    </feature-usage>
+  </control>
+</manifest>
