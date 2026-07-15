@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
@@ -209,9 +210,12 @@ public sealed class IncomingAssociationResolver
 
     /// <summary>
     /// In-memory cache for sprk_recordtype_ref lookups (entity logical name → GUID + display name).
-    /// Populated lazily, lives for the lifetime of the singleton service.
+    /// Populated lazily, lives for the lifetime of the singleton service. Concurrent because the
+    /// resolver is a singleton and inbound/outbound messages resolve on parallel threads (task 018 —
+    /// a plain Dictionary here was a data race). Read-then-write is not atomic, but the value is
+    /// deterministic per key, so a rare double-query just writes the same entry twice — no corruption.
     /// </summary>
-    private readonly Dictionary<string, (Guid Id, string DisplayName)?> _recordTypeRefCache = new();
+    private readonly ConcurrentDictionary<string, (Guid Id, string DisplayName)?> _recordTypeRefCache = new();
 
     /// <summary>
     /// Populates the 4 denormalized resolver fields based on the highest-priority
