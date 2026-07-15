@@ -20,7 +20,7 @@
 | 010 | `ICommunicationEnrichmentService` (both directions; outbound RAG) | W1 | bff-api, communication | FR-08 | 005,006 | 011,052 | true | FULL | ✅ (6 escalations — E2/E3→011, E1/E5 owner, E4/E6 resolved) |
 | 011 | Refactor `IncomingAssociationResolver` → Engine over normalized envelope | W1 | bff-api, refactoring | FR-09 | 010 | 012,013,014 | false (serial in W1) | FULL | ✅ (R-7 preserved; envelope engine + rung abstraction + normalizer; gate clean) |
 | 012 | Rungs 0–1 (explicit-ref + thread continuity) across 8 targets | W1 | bff-api, communication | FR-10 | 011 | 015,030 | true | FULL | ✅ (rung 0/1 + RegardingFieldMap; gate clean; W1 owner heads-up = subject-ref precedes thread) |
-| 013 | Rung 2 (participant correlation; org-by-domain) | W1 | bff-api, communication | FR-10 | 011 | 015,030 | true | FULL | 🔲 |
+| 013 | Rung 2 (participant correlation; org-by-domain) | W1 | bff-api, communication | FR-10 | 011 | 015,030 | true | FULL | ✅ (from/to/cc→contact+junction memberships+org/account; 0.60–0.85; gate clean, FR-04 org-target correct) |
 | 014 | Rung 3 structural detectors (`Detectors/`) | W1 | bff-api, communication | FR-10 | 011 | 015 | true | FULL | 🔲 |
 | 015 | Confidence→status + **auto-file ≥0.85** (ADR-018 kill-switch) | W1 | bff-api, communication | FR-11 | 002,012,013,014 | 030,051 | true | FULL | 🔲 |
 | 016 | Channel seams (`ICommunicationChannelSender`/`ICommunicationArchiver`) | W1 | bff-api, architecture | NFR-04 | 005 | — | true | FULL | 🔲 |
