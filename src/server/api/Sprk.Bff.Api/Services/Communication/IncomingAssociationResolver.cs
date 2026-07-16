@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
@@ -51,6 +52,12 @@ public sealed class IncomingAssociationResolver
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false,
     };
+
+    /// <summary>Structured EventId for the per-rung telemetry record (DEC-8 / NFR-05) — dashboard filter.</summary>
+    private static readonly EventId RungTelemetryEventId = new(4501, "AssociationRungTelemetry");
+
+    /// <summary>Structured EventId for the per-envelope "resolving rung" summary (DEC-8 / NFR-05).</summary>
+    private static readonly EventId ResolvingRungEventId = new(4502, "AssociationResolvingRung");
 
     public IncomingAssociationResolver(
         IEnumerable<IAssociationRung> rungs,
@@ -106,12 +113,17 @@ public sealed class IncomingAssociationResolver
             decision = _statusMapper.Decide(matches, message.Direction, context.TenantKey);
         }
 
+        // Per-envelope "resolving rung" telemetry (DEC-8 / NFR-05): a single dashboard-able signal showing
+        // which rung(s) produced the winning tier, emitted for EVERY envelope regardless of outcome.
+        EmitResolvingRungTelemetry(communicationId, decision);
+
         await ApplyDecisionAsync(communicationId, decision, ct);
     }
 
     /// <summary>
     /// Evaluates a set of rungs defensively (NFR-06: a rung that throws is treated as a non-match) and
-    /// appends their matches to <paramref name="sink"/>.
+    /// appends their matches to <paramref name="sink"/>. Emits one structured per-rung telemetry record per
+    /// rung attempt (DEC-8 / NFR-05).
     /// </summary>
     private async Task EvaluateRungsAsync(
         IReadOnlyList<IAssociationRung> rungs,
@@ -123,19 +135,85 @@ public sealed class IncomingAssociationResolver
     {
         foreach (var rung in rungs)
         {
+            var startTs = Stopwatch.GetTimestamp();
             try
             {
                 var matches = await rung.EvaluateAsync(message, context, ct);
+                var elapsed = Stopwatch.GetElapsedTime(startTs);
+                // "fired" ⇒ the rung returned ≥1 match; "skipped" ⇒ zero (disabled kill-switch, empty
+                // input, or genuine non-match — the engine treats them uniformly).
+                EmitRungTelemetry(rung, communicationId,
+                    outcome: matches.Count > 0 ? "fired" : "skipped",
+                    matchCount: matches.Count, elapsed: elapsed, error: null);
                 if (matches.Count > 0)
                     sink.AddRange(matches);
             }
             catch (Exception ex)
             {
+                var elapsed = Stopwatch.GetElapsedTime(startTs);
+                EmitRungTelemetry(rung, communicationId,
+                    outcome: "error", matchCount: 0, elapsed: elapsed, error: ex);
                 _logger.LogWarning(ex,
                     "Association rung {Rung} (order {Order}) failed for communication {CommunicationId}; skipping",
                     rung.Kind, rung.Order, communicationId);
             }
         }
+    }
+
+    /// <summary>
+    /// Emits one structured per-rung telemetry record (DEC-8 / NFR-05) routed through the injected
+    /// <see cref="ILogger{TCategoryName}"/> (the existing BFF sink — no new pipeline). Carries: communication
+    /// id, rung kind + order, whether it is an AI rung, outcome (<c>fired</c>/<c>skipped</c>/<c>error</c>),
+    /// match count, and latency. Emission is cheap (structured log fields only).
+    /// </summary>
+    /// <remarks>
+    /// <b>Token/cost + cache hit/miss for AI rungs (4–5) is a documented follow-up.</b> The AI facades
+    /// (<c>IRecordMatchingAi</c>, <c>ICommunicationClassificationAi</c>, and the underlying
+    /// <c>IOpenAiClient.GetStructuredCompletionAsync</c>) do not currently surface token usage or cache
+    /// hit/miss to the caller. Plumbing them would change the PublicContracts seam (blast radius) and is out
+    /// of scope for this task; <c>IsAiRung</c> is emitted so a dashboard can partition deterministic vs AI
+    /// cost today, and the token/cache dimension can be added once the facades return usage.
+    /// </remarks>
+    private void EmitRungTelemetry(
+        IAssociationRung rung, Guid communicationId, string outcome, int matchCount, TimeSpan elapsed, Exception? error)
+    {
+        _logger.Log(
+            error is null ? LogLevel.Information : LogLevel.Warning,
+            RungTelemetryEventId,
+            error,
+            "Rung telemetry | CommunicationId: {CommunicationId}, Rung: {Rung}, RungOrder: {RungOrder}, " +
+            "IsAiRung: {IsAiRung}, Outcome: {Outcome}, MatchCount: {MatchCount}, ElapsedMs: {ElapsedMs}",
+            communicationId, rung.Kind, rung.Order, !IsDeterministic(rung.Kind), outcome, matchCount,
+            (long)elapsed.TotalMilliseconds);
+    }
+
+    /// <summary>
+    /// Emits the per-envelope "resolving rung" summary (DEC-8 / NFR-05): the resulting tier + which rung(s)
+    /// contributed to the written (winning) target(s), so the deterministic-first ladder is observable on
+    /// real volume. Derived from the decision provenance already computed — no re-evaluation cost.
+    /// </summary>
+    private void EmitResolvingRungTelemetry(Guid communicationId, AssociationDecision decision)
+    {
+        var resolvingRungs = decision.Provenance.Candidates
+            .Where(c => c.Written)
+            .SelectMany(c => c.Contributors.Select(contrib => contrib.Rung))
+            .Distinct()
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToArray();
+
+        var resolvingRungsText = resolvingRungs.Length > 0 ? string.Join(",", resolvingRungs) : "(none)";
+        var rungsFiredText = decision.Provenance.RungsFired.Count > 0
+            ? string.Join(",", decision.Provenance.RungsFired)
+            : "(none)";
+
+        _logger.Log(
+            LogLevel.Information,
+            ResolvingRungEventId,
+            null,
+            "Association resolving-rung summary | CommunicationId: {CommunicationId}, Tier: {Tier}, " +
+            "AutoFiled: {AutoFiled}, ResolvingRungs: {ResolvingRungs}, RungsFired: {RungsFired}",
+            communicationId, AssociationStatusCodes.Name(decision.Status), decision.AutoFiled,
+            resolvingRungsText, rungsFiredText);
     }
 
     private static bool IsDeterministic(RungKind kind) =>

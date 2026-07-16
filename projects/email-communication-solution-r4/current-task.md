@@ -9,9 +9,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Progress** | **35 / 45 done.** W3 RUNGS COMPLETE: **030 rung 4 ✅ + 031 rung 5 ✅** (both AI rungs land as Suggested/signals, never auto-file). Plus 061 + 075 merged. r2-core CLOSED → W3/W5 ungated. |
-| **Last commits** | `1803b2f80` (031 rung 5, FF-merged clean) · `85ab74a79` (075) · `c1360dcd0` (061) · `29834f041` (030). Tree clean. |
-| **Status** | **W3 rungs done.** Next: **032** (per-rung telemetry + rung 4/5 unit tests — both rungs now exist) → **074-endpoint** (engine evaluate-path + suggestion endpoint) → **W5** (050 gate clears → 051-054; 053 reuses 031's classification output). |
+| **Progress** | **37 / 45 done. W3 COMPLETE** (030 rung 4 ✅ + 031 rung 5 ✅ + **032 telemetry+tests ✅**). AI rungs land as Suggested/signals, never auto-file; deterministic-short-circuit + AI-never-auto-file invariants now locked by tests. Plus 061 + 075 merged. r2-core CLOSED → W5 ungated. |
+| **Last commits** | 032 telemetry+rung 4/5 tests (`f3ce4d85c`) · `1803b2f80` (031) · `85ab74a79` (075) · `c1360dcd0` (061) · `29834f041` (030). |
+| **Status** | **W3 done.** Next: **074-endpoint** (engine evaluate-path + suggestion endpoint) → **W5** (050 gate clears → 051-054; 053 reuses 031's classification output). Telemetry follow-up: token/cost + cache hit/miss for AI rungs needs the PublicContracts facades to return usage (out of scope for 032). |
 | **⬆️ Actions v1.0.1 to re-import** | `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.0.1.zip` — env-var fallback (reads `sprk_MsalClientId`/`sprk_BffApiAppId`/`sprk_BffApiBaseUrl`) + OOB-compact toolbar (16px icons). Footer will read v1.0.1. Connections stays v1.0.0 (no change). |
 
 ### 🔑 AUTH / DEPLOY FACTS (spaarkedev1) — critical for future

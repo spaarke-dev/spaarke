@@ -2,7 +2,7 @@
   <metadata>
     <title>Per-rung telemetry (DEC-8) + rung 4/5 tests</title>
     <phase>Wave 3 — Server: semantic + AI rungs</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>030, 031</dependencies>
     <blocks></blocks>
@@ -129,6 +129,28 @@
   <notes>
     Telemetry is the DEC-8 measurement substrate — the post-launch decision to broaden AI-rung usage or move the auto-file threshold depends on it. Keep the emission cheap (structured log/metric fields, not a new pipeline). Tests are MAINTAIN-class (invariant contracts) and survive the `/test-diet` gate. The AI-never-auto-file and deterministic-short-circuit assertions are the load-bearing ones — do not let them regress.
   </notes>
+
+  <completion>
+    Central per-rung telemetry added to `IncomingAssociationResolver` (existing `ILogger` sink — §11, no new
+    pipeline): `EvaluateRungsAsync` emits one structured record per rung attempt (`EventId 4501` —
+    CommunicationId, Rung, RungOrder, IsAiRung, Outcome fired/skipped/error, MatchCount, ElapsedMs via
+    Stopwatch.GetTimestamp/GetElapsedTime); `ResolveAsync` emits one per-envelope resolving-rung summary
+    (`EventId 4502` — Tier, AutoFiled, ResolvingRungs [rungs contributing to written targets], RungsFired),
+    derived from already-computed provenance. **Tokens/cost + cache hit/miss for AI rungs (4/5) = documented
+    follow-up** — the facades (IRecordMatchingAi / ICommunicationClassificationAi / IOpenAiClient) don't
+    surface usage to the caller; plumbing them changes the PublicContracts seam (blast radius, out of scope).
+    IsAiRung flag emitted so a dashboard can partition deterministic vs AI cost today.
+
+    22 new tests (boundary mocks only, ADR-038 KEEP-path, 0 banned patterns): SemanticMatchRungTests (9),
+    AiClassificationRungTests (6), AssociationLadderIntegrationTests (3), RungTelemetryTests (4) + shared
+    RungTestSupport (CapturingLogger spy + FakeRung + scope-factory/search builders). Load-bearing invariants
+    locked: deterministic ≥0.85 short-circuits (AI facades Times.Never); AI rungs never bear a target /
+    never auto-file; conflict→Ambiguous; privilege = signal-only (ADR-015).
+
+    Build clean; 324 Communication tests green (22 new, 0 fail, 5 pre-existing skips); publish 45.30 MB
+    compressed incl-PDBs (+0.02 delta, ≤60 ceiling); CVE = pre-existing Kiota 1.21.2 High only (0 new);
+    /conflict-check clean; Step 9.5 gates (code-review + adr-check) 0 Critical / 0 ADR violations. W3 COMPLETE.
+  </completion>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
