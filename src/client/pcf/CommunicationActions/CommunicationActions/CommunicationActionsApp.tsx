@@ -28,17 +28,18 @@ import {
   Text,
 } from '@fluentui/react-components';
 import {
-  ArrowReply20Regular,
-  ArrowForward20Regular,
-  Send20Regular,
-  Save20Regular,
-  CloudArrowUp20Regular,
+  ArrowReply16Regular,
+  ArrowForward16Regular,
+  Send16Regular,
+  Save16Regular,
+  CloudArrowUp16Regular,
 } from '@fluentui/react-icons';
 import { authenticatedFetch } from '@spaarke/auth';
 import { SendEmailPage, type ISendEmailPageProps, type EmailComposerMode } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
 import { deriveComposerFields } from './composerPrefill';
+import { getMsalClientId, getBffApiAppId, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 
 // React 16 type seam: the shared lib's .d.ts is emitted against React 19 types,
 // whose FC return type is incompatible with React 16's JSX element type. Cast at
@@ -51,18 +52,26 @@ const COMMUNICATION_TYPE_EMAIL = 100000000;
 
 const useStyles = makeStyles({
   root: { height: '100%', width: '100%', display: 'flex', flexDirection: 'column' },
-  bar: { padding: tokens.spacingVerticalXS, paddingInline: tokens.spacingHorizontalS, flexWrap: 'wrap' },
-  notice: { padding: tokens.spacingHorizontalM },
+  // Compact single row to match the OOB command bar height (~32px).
+  barRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    paddingBlock: tokens.spacingVerticalXXS,
+    paddingInline: tokens.spacingHorizontalXS,
+    minHeight: '32px',
+  },
+  bar: { flexWrap: 'wrap' },
+  grow: { flex: 1 },
+  notice: { paddingInline: tokens.spacingHorizontalM, paddingBottom: tokens.spacingVerticalXS },
   dialogSurface: { maxWidth: '900px', width: '90vw', height: '85vh', padding: 0 },
   dialogBody: { height: '100%', display: 'block' },
-  footer: {
-    marginTop: 'auto',
-    paddingTop: tokens.spacingVerticalXS,
-    paddingInline: tokens.spacingHorizontalS,
-    display: 'flex',
-    justifyContent: 'flex-end',
+  versionText: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground4,
+    whiteSpace: 'nowrap',
+    paddingRight: tokens.spacingHorizontalS,
   },
-  versionText: { fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 },
 });
 
 /** Walk window/parent frames to locate Xrm (PCF runs in an iframe). */
@@ -131,41 +140,58 @@ export interface ICommunicationActionsAppProps {
 export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = ({ context, readOnly, version }) => {
   const s = useStyles();
 
-  const clientAppId = (context.parameters.clientAppId?.raw ?? '').trim();
-  const bffAppId = (context.parameters.bffAppId?.raw ?? '').trim();
-  const bffBaseUrl = (context.parameters.apiBaseUrl?.raw ?? '').trim();
+  const manifestClientAppId = (context.parameters.clientAppId?.raw ?? '').trim();
+  const manifestBffAppId = (context.parameters.bffAppId?.raw ?? '').trim();
+  const manifestApiBaseUrl = (context.parameters.apiBaseUrl?.raw ?? '').trim();
   const showVersionFooter = context.parameters.showVersionFooter?.raw !== false;
   const channelValue = context.parameters.communicationType?.raw;
   const isEmail = channelValue == null || channelValue === COMMUNICATION_TYPE_EMAIL;
 
   const communicationId = React.useMemo(() => getHostRecordId(), []);
+  const webApi = context.webAPI;
 
   const [authReady, setAuthReady] = React.useState(false);
   const [authError, setAuthError] = React.useState<string | null>(null);
+  const [bffBaseUrl, setBffBaseUrl] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [composerMode, setComposerMode] = React.useState<EmailComposerMode | null>(null);
   const [prefill, setPrefill] = React.useState<IRecordPrefill | null>(null);
 
-  // Bootstrap @spaarke/auth once.
+  // Bootstrap @spaarke/auth once. Config resolves from the PCF manifest inputs FIRST,
+  // then falls back to the Dataverse environment variables (sprk_MsalClientId /
+  // sprk_BffApiAppId / sprk_BffApiBaseUrl) — the same pattern SemanticSearch uses, so
+  // the control works with zero form config where those env vars are set.
   React.useEffect(() => {
-    if (!clientAppId || !bffAppId || !bffBaseUrl) {
-      setAuthError('Communication actions are not configured (missing Client App ID / BFF App ID / API URL).');
-      return;
-    }
     let cancelled = false;
-    initializeAuth(clientAppId, bffAppId, bffBaseUrl, resolveDataverseUrl())
-      .then(() => {
-        if (!cancelled) setAuthReady(true);
-      })
-      .catch(err => {
+    void (async () => {
+      try {
+        const clientAppId = manifestClientAppId || (await getMsalClientId(webApi));
+        const bffAppId = manifestBffAppId || (await getBffApiAppId(webApi));
+        // getApiBaseUrl returns host-only (strips /api); @spaarke/auth re-adds /api.
+        const baseUrl = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
+        if (!clientAppId || !bffAppId || !baseUrl) {
+          if (!cancelled) {
+            setAuthError(
+              'Communication actions are not configured. Set the sprk_MsalClientId / sprk_BffApiAppId / ' +
+                'sprk_BffApiBaseUrl Dataverse environment variables (or the PCF Client App ID / BFF App ID / API URL inputs).'
+            );
+          }
+          return;
+        }
+        await initializeAuth(clientAppId, bffAppId, baseUrl, resolveDataverseUrl());
+        if (cancelled) return;
+        setBffBaseUrl(baseUrl);
+        setAuthReady(true);
+      } catch (err) {
         if (!cancelled) setAuthError(err instanceof Error ? err.message : 'Authentication failed to initialize.');
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [clientAppId, bffAppId, bffBaseUrl]);
+  }, [manifestClientAppId, manifestBffAppId, manifestApiBaseUrl, webApi]);
 
   // Load the record fields the composer needs for reply/forward pre-fill.
   React.useEffect(() => {
@@ -300,24 +326,32 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
 
   return (
     <div className={s.root}>
-      <Toolbar className={s.bar} aria-label="Communication actions">
-        <ToolbarButton icon={<ArrowReply20Regular />} disabled={composeDisabled} onClick={() => openComposer('reply')}>
-          Reply
-        </ToolbarButton>
-        <ToolbarButton icon={<ArrowForward20Regular />} disabled={composeDisabled} onClick={() => openComposer('forward')}>
-          Forward
-        </ToolbarButton>
-        <ToolbarButton icon={<Send20Regular />} disabled={composeDisabled} onClick={() => openComposer('draft')}>
-          Send
-        </ToolbarButton>
-        <ToolbarDivider />
-        <ToolbarButton icon={<Save20Regular />} disabled={disabled} onClick={handleSaveDraft}>
-          Save Draft
-        </ToolbarButton>
-        <ToolbarButton icon={<CloudArrowUp20Regular />} disabled={disabled} onClick={handleArchive}>
-          Save to SharePoint
-        </ToolbarButton>
-      </Toolbar>
+      <div className={s.barRow}>
+        <Toolbar size="small" className={s.bar} aria-label="Communication actions">
+          <ToolbarButton icon={<ArrowReply16Regular />} disabled={composeDisabled} onClick={() => openComposer('reply')}>
+            Reply
+          </ToolbarButton>
+          <ToolbarButton
+            icon={<ArrowForward16Regular />}
+            disabled={composeDisabled}
+            onClick={() => openComposer('forward')}
+          >
+            Forward
+          </ToolbarButton>
+          <ToolbarButton icon={<Send16Regular />} disabled={composeDisabled} onClick={() => openComposer('draft')}>
+            Send
+          </ToolbarButton>
+          <ToolbarDivider />
+          <ToolbarButton icon={<Save16Regular />} disabled={disabled} onClick={handleSaveDraft}>
+            Save Draft
+          </ToolbarButton>
+          <ToolbarButton icon={<CloudArrowUp16Regular />} disabled={disabled} onClick={handleArchive}>
+            Save to SharePoint
+          </ToolbarButton>
+        </Toolbar>
+        <div className={s.grow} />
+        {showVersionFooter && <Text className={s.versionText}>v{version}</Text>}
+      </div>
 
       {status && (
         <div className={s.notice}>
@@ -331,12 +365,6 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           <MessageBar intent="error">
             <MessageBarBody>{error}</MessageBarBody>
           </MessageBar>
-        </div>
-      )}
-
-      {showVersionFooter && (
-        <div className={s.footer}>
-          <Text className={s.versionText}>v{version} • Built 2026-07-15</Text>
         </div>
       )}
 

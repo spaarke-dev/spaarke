@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="CommunicationActions" version="1.0.0" display-name-key="Communication Actions" description-key="Virtual PCF: communication actions (Reply / Forward / Send / Save Draft / Save to SharePoint) on the OOB sprk_communication form. Hosts the shared EmailComposer for compose/reply/forward and calls the existing /api/communications/send + /{id}/archive via @spaarke/auth. Replaces the ribbon send script." control-type="virtual" api-version="1.3.18">
+  <control namespace="Spaarke.Controls" constructor="CommunicationActions" version="1.0.1" display-name-key="Communication Actions" description-key="Virtual PCF: communication actions (Reply / Forward / Send / Save Draft / Save to SharePoint) on the OOB sprk_communication form. Hosts the shared EmailComposer for compose/reply/forward and calls the existing /api/communications/send + /{id}/archive via @spaarke/auth. Replaces the ribbon send script." control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
