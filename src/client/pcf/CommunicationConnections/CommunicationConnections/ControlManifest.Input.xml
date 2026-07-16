@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="CommunicationConnections" version="1.0.0" display-name-key="Communication Connections" description-key="Virtual PCF: multi-association review for sprk_communication. Renders the task-015 association provenance as typed connection slots (per-slot confidence + confirm/change, Accept-all, Link-another, create-from-email) and writes the chosen regarding via applyResolverFields (ADR-024). Bind to the sprk_associationprovenance multiline column; place in the OOB form's right accessories column." control-type="virtual">
+  <control namespace="Spaarke.Controls" constructor="CommunicationConnections" version="1.0.0" display-name-key="Communication Connections" description-key="Virtual PCF: multi-association review for sprk_communication. Renders the task-015 association provenance as typed connection slots (per-slot confidence + confirm/change, Accept-all, Link-another, create-from-email) and writes the chosen regarding via applyResolverFields (ADR-024). Bind to the sprk_associationprovenance multiline column; place in the OOB form right accessories column." control-type="virtual">
     <external-service-usage enabled="false">
     </external-service-usage>
     <!-- PRIMARY bound property: the task-015 association provenance JSON (multiline, up to 10000 chars). -->
