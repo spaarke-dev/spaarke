@@ -3,7 +3,7 @@
 > **Status**: Initialized — ready for Wave 0 (task 001)
 > **Created**: 2026-07-16 via `/project-pipeline`
 > **Branch**: `work/messaging-communication-app-r1`
-> **Portfolio**: [Project #654](https://github.com/spaarke-dev/spaarke/issues/654) · Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Status: Active (Planning) · Start 2026-07-16 · Target: _unset_
+> **Portfolio**: [Project #654](https://github.com/spaarke-dev/spaarke/issues/654) · Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Status: Active (Planning) · Start 2026-07-16 · Target 2026-09-10
 
 Add **messaging (real-time chat) as the second channel** on Spaarke's existing communication platform — not a new module or pipeline. Azure Communication Services (ACS) Chat is the transport; Dataverse `sprk_communication` is the system of record; the BFF is the sole policy-enforcement and token-minting point. R1 delivers the server-side plumbing (channel provider + inbound ingestor + ACS integration), a first-class communication thread data model, and a usable **async (polling)** message experience in the MDA. The live open channel, spine-pushed notifications, SMS, and Teams/portal surfaces are deferred to the next project / R2 / R3.
 
