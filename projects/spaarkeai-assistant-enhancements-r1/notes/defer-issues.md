@@ -9,7 +9,7 @@
 | D-032-01 | FR-E5 BU/team enrichment in the User fragment | Deferral | task 032 (owner sign-off 2026-07-15) | {URL} |
 | D-043-01 | No client-accessible preference source for the SNS chip reorder | Gap | task 043 (FR-G1) | {URL} |
 | D-042-01 | User-scope MemoryItem seed deferred (no client memory-write endpoint) | Deferral | task 042 (FR-F3) | {URL} |
-| D-042-02 | Profile-write authZ depends on `sprk_userprofile` Dataverse row-security config | Security follow-up | task 042 (052 write-side hand-off) | {URL} |
+| D-042-02 | Profile-write authZ depends on `sprk_userprofile` Dataverse row-security config | Security follow-up | task 042 (052 write-side hand-off) | ✅ RESOLVED 2026-07-16 |
 
 ---
 
@@ -48,3 +48,4 @@
 - **Mitigations present**: client sources the caller's own id; the client write runs under the **caller's** Dataverse privileges (row-level security applies, unlike the server app-only read); free-text is length/newline-hygiened at write time; and 052 F3/F4 proved profile text can never flip grounding/dispatch — the blast radius is tone/selection bias in the victim's own turn, not control-flow.
 - **What it needs**: confirm/lock the `sprk_userprofile` security role so a user can only create/update a row keyed to **their own** `systemuserid` (or move the write behind a server endpoint that re-derives the caller key server-side — heavier, new BFF surface). This is a **Dataverse security-role configuration** task, not a client-code defect.
 - **Trigger to revisit**: before production enablement of the questionnaire write; owner/security review of the `sprk_userprofile` role.
+- ✅ **RESOLVED 2026-07-16**: owner confirmed `sprk_userprofile` is **user-scoped** — a user cannot create/update a row keyed to another user's `sprk_systemuser`, so the forge vector is closed at the Dataverse role level. No code change needed.
