@@ -1,6 +1,8 @@
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -82,6 +84,18 @@ public interface ISearchIndexNameResolver
         string? parentEntityType,
         string? parentEntityId,
         CancellationToken ct);
+
+    /// <summary>
+    /// Returns the single canonical tenant-default AI Search index name — the value used for BOTH
+    /// reads and writes when no per-record index is resolved via <see cref="ResolveAsync"/>.
+    /// This is the consolidation point for FAILURE-MODES G-9: the read path
+    /// (<c>RagService</c>) and every write/stamp path (indexing job handler, RAG endpoints,
+    /// <c>KnowledgeDeploymentService</c> default deployment) resolve the default from this ONE
+    /// setting (<see cref="AiSearchOptions.KnowledgeIndexName"/>), so read and write can no longer
+    /// silently target different indexes. The deprecated <c>Analysis:SharedIndexName</c> is no
+    /// longer consulted by the write path (FR-26).
+    /// </summary>
+    string GetDefaultIndexName();
 }
 
 /// <inheritdoc cref="ISearchIndexNameResolver"/>
@@ -103,15 +117,21 @@ public sealed class SearchIndexNameResolver : ISearchIndexNameResolver
     private const string BusinessUnitEntity = "businessunit";
 
     private readonly IGenericEntityService _entityService;
+    private readonly AiSearchOptions _aiSearchOptions;
     private readonly ILogger<SearchIndexNameResolver> _logger;
 
     public SearchIndexNameResolver(
         IGenericEntityService entityService,
+        IOptions<AiSearchOptions> aiSearchOptions,
         ILogger<SearchIndexNameResolver> logger)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
+        _aiSearchOptions = aiSearchOptions?.Value ?? throw new ArgumentNullException(nameof(aiSearchOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+
+    /// <inheritdoc />
+    public string GetDefaultIndexName() => _aiSearchOptions.KnowledgeIndexName;
 
     /// <inheritdoc />
     public async Task<string?> ResolveAsync(

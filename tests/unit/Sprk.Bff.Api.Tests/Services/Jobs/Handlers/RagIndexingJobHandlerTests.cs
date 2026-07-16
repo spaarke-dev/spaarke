@@ -45,11 +45,6 @@ public class RagIndexingJobHandlerTests
         _searchIndexNameResolverMock = new Mock<ISearchIndexNameResolver>();
         _loggerMock = new Mock<ILogger<RagIndexingJobHandler>>();
 
-        var analysisOptions = Options.Create(new AnalysisOptions
-        {
-            SharedIndexName = "spaarke-knowledge-index-v2"
-        });
-
         // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — default the resolver to
         // return null (tenant-default fall-through) so existing tests behave UNCHANGED. Tests
         // exercising explicit-routing branches override this Setup.
@@ -60,6 +55,13 @@ public class RagIndexingJobHandlerTests
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((string?)null);
+
+        // FR-26 / G-9: the single canonical tenant-default index. The handler stamps this on the
+        // Dataverse tracking field when no per-record index resolves (replacing the deprecated
+        // Analysis:SharedIndexName read).
+        _searchIndexNameResolverMock
+            .Setup(x => x.GetDefaultIndexName())
+            .Returns("spaarke-files-index");
 
         // RagTelemetry is a concrete class — create a real instance.
         // Its methods are not virtual so cannot be mocked; telemetry
@@ -72,7 +74,6 @@ public class RagIndexingJobHandlerTests
             _idempotencyServiceMock.Object,
             _dataverseServiceMock.Object,
             _searchIndexNameResolverMock.Object,
-            analysisOptions,
             telemetry,
             _loggerMock.Object);
     }
@@ -640,9 +641,11 @@ public class RagIndexingJobHandlerTests
         capturedUpdate.SearchIndexedOn.Should().Be(capturedUpdate.SearchIndexCompletedOn,
             "legacy SearchIndexedOn MUST mirror the new SearchIndexCompletedOn during dual-write");
 
-        // Index routing (unchanged behaviour)
-        capturedUpdate.SearchIndexName.Should().Be("spaarke-knowledge-index-v2",
-            "SearchIndexName is the index routing field — unchanged by the lifecycle migration");
+        // Index routing (FR-26 / G-9): when no per-record index resolves, the stamp is the single
+        // canonical tenant default from ISearchIndexNameResolver.GetDefaultIndexName()
+        // (AiSearch:KnowledgeIndexName) — NOT the deprecated Analysis:SharedIndexName.
+        capturedUpdate.SearchIndexName.Should().Be("spaarke-files-index",
+            "the completion writer stamps the canonical default index resolved via the resolver");
 
         // Queuedon MUST NOT be set on completion — that was stamped at enqueue time
         capturedUpdate.SearchIndexQueuedOn.Should().BeNull(
