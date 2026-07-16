@@ -27,13 +27,22 @@
 | `sprk_threadtype` | Choice (local) | `Record-Anchored = 100000000`, `Direct 1:1 = 100000001` | design §6 topologies; drives 043 |
 | `sprk_privacystate` | Choice (local) | `Open = 100000000`, `Private = 100000001` | design §5/§6.1 "thread-level privacy state" (D-04) |
 | `sprk_privacyeffectivefrom` | Date and Time | nullable; set when flipped to Private/Open — drives **point-forward** switch (prior messages keep prior visibility) | design §5 "point-forward (D-04)" |
-| **Anchor (regarding)** — reuse ADR-024, NOT a new mechanism | | see 4.2 | design §6.1 "anchor (ADR-024 regarding family)" |
+| **Anchor (regarding)** — REUSE the existing regarding family, see 4.1a | | — | design §6.1 "anchor (ADR-024 regarding family, **not a new mechanism**)" |
 
-> **Anchor note (one design detail to confirm at build)**: the thread must be filterable by "which record it's about" without a second regarding mechanism (ADR-024 MUST). **Recommended (thin)**: add a single **denormalized polymorphic anchor** = 2 fields mirroring the existing `sprk_regardingrecord*` convention on `sprk_communication`:
-> - `sprk_anchorrecordid` (Text, 100) — the anchor record's GUID
-> - `sprk_anchorrecordtype` (Text, 100) — the anchor entity logical name (e.g. `sprk_matter`, `sprk_project`)
->
-> This mirrors the polymorphic pattern the audit found and keeps the entity thin. Task 004's `IThreadResolver` populates it from the message's resolved regarding at thread-create. **Alternative (symmetry)**: replicate the full typed `sprk_regarding*` lookup set — heavier, only choose if you want native lookups on the thread form. Confirm which at build; the rest of the spec is independent of this choice.
+#### 4.1a Anchor = REUSE the existing ADR-024 regarding family (NOT new fields)
+
+**Do NOT invent `sprk_anchor*` fields.** `sprk_communication` already carries the ADR-024 regarding family, populated by the existing **RegardingResolver / `RegardingFieldMap`** (`.claude/adr/ADR-024`). The thread anchors with the **same field names + the same resolver** — one regarding mechanism, applied to a second entity. Add to `sprk_communicationthread`:
+
+| Schema name (identical to `sprk_communication`) | Type | Purpose |
+|---|---|---|
+| `sprk_regardingrecordid` | Text (100) | anchor record GUID — the denormalized polymorphic pointer |
+| `sprk_regardingrecordtype` | Text (100) | anchor entity logical name (e.g. `sprk_matter`) |
+| `sprk_regardingrecordname` | Text (400) | display name (for the thread form/grid) |
+| `sprk_regardingrecordurl` | Text (400) | deep link (optional, mirror parity) |
+
+- This **denormalized set is required + sufficient**: `sprk_regardingrecordid` + `sprk_regardingrecordtype` is exactly what `MembershipResolverService` (ADR-034) needs to derive open-thread membership for the anchor record, and what the timeline filters on.
+- **Optional**: the typed `sprk_regarding{matter,project,invoice,servicerequest,workassignment,event,person,organization,account,budget,analysis}` lookups — add these to the thread **only** if you want native lookup controls / rollups on the thread form. Not required for R1.
+- **Population**: `IThreadResolver` (task 040) sets these by calling the **existing** `RegardingFieldMap` the association engine already runs for communications — **no new resolver, catalog, or PCF**. Task 040 copies the message's resolved regarding onto its thread, same as `ThreadContinuityRung` already copies regarding onto email replies.
 
 ### 4.2 Child table: `sprk_communicationchannelref` (thread↔channel, design §6.1 D-03)
 
@@ -90,7 +99,7 @@ One row per `(thread, channel, external-ref)`. R1 populates the ACS `ChatThreadI
 ## Verification (tasks 004/005 close-out, after owner creates)
 
 Run via Dataverse MCP `describe` and confirm each of the above exists with the stated type. Checklist:
-- [ ] `sprk_communicationthread` entity exists (User/Team owned) with `sprk_threadtype`, `sprk_privacystate`, `sprk_privacyeffectivefrom`, anchor fields
+- [ ] `sprk_communicationthread` entity exists (User/Team owned) with `sprk_threadtype`, `sprk_privacystate`, `sprk_privacyeffectivefrom`, and the reused regarding pointer (`sprk_regardingrecordid/type/name/url` — NOT `sprk_anchor*`)
 - [ ] `sprk_communicationchannelref` exists with `sprk_thread` lookup + `sprk_channeltype` + `sprk_externalref`
 - [ ] `sprk_communication.sprk_thread` lookup → thread; `sprk_isprivate`, `sprk_isinternalonly`, `sprk_privilegeclassification`, `sprk_acsmessageid`, `sprk_acschatthreadid`
 - [ ] `sprk_communicationuserid` on BOTH `systemuser` and `contact`
