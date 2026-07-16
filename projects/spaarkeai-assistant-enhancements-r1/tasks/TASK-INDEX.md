@@ -32,7 +32,7 @@
 | 050 | Authoring: richer `sprk_tooldescription` + chips + narrow ambiguity set + Q&A→list | 6 | FR-J1, FR-G2 | 🔲 | 002 | 051 | STANDARD | sonnet / high | ❌ catalog (coord) |
 | 051 | Eval cases per catalog change + negative profile-injection cases | 6 | NFR-06 | 🔲 | 030,050 | — | FULL | sonnet / high | ✅ safe (eval) |
 | 052 | Profile security / authZ / privacy (roles, OBO vs app-only, erasure, prompt-injection) | 6 | NFR-05 | ✅ | 030 | — | FULL | opus / high | ✅ safe (review) — **PASS; signed off 2026-07-16 (F1 ratified · F2 delimiting → renderer · F5 erasure → 042)** |
-| 053 | Publish-size ≤60 MB check + CVE scan | 6 | NFR-04 | 🔲 | 011,022,032,044 | 054 | STANDARD | sonnet / high | ✅ safe (verification) |
+| 053 | Publish-size ≤60 MB check + CVE scan | 6 | NFR-04 | ✅ | 011,022,032,044 | 054 | STANDARD | sonnet / high | ✅ safe (verification) — **DONE 2026-07-16 (deps all ✅): size 48.80 MB compressed incl. PDBs (−0.83 vs 49.63 baseline, ≪ 60 ceiling) — PASS; R1 added ZERO packages (verified git). CVE: ONE pre-existing HIGH — `Microsoft.Kiota.Abstractions 1.21.2` (CVE-2026-44503, RedirectHandler credential leak; fix=1.22.0), IDENTICAL on master → NOT introduced by R1 (per-project gate satisfied). Documented + escalated as a repo-wide deploy-gate remediation (coordinated Kiota bump, natural home = trivy-cve-cleanup-r1) — must land before/with 054. Report: `notes/publish-size-cve-report.md`.** |
 | 054 | Deploy: BFF + SpaarkeAi code page + Dataverse catalog rows | 6 | — | 🔲 | 053 | 090 | STANDARD | sonnet / high | ❌ prescriptive (irreversible) |
 | 090 | Project wrap-up (gates, test-diet, deferrals, README→Complete, sync) | 7 | — | 🔲 | 054 | — | FULL | sonnet / high | ❌ prescriptive (final) |
 
