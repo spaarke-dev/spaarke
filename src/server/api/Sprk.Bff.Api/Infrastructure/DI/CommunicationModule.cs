@@ -1,6 +1,7 @@
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Acs;
 using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Engine.Detectors;
@@ -49,6 +50,13 @@ public static class CommunicationModule
         services.AddSingleton<ICommunicationChannelSender, EmailChannelSender>();
         services.AddSingleton<ICommunicationArchiver, EmailArchiver>();
         services.AddSingleton<CommunicationChannelDispatcher>();
+
+        // ACS identity plane (FR-03 / task 010): server-side ACS identity creation + `communicationUserId`
+        // ↔ Dataverse mapping + `chat`-scoped token minting. Registered UNCONDITIONALLY (ADR-010 / ADR-032)
+        // via the ACS-owned extension; the CommunicationIdentityClient is built from the DI-injected central
+        // TokenCredential (ADR-028 / NFR-05 — no inline credential, no connection-string key). ACS types stay
+        // inside Services/Communication/ (ADR-045). Consumed by the messaging transport (011/020/051).
+        services.AddAcsIdentityPlane(configuration);
 
         // Association Engine (ADR-045 / FR-09/FR-10): the pure Graph→envelope boundary mapper, the
         // ordered rungs, and the envelope-only engine. All unconditional (consumed unconditionally by
