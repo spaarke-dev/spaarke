@@ -210,7 +210,11 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   const handleConfirm = React.useCallback(
     (conn: Connection, chosen?: { targetEntity: string; targetId: string; targetName?: string }): void => {
       const selection: IRegardingSelection = chosen
-        ? { entityType: chosen.targetEntity, recordId: chosen.targetId, recordName: chosen.targetName ?? chosen.targetId }
+        ? {
+            entityType: chosen.targetEntity,
+            recordId: chosen.targetId,
+            recordName: chosen.targetName ?? chosen.targetId,
+          }
         : connectionTarget(conn);
       void fileSelection(conn.field, selection);
     },
@@ -364,7 +368,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
 
       {showVersionFooter && (
         <div className={s.footer}>
-          <Text className={s.versionText}>v{version} • Built 2026-07-15</Text>
+          <Text className={s.versionText}>v{version} • Built 2026-07-16</Text>
         </div>
       )}
 
