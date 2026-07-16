@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -237,6 +238,97 @@ public sealed class DispositionRoutabilitySeamTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // (1e) sprk_risk confirmation gate (assistant-enhancements-r1 task 021 / FR-D1). The resolved
+    //      Binding's declared sprk_risk feeds the ONE metadata gate decision
+    //      (PendingPlanManager.RequiresConfirmation — ADR-041 tier × risk × origin). AlwaysConfirm
+    //      SUSPENDS the dispatch (pending Gate marker BEFORE render, ADR-040) and presents a
+    //      suggestion-that-launches confirm chip INSTEAD of executing — no LLM spend, no ledger
+    //      output; the confirm click re-dispatches with the token, consumes the gate (CONFIRMED
+    //      marker), and executes. None (and ConfirmWhenUncertain, absent a dispatch-uncertain
+    //      producer on the Click path) runs with no gate. This is the dispatch-spine DoD for wiring
+    //      the Binding-risk axis LIVE (it was accepted by RequiresConfirmation but never fed from
+    //      the Click dispatch seam until this task).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DispatchAsync_AlwaysConfirmRisk_SuspendsWithoutExecuting()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.Informational, SelectionInputSchema, risk: BindingRisk.AlwaysConfirm);
+        h.GivenFlatTextAction("ROLE: unused — gated before the LLM.", PassThroughOutputSchema);
+
+        var chunks = await h.DispatchAsync(new { selectionText = "do the risky thing" });
+
+        // NOT EXECUTED: the gate fires BEFORE the LLM spend — no complete chunk, no ledger output.
+        h.OpenAi.LastPrompt.Should().BeNull("AlwaysConfirm suspends BEFORE the LLM spend");
+        chunks.Should().NotContain(c => c.Type == "complete");
+        (await h.GetStoredOutputAsync()).Should().BeNull("a suspended dispatch writes no SessionOutput");
+
+        // PRESENTED: a single suggestion-that-launches confirm chip re-dispatching THIS binding and
+        // carrying the confirm token.
+        var chip = chunks.Should().ContainSingle(c => c.Type == "chips").Subject
+            .Chips.Should().ContainSingle().Subject;
+        chip.TargetBindingId.Should().Be(BindingId.ToString());
+        var confirmGateId = ((JsonObject)chip.Args!)["confirmGateId"]!.GetValue<string>();
+        confirmGateId.Should().NotBeNullOrEmpty();
+
+        // LEDGER (ADR-040): a PENDING Gate marker for the gate id landed (store-precedes-presentation).
+        PendingPlanManager.GetCurrentGateStatus(await h.GetGatesAsync(), confirmGateId)
+            .Should().Be(PendingPlanManager.GateStatusPending);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_AlwaysConfirmRisk_ConfirmTokenReDispatch_ExecutesAndConfirmsGate()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.Informational, SelectionInputSchema, risk: BindingRisk.AlwaysConfirm);
+        h.GivenFlatTextAction("ROLE: Explain the clause.", PassThroughOutputSchema);
+        h.OpenAi.RawJsonToReturn = """{"new_text":"An explanation."}""";
+
+        // 1st dispatch → suspend + confirm chip (carrying the token).
+        var first = await h.DispatchAsync(new { selectionText = "a clause" });
+        var confirmGateId = ((JsonObject)first.Single(c => c.Type == "chips").Chips!.Single().Args!)["confirmGateId"]!
+            .GetValue<string>();
+        h.OpenAi.LastPrompt.Should().BeNull("the first pass did not execute");
+
+        // 2nd dispatch = the confirm click: re-dispatch THIS binding with the token → the gate is
+        // consumed and the Action executes.
+        var second = await h.DispatchAsync(new { selectionText = "a clause", confirmGateId });
+
+        h.OpenAi.LastPrompt.Should().NotBeNull("the confirmed re-dispatch executes the Action");
+        second.Should().Contain(c => c.Type == "complete").And.NotContain(c => c.Type == "error");
+        var stored = await h.GetStoredOutputAsync();
+        stored.Should().NotBeNull("the confirmed dispatch writes its SessionOutput");
+        stored!.Payload.GetProperty("new_text").GetString().Should().Be("An explanation.");
+
+        // The gate is now CONFIRMED (ADR-040 append-only resolution of the same gate id).
+        PendingPlanManager.GetCurrentGateStatus(await h.GetGatesAsync(), confirmGateId)
+            .Should().Be(PendingPlanManager.GateStatusConfirmed);
+    }
+
+    [Theory]
+    [InlineData(BindingRisk.None)]
+    [InlineData(BindingRisk.ConfirmWhenUncertain)]
+    public async Task DispatchAsync_NonAlwaysConfirmRisk_ExecutesWithoutGate(BindingRisk risk)
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.Informational, SelectionInputSchema, risk: risk);
+        h.GivenFlatTextAction("ROLE: Explain the clause.", PassThroughOutputSchema);
+        h.OpenAi.RawJsonToReturn = """{"new_text":"An explanation."}""";
+
+        var chunks = await h.DispatchAsync(new { selectionText = "a clause" });
+
+        // None never gates; ConfirmWhenUncertain does NOT gate on the Click path (dispatchUncertain has
+        // no live producer here — task 022) — the gate stays honestly unfired and the Action executes.
+        h.OpenAi.LastPrompt.Should().NotBeNull("a non-AlwaysConfirm risk executes with no gate on the Click path");
+        chunks.Should().Contain(c => c.Type == "complete").And.NotContain(c => c.Type == "chips");
+        (await h.GetStoredOutputAsync()).Should().NotBeNull();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // (2) LOUD rejection through the registry — a not-yet-routable disposition is
     //     rejected PRE-RUN at the admit-gate (never a silent drop, never
     //     admittable-but-unroutable). No SessionOutput is stored (rejected before run).
@@ -395,7 +487,11 @@ public sealed class DispositionRoutabilitySeamTests
 
         public Task SeedSessionAsync(ChatSession session) => Sessions.UpdateSessionCacheAsync(session);
 
-        public void GivenBinding(BindingDisposition disposition, string inputSchema, string consumerType = "disposition-seam-test") =>
+        public void GivenBinding(
+            BindingDisposition disposition,
+            string inputSchema,
+            string consumerType = "disposition-seam-test",
+            BindingRisk risk = BindingRisk.None) =>
             Routing
                 .Setup(c => c.GetBindingByIdAsync(BindingId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new Binding
@@ -406,7 +502,14 @@ public sealed class DispositionRoutabilitySeamTests
                     ActionKind = ActionKind.Prompted,
                     Disposition = disposition,
                     InputSchemaJson = inputSchema,
+                    Risk = risk,
                 });
+
+        public async Task<IReadOnlyList<SessionGate>?> GetGatesAsync()
+        {
+            var session = await Sessions.GetSessionAsync(TenantId, SessionId);
+            return session?.Gates;
+        }
 
         public void GivenFlatTextAction(string systemPrompt, string outputSchema) =>
             Scope

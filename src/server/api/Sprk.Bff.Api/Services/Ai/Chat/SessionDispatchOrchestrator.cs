@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -281,6 +282,76 @@ public class SessionDispatchOrchestrator
             "tenant={TenantId} session={SessionId} argFileCount={ArgFileCount}",
             binding.BindingId, binding.Ucid, binding.ConsumerType, action.Id, action.Name,
             binding.Disposition, request.TenantId, request.SessionId, requestedFileIds?.Count ?? 0);
+
+        // ── Task 021 (FR-D1) — sprk_risk confirmation gate ══════════════════════════════════════
+        // The resolved Binding's DECLARED risk posture (sprk_risk) feeds the ONE metadata-driven gate
+        // decision (PendingPlanManager.RequiresConfirmation — ADR-041 tier × risk × origin, the
+        // Binding-risk axis). Before executing the Action:
+        //   • AlwaysConfirm → SUSPEND: write the pending Gate marker BEFORE any render (ADR-040
+        //     store-precedes-presentation) and emit a "suggestion-that-launches" confirmation chip
+        //     INSTEAD of executing — the Action never runs, so there is NO LLM spend and NO side effect
+        //     until the user explicitly confirms. The confirm chip re-dispatches THIS binding carrying
+        //     the gate token (+ the original args verbatim); that re-dispatch consumes the pending gate
+        //     (writes the CONFIRMED marker) and executes. This is NOT a second gate — it reuses the ONE
+        //     PendingPlanManager suspend/resume mechanism (ADR-039).
+        //   • None → no gate (the shipped behavior; every R1 create binding is None).
+        // dispatchUncertain has NO live producer on the Click path (task 022 owns that producer), so it
+        // is false here — ConfirmWhenUncertain therefore does not gate on the Click path yet, honestly.
+        var confirmGateId = TryReadConfirmGateId(request.Args);
+        var gateAlreadyConfirmed = false;
+        if (confirmGateId is not null)
+        {
+            // A confirm-click re-dispatch: consume the pending gate (get-then-delete + CONFIRMED marker,
+            // ADR-040). A valid, still-pending token FOR THIS binding lets execution proceed this pass;
+            // an expired / already-consumed / foreign token resolves to null and falls through to re-gate
+            // (fail-closed — a stale confirm can never execute a gated capability).
+            var resumed = await _pendingPlanManager
+                .ResumeInvocationAsync(request.TenantId, request.SessionId, confirmGateId, cancellationToken)
+                .ConfigureAwait(false);
+            gateAlreadyConfirmed = resumed is not null
+                && string.Equals(resumed.BindingId, binding.BindingId.ToString(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!gateAlreadyConfirmed
+            && PendingPlanManager.RequiresConfirmation(sideEffectClass: null, risk: binding.Risk, dispatchUncertain: false))
+        {
+            var gateId = $"dispatch-confirm-{Guid.NewGuid():N}";
+
+            // LEDGER FIRST (ADR-040): the pending marker must exist before the confirmation renders. A
+            // session that vanished mid-turn throws here (pre-first-chunk) → mapped to a clean error by
+            // the endpoint; the Action is NEVER executed on a failed suspend (fail-closed, NFR-03).
+            await _pendingPlanManager
+                .SuspendInvocationAsync(
+                    new PendingInvocation
+                    {
+                        GateId = gateId,
+                        Kind = PendingPlanManager.GateKindConfirmation,
+                        SessionId = request.SessionId,
+                        TenantId = request.TenantId,
+                        ToolId = binding.Ucid ?? binding.ConsumerType,
+                        BindingId = binding.BindingId.ToString(),
+                        // Gate fired on Binding risk alone (no tool side-effect class on the dispatch path).
+                        SideEffectClass = null,
+                        Risk = RiskToLedgerValue(binding.Risk),
+                        // Preserve the original args so the confirmed re-dispatch reproduces the request.
+                        ArgsJson = request.Args is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } a
+                            ? a.GetRawText()
+                            : "{}",
+                        Title = binding.Ucid ?? binding.ConsumerType,
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "FR-D1: dispatch suspended for confirmation (sprk_risk={Risk}) — gateId={GateId} bindingId={BindingId} " +
+                "consumerType={ConsumerType} tenant={TenantId} session={SessionId}. Action NOT executed.",
+                binding.Risk, gateId, binding.BindingId, binding.ConsumerType, request.TenantId, request.SessionId);
+
+            // Present the suggestion-that-launches: a chip that re-dispatches THIS binding carrying the
+            // original args verbatim + the confirm token. The user's explicit click IS the confirmation.
+            yield return AnalysisChunk.FromChips(new[] { BuildConfirmChip(binding, gateId, request.Args) });
+            yield break;
+        }
 
         // Both executor legs (prompted / coded) produce the output JsonElement + its grounding source
         // refs, then join the SAME store-before-render tail (OutputRouter.RouteAsync) below — one ledger
@@ -878,6 +949,64 @@ public class SessionDispatchOrchestrator
         root.TryGetProperty("tldr", out _)
         || root.TryGetProperty("entities", out _)
         || root.TryGetProperty("keywords", out _);
+
+    /// <summary>
+    /// The dispatch-args member carrying the sprk_risk confirmation-gate token on a confirm-click
+    /// re-dispatch (task 021). Kept as a constant so the suspend-side chip author and the resume-side
+    /// reader cannot drift. THIS boundary owns the parse; the client forwards it verbatim (ADR-039).
+    /// </summary>
+    internal const string ConfirmGateArgKey = "confirmGateId";
+
+    /// <summary>
+    /// Tolerant extraction of the task-021 confirmation-gate token (<c>confirmGateId</c> string) from
+    /// the dispatch args. Absent / null / non-string degrades to null (no confirm in flight) — arg
+    /// parsing never throws for shape drift.
+    /// </summary>
+    internal static string? TryReadConfirmGateId(JsonElement? args)
+    {
+        if (args is not { ValueKind: JsonValueKind.Object } obj)
+        {
+            return null;
+        }
+        if (!obj.TryGetProperty(ConfirmGateArgKey, out var el) || el.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        var value = el.GetString();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    /// <summary>
+    /// Maps the Binding's <see cref="BindingRisk"/> to the ledger/audit wire vocabulary
+    /// (<c>none | confirm-when-uncertain | always-confirm</c>) recorded on the suspended
+    /// <see cref="PendingInvocation.Risk"/> + its <c>SessionGate</c> marker (NFR-07 identifiers only).
+    /// </summary>
+    private static string RiskToLedgerValue(BindingRisk risk) => risk switch
+    {
+        BindingRisk.AlwaysConfirm => "always-confirm",
+        BindingRisk.ConfirmWhenUncertain => "confirm-when-uncertain",
+        _ => "none",
+    };
+
+    /// <summary>
+    /// Builds the task-021 "suggestion-that-launches" confirmation chip: it re-dispatches THIS Binding
+    /// carrying the ORIGINAL args verbatim PLUS the confirm token (<see cref="ConfirmGateArgKey"/>). The
+    /// client forwards chip args verbatim as the next dispatch's args (ADR-039 — it never interprets
+    /// them); THIS boundary reads the token back on the re-dispatch to consume the pending gate.
+    /// </summary>
+    private static AnalysisChunkChip BuildConfirmChip(Binding binding, string gateId, JsonElement? originalArgs)
+    {
+        var chipArgs = originalArgs is { ValueKind: JsonValueKind.Object } obj
+            ? JsonNode.Parse(obj.GetRawText())!.AsObject()
+            : new JsonObject();
+        chipArgs[ConfirmGateArgKey] = gateId;
+
+        return new AnalysisChunkChip(
+            TargetBindingId: binding.BindingId.ToString(),
+            Label: $"Confirm: {binding.ConsumerType}",
+            Args: chipArgs,
+            RequiresAttachments: false);
+    }
 
     /// <summary>
     /// Tolerant extraction of the P1 <c>fileIds</c> arg (string array). Missing /
