@@ -51,6 +51,14 @@
          spike 003 measured +0.22 MB compressed (only Azure.Communication.{Identity,Common}.dll are new).
          Uses the DI-injected central TokenCredential (ADR-028 / NFR-05) — NEVER a connection-string key. -->
     <PackageReference Include="Azure.Communication.Identity" Version="1.3.1" />
+    <!-- Azure.Communication.Chat 1.4.0 — ACS thread + membership ops (messaging-communication-app-r1
+         task 011 / FR-15). Thin over the already-present Azure.Core + Azure.Communication.Common (added
+         with Identity above); spike 003 compile-verified the exact retention API
+         (ThreadCreationDateRetentionPolicy(deleteThreadAfterDays:30)) and measured the ACS SDK trio at
+         +0.22 MB compressed total — Chat adds only its own ~0.1 MB DLL. ChatClient auth is a server-minted
+         chat token rooted in the DI-injected central TokenCredential via the identity plane (ADR-028 /
+         NFR-05) — NEVER a connection-string key. -->
+    <PackageReference Include="Azure.Communication.Chat" Version="1.4.0" />
     <!-- Cosmos DB SDK v3 — AI persistence (AIPU2-030: SessionPersistenceService, AIPU2-033: AuditLogService) -->
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.47.0" />
     <PackageReference Include="Azure.AI.DocumentIntelligence" Version="1.0.0" />

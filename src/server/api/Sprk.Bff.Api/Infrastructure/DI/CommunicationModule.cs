@@ -58,6 +58,15 @@ public static class CommunicationModule
         // inside Services/Communication/ (ADR-045). Consumed by the messaging transport (011/020/051).
         services.AddAcsIdentityPlane(configuration);
 
+        // ACS thread + membership plane (FR-15 / task 011): server-side chat-thread create (with 30-day
+        // auto-delete retention set at create time) + idempotent, batch-friendly Add/Remove participant
+        // ops. Registered UNCONDITIONALLY (ADR-010 / ADR-032) via the ACS-owned extension; the ChatClient is
+        // built from a chat token rooted in the DI-injected central TokenCredential (ADR-028 / NFR-05 — no
+        // inline credential, no connection-string key). Lazy client construction requires no live ACS
+        // resource at startup. ACS types stay inside Services/Communication/ (ADR-045). Consumed by the
+        // messaging sender (020), membership reconcile (041), and outbound send (051).
+        services.AddAcsThreadPlane();
+
         // Association Engine (ADR-045 / FR-09/FR-10): the pure Graph→envelope boundary mapper, the
         // ordered rungs, and the envelope-only engine. All unconditional (consumed unconditionally by
         // the inbound processor per ADR-032; no feature gate). Rungs are registered as IAssociationRung
