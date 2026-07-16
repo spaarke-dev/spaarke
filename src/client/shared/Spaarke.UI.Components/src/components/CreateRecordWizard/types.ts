@@ -336,6 +336,22 @@ export interface ICreateRecordWizardConfig {
    * fields are applied — the user can still override everything.
    */
   getAssignWorkDefaults?: () => Partial<IAssignWorkFollowOnState>;
+  /**
+   * Optional "Assign to me" resolver for the Assign Work follow-on step's
+   * Assigned Attorney field (spaarkeai-assistant-enhancements-r1 task 014 /
+   * FR-A4). When supplied, `AssignWorkFollowOnStep` renders an "Assign to me"
+   * button next to Assigned Attorney that calls this resolver and applies the
+   * result via `onAttorneyChange`. The entity wizard supplies this using its
+   * own `IDataService` (e.g. `() => resolveCurrentUserAsContactAssignee(dataService)`
+   * from `services/userLookup.ts`) — `CreateRecordWizard` never resolves
+   * identity itself. Omitting this field hides the button entirely
+   * (fully backward compatible, opt-in only).
+   *
+   * @returns The current user resolved onto the target assignee entity
+   * (`ILookupItem`), or `null` when unresolvable — the caller degrades
+   * gracefully (field stays empty for manual search).
+   */
+  resolveCurrentUserAssignee?: () => Promise<ILookupItem | null>;
 
   /**
    * Optional override for the built-in "Next Steps" card set (default:

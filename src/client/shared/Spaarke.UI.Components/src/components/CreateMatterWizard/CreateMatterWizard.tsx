@@ -48,6 +48,7 @@ import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignm
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
 import type { AuthenticatedFetchFn, IUserBuCascadeDefaults } from '../../services/EntityCreationService';
 import type { AssociationResult } from '../AssociateToStep/types';
+import { resolveCurrentUserAsContactAssignee } from '../../services/userLookup';
 
 // ---------------------------------------------------------------------------
 // Dataverse client URL helper
@@ -82,10 +83,19 @@ function getDataverseClientUrl(): string {
  *
  * - sprk_project: uses the N:N relationship sprk_Project_Matter_nn
  * - account: uses a direct $ref association on the matter's account lookup
+ * - sprk_invoice: updates the SELECTED invoice's own `sprk_Matter` lookup to
+ *   point at the new matter (reverse direction from account/project — an
+ *   invoice references its matter directly; the matter holds no reference
+ *   back. Confirmed live schema per `INVOICE_REGARDING_TARGETS` /
+ *   visual-host-create-button-r1 task 030 field manifest. Added
+ *   spaarkeai-assistant-enhancements-r1 task 014 / FR-A5.)
  *
  * Returns a success/failure result; never throws.
+ *
+ * Exported for unit testing (spaarkeai-assistant-enhancements-r1 task 014) —
+ * see `__tests__/CreateMatterWizard.associateToRecord.test.ts`.
  */
-async function associateToRecord(
+export async function associateToRecord(
   dataService: IDataService,
   matterId: string,
   association: AssociationResult
@@ -134,6 +144,20 @@ async function associateToRecord(
       console.info(
         '[CreateMatterWizard] Account association set:',
         `account(${recordId}) -> sprk_matter(${cleanMatterId})`
+      );
+      return { success: true };
+    }
+
+    if (entityType === 'sprk_invoice') {
+      // For invoice: update the SELECTED invoice's own Matter lookup to point
+      // at the newly created matter. Reverse direction from account/project —
+      // see doc comment above.
+      await dataService.updateRecord('sprk_invoice', recordId, {
+        'sprk_Matter@odata.bind': `/sprk_matters(${cleanMatterId})`,
+      });
+      console.info(
+        '[CreateMatterWizard] Invoice association set:',
+        `sprk_invoice(${recordId}) -> sprk_matter(${cleanMatterId})`
       );
       return { success: true };
     }
@@ -286,13 +310,16 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
 
       // Associate To step — optional step 1.
       // Requires navigationService (for the Dataverse lookup dialog).
-      // Allows linking the new matter to a Project or Account before creation.
+      // Allows linking the new matter to a Project, Account, or Invoice
+      // before creation ("none" = Skip). Invoice added
+      // spaarkeai-assistant-enhancements-r1 task 014 / FR-A5.
       ...(navigationService
         ? {
             associateToStep: {
               entityTypes: [
                 { label: 'Project', entityType: 'sprk_project' },
                 { label: 'Account', entityType: 'account' },
+                { label: 'Invoice', entityType: 'sprk_invoice' },
               ],
               navigationService,
             },
@@ -330,6 +357,12 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         assignWorkPracticeAreaId: step2FormValuesRef.current.practiceAreaId,
         assignWorkPracticeAreaName: step2FormValuesRef.current.practiceAreaName,
       }),
+
+      // "Assign to me" on the Assign Work follow-on's Attorney field
+      // (spaarkeai-assistant-enhancements-r1 task 014 / FR-A4). Reuses the
+      // shared current-user -> contact resolution chain (see
+      // services/userLookup.ts doc comment) — no new identity mechanism.
+      resolveCurrentUserAssignee: () => resolveCurrentUserAsContactAssignee(dataService),
 
       resolveSpeContainerId: resolveSpeContainerId ? resolveSpeContainerId : () => Promise.resolve(''),
 
@@ -488,6 +521,8 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
               description: context.followOn.createEventDescription,
               regardingRecordId: matterId,
               regardingRecordName: matterName,
+              assignedToId: '',
+              assignedToName: '',
             };
             const eventResult = await eventService.createEvent(eventFormValues, 'sprk_matter');
             if (eventResult.warnings.length > 0) result.warnings.push(...eventResult.warnings);

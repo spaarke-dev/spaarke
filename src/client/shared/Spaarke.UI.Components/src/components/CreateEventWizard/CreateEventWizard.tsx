@@ -73,14 +73,26 @@ import {
  * signal (`initialAssociation` supplied OR `lockAssociation === true`)
  * preserves that surface's existing behavior (no Associate-To step at all)
  * while enabling the Visual Host locked-launch path this task targets.
+ *
+ * `showAssociateToStep` (spaarkeai-assistant-enhancements-r1 task 014 /
+ * FR-A5) adds a THIRD, purely additive gate: a caller that wants the
+ * unlocked association picker WITHOUT pre-seeding a value (e.g. the
+ * Assistant's create-task launch, before task 013's smart pre-seed wires an
+ * `initialAssociation`) can opt in explicitly. Defaults to `false`/undefined,
+ * so every existing caller (Visual Host locked launch, standalone Code Page)
+ * is unaffected — this is an extension of the existing gate, not a fork.
+ * `entityTypes` is `EVENT_REGARDING_TARGETS`, which already covers
+ * matter/project/invoice (plus account/contact/work-assignment/analysis/
+ * budget/organization) — no new entity-type catalog is introduced.
  */
 export function resolveEventAssociateToStepConfig(
   navigationService: INavigationService | undefined,
   initialAssociation: AssociationResult | undefined,
-  lockAssociation: boolean | undefined
+  lockAssociation: boolean | undefined,
+  showAssociateToStep?: boolean
 ): IAssociateToStepConfig | undefined {
   if (!navigationService) return undefined;
-  if (initialAssociation === undefined && !lockAssociation) return undefined;
+  if (initialAssociation === undefined && !lockAssociation && !showAssociateToStep) return undefined;
 
   return {
     entityTypes: EVENT_REGARDING_TARGETS.slice(),
@@ -165,6 +177,16 @@ export interface ICreateEventWizardProps {
    * passes `navigationService` but neither of these two props) unchanged.
    */
   lockAssociation?: boolean;
+  /**
+   * When `true`, surfaces the unlocked Associate-To step (matter/project/
+   * invoice/… per `EVENT_REGARDING_TARGETS`, or none) even when no
+   * `initialAssociation`/`lockAssociation` is supplied. Added
+   * spaarkeai-assistant-enhancements-r1 task 014 / FR-A5 for the Assistant's
+   * create-task launch — see `resolveEventAssociateToStepConfig` doc comment
+   * for the full gating rule. Defaults to `false`; every existing caller is
+   * unaffected.
+   */
+  showAssociateToStep?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +224,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
   tenantId,
   initialAssociation,
   lockAssociation,
+  showAssociateToStep,
 }) => {
   // -- Entity-specific form state --------------------------------------------
   const [formValid, setFormValid] = React.useState(false);
@@ -253,7 +276,12 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       // visual-host-create-button-r1 task 015 -- see resolveEventAssociateToStepConfig
       // doc comment for the gating rationale (precise gate vs. TodoWizardDialog's
       // navigationService-only gate, to avoid a Code Page regression).
-      associateToStep: resolveEventAssociateToStepConfig(navigationService, initialAssociation, lockAssociation),
+      associateToStep: resolveEventAssociateToStepConfig(
+        navigationService,
+        initialAssociation,
+        lockAssociation,
+        showAssociateToStep
+      ),
 
       infoStep: {
         id: 'create-record',
@@ -432,6 +460,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       webApiAdapter,
       initialAssociation,
       lockAssociation,
+      showAssociateToStep,
     ]
   );
 
