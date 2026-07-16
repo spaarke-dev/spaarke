@@ -108,6 +108,24 @@ public static class CommunicationModule
         services.Configure<AcsEventGridIngressOptions>(configuration.GetSection(AcsEventGridIngressOptions.SectionName));
         services.AddSingleton<AcsEventGridIngressService>();
 
+        // Inbound ACS-event normalizer (messaging-communication-app-r1 task 031 / FR-02). The ACS analog of
+        // GraphMessageNormalizer: maps an ACS chat Event Grid event → NormalizedMessage exactly ONCE at the
+        // pipeline boundary (ADR-045) — no Azure.Communication.* type leaks downstream (it reads raw JSON, not
+        // ACS SDK types). Pure mapper, no I/O → singleton (ADR-010), mirroring GraphMessageNormalizer's
+        // registration below. Consumed by IncomingMessagingJobHandler.
+        services.AddSingleton<AcsEventNormalizer>();
+
+        // Inbound ACS-message job handler (messaging-communication-app-r1 task 031 / FR-02, FR-04, NFR-03). The
+        // ACS analog of IncomingCommunicationJobHandler: consumes the IncomingMessaging job task 030 enqueues,
+        // normalizes it (AcsEventNormalizer), and persists it idempotently via the task-021 MessagingIngestor
+        // seam (resolved through CommunicationChannelDispatcher.ResolveIngestor(Message)). Idempotent dedupe on
+        // the ACS message id via the EXISTING IIdempotencyService — Event Grid at-least-once redelivery, genuine
+        // duplicates, and our own outbound echo (task 051) all collapse to exactly one persist. On repeated
+        // failure it returns JobStatus.Poisoned so CommunicationJobProcessor dead-letters the job (ADR-004/036 —
+        // never silently dropped). Registered as a concrete SCOPED type (mirrors IncomingCommunicationJobHandler)
+        // for direct resolution by CommunicationJobProcessor — NO second queue/DLQ/idempotency mechanism (root §10).
+        services.AddScoped<IncomingMessagingJobHandler>();
+
         // Association Engine (ADR-045 / FR-09/FR-10): the pure Graph→envelope boundary mapper, the
         // ordered rungs, and the envelope-only engine. All unconditional (consumed unconditionally by
         // the inbound processor per ADR-032; no feature gate). Rungs are registered as IAssociationRung
