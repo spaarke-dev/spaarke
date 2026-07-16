@@ -98,6 +98,7 @@ const config: Config = {
   },
   testRunner: 'jest-circus/runner',
   collectCoverage: false,
+  moduleDirectories: ['node_modules', '<rootDir>/node_modules'],
 };
 
 export default config;

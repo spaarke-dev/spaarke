@@ -1107,7 +1107,16 @@ export function WorkspacePane(): React.JSX.Element {
           : widgetData;
         const composeTabId = manager.addTab("compose", composeWidgetData, displayName);
         syncState();
-        ackComposeFrame();
+        // UC-5 truthfulness (task 020 / FR-C1): a NEW compose tab's widget has
+        // NOT resolved yet — only the empty shell exists. Acking here would
+        // claim "opened the draft in Compose" before anything materialized (the
+        // R2-D fabrication). Register a DRAFT's deferred render-ack now
+        // (stashing a pending id is not itself a claim); a NON-draft open's ack
+        // is withheld until the compose widget actually resolves + attaches, in
+        // the .then() below. Never ack at bare shell creation.
+        if (event.frameId && composeDraftLedgerRef) {
+          pendingRenderAcksRef.current.set(composeDraftLedgerRef, event.frameId);
+        }
         resolveWorkspaceWidget("compose").then((Component) => {
           const resolvedMeta = getWorkspaceWidgetMetadata("compose");
           manager.resolveTabComponent(
@@ -1116,6 +1125,14 @@ export function WorkspacePane(): React.JSX.Element {
             event.displayName ? undefined : resolvedMeta?.displayName,
           );
           syncState();
+          // UC-5 (task 020): the compose widget has now resolved + attached — a
+          // NON-draft open (upload/stored/empty) is genuinely materialized, so
+          // ack it here. Draft opens still defer to compose_content_rendered
+          // (registered above); if that render never fires, no ack is sent and
+          // the server's WaitForAckAsync times out into an honest failure.
+          if (event.frameId && !composeDraftLedgerRef) {
+            sendUiActionAck(event.frameId);
+          }
           const snapshot = manager.getSnapshot();
           const currentTabCount = snapshot.tabs.length;
           dispatch("workspace", {
@@ -1136,20 +1153,6 @@ export function WorkspacePane(): React.JSX.Element {
       const tabId = manager.addTab(widgetType, widgetData, displayName);
       syncState();
 
-      // D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): the tab is NOW
-      // actually materialized in this client's tab state — if the server frame
-      // carried a frameId (an ack-gated tool call is waiting), ack it referencing
-      // that EXACT frame id. Client-originated widget_load events (menu-opened
-      // tabs) never carry a frameId, so this is a no-op for them.
-      //
-      // This is the LAYOUT/other-widget path (Daily Briefing, Documents, …); a
-      // content-bearing Compose draft open is handled by the 'compose' branch
-      // above (which defers its ack until compose_content_rendered — DEF-08 /
-      // task 071). Plain opens ack on tab-open here.
-      if (event.frameId) {
-        sendUiActionAck(event.frameId);
-      }
-
       // Lazy-resolve the widget component; update the tab once resolved.
       resolveWorkspaceWidget(widgetType).then((Component) => {
         const resolvedMeta = getWorkspaceWidgetMetadata(widgetType);
@@ -1163,6 +1166,21 @@ export function WorkspacePane(): React.JSX.Element {
           event.displayName ? undefined : resolvedMeta?.displayName,
         );
         syncState();
+
+        // UC-5 truthfulness (task 020 / FR-C1) — MOVED here from tab-shell
+        // creation (was AIR2-037 acking at addTab). The tab's widget component
+        // has now genuinely resolved + attached; only NOW is "opened X" a true
+        // claim. If the server frame carried a frameId (an ack-gated tool call
+        // is waiting), ack it referencing that EXACT frame id. Client-originated
+        // widget_load events (menu-opened tabs) never carry a frameId, so this
+        // is a no-op for them. If resolution never completes, no ack is sent →
+        // the server's WaitForAckAsync times out into an honest failure, never a
+        // fabricated success. (This is the LAYOUT/other-widget path — Daily
+        // Briefing, Documents, …; a content-bearing Compose draft open defers
+        // its ack to compose_content_rendered in the 'compose' branch above.)
+        if (event.frameId) {
+          sendUiActionAck(event.frameId);
+        }
 
         // Snapshot the current tab count after resolution so ShellStageManager
         // can advance stage (Stage 2 → Stage 3 / Stage 4).
@@ -1219,9 +1237,15 @@ export function WorkspacePane(): React.JSX.Element {
     const defaultWidgets = event.defaultWidgets ?? [];
     const isExclusive = event.isExclusive ?? false;
 
-    // Clear all existing tabs when the playbook is exclusive (guardrail mode).
+    // Clear existing tabs when the playbook is exclusive (guardrail mode).
+    //
+    // No-collateral-teardown (task 020 / FR-C2 / UC-4): this teardown is an
+    // ORCHESTRATED action's side-effect. It must stay scoped to the workspace
+    // "stage" it owns and MUST NOT tear down an unrelated live Compose tab
+    // (the editor holds an unsaved draft/document — losing it was the UC-4
+    // regression). Preserve 'compose' work-product tabs across the clear.
     if (isExclusive && manager.getSnapshot().tabs.length > 0) {
-      manager.clearAllTabs();
+      manager.clearAllTabs({ preserveWidgetTypes: ["compose"] });
       syncState();
       // Emit tabs_clear so subscribers (e.g. ContextPaneController) can reset.
       dispatch("workspace", { type: "tabs_clear" });

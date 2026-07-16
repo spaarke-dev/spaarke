@@ -18,7 +18,7 @@
 | 012 | Wizard entry-payload envelope + hand-off (5→7 wrappers) | 2 | FR-A1, FR-A3 | 🔲 | 002 | 013,014 | FULL | opus / high | ❌ cross-cutting wizards |
 | 013 | Smart pre-seed integration (assistant pre-resolves → wizard defaults) | 2 | FR-B2 | 🔲 | 010,012 | — | FULL | opus / high | ❌ sequential |
 | 014 | In-wizard assign-to-me + association picker; grounding-optional | 2 | FR-A4, FR-A5, P6 | 🔲 | 012 | — | FULL | sonnet / high | ❌ wizard-overlap w/012 |
-| 020 | Action-outcome truthfulness invariant + no-collateral-teardown guard | 3 | FR-C1, FR-C2 | 🔲 | none | — | FULL | opus / high | ✅ safe (client) |
+| 020 | Action-outcome truthfulness invariant + no-collateral-teardown guard | 3 | FR-C1, FR-C2 | ✅ | none | — | FULL | opus / high | ✅ safe (client) |
 | 021 | `sprk_risk` gate-wiring → `PendingPlanManager.RequiresConfirmation` | 3 | FR-D1 | 🔲 | 002 | 022 | FULL | opus / xhigh | ❌ dispatch-spine (seam-test DoD) |
 | 022 | `dispatchUncertain` routing-confidence producer | 3 | FR-D2 | 🔲 | 021 | — | FULL | opus / high | ❌ dispatch-spine (seam-test DoD) |
 | 030 | User-scope stated-profile producer → `ContextBinder.userFragment` | 4 | FR-E2 (+role); FR-E5 BU/team→032 | ✅ | 001 | 031,032,042,051,052 | FULL | opus / xhigh | ❌ hot chat-path (sequential) |
