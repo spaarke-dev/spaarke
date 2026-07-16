@@ -1,5 +1,25 @@
 # Current Task State — Assistant Enhancements R1 ("Follow-Through")
 
+> **Last Updated**: 2026-07-16 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first, then the detailed table below.
+
+## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Milestone** | ✅ **Create flow works END-TO-END** — "create a matter" → draft-in-chat → pre-seeded Create Matter wizard → real record. Vertical went from designed-but-inert to working. |
+| **Effective progress** | ~16/25 tasks. Done this session: 002, 010, 011(closed), 012, 013a, 013b(parts 1+2), 014, 041. Prior: 001, 020, 030, 031, 032, 040, 042, 043, 052. |
+| **Task 013** | 🔄 parts 1+2 done (E2E launch works); **part 3 pending** = D-013-01 resolvedLookups server enrichment (wire the 010 resolver — core `SessionDispatchOrchestrator` + seam test; full design in `notes/defer-issues.md`). Follow-ons D-013-02/03/04 (create-todo logical-name draftValues · event-subtype display · completeHandoff ack). |
+| **Next Action** | **Focused dispatch-spine pass: 013 part 3 (D-013-01) + 021 (sprk_risk gate) together.** 021 finding: `RequiresConfirmation` accepts `BindingRisk` but its only live call site (`SprkChatAgentFactory.cs:732`) passes only the tool's SideEffectClass — the Binding's `sprk_risk` isn't wired into the gate; inject a capability-level risk check in `SessionDispatchOrchestrator` before Action execution (AlwaysConfirm→suspend, None→no gate). Both need `tests/integration/seam/**` DoD. |
+| **Owner-gated (needs Ralph)** | (1) Add `sprk_requiresnoattachedrecord` (Boolean, default No, `sprk` publisher) on `sprk_playbookconsumer` in the maker portal → unblocks 003→044 grounding guard. (2) Review 050 catalog tool-description/chip content (FR-J1). |
+| **Git** | Working tree CLEAN. **15 commits unpushed** to `origin/work/spaarkeai-assistant-enhancements-r1` (0 behind / 15 ahead) — run `/push-to-github` when ready. Branch synced with master earlier this session (merged for visibility). |
+| **Remaining after 013p3/021/022** | 044 (grounding PreFilter, needs the owner column) · 050 (owner review) · 051 (eval — owes E-002-01..17 + risk-tier cases) · 053 (size/CVE) · 054 (deploy) · 090 (wrap-up + test-diet). |
+
+### Critical Context
+The whole vertical is built on the shipped ADR-039 dispatch spine (no new pipeline). `SurfaceLaunch` disposition (100000007, live in spaarkedev1) routes create capabilities to a client-owned launch; the client mints a handoff id + sessionStorage rendezvous (012 `launchSurface`), the server surfaces `disposition`+`consumerType` on the terminal chunk (013a), and the client branches on it (013b). The 010 resolver is built + tested but NOT yet wired (D-013-01 is its only consumer). Dispatch-spine tasks (013 part 3, 021, 022) are main-session/sequential with seam-test DoD — do NOT parallelize them with each other; client/catalog tasks CAN fan out to subagents (proven: 012/041/014/013b ran as subagents this session). `sprk_mattertype_ref` has NO practice-area FK (verified) — that's why 011's incoherent-combo guard was closed satisfied-by-design.
+
+---
+
 | Field | Value |
 |---|---|
 | **014 ✅ MERGED (2026-07-16)** | Worktree subagent merged clean (barrel `services/index.ts` kept both 012 surfaceHandoff + 014 userLookup exports; BFF + shared-lib compile clean; branch cleaned). assign-to-me + association picker + grounding-optional fix (`CreateRecordWizard.addFilesStep.canAdvance→()=>true`). **Wizard files now stable → 013b is collision-free to run.** |
