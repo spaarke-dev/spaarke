@@ -9,9 +9,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Progress** | **31 / 45 done.** W1 + W2 + **W4 (042/043/044/062) COMPLETE & DEPLOYED to spaarkedev1.** Both PCFs render on the OOB form; Actions sign-in works; a test reply SENT. |
-| **Last commits** | `76ef649cb` (Actions v1.0.1 env-var + compact) · `efea8887c` (solution packaging) · `dc532415a` (044b/c) · `07fd904d7` (044a) · `ce5e56672`/`bd773083a` (042). Tree clean. |
-| **Status** | W4 done + deployed. **Next = next wave (owner to direct after /compact).** Actions **v1.0.1** ZIP ready to RE-import (fixes below). |
+| **Progress** | **33 / 45 done.** W1+W2+W4 done; **030 (rung 4 semantic ✅ `29834f041`) + 061 (wizard migration ✅ `c1360dcd0`) landed this session.** r2-core CLOSED → W3/W5/075 ungated. |
+| **Last commits** | `c1360dcd0` (061 fork retire) · `29834f041` (030 rung 4) · `8f19c2280` (W4 handoff). **075 agent RUNNING** (index-config, Services/Ai). Tree clean. |
+| **Status** | Driving the unblocked engine wave in main session: **031 (rung 5 AI classify) NEXT** → 032 (telemetry+tests) → 074-endpoint → W5 (050 gate clears → 051-054). Agents: 075 running; 061 done+merged. |
 | **⬆️ Actions v1.0.1 to re-import** | `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.0.1.zip` — env-var fallback (reads `sprk_MsalClientId`/`sprk_BffApiAppId`/`sprk_BffApiBaseUrl`) + OOB-compact toolbar (16px icons). Footer will read v1.0.1. Connections stays v1.0.0 (no change). |
 
 ### 🔑 AUTH / DEPLOY FACTS (spaarkedev1) — critical for future
@@ -66,7 +66,15 @@ Both PCFs imported + placed (Connections bound to `sprk_associationprovenance`+`
 
 ---
 
-## 030 (rung 4 semantic) — IMPLEMENTED, gates in progress
+## 031 (rung 5 AI classify) — SCOUTED, ready to implement (NEXT turn, fresh context)
+Groundwork done so the next turn implements immediately:
+- **Reuse entry**: `AppOnlyAnalysisService.AnalyzeEmailAsync` (`Services/Ai/AppOnlyAnalysisService.cs:1187`, returns `EmailAnalysisResult`) — app-only/MI runtime. Do NOT build a new runner (§11).
+- **⚠️ No analysis facade in PublicContracts yet** (unlike 030's ready-made `IRecordMatchingAi`). ADR-013 requires Communication→AI via PublicContracts, so 031 MUST **add a new `Services/Ai/PublicContracts/` analysis facade** (e.g. `ICommunicationAnalysisAi`) wrapping `AnalyzeEmailAsync` + a Null-Object peer + DI reg. r2-core closed → we own this now.
+- **JPS Action**: author via `jps-action-create` + `jps-validate` skills — `$choices`-constrained record-types + category/urgency/obligations[]/suggestedActions[]. FIRST check whether `AnalyzeEmailAsync` already runs a JPS Action producing category/urgency (read :1187 + EmailAnalysisResult) — may extend rather than author net-new. Output schema must ALSO serve W5 task 053 (Communication Triage) — design once.
+- **Rung**: `Kind=AiClassification` (5), Order 5 — slots in with **zero engine/mapper change** (same as rung 4: engine cost-gates AI rungs, mapper caps to Suggested). Singleton rung → scoped facade via `IServiceScopeFactory` (mirror `SemanticMatchRung`). Never auto-files; privilege FLAG-only (ADR-015); org→sprk_organization; rationale→provenance. Register in `CommunicationModule`. Telemetry hooks (tokens/latency/cache/fired-skipped) for 032.
+- Model tier for 031 = sonnet @ high (POML). Blocks 032 + 053.
+
+## 030 (rung 4 semantic) — DONE ✅ `29834f041` (gates clean, 327 tests green)
 - **NEW** `Services/Communication/Engine/Rungs/SemanticMatchRung.cs` (Kind=SemanticMatch/4, Order 4) + `Configuration/SemanticMatchOptions.cs` (`Communication:SemanticMatch`; Enabled kill-switch, Limit, MaxCandidates, MinScore 0.50, ScoreCeiling 0.80, MaxQueryChars 1000). **EDIT** `CommunicationModule.cs` (bind options + register rung singleton) + `appsettings.template.json` (SemanticMatch block under Communication).
 - **Zero engine/mapper change**: engine already partitions Kind 4/5 as cost-gated AI rungs (run only when deterministic didn't auto-file); mapper already caps AI rungs to Suggested (auto-file uses deterministic-only confidence). Rung consumes `IRecordMatchingAi` facade (ADR-013) from a per-eval `IServiceScopeFactory` scope (facade scoped, rung singleton). Index name NOT hardcoded (`SearchIndexName=null` → RecordSearchService resolves) — merge-clean with 075. Records index = matter/project/invoice only; org served by rung-2 domain (documented §11). ScoreCeiling 0.80 keeps semantic below 0.85 auto-file threshold. Telemetry: structured fired/skipped/hits/elapsed logs (032 consumes).
 - Build clean (0 err); **327 Communication tests green, 0 failed** (no regression; rung-4 unit tests = 032). §10 publish-size + CVE running; Step 9.5 gates next.
