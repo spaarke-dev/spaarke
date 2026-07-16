@@ -166,6 +166,18 @@ public static class CommunicationModule
         // which already injects the scoped IPostUploadIndexingEnqueuer via the same pattern.
         services.AddSingleton<ICommunicationEnrichmentService, CommunicationEnrichmentService>();
 
+        // Messaging attachment materialization (messaging-communication-app-r1 task 070 / FR-14). The net-new
+        // messaging step that materializes a chat file: ACS/file → SPE (SpeFileStore facade, ADR-007) →
+        // governed sprk_document (sprk_document.sprk_communication lookup) → sprk_communicationattachment
+        // intersection, returning the reference the ACS message carries (SPE is the store; binary never on the
+        // ACS message). Enforces CHAT-ATTACHMENT-POLICY.md (25 MB binary cap + MIME allow-list) BEFORE upload,
+        // rejecting oversize/disallowed with RFC 7807 ProblemDetails (ADR-019). Storage SCHEMA is unchanged —
+        // it reuses the SAME sprk_document/sprk_communicationattachment shape the email inbound path writes.
+        // Registered UNCONDITIONALLY (ADR-010 / ADR-032 — no feature gate). Scoped to match the Scoped
+        // ISpeFileOperations facade lifetime (the Singleton IGenericEntityService composes safely into a Scoped
+        // consumer). Consumed by the messaging inbound/file-share wiring (task 031 / 060), not registered here.
+        services.AddScoped<MessageAttachmentMaterializer>(); // task 070
+
         // Job handler: processes incoming email notifications from Graph webhooks (Task 072)
         // Extracts message details from Graph, creates sprk_communication record, handles attachments.
         // JobType: "IncomingCommunication" — processed by dedicated CommunicationJobProcessor (not shared queue).
