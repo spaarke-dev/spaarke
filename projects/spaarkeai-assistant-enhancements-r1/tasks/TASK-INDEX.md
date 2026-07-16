@@ -22,7 +22,7 @@
 | 021 | `sprk_risk` gate-wiring → `PendingPlanManager.RequiresConfirmation` | 3 | FR-D1 | 🔲 | 002 | 022 | FULL | opus / xhigh | ❌ dispatch-spine (seam-test DoD) |
 | 022 | `dispatchUncertain` routing-confidence producer | 3 | FR-D2 | 🔲 | 021 | — | FULL | opus / high | ❌ dispatch-spine (seam-test DoD) |
 | 030 | User-scope stated-profile producer → `ContextBinder.userFragment` | 4 | FR-E2 (+role); FR-E5 BU/team→032 | ✅ | 001 | 031,032,042,051,052 | FULL | opus / xhigh | ❌ hot chat-path (sequential) |
-| 031 | preference≠permission negative test; not-a-second-decider | 4 | FR-E3, FR-E4 | 🔲 | 030 | — | FULL | sonnet / high | ✅ safe (test file) |
+| 031 | preference≠permission negative test; not-a-second-decider | 4 | FR-E3, FR-E4 | ✅ | 030 | — | FULL | sonnet / high | ✅ safe (test file) |
 | 032 | Amend `EnvelopeBudget.User` + byte-stable render + eval re-baseline + caching | 4 | NFR-01, NFR-02, NFR-03 | 🔲 | 030 | — | FULL | opus / high | ❌ hot-path (eval gate) |
 | 040 | Assistant-pane tool drop-down (Fluent v9) | 5 | FR-F1 | ✅ | none | 041,042 | STANDARD | sonnet / high | ✅ safe |
 | 041 | Quick Start modal (reuse wizard library) | 5 | FR-F2 | 🔲 | 040 | — | STANDARD | sonnet / high | ❌ dropdown-surface w/040 |
