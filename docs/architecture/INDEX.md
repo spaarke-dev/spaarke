@@ -67,8 +67,8 @@ This directory contains comprehensive architecture documentation covering system
 
 | Document | Description | Last Updated | Last Reviewed | Status |
 |----------|-------------|--------------|---------------|--------|
-| [email-processing-architecture.md](email-processing-architecture.md) | Consolidated email-to-document pipeline (hybrid triggers, idempotency, .eml archival, RAG indexing) | 2026-04-05 | 2026-04-05 | New |
-| [communication-service-architecture.md](communication-service-architecture.md) | Communication service: outbound/inbound email, webhook/polling hybrid, mailbox verification, deduplication | 2026-04-05 | 2026-04-05 | Current |
+| [communication-intelligence-architecture.md](communication-intelligence-architecture.md) | **Canonical (R4)** — the Communication Intelligence substrate: normalized envelope, 6-rung Association Engine, confidence→status ladder + auto-file kill-switch, direction-symmetric enrichment, channel seams, suggestion endpoint, shared inbound patterns (idempotency, .eml archival, attachment→Document, RAG). Absorbs the retired email-processing / email-to-document docs. | 2026-07-16 | 2026-07-16 | Canonical (r4) |
+| [communication-service-architecture.md](communication-service-architecture.md) | Communication send/inbound service mechanics: canonical Graph send, mailbox accounts, webhook/polling hybrid, mailbox verification, deduplication (points to the canonical intelligence doc for the engine) | 2026-07-16 | 2026-07-16 | Current (r4) |
 | [office-outlook-teams-integration-architecture.md](office-outlook-teams-integration-architecture.md) | Office, Outlook, and Teams integration | 2026-04-05 | 2026-04-05 | Current |
 
 ### Feature Architectures

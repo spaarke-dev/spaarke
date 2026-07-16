@@ -2,7 +2,7 @@
   <metadata>
     <title>Author `docs/architecture/communication-intelligence-architecture.md`</title>
     <phase>Wave 8 — Documentation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>010, 011, 012, 013, 014, 015, 030, 031, 051, 052, 053, 054, 072, 073</dependencies>
     <blocks></blocks>

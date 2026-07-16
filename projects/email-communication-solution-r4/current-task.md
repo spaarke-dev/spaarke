@@ -1,7 +1,7 @@
 # Current Task — email-communication-solution-r4
 
 > **Purpose**: Active task state tracker for context recovery. Reset by `task-execute` on each task transition.
-> **Last Updated**: 2026-07-15 (by context-handoff — W4 deployed to spaarkedev1; Actions v1.0.1 ready)
+> **Last Updated**: 2026-07-16 (W8 documentation wave complete — 080/081/082)
 
 ---
 
@@ -9,7 +9,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Progress** | **38 / 45 done. W3 COMPLETE + 074-endpoint ✅.** All 6 rungs + telemetry + read-only `POST /{id}/suggest-associations` (behavior-preserving `EvaluateAsync` extract; 352 Comm tests green). Plus 061 + 075 merged. |
+| **W8 docs — DONE (2026-07-16)** | **080 ✅** authored `docs/architecture/communication-intelligence-architecture.md` (canonical R4 substrate; absorbed idempotency/.eml/attachment→Document/RAG from the retired `email-processing-architecture.md`). **081 ✅** data-model already R4-current → added 080 pointer; rewrote `communication-service-architecture.md` to R4; **DELETED** `email-processing-architecture.md` + `email-to-document-{architecture,automation}.md` (+ fixed 6 inbound links). **082 ⛔ N/A** — `EMAIL-TRIAGE-MODULE-DESIGN.md` never existed; RI design re-homed to `spaarke-notification-spine-r1`. Also **deleted the superseded R3 project body** (kept `SUPERSEDED.md` tombstone) + bannered the retired ribbon sections in `COMMUNICATION-DEPLOYMENT-GUIDE.md`. ⚠ Source-of-truth note: shipped send DTO field is `AttachmentDocumentIds`; `AttachmentDriveItemIds` rename deferred/unshipped. |
+| **Progress** | **41 / 45 done** (080/081/082 W8 docs complete; 082 N/A). Remaining: 090 wrap-up + owner-side 043 deploy remainder. **W3 COMPLETE + 074-endpoint ✅.** All 6 rungs + telemetry + read-only `POST /{id}/suggest-associations` (behavior-preserving `EvaluateAsync` extract; 352 Comm tests green). Plus 061 + 075 merged. |
 | **Last commits** | `400885a6e` (074 suggest endpoint) · `b4483f00e` (032) · `1803b2f80` (031) · `85ab74a79` (075) · `29834f041` (030). Tree clean. |
 | **Status** | **CLOSING r4 at milestone (owner 2026-07-16).** **W5 (050–054) RE-HOMED** → a new Responsive-Intelligence project. Scoping found W5 can't be built here: `EventRulesService.FireAsync` is SSE/user/session-shaped (E5 — wrong for fire-and-forget comms); OutputRouter record/notification legs = unbuilt net-new mechanisms = the shared `kind`-typed notification spine `assistant-r1.5` is already building + `messaging` will consume (both designs say build it ONCE, coordinated). Full architecture + convergence documented in **`notes/W5-responsive-intelligence-and-shared-notification-spine.md`**. **Remaining in r4: W8 docs (080–082)** — extend 080 to document the 4-layer spine decision — **+ owner 043 deploy**. |
 | **⬆️ Actions v1.0.1 to re-import** | `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.0.1.zip` — env-var fallback (reads `sprk_MsalClientId`/`sprk_BffApiAppId`/`sprk_BffApiBaseUrl`) + OOB-compact toolbar (16px icons). Footer will read v1.0.1. Connections stays v1.0.0 (no change). |

@@ -34,7 +34,7 @@ R4 delivers a channel-extensible **Communication Intelligence layer** and absorb
 - `Services/Communication/`: `IncomingCommunicationProcessor`, `IncomingAssociationResolver`, `CommunicationService`, `RegardingLookupMap`.
 - `Services/Ai/`: `AppOnlyAnalysisService`, `OutputRouter`/`DispositionRoutability.cs`, `EventRulesService`, `CreateNotification`/`CreateTask`/`DeliverComposite` executors.
 - Client: `PolymorphicResolverService`, `RegardingResolver` PCF, `TODO_REGARDING_CATALOG`, `FieldMappingService`.
-- Send-side reference: R3's absorbed tasks at [`../x-email-communication-solution-r3/tasks/`](../x-email-communication-solution-r3/tasks/) + [`reference/r3-send-side-design.md`](reference/r3-send-side-design.md).
+- Send-side reference: [`reference/r3-send-side-design.md`](reference/r3-send-side-design.md) + [`reference/r3-send-side-plan.md`](reference/r3-send-side-plan.md) (the absorbed R3 send-side detail; the R3 project body was deleted in W8 — see [`../x-email-communication-solution-r3/SUPERSEDED.md`](../x-email-communication-solution-r3/SUPERSEDED.md)).
 
 ### ⚠️ Hot-path coordination (BINDING)
 Per [`projects/INDEX.md`](../INDEX.md), **`spaarke-ai-architecture-redesign-r2` is the sole owner of `Services/Ai/` internals**, publishing seams under `Services/Ai/PublicContracts/`. **W5 (Responsive Intelligence) edits `Services/Ai/` internals and is GATED**: task 050 is a coordination gate that MUST clear (via `/conflict-check` + confirmed OutputRouter disposition ownership + consuming PublicContracts seams, no internal fork) before tasks 051–054 begin. W1/W3 touch `Services/Communication/**` + new files (low overlap). All BFF-touching tasks run `/conflict-check` before opening a PR.

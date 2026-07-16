@@ -1,18 +1,21 @@
 # Communication Service Architecture
 
-> **Last Updated**: April 5, 2026
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
-> **Status**: Current
-> **Purpose**: Architecture documentation for the Communication Service module — outbound/inbound email via Microsoft Graph, Dataverse-managed mailbox accounts, webhook/polling hybrid for inbound, SPE archival, deduplication, mailbox verification, and AI playbook integration.
+> **Last Updated**: 2026-07-16
+> **Last Reviewed**: 2026-07-16
+> **Reviewed By**: email-communication-solution-r4 task 081 (W8)
+> **Status**: Current (R4)
+> **Purpose**: Architecture documentation for the Communication Service **send/inbound mechanics** — canonical outbound email via Microsoft Graph, Dataverse-managed mailbox accounts, webhook/polling hybrid for inbound, SPE archival, deduplication, and mailbox verification.
+> **Canonical substrate**: The **association/intelligence** half (normalized envelope, 6-rung Association Engine, confidence→status ladder + auto-file, enrichment, channel seams) lives in **[communication-intelligence-architecture.md](communication-intelligence-architecture.md)** and **[ADR-045](../../.claude/adr/ADR-045-communication-architecture.md)**. This doc covers the transport/service plumbing that surrounds it.
 
 ---
 
 ## Overview
 
-The Communication Service provides a unified email communication layer built on Microsoft Graph. It supports outbound email (shared mailbox via app-only and individual user via OBO), inbound email processing via a webhook/polling hybrid with multi-layer deduplication, `.eml` archival to SharePoint Embedded, and integration with the AI playbook system. All mailbox configuration is managed through Dataverse `sprk_communicationaccount` records rather than static configuration files.
+The Communication Service provides a unified email communication layer built on Microsoft Graph. It supports outbound email (shared mailbox via app-only and individual user via OBO), inbound email processing via a webhook/polling hybrid with multi-layer deduplication, `.eml` archival to SharePoint Embedded, and — via the R4 enrichment pipeline — direction-symmetric association + RAG indexing (see the canonical substrate doc). All mailbox configuration is managed through Dataverse `sprk_communicationaccount` records rather than static configuration files.
 
-The critical design principle is **Graph send is the critical path** — if the Graph `sendMail` call fails, the entire operation fails. All tracking (Dataverse record creation, SPE archival, attachment records, AI analysis) is best-effort and wrapped in try/catch.
+The critical design principle is **Graph send is the critical path** — if the Graph `sendMail` call fails, the entire operation fails. All tracking (Dataverse record creation, SPE archival, attachment records, association, AI analysis) is best-effort and wrapped in try/catch.
+
+> **R4 changes (send side)**: (1) the send path stamps the sent message's **`Internet-Message-Id`** back onto `sprk_communication.sprk_internetmessageid` (feeds the thread-continuity rung); (2) all client email-send UX is consolidated behind ONE canonical **`<EmailComposer />`** engine (`@spaarke/ui-components`) exposed via three thin wrappers (`SendEmailStep`/`SendEmailDialog`/`SendEmailPage`), with programmatic send via the `sendCommunication()` typed wrapper (ADR-045); (3) the record surface's send actions are hosted by the **Communication Actions PCF**, which **replaces the retired ~1,150-LOC ribbon web resource `sprk_communication_send.js`**. The send request DTO carries `AttachmentDocumentIds` (attachment Document GUIDs); a canonical `AttachmentDriveItemIds` (File-ID) rename is designed but not yet shipped (deferred — see the R4 project notes). The old fragmented, per-caller client-send implementations are **RETIRED** (§ Fragmented client send — RETIRED).
 
 ---
 
@@ -111,11 +114,15 @@ Shared mailboxes are not matter-specific — no automatic default-matter assignm
 
 ## Inbound Association Resolution
 
-`IncomingAssociationResolver` uses a 3-level priority cascade. First match wins:
+> **R4**: `IncomingAssociationResolver` is now the **6-rung Association Engine** operating over the **normalized message envelope**, with a confidence→status ladder, per-tenant auto-file kill-switch, provenance, and per-rung telemetry. The pre-R4 3-level cascade below is **RETIRED** — see **[communication-intelligence-architecture.md](communication-intelligence-architecture.md)** (canonical) and [ADR-045](../../.claude/adr/ADR-045-communication-architecture.md) for the current design.
 
-1. **Thread**: Fetches `In-Reply-To` header from Graph; searches `sprk_internetmessageid` then `sprk_graphmessageid`; copies regarding fields from parent record.
-2. **Sender**: Queries `contact` by sender email; queries `account` by sender email domain (skips common providers like gmail.com, outlook.com).
-3. **Subject pattern**: Applies regex patterns (`MAT-(\d+)`, `Matter\s*#(\d+)`, etc.) against subject line to find `sprk_matter` by reference number.
+**~~RETIRED — pre-R4 3-level priority cascade~~** (superseded by the 6-rung engine):
+
+1. ~~**Thread**: Fetches `In-Reply-To` header from Graph; searches `sprk_internetmessageid` then `sprk_graphmessageid`; copies regarding fields from parent record.~~
+2. ~~**Sender**: Queries `contact` by sender email; queries `account` by sender email domain (skips common providers like gmail.com, outlook.com).~~
+3. ~~**Subject pattern**: Applies regex patterns (`MAT-(\d+)`, `Matter\s*#(\d+)`, etc.) against subject line to find `sprk_matter` by reference number.~~
+
+The rung ladder that replaces this (rung 0 explicit-ref → 1 thread-continuity → 2 participant-correlation → 3 structural-detectors → 4 semantic-match → 5 AI-classify), plus the confidence/auto-file semantics, is documented in the canonical substrate doc.
 
 ---
 
@@ -184,6 +191,18 @@ Three `BackgroundService` implementations following ADR-001:
 
 ---
 
+## Fragmented client send — RETIRED
+
+Before R4, email-send UX was implemented ad-hoc across ~6 divergent client surfaces plus a ~1,150-LOC (×2 copies) ribbon web resource `sprk_communication_send.js`. R4 **retires all of it** (ADR-045 rule 1):
+
+- All send UX flows through ONE `<EmailComposer />` engine in `@spaarke/ui-components` (modes `compose|view|reply|forward|draft`; mounts `inline|dialog|page`) via three thin wrappers (`SendEmailStep`/`SendEmailDialog`/`SendEmailPage`).
+- All programmatic (no-UI) send flows through the `sendCommunication()` typed wrapper — no ad-hoc `fetch` to the send endpoint, no per-caller composer fork.
+- The `sprk_communication` record's send actions are hosted by the **Communication Actions PCF** on the OOB form, which **replaces the retired ribbon web resource** (tasks 044c/062).
+
+Do not add a sixth client-side send implementation; if a new mount emerges, add a thin wrapper over the one engine.
+
+---
+
 ## Error Codes
 
 | Code | HTTP | Scenario |
@@ -239,13 +258,14 @@ Three `BackgroundService` implementations following ADR-001:
 
 ## Related
 
+- [communication-intelligence-architecture.md](communication-intelligence-architecture.md) — **canonical** Communication Intelligence substrate (Association Engine, enrichment, channel seams, shared inbound patterns)
+- [ADR-045 — Communication Architecture](../../.claude/adr/ADR-045-communication-architecture.md) — the four coupled rules (canonical send, engine over envelope, direction-symmetric enrichment, channel seams)
 - [sdap-auth-patterns.md](sdap-auth-patterns.md) — Auth patterns (app-only for background, OBO for user-mode)
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) — BFF patterns including job handler pattern
-- [email-processing-architecture.md](email-processing-architecture.md) — Merged email-to-document pipeline (R1 + R2)
 - [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) — AI tool handler pattern for SendCommunicationToolHandler
 
 ---
 
 *See also: [Admin Guide](../guides/COMMUNICATION-ADMIN-GUIDE.md) | [Deployment Guide](../guides/COMMUNICATION-DEPLOYMENT-GUIDE.md)*
 
-*Last Updated: April 5, 2026*
+*Last Updated: 2026-07-16 — email-communication-solution-r4 W8 (task 081).*
