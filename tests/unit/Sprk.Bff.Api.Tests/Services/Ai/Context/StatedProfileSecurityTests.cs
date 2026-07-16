@@ -131,7 +131,10 @@ public sealed class StatedProfileSecurityTests
         typeof(AgentToolFilterContext).GetProperties()
             .Select(p => p.Name)
             .Should().BeEquivalentTo(
-                new[] { "Surface", "HasSessionFiles", "HasActiveDocument", "HasAnalysisBinding" },
+                // HasAttachedRecord added by task 044 (FR-H1) — a STRUCTURAL host-record fact
+                // (ChatHostContext.IsValid()), NOT a profile/User-fragment signal; grounding stays
+                // profile-independent.
+                new[] { "Surface", "HasSessionFiles", "HasActiveDocument", "HasAnalysisBinding", "HasAttachedRecord" },
                 "the grounding filter context is structural-facts-only — no profile/User-fragment-derived member exists");
 
         factsOnly.Surface.Should().Be("assistant");
