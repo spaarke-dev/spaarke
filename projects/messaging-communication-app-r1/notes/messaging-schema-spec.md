@@ -1,7 +1,25 @@
 # Messaging R1 — Dataverse Schema Spec (maker-ready) — tasks 004 + 005
 
 > **For**: owner to create in `spaarkedev1`. **Grounded in**: task-001 live audit (`notes/spikes/001-schema-audit.md`), design §5/§6.1/§6.4, spec FR-05/FR-08. Publisher prefix **`sprk`**.
-> **Status**: awaiting owner creation. After creation, tasks 004/005 verify the live schema matches this spec (MCP `describe`).
+> **Status**: ✅ **CREATED + VERIFIED live in spaarkedev1 (2026-07-16, MCP `describe`)**. Tasks 004/005 done. Two field names as-built differ from the original spec — see the AS-BUILT table below; **downstream code MUST use the as-built names**.
+
+---
+
+## ⭐ AS-BUILT FIELD NAMES (authoritative — verified live 2026-07-16)
+
+| Concept | As-built logical name | On entity | Note |
+|---|---|---|---|
+| Message → thread lookup | **`sprk_communicationthread`** | `sprk_communication` | ⚠️ NOT `sprk_thread`. Timeline/read filters + `IThreadResolver` write use THIS name. |
+| Channel-ref → thread lookup | **`sprk_thread`** | `sprk_communicationchannelref` | This one IS `sprk_thread` (child table). Don't confuse with the message lookup above. |
+| ACS message id (dedupe key) | **`sprk_acsmessageid`** | `sprk_communication` | echo-dedup / idempotency key |
+| ACS thread id | **`sprk_acsthreadid`** | `sprk_communication` | ⚠️ NOT `sprk_acschatthreadid` |
+| Channel-ref external ref (ACS ChatThreadId) | `sprk_externalref` | `sprk_communicationchannelref` | NVARCHAR(500) |
+| Message-level privacy / internal-only | `sprk_isprivate` / `sprk_isinternalonly` | `sprk_communication` | BIT (two-option) |
+| Privilege | `sprk_privilegeclassification` | `sprk_communication` | None/Potentially Privileged/Privileged (100000000/1/2) |
+| Thread anchor (regarding) | `sprk_regardingrecordid` / `sprk_regardingrecordtype` / `sprk_regardingrecordname` / `sprk_regardingrecordurl` | `sprk_communicationthread` | reused regarding pointer (no `sprk_anchor*`) |
+| ACS identity map | `sprk_communicationuserid` | `systemuser` + `contact` | present on both |
+
+> POML task files were authored against the pre-build draft names (`sprk_thread` for the message lookup, `sprk_acschatthreadid`). Those are shorthand — **the table above wins**. The orchestrator passes as-built names to each implementing agent; agents also `describe` live before writing.
 > **Confirmed by 001 audit**: none of the below exist yet (clean adds); `sprk_communicationtype` global choice already has `Message = 100000004`; `sprk_communication` already carries the full ADR-024 regarding family (11 typed `sprk_regarding*` + 5 polymorphic `sprk_regardingrecord*`).
 
 ---
@@ -69,7 +87,7 @@ One row per `(thread, channel, external-ref)`. R1 populates the ACS `ChatThreadI
 | Relationship | Type | Fields |
 |---|---|---|
 | `sprk_communicationthread` → `sprk_communicationchannelref` | 1:N | via `sprk_communicationchannelref.sprk_thread` |
-| `sprk_communicationthread` → `sprk_communication` | 1:N | via `sprk_communication.sprk_thread` (created in task 005 below) |
+| `sprk_communicationthread` → `sprk_communication` | 1:N | via `sprk_communication.sprk_communicationthread` (as-built; created in task 005) |
 
 ---
 
@@ -79,12 +97,12 @@ One row per `(thread, channel, external-ref)`. R1 populates the ACS `ChatThreadI
 
 | Schema name | Type | Details | FR |
 |---|---|---|---|
-| `sprk_thread` | **Lookup → `sprk_communicationthread`** | nullable; the grouping key; set by `IThreadResolver` (040) both directions | FR-05/FR-06 |
+| `sprk_communicationthread` *(as-built; draft said `sprk_thread`)* | **Lookup → `sprk_communicationthread`** | nullable; the grouping key; set by `IThreadResolver` (040) both directions | FR-05/FR-06 |
 | `sprk_isprivate` | Two-Option (Yes/No) | default **No**; message-level privacy | FR-08 |
 | `sprk_isinternalonly` | Two-Option (Yes/No) | default **No**; hidden from external participants (R2/R3) | FR-08 (D-05) |
 | `sprk_privilegeclassification` | Choice (local) | `None = 100000000`, `Potentially Privileged = 100000001`, `Privileged = 100000002` | FR-08; AI may FLAG never decide (ADR-015) |
 | `sprk_acsmessageid` | Text | 200; **the idempotency/echo-dedup key** (ACS `SendChatMessageResult.Id`); index for dedupe lookups | FR-04, NFR-03 |
-| `sprk_acschatthreadid` | Text | 200; the ACS thread this message belongs to (denormalized convenience; canonical home is the channel-ref row) | FR-02 |
+| `sprk_acsthreadid` *(as-built; draft said `sprk_acschatthreadid`)* | Text | 200; the ACS thread this message belongs to (denormalized convenience; canonical home is the channel-ref row) | FR-02 |
 
 > **Do NOT reuse** `sprk_graphmessageid` / `sprk_internetmessageid` / `sprk_correlationid` / `sprk_inreplyto` for the ACS message id — the 001 audit confirmed those are email/Graph-specific. `sprk_acsmessageid` is net-new.
 
@@ -101,7 +119,7 @@ One row per `(thread, channel, external-ref)`. R1 populates the ACS `ChatThreadI
 Run via Dataverse MCP `describe` and confirm each of the above exists with the stated type. Checklist:
 - [ ] `sprk_communicationthread` entity exists (User/Team owned) with `sprk_threadtype`, `sprk_privacystate`, `sprk_privacyeffectivefrom`, and the reused regarding pointer (`sprk_regardingrecordid/type/name/url` — NOT `sprk_anchor*`)
 - [ ] `sprk_communicationchannelref` exists with `sprk_thread` lookup + `sprk_channeltype` + `sprk_externalref`
-- [ ] `sprk_communication.sprk_thread` lookup → thread; `sprk_isprivate`, `sprk_isinternalonly`, `sprk_privilegeclassification`, `sprk_acsmessageid`, `sprk_acschatthreadid`
+- [x] `sprk_communication.sprk_communicationthread` lookup → thread; `sprk_isprivate`, `sprk_isinternalonly`, `sprk_privilegeclassification`, `sprk_acsmessageid`, `sprk_acsthreadid` — VERIFIED live 2026-07-16
 - [ ] `sprk_communicationuserid` on BOTH `systemuser` and `contact`
 - [ ] Option-set integers match exactly (`sprk_privilegeclassification`, `sprk_threadtype`, `sprk_privacystate`)
 - [ ] Add all to the messaging solution; publish
