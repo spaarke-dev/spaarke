@@ -41,7 +41,6 @@ import { WidgetErrorBoundary } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import type { WorkspaceWidgetProps } from "@spaarke/ai-widgets";
 import { useDispatchPaneEvent } from "@spaarke/ai-widgets";
-import { AddToAssistantToggle } from "./AddToAssistantToggle";
 import { SPAARKEAI_TEMPLATE_FILTER } from "../../constants/workspaceTemplateFilter";
 import { resolveRuntimeConfig } from "@spaarke/auth";
 
@@ -213,8 +212,8 @@ const useStyles = makeStyles({
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
-    // R2 UAT §4.1 (2026-07-03) — small horizontal gap so the new gear icon
-    // sits comfortably to the left of the AddToAssistantToggle.
+    // FIX #6 (spaarkeai-compose-r2) — the "Visible to assistant" toggle was
+    // removed; this bar now holds only the workspace-layout edit gear.
     columnGap: tokens.spacingHorizontalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
@@ -261,6 +260,23 @@ const useStyles = makeStyles({
     height: "100%",
     width: "100%",
   },
+
+  // UAT round-7 #1 — keep-alive host for the single Compose tab. Fills the
+  // content area like a direct ActiveWidgetContent child (flex column) so the
+  // mounted ComposeWorkspace lays out identically whether it is the active tab
+  // or a hidden keep-alive. The hidden variant collapses it via display:none
+  // while KEEPING it mounted, so ComposeWorkspace's local reducer state
+  // (docxBytes/seedHtml/sessionId/editor) survives a tab switch with no
+  // re-fetch or remount.
+  composeKeepAlive: {
+    flex: 1,
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+  },
+  composeKeepAliveHidden: {
+    display: "none",
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -276,30 +292,6 @@ export interface WorkspaceTabManagerComponentProps {
   onTabChange: (tabId: string) => void;
   /** Called when the user clicks the close button on a tab. */
   onTabClose: (tabId: string) => void;
-
-  /**
-   * Current chat session identifier. Required for the per-tab
-   * AddToAssistantToggle (R6 Pillar 9 / task 098) so the dispatched
-   * `workspace.tab_edited` PaneEventBus event is scoped to the active
-   * session per ADR-015.
-   *
-   * When null, the toggle is not rendered (no session = no visibility
-   * contract to project).
-   */
-  chatSessionId?: string | null;
-
-  /**
-   * Called when the user toggles the per-tab "Visible to assistant"
-   * switch. Receives the tabId and the NEW visibility value. The host
-   * (WorkspacePane) persists the change via PATCH to
-   * `/api/ai/chat/sessions/{id}/tabs/{tabId}` AND updates the local
-   * WorkspaceTabManager so the next system-prompt snapshot reflects
-   * the new flag.
-   *
-   * R6 Pillar 9 / task 098 — server projection already wired; this
-   * callback is the missing UI mount point.
-   */
-  onToggleVisibility?: (tabId: string, visibleToAssistant: boolean) => void;
 
   /**
    * When true, suppress the tab-bar strip and render only the active
@@ -432,9 +424,19 @@ async function launchEditWizardForTab(
 interface ActiveWidgetContentProps {
   tab: WorkspaceTab;
   styles: ReturnType<typeof useStyles>;
+  /**
+   * spaarkeai-compose-r2 (multi-Compose-tab): whether this tab is the ACTIVE (visible) tab.
+   * Defaults to `true`. Forwarded to the widget so keep-alive widgets (Compose) mounted-hidden
+   * while inactive can suppress "I am the active surface" side effects (active-document claim).
+   */
+  isActiveTab?: boolean;
 }
 
-function ActiveWidgetContent({ tab, styles }: ActiveWidgetContentProps): React.JSX.Element {
+function ActiveWidgetContent({
+  tab,
+  styles,
+  isActiveTab = true,
+}: ActiveWidgetContentProps): React.JSX.Element {
   // Loading — registry promise not yet resolved.
   if (tab.isLoading || tab.Component === null) {
     return (
@@ -462,6 +464,8 @@ function ActiveWidgetContent({ tab, styles }: ActiveWidgetContentProps): React.J
           data={tab.widgetData}
           widgetType={tab.widgetType}
           isLoading={false}
+          tabId={tab.id}
+          isActiveTab={isActiveTab}
         />
       </WidgetErrorBoundary>
     </div>
@@ -484,8 +488,6 @@ export function WorkspaceTabManagerComponent({
   activeTabId,
   onTabChange,
   onTabClose,
-  chatSessionId,
-  onToggleVisibility,
   hideTabBar = false,
 }: WorkspaceTabManagerComponentProps): React.JSX.Element {
   const styles = useStyles();
@@ -493,6 +495,25 @@ export function WorkspaceTabManagerComponent({
 
   // Resolve the active tab record.
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
+
+  // ---------------------------------------------------------------------------
+  // Compose keep-alive (UAT round-7 #1; multi-tab — spaarkeai-compose-r2)
+  //
+  // EVERY Compose DIRECT tab (widgetType 'compose') is kept MOUNTED across tab
+  // switches and toggled hidden when it is not the active tab. Rendering only
+  // the active tab (the default for every other tab type) UNMOUNTS
+  // ComposeWorkspace on a switch, destroying its live local reducer state (the
+  // loaded doc). Keeping each mounted-hidden preserves that state with zero
+  // re-fetch.
+  //
+  // Multiple Compose tabs can now be open simultaneously — one keep-alive host
+  // per compose tab, ALL mounted, only the active one visible. Scoped to
+  // 'compose' ONLY: every other inactive tab still unmounts (the memory/
+  // connection design for multi-instance widgets is unchanged).
+  // ---------------------------------------------------------------------------
+  const composeTabs = tabs.filter((t) => t.widgetType === "compose");
+  const activeIsCompose =
+    activeTab !== null && activeTab.widgetType === "compose";
 
   // R2 UAT §3.3 (2026-07-03): after gear-icon edit wizard closes with a save,
   // close the affected tab and dispatch a fresh widget_load so the tab
@@ -743,56 +764,77 @@ export function WorkspaceTabManagerComponent({
       {/* Active tab content                                                   */}
       {/* ------------------------------------------------------------------ */}
       <div className={styles.content}>
-        {/* R6 Pillar 9 / task 098 — per-tab "Visible to assistant" toggle.
-            Rendered above the widget content (not inline in the tab strip —
-            tab labels stay clean). Only shows when:
-              - we have an active tab AND
-              - we have a chat session (need for ADR-015-scoped event) AND
-              - the host wired onToggleVisibility (otherwise it's read-only). */}
-        {activeTab !== null && chatSessionId && onToggleVisibility ? (
+        {/* FIX #6 (spaarkeai-compose-r2) — the per-tab "Visible to assistant"
+            toggle was REMOVED. The Assistant's active document now follows the
+            ACTIVE tab (WorkspacePane drives register/withdraw on tab activation
+            via the compose visibility conduit) — visibility is implicit, no UI.
+            What remains here is the workspace-LAYOUT edit gear (R2 UAT §4.1):
+            it opens the edit wizard for the active workspace layout. It is
+            shown ONLY for workspace-layout tabs (widgetType === "workspace")
+            with a resolvable layoutId — so it never appears on the Compose
+            surface (widgetType 'compose'), and the bar itself does not render
+            for compose tabs. */}
+        {activeTab !== null &&
+         activeTab.widgetType === "workspace" &&
+         (activeTab.widgetData as { layoutId?: string } | null)?.layoutId ? (
           <div className={styles.visibilityBar}>
-            {/* R2 UAT §4.1 (2026-07-03) — gear icon opens the edit wizard for
-                the active workspace layout at the Choose Layout step. Only
-                shown for workspace-layout tabs (widgetType === "workspace")
-                with a resolvable layoutId in widgetData. */}
-            {activeTab.widgetType === "workspace" &&
-             (activeTab.widgetData as { layoutId?: string } | null)?.layoutId ? (
-              <Tooltip content="Edit workspace layout" relationship="label" withArrow>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<Settings16Regular />}
-                  aria-label="Edit workspace layout"
-                  onClick={() =>
-                    handleGearIconClick(
-                      activeTab.id,
-                      (activeTab.widgetData as { layoutId: string }).layoutId,
-                      (activeTab.widgetData as { layoutName?: string }).layoutName
-                        ?? activeTab.displayName
-                        ?? "Workspace",
-                    )
-                  }
-                  data-testid="workspace-edit-gear"
-                />
-              </Tooltip>
-            ) : null}
-            <AddToAssistantToggle
-              tabId={activeTab.id}
-              sessionId={chatSessionId}
-              visibleToAssistant={activeTab.visibleToAssistant}
-              onChange={(next) => onToggleVisibility(activeTab.id, next)}
-            />
+            <Tooltip content="Edit workspace layout" relationship="label" withArrow>
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<Settings16Regular />}
+                aria-label="Edit workspace layout"
+                onClick={() =>
+                  handleGearIconClick(
+                    activeTab.id,
+                    (activeTab.widgetData as { layoutId: string }).layoutId,
+                    (activeTab.widgetData as { layoutName?: string }).layoutName
+                      ?? activeTab.displayName
+                      ?? "Workspace",
+                  )
+                }
+                data-testid="workspace-edit-gear"
+              />
+            </Tooltip>
           </div>
         ) : null}
 
-        {activeTab !== null ? (
-          <ActiveWidgetContent tab={activeTab} styles={styles} />
-        ) : (
+        {/* Compose keep-alive hosts (UAT round-7 #1; multi-tab — spaarkeai-compose-r2).
+            One host PER compose tab, ALL mounted; each hidden (display:none,
+            aria-hidden) when it is not the active tab so every ComposeWorkspace's
+            live reducer state survives tab switches. The active compose tab's host
+            is the visible surface — the active-tab branch below renders nothing for
+            a compose active tab (no double-mount). */}
+        {composeTabs.map((composeTab) => {
+          const isActiveComposeTab = composeTab.id === activeTabId;
+          return (
+            <div
+              key={composeTab.id}
+              className={mergeClasses(
+                styles.composeKeepAlive,
+                !isActiveComposeTab && styles.composeKeepAliveHidden,
+              )}
+              data-testid="workspace-compose-keepalive"
+              data-tab-id={composeTab.id}
+              aria-hidden={!isActiveComposeTab}
+            >
+              <ActiveWidgetContent
+                tab={composeTab}
+                styles={styles}
+                isActiveTab={isActiveComposeTab}
+              />
+            </div>
+          );
+        })}
+
+        {activeTab !== null && !activeIsCompose ? (
+          <ActiveWidgetContent tab={activeTab} styles={styles} isActiveTab />
+        ) : activeTab === null ? (
           <div className={styles.errorState}>
             <WarningRegular className={styles.errorIcon} />
             <Text size={300}>No active tab</Text>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

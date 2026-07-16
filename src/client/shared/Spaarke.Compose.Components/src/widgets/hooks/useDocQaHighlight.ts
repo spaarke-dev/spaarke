@@ -102,7 +102,10 @@ export function useDocQaHighlight(editor: Editor | null): UseDocQaHighlightResul
   // Auto-clear the timer on unmount so it never fires against a destroyed editor.
   React.useEffect(() => clearTimer, [clearTimer]);
 
-  return { activeHighlight, highlight, clear };
+  // Memoize the result so ComposeEditor's useImperativeHandle (which keys on `qaHighlight`) gets a
+  // STABLE reference — paired with usePendingRedline's memoized return, the editor handle no longer
+  // rebuilds on every render, only when a member's identity actually changes.
+  return React.useMemo(() => ({ activeHighlight, highlight, clear }), [activeHighlight, highlight, clear]);
 }
 
 export default useDocQaHighlight;

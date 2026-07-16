@@ -419,6 +419,21 @@ public sealed record SaveComposeDocumentRequest
     /// <summary>Optional display name used only on first-Save promotion (Path B initial
     /// row creation) and as the created drive-item's file name.</summary>
     public string? DisplayName { get; init; }
+
+    /// <summary>
+    /// Redline/comment save fidelity (spaarkeai-compose-r2 UAT-R7 #2/#3/#4): accepted-as-pending
+    /// track-change insertions/deletions + comments to materialize as NATIVE Word markup
+    /// (<c>w:ins</c>/<c>w:del</c>/<c>w:comment</c>) via <see cref="DocxAnnotationWriter"/> BEFORE
+    /// persisting. The client sends (a) <see cref="Content"/> as a clean BASELINE <c>.docx</c> — the
+    /// document with pending redlines reduced to their committed (reject-state) text and accepted
+    /// edits already baked in — and (b) this list; <see cref="IComposeService.SaveAsync"/> re-applies
+    /// them on top so the saved <c>.docx</c> carries real tracked changes + comments instead of the
+    /// flattened plain text the client <c>tipTapToDocxBytes</c> writer (which has no track-change
+    /// branch) would otherwise produce. Null/empty → the baseline is persisted byte-identical (a plain
+    /// no-redline Save is unchanged; FR-06a byte fidelity preserved). Same <see cref="DocxAnnotation"/>
+    /// shape the push-annotations path uses (reuse, not a parallel contract).
+    /// </summary>
+    public IReadOnlyList<DocxAnnotation>? Annotations { get; init; }
 }
 
 /// <summary>Save outcome — new SPE version id + resolved <c>sprk_documentid</c>.</summary>
@@ -444,9 +459,10 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// FR-05 per-step create-on-save projection over the existing job pipeline
     /// (<see cref="JobAwareCompletionState"/>): the ordered steps
     /// <c>container → record → profile-analysis → indexing</c> with each step's state. The
-    /// <c>profile-analysis</c> step is DEFERRED (core-owned <c>IDocumentProfileAi</c> facade —
-    /// not implemented here), so the aggregate is <see cref="JobAwareState.Partial"/> on the
-    /// happy path (record exists + indexed, downstream profile pending). A record with no SPE
+    /// <c>profile-analysis</c> step runs in-process fire-and-forget under the caller's OBO identity
+    /// (best-effort enrichment via the canonical <c>IDocumentProfileAi</c> facade — #615 resolved),
+    /// so the synchronous aggregate is <see cref="JobAwareState.Partial"/> on the
+    /// happy path (record exists + indexed, profile dispatched off-thread). A record with no SPE
     /// file OR no index is never a success — see
     /// <see cref="ComposeService.IsInterimCreateOnSaveSuccess"/> for the interim R5-E bar. Null
     /// only for legacy callers that predate FR-05 (always populated by the current Save path).
@@ -469,6 +485,32 @@ public sealed record PromoteComposeDocumentRequest
 
     /// <summary>Optional display name used only when a new row is created.</summary>
     public string? DisplayName { get; init; }
+
+    // ── SPE pointer + file metadata (threaded from SaveAsync's already-computed upload result) ──
+    // Written onto the new sprk_document so the record is COMPLETE — carrying the SPE drive
+    // pointer + has-file flag + size/mime/filepath, mirroring the canonical
+    // OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync write. Without these the
+    // record has only the item-id, and every downstream reader (open-links, preview) 409s
+    // "No file is attached to this document yet." All optional: a standalone /promote caller
+    // that supplies none still creates a row (sprk_hasfile is set true by precondition — the
+    // drive-item id itself proves a file exists), just without the drive pointer.
+
+    /// <summary>SPE drive (container) id → <c>sprk_graphdriveid</c>. The field whose absence is
+    /// the root cause of the "no file attached" 409s.</summary>
+    public string? GraphDriveId { get; init; }
+
+    /// <summary>Resolved file name (carries the <c>.docx</c> extension) → <c>sprk_filename</c>.
+    /// Preferred over <see cref="DisplayName"/> for the file-name column when supplied.</summary>
+    public string? FileName { get; init; }
+
+    /// <summary>File size in bytes → <c>sprk_filesize</c> (cast to the Whole Number column).</summary>
+    public long? FileSize { get; init; }
+
+    /// <summary>MIME type → <c>sprk_mimetype</c> (DOCX for Compose).</summary>
+    public string? MimeType { get; init; }
+
+    /// <summary>SPE web URL → <c>sprk_filepath</c> (enables "Open in SharePoint" links).</summary>
+    public string? FilePath { get; init; }
 }
 
 /// <summary>Promote outcome — resolved <c>sprk_documentid</c> + a flag distinguishing

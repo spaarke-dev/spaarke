@@ -1,5 +1,8 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -44,6 +47,16 @@ public class ComposeService : IComposeService
     private const string GraphItemIdAttribute = "sprk_graphitemid";
     private const string DisplayNameAttribute = "sprk_documentname";
     private const string FileNameAttribute = "sprk_filename";
+    // SPE-pointer + file-metadata columns — logical names mirrored from the canonical
+    // OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync write (Services/Office),
+    // which maps through Spaarke.Dataverse UpdateDocumentRequest → DataverseWebApiService.
+    // WITHOUT these, every downstream reader (open-links, preview) validates the SPE pointer,
+    // finds drive-id empty + sprk_hasfile false, and 409s "No file is attached to this document".
+    private const string GraphDriveIdAttribute = "sprk_graphdriveid";
+    private const string HasFileAttribute = "sprk_hasfile";
+    private const string FileSizeAttribute = "sprk_filesize";
+    private const string MimeTypeAttribute = "sprk_mimetype";
+    private const string FilePathAttribute = "sprk_filepath";
 
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).
@@ -73,6 +86,40 @@ public class ComposeService : IComposeService
     private readonly IPostUploadIndexingEnqueuer _indexing;
     private readonly ILogger<ComposeService> _logger;
     private readonly ComposePushSaveStatusStore? _pushSaveStatusStore;
+    // FR-05 Fork C (compose-r2, UAT #7b): the ADR-013-safe profile seam is the OBO-capable
+    // IDocumentProfileAi facade (Services/Ai/PublicContracts). ComposeService injects ONLY this
+    // facade — NOT IAppOnlyAnalysisService / IOpenAiClient / IPlaybookService / IConsumerRoutingService
+    // (ADR013_ComposeFacadeTests). The facade downloads the user-OBO-written SPE file UNDER OBO
+    // (the same identity + SPE call the RAG indexing step already uses — MI 403s on it) and reuses
+    // the existing extract → classify → summarize → field-map → UpdateDocumentAsync pipeline
+    // unchanged. It REPLACES the round-6 AppOnlyDocumentAnalysis Service-Bus enqueue, which silently
+    // 403'd on the user-written file (the bug UAT #7b reported).
+    //
+    // FIRE-AND-FORGET / BACKGROUND (owner-approved, compose-r2): the profile leg is NO LONGER awaited
+    // in the create-on-save response path. The full extract → classify → summarize → field-map LLM
+    // pipeline runs ~15-40 s; awaiting it blocked the HTTP response for that entire time. SaveAsync now
+    // DISPATCHES the profile onto a detached DI scope (IServiceScopeFactory) and returns immediately;
+    // the 7 sprk_document profile fields populate shortly AFTER the save returns. OBO is preserved by
+    // capturing the caller's bearer token + claims BEFORE returning and threading them into a synthetic
+    // HttpContext resolved against the fresh scope (the profile path reads ONLY the Authorization header
+    // + User claims from HttpContext — see TokenHelper.ExtractBearerToken / GraphClientFactory.ForUserAsync;
+    // the user access token stays valid long enough to exchange after the response). Best-effort: the
+    // background task swallows + logs every failure, so a profile miss can never crash the process or
+    // affect the already-returned save. Optional + defaults null (same rationale as _pushSaveStatusStore
+    // below) so existing 6-arg test constructors keep compiling; the field is now the availability GATE
+    // (null → nothing to dispatch), while the actual run resolves a FRESH facade from the detached scope.
+    private readonly IDocumentProfileAi? _documentProfileAi;
+    // compose-r2 FR-30 (#629): durable Record-scope memory-capture facade (ADR-013). Optional + defaults
+    // null so existing test constructors keep compiling; DI resolves the real ComposeMemoryCapture in every
+    // non-test host. Null → the STEP 5 capture below is a clean no-op (best-effort availability gate).
+    private readonly IComposeMemoryCapture? _memoryCapture;
+    // Fire-and-forget profile dispatch (compose-r2): a NEW DI scope is created per background profile so
+    // the profile facade + its scoped deps never touch the disposing request scope. Optional + defaults
+    // null so existing test constructors compile; DI always resolves it in every non-test host.
+    private readonly IServiceScopeFactory? _scopeFactory;
+    // App-shutdown token for the detached profile task — NEVER the request CancellationToken (which
+    // cancels when the response completes). Optional; null → CancellationToken.None.
+    private readonly IHostApplicationLifetime? _appLifetime;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -81,7 +128,11 @@ public class ComposeService : IComposeService
         DocxAnnotationWriter annotationWriter,
         IPostUploadIndexingEnqueuer indexing,
         ILogger<ComposeService> logger,
-        IDistributedCache? cache = null)
+        IDistributedCache? cache = null,
+        IDocumentProfileAi? documentProfileAi = null,
+        IServiceScopeFactory? scopeFactory = null,
+        IHostApplicationLifetime? appLifetime = null,
+        IComposeMemoryCapture? memoryCapture = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -89,6 +140,10 @@ public class ComposeService : IComposeService
         _annotationWriter = annotationWriter;
         _indexing = indexing;
         _logger = logger;
+        _documentProfileAi = documentProfileAi;
+        _scopeFactory = scopeFactory;
+        _appLifetime = appLifetime;
+        _memoryCapture = memoryCapture;
         // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
         // Optional + defaults null so existing 6-arg test constructors (sibling task suites
         // 013/050/060/062/102) keep compiling unchanged; DI (AddScoped<IComposeService,
@@ -271,17 +326,37 @@ public class ComposeService : IComposeService
             throw new ArgumentException("Content is required and must be non-empty.", nameof(request));
 
         // ────────────────────────────────────────────────────────────────────────────
-        // FR-06a upload fidelity (task 015): the choice between the pristine ORIGINAL
-        // upload bytes and the tipTapToDocxBytes-regenerated bytes is made by the CALLER
-        // (ComposeWorkspace.tsx triggerSave), keyed off the editor's own dirty flag — an
-        // unedited mount sends the retained original bytes byte-identical; an edited
-        // mount sends the regenerated .docx. SaveAsync treats request.Content as an
-        // OPAQUE, already-decided byte payload: it MUST NOT re-encode, re-wrap, or
-        // otherwise transform it before persisting, in either branch below. See
-        // ComposeServiceUploadFidelityTests.cs for the byte-identity regression guard.
+        // FR-06a upload fidelity (task 015) + REDLINE/COMMENT fidelity (UAT-R7 #2/#3/#4):
+        // the choice between the pristine ORIGINAL upload bytes and the tipTapToDocxBytes-
+        // regenerated bytes is made by the CALLER (ComposeWorkspace.tsx triggerSave), keyed off
+        // the editor's own dirty flag — an unedited mount sends the retained original bytes
+        // byte-identical; an edited mount sends the regenerated .docx. SaveAsync treats
+        // request.Content as an OPAQUE, already-decided BASELINE byte payload and MUST NOT
+        // re-encode/re-wrap it.
+        //
+        // The ONE deliberate transform (UAT-R7 #2/#3/#4, owner-approved): when request.Annotations
+        // is non-empty, the caller's Content is a clean BASELINE (pending redlines reduced to their
+        // reject-state text; accepted edits already baked in) and this method re-applies the pending
+        // track-changes + comments as NATIVE OOXML (w:ins/w:del/w:comment) via the SAME proven
+        // DocxAnnotationWriter the push path uses (PushAnnotationsAsync) — BEFORE any SPE write. This
+        // fixes the flatten-to-plain-text defect where the client docx writer, which has no
+        // track-change branch, wrote both original + AI text as plain body text. An EMPTY/null
+        // annotation list persists the baseline byte-identical (a plain no-redline Save is unchanged;
+        // the FR-06a byte-identity invariant still holds — see ComposeServiceUploadFidelityTests.cs).
+        // The render is pure/in-memory; a bad batch (malformed / target-not-found) throws
+        // DocxAnnotationException BEFORE the write, so no partial SPE version can land.
         // ────────────────────────────────────────────────────────────────────────────
         var observedAt = DateTimeOffset.UtcNow;
         var isTransientCreate = string.IsNullOrWhiteSpace(request.DocumentSpeId);
+
+        byte[] contentToPersist = request.Content.ToArray();
+        if (request.Annotations is { Count: > 0 })
+        {
+            _logger.LogInformation(
+                "Compose save: applying {AnnotationCount} redline/comment annotation(s) to the baseline before persist (session={SessionId}).",
+                request.Annotations.Count, request.SessionId);
+            contentToPersist = _annotationWriter.Annotate(contentToPersist, request.Annotations);
+        }
 
         _logger.LogInformation(
             "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} container={ContainerId} transientCreate={IsTransientCreate} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
@@ -316,7 +391,7 @@ public class ComposeService : IComposeService
             // once created, the client re-Saves with the returned id → the replace path below, so
             // the drive-item is never double-created.
             var driveId = await _spe.ResolveDriveIdAsync(request.ContainerId, cancellationToken).ConfigureAwait(false);
-            using var createStream = new MemoryStream(request.Content.ToArray(), writable: false);
+            using var createStream = new MemoryStream(contentToPersist, writable: false);
             var created = await _spe.UploadSmallAsUserAsync(
                     httpContext, driveId, fileName, createStream, cancellationToken)
                 .ConfigureAwait(false);
@@ -339,7 +414,7 @@ public class ComposeService : IComposeService
             if (string.IsNullOrWhiteSpace(request.DriveId))
                 throw new ArgumentException("DriveId is required for SPE drive-item access when DocumentSpeId is supplied.", nameof(request));
 
-            using var contentStream = new MemoryStream(request.Content.ToArray(), writable: false);
+            using var contentStream = new MemoryStream(contentToPersist, writable: false);
             var replaced = await _spe.ReplaceFileContentAsUserAsync(
                     httpContext, request.DriveId, request.DocumentSpeId!, contentStream, cancellationToken)
                 .ConfigureAwait(false);
@@ -365,6 +440,15 @@ public class ComposeService : IComposeService
             SessionId = request.SessionId,
             TenantId = request.TenantId,
             DisplayName = request.DisplayName,
+            // Thread the already-computed SPE pointer + file metadata into the record write so
+            // the created sprk_document is COMPLETE (drive-id + has-file + size/mime/filepath),
+            // mirroring OfficeDocumentPersistence. The SPE upload above already produced these;
+            // this only carries them forward — no new upload logic.
+            GraphDriveId = effectiveDriveId,
+            FileName = fileName,
+            FileSize = saved.Size ?? contentToPersist.Length,
+            MimeType = DocxContentType,
+            FilePath = saved.WebUrl,
         };
 
         var promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
@@ -383,7 +467,7 @@ public class ComposeService : IComposeService
                     DriveId: effectiveDriveId ?? string.Empty,
                     ItemId: effectiveSpeId,
                     FileName: fileName,
-                    FileSizeBytes: saved.Size ?? request.Content.Length,
+                    FileSizeBytes: saved.Size ?? contentToPersist.Length,
                     ContentType: DocxContentType,
                     DocumentId: promotion.DocumentRecordId?.ToString(),
                     ParentEntity: null,          // parent association is task 014 — standalone Document is valid
@@ -395,15 +479,54 @@ public class ComposeService : IComposeService
             .ConfigureAwait(false);
 
         // ────────────────────────────────────────────────────────────────────────────
-        // Project per-step states (container → record → profile-analysis[deferred] → indexing)
+        // STEP 3 — profile-analysis (FR-05 Fork C, compose-r2, UAT #7b — now FIRE-AND-FORGET).
+        // The Compose user wrote the file, so profiling MUST run UNDER OBO (Pattern 4) — a background
+        // AppOnlyDocumentAnalysis (MI) job would 403 on the download (that was the round-6 bug: profile
+        // fields silently never populated). But awaiting the full extract → classify → summarize →
+        // field-map LLM pipeline (~15-40 s) INLINE blocked this HTTP response for that entire time.
+        //
+        // So the profile is now DISPATCHED to a detached DI scope and NOT awaited: SaveAsync returns
+        // immediately, and the OBO-capable IDocumentProfileAi facade runs the SAME pipeline in the
+        // background, writing the 7 sprk_document profile fields shortly AFTER this save returns. OBO is
+        // preserved by capturing the caller's bearer token + claims before returning (see
+        // DispatchBackgroundProfile). Best-effort: the background task swallows + logs every failure, so
+        // it can never fail or block the save. Because the outcome is not known synchronously, the
+        // returned profile step is a non-terminal "dispatched" (Running) signal — the record is a valid
+        // interim success (container + record + indexing) with the profile still in flight.
+        // ────────────────────────────────────────────────────────────────────────────
+        var profileSignal = promotion.DocumentRecordId.HasValue
+            ? DispatchBackgroundProfile(promotion.DocumentRecordId.Value, httpContext)
+            : ProfileNotAttemptedSignal("no sprk_document record id resolved — profile not attempted");
+
+        // ────────────────────────────────────────────────────────────────────────────
+        // STEP 5 — durable memory capture (FR-30, compose-r2, deferral #629). Best-effort: distil the
+        // session's durable insights (defined terms today) into Record-scope MemoryItems keyed by the
+        // newly-saved sprk_document, via the ADR-013 IComposeMemoryCapture facade (shared IMemoryItemStore,
+        // no forked store). Runs ONLY when a sprk_document id was resolved. The untrusted-origin gate is
+        // DEFERRED to the memory-governance project (#629); TrustLevel is carried inert. This NEVER affects
+        // the returned Save result or the completion-state projection — a capture miss is silently logged.
+        // ────────────────────────────────────────────────────────────────────────────
+        if (promotion.DocumentRecordId.HasValue)
+        {
+            await CaptureDocumentMemoryAsync(
+                    promotion.DocumentRecordId.Value, request.TenantId, request.SessionId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        // ────────────────────────────────────────────────────────────────────────────
+        // Project per-step states (container → record → profile-analysis → indexing)
         // through the shared JobAwareCompletionStateProjector. A fileless/unindexed record can
-        // never be a success (aggregate Failed/Partial); profile is deferred to core (Fork C).
+        // never be a success (aggregate Failed/Partial). The profile step is DISPATCHED to the
+        // background above (fire-and-forget, not awaited): in the returned response it is a non-terminal
+        // "dispatched"/Running signal, so the synchronous aggregate reads Partial (record + index exist,
+        // profile pending) and never demotes to Failed on a best-effort profile (Fork C, compose-r2).
         // ────────────────────────────────────────────────────────────────────────────
         var completion = ProjectCreateOnSaveState(
             subjectId: effectiveSpeId,
             correlationId: httpContext.TraceIdentifier,
             containerSignal: CompletedSignal(StepContainer),
             recordSignal: CompletedSignal(StepRecord),
+            profileSignal: profileSignal,
             indexingSignal: IndexingSignal(indexingResult),
             observedAt: observedAt);
 
@@ -419,6 +542,97 @@ public class ComposeService : IComposeService
             WasPromotedThisSave = promotion.WasCreated,
             CompletionState = completion,
         };
+    }
+
+    /// <summary>
+    /// STEP 5 (FR-30, compose-r2, #629) — best-effort durable memory CAPTURE. Distils the bound session's
+    /// durable insights (defined terms today) into Record-scope memory keyed by the saved
+    /// <c>sprk_document</c>, via the ADR-013 <see cref="IComposeMemoryCapture"/> facade. The whole body is
+    /// guarded so a memory-capture failure NEVER throws — a Save must never be blocked or failed by it. A
+    /// no-op when the facade is unregistered (null gate) or no session is bound.
+    /// </summary>
+    private async Task CaptureDocumentMemoryAsync(
+        Guid documentId,
+        string tenantId,
+        string? sessionId,
+        CancellationToken ct)
+    {
+        // Availability gate + precondition: no facade (AI/persistence off in this host) or no bound
+        // session → nothing to capture. Both are clean no-ops, not failures.
+        if (_memoryCapture is null || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return;
+        }
+
+        try
+        {
+            var session = await _sessions.GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+            var definedTerms = session?.DefinedTermsTracking;
+            if (definedTerms is null || definedTerms.Count == 0)
+            {
+                return;
+            }
+
+            // DISTILL: a defined term is durable knowledge only when it carries BOTH a non-empty label
+            // (the fact Key) AND a definition (the fact Value). Guarding Term too avoids persisting an
+            // empty-key fact (two of which would collide on the store's hashed empty key).
+            var insights = new List<ComposeInsight>(definedTerms.Count);
+            foreach (var term in definedTerms)
+            {
+                if (string.IsNullOrWhiteSpace(term.Term) || string.IsNullOrWhiteSpace(term.Definition))
+                {
+                    continue;
+                }
+
+                insights.Add(new ComposeInsight(
+                    FactType: "defined-term",
+                    Key: term.Term,
+                    Value: term.Definition!,
+                    Origin: string.Equals(term.Source, "ai", StringComparison.OrdinalIgnoreCase)
+                        ? MemoryOrigin.AiDerived
+                        : MemoryOrigin.User,
+                    // Confidence null → the store default (1.0), which keeps AI-extracted terms above the
+                    // recall confidence gate so they DO surface in later sessions (the FR-30 point).
+                    // ConfirmedByUser=false (set in the facade) is the honest "unverified" marker; DefinedTerm
+                    // carries no per-term confidence signal to thread here.
+                    Confidence: null,
+                    BindingId: term.Provenance?.BindingId,
+                    LedgerRef: term.Provenance?.LedgerRef));
+            }
+
+            if (insights.Count == 0)
+            {
+                return;
+            }
+
+            var outcome = await _memoryCapture.CaptureRecordInsightsAsync(
+                    subjectType: "sprk_document",
+                    subjectId: documentId.ToString(),
+                    insights: insights,
+                    provenance: new ComposeMemoryProvenance
+                    {
+                        TenantId = tenantId,
+                        SessionId = sessionId,
+                        CreatedBy = null,   // caller identity not threaded here; envelope stays honest (null)
+                    },
+                    ct)
+                .ConfigureAwait(false);
+
+            _logger.LogDebug(
+                "Compose memory-capture (FR-30): document {DocumentId} — {Status} {Count} insight(s) (session={SessionId}).",
+                documentId, outcome.Status, outcome.Count, sessionId);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Honour cancellation quietly — the Save has already returned its result on its own terms.
+        }
+        catch (Exception ex)
+        {
+            // Best-effort: a memory-capture failure must never fail or block a Save (swallow + log).
+            _logger.LogWarning(ex,
+                "Compose memory-capture (FR-30): threw while capturing memory for document {DocumentId} — best-effort, Save unaffected.",
+                documentId);
+        }
     }
 
     /// <inheritdoc />
@@ -468,15 +682,51 @@ public class ComposeService : IComposeService
         }
 
         // 2) Create the sprk_document row.
+        //    The record MUST carry the full SPE pointer + file metadata (drive-id + has-file +
+        //    size/mime/filepath), NOT just the item-id — otherwise downstream readers (open-links,
+        //    preview) validate the pointer, find drive-id empty + sprk_hasfile false, and 409
+        //    "No file is attached to this document yet." Field set mirrors the canonical
+        //    OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync write.
         var entity = new Entity(DocumentLogicalName);
         entity[GraphItemIdAttribute] = request.DocumentSpeId;
         var effectiveDisplayName = !string.IsNullOrWhiteSpace(request.DisplayName)
             ? request.DisplayName!
             : $"Compose document ({request.DocumentSpeId})";
         entity[DisplayNameAttribute] = effectiveDisplayName;
-        if (!string.IsNullOrWhiteSpace(request.DisplayName))
+
+        // Prefer the resolved file name (carries the .docx extension); fall back to the display
+        // name for standalone promote callers that supply neither.
+        var effectiveFileName = !string.IsNullOrWhiteSpace(request.FileName)
+            ? request.FileName!
+            : request.DisplayName;
+        if (!string.IsNullOrWhiteSpace(effectiveFileName))
         {
-            entity[FileNameAttribute] = request.DisplayName!;
+            entity[FileNameAttribute] = effectiveFileName!;
+        }
+
+        // SPE drive pointer — the field whose absence is the root cause of the 409s.
+        if (!string.IsNullOrWhiteSpace(request.GraphDriveId))
+        {
+            entity[GraphDriveIdAttribute] = request.GraphDriveId!;
+        }
+
+        // A promoted Compose document always has an SPE file behind it (the drive-item id is a
+        // hard precondition of this method). Mark it so downstream readers stop rejecting it.
+        entity[HasFileAttribute] = true;
+
+        if (request.FileSize.HasValue)
+        {
+            // sprk_filesize is a Whole Number (int) column; the OrganizationService write path is
+            // strict about CLR type, so cast (same as OfficeDocumentPersistence / DataverseServiceClientImpl).
+            entity[FileSizeAttribute] = (int)request.FileSize.Value;
+        }
+        if (!string.IsNullOrWhiteSpace(request.MimeType))
+        {
+            entity[MimeTypeAttribute] = request.MimeType!;
+        }
+        if (!string.IsNullOrWhiteSpace(request.FilePath))
+        {
+            entity[FilePathAttribute] = request.FilePath!;
         }
 
         Guid newId;
@@ -534,20 +784,23 @@ public class ComposeService : IComposeService
     //
     // The four steps container → record → profile-analysis → indexing are projected through the
     // shared JobAwareCompletionStateProjector (store-before-render, ADR-040). profile-analysis is
-    // DEFERRED: the only profile seam (IAppOnlyAnalysisService) trips the ADR-013 NetArchTest
-    // facade rule AND runs under MI (which 403s on the OBO-written file). Core owns the
-    // Services/Ai/PublicContracts/IDocumentProfileAi facade (redesign-r2, notes/HANDOFF-…). Until
-    // it ships, profile emits a non-terminal deferred state and the aggregate stays Partial on the
-    // happy path — record exists + indexed, downstream profile pending (the ingestion-parity signal).
+    // DISPATCHED FIRE-AND-FORGET under OBO via the ADR-013-safe IDocumentProfileAi facade (compose-r2) —
+    // captured OBO token + fresh DI scope, because a background MI job 403s on the user-OBO-written file.
+    // In the synchronous response the profile step is a non-terminal "dispatched" (Running) signal, so
+    // the aggregate reads Partial (record + index exist, profile pending) and never reads Failed on a
+    // best-effort profile miss (which happens off-thread and is only logged).
     // =========================================================================
 
     /// <summary>
     /// The interim R5-E success bar for FR-05 create-on-save (documented exception, 2026-07-09):
-    /// a record is interim-successful ONLY when the <c>container</c>, <c>record</c>, AND
-    /// <c>indexing</c> steps all reached terminal success — a record with no SPE file OR no index
-    /// is NEVER a success. <c>profile-analysis</c> is excluded (deferred to core's
-    /// <c>IDocumentProfileAi</c>); the FULL R5-E bar (aggregate == <see cref="JobAwareState.Completed"/>,
-    /// which requires profile too) is restored when core ships the facade.
+    /// a record is interim-successful when the <c>container</c>, <c>record</c>, AND <c>indexing</c>
+    /// steps all reached terminal success — a record with no SPE file OR no index is NEVER a success.
+    /// <c>profile-analysis</c> is intentionally EXCLUDED from this bar so a best-effort profile miss
+    /// never demotes an otherwise-good save. Since the profile now runs FIRE-AND-FORGET in the
+    /// background (<see cref="DispatchBackgroundProfile"/>), the synchronous create-on-save response
+    /// carries a non-terminal "dispatched" profile step — so the interim bar (container + record +
+    /// indexing) is the operative success bar for the returned aggregate; the profile fields land
+    /// shortly after, off the response path.
     /// </summary>
     public static bool IsInterimCreateOnSaveSuccess(JobAwareCompletionState state)
     {
@@ -578,17 +831,170 @@ public class ComposeService : IComposeService
     };
 
     /// <summary>
-    /// The DEFERRED profile-analysis signal (Fork C, core-owned). No stored outcome, not started —
-    /// projects to <see cref="JobAwareState.Queued"/> (the honest "nothing persisted yet" state,
-    /// since the contract has no dedicated Deferred member) with a <c>deferred</c> diagnostic so
-    /// the OutcomeCard and a future re-profile pass can distinguish it from a genuinely-queued step.
+    /// FR-05 Fork C (compose-r2): DISPATCHES a best-effort OBO document-profile onto a detached DI
+    /// scope (fire-and-forget) for a newly-created (or idempotently-resolved) <c>sprk_document</c>, and
+    /// returns the non-terminal "dispatched" profile-analysis step signal WITHOUT awaiting the profile.
+    /// The background task (<see cref="RunBackgroundProfileAsync"/>) downloads the user-OBO-written SPE
+    /// file as the user (a background MI job would 403 — the round-6 bug) and reuses the existing
+    /// extract → classify → summarize → field-map → UpdateDocumentAsync pipeline; its 7 profile fields
+    /// land shortly AFTER the save returns.
     /// </summary>
-    private static StoredStepSignal DeferredProfileSignal() => new()
+    /// <remarks>
+    /// <para>
+    /// <b>Why a detached scope (constraint #1):</b> the request DI scope disposes when the HTTP
+    /// response returns, so the background profile MUST resolve the facade from a FRESH
+    /// <see cref="IServiceScopeFactory.CreateScope"/> — never a service captured from the request scope.
+    /// </para>
+    /// <para>
+    /// <b>How OBO survives (constraint #2):</b> the profile path reads ONLY the <c>Authorization</c>
+    /// header (the OBO user assertion) + <c>User</c> claims + <c>TraceIdentifier</c> from
+    /// <see cref="HttpContext"/> (see <c>TokenHelper.ExtractBearerToken</c> /
+    /// <c>GraphClientFactory.ForUserAsync</c>). Those three are captured HERE, before the request scope
+    /// disposes, and threaded into a synthetic <see cref="DefaultHttpContext"/> in the background task —
+    /// the user access token stays valid long enough to exchange after the response. If the save request
+    /// carried no bearer token, a background OBO download would 401, so we DO NOT dispatch a doomed task:
+    /// we skip cleanly with a non-terminal not-attempted signal instead.
+    /// </para>
+    /// <para>
+    /// Best-effort by design: a null facade / scope factory (test host, AI-gate off) or a missing bearer
+    /// token returns a NON-terminal signal, and any background failure is swallowed + logged
+    /// (<see cref="RunBackgroundProfileAsync"/>) — the synchronous save is never blocked, and its
+    /// aggregate is never demoted to Failed by a profile miss. ADR-013: injects NO AI-internal type.
+    /// </para>
+    /// </remarks>
+    private StoredStepSignal DispatchBackgroundProfile(Guid documentId, HttpContext httpContext)
+    {
+        // Availability gate: no scope factory (unit-test host) or no facade registered (compound AI gate
+        // off) → nothing to dispatch. Report non-terminal not-attempted synchronously.
+        if (_scopeFactory is null || _documentProfileAi is null)
+        {
+            return ProfileNotAttemptedSignal(
+                "profile facade unavailable (no IDocumentProfileAi / IServiceScopeFactory) — profile not dispatched");
+        }
+
+        // Capture the OBO user assertion (raw Authorization header) BEFORE the request scope disposes.
+        // Non-throwing (unlike TokenHelper.ExtractBearerToken) so a token-less save degrades cleanly.
+        var authorizationHeader = httpContext.Request?.Headers.Authorization.ToString();
+        if (string.IsNullOrWhiteSpace(authorizationHeader)
+            || !authorizationHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            // No user token to detach — a background OBO download would 401. Never ship a broken detach.
+            _logger.LogWarning(
+                "Compose create-on-save: no bearer Authorization header on the save request for document {DocumentId} — background OBO profile not dispatched (best-effort skip).",
+                documentId);
+            return ProfileNotAttemptedSignal(
+                "no bearer Authorization header on the save request — background OBO profile not dispatched");
+        }
+
+        // Capture the remaining request-scoped context the profile facade reads. A ClaimsPrincipal is a
+        // plain object with no request-tied lifetime, so retaining the reference across the response is safe.
+        var user = httpContext.User;
+        var correlationId = httpContext.TraceIdentifier;
+
+        // Fire-and-forget: detach from the request scope AND the request CancellationToken (constraint #3).
+        // The task is unobserved by design; RunBackgroundProfileAsync owns its own try/catch so nothing
+        // faults the finalizer thread. The discard makes the intent explicit to reviewers + analyzers.
+        _ = Task.Run(() => RunBackgroundProfileAsync(documentId, authorizationHeader, user, correlationId));
+
+        return ProfileDispatchedSignal();
+    }
+
+    /// <summary>
+    /// The detached (fire-and-forget) body of the best-effort OBO document-profile. Creates a NEW DI
+    /// scope, rebuilds a minimal <see cref="HttpContext"/> from the captured OBO token + claims, resolves
+    /// the <see cref="IDocumentProfileAi"/> facade FROM THAT SCOPE, and runs the profile. NEVER throws —
+    /// a background profiling failure must not crash the process (unobserved-exception safe, constraint #4).
+    /// </summary>
+    private async Task RunBackgroundProfileAsync(
+        Guid documentId,
+        string authorizationHeader,
+        ClaimsPrincipal? user,
+        string correlationId)
+    {
+        // Constraint #3: use the app-shutdown token, NOT the (already-completed) request token. A profile
+        // in flight when the host stops is cut off cleanly; otherwise it runs to completion.
+        var ct = _appLifetime?.ApplicationStopping ?? CancellationToken.None;
+
+        try
+        {
+            await using var scope = _scopeFactory!.CreateAsyncScope();
+
+            // Rebuild a minimal HttpContext carrying ONLY what the profile path reads: the OBO user
+            // assertion (Authorization header), the User claims (runContext.TenantId + tenant-cache
+            // scoping), and the correlation id. Backed by the fresh scope's provider so any
+            // RequestServices lookup resolves against the detached (non-disposed) scope.
+            var detachedContext = new DefaultHttpContext
+            {
+                RequestServices = scope.ServiceProvider,
+                TraceIdentifier = correlationId,
+            };
+            detachedContext.Request.Headers.Authorization = authorizationHeader;
+            if (user is not null)
+            {
+                detachedContext.User = user;
+            }
+
+            // Keep AnalysisDocumentLoader's IHttpContextAccessor-based tenant-cache scoping coherent
+            // (else it degrades to the documented "system" sentinel — acceptable, but this is tidier).
+            var accessor = scope.ServiceProvider.GetService<IHttpContextAccessor>();
+            if (accessor is not null)
+            {
+                accessor.HttpContext = detachedContext;
+            }
+
+            // Constraint #1: resolve the facade from the NEW scope — never the request-scope service.
+            var facade = scope.ServiceProvider.GetService<IDocumentProfileAi>();
+            if (facade is null)
+            {
+                _logger.LogWarning(
+                    "Compose background profile: IDocumentProfileAi did not resolve from the detached scope for document {DocumentId} (correlation={CorrelationId}) — skipped.",
+                    documentId, correlationId);
+                return;
+            }
+
+            _logger.LogInformation(
+                "Compose background profile: starting best-effort OBO profile for document {DocumentId} (correlation={CorrelationId}).",
+                documentId, correlationId);
+
+            var result = await facade.ProfileDocumentAsUserAsync(documentId, detachedContext, ct)
+                .ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Compose background profile: document {DocumentId} — success={Success} (failure={Failure} skip={Skip}) (correlation={CorrelationId}). Profile fields populate on the record now.",
+                documentId, result.Success, result.FailureReason ?? "(none)", result.SkipReason ?? "(none)", correlationId);
+        }
+        catch (Exception ex)
+        {
+            // Constraint #4: unobserved-exception safe. The save already returned on its own terms; a
+            // best-effort background profile failure is logged and swallowed, never rethrown.
+            _logger.LogError(ex,
+                "Compose background profile: threw while profiling document {DocumentId} (correlation={CorrelationId}) — best-effort, the save is unaffected.",
+                documentId, correlationId);
+        }
+    }
+
+    /// <summary>Non-terminal (Running) profile-analysis signal for the fire-and-forget path: the profile
+    /// was DISPATCHED to a background scope and runs best-effort AFTER the save returns (the 7
+    /// sprk_document profile fields populate shortly after). <c>Started=true</c> + no stored status →
+    /// projects to <see cref="JobAwareState.Running"/>, so the returned aggregate reads Partial (record +
+    /// index exist, profile pending), never Completed-on-claim and never Failed.</summary>
+    private static StoredStepSignal ProfileDispatchedSignal() => new()
+    {
+        StepName = StepProfileAnalysis,
+        StoredStatus = null,
+        Started = true,
+        Detail = "profile-analysis dispatched to background (best-effort); the profile fields populate shortly after the save returns",
+    };
+
+    /// <summary>A non-terminal profile-analysis signal for when the profile was NOT attempted
+    /// (container/record step never produced a record, or no facade injected). Non-terminal so it
+    /// never poisons the create-on-save aggregate.</summary>
+    private static StoredStepSignal ProfileNotAttemptedSignal(string detail) => new()
     {
         StepName = StepProfileAnalysis,
         StoredStatus = null,
         Started = false,
-        Detail = "deferred: core-owned Services/Ai/PublicContracts/IDocumentProfileAi (Fork C) — not implemented in this task",
+        Detail = detail,
     };
 
     /// <summary>Maps the indexing enqueue outcome to a stored step signal: submitted (sync-OBO ran)
@@ -632,6 +1038,7 @@ public class ComposeService : IComposeService
         string correlationId,
         StoredStepSignal containerSignal,
         StoredStepSignal recordSignal,
+        StoredStepSignal profileSignal,
         StoredStepSignal indexingSignal,
         DateTimeOffset observedAt)
     {
@@ -647,7 +1054,7 @@ public class ComposeService : IComposeService
         {
             containerSignal,
             recordSignal,
-            DeferredProfileSignal(),
+            profileSignal,
             indexingSignal,
         };
 
@@ -676,6 +1083,9 @@ public class ComposeService : IComposeService
             correlationId: request.SessionId,
             containerSignal: containerFailed,
             recordSignal: new StoredStepSignal { StepName = StepRecord, StoredStatus = null, Started = false },
+            // Container failed → no record → nothing to profile. Non-terminal so the aggregate stays
+            // Failed (driven by the container step), not double-counted.
+            profileSignal: ProfileNotAttemptedSignal("profile not attempted: container step failed"),
             indexingSignal: new StoredStepSignal { StepName = StepIndexing, StoredStatus = null, Started = false },
             observedAt: observedAt);
 

@@ -204,6 +204,28 @@ public class SprkChatAgentFactory
         "rules: relay the links the platform hands you; never compose, guess, or reconstruct one " +
         "yourself.";
 
+    /// <summary>
+    /// spaarkeai-compose-r2 — Model Y redirect for the #2 defect (a free-text edit instruction typed
+    /// in the Assistant while a document is open in Compose was narrated as a full-document rewrite in
+    /// chat). Editing lives in the EDITOR (highlight-to-edit), not the chat loop. This directive stops
+    /// the model from free-forming a rewrite as plain chat text — the failure mode the deterministic
+    /// <see cref="BindingCapabilityTool"/> compose-revise-document guard cannot catch (that guard only
+    /// fires when the model INVOKES the tool; this covers the model composing the rewrite as prose
+    /// instead). Deterministic constant text (NFR-04 prompt-cache stability). Its own wording is
+    /// self-gating ("When a document is open in the Compose editor…") so it is a no-op for non-Compose
+    /// sessions. Exposed internal for the directive-presence tests.
+    /// </summary>
+    internal const string ComposeEditRedirectDirective =
+        "\n\n## Editing a document open in Compose (Spaarke platform contract)\n" +
+        "When a document is open in the Compose editor and the user asks you to EDIT, rewrite, expand, " +
+        "shorten, tighten, or otherwise revise part or all of it through chat, DO NOT produce a " +
+        "rewritten version of the document — in whole or in part — in your chat reply, and do NOT " +
+        "invoke a whole-document revise capability to do it. Editing happens IN the Compose editor, " +
+        "not in chat. Instead, tell the user to highlight the text they want to change in the Compose " +
+        "editor and choose an editing option (for example, Draft alternative or Improve clarity). Keep " +
+        "the reply to a single short sentence pointing them to the editor's highlight-to-edit options; " +
+        "never restate or regenerate the document's contents in chat.";
+
     // Task 053 (FR-B-04): BuildCurrentDateDirective moved to the shared
     // ContextSliceProducers.EnvironmentFactsProducer (the ONE source for this primitive — the interactive
     // append site above + the Context Binder's Workspace slice both call it). Byte-identical output.
@@ -293,6 +315,13 @@ public class SprkChatAgentFactory
     /// Default <c>null</c> for backward compatibility — pre-R5 sessions / call sites that
     /// omit the parameter behave exactly as before.
     /// </param>
+    /// <param name="activeSessionFileId">
+    /// spaarkeai-compose-r2 "summarize this document" reinforcement: the active document's
+    /// <see cref="ChatSessionFile.FileId"/> (<c>session.ActiveDocument?.SessionFileId</c>), or null.
+    /// Forwarded to <see cref="BuildSessionFilesManifestSuffix"/> so the Session Files manifest marks
+    /// the active file and tells the LLM it is the default target when no fileIds are passed. Prompt-only;
+    /// the deterministic scoping lives in <c>SessionDispatchOrchestrator.ResolveTargetFiles</c>.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
@@ -312,6 +341,7 @@ public class SprkChatAgentFactory
         IReadOnlyList<string>? previousTurnToolNames = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
         IReadOnlyList<SessionOutput>? ledgerOutputs = null,
+        string? activeSessionFileId = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -419,7 +449,7 @@ public class SprkChatAgentFactory
         {
             try
             {
-                var manifestSuffix = BuildSessionFilesManifestSuffix(files);
+                var manifestSuffix = BuildSessionFilesManifestSuffix(files, activeSessionFileId);
                 if (!string.IsNullOrEmpty(manifestSuffix))
                 {
                     // R6 task 068 — session-files manifest participates in the shared 8K
@@ -890,6 +920,22 @@ public class SprkChatAgentFactory
         }
         // === End D-F0 doctrine ==========================================================
 
+        // === spaarkeai-compose-r2 — Model Y compose-edit redirect (#2 defect) ============
+        // Steer free-text "edit this document" requests to the EDITOR (highlight-to-edit)
+        // instead of a narrated full-document rewrite in chat. Pairs with the deterministic
+        // BindingCapabilityTool compose-revise-document guard (which covers the model
+        // INVOKING the tool); this covers the model composing the rewrite as plain prose.
+        // Self-gating wording (no-op outside Compose); appended whenever tools project so a
+        // Compose-hosted session always carries it. Deterministic constant text (NFR-04).
+        if (finalTools.Count > 0)
+        {
+            context = context with
+            {
+                SystemPrompt = context.SystemPrompt + ComposeEditRedirectDirective,
+            };
+        }
+        // === End compose-edit redirect ==================================================
+
         // === G-P3 UAT round-5 R5-A — current-date context (2026-07-07) ==================
         // Incident: "due date tomorrow" produced 6/13/2024 — the model had NO current-date
         // context and hallucinated a date (wrong YEAR). Deterministic date line at a STABLE
@@ -1077,8 +1123,19 @@ public class SprkChatAgentFactory
     /// </para>
     /// </remarks>
     /// <param name="uploadedFiles">Non-empty, non-null manifest list. Caller guarantees Count &gt; 0.</param>
+    /// <param name="activeSessionFileId">
+    /// spaarkeai-compose-r2 "summarize this document" reinforcement: the <see cref="ChatSessionFile.FileId"/>
+    /// of the session's ACTIVE document (<c>session.ActiveDocument?.SessionFileId</c>), or null when none is
+    /// registered. When it matches a usable manifest entry, that entry is marked " (active)" and a single
+    /// instruction line tells the LLM the active file is the default target for "this/the document"; to
+    /// target other or ALL files the LLM must pass their fileIds explicitly. Prompt-only reinforcement — the
+    /// DETERMINISTIC scoping lives in <c>SessionDispatchOrchestrator.ResolveTargetFiles</c>. ADR-015 preserved
+    /// (fileId + fileName only; never file content).
+    /// </param>
     /// <returns>The suffix beginning with two newlines, ready to concatenate onto a system prompt. Empty string when the manifest yields no usable entries (defensive — should not happen for Count &gt; 0).</returns>
-    internal static string BuildSessionFilesManifestSuffix(IReadOnlyList<ChatSessionFile> uploadedFiles)
+    internal static string BuildSessionFilesManifestSuffix(
+        IReadOnlyList<ChatSessionFile> uploadedFiles,
+        string? activeSessionFileId = null)
     {
         if (uploadedFiles is null || uploadedFiles.Count == 0)
         {
@@ -1096,7 +1153,15 @@ public class SprkChatAgentFactory
             return string.Empty;
         }
 
-        var fileNames = string.Join(", ", usable.Select(f => f.FileName));
+        // The active file (when its id is present in the usable manifest) gets a " (active)"
+        // marker on its name so the LLM can see WHICH file "this document" refers to (ADR-015:
+        // still just fileName — no content leaks).
+        var activeFile = string.IsNullOrEmpty(activeSessionFileId)
+            ? null
+            : usable.FirstOrDefault(f => string.Equals(f.FileId, activeSessionFileId, StringComparison.Ordinal));
+
+        var fileNames = string.Join(", ", usable.Select(f =>
+            ReferenceEquals(f, activeFile) ? $"{f.FileName} (active)" : f.FileName));
         var fileIds = string.Join(", ", usable.Select(f => f.FileId));
         var pluralSuffix = usable.Count == 1 ? string.Empty : "s";
 
@@ -1104,9 +1169,23 @@ public class SprkChatAgentFactory
         // not blend it into the preceding "### Active Capabilities" or entity enrichment.
         // Task 044: tool-agnostic wording — the deleted generic playbook dispatcher is no
         // longer named; capability tools accept the session file IDs via their declared
-        // fileIds argument (FR-08 default-all applies when omitted).
-        return $"\n\nSession Files: This chat session has {usable.Count} uploaded file{pluralSuffix} available for tool calls: {fileNames}. " +
+        // fileIds argument.
+        var suffix = $"\n\nSession Files: This chat session has {usable.Count} uploaded file{pluralSuffix} available for tool calls: {fileNames}. " +
                $"When a capability needs these files (e.g. summarize), pass their file IDs in the tool call's fileIds argument: {fileIds}.";
+
+        // spaarkeai-compose-r2: when an active document is set, tell the LLM it is the default
+        // target for "this/the document" (omitting fileIds), and that targeting other or ALL
+        // files requires passing their fileIds explicitly. Mirrors the deterministic default in
+        // SessionDispatchOrchestrator.ResolveTargetFiles.
+        if (activeFile is not null)
+        {
+            suffix +=
+                $" When the user says \"this document\"/\"the document\" or omits a file, the ACTIVE file " +
+                $"({activeFile.FileName}, fileId {activeFile.FileId}) is the default target; to summarize other " +
+                $"files or ALL files, pass their fileIds explicitly.";
+        }
+
+        return suffix;
     }
 
 
@@ -1431,8 +1510,40 @@ public class SprkChatAgentFactory
     /// </remarks>
     internal const int SelectionTextMaxChars = 200;
 
+    /// <summary>
+    /// Registry widget-type discriminator for the first-class Compose DIRECT widget
+    /// (spaarkeai-compose-r2 — "the flip"). MUST match <c>registerComposeWidget.ts</c>
+    /// (<c>widgetType: 'compose'</c>) and <c>SendWorkspaceArtifactHandler.ClientComposeWidgetKey</c>.
+    /// A Compose tab HOLDS A DOCUMENT, so it is projected onto the DocumentViewer
+    /// visible-state (mirrors the client <c>composeWidgetVisibility</c>) rather than the
+    /// Dashboard variant — otherwise the agent only learns "there is a Compose dashboard",
+    /// never WHICH document is open.
+    /// </summary>
+    internal const string ComposeWidgetType = "compose";
+
+    /// <summary>
+    /// Graceful default filename for a Compose tab whose server-readable
+    /// <see cref="WorkspaceTabWidgetData"/> carries no document filename (e.g. a Dashboard-
+    /// shaped payload). Keeps the agent-visible identity as "a document in Compose" rather
+    /// than a mislabeled layout name. See the contract note on <see cref="DeriveComposeVisibleState"/>.
+    /// </summary>
+    internal const string ComposeDefaultFilename = "Compose document";
+
     internal static WorkspaceTabVisibleState? TryDeriveVisibleState(WorkspaceTab tab)
     {
+        // spaarkeai-compose-r2 ("the flip"): a first-class Compose Direct widget
+        // (widgetType "compose") HOLDS A DOCUMENT. Mirror the client
+        // composeWidgetVisibility (registerComposeWidget.ts) — project the active-document
+        // identity onto the DocumentViewer variant so the agent learns the FILENAME of the
+        // document open in Compose, not merely that a "Compose" dashboard exists. This is
+        // checked BEFORE the closed-union switch because a compose tab's typed widgetData
+        // may be either a DocumentViewer payload (carries the real filename) or a Dashboard
+        // payload (no filename — the contract gap noted on DeriveComposeVisibleState).
+        if (string.Equals(tab.WidgetType, ComposeWidgetType, StringComparison.OrdinalIgnoreCase))
+        {
+            return DeriveComposeVisibleState(tab.WidgetData);
+        }
+
         // Closed-union switch over the polymorphic widget-data types. A new widget kind
         // cannot accidentally leak more than the FR-57 contract permits because the
         // compiler requires explicit handling here.
@@ -1463,6 +1574,58 @@ public class SprkChatAgentFactory
             // Unknown / null widget data → no visible state (privacy default).
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Derive the agent-visible state for a Compose tab (widgetType "compose"). A Compose
+    /// tab always HOLDS A DOCUMENT, so it maps to <see cref="WorkspaceTabVisibleState.DocumentViewer"/>
+    /// carrying the filename — never the Dashboard variant.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Preferred path</b>: the persisted widgetData is a <see cref="DocumentViewerTabWidgetData"/>
+    /// (kind "DocumentViewer") carrying the real <c>filename</c> — mirrors the client
+    /// <c>composeWidgetVisibility</c> projection in <c>registerComposeWidget.ts</c>. The real
+    /// filename flows straight through, including any selection state.
+    /// </para>
+    /// <para>
+    /// <b>CONTRACT GAP (reported to the client-owning agent)</b>: the flipped Compose tab
+    /// persists its identity under <c>widgetData.compose.fileName</c> (see
+    /// <c>composeWidgetData.ts</c> — also <c>compose.upload.fileName</c> /
+    /// <c>compose.draft.fileName</c>). That shape has NO <c>kind</c> discriminator, so the
+    /// strict 4-variant <see cref="WorkspaceTabWidgetData"/> union cannot deserialize it into
+    /// a filename-bearing typed payload — a Compose tab currently deserializes as a
+    /// <see cref="DashboardTabWidgetData"/> (name only, e.g. "Compose"), which carries NO
+    /// document filename. When that is the case we still emit a DocumentViewer (so the agent
+    /// learns a document is open in Compose, not a "Compose dashboard") but with a graceful
+    /// default filename. The durable fix is client-owned: persist the Compose tab's widgetData
+    /// as a DocumentViewer payload (<c>{ kind: "DocumentViewer", filename, ... }</c>, which the
+    /// client already computes) so the real filename reaches this derivation. Server reuses the
+    /// existing DocumentViewer types only — no new widget kind, no schema change.
+    /// </para>
+    /// </remarks>
+    private static WorkspaceTabVisibleState DeriveComposeVisibleState(WorkspaceTabWidgetData? widgetData)
+    {
+        // Preferred: a DocumentViewer-shaped payload carries the real active-document filename.
+        if (widgetData is DocumentViewerTabWidgetData d && !string.IsNullOrWhiteSpace(d.Filename))
+        {
+            return new WorkspaceTabVisibleState.DocumentViewer(
+                Filename: d.Filename,
+                MimeType: d.MimeType,
+                SizeBytes: d.SizeBytes,
+                HasSelection: d.HasSelection ?? false,
+                SelectionText: TruncateSelection(d.SelectionText, d.HasSelection ?? false));
+        }
+
+        // Fallback (contract gap): no server-readable filename — emit DocumentViewer with a
+        // graceful default so the agent still learns a document is open in Compose. The
+        // Dashboard layout label ("Compose") is deliberately NOT masqueraded as a filename.
+        return new WorkspaceTabVisibleState.DocumentViewer(
+            Filename: ComposeDefaultFilename,
+            MimeType: string.Empty,
+            SizeBytes: 0,
+            HasSelection: false,
+            SelectionText: null);
     }
 
     /// <summary>Summary has visible state when EITHER a non-empty TL;DR OR a non-empty body exists.</summary>

@@ -138,6 +138,7 @@ import {
   buildFileConfirmationMessage,
   buildMultiFileSummarizeInterjection,
   makeLocalAssistantMessage,
+  makeSavedToDmsMessage,
   routeSummarizeIntent,
   SUMMARIZE_PROMPT_FIRST_INTERJECTION,
   FILE_CONFIRMATION_MAX_NAMES,
@@ -245,6 +246,22 @@ describe('makeLocalAssistantMessage', () => {
     expect(msg.metadata?.responseType).toBe('markdown');
     expect(typeof msg.timestamp).toBe('string');
     expect(new Date(msg.timestamp).toString()).not.toBe('Invalid Date');
+  });
+});
+
+describe('makeSavedToDmsMessage (FIX #7a)', () => {
+  it('builds a persistent Assistant message with savedPreview metadata carrying the document id', () => {
+    const msg = makeSavedToDmsMessage('Brief.docx', 'doc-123');
+    expect(msg.role).toBe('Assistant');
+    expect(msg.content).toBe("Saved 'Brief.docx' to the DMS.");
+    expect(msg.metadata?.responseType).toBe('markdown');
+    expect(msg.metadata?.savedPreview).toEqual({ documentId: 'doc-123', fileName: 'Brief.docx' });
+  });
+
+  it('falls back to a generic name when the filename is missing/blank', () => {
+    const msg = makeSavedToDmsMessage(undefined, 'doc-9');
+    expect(msg.content).toBe("Saved 'your document' to the DMS.");
+    expect(msg.metadata?.savedPreview?.documentId).toBe('doc-9');
   });
 });
 

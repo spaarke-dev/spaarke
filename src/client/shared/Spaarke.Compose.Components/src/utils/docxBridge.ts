@@ -143,6 +143,69 @@ export async function docxToTipTapHtml(docxBytes: ArrayBuffer): Promise<MammothC
  * @throws        Error if the editor JSON is malformed or docx Packer fails
  */
 export async function tipTapToDocxBytes(editor: Editor): Promise<ArrayBuffer> {
+  return tipTapJsonToDocxBytes(editor.getJSON() as TipTapNode);
+}
+
+/**
+ * TipTap JSON node shape (subset — covers OOB extensions in scope). Exported so the redline→Word
+ * save-fidelity path (UAT-R7 #2/#3/#4) can build a BASELINE document tree without a live editor.
+ */
+export type TipTapNode = {
+  type?: string;
+  content?: TipTapNode[];
+  text?: string;
+  attrs?: Record<string, unknown>;
+  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
+};
+
+/**
+ * Build the REJECT-STATE BASELINE of a TipTap doc for redline→Word save fidelity (UAT-R7 #2/#3/#4).
+ *
+ * The Compose editor renders pending AI redlines as {@link ../widgets/marks/InsertionMark insertion}
+ * / {@link ../widgets/marks/DeletionMark deletion} marks. A plain `tipTapToDocxBytes` flattens BOTH
+ * halves to plain body text (it has no track-change branch), so the saved `.docx` ends up carrying
+ * the original AND the AI text as ordinary text. Instead, Save sends a clean baseline (this) + a
+ * structured annotation list, and the BFF re-applies the redlines as NATIVE `w:ins`/`w:del`/
+ * `w:comment` via `DocxAnnotationWriter`.
+ *
+ * The baseline is the document as if every PENDING redline were REJECTED:
+ *  - text carrying the `insertion` mark (the proposed new text) is DROPPED;
+ *  - text carrying the `deletion` mark (the original) is KEPT, with the redline/comment marks
+ *    stripped so it serializes as ordinary text;
+ *  - ACCEPTED edits are already committed in the doc (accept unsets the marks → normal text), so
+ *    they flow through untouched.
+ *
+ * Returns a new tree (the input is not mutated).
+ */
+export function buildRejectBaselineJson(node: TipTapNode): TipTapNode {
+  const REDLINE_MARKS = new Set(['insertion', 'deletion', 'commentAnchor']);
+
+  const transform = (n: TipTapNode): TipTapNode | null => {
+    // Drop proposed-insertion text entirely (reject = it was never there).
+    if (n.type === 'text' && (n.marks?.some(m => m.type === 'insertion') ?? false)) {
+      return null;
+    }
+    const next: TipTapNode = { ...n };
+    if (n.marks) {
+      const kept = n.marks.filter(m => !REDLINE_MARKS.has(m.type));
+      if (kept.length > 0) next.marks = kept;
+      else delete next.marks;
+    }
+    if (n.content) {
+      next.content = n.content.map(transform).filter((c): c is TipTapNode => c !== null);
+    }
+    return next;
+  };
+
+  return transform(node) ?? { type: 'doc', content: [] };
+}
+
+/**
+ * Serialize a TipTap JSON document tree (not a live editor) to DOCX bytes. This is the JSON-in core
+ * of {@link tipTapToDocxBytes}; the redline save path calls it with a {@link buildRejectBaselineJson}
+ * baseline. Fidelity is governed by the same Spike #1 OOB subset.
+ */
+export async function tipTapJsonToDocxBytes(json: TipTapNode): Promise<ArrayBuffer> {
   // Lazy-load docx (MIT). Pure-JS pack; ~90 KB minified-gzipped.
   const docxModule = await import('docx');
   const {
@@ -156,17 +219,6 @@ export async function tipTapToDocxBytes(editor: Editor): Promise<ArrayBuffer> {
     TableCell: DocxCell,
     AlignmentType,
   } = docxModule;
-
-  // TipTap JSON node shape (subset — covers OOB extensions in scope).
-  type TipTapNode = {
-    type: string;
-    content?: TipTapNode[];
-    text?: string;
-    attrs?: Record<string, unknown>;
-    marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
-  };
-
-  const json = editor.getJSON() as TipTapNode;
 
   const headingMap: Record<number, (typeof HeadingLevel)[keyof typeof HeadingLevel]> = {
     1: HeadingLevel.HEADING_1,

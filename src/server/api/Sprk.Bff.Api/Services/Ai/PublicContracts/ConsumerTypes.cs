@@ -284,6 +284,28 @@ public static class ConsumerTypes
     public const string CreateMatter = "create-matter";
 
     /// <summary>
+    /// The Compose whole-document revision capability (DEF-11, spaarkeai-compose-r2) — a
+    /// prompted Action (<c>compose-revise-document</c>) that revises the ENTIRE document
+    /// currently open in Compose against a chosen <c>revisionIntent</c> (align-clauses,
+    /// flag-risks, improve-clarity, custom), emitting a dual-channel payload: structured
+    /// <c>edits[]</c> (pending track-changes, same shape as
+    /// <see cref="ComposeDraftAlternative"/>'s payload) and/or anchored <c>comments[]</c>
+    /// (review-flag comments, DEF-13 path). Declares the core <c>compose</c> Binding
+    /// disposition (<see cref="BindingDisposition.Compose"/>, 100000006) — the payload is
+    /// ledger-written before render (ADR-040). Distinct from <see cref="ComposeDraftAlternative"/>
+    /// (a single selected clause, one edit) and <see cref="ComposeDraftDocument"/> (drafts a
+    /// brand-new document from scratch): this capability revises an EXISTING whole document.
+    /// When invoked from the text/agent path, <c>BindingCapabilityTool</c> routes the dispatch
+    /// to the session's <c>ActiveDocument.DocumentSessionId</c> (the DOCUMENT session, per the
+    /// DEF-09 precedent) when one is registered, falling back to the chat session otherwise.
+    /// §11 justification lives in <c>infra/dataverse/actions/compose-revise-document.action.json</c>.
+    /// Registered ahead of the live Binding-row deploy (mirror-first at
+    /// <c>infra/dataverse/sprk_playbookconsumer-rows.json</c>); interim
+    /// <see cref="RoutingConsumerTypeHealthCheck"/> <c>ConstantsWithoutRows</c> finding until seeded.
+    /// </summary>
+    public const string ComposeReviseDocument = "compose-revise-document";
+
+    /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
     /// 028e exit gate).
@@ -312,5 +334,6 @@ public static class ConsumerTypes
         ComposeDraftAlternative,
         ComposeDraftDocument,
         CreateMatter,
+        ComposeReviseDocument,
     };
 }

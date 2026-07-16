@@ -177,3 +177,40 @@ export function makeLocalAssistantMessage(content: string): IChatMessage {
     metadata: { responseType: "markdown" },
   };
 }
+
+/**
+ * DEF-12 — build the CONFIRMATION Assistant message for an applied Compose AI edit, carrying the
+ * `composeEdit` metadata that makes SprkChat render the per-message Accept / Reject / Try-another
+ * controls (the Assistant is the AI↔user interaction surface). `content` stays SUMMARY-ONLY (a brief
+ * "I revised …") — the proposed text is the redline in the document and the reasoning lives in the
+ * Context Execution Trace; neither is dumped here. `ledgerRef`/`bindingId` address the applied compose
+ * output so the controls route to the existing accept/undo/tryAnother handlers.
+ */
+export function makeComposeEditControlsMessage(
+  content: string,
+  composeEdit: { ledgerRef: string; bindingId: string }
+): IChatMessage {
+  return {
+    role: "Assistant",
+    content,
+    timestamp: new Date().toISOString(),
+    metadata: { responseType: "markdown", composeEdit },
+  };
+}
+
+/**
+ * FIX #7a — build the PERSISTENT "Saved to the DMS" Assistant message posted after the Compose
+ * create-on-save flow succeeds (the "Add the document to the DMS" chip → editor Save → save-completed
+ * conduit). The `savedPreview` metadata makes SprkChat render an "Open preview" affordance that opens
+ * the File Preview modal for `documentId` — replacing the transient in-editor Saved ✓ banner link.
+ * CLIENT-RENDERED only (not in BFF chat history), same as the other local-message helpers.
+ */
+export function makeSavedToDmsMessage(fileName: string | undefined, documentId: string): IChatMessage {
+  const name = fileName && fileName.trim().length > 0 ? fileName.trim() : "your document";
+  return {
+    role: "Assistant",
+    content: `Saved '${name}' to the DMS.`,
+    timestamp: new Date().toISOString(),
+    metadata: { responseType: "markdown", savedPreview: { documentId, fileName } },
+  };
+}

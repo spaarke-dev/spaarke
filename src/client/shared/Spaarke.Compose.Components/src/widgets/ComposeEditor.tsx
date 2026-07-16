@@ -81,7 +81,12 @@ import CharacterCount from '@tiptap/extension-character-count';
 import TextAlign from '@tiptap/extension-text-align';
 
 import { makeStyles, mergeClasses, tokens, Spinner, Text, Button } from '@fluentui/react-components';
-import { Checkmark16Regular, Dismiss16Regular } from '@fluentui/react-icons';
+import {
+  ArrowDown20Regular,
+  Checkmark16Regular,
+  Dismiss16Regular,
+  DocumentProhibited24Regular,
+} from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
 import { InsertionMark } from './marks/InsertionMark';
@@ -97,7 +102,64 @@ import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighl
 // resolve). Same rationale as ComposeWorkspace.tsx above.
 import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widgets/events';
 
-import { docxToTipTapHtml, tipTapToDocxBytes } from '../utils/docxBridge';
+import {
+  docxToTipTapHtml,
+  tipTapToDocxBytes,
+  tipTapJsonToDocxBytes,
+  buildRejectBaselineJson,
+  type TipTapNode,
+} from '../utils/docxBridge';
+// Redline → Word save fidelity (UAT-R7 #2/#3/#4): the redline→annotation bridge + its wire type.
+import { redlineMarksToDocxAnnotations, type DocxAnnotationInput } from './useComposeWordShuttle';
+
+// ---------------------------------------------------------------------------
+// Wave 6 (UAT-R4, DEF-G) — non-docx reference-only guard
+// ---------------------------------------------------------------------------
+//
+// Editable Compose content is DOCX-ONLY by design (mammoth parses OOXML/zip;
+// there is no PDF→editable conversion — Open-in-Word is the escape hatch). A
+// DOCX is a ZIP archive, so its first four bytes are the ZIP local-file-header
+// magic `PK\x03\x04` (0x50 0x4B 0x03 0x04). Any other leading signature — a
+// `%PDF-` header, plain text, etc. — cannot be a DOCX; mammoth would THROW on
+// it and (pre-Wave-6) leave a silent, confusing empty `<p></p>` editor. Since
+// Wave 3 made "Open in Compose" open the active SOURCE document, a chat-uploaded
+// PDF can now reach this editor. We detect non-docx from the byte signature
+// BEFORE calling mammoth and render an explicit reference-only state instead
+// (with the mammoth throw as a defensive fallback that renders the same state).
+//
+// `PK\x05\x06` (empty archive) / `PK\x07\x08` (spanned) are deliberately NOT
+// treated as docx — a real .docx always begins with a local file header
+// (`PK\x03\x04`), never an empty/spanned end-of-central-directory marker.
+const ZIP_LOCAL_FILE_HEADER = [0x50, 0x4b, 0x03, 0x04] as const;
+
+/** True when `bytes` begins with the ZIP local-file-header magic — the necessary signature of a DOCX. */
+function isDocxBytes(bytes: ArrayBuffer): boolean {
+  if (bytes.byteLength < ZIP_LOCAL_FILE_HEADER.length) return false;
+  const sig = new Uint8Array(bytes, 0, ZIP_LOCAL_FILE_HEADER.length);
+  return ZIP_LOCAL_FILE_HEADER.every((b, i) => sig[i] === b);
+}
+
+/**
+ * Known non-DOCX file extensions. An OOXML ZIP signature is necessary but NOT
+ * sufficient for a DOCX — .xlsx / .pptx / .zip are also `PK\x03\x04` ZIPs, so
+ * the fileName extension is a second, complementary signal. A `.pdf` / `.txt`
+ * is caught by the signature alone; a PK-zip sibling format needs the extension.
+ */
+const NON_DOCX_EXTENSION = /\.(pdf|txt|rtf|doc|xlsx?|pptx?|csv|zip|md|html?|json|xml|png|jpe?g|gif|tiff?)$/i;
+
+/**
+ * Wave 6 (DEF-G) — decide whether a mounted buffer is an EDITABLE DOCX (attempt
+ * mammoth) or a reference-only file. Combines the two pre-mammoth signals so the
+ * common non-docx cases are caught BEFORE the import (never relying on a mammoth
+ * throw, which — swapped mid-session — would fight ProseMirror's DOM):
+ *  1. An explicitly non-docx fileName extension is reference-only even if the
+ *     bytes look like a ZIP (xlsx/pptx are ZIPs too).
+ *  2. Otherwise, a real .docx must carry the OOXML ZIP local-file-header magic.
+ */
+function isEditableDocx(bytes: ArrayBuffer, fileName: string | undefined): boolean {
+  if (fileName && NON_DOCX_EXTENSION.test(fileName.trim())) return false;
+  return isDocxBytes(bytes);
+}
 
 // ---------------------------------------------------------------------------
 // LOCKED Spike #1 extension list — DO NOT add to or remove from this list
@@ -209,14 +271,47 @@ export interface ComposeEditorDocumentRef {
 export interface ComposeDraftPayload {
   /** Text the draft targets for replacement; absent/empty for an insertion-style draft. */
   target_text?: string;
-  /** The drafted content to materialize into the editor (load-bearing field). */
-  new_text: string;
+  /** The drafted content to materialize into the editor (load-bearing single-edit field). */
+  new_text?: string;
   /** How the client resolves `target_text` (Compose vocabulary, e.g. `strict` / `insert`). */
   match_mode?: string;
   /** Optional model-supplied rationale (provenance/explanation). */
   rationale?: string;
   /** Citations / source ids the draft was grounded on (ids only). */
   sources?: string[];
+  /**
+   * DEF-11 whole-document revision: a CHANGE LIST of targeted edits across the document
+   * (`compose-revise-document` output). When present (non-empty), the workspace materializes a
+   * MULTI-change redline via {@link ComposeEditorHandle.materializeComposeEdits} instead of the
+   * single-edit path. Mutually meaningful with {@link comments}: a payload may carry either or both.
+   */
+  edits?: ComposeDraftEdit[];
+  /**
+   * DEF-11 whole-document revision: anchored review FLAGS (no rewrite) — `flag-risks` intent. Each
+   * becomes an anchored `comment` annotation (DEF-13 path) shown in the doc + written as a Word
+   * `w:comment` on Save. Flags are NOT accept/reject-able (they carry no edit).
+   */
+  comments?: ComposeDraftComment[];
+}
+
+/** DEF-11: one targeted edit in a whole-document revision change list. Shape = the single-edit redline payload. */
+export interface ComposeDraftEdit {
+  /** Exact substring to replace — VERBATIM from the document so the editor can locate it. */
+  target_text: string;
+  /** The proposed replacement clause language, inserted as a pending track-change. */
+  new_text: string;
+  /** How to locate `target_text`: `strict` (default) | `first` | `all`. */
+  match_mode?: string;
+  /** Optional per-change rationale. */
+  rationale?: string;
+}
+
+/** DEF-11: one anchored review flag in a whole-document revision (no rewrite). */
+export interface ComposeDraftComment {
+  /** Exact substring the flag is anchored to. */
+  target_text: string;
+  /** The reviewer flag / comment body. */
+  comment: string;
 }
 
 /**
@@ -295,6 +390,34 @@ export interface ComposeEditorProps {
    * host's serial queue. Optional — see `ComposeActionEnqueue`.
    */
   enqueueComposeAction?: ComposeActionEnqueue;
+
+  // ---------------------------------------------------------------------------
+  // FIX #5 (UAT) — Word + Save command handlers, forwarded to the consolidated
+  // ComposeFormatToolbar's "Word" dropdown + right-aligned Save button. The HOST
+  // (ComposeWorkspace) still OWNS the binding (Open-in-Word via `useDocumentActions`,
+  // Save via `triggerSave`, Push via the annotations shuttle) — the editor is a
+  // pure forwarder, so the shared lib stays decoupled from `@spaarke/document-operations`.
+  // All optional: the Word dropdown / Save button render only when their handlers
+  // are threaded (standalone/library mounts omit them).
+  // ---------------------------------------------------------------------------
+  /** Open the current document in Word for the Web. */
+  onOpenInWord?: () => void;
+  /** Open the current document in the Word desktop app. */
+  onOpenInWordDesktop?: () => void;
+  /** Render accepted annotations into the .docx as native Word track-changes + comments. */
+  onPushToWord?: () => void;
+  /** Disables the two Open-in-Word items (no persisted document, or an action in flight). */
+  wordActionsDisabled?: boolean;
+  /** True when there is something to push (persisted doc + ≥1 accepted annotation). */
+  canPushToWord?: boolean;
+  /** True while a push-to-Word is in flight. */
+  isPushingToWord?: boolean;
+  /** Save handler (create-on-save first Save, or update). Renders the Save button when set. */
+  onSave?: () => void;
+  /** True when Save should be enabled (unsaved edit OR unpersisted transient draft). */
+  canSave?: boolean;
+  /** True while a save is in flight. */
+  isSaving?: boolean;
 }
 
 /**
@@ -312,6 +435,21 @@ export interface ComposeEditorHandle {
    * @throws  Error if no editor is mounted or if docx packing fails.
    */
   serialize(): Promise<ArrayBuffer>;
+
+  /**
+   * Redline → Word save fidelity (UAT-R7 #2/#3/#4). Serialize a clean BASELINE `.docx` (the
+   * document as if every PENDING redline were REJECTED — proposed insertions dropped, struck
+   * originals kept as normal text — with ACCEPTED edits already committed) AND the
+   * redline→annotation bridge ({@link DocxAnnotationInput}[]) mapping the current pending
+   * insertion/deletion marks. The host sends both to the BFF Save endpoint, which re-applies the
+   * annotations as NATIVE `w:ins`/`w:del` via `DocxAnnotationWriter`. This replaces the mark-blind
+   * `serialize()` for a redlined Save (which flattened both original + AI text to plain body text).
+   * Resets the dirty flag on success like {@link serialize}.
+   */
+  serializeForSave(): Promise<{ baselineBytes: ArrayBuffer; redlineAnnotations: DocxAnnotationInput[] }>;
+
+  /** True when the editor currently holds one or more PENDING redlines (drives the Save path). */
+  hasPendingRedlines(): boolean;
 
   /**
    * Live character + word counters from the TipTap CharacterCount extension.
@@ -360,6 +498,32 @@ export interface ComposeEditorHandle {
   materializePendingRedline(draft: ComposeDraftPayload, provenance: ComposeDraftProvenance): MaterializeStatus;
 
   /**
+   * DEF-11 whole-document revision. Materialize a CHANGE LIST (`compose-revise-document.edits`) as a
+   * MULTI-change pending redline: each edit `i` renders as its own insertion/deletion pair keyed by
+   * the sub-provenance `{ledgerRef}#{i}` (so per-change on-click accept/reject stays granular), all
+   * under the ONE stored compose output. Accept/Reject on the Assistant confirmation address the BASE
+   * `ledgerRef` → Accept-all / Reject-all. Returns one status per edit (index-aligned).
+   */
+  materializeComposeEdits(edits: ComposeDraftEdit[], provenance: ComposeDraftProvenance): MaterializeStatus[];
+
+  /**
+   * DEF-12 — commit the pending redline addressed by `ledgerRef` (delegates to
+   * `usePendingRedline.accept`): keep the inserted alternative as normal text, remove the struck
+   * original. Called by the WORKSPACE's redline-accept bridge handler when the user clicks Accept on
+   * the Assistant confirmation message (the Accept control moved to the Assistant; the accept LOGIC
+   * stays here). Also invoked by the in-document per-change on-click affordance. No-op if unmounted.
+   */
+  acceptPendingRedline(ledgerRef: string): void;
+
+  /**
+   * DEF-12 — revert the pending redline addressed by `ledgerRef` in the DOCUMENT
+   * (`usePendingRedline.reject`): restore the struck original, drop the insertion. This is the
+   * in-document per-change granularity affordance; the Assistant's "Reject" is instead a durable
+   * ledger supersession (useEditSupersession.undo). No-op if unmounted.
+   */
+  rejectPendingRedline(ledgerRef: string): void;
+
+  /**
    * FR-35 Doc Q&A ephemeral highlight (spaarkeai-compose-r2 task 072, stretch).
    * Resolve `sourceText` (the cited excerpt from a grounded Text-path answer)
    * against the CURRENT document and, on a unique match, render a TRANSIENT
@@ -390,9 +554,26 @@ const useStyles = makeStyles({
     boxSizing: 'border-box',
     overflow: 'hidden',
   },
+  // FIX #9 — the scroll region that wraps the editor surface + the floating
+  // "scroll for more" FAB. `position: relative` anchors the absolutely-positioned
+  // FAB; it does NOT itself scroll (the inner `editorSurface` does).
+  editorScrollWrap: {
+    position: 'relative',
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
   editorSurface: {
     flex: 1,
     overflow: 'auto',
+    // FIX #9 — hide the native scrollbar while remaining scrollable. The floating
+    // down-arrow FAB is the progressive-scroll affordance instead of a visible
+    // scrollbar. Layout/visibility only (no color) — ADR-021-neutral.
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': {
+      display: 'none',
+    },
     padding: tokens.spacingHorizontalL,
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
@@ -465,15 +646,43 @@ const useStyles = makeStyles({
     columnGap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground2,
   },
-  // Task 111: the popup is now AI-actions-ONLY (ComposeAiToolbar owns the
-  // single Toolbar rendered inside it). `flexWrap` + `maxWidth` are ADDITIVE
-  // overflow-prevention (previously absent) — the text-labelled AI buttons
-  // wrap onto a second row instead of overflowing the popup width.
+  // Wave 6 (DEF-G) — reference-only state for a non-docx file that reached the
+  // editor. Calm + informative (NOT an error / not a blank editor). Semantic
+  // tokens only (ADR-021 dark-mode-correct).
+  referenceOnly: {
+    display: 'flex',
+    flex: 1,
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    rowGap: tokens.spacingVerticalS,
+    padding: tokens.spacingHorizontalXXL,
+    textAlign: 'center',
+    color: tokens.colorNeutralForeground2,
+  },
+  referenceOnlyIcon: {
+    fontSize: '48px',
+    width: '48px',
+    height: '48px',
+    color: tokens.colorNeutralForeground3,
+  },
+  referenceOnlyDetail: {
+    maxWidth: '420px',
+    color: tokens.colorNeutralForeground3,
+  },
+  // DEF-17 (UAT-R3): the popup (AI-actions-ONLY since task 111) must present a
+  // SINGLE row. The former `flexWrap: 'wrap'` + `maxWidth: '420px'` cap forced
+  // a second wrapped row once the text-labelled buttons exceeded 420px — that
+  // is exactly the two-line bug DEF-17 fixes. The popup now sizes to its
+  // single-row content (`flexWrap: 'nowrap'`, no width cap); any action that
+  // would not fit lives in ComposeAiToolbar's ⋯ overflow menu rather than
+  // wrapping. `maxWidth: '100vw'` is a viewport safety net only (a floating
+  // tippy popup should never exceed the screen), not a wrap trigger.
   bubbleMenu: {
     display: 'flex',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    maxWidth: '420px',
+    flexWrap: 'nowrap',
+    maxWidth: '100vw',
     columnGap: tokens.spacingHorizontalXXS,
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -489,21 +698,32 @@ const useStyles = makeStyles({
     position: 'fixed',
     zIndex: 1000,
   },
-  // R2 pending-redline accept/reject affordances (task 033, FR-16). Semantic tokens only
-  // (ADR-021 dark-mode-correct) — no hardcoded hex.
-  redlineControls: {
-    display: 'flex',
-    flexDirection: 'column',
-    rowGap: tokens.spacingVerticalXXS,
-    padding: tokens.spacingHorizontalS,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  redlineItem: {
+  // FIX #9 — layout-only wrapper for the AI selection bubble + right-click popup.
+  // The elevated light-grey SURFACE (background + shadow + radius) now lives on
+  // `ComposeAiToolbar`'s own Toolbar so it spans the whole menu (was previously on
+  // `bubbleMenu`, which produced the partial-background UAT finding). This wrapper
+  // only positions/sizes the popup; it carries no surface of its own so there is
+  // no double background. (`bubbleMenu` below is retained for the redline
+  // accept/reject popover, whose buttons still need a surface.)
+  aiBubbleWrap: {
     display: 'flex',
     alignItems: 'center',
-    columnGap: tokens.spacingHorizontalS,
+    maxWidth: '100vw',
   },
+  // FIX #9 — floating circular "scroll for more" button, pinned bottom-center of
+  // the editor scroll region. Elevated (shadow) so it reads above the page; shown
+  // only when the surface is not scrolled to the bottom. Semantic tokens only.
+  scrollDownFab: {
+    position: 'absolute',
+    bottom: tokens.spacingVerticalL,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: 2,
+    boxShadow: tokens.shadow16,
+  },
+  // DEF-12 — label inside the per-change on-click accept/reject popover (task 033/FR-16 rationale
+  // shown truncated, Tier-3-safe). Semantic tokens only (ADR-021 dark-mode-correct). The former
+  // fixed `redlineControls`/`redlineItem` bar styles were removed with the bar itself.
   redlineLabel: {
     flex: 1,
     minWidth: 0,
@@ -690,6 +910,15 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onDirtyChange,
       onImportWarnings,
       enqueueComposeAction,
+      onOpenInWord,
+      onOpenInWordDesktop,
+      onPushToWord,
+      wordActionsDisabled,
+      canPushToWord,
+      isPushingToWord,
+      onSave,
+      canSave,
+      isSaving,
     } = props;
 
     const styles = useStyles();
@@ -697,6 +926,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     const [isImporting, setIsImporting] = React.useState<boolean>(false);
     const dirtyRef = React.useRef<boolean>(false);
+
+    // ----- Wave 6 (DEF-G) — non-docx reference-only state ------------------
+    // Non-null when a NON-DOCX buffer reached the editor (detected by byte
+    // signature before mammoth, or via the mammoth-throw fallback). The editor
+    // then renders an explicit reference-only surface instead of a silent empty
+    // `<p></p>`. `fileName` is the UI label only (Tier 1 identifier).
+    const [referenceOnly, setReferenceOnly] = React.useState<{ fileName?: string } | null>(null);
 
     // ----- Task 111 — right-click (context-menu) AI-toolbar trigger --------
     // The screen point (viewport coords) of the last suppressed native context
@@ -711,6 +947,39 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // is NO selection (a caret / point-insertion), per task 111 requirement 2.
     const [contextMenuAnchor, setContextMenuAnchor] = React.useState<{ x: number; y: number } | null>(null);
     const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
+
+    // ----- FIX #9 — hidden-scrollbar editor surface + "scroll for more" FAB ----
+    // The editor scroll region hides its native scrollbar (see `editorSurface`
+    // style: `scrollbarWidth: none` + `::-webkit-scrollbar { display: none }`)
+    // while staying scrollable (`overflow: auto`). To keep the "there is more
+    // below" affordance a docx editor needs, a floating circular down-arrow button
+    // appears at the bottom whenever the surface is NOT scrolled to the end; it
+    // scrolls the content down one viewport-ish on click. (This is the
+    // progressive-scroll interpretation of the UAT "lazy load" note — a docx
+    // editor loads its whole document into ProseMirror; there is no paged data to
+    // lazily fetch, so the affordance is a scroll cue, not a data pager.)
+    const editorScrollRef = React.useRef<HTMLDivElement | null>(null);
+    const [showScrollDown, setShowScrollDown] = React.useState<boolean>(false);
+
+    const scrollEditorDown = React.useCallback((): void => {
+      const el = editorScrollRef.current;
+      if (!el) return;
+      el.scrollBy({ top: Math.round(el.clientHeight * 0.8), behavior: 'smooth' });
+    }, []);
+
+    // ----- DEF-12 — per-change on-click accept/reject affordance ------------
+    // The cramped fixed `compose-redline-controls` bar (scroll-hidden, no reason-wrap) was REMOVED
+    // as the primary control — that role moved to the Assistant confirmation message. Per-change
+    // granularity stays: clicking a redline span (`<span data-compose-mark data-ledger-ref>`, the
+    // FR-15 marks) opens a small popover at the click point with Accept / Reject for THAT change,
+    // wired to the same `usePendingRedline.accept/reject` handlers the bar used. The visual redline
+    // marks themselves are untouched.
+    const [redlineClickAnchor, setRedlineClickAnchor] = React.useState<{
+      x: number;
+      y: number;
+      ledgerRef: string;
+    } | null>(null);
+    const redlinePopoverRef = React.useRef<HTMLDivElement | null>(null);
 
     // Dismiss the context-menu popup on an outside click or Escape. Mirrors
     // the standard "click-away" pattern; the BubbleMenu's own dismissal
@@ -733,6 +1002,26 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         document.removeEventListener('keydown', handleKeyDown);
       };
     }, [contextMenuAnchor]);
+
+    // DEF-12 — dismiss the per-change redline popover on an outside click / Escape (mirrors the
+    // context-menu dismissal above; the two popups never coexist meaningfully).
+    React.useEffect(() => {
+      if (!redlineClickAnchor) return;
+      const handlePointerDown = (event: MouseEvent): void => {
+        if (redlinePopoverRef.current && !redlinePopoverRef.current.contains(event.target as Node)) {
+          setRedlineClickAnchor(null);
+        }
+      };
+      const handleKeyDown = (event: KeyboardEvent): void => {
+        if (event.key === 'Escape') setRedlineClickAnchor(null);
+      };
+      document.addEventListener('mousedown', handlePointerDown);
+      document.addEventListener('keydown', handleKeyDown);
+      return () => {
+        document.removeEventListener('mousedown', handlePointerDown);
+        document.removeEventListener('keydown', handleKeyDown);
+      };
+    }, [redlineClickAnchor]);
 
     // ----- TipTap editor instance -----------------------------------------
     const editor = useEditor({
@@ -774,6 +1063,21 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             }
             return true;
           },
+          // DEF-12 — per-change on-click accept/reject. A left-click that lands on a redline mark
+          // span (identified by its `data-ledger-ref` provenance attribute) opens the small
+          // accept/reject popover for THAT change. Clicks elsewhere fall through unchanged (normal
+          // caret placement / editing). Read the ledgerRef off the DOM target's nearest mark span —
+          // the most robust way to map a click to a specific pending redline.
+          click: (_view, event) => {
+            const target = event.target as HTMLElement | null;
+            const span = target?.closest?.('[data-compose-mark][data-ledger-ref]') as HTMLElement | null;
+            const ledgerRef = span?.getAttribute('data-ledger-ref') ?? '';
+            if (ledgerRef) {
+              setRedlineClickAnchor({ x: event.clientX, y: event.clientY, ledgerRef });
+            }
+            // Return false: never swallow the click — the caret still moves and normal editing works.
+            return false;
+          },
         },
       },
       onUpdate: () => {
@@ -788,6 +1092,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     React.useEffect(() => {
       if (!editor) return;
       if (!docxBytes) {
+        // Any prior reference-only state is cleared when we leave the docx path.
+        setReferenceOnly(null);
         // DEF-08: an AI-drafted full-document seed sets the editor content DIRECTLY from HTML
         // (no docx decode) — the draft body IS the editor content. A draft is a transient working
         // draft (never yet saved), so report dirty=true to the workspace (create-on-save first Save
@@ -805,6 +1111,22 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         onDirtyChange?.(false);
         return;
       }
+      // Wave 6 (DEF-G): a NON-DOCX buffer (e.g. a chat-uploaded PDF reaching the
+      // editor via Wave-3 "Open in Compose") cannot be edited — mammoth would
+      // throw and leave a silent empty editor. Detect it from the byte signature
+      // BEFORE attempting the import and render an explicit reference-only state.
+      // The editable DOCX path below is unchanged. Nothing is editable here, so
+      // report dirty=false (no create-on-save for a reference-only file).
+      if (!isEditableDocx(docxBytes, documentRef?.fileName)) {
+        editor.commands.setContent('<p></p>');
+        dirtyRef.current = false;
+        setReferenceOnly({ fileName: documentRef?.fileName });
+        onDirtyChange?.(false);
+        return;
+      }
+      // A valid DOCX cleared any prior reference-only state (e.g. a subsequent
+      // real .docx mount replacing a non-docx one).
+      setReferenceOnly(null);
       // gap 1.6 / DEF-01: a TRANSIENT (Browse/Upload) mount has no SPE pointer yet (empty
       // speDriveItemId). Its create-on-save first Save must be reachable, so we report
       // dirty=true to the workspace (there IS unsaved work — the draft has never been
@@ -832,8 +1154,16 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         .catch(err => {
           // eslint-disable-next-line no-console
           console.error('[ComposeEditor] DOCX import failed', err instanceof Error ? err.message : String(err));
-          // Caller can detect via onImportWarnings empty + ProseMirror empty;
-          // R2 will add a structured error callback.
+          // Wave 6 (DEF-G): the pre-mammoth `isEditableDocx` gate above is the
+          // ROBUST non-docx detector (extension + ZIP signature) — it routes the
+          // real reference-only cases (PDF/txt/xlsx/etc.) away BEFORE this import,
+          // while ProseMirror is still pristine. We deliberately do NOT flip to
+          // reference-only HERE: a mammoth throw on a buffer that DID pass the gate
+          // is a genuinely-DOCX-but-unparseable case (corrupt OOXML / rare env
+          // failure), and swapping the surface mid-session would unmount a live
+          // ProseMirror instance. Preserve the original behavior — log + leave the
+          // editor — so a transient import failure never yields a false "can't be
+          // edited" verdict for a real .docx.
         })
         .finally(() => {
           if (!cancelled) setIsImporting(false);
@@ -859,6 +1189,33 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // ----- FR-35 Doc Q&A ephemeral highlight (task 072, stretch) -----------
     const qaHighlight = useDocQaHighlight(editor);
 
+    // ----- FIX #9 — track whether the editor surface has more content below ---
+    // Show the down-arrow FAB only when NOT scrolled to the bottom. Re-measure on
+    // scroll, on content-size changes (ResizeObserver — guarded for jsdom), and on
+    // editor transactions (typing/import grows the doc). A small epsilon avoids a
+    // flickering button at the exact bottom.
+    React.useEffect(() => {
+      const el = editorScrollRef.current;
+      if (!el) return;
+      const measure = (): void => {
+        const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+        setShowScrollDown(remaining > 8);
+      };
+      measure();
+      el.addEventListener('scroll', measure, { passive: true });
+      let ro: ResizeObserver | undefined;
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(measure);
+        ro.observe(el);
+      }
+      if (editor) editor.on('transaction', measure);
+      return () => {
+        el.removeEventListener('scroll', measure);
+        ro?.disconnect();
+        if (editor) editor.off('transaction', measure);
+      };
+    }, [editor, referenceOnly, isImporting]);
+
     // ----- Imperative handle ----------------------------------------------
     React.useImperativeHandle(
       ref,
@@ -874,6 +1231,21 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onDirtyChange?.(false);
           return bytes;
         },
+        // UAT-R7 #2/#3/#4 — baseline (reject-state) bytes + the redline→annotation bridge. The BFF
+        // re-applies the annotations as native w:ins/w:del so pending redlines save as real Word
+        // tracked-changes instead of the mark-blind flatten `serialize()` produced.
+        serializeForSave: async () => {
+          if (!editor) {
+            throw new Error('ComposeEditor: cannot serialize for save — editor not mounted');
+          }
+          const json = editor.getJSON();
+          const redlineAnnotations = redlineMarksToDocxAnnotations(json, 'Spaarke Assistant', new Date().toISOString());
+          const baselineBytes = await tipTapJsonToDocxBytes(buildRejectBaselineJson(json as TipTapNode));
+          dirtyRef.current = false;
+          onDirtyChange?.(false);
+          return { baselineBytes, redlineAnnotations };
+        },
+        hasPendingRedlines: () => redline.pending.length > 0,
         getCounts: () => {
           if (!editor) return { characters: 0, words: 0 };
           // The CharacterCount extension hangs storage off editor.storage.
@@ -892,6 +1264,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           redline.materialize(draft, provenance);
         },
         materializePendingRedline: (draft, provenance) => redline.materialize(draft, provenance),
+        materializeComposeEdits: (edits, provenance) => redline.materializeMany(edits, provenance),
+        acceptPendingRedline: ledgerRef => redline.accept(ledgerRef),
+        rejectPendingRedline: ledgerRef => redline.reject(ledgerRef),
         highlightCitedSpan: (sourceText, sectionLabel) => qaHighlight.highlight(sourceText, sectionLabel),
         clearCitedHighlight: () => qaHighlight.clear(),
       }),
@@ -905,6 +1280,35 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           <div className={styles.loadingState} role="status" aria-live="polite">
             <Spinner size="small" />
             <Text size={200}>Loading editor…</Text>
+          </div>
+        </div>
+      );
+    }
+
+    // Wave 6 (DEF-G) — a non-docx file reached the editor: show an explicit,
+    // calm reference-only surface INSTEAD of the editable ProseMirror surface
+    // (never a silent empty `<p></p>`). Editable content is DOCX-only by design;
+    // the file remains available to the Assistant for reference (summarize,
+    // extract, Q&A). Semantic tokens only (ADR-021 dark-mode-correct).
+    if (referenceOnly) {
+      return (
+        <div
+          className={styles.container}
+          role="region"
+          aria-label={referenceOnly.fileName ?? 'Compose editor'}
+          data-compose-editor-spe-id={documentRef?.speDriveItemId ?? ''}
+        >
+          <div className={styles.referenceOnly} role="status" data-testid="compose-reference-only">
+            <DocumentProhibited24Regular className={styles.referenceOnlyIcon} aria-hidden="true" />
+            <Text weight="semibold">
+              {referenceOnly.fileName
+                ? `“${referenceOnly.fileName}” can’t be edited in Compose`
+                : 'This file can’t be edited in Compose'}
+            </Text>
+            <Text size={200} className={styles.referenceOnlyDetail}>
+              Only Word (.docx) documents can be edited here. This file is available to the Assistant for reference —
+              ask it to summarize, extract from, or answer questions about it.
+            </Text>
           </div>
         </div>
       );
@@ -924,9 +1328,25 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             they are ONLY reachable via the selection-triggered AI-actions
             popup's host, the BubbleMenu below, which task 111 made AI-actions
             ONLY — this is a known, flagged trade-off, not a silent removal). */}
-        <ComposeFormatToolbar editor={editor} disabled={isImporting} />
+        <ComposeFormatToolbar
+          editor={editor}
+          disabled={isImporting}
+          onOpenInWord={onOpenInWord}
+          onOpenInWordDesktop={onOpenInWordDesktop}
+          onPushToWord={onPushToWord}
+          wordActionsDisabled={wordActionsDisabled}
+          canPushToWord={canPushToWord}
+          isPushingToWord={isPushingToWord}
+          onSave={onSave}
+          canSave={canSave}
+          isSaving={isSaving}
+        />
         {editor ? (
-          <BubbleMenu editor={editor} tippyOptions={{ duration: 100, placement: 'top' }} className={styles.bubbleMenu}>
+          <BubbleMenu
+            editor={editor}
+            tippyOptions={{ duration: 100, placement: 'top' }}
+            className={styles.aiBubbleWrap}
+          >
             {/* ===================================================================
                 AI TOOLBAR MOUNT — task 030 (FR-14), AI-actions-ONLY per task 111
                 (UAT-R2 layout fix): the sibling formatting Toolbar that used to
@@ -960,7 +1380,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         {contextMenuAnchor ? (
           <div
             ref={contextMenuRef}
-            className={mergeClasses(styles.bubbleMenu, styles.contextMenuPopup)}
+            className={mergeClasses(styles.aiBubbleWrap, styles.contextMenuPopup)}
             style={{ left: contextMenuAnchor.x, top: contextMenuAnchor.y }}
             data-testid="compose-ai-context-menu"
           >
@@ -1008,47 +1428,89 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             />
           </div>
         ) : null}
-        {redline.pending.length > 0 ? (
-          <div
-            className={styles.redlineControls}
-            role="group"
-            aria-label="Pending suggested edits"
-            data-testid="compose-redline-controls"
-          >
-            {redline.pending.map(p => (
-              <div key={p.ledgerRef} className={styles.redlineItem} data-testid={`compose-redline-${p.ledgerRef}`}>
-                <Text size={200} className={styles.redlineLabel} title={p.rationale ?? undefined}>
-                  {redlineLabelText(p.rationale, p.ledgerRef)}
-                </Text>
-                <Button
-                  size="small"
-                  appearance="primary"
-                  icon={<Checkmark16Regular />}
-                  onClick={() => redline.accept(p.ledgerRef)}
-                  data-testid={`compose-redline-accept-${p.ledgerRef}`}
+        {/* ===================================================================
+            DEF-12 — per-change on-click accept/reject POPOVER. Replaces the
+            removed fixed `compose-redline-controls` bar (the primary control is
+            now the Assistant confirmation message). Opens at the click point on
+            a redline span; Accept/Reject route to the SAME
+            usePendingRedline.accept/reject handlers, scoped to the clicked
+            change's ledgerRef. Reuses `styles.bubbleMenu`'s dark-mode-correct
+            treatment (semantic tokens; ADR-021).
+            =================================================================== */}
+        {redlineClickAnchor
+          ? (() => {
+              const clicked = redline.pending.find(p => p.ledgerRef === redlineClickAnchor.ledgerRef);
+              return (
+                <div
+                  ref={redlinePopoverRef}
+                  className={mergeClasses(styles.bubbleMenu, styles.contextMenuPopup)}
+                  style={{ left: redlineClickAnchor.x, top: redlineClickAnchor.y }}
+                  role="group"
+                  aria-label="Accept or reject this suggested edit"
+                  data-testid="compose-redline-onclick"
+                  data-ledger-ref={redlineClickAnchor.ledgerRef}
                 >
-                  Accept
-                </Button>
-                <Button
-                  size="small"
-                  appearance="subtle"
-                  icon={<Dismiss16Regular />}
-                  onClick={() => redline.reject(p.ledgerRef)}
-                  data-testid={`compose-redline-reject-${p.ledgerRef}`}
-                >
-                  Reject
-                </Button>
-              </div>
-            ))}
-          </div>
-        ) : null}
+                  {clicked?.rationale ? (
+                    <Text size={200} className={styles.redlineLabel} title={clicked.rationale}>
+                      {redlineLabelText(clicked.rationale, clicked.ledgerRef)}
+                    </Text>
+                  ) : null}
+                  <Button
+                    size="small"
+                    appearance="primary"
+                    icon={<Checkmark16Regular />}
+                    onClick={() => {
+                      redline.accept(redlineClickAnchor.ledgerRef);
+                      setRedlineClickAnchor(null);
+                    }}
+                    data-testid={`compose-redline-accept-${redlineClickAnchor.ledgerRef}`}
+                  >
+                    Accept
+                  </Button>
+                  <Button
+                    size="small"
+                    appearance="subtle"
+                    icon={<Dismiss16Regular />}
+                    onClick={() => {
+                      redline.reject(redlineClickAnchor.ledgerRef);
+                      setRedlineClickAnchor(null);
+                    }}
+                    data-testid={`compose-redline-reject-${redlineClickAnchor.ledgerRef}`}
+                  >
+                    Reject
+                  </Button>
+                </div>
+              );
+            })()
+          : null}
         {isImporting ? (
           <div className={styles.loadingState} role="status" aria-live="polite">
             <Spinner size="small" />
             <Text size={200}>Importing document…</Text>
           </div>
         ) : null}
-        <EditorContent editor={editor} className={styles.editorSurface} />
+        {/* FIX #9 — scroll region: native scrollbar hidden (see `editorSurface`
+            style), with a floating circular down-arrow FAB that appears only when
+            more content sits below the fold and scrolls the surface down on click.
+            The FAB is a sibling of the scroller (not inside it) so it stays pinned
+            at the bottom instead of scrolling away with the content. */}
+        <div className={styles.editorScrollWrap}>
+          <div ref={editorScrollRef} className={styles.editorSurface} data-testid="compose-editor-surface">
+            <EditorContent editor={editor} />
+          </div>
+          {showScrollDown ? (
+            <Button
+              appearance="primary"
+              shape="circular"
+              size="large"
+              className={styles.scrollDownFab}
+              icon={<ArrowDown20Regular />}
+              aria-label="Scroll down for more"
+              onClick={scrollEditorDown}
+              data-testid="compose-editor-scroll-down"
+            />
+          ) : null}
+        </div>
       </div>
     );
   }

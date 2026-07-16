@@ -14,6 +14,10 @@ import {
   ComposeActionBridgeProvider,
   useComposeActionBridge,
   useRegisterComposeActionDispatcher,
+  useRegisterComposeSaveHandler,
+  useComposeSave,
+  useRegisterComposeSaveCompletedHandler,
+  useComposeSaveCompleted,
 } from './composeActionBridge';
 
 const wrapper = ({ children }: { children?: React.ReactNode }): React.JSX.Element => (
@@ -102,5 +106,59 @@ describe('composeActionBridge', () => {
     act(() => result.current!.setDispatcher(null));
     await waitFor(() => expect(result.current!.hasDispatcher).toBe(false));
     await expect(result.current!.enqueue({ id: 'z', bindingId: 'b' })).rejects.toThrow(/no host dispatcher/i);
+  });
+
+  // ── FIX #1b — Compose Save trigger conduit (Assistant "Add to DMS" → editor Save) ────────────────
+  describe('save-trigger conduit (FIX #1b)', () => {
+    it('useComposeSave is null until an editor Save handler registers, then delegates', async () => {
+      const saveHandler = jest.fn();
+      const { result } = renderHook(
+        () => {
+          const save = useComposeSave();
+          useRegisterComposeSaveHandler(saveHandler);
+          return save;
+        },
+        { wrapper }
+      );
+
+      // On the FIRST render, useComposeSave read the bridge BEFORE the register effect ran → null.
+      // After the effect flips hasComposeSaveHandler, it returns the delegate.
+      await waitFor(() => expect(result.current).not.toBeNull());
+      act(() => {
+        result.current!();
+      });
+      expect(saveHandler).toHaveBeenCalledTimes(1);
+    });
+
+    it('useComposeSave is null with NO registered handler (no Compose tab open)', () => {
+      const { result } = renderHook(() => useComposeSave(), { wrapper });
+      expect(result.current).toBeNull();
+    });
+  });
+
+  // ── FIX #7a — Save-completed conduit (editor Save success → Assistant posts confirmation) ─────────
+  describe('save-completed conduit (FIX #7a)', () => {
+    it('the editor delegate reaches the host handler with { documentRecordId, fileName }', async () => {
+      const hostHandler = jest.fn();
+      const { result } = renderHook(
+        () => {
+          const notify = useComposeSaveCompleted();
+          useRegisterComposeSaveCompletedHandler(hostHandler);
+          return notify;
+        },
+        { wrapper }
+      );
+
+      await waitFor(() => expect(result.current).not.toBeNull());
+      act(() => {
+        result.current!({ documentRecordId: 'doc-123', fileName: 'Brief.docx' });
+      });
+      expect(hostHandler).toHaveBeenCalledWith({ documentRecordId: 'doc-123', fileName: 'Brief.docx' });
+    });
+
+    it('useComposeSaveCompleted is null with NO registered host handler (standalone mount)', () => {
+      const { result } = renderHook(() => useComposeSaveCompleted(), { wrapper });
+      expect(result.current).toBeNull();
+    });
   });
 });

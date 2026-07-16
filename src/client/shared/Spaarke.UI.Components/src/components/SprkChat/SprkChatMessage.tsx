@@ -20,7 +20,15 @@
 
 import * as React from 'react';
 import { makeStyles, shorthands, tokens, mergeClasses, Text, Spinner, Button } from '@fluentui/react-components';
-import { ArrowExportRegular, DocumentEditRegular } from '@fluentui/react-icons';
+import {
+  ArrowExportRegular,
+  CheckmarkRegular,
+  DismissRegular,
+  ArrowSyncRegular,
+  BookmarkRegular,
+  DocumentArrowRightRegular,
+  DocumentRegular,
+} from '@fluentui/react-icons';
 import { ISprkChatMessageProps, ICitation, IDocumentStatusChatMessage } from './types';
 import { CitationMarker } from './SprkChatCitationPopover';
 import { SprkChatMessageRenderer } from './SprkChatMessageRenderer';
@@ -316,15 +324,32 @@ export interface ISprkChatMessageExtendedProps extends ISprkChatMessageProps {
    */
   onInsert?: (content: string) => void;
   /**
-   * DEF-08 Part B: called when the user clicks "Open in Compose" on a completed assistant message.
-   * The host (ConversationPane) opens a (reused) Compose editor tab SEEDED with this message's text
-   * as an editable full-document draft (create-on-save) — the manual fallback for a chat drafting
-   * intent. Only rendered on completed (non-streaming) assistant messages with content when the
-   * host provides this callback (opt-in).
-   *
-   * @param content - The message text content to seed the Compose draft with.
+   * @deprecated spaarkeai-compose-r2 FIX #10a: the generic per-message "Open in Compose" affordance was
+   * REMOVED (it did not reliably work and was not always appropriate). This prop is retained for prop
+   * compatibility with SprkChat's conditional forwarding but NO button is rendered from it any longer.
+   * Intentional mounting now happens via the "revise this document" flow / server-driven
+   * `workspace_open_tab` seed, not an auto-appended per-message link.
    */
   onOpenInCompose?: (content: string) => void;
+  /**
+   * spaarkeai-compose-r2 R4 — "Insert into document". When provided (and the message is a completed
+   * Assistant message with content), renders an "Insert into document" button that inserts this
+   * message's text into the open Compose editor as a tracked change at the user's current
+   * selection/cursor. Distinct from the legacy {@link onInsert} (BroadcastChannel → Lexical editor)
+   * path; the host (SpaarkeAi ConversationPane) routes this through the cross-pane Compose bridge to
+   * the editor's existing redline engine. Omitting it renders no button.
+   *
+   * @param content - the message text to insert into the Compose document.
+   */
+  onInsertToCompose?: (content: string) => void;
+  /**
+   * spaarkeai-compose-r2 FIX #7a — "Open preview". When provided (and the message carries
+   * `metadata.savedPreview`), renders an "Open preview" button that opens the File Preview modal for
+   * the saved document. Omitting it renders no button.
+   * @param documentId - the persisted `sprk_documentid` to preview.
+   * @param fileName - optional display name for the modal title.
+   */
+  onOpenSavedPreview?: (documentId: string, fileName?: string) => void;
   /**
    * Called when the user clicks "Save to matter files" on a completed document
    * status message. SprkChat.tsx calls the BFF persist endpoint and updates the
@@ -372,6 +397,28 @@ export interface ISprkChatMessageExtendedProps extends ISprkChatMessageProps {
    * `metadata.responseType === 'outcome_card'`); chips render disabled when omitted.
    */
   onNextStep?: (chip: INextStepChip) => void;
+
+  /**
+   * spaarkeai-compose-r2 DEF-12 — per-message Compose-edit controls. Rendered ONLY on an Assistant
+   * message carrying `metadata.composeEdit` while {@link composeEditActive} is true. Each callback
+   * receives the message's `ledgerRef` + `bindingId`; the host wires them to the existing redline
+   * handlers (Accept → usePendingRedline.accept, Reject → useEditSupersession.undo, Try-another →
+   * useEditSupersession.tryAnother). Omitting a callback renders that control disabled.
+   */
+  onComposeEditAccept?: (ledgerRef: string, bindingId: string) => void;
+  onComposeEditReject?: (ledgerRef: string, bindingId: string) => void;
+  onComposeEditTryAnother?: (ledgerRef: string, bindingId: string) => void;
+  /**
+   * spaarkeai-compose-r2 FIX #3 — "Keep redline". Dismisses the action prompt but LEAVES the pending
+   * redline marks in place so the user keeps editing (the host clears only the tracked edit; it does
+   * NOT accept, undo, or reject). Omitting this callback renders the control disabled.
+   */
+  onComposeEditKeep?: (ledgerRef: string, bindingId: string) => void;
+  /**
+   * DEF-12 — whether this message's compose edit is still the live pending one. False (stale /
+   * superseded / accepted) suppresses the controls so old confirmations don't show dead buttons.
+   */
+  composeEditActive?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -435,7 +482,8 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   isPlanExecuting,
   onCancelExecution,
   onInsert,
-  onOpenInCompose,
+  onInsertToCompose,
+  onOpenSavedPreview,
   onSaveToMatterFiles,
   hasContainerId,
   // chat-routing-redesign-r1 task 117b
@@ -443,6 +491,12 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   onOpenLibraryModal,
   // spaarke-ai-architecture-redesign-r2 task 062
   onNextStep,
+  // spaarkeai-compose-r2 DEF-12
+  onComposeEditAccept,
+  onComposeEditReject,
+  onComposeEditTryAnother,
+  onComposeEditKeep,
+  composeEditActive,
 }) => {
   const styles = useStyles();
   const isUser = message.role === 'User';
@@ -481,6 +535,110 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
 
   const responseType = message.metadata?.responseType;
   const isStructured = isAssistant && responseType != null && responseType !== '';
+
+  // ── DEF-12: per-message Compose-edit controls (Accept / Reject / Try-another) ──────────────
+  // Attached to the CONFIRMATION message for an applied Compose AI edit (the Assistant is the AI↔user
+  // interaction surface — Word Copilot parity; the cramped in-editor bar is gone). Rendered ONLY while
+  // this edit is the live pending one (`composeEditActive`). Because the confirmation carries
+  // `responseType: 'markdown'` it renders through the structured branch, so the controls node is shared
+  // into BOTH the structured-markdown branch and the plain-text branch below.
+  const composeEdit = isAssistant && !isStreaming ? message.metadata?.composeEdit : undefined;
+  const showComposeEditControls = !!composeEdit && composeEditActive === true;
+  const composeEditControlsNode =
+    showComposeEditControls && composeEdit ? (
+      <div className={styles.messageActions} role="group" aria-label="Accept, reject, or replace the AI edit">
+        <Button
+          appearance="primary"
+          size="small"
+          icon={React.createElement(CheckmarkRegular)}
+          disabled={!onComposeEditAccept}
+          onClick={() => onComposeEditAccept?.(composeEdit.ledgerRef, composeEdit.bindingId)}
+          data-testid="compose-edit-accept"
+          title="Accept the tracked change in the document"
+        >
+          Accept
+        </Button>
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={React.createElement(DismissRegular)}
+          disabled={!onComposeEditReject}
+          onClick={() => onComposeEditReject?.(composeEdit.ledgerRef, composeEdit.bindingId)}
+          data-testid="compose-edit-reject"
+          title="Reject the change (removes the redline)"
+        >
+          Reject
+        </Button>
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={React.createElement(ArrowSyncRegular)}
+          disabled={!onComposeEditTryAnother}
+          onClick={() => onComposeEditTryAnother?.(composeEdit.ledgerRef, composeEdit.bindingId)}
+          data-testid="compose-edit-try-another"
+          title="Discard this and draft a different alternative"
+        >
+          Try another
+        </Button>
+        {/* FIX #3 — "Keep redline": dismiss this action prompt but LEAVE the pending redline marks in
+            place so the user keeps editing. The per-change on-click Accept/Reject popover remains. */}
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={React.createElement(BookmarkRegular)}
+          disabled={!onComposeEditKeep}
+          onClick={() => onComposeEditKeep?.(composeEdit.ledgerRef, composeEdit.bindingId)}
+          data-testid="compose-edit-keep"
+          title="Keep the redline in the document and keep editing"
+        >
+          Keep redline
+        </Button>
+      </div>
+    ) : null;
+
+  // ── R4: "Insert into document" affordance ──────────────────────────────────
+  // Renders on a completed (non-streaming) ASSISTANT message with content when the host provides
+  // `onInsertToCompose` (SpaarkeAi ConversationPane, only when a live Compose editor is registered).
+  // Inserts THIS message's text into the open Compose document as a tracked change at the current
+  // selection/cursor (routed by the host through the cross-pane bridge to the existing redline
+  // engine). Distinct from the legacy `onInsert` BroadcastChannel path. Shared into both the
+  // structured-markdown branch and the plain-text branch below.
+  const renderInsertToComposeButton = (content: string): React.ReactNode =>
+    isAssistant && !isStreaming && !!onInsertToCompose && !!content ? (
+      <div className={styles.messageActions}>
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={React.createElement(DocumentArrowRightRegular)}
+          onClick={() => onInsertToCompose(content)}
+          data-testid="insert-into-document"
+          title="Insert this into the open Compose document as a tracked change"
+        >
+          Insert into document
+        </Button>
+      </div>
+    ) : null;
+
+  // ── FIX #7a: "Open preview" affordance on a persistent "Saved to the DMS" message ──────────────
+  // Renders on a completed ASSISTANT message carrying `metadata.savedPreview` when the host provides
+  // `onOpenSavedPreview` (SpaarkeAi ConversationPane). Opens the File Preview modal for the saved
+  // document. Shared into both the structured-markdown and plain-text render branches below.
+  const savedPreview = isAssistant && !isStreaming ? message.metadata?.savedPreview : undefined;
+  const savedPreviewNode =
+    savedPreview?.documentId && onOpenSavedPreview ? (
+      <div className={styles.messageActions}>
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={React.createElement(DocumentRegular)}
+          onClick={() => onOpenSavedPreview(savedPreview.documentId, savedPreview.fileName)}
+          data-testid="open-saved-preview"
+          title="Open a preview of the saved document"
+        >
+          Open preview
+        </Button>
+      </div>
+    ) : null;
 
   // ── Document status rendering (FR-14: Save to matter files) ────────────────
   // When the message carries document_status metadata, render SprkChatDocumentStatus
@@ -594,6 +752,12 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
           // when responseType === 'outcome_card'.
           onNextStep={onNextStep}
         />
+        {/* DEF-12: compose-edit confirmation controls (responseType 'markdown' renders here). */}
+        {composeEditControlsNode}
+        {/* FIX #7a: "Open preview" on a persistent "Saved to the DMS" message. */}
+        {savedPreviewNode}
+        {/* R4: "Insert into document" — suppressed on playbook_options (no free-text body). */}
+        {responseType !== 'playbook_options' && renderInsertToComposeButton(structuredInsertContent)}
         {/*
          * chat-routing-redesign-r1 task 117b: suppress the Insert button on
          * `playbook_options` cards — they have no free-text body to insert into
@@ -623,8 +787,6 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   // The button is NOT rendered for user messages (spec-2D: "Insert button MUST only
   // appear on AI response messages, not user messages").
   const showInsertButton = isAssistant && !isStreaming && !!message.content && !!onInsert;
-  // DEF-08 Part B: "Open in Compose" — same gating as Insert, opt-in via onOpenInCompose.
-  const showOpenInComposeButton = isAssistant && !isStreaming && !!message.content && !!onOpenInCompose;
 
   return (
     <div className={containerClass} role="listitem" aria-label={`${message.role} message`}>
@@ -645,30 +807,26 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
         <span className={timestampClass}>{formatTimestamp(message.timestamp)}</span>
       )}
 
-      {(showInsertButton || showOpenInComposeButton) && (
+      {/* DEF-12: compose-edit confirmation controls (plain-text branch — when responseType is absent). */}
+      {composeEditControlsNode}
+
+      {/* FIX #7a: "Open preview" on a persistent "Saved to the DMS" message (plain-text branch). */}
+      {savedPreviewNode}
+
+      {/* R4: "Insert into document" (plain-text branch). */}
+      {renderInsertToComposeButton(message.content)}
+
+      {showInsertButton && (
         <div className={styles.messageActions}>
-          {showInsertButton && (
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={React.createElement(ArrowExportRegular)}
-              onClick={() => onInsert!(message.content)}
-              title="Insert into editor"
-            >
-              Insert
-            </Button>
-          )}
-          {showOpenInComposeButton && (
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={React.createElement(DocumentEditRegular)}
-              onClick={() => onOpenInCompose!(message.content)}
-              title="Open this as an editable document in Compose"
-            >
-              Open in Compose
-            </Button>
-          )}
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={React.createElement(ArrowExportRegular)}
+            onClick={() => onInsert!(message.content)}
+            title="Insert into editor"
+          >
+            Insert
+          </Button>
         </div>
       )}
     </div>

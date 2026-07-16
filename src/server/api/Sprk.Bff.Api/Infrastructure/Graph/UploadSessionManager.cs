@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
+using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Models;
 
 namespace Sprk.Bff.Api.Infrastructure.Graph;
@@ -370,6 +371,53 @@ public class UploadSessionManager
                 saved.WebUrl,
                 saved.ParentReference?.DriveId ?? driveId);
         }
+        // ── DEF-14: PRIMARY catch surface. The Graph SDK v5 / Kiota `PutAsync` above raises
+        //    `Microsoft.Graph.Models.ODataErrors.ODataError`, NOT the legacy
+        //    `Microsoft.Graph.ServiceException`. The ServiceException catches below were
+        //    therefore DEAD CODE (Kiota never throws that type), so a 423/412 leaked to the
+        //    endpoint as an opaque 500. These ODataError filters revive the intended typed
+        //    translation. ADR-007: the Microsoft.Graph type is caught + translated here, inside
+        //    Infrastructure.Graph — only the domain exceptions cross the ISpeFileOperations facade.
+        catch (ODataError ex) when (ex.ResponseStatusCode == 404)
+        {
+            _logger.LogWarning("SPE replace-content: drive-item not found drive={DriveId} item={ItemId}", driveId, itemId);
+            return null;
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogError(ex, "SPE replace-content: access denied drive={DriveId} item={ItemId}", driveId, itemId);
+            throw new UnauthorizedAccessException($"Access denied to drive-item {itemId} on drive {driveId}", ex);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == 412)
+        {
+            // FR-24 / Spike 7 C′ (G-1): the ETag moved under us — reject instead of clobbering.
+            _logger.LogWarning(ex, "SPE replace-content: If-Match precondition failed drive={DriveId} item={ItemId} ifMatch={IfMatch}",
+                driveId, itemId, ifMatch);
+            throw new EtagPreconditionFailedException(itemId, ifMatch, ex);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == 423 || IsResourceLockedCode(ex.Error?.Code))
+        {
+            // FR-24 / Spike 7 C (G-2) + DEF-14: the drive-item is open in Word for Web / checked
+            // out at the SPE level (HTTP 423, or a SharePoint "resourceLocked"/"locked" error code
+            // that can ride on a different status) — surface a typed 423 rather than an opaque 500.
+            _logger.LogWarning(ex, "SPE replace-content: drive-item locked drive={DriveId} item={ItemId} code={Code}",
+                driveId, itemId, ex.Error?.Code);
+            throw new DocumentLockedByWordException(itemId, ex);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == 429)
+        {
+            _logger.LogWarning(ex, "SPE replace-content: Graph throttling drive={DriveId} item={ItemId}", driveId, itemId);
+            throw new InvalidOperationException("Service temporarily unavailable due to Graph rate limiting", ex);
+        }
+        catch (ODataError ex)
+        {
+            _logger.LogError(ex, "SPE replace-content Graph error drive={DriveId} item={ItemId}: {Message}",
+                driveId, itemId, ex.Error?.Message ?? ex.Message);
+            throw new InvalidOperationException($"Failed to replace drive-item content: {ex.Error?.Message ?? ex.Message}", ex);
+        }
+        // ── Belt-and-suspenders: the legacy ServiceException path is retained in case a non-Kiota
+        //    code path (or a future SDK) raises it. Harmless; the ODataError filters above are the
+        //    ones that fire in production today.
         catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
         {
             _logger.LogWarning("SPE replace-content: drive-item not found drive={DriveId} item={ItemId}", driveId, itemId);
@@ -406,6 +454,16 @@ public class UploadSessionManager
             throw new InvalidOperationException($"Failed to replace drive-item content: {ex.Message}", ex);
         }
     }
+
+    /// <summary>
+    /// DEF-14: true when a Graph/SharePoint error code denotes a locked/checked-out drive-item.
+    /// SPE surfaces document locks as HTTP 423, but the SharePoint back-end sometimes rides the
+    /// lock signal on a differently-numbered status with a <c>resourceLocked</c> / <c>locked</c>
+    /// error code, so we match the code defensively as well as the status.
+    /// </summary>
+    private static bool IsResourceLockedCode(string? code) =>
+        !string.IsNullOrEmpty(code) &&
+        code.Contains("locked", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Creates an upload session for large files as the user (OBO flow).

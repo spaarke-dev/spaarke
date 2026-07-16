@@ -72,7 +72,7 @@ import type { ComposeActionEnqueue } from './ComposeAiToolbar';
 // `@spaarke/ai-outputs` subpaths, which LegalWorkspace's standalone Rollup
 // cannot resolve). Matches the SpaarkeAi `useWorkspaceLayouts` adapter pattern
 // (documented in `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`).
-import { useDispatchPaneEvent, type WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
+import { useDispatchPaneEvent, usePaneEvent, type WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 // Compose three-pane coordination — WORKSPACE leg (task 104 / E2E-R5). Typed
 // receivers for Flow 3 (compose_context_insert) + Flow 5 (compose_assistant_insert).
 import { useComposeWorkspaceReceivers } from './useComposeWorkspaceReceivers';
@@ -80,8 +80,15 @@ import { useComposeWorkspaceReceivers } from './useComposeWorkspaceReceivers';
 // mount, under ComposeActionBridgeProvider), a Browse/direct transient mount is registered with the
 // active chat session so chat "summarize this document" + "edit in Compose" resolve it. Null on a
 // standalone LegalWorkspace mount (no bridge provider) → registration is skipped, Save still works.
-import { useComposeActiveDocumentRegistration } from '../context/composeActionBridge';
-import { authenticatedFetch } from '@spaarke/auth';
+import {
+  useComposeActiveDocumentRegistration,
+  useRegisterComposeRedlineAcceptHandler,
+  useRegisterComposeVisibilityHandler,
+  useRegisterComposeInsertSuggestionHandler,
+  useRegisterComposeSaveHandler,
+  useComposeSaveCompleted,
+} from '../context/composeActionBridge';
+import { authenticatedFetch, ApiError } from '@spaarke/auth';
 // FR-02 (task 011): "Search for Document" opens the standard Dataverse lookup dialog
 // (Xrm.Utility.lookupObjects) scoped to `sprk_document`, then resolves the picked
 // record's SPE pointer via Xrm.WebApi.retrieveRecord — the SAME two Xrm primitives
@@ -90,7 +97,15 @@ import { authenticatedFetch } from '@spaarke/auth';
 // not a dispatch).
 import { createXrmNavigationService, createXrmDataService, type LookupResult } from '@spaarke/ui-components';
 
-import { ComposeToolbar } from './ComposeToolbar';
+// FIX #5 (UAT): the separate `ComposeToolbar` command bar (Open-in-Word + Save +
+// Push) was folded into the consolidated single-row `ComposeFormatToolbar` that
+// lives inside `ComposeEditor`. ComposeWorkspace still OWNS the handler binding —
+// it resolves Open-in-Word here via `useDocumentActions` and threads the bound
+// callbacks (+ Save / Push) down to `ComposeEditor`, which forwards them to the
+// toolbar's "Word" dropdown + right-aligned Save button. `ComposeToolbar.tsx` is
+// retained for its own standalone tests + potential reuse, but is no longer
+// rendered here (one toolbar row, not two).
+import { useDocumentActions } from '@spaarke/document-operations';
 import { ComposeEmptyState } from './ComposeEmptyState';
 import { ComposeConflictDialog } from './ComposeConflictDialog';
 // Return-from-Word re-anchor UX (task 054 — BUILT; mounted here by task 103, gap 3.5).
@@ -105,6 +120,7 @@ import {
   useComposeCheckChanges,
   anchoredAnnotationsToPriorAnchors,
   anchoredAnnotationsToDocxAnnotations,
+  type DocxAnnotationInput,
 } from './useComposeWordShuttle';
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
 import { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHeartbeatGate } from './hooks';
@@ -147,6 +163,23 @@ function toAssistantInsertPayload(event: WorkspacePaneEvent): ComposeAssistantTo
 
 // Re-export types for backwards-compatible consumer imports.
 export type { ComposeCheckoutStatus, ComposeWorkspaceState, ComposeWorkspaceAction } from './ComposeWorkspace.types';
+
+/**
+ * Mint a client-generated DOCUMENT session id for a mount door that has no server round-trip
+ * (Wave 2 / UAT-R3 Test #3: the Browse-direct-upload path). The assistant-upload path receives a
+ * server sessionId (`POST /api/compose/upload`); Browse bytes are LOCAL, so there is no
+ * server-assigned id — this is the tab-lifetime document session id that AI-edit dispatch threads
+ * as `documentSessionId` so a compose EDIT routes to the DOCUMENT session (redline) instead of
+ * being misclassified INFORMATIONAL (prose card). Prefers `crypto.randomUUID()` when available and
+ * degrades to a timestamp+random id so jsdom/older runtimes without it still mint a stable value.
+ */
+function mintDocumentSessionId(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) {
+    return c.randomUUID();
+  }
+  return `compose-doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 // ---------------------------------------------------------------------------
 // FR-02 (task 011) — `sprk_document` field constants for the Search lookup
@@ -294,6 +327,27 @@ export interface ComposeWorkspaceProps {
    * `ComposeActionEnqueue`.
    */
   enqueueComposeAction?: ComposeActionEnqueue;
+
+  /**
+   * spaarkeai-compose-r2 (multi-Compose-tab) — the id of the WORKSPACE TAB this editor is
+   * mounted in, when hosted as a keep-alive workspace tab (SpaarkeAi). Multiple Compose tabs
+   * can be mounted simultaneously (each hidden except the active one); this id lets THIS instance
+   * tab-scope its active-document re-registration to `tab_change` events that target THIS tab —
+   * so two mounted editors never fight over the session's active document. Omitted on the
+   * standalone / layout-door single-instance mounts (the legacy widgetType/seed discriminant is
+   * used then).
+   */
+  workspaceTabId?: string;
+
+  /**
+   * spaarkeai-compose-r2 (multi-Compose-tab) — whether THIS editor's workspace tab is the ACTIVE
+   * (visible) tab. Defaults to `true` (standalone / single-instance mounts are always "active").
+   * When `false`, this instance suppresses the load-time active-document auto-registrations and
+   * the visibility-conduit visible=true register, so only the ACTIVE tab's document is the
+   * session's active document. The becoming-active re-registration flows through the tab-scoped
+   * `tab_change` effect.
+   */
+  isActiveTab?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +360,12 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     width: '100%',
     height: '100%',
+    // FIX #6 (spaarkeai-compose-r2): `minHeight: 0` lets root shrink as a flex child of the Direct
+    // widget's bounded host (ComposeDirectWidget) instead of growing to its content height. Without
+    // it, `editorSlot` (flex:1) could not resolve a bounded height, an outer container would become
+    // the scroller, and the sticky ComposeFormatToolbar would scroll away. Harmless for the standalone
+    // / layout-door mounts (a block parent ignores it).
+    minHeight: 0,
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
     boxSizing: 'border-box',
@@ -370,9 +430,20 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     onComposeUnmount,
     className,
     enqueueComposeAction,
+    workspaceTabId,
+    isActiveTab = true,
   } = props;
 
   const [state, dispatch] = React.useReducer(composeWorkspaceReducer, INITIAL_STATE);
+
+  // spaarkeai-compose-r2 (multi-Compose-tab): keep the latest active-tab flag in a ref so the
+  // async load effects + the single-slot visibility conduit handler (both of which capture their
+  // closure at mount / dep-change time) can read whether THIS instance is the active tab WITHOUT
+  // re-subscribing. Only the ACTIVE tab's instance may claim the session's active document.
+  const isActiveTabRef = React.useRef<boolean>(isActiveTab);
+  React.useEffect(() => {
+    isActiveTabRef.current = isActiveTab;
+  }, [isActiveTab]);
 
   // FR-05 (task 100): keep the latest host-resolved BU container id in a ref so the Browse
   // handler + upload effect (whose closures would otherwise capture a stale prop) always thread
@@ -428,6 +499,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // the same stored draft). `composeDraftError` surfaces a soft failure without crashing.
   const [lastMaterializedKey, setLastMaterializedKey] = React.useState<string | null>(null);
   const [composeDraftError, setComposeDraftError] = React.useState<string | null>(null);
+
+  // -------------------------------------------------------------------------
+  // #1(b) — "Open preview" for the document persisted by the last Save
+  // FIX #7a — the host (ConversationPane) save-completed conduit. When a Save persists a document,
+  // we hand the persisted id + filename to the Assistant so it POSTs a PERSISTENT "Saved '{filename}'
+  // to the DMS." chat message with an "Open preview" affordance (replacing the transient banner's
+  // preview link). Held in a ref so triggerSave's useCallback need not depend on the (identity-
+  // flipping) delegate. Null on a standalone LegalWorkspace mount → the editor's own Saved ✓ banner
+  // remains the only confirmation there.
+  const notifyComposeSaveCompleted = useComposeSaveCompleted();
+  const notifyComposeSaveCompletedRef = React.useRef(notifyComposeSaveCompleted);
+  notifyComposeSaveCompletedRef.current = notifyComposeSaveCompleted;
 
   // -------------------------------------------------------------------------
   // FR-29 / FR-33 (R2, tasks 060/102) — anchored annotations + defined-terms +
@@ -671,6 +754,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const { pull: pullAnnotations } = useComposePullAnnotations({ bffBaseUrl });
   const { checkChanges } = useComposeCheckChanges({ bffBaseUrl });
 
+  // FIX #5 (UAT): Open-in-Word (Web + Desktop) handlers for the consolidated
+  // toolbar's "Word" dropdown. Bound HERE (the host) and threaded to ComposeEditor
+  // so the shared-lib editor stays decoupled from `@spaarke/document-operations`.
+  // Safe to call at mount — the hook only allocates `useState`/`useCallback`; the
+  // authenticated fetch fires lazily on click.
+  const { openInWeb, openInDesktop, isActing: isWordActing } = useDocumentActions({ bffBaseUrl });
+
   const [reanchorPanelOpen, setReanchorPanelOpen] = React.useState(false);
   const [pulledAnnotationCount, setPulledAnnotationCount] = React.useState(0);
 
@@ -872,7 +962,37 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // no original bytes were retained) pays the regeneration cost via the EXISTING
       // `tipTapToDocxBytes` path — that path is otherwise unchanged.
       const editorIsDirty = editorRef.current.isDirty();
-      const bytes = editorIsDirty || !state.docxBytes ? await editorRef.current.serialize() : state.docxBytes;
+
+      // UAT-R7 #2/#3/#4 — redline→Word save fidelity. When the editor holds PENDING redlines OR the
+      // session has anchored COMMENT annotations (DEF-13 edit-reason / DEF-11 review flags), Save
+      // must NOT go through the mark-blind `serialize()` (which flattens insertion/deletion marks to
+      // plain body text and drops comments). Instead send a clean BASELINE (pending redlines reduced
+      // to their reject-state text; accepted edits already baked in) + a structured annotation list;
+      // the BFF re-applies them as native w:ins/w:del/w:comment via DocxAnnotationWriter.
+      // This is also the #3 dirty-flag fix: any accept/reject/redline/comment op forces the
+      // annotation path, so accepted edits are never discarded in favor of pristine original bytes.
+      // `?.()` guards an older mounted editor build without the redline-save handle (defensive,
+      // mirroring the materializeComposeDraft guard) — it degrades to the plain serialize path.
+      const hasRedlines = editorRef.current.hasPendingRedlines?.() ?? false;
+      const commentAnnotations = composeDocxAnnotations; // anchoredAnnotationsToDocxAnnotations(anchoredAnnotations)
+      const needsAnnotationSave =
+        (hasRedlines || commentAnnotations.length > 0) && typeof editorRef.current.serializeForSave === 'function';
+
+      let bytes: ArrayBuffer;
+      let saveAnnotations: DocxAnnotationInput[] = [];
+      if (needsAnnotationSave) {
+        const forSave = await editorRef.current.serializeForSave();
+        bytes = forSave.baselineBytes;
+        // Redlines first, then comments — DocxAnnotationWriter emits comments before track-changes
+        // regardless of list order (EDGE-1), so the concat order only affects the ins/del sequence
+        // the bridge already ordered correctly (Insertion-before-Deletion per pair).
+        saveAnnotations = [...forSave.redlineAnnotations, ...commentAnnotations];
+      } else {
+        // FR-06a fidelity (no redlines, no comments): an unedited mount persists the pristine
+        // ORIGINAL bytes byte-identical; a genuinely dirty editor (or a defensive missing-original)
+        // regenerates via the EXISTING tipTapToDocxBytes path.
+        bytes = editorIsDirty || !state.docxBytes ? await editorRef.current.serialize() : state.docxBytes;
+      }
 
       // FR-05 (task 100): the create-on-save route carries no id in the path (the draft has no
       // drive-item yet) and sends `containerId`; the replace route carries the SPE id + driveId.
@@ -891,6 +1011,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       }
       const base64Content = btoa(binary);
 
+      // UAT-R7 #2/#3/#4: carry the redline + comment annotations so the BFF re-applies them onto the
+      // baseline as native Word markup. Empty on a plain no-redline Save → the server persists the
+      // baseline unchanged (FR-06a byte fidelity preserved).
       const requestBody = isTransientCreate
         ? {
             containerId: saveContainerId,
@@ -898,6 +1021,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             sessionId: state.sessionId,
             content: base64Content,
             displayName: state.documentRef.fileName ?? null,
+            annotations: saveAnnotations,
           }
         : {
             driveId: effectiveDriveId,
@@ -906,6 +1030,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             content: base64Content,
             documentRecordId: state.documentRef.sprkDocumentId ?? null,
             displayName: state.documentRef.fileName ?? null,
+            annotations: saveAnnotations,
           };
 
       const response = await authenticatedFetch(url, {
@@ -940,10 +1065,28 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const payload = (await response.json()) as {
         documentSpeId: string;
         documentRecordId?: string;
+        // #1(b): the create-on-save response's new-document id. `documentRecordId` is the
+        // established field (the `sprk_documentid`); `documentId` is read defensively in case the
+        // sibling BFF change names it that. Either drives the Saved ✓ banner's "Open preview" link.
+        documentId?: string;
         eTag?: string;
         size: number;
         wasPromotedThisSave: boolean;
       };
+
+      // #1(b): the persisted document id drives the Assistant's persistent "Saved to the DMS" chat
+      // affordance (FIX #7a below).
+      const savedDocumentId = payload.documentRecordId ?? payload.documentId;
+      if (savedDocumentId) {
+        // FIX #7a: report the completed Save to the Assistant so it posts a PERSISTENT confirmation
+        // + "Open preview" chat message. No-op (null delegate) on a standalone mount. The transient
+        // in-editor banner's preview link is dropped (below) now that the persistent affordance lives
+        // in chat; the banner's success signal is unaffected.
+        notifyComposeSaveCompletedRef.current?.({
+          documentRecordId: savedDocumentId,
+          fileName: state.documentRef.fileName,
+        });
+      }
 
       dispatch({
         kind: 'saveSucceeded',
@@ -983,7 +1126,28 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     effectiveDriveId,
     tenantId,
     onCreateOnSaveComplete,
+    composeDocxAnnotations,
   ]);
+
+  // FIX #1b — publish the editor's Save into the cross-pane bridge so the Assistant's "Add the
+  // document to the DMS" chip (ConversationPane) drives the SAME create-on-save / save-to-matter
+  // flow (`triggerSave`) via a DIRECT call — no PaneEventBus discriminant. No-op outside the bridge
+  // provider (standalone LegalWorkspace mount).
+  //
+  // spaarkeai-compose-r2 (multi-Compose-tab): the bridge Save slot is single-writer (last-mounted
+  // instance wins). Gate the bridge-facing wrapper so an INACTIVE tab's instance holding the slot
+  // does NOT save the WRONG document when the chip is issued while a DIFFERENT Compose tab is active —
+  // only the ACTIVE tab services the chip. The toolbar / Ctrl+S paths call `triggerSave` DIRECTLY and
+  // stay ungated (a hidden inactive tab has no reachable toolbar/focus, so those can only fire on the
+  // active tab anyway). The wrapper is stable identity (reads a ref) yet always dispatches the LATEST
+  // triggerSave, so the chip hits the current save state.
+  const triggerSaveRef = React.useRef(triggerSave);
+  triggerSaveRef.current = triggerSave;
+  const handleBridgeSave = React.useCallback((): void | Promise<void> => {
+    if (isActiveTabRef.current === false) return;
+    return triggerSaveRef.current();
+  }, []);
+  useRegisterComposeSaveHandler(handleBridgeSave);
 
   // Keyboard shortcut: Ctrl/Cmd+S → save.
   React.useEffect(() => {
@@ -1006,6 +1170,71 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // `targetLedgerRef` selects a specific stored output ({bindingId}@t{n}); when omitted, the
   // CURRENT (highest-turn) compose output for the session is materialized — the refresh-durable
   // and supersession/undo-replace resolution (FR-17 foundation).
+  // DEF-13 — turn an AI edit's rationale into an anchored COMMENT annotation (see the call site in
+  // materializeComposeDraftFromLedger for the full pipeline rationale). Pure state update; dedups by
+  // the ledger key's derived annotation id so re-materialize (refresh/duplicate signal) is idempotent.
+  const registerAiEditReasonComment = React.useCallback(
+    (payload: ComposeDraftPayload, provenance: { ledgerRef: string; bindingId: string }): void => {
+      const rationale = payload?.rationale?.trim();
+      const targetText = payload?.target_text?.trim();
+      if (!rationale || !targetText) return; // no reason, or no span to anchor a comment to
+      const annotationId = `ai-edit-reason:${provenance.ledgerRef}`;
+      setAnchoredAnnotations(prev => {
+        if (prev.some(a => a.id === annotationId)) return prev; // idempotent
+        const comment: AnchoredAnnotation = {
+          id: annotationId,
+          type: 'comment',
+          anchor: { textPattern: targetText, paragraphHint: -1, spanId: provenance.ledgerRef },
+          body: rationale,
+          author: 'Spaarke Assistant',
+          timestamp: new Date().toISOString(),
+          source: 'ai',
+          provenance: { bindingId: provenance.bindingId, ledgerRef: provenance.ledgerRef },
+        };
+        return [...prev, comment];
+      });
+    },
+    []
+  );
+
+  // DEF-11 — register a whole-document revision's REVIEW FLAGS (`flag-risks` intent → payload.comments)
+  // as anchored `comment` AnchoredAnnotations. Same pipeline as DEF-13's edit-reason comment: each flag
+  // flows through `anchoredAnnotations` (persisted by the gap-4.3 effect) → `anchoredAnnotationsToDocxAnnotations`
+  // → PushAnnotations → `DocxAnnotationWriter` (a real `w:comment` anchored to `target_text` on Save/Push).
+  // No accept/reject (flags carry no edit). Deduped by the ledger key + index so a re-materialize
+  // (refresh / duplicate signal) never appends duplicates.
+  const registerAiReviewComments = React.useCallback(
+    (
+      comments: Array<{ target_text?: string; comment?: string }>,
+      provenance: { ledgerRef: string; bindingId: string }
+    ): void => {
+      const flags = comments
+        .map((c, i) => ({ i, target: c?.target_text?.trim() ?? '', body: c?.comment?.trim() ?? '' }))
+        .filter(c => c.target.length > 0 && c.body.length > 0);
+      if (flags.length === 0) return;
+      setAnchoredAnnotations(prev => {
+        const existing = new Set(prev.map(a => a.id));
+        const additions: AnchoredAnnotation[] = [];
+        for (const flag of flags) {
+          const annotationId = `ai-review:${provenance.ledgerRef}#${flag.i}`;
+          if (existing.has(annotationId)) continue;
+          additions.push({
+            id: annotationId,
+            type: 'comment',
+            anchor: { textPattern: flag.target, paragraphHint: -1, spanId: provenance.ledgerRef },
+            body: flag.body,
+            author: 'Spaarke Assistant',
+            timestamp: new Date().toISOString(),
+            source: 'ai',
+            provenance: { bindingId: provenance.bindingId, ledgerRef: provenance.ledgerRef },
+          });
+        }
+        return additions.length > 0 ? [...prev, ...additions] : prev;
+      });
+    },
+    []
+  );
+
   const materializeComposeDraftFromLedger = React.useCallback(
     async (targetLedgerRef?: string): Promise<void> => {
       if (state.status !== 'loaded') return;
@@ -1026,6 +1255,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // INTEGRATION HOOK #1). `@spaarke/auth` per ADR-028.
         const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(state.sessionId)}/compose-outputs`;
         const response = await authenticatedFetch(url, { method: 'GET' });
+        // Defensive: authenticatedFetch throws ApiError on non-2xx (it never returns a
+        // non-ok Response), so a 404 lands in the catch below — not here. This guard is a
+        // safety net should that behaviour ever change.
         if (!response.ok) {
           if (response.status === 404) return; // no compose outputs yet — nothing to materialize
           setComposeDraftError(`Failed to load the drafted content (HTTP ${response.status}).`);
@@ -1046,19 +1278,62 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // Idempotent — never double-apply the same stored draft (refresh / duplicate signal).
         if (target.key === lastMaterializedKey) return;
 
-        editor.materializeComposeDraft(target.payload, {
+        const provenance = {
           ledgerRef: target.key, // {bindingId}@t{n} provenance
           bindingId: target.bindingId,
           turn: target.turn,
-        });
+        };
+        // DEF-11: a whole-document revision (`compose-revise-document`) carries a CHANGE LIST
+        // (`edits[]`) and/or REVIEW FLAGS (`comments[]`). A single-edit draft (compose-draft-alternative /
+        // compose-draft-document) has neither — it keeps the shipped single-materialize path.
+        const editList = Array.isArray(target.payload?.edits) ? target.payload.edits : null;
+        const commentList = Array.isArray(target.payload?.comments) ? target.payload.comments : null;
+        if (editList && editList.length > 0) {
+          editor.materializeComposeEdits(editList, provenance); // multi-change redline
+        } else {
+          editor.materializeComposeDraft(target.payload, provenance); // single-edit redline (unchanged)
+        }
         setLastMaterializedKey(target.key);
         setComposeDraftError(null);
+
+        // DEF-13 — register the AI edit's REASON as an anchored COMMENT annotation on the change.
+        // The rationale becomes a real Word `w:comment` on Save/Push: it flows through the EXISTING
+        // annotations pipeline — `anchoredAnnotations` (persisted by the gap-4.3 effect) →
+        // `anchoredAnnotationsToDocxAnnotations` → PushAnnotations → `DocxAnnotationWriter` (which
+        // already emits `w:comment` anchored to `targetText`). No parallel machinery. Anchored to the
+        // edit's `target_text` (the redline range); skipped for an insertion-style draft with no
+        // target (no span to anchor a comment to) or an empty rationale. Deduped by the ledger key so
+        // a refresh/duplicate materialize never appends a second copy.
+        // DEF-11: a whole-document revision's REVIEW FLAGS become anchored comments (flag-risks intent).
+        // A single-edit draft instead contributes its rationale as ONE anchored comment (DEF-13).
+        if (commentList && commentList.length > 0) {
+          registerAiReviewComments(commentList, provenance);
+        } else {
+          registerAiEditReasonComment(target.payload, {
+            ledgerRef: target.key,
+            bindingId: target.bindingId,
+          });
+        }
       } catch (err) {
+        // A 404 means the session has no compose outputs yet — a fresh document/upload mount
+        // with nothing drafted. authenticatedFetch throws ApiError on non-2xx (never returns a
+        // non-ok Response), so this "nothing to materialize" case lands here. It is a silent
+        // no-op: this callback also runs UNCONDITIONALLY on every 'loaded' transition
+        // (refresh-durability effect), where a plain file load legitimately has no draft. Only
+        // genuine failures (500, network) surface an error card.
+        if (err instanceof ApiError && err.status === 404) return;
         const message = err instanceof Error ? err.message : String(err);
         setComposeDraftError(`Failed to insert drafted content: ${message}`);
       }
     },
-    [state.status, state.sessionId, bffBaseUrl, lastMaterializedKey]
+    [
+      state.status,
+      state.sessionId,
+      bffBaseUrl,
+      lastMaterializedKey,
+      registerAiEditReasonComment,
+      registerAiReviewComments,
+    ]
   );
 
   // -------------------------------------------------------------------------
@@ -1105,6 +1380,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       editorRef.current?.highlightCitedSpan(event.qaSourceText, event.qaSectionLabel);
     },
   });
+
+  // DEF-12 — publish the editor's redline-accept into the cross-pane bridge so the Assistant
+  // confirmation message's "Accept" control (the AI↔user interaction surface) commits the redline
+  // through the EXISTING `usePendingRedline.accept` (via the editor handle). No-op outside the bridge
+  // provider (standalone LegalWorkspace mount). Reject/Try-another do NOT route here — they are the
+  // Assistant's durable ledger supersessions.
+  //
+  // spaarkeai-compose-r2 (multi-Compose-tab): the bridge Accept slot is single-writer (last-mounted
+  // instance wins). Gate so an INACTIVE tab's instance holding the slot does NOT commit a redline into
+  // a HIDDEN document when the chat Accept is issued while a DIFFERENT Compose tab is active — only the
+  // ACTIVE tab services it (standalone / single-instance mounts default isActiveTab=true, so unaffected).
+  const handleBridgeAcceptRedline = React.useCallback((ledgerRef: string): void => {
+    if (isActiveTabRef.current === false) return;
+    editorRef.current?.acceptPendingRedline(ledgerRef);
+  }, []);
+  useRegisterComposeRedlineAcceptHandler(handleBridgeAcceptRedline);
 
   // FR-04 refresh-durability (task 016): on (re)load of a session, re-materialize the CURRENT
   // compose draft from the ledger so a page refresh restores the drafted content — materialized
@@ -1232,9 +1523,23 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // A Browse mount has no SPE drive — clear any stale Search-resolved drive id
       // (FR-02/task 011) so a later Save doesn't key off the WRONG drive.
       setSearchResolvedDriveId(null);
+      // Wave 2 (UAT-R3 Test #3 fix): mint the tab's DOCUMENT session id here. Unlike the
+      // assistant-upload path (which gets a server sessionId via requestUploadMount), a Browse
+      // mount never hits the server, so its `mountTransient` reducer previously left
+      // state.sessionId ''. That empty id caused the AI toolbar to thread `documentSessionId: ''`,
+      // which ConversationPane reclassified as INFORMATIONAL (prose card) instead of a compose
+      // EDIT (redline). A minted, tab-lifetime id restores EDIT routing (DEF-09/DEF-11) and the
+      // redline-from-ledger materialization (which aborts on empty state.sessionId).
+      const browseDocumentSessionId = mintDocumentSessionId();
       // FR-05 (task 100): carry the host-resolved BU container so the first Save (create-on-save)
       // knows which SPE container to mint the new sprk_document's drive-item in.
-      dispatch({ kind: 'mountTransient', docxBytes: result, fileName: file.name, containerId: containerIdRef.current });
+      dispatch({
+        kind: 'mountTransient',
+        docxBytes: result,
+        fileName: file.name,
+        containerId: containerIdRef.current,
+        sessionId: browseDocumentSessionId,
+      });
       // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
       // (create-on-save, task 013) is enabled immediately.
       setIsDirty(true);
@@ -1243,7 +1548,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // forget; the host lands the bytes as a ChatSessionFile + marks the active document. Null
       // (no-op) on a standalone LegalWorkspace mount. Bytes travel by a direct function call — never
       // the PaneEventBus (ADR-015 keeps the bus content-free).
-      void registerActiveDocumentRef.current?.({ docxBytes: result, fileName: file.name });
+      // Wave 3 Part 2: thread the tab's minted document session id so the server sets
+      // ActiveDocument.DocumentSessionId → a typed revise/draft (TEXT path) routes into THIS doc session.
+      void registerActiveDocumentRef.current?.({
+        docxBytes: result,
+        fileName: file.name,
+        documentSessionId: browseDocumentSessionId,
+      });
     };
     reader.onerror = () => {
       dispatch({
@@ -1253,6 +1564,174 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     };
     reader.readAsArrayBuffer(file);
   }, []);
+
+  // -------------------------------------------------------------------------
+  // R3 — "Visible to assistant" toggle → active-document register/withdraw
+  // -------------------------------------------------------------------------
+  // The toggle lives on the WORKSPACE tab strip (WorkspacePane.handleToggleVisibility), but the
+  // loaded document BYTES live HERE. When the user toggles it ON we register the doc's identity +
+  // extracted text into the chat context via the SAME conduit the Browse / stored-doc (DEF-10) /
+  // upload auto-registers use (`registerActiveDocument` → chat upload → ChatSessionFile RAG +
+  // ActiveDocument); OFF withdraws it (`visible: false` in the POST body, mapped server-side). No new
+  // conduit machinery (§11) — this handler just parameterizes the existing one with `visible`.
+  const handleComposeVisibilityChange = React.useCallback(
+    (visible: boolean): void => {
+      if (state.status !== 'loaded' && state.status !== 'saving') return;
+      if (!state.docxBytes) return;
+      // spaarkeai-compose-r2 (multi-Compose-tab): the visibility conduit is single-slot (the bridge
+      // holds ONE editor handler; the last-mounted instance wins the slot). Guard the REGISTER
+      // (visible=true) so an INACTIVE instance holding the slot cannot claim the session's active
+      // document when WorkspacePane drives visible=true for a DIFFERENT active Compose tab — the
+      // active tab registers via the tab-scoped tab_change effect below. A WITHDRAW (visible=false,
+      // switch to a non-document tab) is session-level and safe from any instance, so it is allowed
+      // through regardless of active state.
+      if (visible && isActiveTabRef.current === false) return;
+      void registerActiveDocumentRef.current?.({
+        docxBytes: state.docxBytes,
+        fileName: state.documentRef?.fileName,
+        documentSessionId: state.sessionId,
+        visible,
+      });
+    },
+    [state.status, state.docxBytes, state.documentRef?.fileName, state.sessionId]
+  );
+  useRegisterComposeVisibilityHandler(handleComposeVisibilityChange);
+
+  // -------------------------------------------------------------------------
+  // R4 — "Insert into document": Assistant suggestion → tracked change at selection
+  // -------------------------------------------------------------------------
+  // Track the editor's latest selection (Flow-1 `compose_selection_changed`, dispatched by
+  // ComposeEditor on the `context` channel) so the insert handler can decide strike+replace (a live
+  // selection) vs insert-at-cursor. Read-only cache; no editor changes (the engine already anchors).
+  const lastSelectionRef = React.useRef<{ from: number; to: number; selectionText: string } | null>(null);
+  usePaneEvent('context', (event): void => {
+    if (event.type !== 'compose_selection_changed') return;
+    lastSelectionRef.current = event.selection
+      ? { from: event.selection.from, to: event.selection.to, selectionText: event.selection.selectionText }
+      : null;
+  });
+
+  // Materialize an Assistant suggestion as a PENDING redline via the EXISTING engine
+  // (`materializeComposeDraft` → usePendingRedline.materialize) — no engine changes (§11). A live
+  // selection → `target_text` (strike+replace at selection); no selection → omit (insert at cursor).
+  // Each insert gets a UNIQUE ledgerRef/bindingId so multiple chat inserts coexist as independent
+  // redlines (a shared bindingId would make a later insert SUPERSEDE — strip — the earlier one). The
+  // per-change Accept/Reject popover + `usePendingRedline.accept/reject` handle it by ledgerRef.
+  const chatInsertSeqRef = React.useRef(0);
+  const handleInsertSuggestion = React.useCallback((content: string, messageId?: string): void => {
+    // spaarkeai-compose-r2 (multi-Compose-tab): the bridge Insert slot is single-writer (last-mounted
+    // instance wins). Gate so an INACTIVE tab's instance holding the slot does NOT materialize the
+    // Assistant suggestion into a HIDDEN document when "Insert into document" is issued while a
+    // DIFFERENT Compose tab is active — only the ACTIVE tab services it (standalone / single-instance
+    // mounts default isActiveTab=true, so unaffected).
+    if (isActiveTabRef.current === false) return;
+    const editor = editorRef.current;
+    if (!editor || typeof editor.materializeComposeDraft !== 'function') return;
+    if (!content || content.trim().length === 0) return;
+    const sel = lastSelectionRef.current;
+    const targetText = sel && sel.to > sel.from && sel.selectionText.trim().length > 0 ? sel.selectionText : undefined;
+    const id = messageId && messageId.length > 0 ? messageId : String((chatInsertSeqRef.current += 1));
+    const ledgerRef = `chat-insert:${id}`;
+    editor.materializeComposeDraft(
+      targetText ? { new_text: content, target_text: targetText } : { new_text: content },
+      { ledgerRef, bindingId: ledgerRef, turn: 0 }
+    );
+    setIsDirty(true);
+  }, []);
+  useRegisterComposeInsertSuggestionHandler(handleInsertSuggestion);
+
+  // -------------------------------------------------------------------------
+  // DEF-10 (DEF-UAT-1 part 2, 2026-07-12) — share the loaded HOST document's
+  // TEXT with the Assistant's chat session
+  // -------------------------------------------------------------------------
+  // A host `sprk_document` opened in Compose ("Open in Compose") loads its DOCX
+  // bytes via the stored-document Load effect above — but, unlike a Browse mount
+  // (handleBrowseFileSelected) or a chat upload, those bytes never reached the
+  // CHAT session. So the Assistant answered "no document uploaded in this session"
+  // to "summarize this document": the two-session split (document session ≠ chat
+  // session). This effect closes that gap by REUSING the EXACT same host registrar
+  // the Browse path uses (ConversationPane.registerComposeActiveDocument → the
+  // EXISTING chat upload endpoint → a ChatSessionFile carrying ExtractedText →
+  // SessionFileTextSource / the session-files RAG index). NO new BFF endpoint and
+  // NO parallel context path (§11): the loaded bytes we already hold are handed to
+  // the same conduit a Browse mount uses.
+  //
+  // "Visible to assistant" is DEFAULT ON for a host document (owner decision
+  // 2026-07-12): it is auto-registered on load — no toggle required, and toggling
+  // the workspace-tab flag is no longer the (inert) path to doc visibility.
+  //
+  // Fires ONCE per stored SPE document (ref-guarded by speDriveItemId). Transient
+  // Browse / upload / draft mounts are EXCLUDED: a Browse mount already registers
+  // itself (above), and upload / draft mounts are chat-native (an upload IS a
+  // ChatSessionFile; a draft lives in the session ledger). No-op (null registrar)
+  // on a standalone LegalWorkspace mount with no bridge provider — Save is unaffected.
+  const sharedActiveDocumentKeyRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (state.status !== 'loaded') return;
+    const speDriveItemId = state.documentRef?.speDriveItemId;
+    // Only a STORED host document has a real SPE drive-item id; transient mounts set it to ''.
+    if (!speDriveItemId) return;
+    if (!state.docxBytes) return;
+    if (sharedActiveDocumentKeyRef.current === speDriveItemId) return; // once per stored document
+    // spaarkeai-compose-r2 (multi-Compose-tab): only the ACTIVE tab's instance auto-claims the
+    // session's active document on load. An INACTIVE instance finishing its load (e.g. a second
+    // Compose tab opened over this one, or a background load race) must NOT steal active-doc from
+    // the tab the user is viewing. When this tab later becomes active the tab-scoped tab_change
+    // effect below re-registers it. (Guard skips WITHOUT setting the once-ref so a later activation
+    // still registers.)
+    if (isActiveTabRef.current === false) return;
+    sharedActiveDocumentKeyRef.current = speDriveItemId;
+    void registerActiveDocumentRef.current?.({
+      docxBytes: state.docxBytes,
+      fileName: state.documentRef?.fileName,
+      // Wave 3 Part 2: the stored document's loaded session id IS its document session (keyed
+      // DocumentId+MatterId) — register it so a typed revise/draft routes into THIS doc session.
+      documentSessionId: state.sessionId,
+    });
+    // registerActiveDocumentRef is a stable ref; excluded from deps intentionally.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.status, state.documentRef?.speDriveItemId, state.docxBytes]);
+
+  // -------------------------------------------------------------------------
+  // Wave 3 Part 3 — tab-scoped ActiveDocument (multi-tab correctness)
+  // -------------------------------------------------------------------------
+  // With multiple Compose tabs the Assistant-typed edit must target the tab the user is VIEWING, not
+  // the last one that mounted. When a Compose tab becomes the ACTIVE workspace tab (WorkspacePane
+  // dispatches `tab_change` / `active_widget_changed` on the `workspace` channel), re-register THIS
+  // tab's document as the session's active document — most-recent-active-wins — so
+  // ChatSession.ActiveDocument.DocumentSessionId re-points to the viewed tab and BindingCapabilityTool
+  // routes a typed revise/draft here. Reuses the Part-2 registration conduit (the host dedups the
+  // upload → pointer-only re-assert; no duplicate ChatSessionFile). NO new bus event (ADR-030): the
+  // existing tab_change discriminant is the signal. Gated on a loaded document with a real document
+  // session id, and only when the newly-active tab is a Compose tab.
+  usePaneEvent('workspace', (event: WorkspacePaneEvent): void => {
+    if (event.type !== 'tab_change' && event.type !== 'active_widget_changed') return;
+    if (state.status !== 'loaded' && state.status !== 'saving') return;
+    if (!state.sessionId || !state.docxBytes) return;
+    // spaarkeai-compose-r2 (multi-Compose-tab): when this instance knows its OWN workspace tab id
+    // (SpaarkeAi keep-alive mount), re-register ONLY when the newly-active tab is THIS tab. Multiple
+    // Compose editors are mounted at once (each hidden except the active one); without this scope
+    // EVERY mounted editor would re-register on ANY compose tab activation and fight over the
+    // session's active document (most-recent-active-wins would resolve to whichever effect ran last,
+    // not the tab the user is viewing). Comparing the event's target tab id is deterministic — it
+    // does not depend on the `isActiveTab` prop having re-rendered before the synchronous dispatch.
+    if (workspaceTabId) {
+      if (event.tabId !== workspaceTabId) return;
+    } else {
+      // Standalone / layout-door single-instance mount (no tab id): recognize a Compose tab by its
+      // DIRECT widgetType regardless of seed shape, or the legacy LAYOUT discriminant (compose seed
+      // / layoutName === 'Compose') for the ribbon compose-launch path (widgetType 'workspace').
+      const wd = event.widgetData as { compose?: unknown; layoutName?: string } | null | undefined;
+      const activeTabIsCompose =
+        event.widgetType === 'compose' || (wd != null && (wd.compose != null || wd.layoutName === 'Compose'));
+      if (!activeTabIsCompose) return;
+    }
+    void registerActiveDocumentRef.current?.({
+      docxBytes: state.docxBytes,
+      fileName: state.documentRef?.fileName,
+      documentSessionId: state.sessionId,
+    });
+  });
 
   // -------------------------------------------------------------------------
   // FR-03 (task 012) — transient upload-mount
@@ -1326,6 +1805,24 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // A freshly-mounted upload is unsaved by definition — mark dirty so Save
         // (create-on-save, task 013) is enabled immediately.
         setIsDirty(true);
+        // Wave 4 (spaarkeai-compose-r2, end-to-end revise): register THIS upload mount's document
+        // session with the host so `ChatSession.ActiveDocument.DocumentSessionId` back-fills — the
+        // Browse (line ~1383) and stored-doc (line ~1432) paths already do this, but the assistant
+        // upload-mount door did NOT, so a chat-uploaded doc auto-mounted for "revise this document"
+        // never established the routing target and a subsequent typed/chip revise fell back to the
+        // chat session (narrated as prose instead of redlined). `requestUploadMount` already set
+        // state.sessionId to `uploadRef.sessionId`; thread that same id. The host dedups the upload
+        // (pointer-only re-assert; no duplicate ChatSessionFile). No-op on a standalone mount.
+        // spaarkeai-compose-r2 (multi-Compose-tab): only the ACTIVE tab's instance auto-claims the
+        // session's active document — an inactive instance finishing its upload load must not steal
+        // active-doc from the viewed tab; it re-registers via the tab_change effect on activation.
+        if (isActiveTabRef.current !== false) {
+          void registerActiveDocumentRef.current?.({
+            docxBytes: bytes.buffer,
+            fileName: payload.fileName ?? uploadRef.fileName,
+            documentSessionId: uploadRef.sessionId,
+          });
+        }
       } catch (err) {
         if (ac.signal.aborted) return;
         const message = err instanceof Error ? err.message : String(err);
@@ -1387,6 +1884,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       try {
         const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(draftSessionId)}/compose-outputs`;
         const response = await authenticatedFetch(url, { method: 'GET', signal: ac.signal });
+        // Defensive: authenticatedFetch throws ApiError on non-2xx (it never returns a
+        // non-ok Response), so a 404 lands in the catch below — not here. This guard is a
+        // safety net should that behaviour ever change.
         if (!response.ok) {
           dispatch({
             kind: 'loadFailed',
@@ -1434,6 +1934,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         setIsDirty(true);
       } catch (err) {
         if (ac.signal.aborted) return;
+        // This is a DRAFT-SEED mount — a draft IS expected. authenticatedFetch throws ApiError
+        // on non-2xx (never returns a non-ok Response), so a 404 (the drafted output isn't in
+        // the session — expired or never written) lands here. Surface the same soft, non-scary
+        // message the equivalent stored-doc path would; do NOT crash.
+        if (err instanceof ApiError && err.status === 404) {
+          dispatch({
+            kind: 'loadFailed',
+            errorMessage:
+              'The drafted document is no longer available (the session may have expired). Try drafting it again.',
+          });
+          return;
+        }
         const message = err instanceof Error ? err.message : String(err);
         dispatch({ kind: 'loadFailed', errorMessage: `Failed to load the drafted document: ${message}` });
       }
@@ -1489,6 +2001,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     (state.status === 'loaded' || state.status === 'saving') &&
     !!state.documentRef &&
     !state.documentRef.speDriveItemId;
+
+  // FIX #5 (UAT): derived enable/disable state for the consolidated toolbar's Word
+  // dropdown + Save button (was previously computed inside ComposeToolbar). Same
+  // rules as before: Open-in-Word needs a real persisted document id + bffBaseUrl
+  // and is suppressed while saving or while another doc action is in flight; Save
+  // is available when there is unsaved work (an edit OR an unpersisted transient
+  // draft) and not mid-save.
+  const isSavingNow = state.status === 'saving';
+  const hasWordDocument = toolbarDocumentId.length > 0 && bffBaseUrl.length > 0;
+  const wordActionsDisabled = isSavingNow || !hasWordDocument || isWordActing;
+  const canSaveNow = !isSavingNow && bffBaseUrl.length > 0 && (isDirty || hasTransientDraft);
 
   // -------------------------------------------------------------------------
   // Render
@@ -1562,30 +2085,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       {/* Loaded / Saving — toolbar + editor + banners */}
       {showEditor ? (
         <>
-          <div className={styles.toolbarSlot}>
-            <ComposeToolbar
-              documentId={toolbarDocumentId}
-              bffBaseUrl={bffBaseUrl}
-              disabled={state.status === 'saving'}
-              onSaveRequested={() => {
-                void triggerSave();
-              }}
-              isDirty={isDirty}
-              hasTransientDraft={hasTransientDraft}
-              isSaving={state.status === 'saving'}
-              // gap 3.1 — only offer Push-to-Word for a persisted document (a transient draft has
-              // no SPE drive-item to write native annotations into yet).
-              onPushToWordRequested={
-                state.documentRef?.speDriveItemId
-                  ? () => {
-                      void handlePushToWord();
-                    }
-                  : undefined
-              }
-              canPushToWord={canPushToWord}
-              isPushingToWord={isPushingToWord}
-            />
-          </div>
+          {/* FIX #5 (UAT): the separate ComposeToolbar command-bar row was removed — its
+              Open-in-Word / Save / Push actions now live in the consolidated single-row
+              ComposeFormatToolbar inside ComposeEditor (handlers threaded below). */}
 
           {/* gap 3.5 — return-from-Word re-anchor summary banner (task 054 component, mounted here). */}
           <ComposeReanchorBanner
@@ -1602,6 +2104,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             checkoutFailureMessage={state.checkoutFailureMessage}
             importWarnings={state.importWarnings}
             pendingAssistantInsert={state.pendingAssistantInsert}
+            saveSuccessToken={state.saveSuccessToken}
+            // FIX #7a: the transient "Open preview" link was REMOVED from the Saved ✓ banner — the
+            // persistent affordance now lives in the Assistant chat (a "Saved to the DMS" message
+            // with "Open preview", posted via the save-completed conduit). The banner keeps its
+            // success signal (saveSuccessToken) but no longer carries the preview link.
           />
 
           {/* FR-04 (task 016): soft failure surfacing for draft materialization. */}
@@ -1632,6 +2139,30 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               onDirtyChange={handleDirtyChange}
               onImportWarnings={handleImportWarnings}
               enqueueComposeAction={enqueueComposeAction}
+              // FIX #5 (UAT): Word + Save actions folded into the consolidated toolbar.
+              onOpenInWord={() => {
+                if (!wordActionsDisabled) void openInWeb(toolbarDocumentId);
+              }}
+              onOpenInWordDesktop={() => {
+                if (!wordActionsDisabled) void openInDesktop(toolbarDocumentId);
+              }}
+              // gap 3.1 — only offer Push-to-Word for a persisted document (a transient
+              // draft has no SPE drive-item to write native annotations into yet).
+              onPushToWord={
+                state.documentRef?.speDriveItemId
+                  ? () => {
+                      void handlePushToWord();
+                    }
+                  : undefined
+              }
+              wordActionsDisabled={wordActionsDisabled}
+              canPushToWord={canPushToWord}
+              isPushingToWord={isPushingToWord}
+              onSave={() => {
+                void triggerSave();
+              }}
+              canSave={canSaveNow}
+              isSaving={isSavingNow}
             />
           </div>
         </>

@@ -8,6 +8,17 @@
 > **Not yet**: spec / plan / task decomposition. This document scopes the problem
 > space so a proper `/project-pipeline projects/spaarkeai-compose-r3` can be run later.
 
+> **🔎 2026-07-14 UPDATE — read [`ooxml-fidelity-findings.md`](ooxml-fidelity-findings.md) first.**
+> A grounded gap-check during R2 close-out mapped the shipped Compose save/redline path
+> against the fidelity target and formalized **three enhancements (E1/E2/E3)** with verdicts:
+> **E1** retained-original OOXML delta save (= Scope **A**, the keystone — GENUINELY MISSING for
+> edited saves), **E2** `paraId` anchoring (= A/E — MISSING, coupled to E1), **E3** enriched redline
+> contract (= G/H — PARTIALLY present; rationale already ships, confidence+offsets missing).
+> The findings doc also **corrects this seed**: R2 already shipped **home-grown track changes +
+> comments** (native `w:ins`/`w:del`/`w:comment`, no TipTap Pro), so Scope **B/C** authoring is DONE
+> — R3's B/C work is now the **import round-trip**. Constraint reaffirmed: **no TipTap product
+> features, paid or unpaid.** E1/E2/E3 are the prioritized R3 core; `design.md` is authored next.
+
 ---
 
 ## Motivation
@@ -70,28 +81,26 @@ elements are dropped even when the user made no changes touching them.
 
 ### B. Track Changes / Revision Marks
 
-TipTap Pro has a Track Changes extension (commercial). R1 explicitly
-banned TipTap Pro. Options:
-- **Read-only track-changes display**. Import the DOCX's revision marks,
-  render as read-only annotations in the editor, but don't create new ones
-  from user edits. Preserves seeing history; doesn't produce new history.
-- **Custom TipTap extension**. Build our own revision-marking extension.
-  Non-trivial engineering (~2-4 weeks). Requires acceptance workflow.
-- **License TipTap Pro**. Requires legal + procurement.
-- **Defer indefinitely**. Track changes stays a Word-only feature; Compose
-  users work off Compose for AI-assisted drafting, then take work back to
-  Word for track-changes review cycles.
+> **⚠️ SUPERSEDED (2026-07-14): AUTHORING is DONE.** R2 shipped a **home-grown** revision-marking
+> system — our own TipTap marks → `DocxAnnotationWriter` emitting **native OOXML `w:ins`/`w:del`**,
+> with an accept/reject workflow. **No TipTap Pro** (the "License TipTap Pro" option below is
+> RETIRED — constraint reaffirmed: no TipTap product features, paid or unpaid). See
+> [`ooxml-fidelity-findings.md`](ooxml-fidelity-findings.md) §Current State.
+
+The remaining R3 gap is **IMPORT round-trip**:
+- **Read existing DOCX revision marks** on Load and render them in the editor (currently only
+  *authored* marks are handled; a doc that already has Word revisions doesn't round-trip its
+  history in). Depends on the E1/E2 OOXML-identity work (retained-original + `paraId`).
 
 ### C. Comments (Word `<w:comment>` elements)
 
-R1 spec: "MUST NOT store comments as Word `<w:comment>` elements in R1
-(use ChatSession annotations in R2+)". R3 candidate: implement comments
-as `<w:comment>` elements preserving Word compatibility.
+> **⚠️ SUPERSEDED (2026-07-14): AUTHORING is DONE.** R2 writes new comments as **native
+> `<w:comment>`** via `DocxAnnotationWriter` (anchored-annotation pipeline). R1's "MUST NOT store
+> comments as `w:comment`" was lifted in R2.
 
-- Import: read source DOCX comments, render in editor as first-class
-  comment threads.
-- Author: add new comments in TipTap UI; write as `<w:comment>` on save.
-- Round-trip: preserve author name, timestamp, response threads.
+The remaining R3 gap is **IMPORT round-trip**:
+- Read source DOCX comments on Load and render them as first-class comment threads in the editor
+  (author, timestamp, response threads), preserving them across the retained-original save (E1).
 
 ### D. Fields (Dates, Cross-References, Mail-Merge Tokens)
 
@@ -220,6 +229,11 @@ worth noting as it interacts with Track Changes, Comments, and Save.
 | Date | Source | Feedback |
 |---|---|---|
 | 2026-07-01 | R1 UAT | "when it saves the WORD document loses its original formatting" — motivating factor for R3 A (preserving formatting on Save) |
+| 2026-07-14 | R2 gap-check | Grounded verdicts: **E1** retained-original delta save GENUINELY MISSING for edited saves (any dirty Save rebuilds lossily from TipTap via `tipTapJsonToDocxBytes`); only unedited saves round-trip. Root of R1+R2 fidelity pain. → Scope A. See [`ooxml-fidelity-findings.md`](ooxml-fidelity-findings.md). |
+| 2026-07-14 | R2 gap-check | **E2** `paraId` anchoring MISSING (fuzzy text+index today; mammoth import discards paraIds) — coupled to E1 as one OOXML-identity workstream. → Scope A/E. |
+| 2026-07-14 | R2 gap-check | **E3** enriched redline contract PARTIALLY present — rationale + sources carried and rationale already surfaced in accept/reject UI; **confidence** signal + explicit offsets missing (offsets ride with E2). → Scope G/H. |
+| 2026-07-14 | R2 status | Track changes + comments AUTHORING shipped home-grown in R2 (native `w:ins`/`w:del`/`w:comment`, no TipTap Pro) → Scope B/C authoring DONE; **import round-trip** is the remaining R3 gap. |
+| 2026-07-14 | Owner (compose-r2 UAT) | Assistant/Workspace **pane UI redesign** is a SEPARATE project, sequenced AFTER compose-r2 merges (freeze the Compose output seam first) — NOT R3 scope; noted here for lineage. |
 
 ---
 

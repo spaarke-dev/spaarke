@@ -316,7 +316,7 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.NotificationService>();
 
         // B4 — IChatDataverseRepository + ChatDataverseRepository
-        // (deps: IGenericEntityService, IFieldMappingDataverseService, ILogger — all unconditional).
+        // (deps: IGenericEntityService, ILogger — all unconditional).
         services.AddScoped<IChatDataverseRepository, ChatDataverseRepository>();
 
         // B4 — ChatSessionManager (deps: IDistributedCache, IChatDataverseRepository,
@@ -643,6 +643,21 @@ public static class AnalysisServicesModule
         services.AddScoped<AnalysisResultPersistence>();
         services.AddScoped<IAnalysisOrchestrationService, AnalysisOrchestrationService>();
         services.AddScoped<IAppOnlyAnalysisService, AppOnlyAnalysisService>();
+
+        // spaarkeai-compose-r2 (UAT #7b): OBO-capable document-profile facade. ComposeService
+        // (CRUD) injects ONLY this PublicContracts facade (ADR-013). The impl invokes the
+        // "Document Profiler" Action (ACT-011) directly on the ADR-043 completion-engine spine —
+        // IActionResolver (document-profile Binding) → IDocumentTextSource (OBO download) →
+        // IActionRunner (ActionRunner) → DocumentProfileOutputMapper → UpdateDocumentFieldsAsync —
+        // NOT the retired playbook/node engine. Registered here inside the compound AI gate
+        // alongside AddLinearConsumers, so its (optional) AI execution seams resolve to real impls;
+        // the seams are nullable ctor params (ADR-032 optional-via-null-tolerance) so a compound-OFF
+        // host resolves ComposeService's optional IDocumentProfileAi to null and skips profiling
+        // cleanly. Scoped: runs in the OBO request scope. CANONICAL facade (not a stand-in) —
+        // resolved 2026-07-15 (#615 / PE-D4); redesign-r2 adopts this as-is if it resumes. See ADR
+        // Tensions in projects/spaarkeai-compose-r2/design.md.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IDocumentProfileAi,
+                           Sprk.Bff.Api.Services.Ai.PublicContracts.DocumentProfileAi>();
 
         // DailyBriefingNarrator — the platform's first `coded` composite workflow
         // (FR-P3-04, ai-architecture-redesign-r1 task 043; ICodedWorkflow retrofit in

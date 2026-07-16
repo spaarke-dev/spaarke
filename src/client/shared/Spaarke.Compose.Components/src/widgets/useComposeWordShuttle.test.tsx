@@ -87,6 +87,33 @@ describe('anchoredAnnotationsToDocxAnnotations (gap 3.1 mapping)', () => {
     ]);
     expect(result).toHaveLength(0);
   });
+
+  it('DEF-13: maps an AI edit-REASON comment annotation to a native w:comment push entry anchored to the change', () => {
+    // The reason ComposeWorkspace registers on a redline (registerAiEditReasonComment): a Compose
+    // AnchoredAnnotation of type 'comment', source 'ai', body = the model rationale, anchored to the
+    // edit's target_text. It must map to a Comment DocxAnnotationInput so DocxAnnotationWriter emits a
+    // real w:comment on Push/Save.
+    const result = anchoredAnnotationsToDocxAnnotations([
+      {
+        id: 'ai-edit-reason:binding-1@t1',
+        type: 'comment',
+        anchor: { textPattern: 'the prior clause', paragraphHint: -1, spanId: 'binding-1@t1' },
+        body: 'clearer indemnity language',
+        author: 'Spaarke Assistant',
+        timestamp: '2026-07-12T00:00:00.000Z',
+        source: 'ai',
+        provenance: { bindingId: 'binding-1', ledgerRef: 'binding-1@t1' },
+      },
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      kind: DocxTrackChangeKind.Comment,
+      commentText: 'clearer indemnity language',
+      targetText: 'the prior clause',
+      author: 'Spaarke Assistant',
+    });
+  });
 });
 
 describe('anchoredAnnotationsToPriorAnchors (gap 3.5 mapping)', () => {

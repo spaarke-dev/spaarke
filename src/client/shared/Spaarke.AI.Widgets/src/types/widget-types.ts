@@ -36,6 +36,19 @@ export interface WorkspaceWidgetProps<T = unknown> {
   error?: string;
   /** Optional class name for root element overrides (mergeClasses compatible). */
   className?: string;
+  /**
+   * Optional id of the workspace TAB this widget instance is mounted in. Supplied by the host tab
+   * manager for keep-alive mounts (e.g. Compose) so a widget that keeps multiple mounted instances
+   * can tab-scope side effects to its own tab. Ignored by most widgets.
+   */
+  tabId?: string;
+  /**
+   * Whether this widget's tab is the ACTIVE (visible) tab. Defaults to `true` when omitted (the
+   * only mounted instance). Used by keep-alive widgets (e.g. Compose) that stay mounted-hidden
+   * while inactive so they can suppress "I am the active surface" side effects. Ignored by most
+   * widgets.
+   */
+  isActiveTab?: boolean;
 }
 
 /**

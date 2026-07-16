@@ -28,7 +28,16 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, MessageBar, MessageBarBody, MessageBarTitle } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
+  MessageBarActions,
+  Button,
+} from '@fluentui/react-components';
+import { Dismiss16Regular } from '@fluentui/react-icons';
 
 import type { ComposeCheckoutLockedByInfo, ComposeCheckoutStatus } from './ComposeWorkspace.types';
 import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts';
@@ -40,7 +49,16 @@ export interface ComposeBannerStackProps {
   checkoutFailureMessage: string | null;
   importWarnings: Array<{ type: string; message: string }>;
   pendingAssistantInsert: ComposeAssistantToWorkspaceFlow | null;
+  /**
+   * UAT #7 (compose-r2): a monotonically-incrementing token bumped by the parent on every
+   * successful Save. A CHANGE in value (not its magnitude) surfaces a transient "Saved ✓"
+   * MessageBar that auto-dismisses after {@link SAVE_SUCCESS_VISIBLE_MS}. 0 = no save yet.
+   */
+  saveSuccessToken?: number;
 }
+
+/** How long the transient "Saved ✓" confirmation stays up before auto-dismissing. */
+const SAVE_SUCCESS_VISIBLE_MS = 4000;
 
 const useStyles = makeStyles({
   bannerStack: {
@@ -62,12 +80,42 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     checkoutFailureMessage,
     importWarnings,
     pendingAssistantInsert,
+    saveSuccessToken = 0,
   } = props;
 
+  // DEF-15 (UAT-R3): the "Document opened with N simplification(s)" warning is
+  // informational and permanent-until-dismissed. Per-mount dismissal is enough
+  // (owner: "it need not persist across mounts") — a plain local flag. It resets
+  // whenever a NEW set of import warnings arrives (a fresh document load hands a
+  // new `importWarnings` array reference) so a later, genuinely-different import
+  // is not silently swallowed by a stale dismissal.
+  const [importWarningsDismissed, setImportWarningsDismissed] = React.useState(false);
+  React.useEffect(() => {
+    setImportWarningsDismissed(false);
+  }, [importWarnings]);
+
+  const showImportWarnings = importWarnings.length > 0 && !importWarningsDismissed;
+
+  // UAT #7: a successful Save previously showed no confirmation — the button flipped from
+  // "Saving" back to idle silently. Surface a transient success MessageBar whenever the parent
+  // bumps `saveSuccessToken`, auto-dismissing after SAVE_SUCCESS_VISIBLE_MS. Keyed on the token
+  // value (not a boolean) so a second identical Save re-triggers the banner. An in-flight save
+  // error (a fresh `errorMessage`) suppresses the stale success row.
+  const [showSaveSuccess, setShowSaveSuccess] = React.useState(false);
+  React.useEffect(() => {
+    if (saveSuccessToken <= 0) return;
+    setShowSaveSuccess(true);
+    const timer = setTimeout(() => setShowSaveSuccess(false), SAVE_SUCCESS_VISIBLE_MS);
+    return () => clearTimeout(timer);
+  }, [saveSuccessToken]);
+
+  const showSaveSuccessBanner = showSaveSuccess && !errorMessage;
+
   const showStack =
-    importWarnings.length > 0 ||
+    showImportWarnings ||
     !!errorMessage ||
     !!pendingAssistantInsert ||
+    showSaveSuccessBanner ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -76,6 +124,26 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
 
   return (
     <div className={styles.bannerStack}>
+      {showSaveSuccessBanner ? (
+        <MessageBar intent="success" data-testid="compose-workspace-save-success-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Saved to matter files</MessageBarTitle>
+            Your document was saved and is available in the matter&apos;s files.
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-save-success-dismiss"
+                onClick={() => setShowSaveSuccess(false)}
+              />
+            }
+          />
+        </MessageBar>
+      ) : null}
+
       {errorMessage ? (
         <MessageBar intent="error" data-testid="compose-workspace-error-banner" aria-live="polite">
           <MessageBarBody>
@@ -115,12 +183,25 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
         </MessageBar>
       ) : null}
 
-      {importWarnings.length > 0 ? (
+      {showImportWarnings ? (
         <MessageBar intent="warning" data-testid="compose-workspace-import-warning-banner" aria-live="polite">
           <MessageBarBody>
             <MessageBarTitle>Document opened with {importWarnings.length} simplification(s)</MessageBarTitle>
             Some advanced features may not be preserved on save.
           </MessageBarBody>
+          {/* DEF-15: Fluent v9's MessageBar dismiss affordance — the trailing
+              container action. Clears the banner for this mount only. */}
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-import-warning-dismiss"
+                onClick={() => setImportWarningsDismissed(true)}
+              />
+            }
+          />
         </MessageBar>
       ) : null}
 

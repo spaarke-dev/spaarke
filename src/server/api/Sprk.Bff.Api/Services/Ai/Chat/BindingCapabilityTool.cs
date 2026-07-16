@@ -164,11 +164,42 @@ public sealed class BindingCapabilityTool : AIFunction
         }
     }
 
+    /// <summary>
+    /// spaarkeai-compose-r2 — Model Y redirect target: the whole-document revise capability that
+    /// edits a document already open in Compose. When invoked from the TEXT/agent path its
+    /// full-document payload cannot render as an inline redline (that materialization is wired only
+    /// to the client Click-path apply-leg), so it would be narrated as a rewrite in chat (the #2
+    /// defect). Owner decision: editing lives in the EDITOR (highlight-to-edit) — the agent redirects.
+    /// Aliases the canonical <see cref="ConsumerTypes.ComposeReviseDocument"/> to avoid drift.
+    /// </summary>
+    internal const string ComposeReviseDocumentConsumerType = ConsumerTypes.ComposeReviseDocument;
+
     /// <inheritdoc />
     protected override async ValueTask<object?> InvokeCoreAsync(
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
+        // ── Model Y (spaarkeai-compose-r2 #2 defect) compose-edit redirect ──────────────────────
+        // Deterministic backstop to the SprkChatAgentFactory.ComposeEditRedirectDirective prompt
+        // rule: if the model INVOKES compose-revise-document (whole-document revise of the open
+        // document) from the agent turn anyway, do NOT dispatch — that path can't render an inline
+        // redline, so its rewritten text would be narrated in chat. Return an honest redirect to the
+        // editor's highlight-to-edit options instead. Scoped to compose-revise-document ONLY, so the
+        // DEF-08 compose-draft-document (drafts a NEW reviewable document) and the DEF-09
+        // compose-draft-alternative (a single-selection edit, workspace surface) — the desired flows —
+        // are untouched. The client Click-path named-intent revise (SessionDispatchOrchestrator via
+        // dispatchConsumer) never reaches THIS tool, so that round-5 flow is unaffected.
+        if (string.Equals(_binding.ConsumerType, ComposeReviseDocumentConsumerType, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation(
+                "[agent-turn.capability] compose-revise-document redirected to editor (Model Y) — binding={BindingId} session={SessionId}",
+                _binding.BindingId, _sessionId);
+            return "To edit the document open in Compose, ask the user to highlight the text they want " +
+                   "to change in the Compose editor and choose an editing option (for example, Draft " +
+                   "alternative or Improve clarity). Do NOT rewrite the document in chat.";
+        }
+        // ── End Model Y redirect ────────────────────────────────────────────────────────────────
+
         // Fresh scope per invocation: the orchestrator + its dependencies are Scoped,
         // and the agent-creation scope is long gone by the time the LLM calls tools.
         await using var scope = _rootServices.CreateAsyncScope();
@@ -201,7 +232,39 @@ public sealed class BindingCapabilityTool : AIFunction
                 arguments.ToDictionary(a => a.Key, a => a.Value));
         }
 
-        var request = new SessionDispatchRequest(_tenantId, _sessionId, _binding.BindingId, args);
+        // ── DEF-11 (spaarkeai-compose-r2) document-session routing ──────────────────────────────
+        // A `compose`-disposition capability invoked from the TEXT/agent path still runs inside the
+        // CHAT session's tool-call loop, but its ledger output must land where the Compose editor
+        // reads pending redlines/comments from — the DOCUMENT session (DEF-09 precedent: "a Compose
+        // edit belongs to the document session", two sessions deliberately kept separate, never
+        // unified). ChatSession.ActiveDocument.DocumentSessionId (task 113 bridge, DEF-11 additive
+        // field) is the pointer the compose-direct/upload registration writes; when it is present we
+        // dispatch into THAT session instead of the chat session. Fail-soft by construction: any
+        // missing service, missing session, or missing/blank pointer leaves dispatchSessionId at its
+        // _sessionId default — the pre-DEF-11 chat-session behavior — so a non-Compose binding (the
+        // overwhelming majority of capability tools) or a session with no registered document is
+        // completely unaffected.
+        var dispatchSessionId = _sessionId;
+        if (_binding.Disposition == BindingDisposition.Compose)
+        {
+            var sessionManager = scope.ServiceProvider.GetService<ChatSessionManager>();
+            if (sessionManager is not null)
+            {
+                var currentSession = await ResolveCurrentSessionAsync(sessionManager, cancellationToken).ConfigureAwait(false);
+                var documentSessionId = currentSession?.ActiveDocument?.DocumentSessionId;
+                if (!string.IsNullOrWhiteSpace(documentSessionId))
+                {
+                    dispatchSessionId = documentSessionId!;
+                    _logger.LogInformation(
+                        "[agent-turn.capability] compose-disposition dispatch routed to document session — " +
+                        "binding={BindingId} chatSession={ChatSessionId} documentSession={DocumentSessionId}",
+                        _binding.BindingId, _sessionId, dispatchSessionId);
+                }
+            }
+        }
+        // ── End DEF-11 routing ───────────────────────────────────────────────────────────────────
+
+        var request = new SessionDispatchRequest(_tenantId, dispatchSessionId, _binding.BindingId, args);
 
         try
         {
@@ -369,6 +432,48 @@ public sealed class BindingCapabilityTool : AIFunction
             suspended.GateId, _binding.BindingId, missing.Count, _binding.CaptureMode, _sessionId);
 
         return ElicitationTurnRouter.BuildClarifyInstruction(_binding.ConsumerType, Name, missing);
+    }
+
+    /// <summary>
+    /// DEF-11: resolves the CURRENT chat session for its <see cref="ChatSession.ActiveDocument"/>
+    /// pointer, probing <see cref="_sessionId"/>'s "N"/"D" GUID-string forms the same way
+    /// <c>ComposeEndpoints.ResolveSessionAsync</c> does — a client may have registered the active
+    /// document under a different GUID spelling than the one this tool call carries. Returns null
+    /// (fail-soft) rather than throwing when no candidate resolves.
+    /// </summary>
+    private async Task<ChatSession?> ResolveCurrentSessionAsync(
+        ChatSessionManager sessionManager, CancellationToken cancellationToken)
+    {
+        foreach (var candidate in EnumerateSessionIdForms(_sessionId))
+        {
+            var session = await sessionManager.GetSessionAsync(_tenantId, candidate, cancellationToken).ConfigureAwait(false);
+            if (session is not null)
+            {
+                return session;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Yields <paramref name="sessionId"/> then its GUID "N"/"D" normalizations (when parseable).</summary>
+    private static IEnumerable<string> EnumerateSessionIdForms(string sessionId)
+    {
+        yield return sessionId;
+        if (Guid.TryParse(sessionId, out var g))
+        {
+            var n = g.ToString("N");
+            var d = g.ToString("D");
+            if (!string.Equals(n, sessionId, StringComparison.Ordinal))
+            {
+                yield return n;
+            }
+
+            if (!string.Equals(d, sessionId, StringComparison.Ordinal))
+            {
+                yield return d;
+            }
+        }
     }
 
     /// <summary>Ledger/audit vocabulary for the Binding risk posture (mirrors sprk_risk labels).</summary>

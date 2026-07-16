@@ -4,9 +4,9 @@
  * Defect (DEF-08 side effect): every chat "open as a document" / "Open in Compose" widget_load
  * minted a NEW workspace tab, so repeated opens accumulated duplicate (often blank) Compose tabs.
  *
- * Fix under test: the `workspace.widget_load` handler REUSES the single existing Compose layout
- * tab (matched by widgetData.layoutId) for a compose-seeded open — it updates the seed + activates
- * the tab instead of adding a duplicate.
+ * Fix under test: the `workspace.widget_load` handler REUSES the single existing Compose DIRECT
+ * tab (matched by widgetType === 'compose' — spaarkeai-compose-r2) for a compose open — it updates
+ * the seed + activates the tab instead of adding a duplicate.
  *
  * Harness derived from WorkspacePane.compose-relaunch.test.tsx. Auto-install is disabled by
  * returning a null activeLayout (layoutForAutoInstall stays null → the auto-install effect
@@ -133,10 +133,8 @@ function renderPane(): { bus: PaneEventBus } {
 function composeDraftOpen(ledgerRef: string) {
   return {
     type: 'widget_load' as const,
-    widgetType: 'workspace',
+    widgetType: 'compose',
     widgetData: {
-      layoutId: 'layout-compose',
-      layoutName: 'Compose',
       compose: { draft: { ledgerRef, sessionId: 'session-reuse' } },
     },
     displayName: 'Compose',
@@ -162,7 +160,7 @@ describe('WorkspacePane — DEF-08 compose-draft single-tab reuse', () => {
     });
     await waitFor(() => {
       const composeTabPatches = recordedPatches.filter((p) =>
-        p.tabs.some((t) => t.widgetType === 'workspace'),
+        p.tabs.some((t) => t.widgetType === 'compose'),
       );
       expect(composeTabPatches.length).toBeGreaterThan(0);
     });
@@ -172,18 +170,18 @@ describe('WorkspacePane — DEF-08 compose-draft single-tab reuse', () => {
       bus.dispatch('workspace', composeDraftOpen('binding-1@t2'));
     });
 
-    // Every PATCH that carries a workspace tab carries EXACTLY ONE (no accumulated duplicates).
+    // Every PATCH that carries a compose tab carries EXACTLY ONE (no accumulated duplicates).
     await waitFor(() => {
       const lastPatch = recordedPatches[recordedPatches.length - 1];
       expect(lastPatch).toBeDefined();
     });
     for (const patch of recordedPatches) {
-      const workspaceTabs = patch.tabs.filter((t) => t.widgetType === 'workspace');
-      expect(workspaceTabs.length).toBeLessThanOrEqual(1);
+      const composeTabs = patch.tabs.filter((t) => t.widgetType === 'compose');
+      expect(composeTabs.length).toBeLessThanOrEqual(1);
     }
-    const finalWorkspaceTabs = recordedPatches[recordedPatches.length - 1].tabs.filter(
-      (t) => t.widgetType === 'workspace',
+    const finalComposeTabs = recordedPatches[recordedPatches.length - 1].tabs.filter(
+      (t) => t.widgetType === 'compose',
     );
-    expect(finalWorkspaceTabs).toHaveLength(1);
+    expect(finalComposeTabs).toHaveLength(1);
   });
 });

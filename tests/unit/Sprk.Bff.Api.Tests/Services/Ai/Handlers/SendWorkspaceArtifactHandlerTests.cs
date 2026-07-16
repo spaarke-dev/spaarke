@@ -150,14 +150,40 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
         emitted[0].Type.Should().Be("context_event");
         var dto = emitted[0].Data.Should().BeOfType<Sprk.Bff.Api.Services.Ai.Telemetry.ContextSseEventDto>().Subject;
         dto.ContextEventType.Should().Be(SendWorkspaceArtifactHandler.WorkspaceOpenTabEventType);
-        dto.ContextWidgetType.Should().Be(SendWorkspaceArtifactHandler.ClientWorkspaceWidgetKey,
-            because: "the client registry key for a layout tab is the plain 'workspace' widget");
+        dto.ContextWidgetType.Should().Be(SendWorkspaceArtifactHandler.ClientComposeWidgetKey,
+            because: "spaarkeai-compose-r2: a Compose mount dispatches the first-class DIRECT 'compose' widget so ComposeWorkspace mounts unconditionally (never LegalWorkspaceApp/dashboard)");
         dto.ContextDisplayName.Should().Be("Compose");
         dto.ContextTabId.Should().Be(DeterministicTabGuid.ToString("N"));
 
         using var widgetData = JsonDocument.Parse(dto.ContextWidgetDataJson!);
         widgetData.RootElement.GetProperty("layoutId").GetString().Should().Be(ComposeLayoutId.ToString("D"));
         widgetData.RootElement.GetProperty("layoutName").GetString().Should().Be("Compose");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_NonComposeLayout_KeepsWorkspaceLayoutDoor()
+    {
+        // Guardrail (spaarkeai-compose-r2): ONLY the Compose layout flips to the DIRECT
+        // 'compose' widget. A non-Compose layout (the hard-coded "Corporate Workspace"
+        // system row) MUST keep the LAYOUT door ('workspace') so it still mounts via
+        // LegalWorkspaceApp — the flip must not regress Daily Briefing / other layouts.
+        var emitted = new List<Sprk.Bff.Api.Api.Ai.ChatSseEvent>();
+
+        var handler = CreateHandler();
+        var ctx = BuildChatInvocationContext(
+            toolArgumentsJson: BuildWorkspaceArgsJson(layoutName: "Corporate Workspace", title: "Corporate Workspace")) with
+        {
+            SseWriter = (evt, _) => { emitted.Add(evt); return Task.CompletedTask; }
+        };
+        var tool = BuildArtifactTool();
+
+        var result = await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        var dto = emitted.Should().ContainSingle().Subject.Data
+            .Should().BeOfType<Sprk.Bff.Api.Services.Ai.Telemetry.ContextSseEventDto>().Subject;
+        dto.ContextWidgetType.Should().Be(SendWorkspaceArtifactHandler.ClientWorkspaceWidgetKey,
+            because: "a non-Compose layout keeps the LAYOUT door — only Compose flips to the DIRECT 'compose' widget");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

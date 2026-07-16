@@ -1,28 +1,39 @@
 /**
- * ComposeFormatToolbar.tsx — block-level formatting toolbar for ComposeEditor.
+ * ComposeFormatToolbar.tsx — single-row document command toolbar for ComposeEditor.
  *
- * Renders a persistent Fluent v9 Toolbar above the TipTap editor with the
- * block-level controls users cannot access via selection-only UI (headings,
- * lists, blockquote, alignment, undo/redo) PLUS the inline character-format
- * controls (bold / italic / underline / strikethrough / link).
+ * FIX #5 (spaarkeai-compose-r2 UAT): the toolbar was consolidated from TWO wrapping
+ * rows of individual icon buttons into ONE row grouped behind labelled Fluent v9
+ * `Menu` dropdowns. The dropdown TRIGGER buttons carry WORD labels (Body / Paragraph
+ * / Font / Word); the tools INSIDE each dropdown are ICON-only buttons with a hover
+ * Tooltip naming each command. `Save` + `Undo`/`Redo` are icon-only buttons pushed
+ * to the RIGHT edge (a `flex:1` spacer). This is a REORGANIZATION only — every
+ * command previously reachable stays wired with its disabled/active state intact.
  *
- * TASK 111 (UAT-R2, 2026-07-10): the inline character-format controls
- * (Bold / Italic / Underline / Strikethrough / Link) were RELOCATED here from
- * the TipTap selection BubbleMenu (owner decision — the BubbleMenu is now
- * AI-actions ONLY; see ComposeEditor.tsx). They are always-visible top-toolbar
- * controls now, grouped after the align controls behind a `ToolbarDivider`.
- * The active-state highlighting (`isActive('bold')` etc.) and the Link
- * add/edit `window.prompt` flow are preserved byte-for-byte from the former
- * BubbleMenu implementation — no formatting capability was lost, only relocated.
+ * Dropdown map:
+ *   - Body      — block/heading style (unchanged from task 111).
+ *   - Paragraph — bullet list, numbered list, blockquote, align left/center/right.
+ *   - Font      — bold, italic, underline, strikethrough, link.
+ *   - Word      — Open in Word Web, Open in Word Desktop, Push to Word. These were
+ *                 previously top-level actions on the separate `ComposeToolbar`
+ *                 command bar (rendered by ComposeWorkspace). The host now binds the
+ *                 handlers (`onOpenInWord` / `onOpenInWordDesktop` / `onPushToWord`)
+ *                 and threads them here via ComposeEditor. The dropdown is omitted
+ *                 when the host wires no Word handlers.
+ *   - Save      — icon button (right-aligned); rendered only when `onSave` is wired.
+ *   - Undo/Redo — icon buttons (right-aligned).
+ *
+ * The inline character-format controls (Bold / Italic / Underline / Strikethrough /
+ * Link) were RELOCATED here from the TipTap selection BubbleMenu at task 111 (the
+ * BubbleMenu is AI-actions ONLY now). The active-state highlighting
+ * (`isActive('bold')` etc.) and the Link add/edit `window.prompt` flow are preserved
+ * byte-for-byte from that relocation — no formatting capability was lost.
  *
  * Extensions consumed here MUST match the LOCKED_EXTENSIONS list in
- * ComposeEditor.tsx (StarterKit headings 1–3 subset + Bold/Italic/Strike,
- * BulletList, OrderedList, Blockquote, TextAlign, History; Underline + Link
- * are the additive `@tiptap/extension-underline` / `@tiptap/extension-link`).
- * Adding a button here without loading the corresponding extension will make
- * TipTap silently ignore the command.
+ * ComposeEditor.tsx. Adding a button here without loading the corresponding
+ * extension will make TipTap silently ignore the command.
  *
- * @see ComposeEditor.tsx (host + AI-only BubbleMenu wiring)
+ * @see ComposeEditor.tsx (host + AI-only BubbleMenu wiring + Word/Save prop source)
+ * @see ADR-021 — Fluent v9 semantic tokens, dark-mode-correct
  */
 
 import * as React from 'react';
@@ -30,7 +41,8 @@ import { type Editor } from '@tiptap/react';
 import {
   Toolbar,
   ToolbarButton,
-  ToolbarDivider,
+  Button,
+  Tooltip,
   makeStyles,
   tokens,
   Menu,
@@ -38,7 +50,6 @@ import {
   MenuPopover,
   MenuList,
   MenuItem,
-  Button,
 } from '@fluentui/react-components';
 import {
   TextBold24Regular,
@@ -56,6 +67,10 @@ import {
   ArrowUndo24Regular,
   ArrowRedo24Regular,
   ChevronDown16Regular,
+  OpenRegular,
+  DesktopRegular,
+  ArrowUploadRegular,
+  SaveRegular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -71,10 +86,35 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalXXS,
-    flexWrap: 'wrap',
+    // FIX #5: a SINGLE row now — the dropdowns keep the control count low enough
+    // that the bar never needs to wrap (was `flexWrap: 'wrap'`, the source of the
+    // "two rows" UAT finding).
+    flexWrap: 'nowrap',
+    // DEF-16 (UAT-R3): pin the formatting toolbar to the top of the editor scroll
+    // region so it stays reachable while a long document body scrolls beneath it.
+    // The opaque background + z-index prevent scrolled content bleeding through the
+    // pinned bar. Semantic tokens only (ADR-021 dark-mode-correct).
+    position: 'sticky',
+    top: 0,
+    zIndex: 1,
+    backgroundColor: tokens.colorNeutralBackground1,
   },
-  headingMenuButton: {
+  menuButton: {
     minWidth: '96px',
+  },
+  // FIX #5: the icon-only tool palette rendered INSIDE a Paragraph/Font/Word
+  // dropdown popover — a comfortable, even horizontal gap (not cramped, not
+  // spread). Semantic tokens only.
+  dropdownPalette: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalXS,
+    paddingInline: tokens.spacingHorizontalXS,
+    paddingBlock: tokens.spacingVerticalXS,
+  },
+  // Pushes Save + Undo/Redo to the right edge of the single row.
+  spacer: {
+    flexGrow: 1,
   },
 });
 
@@ -82,11 +122,33 @@ export interface ComposeFormatToolbarProps {
   editor: Editor | null;
   /** Applies a disabled visual + non-interactive state to every control. */
   disabled?: boolean;
+
+  // ---- Word group (FIX #5) — host-bound handlers; dropdown hidden if all absent ----
+  /** Open the current document in Word for the Web. */
+  onOpenInWord?: () => void;
+  /** Open the current document in the Word desktop app. */
+  onOpenInWordDesktop?: () => void;
+  /** Render accepted annotations into the .docx as native Word track-changes + comments. */
+  onPushToWord?: () => void;
+  /** Disables the two Open-in-Word items (no persisted document, or an action is in flight). */
+  wordActionsDisabled?: boolean;
+  /** True when there is something to push (persisted doc + ≥1 accepted annotation). */
+  canPushToWord?: boolean;
+  /** True while a push-to-Word is in flight. */
+  isPushingToWord?: boolean;
+
+  // ---- Save (FIX #5) — icon button, right-aligned; rendered only when `onSave` set ----
+  /** Save handler (create-on-save first Save, or update). */
+  onSave?: () => void;
+  /** True when Save should be enabled (unsaved edit OR unpersisted transient draft). */
+  canSave?: boolean;
+  /** True while a save is in flight. */
+  isSaving?: boolean;
 }
 
 /**
- * Currently-selected block level, derived from the editor. Drives the label
- * on the heading menu button so operators see what block their cursor is in.
+ * Currently-selected block level, derived from the editor. Drives the label on the
+ * Body menu button so operators see what block their cursor is in.
  */
 function currentBlockLabel(editor: Editor | null): string {
   if (!editor) return 'Body';
@@ -96,13 +158,79 @@ function currentBlockLabel(editor: Editor | null): string {
   return 'Body';
 }
 
+/**
+ * Labelled dropdown trigger button (Paragraph / Font / Word). Uses `forwardRef`
+ * and spreads `...rest` so the props Fluent `MenuTrigger` injects on its child
+ * (onClick, ref, aria-expanded/haspopup, id) reach the underlying `Button` — a
+ * plain function-component child would swallow them and the menu would never open.
+ */
+const DropdownButton = React.forwardRef<
+  HTMLButtonElement,
+  { label: string; disabled?: boolean; testId: string } & React.ComponentProps<typeof Button>
+>(function DropdownButton({ label, disabled, testId, ...rest }, ref) {
+  return (
+    <Button
+      {...rest}
+      ref={ref}
+      appearance="subtle"
+      size="small"
+      disabled={disabled}
+      icon={<ChevronDown16Regular />}
+      iconPosition="after"
+      data-testid={testId}
+    >
+      {label}
+    </Button>
+  );
+});
+
+/**
+ * Icon-only tool inside a dropdown palette. Hover Tooltip names the command; the
+ * `active` flag drives the Fluent primary/subtle highlight + `aria-pressed`.
+ */
+function PaletteIconButton(props: {
+  icon: React.JSX.Element;
+  label: string;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  testId: string;
+}): React.JSX.Element {
+  return (
+    // The Button carries the accessible NAME via `aria-label`; the Tooltip is therefore a
+    // `description` (not a second `label`) so the two do not both claim the accessible name.
+    <Tooltip content={props.label} relationship="description" withArrow>
+      <Button
+        appearance={props.active ? 'primary' : 'subtle'}
+        size="small"
+        icon={props.icon}
+        aria-label={props.label}
+        aria-pressed={props.active}
+        disabled={props.disabled}
+        onClick={props.onClick}
+        data-testid={props.testId}
+      />
+    </Tooltip>
+  );
+}
+
 export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JSX.Element | null {
   const styles = useStyles();
-  const { editor, disabled } = props;
+  const {
+    editor,
+    disabled,
+    onOpenInWord,
+    onOpenInWordDesktop,
+    onPushToWord,
+    wordActionsDisabled,
+    canPushToWord,
+    isPushingToWord,
+    onSave,
+    canSave,
+    isSaving,
+  } = props;
 
   // Re-render on selection/transaction to keep the "active" highlight in sync.
-  // TipTap doesn't force a parent re-render on selection change, so subscribe
-  // to the editor's transaction event and bump a local counter.
   const [, forceUpdate] = React.useReducer((x: number) => x + 1, 0);
   React.useEffect(() => {
     if (!editor) return;
@@ -129,10 +257,9 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     }
   };
 
-  // Task 111 — Link add/edit handler, relocated verbatim from the former
-  // BubbleMenu implementation (ComposeEditor.tsx `toggleLink`): prompts for a
-  // URL and applies it as a link mark to the current selection; removing an
-  // existing link uses the same button when a link is already active.
+  // Link add/edit handler, relocated verbatim from the former BubbleMenu impl:
+  // prompts for a URL and applies it as a link mark; removing an existing link
+  // uses the same button when a link is already active.
   const toggleLink = (): void => {
     if (controlDisabled) return;
     if (editor.isActive('link')) {
@@ -150,6 +277,11 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     editor.chain().focus().extendMarkRange('link').setLink({ href: url.trim() }).run();
   };
 
+  const showWordMenu = Boolean(onOpenInWord || onOpenInWordDesktop || onPushToWord);
+  const openInWordDisabled = controlDisabled || wordActionsDisabled === true;
+  const pushDisabled = controlDisabled || canPushToWord !== true || isPushingToWord === true;
+  const saveDisabled = controlDisabled || canSave !== true || isSaving === true;
+
   return (
     <Toolbar
       className={styles.toolbar}
@@ -157,13 +289,14 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
       aria-label="Document formatting"
       data-testid="compose-format-toolbar"
     >
+      {/* ---- Body (block/heading style) ---- */}
       <Menu positioning="below-start">
         <MenuTrigger disableButtonEnhancement>
           <Button
             appearance="subtle"
             size="small"
             disabled={controlDisabled}
-            className={styles.headingMenuButton}
+            className={styles.menuButton}
             icon={<ChevronDown16Regular />}
             iconPosition="after"
             data-testid="compose-format-heading-menu"
@@ -181,130 +314,174 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </MenuPopover>
       </Menu>
 
-      <ToolbarDivider />
+      {/* ---- Paragraph (lists / blockquote / alignment) ---- */}
+      <Menu positioning="below-start">
+        <MenuTrigger disableButtonEnhancement>
+          <DropdownButton label="Paragraph" disabled={controlDisabled} testId="compose-format-paragraph-menu" />
+        </MenuTrigger>
+        <MenuPopover>
+          <div className={styles.dropdownPalette} role="group" aria-label="Paragraph formatting">
+            <PaletteIconButton
+              icon={<TextBulletListLtr24Regular />}
+              label="Bullet list"
+              active={editor.isActive('bulletList')}
+              disabled={controlDisabled}
+              onClick={() => editor.chain().focus().toggleBulletList().run()}
+              testId="compose-format-bullet-list"
+            />
+            <PaletteIconButton
+              icon={<TextNumberListLtr24Regular />}
+              label="Numbered list"
+              active={editor.isActive('orderedList')}
+              disabled={controlDisabled}
+              onClick={() => editor.chain().focus().toggleOrderedList().run()}
+              testId="compose-format-ordered-list"
+            />
+            <PaletteIconButton
+              icon={<TextQuote24Regular />}
+              label="Blockquote"
+              active={editor.isActive('blockquote')}
+              disabled={controlDisabled}
+              onClick={() => editor.chain().focus().toggleBlockquote().run()}
+              testId="compose-format-blockquote"
+            />
+            <PaletteIconButton
+              icon={<TextAlignLeft24Regular />}
+              label="Align left"
+              active={editor.isActive({ textAlign: 'left' })}
+              disabled={controlDisabled}
+              onClick={() => editor.chain().focus().setTextAlign('left').run()}
+              testId="compose-format-align-left"
+            />
+            <PaletteIconButton
+              icon={<TextAlignCenter24Regular />}
+              label="Align center"
+              active={editor.isActive({ textAlign: 'center' })}
+              disabled={controlDisabled}
+              onClick={() => editor.chain().focus().setTextAlign('center').run()}
+              testId="compose-format-align-center"
+            />
+            <PaletteIconButton
+              icon={<TextAlignRight24Regular />}
+              label="Align right"
+              active={editor.isActive({ textAlign: 'right' })}
+              disabled={controlDisabled}
+              onClick={() => editor.chain().focus().setTextAlign('right').run()}
+              testId="compose-format-align-right"
+            />
+          </div>
+        </MenuPopover>
+      </Menu>
 
-      <ToolbarButton
-        appearance={editor.isActive('bulletList') ? 'primary' : 'subtle'}
-        icon={<TextBulletListLtr24Regular />}
-        aria-label="Bullet list"
-        aria-pressed={editor.isActive('bulletList')}
-        disabled={controlDisabled}
-        onClick={() => editor.chain().focus().toggleBulletList().run()}
-        data-testid="compose-format-bullet-list"
-      />
+      {/* ---- Font (character formatting) ---- */}
+      <Menu positioning="below-start">
+        <MenuTrigger disableButtonEnhancement>
+          <DropdownButton label="Font" disabled={controlDisabled} testId="compose-format-font-menu" />
+        </MenuTrigger>
+        <MenuPopover>
+          <div className={styles.dropdownPalette} role="group" aria-label="Character formatting">
+            <PaletteIconButton
+              icon={<TextBold24Regular />}
+              label="Bold"
+              active={editor.isActive('bold')}
+              disabled={controlDisabled}
+              onClick={() => editor.chain().focus().toggleBold().run()}
+              testId="compose-format-bold"
+            />
+            <PaletteIconButton
+              icon={<TextItalic24Regular />}
+              label="Italic"
+              active={editor.isActive('italic')}
+              disabled={controlDisabled}
+              onClick={() => editor.chain().focus().toggleItalic().run()}
+              testId="compose-format-italic"
+            />
+            <PaletteIconButton
+              icon={<TextUnderline24Regular />}
+              label="Underline"
+              active={editor.isActive('underline')}
+              disabled={controlDisabled}
+              onClick={() => editor.chain().focus().toggleUnderline().run()}
+              testId="compose-format-underline"
+            />
+            <PaletteIconButton
+              icon={<TextStrikethrough24Regular />}
+              label="Strikethrough"
+              active={editor.isActive('strike')}
+              disabled={controlDisabled}
+              onClick={() => editor.chain().focus().toggleStrike().run()}
+              testId="compose-format-strike"
+            />
+            <PaletteIconButton
+              icon={editor.isActive('link') ? <LinkDismiss24Regular /> : <Link24Regular />}
+              label={editor.isActive('link') ? 'Remove link' : 'Add link'}
+              active={editor.isActive('link')}
+              disabled={controlDisabled}
+              onClick={toggleLink}
+              testId="compose-format-link"
+            />
+          </div>
+        </MenuPopover>
+      </Menu>
 
-      <ToolbarButton
-        appearance={editor.isActive('orderedList') ? 'primary' : 'subtle'}
-        icon={<TextNumberListLtr24Regular />}
-        aria-label="Numbered list"
-        aria-pressed={editor.isActive('orderedList')}
-        disabled={controlDisabled}
-        onClick={() => editor.chain().focus().toggleOrderedList().run()}
-        data-testid="compose-format-ordered-list"
-      />
+      {/* ---- Word (Open in Web / Desktop / Push to Word) ---- */}
+      {showWordMenu ? (
+        <Menu positioning="below-start">
+          <MenuTrigger disableButtonEnhancement>
+            <DropdownButton label="Word" disabled={controlDisabled} testId="compose-format-word-menu" />
+          </MenuTrigger>
+          <MenuPopover>
+            <div className={styles.dropdownPalette} role="group" aria-label="Word document actions">
+              {onOpenInWord ? (
+                <PaletteIconButton
+                  icon={<OpenRegular />}
+                  label="Open in Word for Web"
+                  disabled={openInWordDisabled}
+                  onClick={onOpenInWord}
+                  testId="compose-format-open-word-web"
+                />
+              ) : null}
+              {onOpenInWordDesktop ? (
+                <PaletteIconButton
+                  icon={<DesktopRegular />}
+                  label="Open in Word Desktop"
+                  disabled={openInWordDisabled}
+                  onClick={onOpenInWordDesktop}
+                  testId="compose-format-open-word-desktop"
+                />
+              ) : null}
+              {onPushToWord ? (
+                <PaletteIconButton
+                  icon={<ArrowUploadRegular />}
+                  label={isPushingToWord ? 'Pushing to Word…' : 'Push to Word'}
+                  disabled={pushDisabled}
+                  onClick={onPushToWord}
+                  testId="compose-format-push-to-word"
+                />
+              ) : null}
+            </div>
+          </MenuPopover>
+        </Menu>
+      ) : null}
 
-      <ToolbarButton
-        appearance={editor.isActive('blockquote') ? 'primary' : 'subtle'}
-        icon={<TextQuote24Regular />}
-        aria-label="Blockquote"
-        aria-pressed={editor.isActive('blockquote')}
-        disabled={controlDisabled}
-        onClick={() => editor.chain().focus().toggleBlockquote().run()}
-        data-testid="compose-format-blockquote"
-      />
+      {/* Spacer — pushes Save + Undo/Redo to the right edge. */}
+      <div className={styles.spacer} />
 
-      <ToolbarDivider />
+      {/* ---- Save (icon-only, right-aligned) ---- */}
+      {onSave ? (
+        <Tooltip content={isSaving ? 'Saving…' : 'Save changes'} relationship="label" withArrow>
+          <ToolbarButton
+            appearance="subtle"
+            icon={<SaveRegular />}
+            aria-label={isSaving ? 'Saving' : 'Save changes'}
+            disabled={saveDisabled}
+            onClick={onSave}
+            data-testid="compose-format-save"
+          />
+        </Tooltip>
+      ) : null}
 
-      <ToolbarButton
-        appearance={editor.isActive({ textAlign: 'left' }) ? 'primary' : 'subtle'}
-        icon={<TextAlignLeft24Regular />}
-        aria-label="Align left"
-        aria-pressed={editor.isActive({ textAlign: 'left' })}
-        disabled={controlDisabled}
-        onClick={() => editor.chain().focus().setTextAlign('left').run()}
-        data-testid="compose-format-align-left"
-      />
-
-      <ToolbarButton
-        appearance={editor.isActive({ textAlign: 'center' }) ? 'primary' : 'subtle'}
-        icon={<TextAlignCenter24Regular />}
-        aria-label="Align center"
-        aria-pressed={editor.isActive({ textAlign: 'center' })}
-        disabled={controlDisabled}
-        onClick={() => editor.chain().focus().setTextAlign('center').run()}
-        data-testid="compose-format-align-center"
-      />
-
-      <ToolbarButton
-        appearance={editor.isActive({ textAlign: 'right' }) ? 'primary' : 'subtle'}
-        icon={<TextAlignRight24Regular />}
-        aria-label="Align right"
-        aria-pressed={editor.isActive({ textAlign: 'right' })}
-        disabled={controlDisabled}
-        onClick={() => editor.chain().focus().setTextAlign('right').run()}
-        data-testid="compose-format-align-right"
-      />
-
-      <ToolbarDivider />
-
-      {/* ===================================================================
-          INLINE CHARACTER-FORMAT GROUP — task 111 (UAT-R2). Relocated from the
-          selection BubbleMenu (now AI-only). Active-state highlight + Link
-          add/edit `window.prompt` flow preserved verbatim from the former
-          BubbleMenu impl. See file header "TASK 111".
-          =================================================================== */}
-      <ToolbarButton
-        appearance={editor.isActive('bold') ? 'primary' : 'subtle'}
-        icon={<TextBold24Regular />}
-        aria-label="Bold"
-        aria-pressed={editor.isActive('bold')}
-        disabled={controlDisabled}
-        onClick={() => editor.chain().focus().toggleBold().run()}
-        data-testid="compose-format-bold"
-      />
-
-      <ToolbarButton
-        appearance={editor.isActive('italic') ? 'primary' : 'subtle'}
-        icon={<TextItalic24Regular />}
-        aria-label="Italic"
-        aria-pressed={editor.isActive('italic')}
-        disabled={controlDisabled}
-        onClick={() => editor.chain().focus().toggleItalic().run()}
-        data-testid="compose-format-italic"
-      />
-
-      <ToolbarButton
-        appearance={editor.isActive('underline') ? 'primary' : 'subtle'}
-        icon={<TextUnderline24Regular />}
-        aria-label="Underline"
-        aria-pressed={editor.isActive('underline')}
-        disabled={controlDisabled}
-        onClick={() => editor.chain().focus().toggleUnderline().run()}
-        data-testid="compose-format-underline"
-      />
-
-      <ToolbarButton
-        appearance={editor.isActive('strike') ? 'primary' : 'subtle'}
-        icon={<TextStrikethrough24Regular />}
-        aria-label="Strikethrough"
-        aria-pressed={editor.isActive('strike')}
-        disabled={controlDisabled}
-        onClick={() => editor.chain().focus().toggleStrike().run()}
-        data-testid="compose-format-strike"
-      />
-
-      <ToolbarButton
-        appearance={editor.isActive('link') ? 'primary' : 'subtle'}
-        icon={editor.isActive('link') ? <LinkDismiss24Regular /> : <Link24Regular />}
-        aria-label={editor.isActive('link') ? 'Remove link' : 'Add link'}
-        aria-pressed={editor.isActive('link')}
-        disabled={controlDisabled}
-        onClick={toggleLink}
-        data-testid="compose-format-link"
-      />
-
-      <ToolbarDivider />
-
+      {/* ---- Undo / Redo (icon-only, right-aligned) ---- */}
       <ToolbarButton
         appearance="subtle"
         icon={<ArrowUndo24Regular />}

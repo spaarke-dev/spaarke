@@ -38,6 +38,7 @@ public class ComposeR2OutputSchemaContractTests
         "compose-draft-alternative.schema.json",
         "compose-summarize-word-changes.schema.json",
         "compose-defined-terms.schema.json",
+        "compose-revise-document.schema.json",
     };
 
     [Theory]

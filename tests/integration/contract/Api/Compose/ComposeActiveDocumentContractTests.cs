@@ -24,6 +24,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -163,6 +164,264 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
 
         resolved.ExtractedText.Should().Contain(extractedText,
             because: "the registered Compose-direct upload is now a summarize-resolvable ChatSessionFile (defect 4)");
+    }
+
+    /// <summary>
+    /// Multi-Compose-tab (UAT 2026-07-14): switching tabs fires the newly-active tab's register
+    /// (visible:true) AND the hidden tab's WITHDRAW (visible:false). A withdraw MUST NOT re-pin the
+    /// withdrawing document as active — the server previously had no `visible` property (it was dropped
+    /// on deserialization), so a hidden tab's withdraw re-asserted itself as active, leaving the
+    /// Assistant stuck on the first document after every tab switch. A withdraw clears ActiveDocument
+    /// ONLY if it still points at THAT document; a stale withdraw of a non-active tab is a no-op.
+    /// </summary>
+    [Fact]
+    public async Task PostActiveDocument_WithdrawOfNonActiveDocument_DoesNotClobberActiveDocument()
+    {
+        // Arrange — a session with TWO compose-direct files (two open Compose tabs).
+        var sessionId = Guid.NewGuid().ToString("N");
+        const string fileA = "compose-file-a";
+        const string fileB = "compose-file-b";
+        const string docType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        var seeded = new ChatSession(
+            SessionId: sessionId,
+            TenantId: ComposeActiveDocumentFixture.TenantId,
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>(),
+            HostContext: null,
+            AdditionalDocumentIds: null,
+            UploadedFiles: new[]
+            {
+                new ChatSessionFile(fileA, "a.docx", docType, 256, $"{fileA}_s_0", DateTimeOffset.UtcNow),
+                new ChatSessionFile(fileB, "b.docx", docType, 256, $"{fileB}_s_0", DateTimeOffset.UtcNow),
+            });
+        await _fixture.Sessions.UpdateSessionCacheAsync(seeded);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        // Act — tab A active, then switch to tab B (B registers as active).
+        (await client.PostAsJsonAsync("/api/compose/active-document",
+            new { sessionId, sessionFileId = fileA, source = ActiveDocumentIdentity.SourceComposeDirect }))
+            .EnsureSuccessStatusCode();
+        (await client.PostAsJsonAsync("/api/compose/active-document",
+            new { sessionId, sessionFileId = fileB, source = ActiveDocumentIdentity.SourceComposeDirect }))
+            .EnsureSuccessStatusCode();
+
+        // The now-hidden tab A withdraws (visible:false) — the bug re-pinned A as active here.
+        var withdrawA = await client.PostAsJsonAsync("/api/compose/active-document",
+            new { sessionId, sessionFileId = fileA, source = ActiveDocumentIdentity.SourceComposeDirect, visible = false });
+        withdrawA.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Assert — the active document is STILL B (A's stale withdraw did not clobber it).
+        var afterWithdrawA = await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, sessionId);
+        afterWithdrawA!.ActiveDocument.Should().NotBeNull(
+            because: "a stale withdraw of the non-active tab must neither clear nor change the active document");
+        afterWithdrawA.ActiveDocument!.SessionFileId.Should().Be(fileB,
+            because: "tab B is the active tab; the hidden tab A's withdraw must NOT re-pin A as active (UAT stuck-on-first-doc)");
+
+        // Withdrawing the ACTIVE tab (B) clears the active document (nothing is active).
+        (await client.PostAsJsonAsync("/api/compose/active-document",
+            new { sessionId, sessionFileId = fileB, source = ActiveDocumentIdentity.SourceComposeDirect, visible = false }))
+            .EnsureSuccessStatusCode();
+        var afterWithdrawB = await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, sessionId);
+        afterWithdrawB!.ActiveDocument.Should().BeNull(
+            because: "withdrawing the currently-active document clears it — there is no active tab");
+    }
+
+    /// <summary>
+    /// Wave 3 (DEF-11 TEXT-path close): the client now threads the Compose tab's document session id
+    /// as <c>documentSessionId</c>. This drives the REAL route with it and asserts (1) the response
+    /// echoes it and (2) the persisted <see cref="ActiveDocumentIdentity.DocumentSessionId"/> is set —
+    /// which is precisely the field <c>BindingCapabilityTool</c> reads to route a TEXT/typed
+    /// revise-or-draft into the document session (proven end-to-end by
+    /// <c>ComposeDocumentSessionRoutingTests</c>). Without this persistence the TEXT path fail-softs to
+    /// the chat session and no redline appears in the open document.
+    /// </summary>
+    [Fact]
+    public async Task PostActiveDocument_WithDocumentSessionId_PersistsItOnActiveDocument()
+    {
+        var sessionId = Guid.NewGuid().ToString("N");
+        var documentSessionId = Guid.NewGuid().ToString("N");
+        const string fileId = "browse-mounted-file-def11";
+
+        var seeded = new ChatSession(
+            SessionId: sessionId,
+            TenantId: ComposeActiveDocumentFixture.TenantId,
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>(),
+            HostContext: null,
+            AdditionalDocumentIds: null,
+            UploadedFiles: new[]
+            {
+                new ChatSessionFile(
+                    FileId: fileId,
+                    FileName: "browse.docx",
+                    ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    SizeBytes: 64,
+                    SearchDocumentIdsCsv: $"{fileId}_s_0",
+                    UploadedAt: DateTimeOffset.UtcNow),
+            });
+        await _fixture.Sessions.UpdateSessionCacheAsync(seeded);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync("/api/compose/active-document", new
+        {
+            sessionId,
+            sessionFileId = fileId,
+            source = ActiveDocumentIdentity.SourceComposeDirect,
+            documentSessionId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<ComposeActiveDocumentResponse>();
+        body!.DocumentSessionId.Should().Be(documentSessionId,
+            because: "the response echoes the registered document session id (Wave 3 DEF-11)");
+
+        var after = await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, sessionId);
+        after!.ActiveDocument.Should().NotBeNull();
+        after.ActiveDocument!.DocumentSessionId.Should().Be(documentSessionId,
+            because: "BindingCapabilityTool reads ActiveDocument.DocumentSessionId to route a TEXT-path " +
+            "compose edit into the DOCUMENT session (redline in the open doc), not the chat session");
+    }
+
+    /// <summary>
+    /// DEF-11 draft-alternative-404 fix (spaarkeai-compose-r2): registering the active document with a
+    /// <c>documentSessionId</c> idempotently CREATES a resolvable <see cref="ChatSession"/> keyed by
+    /// that id — so a <c>materializesInEditor</c> compose dispatch to
+    /// <c>POST /api/ai/chat/sessions/{documentSessionId}/dispatch</c> resolves (200) instead of the
+    /// 404 <c>dispatch.session-not-found</c> that shipped (the client-minted document session was never
+    /// created via <c>POST /api/ai/chat/sessions</c>). Asserts the persisted side effect directly.
+    /// </summary>
+    [Fact]
+    public async Task PostActiveDocument_WithDocumentSessionId_CreatesResolvableDocumentSession()
+    {
+        var sessionId = Guid.NewGuid().ToString("N");
+        var documentSessionId = Guid.NewGuid().ToString("D");
+        const string fileId = "browse-mounted-file-create";
+
+        await _fixture.Sessions.UpdateSessionCacheAsync(new ChatSession(
+            SessionId: sessionId,
+            TenantId: ComposeActiveDocumentFixture.TenantId,
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>(),
+            HostContext: null,
+            AdditionalDocumentIds: null,
+            UploadedFiles: new[]
+            {
+                new ChatSessionFile(fileId, "browse.docx",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    64, $"{fileId}_s_0", DateTimeOffset.UtcNow),
+            }));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        // Before registration the document session does not exist (it is client-minted, never created
+        // via the chat session-create endpoint).
+        (await _fixture.Sessions.GetSessionAsync(ComposeActiveDocumentFixture.TenantId, documentSessionId))
+            .Should().BeNull("the client-minted document session is not created until registration");
+
+        var response = await client.PostAsJsonAsync("/api/compose/active-document", new
+        {
+            sessionId,
+            sessionFileId = fileId,
+            source = ActiveDocumentIdentity.SourceComposeDirect,
+            documentSessionId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var docSession = await _fixture.Sessions.GetSessionAsync(
+            ComposeActiveDocumentFixture.TenantId, documentSessionId);
+        docSession.Should().NotBeNull(
+            "RegisterActiveDocument idempotently creates a resolvable ChatSession keyed by documentSessionId — " +
+            "the fix that lets the compose /dispatch resolve it (200) instead of 404");
+        docSession!.SessionId.Should().Be(documentSessionId);
+        docSession.TenantId.Should().Be(ComposeActiveDocumentFixture.TenantId);
+        docSession.Outputs.Should().BeNullOrEmpty("a freshly-created document session carries no outputs");
+    }
+
+    /// <summary>
+    /// Idempotency guard (the critical property): re-registering the SAME documentSessionId across the
+    /// multiple mount doors (Browse, upload, stored-doc, DEF-08 draft) MUST NOT clobber an existing
+    /// document session's <see cref="ChatSession.Outputs"/> — that ledger holds the pending compose
+    /// redlines the editor materializes; wiping it would drop them.
+    /// </summary>
+    [Fact]
+    public async Task PostActiveDocument_ReRegisteringDocumentSession_PreservesExistingOutputs()
+    {
+        var sessionId = Guid.NewGuid().ToString("N");
+        var documentSessionId = Guid.NewGuid().ToString("D");
+        const string fileId = "browse-mounted-file-idempotent";
+
+        await _fixture.Sessions.UpdateSessionCacheAsync(new ChatSession(
+            SessionId: sessionId,
+            TenantId: ComposeActiveDocumentFixture.TenantId,
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>(),
+            HostContext: null,
+            AdditionalDocumentIds: null,
+            UploadedFiles: new[]
+            {
+                new ChatSessionFile(fileId, "browse.docx",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    64, $"{fileId}_s_0", DateTimeOffset.UtcNow),
+            }));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        object RegisterBody() => new
+        {
+            sessionId,
+            sessionFileId = fileId,
+            source = ActiveDocumentIdentity.SourceComposeDirect,
+            documentSessionId,
+        };
+
+        // First registration creates the document session.
+        (await client.PostAsJsonAsync("/api/compose/active-document", RegisterBody()))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Simulate a compose dispatch having landed a redline output on the document session (the state
+        // a real materializesInEditor dispatch produces via OutputRouter).
+        var docSession = await _fixture.Sessions.GetSessionAsync(
+            ComposeActiveDocumentFixture.TenantId, documentSessionId);
+        docSession.Should().NotBeNull();
+        var pendingRedline = new SessionOutput
+        {
+            Key = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee@t1",
+            BindingId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            UcId = "UC-COMPOSE-1",
+            Turn = 1,
+            Disposition = "compose",
+            Payload = JsonDocument.Parse("""{"new_text":"redline the editor will materialize"}""").RootElement.Clone(),
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        await _fixture.Sessions.UpdateSessionCacheAsync(
+            docSession! with { Outputs = new[] { pendingRedline } });
+
+        // Second registration of the SAME document session — MUST preserve the pending redline.
+        (await client.PostAsJsonAsync("/api/compose/active-document", RegisterBody()))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var after = await _fixture.Sessions.GetSessionAsync(
+            ComposeActiveDocumentFixture.TenantId, documentSessionId);
+        after!.Outputs.Should().NotBeNullOrEmpty(
+            "re-registration MUST NOT clobber an existing document session's Outputs (pending redlines)");
+        after.Outputs!.Should().ContainSingle()
+            .Which.Key.Should().Be("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee@t1",
+                "the previously-stored compose output survives a repeat active-document registration");
     }
 }
 

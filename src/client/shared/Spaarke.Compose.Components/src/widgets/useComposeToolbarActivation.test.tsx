@@ -158,15 +158,12 @@ describe('useComposeToolbarActivation — activation (E2E DoD row 3)', () => {
 
     // Overflow: the matching whole-doc summarize was ignored (no such button was
     // ever appended); the matching `compose-defined-terms` DEFAULT overflow action
-    // is now enabled, while the un-returned `compose-summarize-word-changes` stays
-    // disabled.
+    // is now enabled. (FIX #5 removed `compose-summarize-word-changes` from the
+    // selection toolbar registry, so it is no longer an overflow action here.)
     await user.click(screen.getByTestId('compose-ai-toolbar-more'));
     const definedTerms = await screen.findByTestId('compose-ai-toolbar-overflow-compose-defined-terms');
     expect(definedTerms).not.toHaveAttribute('aria-disabled', 'true');
-    expect(screen.getByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')).toHaveAttribute(
-      'aria-disabled',
-      'true'
-    );
+    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')).not.toBeInTheDocument();
     // The non-matching capability was NOT turned into an action.
     expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize')).not.toBeInTheDocument();
     expect(within(screen.getByRole('menu')).queryByText('compose-summarize')).not.toBeInTheDocument();

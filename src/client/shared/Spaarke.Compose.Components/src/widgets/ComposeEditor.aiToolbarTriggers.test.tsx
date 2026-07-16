@@ -84,23 +84,32 @@ function getEditorInstance(container: HTMLElement): Editor {
   return dom.editor;
 }
 
-describe('ComposeEditor — top formatting toolbar owns the relocated inline controls (task 111)', () => {
-  it('renders the persistent ComposeFormatToolbar with block controls AND the relocated Bold/Italic/Underline/Strikethrough/Link', async () => {
-    const { container } = renderComposeEditor();
+describe('ComposeEditor — consolidated single-row ComposeFormatToolbar (FIX #5)', () => {
+  it('renders the labelled dropdown triggers (Body / Paragraph / Font) + always-visible Undo/Redo', async () => {
+    renderComposeEditor();
     await screen.findByRole('textbox'); // editor mounted
 
     const formatToolbar = screen.getByTestId('compose-format-toolbar');
     expect(formatToolbar).toBeInTheDocument();
-    // Existing block controls (no regression).
-    expect(within(formatToolbar).getByTestId('compose-format-bullet-list')).toBeInTheDocument();
+    // FIX #5: block + character controls are now grouped behind dropdowns; the
+    // row shows the labelled triggers + right-aligned Undo/Redo.
+    expect(within(formatToolbar).getByTestId('compose-format-heading-menu')).toBeInTheDocument();
+    expect(within(formatToolbar).getByTestId('compose-format-paragraph-menu')).toBeInTheDocument();
+    expect(within(formatToolbar).getByTestId('compose-format-font-menu')).toBeInTheDocument();
     expect(within(formatToolbar).getByTestId('compose-format-undo')).toBeInTheDocument();
-    // Relocated inline character-format controls — now fully reachable from the
-    // top toolbar (owner decision; task 111).
-    expect(within(formatToolbar).getByTestId('compose-format-bold')).toBeInTheDocument();
-    expect(within(formatToolbar).getByTestId('compose-format-italic')).toBeInTheDocument();
-    expect(within(formatToolbar).getByTestId('compose-format-underline')).toBeInTheDocument();
-    expect(within(formatToolbar).getByTestId('compose-format-strike')).toBeInTheDocument();
-    expect(within(formatToolbar).getByTestId('compose-format-link')).toBeInTheDocument();
+  });
+
+  it('the Font dropdown still exposes the relocated Bold/Italic/Underline/Strikethrough/Link controls', async () => {
+    renderComposeEditor();
+    await screen.findByRole('textbox');
+
+    fireEvent.click(screen.getByTestId('compose-format-font-menu'));
+
+    expect(await screen.findByTestId('compose-format-bold')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-italic')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-underline')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-strike')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-link')).toBeInTheDocument();
   });
 });
 
@@ -134,21 +143,22 @@ describe('ComposeEditor — right-click AI-toolbar trigger (task 111 requirement
     const toolbar = toolbars[0];
     expect(toolbar).toHaveAttribute('data-testid', 'compose-ai-toolbar');
 
-    // All 5 AI actions present (3 primary buttons + overflow trigger; the 2
-    // overflow actions are behind "More actions").
+    // AI actions present (3 primary buttons + the Email menu + overflow trigger;
+    // the whole-document defined-terms action is behind "More actions"). FIX #5
+    // removed summarize-word-changes from the selection toolbar.
     expect(within(toolbar).getByTestId('compose-ai-toolbar-compose-explain-clause')).toBeInTheDocument();
     expect(within(toolbar).getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeInTheDocument();
     expect(within(toolbar).getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeInTheDocument();
     expect(within(toolbar).getByTestId('compose-ai-toolbar-more')).toBeInTheDocument();
 
     await fireEvent.click(within(toolbar).getByTestId('compose-ai-toolbar-more'));
-    expect(await screen.findByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-ai-toolbar-overflow-compose-defined-terms')).toBeInTheDocument();
+    expect(await screen.findByTestId('compose-ai-toolbar-overflow-compose-defined-terms')).toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')).not.toBeInTheDocument();
 
-    // Divider is a child of the (single) Toolbar — has Toolbar context, not orphaned.
-    const divider = toolbar.querySelector('[role="separator"]');
-    expect(divider).not.toBeNull();
-    expect(toolbar.contains(divider)).toBe(true);
+    // ToolbarDividers were removed (compose-r2 UAT) to close the large Explain→Email icon gap —
+    // grouping is now carried by the distinct glyphs/tooltips. Assert the single Toolbar renders
+    // with NO separator rather than a divider-in-context.
+    expect(toolbar.querySelector('[role="separator"]')).toBeNull();
 
     // AI-actions ONLY — no formatting controls leaked into the popup.
     expect(within(popup).queryByLabelText('Bold')).not.toBeInTheDocument();
@@ -157,8 +167,10 @@ describe('ComposeEditor — right-click AI-toolbar trigger (task 111 requirement
     expect(within(popup).queryByLabelText('Strikethrough')).not.toBeInTheDocument();
     expect(within(popup).queryByLabelText('Add link')).not.toBeInTheDocument();
 
-    // No CSS overflow — wrap or width-cap is present (real Griffel-injected CSS).
-    expect(getComputedStyle(toolbar).flexWrap).toBe('wrap');
+    // DEF-17 (UAT-R3): the AI bubble renders on a SINGLE line (flex-wrap:
+    // nowrap); overflow actions go to the ⋯ menu, not a second row (real
+    // Griffel-injected CSS).
+    expect(getComputedStyle(toolbar).flexWrap).toBe('nowrap');
   });
 
   it('dismisses on Escape and on an outside click', async () => {

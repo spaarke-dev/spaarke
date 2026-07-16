@@ -19,6 +19,7 @@ namespace Sprk.Bff.Api.Api.Ai;
 ///   - <c>opportunity</c>
 ///   - <c>incident</c>
 ///   - <c>sprk_matter</c>
+///   - <c>sprk_document</c> (Compose document host — returns an empty context mapping, not a 400)
 ///
 /// Follows ADR-001 (Minimal API), ADR-008 (endpoint filters for auth), ADR-009 (Redis caching).
 /// tenantId is extracted from JWT claims (ADR-014 — never from query string per ADR-008).
@@ -48,7 +49,8 @@ public static class StandaloneChatContextEndpoints
                 "Returns the standalone chat context for any supported Dataverse entity type and record ID. " +
                 "Provides context field descriptors (attribute logical name, display label, field type) " +
                 "for the entity type, allowing the SprkChat UI to render entity metadata in the context panel. " +
-                "Supported entity types: contact, account, opportunity, incident, sprk_matter. " +
+                "Supported entity types: contact, account, opportunity, incident, sprk_matter, sprk_document " +
+                "(sprk_document is the Compose document host and resolves to an empty context mapping rather than a 400). " +
                 "Results are Redis-cached for 30 minutes (cache key: chat-context:{tenantId}:standalone:{entityType}:{entityId}). " +
                 "Returns 400 for unsupported entity types or invalid entityId (non-GUID). " +
                 "tenantId is extracted from JWT claims (tid) — never from query string (ADR-008).")

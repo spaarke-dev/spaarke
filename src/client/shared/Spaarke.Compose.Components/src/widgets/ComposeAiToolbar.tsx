@@ -97,8 +97,11 @@
  * (previously a Fragment of `<ToolbarDivider/>` + a second `<Toolbar>`, both
  * mounted as siblings inside the host's flex row — the divider had no Toolbar
  * context (collapsed/misaligned) and two Toolbars each imposed their own
- * padding). The divider now lives INSIDE this single Toolbar (between the
- * primary buttons and the overflow trigger) so it always has context. A new
+ * padding). (GAP FIX, UAT 2026-07-15: the in-Toolbar dividers were subsequently
+ * REMOVED — Fluent's ToolbarDivider `padding: 0 12px` produced a large visual gap
+ * between the primary AI icons and the trailing Email / overflow icons; every
+ * action now sits in one tightly-spaced row at the single `columnGap` token. See
+ * the "GAP FIX" note in the render body.) A new
  * `forceVisible` prop lets ComposeEditor's right-click (context-menu) trigger
  * render this toolbar even on a COLLAPSED selection (point-insertion) — see
  * `forceVisible` doc below; `handleActionClick`'s existing collapsed-selection
@@ -111,7 +114,6 @@ import { type Editor } from '@tiptap/react';
 import {
   Toolbar,
   ToolbarButton,
-  ToolbarDivider,
   Tooltip,
   Menu,
   MenuTrigger,
@@ -121,7 +123,15 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { Info24Regular, ArrowSwapRegular, DocumentEdit24Regular, MoreHorizontal20Regular } from '@fluentui/react-icons';
+import {
+  Info24Regular,
+  ArrowSwapRegular,
+  DocumentEdit24Regular,
+  MoreVertical20Regular,
+  Mail24Regular,
+  Open24Regular,
+  Send24Regular,
+} from '@fluentui/react-icons';
 import { useAuth } from '@spaarke/auth';
 import {
   createConsumerDispatcher,
@@ -131,6 +141,39 @@ import {
 } from '@spaarke/ui-components';
 import type { DispatchPaneEvent, WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 import type { ComposeDocumentRef } from '../types/compose-contracts';
+import type { TipTapNode } from '../utils/docxBridge';
+
+/**
+ * spaarkeai-compose-r2 — clean-body extraction for the Email stub (FIX #10b).
+ *
+ * A plain `doc.textBetween(...)` concatenates BOTH halves of a pending redline — the struck original
+ * AND the proposed insertion — yielding a garbled email body ("old textnew text"). This walks the
+ * TipTap JSON and renders pending redlines as their ACCEPTED text: struck (deletion-marked) originals
+ * are DROPPED, AI insertions are kept as ordinary text, so the emailed draft matches what the author
+ * is composing. It is the ACCEPT-view, NOT the {@link buildRejectBaselineJson} reject baseline — an
+ * email of a chat-drafted document must carry the drafted content, which the reject baseline (which
+ * drops all insertions) would strip to empty. Textblocks are joined with newlines to keep paragraphs.
+ */
+export function extractCleanDraftText(doc: TipTapNode): string {
+  const TEXTBLOCK_TYPES = new Set(['paragraph', 'heading', 'blockquote', 'codeBlock']);
+  const blocks: string[] = [];
+  const inlineText = (n: TipTapNode): string => {
+    if (n.type === 'text') {
+      if (n.marks?.some(m => m.type === 'deletion')) return ''; // struck original — drop
+      return n.text ?? '';
+    }
+    return (n.content ?? []).map(inlineText).join('');
+  };
+  const walk = (n: TipTapNode): void => {
+    if (n.type && TEXTBLOCK_TYPES.has(n.type)) {
+      blocks.push(inlineText(n)); // textblock: collect its inline run, do not double-descend
+      return;
+    }
+    (n.content ?? []).forEach(walk);
+  };
+  walk(doc);
+  return blocks.join('\n').trim();
+}
 
 /**
  * FR-18 host-provided serialization seam (spaarkeai-compose-r2 tasks 030 + 032).
@@ -167,6 +210,12 @@ export type ComposeActionEnqueue = (request: {
    * dispatch + Assistant-rendered prose.
    */
   documentSessionId?: string;
+  /**
+   * DEF-11: present ⇒ this edit action revises the WHOLE open document (`compose-revise-document`),
+   * not just a selection. The host uses it ONLY to pick the Assistant confirmation copy variant;
+   * routing/materialize/Accept-all are unaffected (mirrors `ComposeActionRequest.revisionScope`).
+   */
+  revisionScope?: 'selection' | 'whole-document';
 }) => Promise<DispatchConsumerResult>;
 
 // ---------------------------------------------------------------------------
@@ -225,21 +274,17 @@ const EXPLAIN_TOOLTIP =
 const COMPARE_TOOLTIP =
   'Compare this clause against the matter/firm playbook — surfaces matches, deviations, and a risk score.';
 const DRAFT_TOOLTIP = 'Draft an alternative version of this clause as a pending suggestion you can accept or reject.';
-// Tooltip copy for the two whole-document overflow actions (excerpts of the
-// authored `sprk_playbookconsumer` toolDescription for each — same "tool
-// descriptions ARE the prompt" sourcing rule as the primary three).
-const SUMMARIZE_WORD_CHANGES_TOOLTIP =
-  'Summarize the tracked changes a reviewer made in Word — insertions, deletions, comments, and structural edits — in plain language. Read-only.';
+// Tooltip copy for the whole-document overflow action (excerpt of the authored
+// `sprk_playbookconsumer` toolDescription — same "tool descriptions ARE the
+// prompt" sourcing rule as the primary three).
 const DEFINED_TERMS_TOOLTIP =
   'Scan the document for defined terms and check they are used consistently. Read-only; results render in the Context pane.';
 
 /**
- * The five R2-committed AI actions (design.md §2.0/§2.1-§2.5). The three
- * clause-selection actions are `primary` (always-visible buttons); the two
- * whole-document actions (summarize-word-changes, defined-terms) are
- * `overflow` (in the "More actions…" menu) — closing gap 2.3 (they previously
- * had NO client trigger at all: absent from DEFAULT_ACTIONS, the overflow was
- * empty). All five dispatch through the SAME 046 seam (`handleActionClick` →
+ * The R2-committed AI actions (design.md §2.0/§2.1-§2.5). The three
+ * clause-selection actions are `primary` (always-visible buttons); the
+ * whole-document defined-terms action is `overflow` (in the "More actions…"
+ * menu). All dispatch through the SAME 046 seam (`handleActionClick` →
  * `enqueueComposeAction` / `dispatchConsumer`) — no new route or discriminant.
  *
  * All ship with `bindingId: ''` — see file header "PHASE-4 STUB BOUNDARY".
@@ -248,12 +293,13 @@ const DEFINED_TERMS_TOOLTIP =
  * `registerComposeAiToolbarAction` (see file header). Those GUIDs are minted
  * per-environment at catalog SEED time (task 047, owner/live-env), so button
  * ENABLEMENT is E2E-pending on that deploy — but the trigger ENTRY POINTS
- * (this registry) exist now, which is what gap 2.3 required.
+ * (this registry) exist now.
  *
- * NOTE (summarize-word-changes): the overflow gives it a working trigger now.
- * Its dedicated "return-from-Word" entry (fired when a reviewer's edits come
- * back from Word) is hosted by the return-from-Word reanchor UI (Cluster 3 /
- * task 054), which is not yet mounted — that additional entry lands with 054.
+ * NOTE (FIX #5, UAT): `compose-summarize-word-changes` was REMOVED from this
+ * selection-toolbar registry. It is a RETURN-FROM-WORD action requiring real
+ * tracked-change data (`changesText`); on the selection toolbar it has no change
+ * data, so the LLM fabricates a phantom "[Insertion]". Its legitimate trigger is
+ * the return-from-Word reanchor UI (Cluster 3 / task 054), not this toolbar.
  */
 const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
   {
@@ -279,15 +325,6 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     // DEF-09: the ONLY compose-disposition EDIT action — its alternative renders as an
     // inline redline in the document, so route to the DOCUMENT session + confirm-only.
     materializesInEditor: true,
-  },
-  {
-    // gap 2.3 — the return-from-Word summarization trigger (FR-10). Overflow
-    // entry now; the dedicated return-from-Word entry lands with task 054.
-    id: 'compose-summarize-word-changes',
-    label: 'Summarize Word changes',
-    tooltip: SUMMARIZE_WORD_CHANGES_TOOLTIP,
-    bindingId: '',
-    placement: 'overflow',
   },
   {
     // gap 2.3 — the defined-terms scan (FR-11). Overflow-menu trigger per the
@@ -408,14 +445,30 @@ export interface ComposeAiToolbarProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  // Task 111: the redundant `display: 'flex'` / `columnGap` override was
-  // dropped — Fluent's own `<Toolbar>` already applies its layout (fighting
-  // it caused double-spacing). `flexWrap` is an ADDITION (not a duplicate of
-  // Toolbar's own behavior): it lets the AI buttons wrap onto a second row
-  // instead of overflowing the popup width when the host (ComposeEditor's
-  // `styles.bubbleMenu`) width-caps the container.
+  // DEF-17 (UAT-R3): the inline AI bubble renders on ONE line. `flexWrap: 'nowrap'`
+  // keeps the primary buttons + in-context divider + overflow (⋯) trigger on a
+  // single row; any action that does not fit belongs in the "More actions…"
+  // overflow menu (placement: 'overflow'), NOT on a second wrapped row.
+  //
+  // FIX #9 (UAT): the elevated SURFACE now lives on THIS Toolbar (previously on
+  // ComposeEditor's `bubbleMenu` wrapper, which produced the partial-background
+  // finding). Putting the background + shadow on the Toolbar makes it span the
+  // WHOLE menu — every item sits on the one surface. A light-grey elevated neutral
+  // (`colorNeutralBackground3`) reads clearly on the white page and stays legible
+  // in dark mode (the token flips); `shadow16` keeps the elevation. `columnGap`
+  // gives a comfortable, even spacing between the icon-only buttons — not cramped,
+  // not spread. Semantic tokens only (ADR-021 dark-mode-correct).
   toolbar: {
-    flexWrap: 'wrap',
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'nowrap',
+    whiteSpace: 'nowrap',
+    columnGap: tokens.spacingHorizontalS,
+    backgroundColor: tokens.colorNeutralBackground3,
+    boxShadow: tokens.shadow16,
+    borderRadius: tokens.borderRadiusMedium,
+    paddingInline: tokens.spacingHorizontalS,
+    paddingBlock: tokens.spacingVerticalXS,
   },
 });
 
@@ -538,6 +591,38 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
     [editor, dispatchConsumer, enqueueComposeAction, documentRef, sessionId]
   );
 
+  // FIX #10b (UAT) — "Email" affordance. Compose is the default drafting
+  // surface; an explicit email path is a STUB for now. Both menu items open a
+  // new STUB email widget tab by dispatching a `workspace` `widget_load` on the
+  // EXISTING PaneEventBus (ADR-030; NO new bus, NO dispatch endpoint). The
+  // contract MATCHES the chat "email" chip another agent emits:
+  //   workspace / widget_load, widgetType 'email', displayName 'Email',
+  //   widgetData { layoutName: 'Email', mode: 'open' | 'send', ... }.
+  // WorkspacePane resolves the EmailStubWidget for `widgetType === 'email'`.
+  //   - Open in Email → mode 'open', carries the drafted body text.
+  //   - Send in Email → mode 'send', carries the current file as an attachment.
+  const handleEmailAction = React.useCallback(
+    (mode: 'open' | 'send'): void => {
+      if (!editor) return;
+      // Clean the drafted body so pending redlines email as their ACCEPTED text, not the garbled
+      // struck-original + proposed-insertion concatenation `textBetween` produces.
+      const draftedText = extractCleanDraftText(editor.getJSON() as TipTapNode);
+      const attachmentFileName = documentRef?.fileName ?? 'Untitled.docx';
+      dispatch('workspace', {
+        type: 'widget_load',
+        widgetType: 'email',
+        displayName: 'Email',
+        widgetData: {
+          layoutName: 'Email',
+          mode,
+          ...(mode === 'open' ? { bodyText: draftedText } : {}),
+          ...(mode === 'send' ? { attachmentFileName } : {}),
+        },
+      });
+    },
+    [editor, documentRef, dispatch]
+  );
+
   if (!editor) return null;
 
   const { from, to } = editor.state.selection;
@@ -550,13 +635,19 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   const overflowActions = allActions.filter(a => a.placement === 'overflow');
 
   // Task 111 — SINGLE Toolbar (no wrapping Fragment, no orphaned top-level
-  // divider): the divider is a DIRECT CHILD of this Toolbar (between the
-  // primary buttons and the overflow trigger), so it always has Toolbar
-  // context (see file header "TASK 111" note).
+  // divider). GAP FIX (UAT, 2026-07-15): the two ToolbarDividers were removed.
+  // Fluent's ToolbarDivider ships `padding: 0 12px`, which (with the toolbar's
+  // columnGap on each side) produced a ~40px "large gap" between the primary AI
+  // icons and the trailing Email / overflow (⋮) affordances. Removing them lets
+  // every action sit in ONE tightly-spaced, evenly-spaced row at the single
+  // `columnGap` token — no large gap, all actions still reachable, all
+  // aria-labels preserved. Grouping is carried by distinct glyphs + tooltips.
   return (
     <Toolbar size="small" className={styles.toolbar} aria-label="AI actions" data-testid="compose-ai-toolbar">
+      {/* FIX #9 — ICON-ONLY primary buttons (the tool WORDS were removed); the
+          hover Tooltip names each tool. Names come from `action.label`. */}
       {primaryActions.map(action => (
-        <Tooltip key={action.id} content={action.tooltip} relationship="description" withArrow>
+        <Tooltip key={action.id} content={action.label} relationship="description" withArrow>
           <ToolbarButton
             appearance="subtle"
             icon={actionIcon(action.id)}
@@ -564,22 +655,55 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
             aria-label={action.label}
             data-testid={`compose-ai-toolbar-${action.id}`}
             onClick={() => handleActionClick(action)}
-          >
-            {action.label}
-          </ToolbarButton>
+          />
         </Tooltip>
       ))}
 
-      <ToolbarDivider />
+      {/* FIX #10b — Email split-menu (STUB target). Consistent with the primary
+          labelled buttons; both items dispatch a workspace/widget_load that opens
+          the EmailStubWidget tab (see handleEmailAction). */}
+      <Menu positioning="below-end">
+        <MenuTrigger disableButtonEnhancement>
+          <Tooltip content="Email" relationship="description" withArrow>
+            <ToolbarButton
+              appearance="subtle"
+              icon={<Mail24Regular />}
+              aria-label="Email"
+              data-testid="compose-ai-toolbar-email"
+            />
+          </Tooltip>
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            <MenuItem
+              icon={<Open24Regular />}
+              data-testid="compose-ai-toolbar-email-open"
+              onClick={() => handleEmailAction('open')}
+            >
+              Open in Email
+            </MenuItem>
+            <MenuItem
+              icon={<Send24Regular />}
+              data-testid="compose-ai-toolbar-email-send"
+              onClick={() => handleEmailAction('send')}
+            >
+              Send in Email
+            </MenuItem>
+          </MenuList>
+        </MenuPopover>
+      </Menu>
 
       <Menu positioning="below-end">
         <MenuTrigger disableButtonEnhancement>
-          <ToolbarButton
-            appearance="subtle"
-            icon={<MoreHorizontal20Regular />}
-            aria-label="More actions"
-            data-testid="compose-ai-toolbar-more"
-          />
+          <Tooltip content="More actions" relationship="description" withArrow>
+            <ToolbarButton
+              appearance="subtle"
+              // FIX #9 — VERTICAL three-dots overflow affordance.
+              icon={<MoreVertical20Regular />}
+              aria-label="More actions"
+              data-testid="compose-ai-toolbar-more"
+            />
+          </Tooltip>
         </MenuTrigger>
         <MenuPopover>
           <MenuList>

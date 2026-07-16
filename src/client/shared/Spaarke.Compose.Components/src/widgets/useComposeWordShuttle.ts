@@ -164,6 +164,104 @@ export function anchoredAnnotationsToDocxAnnotations(
 }
 
 // ---------------------------------------------------------------------------
+// Redline → Word bridge (UAT-R7 #2/#3): PENDING redline marks → DocxAnnotationInput[]
+// ---------------------------------------------------------------------------
+
+/** Minimal TipTap doc/text node shape for redline extraction (decoupled from `@tiptap/core`). */
+interface RedlineJsonNode {
+  type?: string;
+  text?: string;
+  content?: RedlineJsonNode[];
+  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
+}
+
+/** Accumulator for one pending redline (keyed by `ledgerRef`) while walking the doc. */
+interface RedlineAccumulator {
+  ledgerRef: string;
+  /** Concatenated text carrying the `deletion` mark — the ORIGINAL (target_text). */
+  deletionText: string;
+  /** Concatenated text carrying the `insertion` mark — the REPLACEMENT (new_text). */
+  insertionText: string;
+}
+
+/**
+ * Bridge (UAT-R7 #2) — map the editor's PENDING redline marks into {@link DocxAnnotationInput}s so
+ * SAVE renders them as NATIVE Word `w:ins`/`w:del` via `DocxAnnotationWriter` (the proven server
+ * writer), instead of the client `tipTapToDocxBytes` flattening them to plain text.
+ *
+ * This is the previously-ABSENT producer the redline marks (`usePendingRedline`) never had — the
+ * sibling of {@link anchoredAnnotationsToDocxAnnotations} (which already maps the COMMENT half). It
+ * reads the redline text straight from the marks in the editor's JSON (the `insertion` / `deletion`
+ * marks carry the content + a `ledgerRef` in their attrs), grouping by `ledgerRef`:
+ *  - deletion-marked text → the original `target_text`;
+ *  - insertion-marked text → the replacement `new_text`.
+ *
+ * Emission order per replace pair is Insertion BEFORE Deletion: the writer's anchor lookup counts
+ * only live `w:t` runs (a struck run becomes `w:delText`), so the insertion must be placed against
+ * the still-live original before the deletion converts it — otherwise the insertion's anchor would
+ * be gone (TargetNotFound). A pure insertion (no deletion half) becomes a tracked append; a pure
+ * deletion becomes a `w:del`.
+ *
+ * @param docJson the editor's `getJSON()` output (a TipTap doc tree)
+ * @param author  Word revision attribution for the emitted changes
+ * @param timestamp ISO-8601 date stamped into the `w:date` attribute
+ */
+export function redlineMarksToDocxAnnotations(
+  docJson: unknown,
+  author: string,
+  timestamp: string
+): DocxAnnotationInput[] {
+  const byRef = new Map<string, RedlineAccumulator>();
+  const order: string[] = [];
+
+  const visit = (node: RedlineJsonNode | null | undefined): void => {
+    if (!node) return;
+    if (node.type === 'text' && typeof node.text === 'string' && node.text.length > 0 && node.marks) {
+      for (const mark of node.marks) {
+        if (mark.type !== 'insertion' && mark.type !== 'deletion') continue;
+        const ledgerRef = typeof mark.attrs?.ledgerRef === 'string' ? mark.attrs.ledgerRef : '';
+        if (!ledgerRef) continue;
+        let acc = byRef.get(ledgerRef);
+        if (!acc) {
+          acc = { ledgerRef, deletionText: '', insertionText: '' };
+          byRef.set(ledgerRef, acc);
+          order.push(ledgerRef);
+        }
+        if (mark.type === 'insertion') acc.insertionText += node.text;
+        else acc.deletionText += node.text;
+      }
+    }
+    if (node.content) for (const child of node.content) visit(child);
+  };
+  visit(docJson as RedlineJsonNode);
+
+  const result: DocxAnnotationInput[] = [];
+  for (const ref of order) {
+    const acc = byRef.get(ref)!;
+    const targetText = acc.deletionText.length > 0 ? acc.deletionText : undefined;
+    // Insertion FIRST (anchored to the still-live original), then Deletion — see JSDoc.
+    if (acc.insertionText.length > 0) {
+      result.push({
+        kind: DocxTrackChangeKind.Insertion,
+        targetText: targetText ?? null,
+        newText: acc.insertionText,
+        author,
+        date: timestamp,
+      });
+    }
+    if (acc.deletionText.length > 0) {
+      result.push({
+        kind: DocxTrackChangeKind.Deletion,
+        targetText: acc.deletionText,
+        author,
+        date: timestamp,
+      });
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Hook: push-annotations (gap 3.1)
 // ---------------------------------------------------------------------------
 
