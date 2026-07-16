@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | **Parallel wave: 030 + 040 in flight (subagents)** |
-| **Status** | 001 ✅. 002 unblocked+reshaped (design §10.1; held for owner sign-off on the surface-launch mechanism before mutating shipped capabilities). **003 ⏸️ deferred** (MCP creates wrong publisher prefix on the core routing catalog — needs `sprk`-publisher column). **030** (User Model producer, BFF) + **040** (tool drop-down, client) dispatched to background subagents — no file overlap. |
-| **Next action** | On subagent completion: review each diff → **Step 9.5 gates (code-review + adr-check)** → build-verify → commit → mark ✅. Then continue User Model vertical: **031** (pref≠perm test) + **032** (budget amend, Path B) depend on 030. |
-| **Parallel Execution** | 030 → `Services/Ai/Context/` (BFF, opus). 040 → `SpaarkeAi` + `Spaarke.UI.Components` (client, sonnet). Dispatched 2026-07-15. |
+| **Active task** | **Wave complete: 030 ✅ + 040 ✅. Next: 031 + 032 (User Model vertical)** |
+| **Status** | Done: 001 ✅, 030 ✅ (profile producer, committed 24a9d5d5b), 040 ✅ (tool drop-down, Step 9.5 verified). 4/25 effective. Held: 002 (owner sign-off on surface-launch mechanism), 003 ⏸️ (MCP publisher prefix). |
+| **Next action** | **031** (pref≠perm negative test — depends 030) then **032** (budget amend Path B + FR-E5 BU/team — depends 030). Both unblocked. 041/042 also now unblocked by 040. |
+| **Parallel Execution** | 030 (BFF) + 040 (client) ran concurrently, no overlap. Both reviewed + gated in main session; lockfile churn from 040's env-gap npm install reverted (not committed). |
 | **Completed** | **001** ✅ — `notes/userprofile-schema-contract.md`. 2 owner-actionable findings: **F-1** `sprk_primaryrole` may be local (owner wanted global set); **F-2** alt-key name unreadable via MCP (confirm at task 042). |
 | **Branch** | `work/spaarkeai-assistant-enhancements-r1` (synced with origin/master 2026-07-15; clean; seams intact) |
 | **Scope** | R1 only. **R1.5 (proactive push / Azure SignalR) designed, NOT decomposed** — filed as a follow-on spec-pass at wrap-up (task 090). |

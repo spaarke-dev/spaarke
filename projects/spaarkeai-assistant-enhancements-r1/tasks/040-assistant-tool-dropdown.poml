@@ -3,7 +3,8 @@
   <metadata>
     <title>Assistant-pane tool drop-down (Fluent v9)</title>
     <phase>5: Assistant Surface</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-07-15</completed>
     <estimated-hours>3</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>041, 042</blocks>

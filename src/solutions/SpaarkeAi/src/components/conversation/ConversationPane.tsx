@@ -35,6 +35,7 @@ import { WelcomePanel } from "../WelcomePanel";
 import { ComposeAssistantCoordination } from "./ComposeAssistantCoordination";
 import { useShellStage, useRestoreContext, usePaneCollapseContext } from "../shell/ThreePaneShell";
 import { HistoryMenu } from "./HistoryOverlay";
+import { AssistantToolMenu } from "./AssistantToolMenu";
 import { CommandHelpPanel } from "./CommandHelpPanel";
 import { HelpAffordance } from "./HelpAffordance";
 import { useInjectionQueue } from "./useInjectionQueue";
@@ -1275,6 +1276,13 @@ export function ConversationPane(): React.JSX.Element {
         expanded={!(paneCollapse?.isCollapsed("assistant") ?? false)}
         rightSlot={
           <>
+            {/* Task 040 (FR-F1) — the Assistant tool drop-down (Quick Start +
+                My Assistant). Mirrors HistoryMenu/ContextPaneMenu/
+                WorkspacePaneMenu — a second, independent Menu trigger in this
+                rightSlot (History lists past sessions; this lists Assistant
+                tools). Entry behavior is wired in tasks 041/042; see
+                AssistantToolMenu.tsx for the placeholder-handler contract. */}
+            <AssistantToolMenu />
             {/* R4-5: New session — clears the persisted session id and remounts
                 SprkChat to mint a fresh session. PaneHeader's rightSlot already
                 stops propagation, so the header collapse never fires. */}
