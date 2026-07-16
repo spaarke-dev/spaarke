@@ -90,6 +90,106 @@ describe('useMyAssistant', () => {
     expect(result.current.coldStart).toBe(false);
   });
 
+  it('onSubmit seeds User-scope memory via POST /api/memory/user/seed after the profile save', async () => {
+    const port = fakePort(null);
+    const authenticatedFetch = jest
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200 } as Response);
+    const { result } = renderHook(() =>
+      useMyAssistant({
+        port,
+        getUserId: () => USER,
+        getDisplayName: () => 'Ada',
+        authenticatedFetch,
+        bffBaseUrl: 'https://bff.example',
+      })
+    );
+    await waitFor(() => expect(result.current.coldStart).toBe(true));
+
+    await act(async () => {
+      await result.current.onSubmit({
+        primaryRole: 100000001,
+        practiceAreaIds: ['pa-1'],
+        focusAreas: 'M&A',
+        officeLocation: 'London',
+        assistantPreferences: 'Concise, no legalese',
+      });
+    });
+
+    // Profile persisted first, then the best-effort BFF seed call.
+    expect(port.upsertProfileByUser).toHaveBeenCalledTimes(1);
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = authenticatedFetch.mock.calls[0];
+    expect(url).toBe('https://bff.example/api/memory/user/seed');
+    expect(init.method).toBe('POST');
+    const body = JSON.parse(init.body as string);
+    expect(body).toMatchObject({
+      factType: 'keyFact',
+      key: 'Assistant preferences',
+      value: 'Concise, no legalese',
+    });
+    // The subject/systemuserid is NEVER in the client body — the server resolves it from auth.
+    expect(body).not.toHaveProperty('userId');
+    expect(body).not.toHaveProperty('subjectId');
+  });
+
+  it('onSubmit does not call the seed endpoint when there are no free-text preferences', async () => {
+    const port = fakePort(null);
+    const authenticatedFetch = jest.fn().mockResolvedValue({ ok: true, status: 200 } as Response);
+    const { result } = renderHook(() =>
+      useMyAssistant({
+        port,
+        getUserId: () => USER,
+        authenticatedFetch,
+        bffBaseUrl: 'https://bff.example',
+      })
+    );
+    await waitFor(() => expect(result.current.coldStart).toBe(true));
+
+    await act(async () => {
+      await result.current.onSubmit({
+        primaryRole: 100000001,
+        practiceAreaIds: ['pa-1'],
+        focusAreas: '',
+        officeLocation: '',
+        assistantPreferences: '   ',
+      });
+    });
+
+    expect(port.upsertProfileByUser).toHaveBeenCalledTimes(1);
+    expect(authenticatedFetch).not.toHaveBeenCalled();
+  });
+
+  it('onSubmit: a failing seed call NEVER blocks the profile save', async () => {
+    const port = fakePort(null);
+    const authenticatedFetch = jest.fn().mockRejectedValue(new Error('bff down'));
+    const { result } = renderHook(() =>
+      useMyAssistant({
+        port,
+        getUserId: () => USER,
+        authenticatedFetch,
+        bffBaseUrl: 'https://bff.example',
+      })
+    );
+    await waitFor(() => expect(result.current.coldStart).toBe(true));
+
+    await act(async () => {
+      // Must resolve (not throw) despite the seed call rejecting.
+      await result.current.onSubmit({
+        primaryRole: 100000001,
+        practiceAreaIds: ['pa-1'],
+        focusAreas: 'M&A',
+        officeLocation: 'London',
+        assistantPreferences: 'Concise',
+      });
+    });
+
+    expect(port.upsertProfileByUser).toHaveBeenCalledTimes(1);
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+    // The profile save completed: the cold-start gate cleared even though the seed failed.
+    expect(result.current.coldStart).toBe(false);
+  });
+
   it('onErase deletes the profile and calls the existing DELETE /api/memory/user endpoint', async () => {
     const port = fakePort(completeRow);
     const authenticatedFetch = jest

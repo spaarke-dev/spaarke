@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | **042 ✅ DONE. All independent/unblocked tasks complete. Remaining work = create-flow chain, blocked on the 002 `SurfaceLaunch` maker-portal add.** |
+| **Active task** | **Owner-requested enhancements DONE (2026-07-16): D-032-01 BU/team ✅ + D-042-01 user-memory seed ✅ (combined build + 100 affected tests green). D-042-02 resolved. Back to the maker-portal wait.** |
 | **Status** | Done: 001 ✅, 030 ✅, 040 ✅, 031 ✅, 032 ✅, 020 ✅, 043 ✅, 052 ✅, **042 ✅ (keyed upsert + N:N + F5 erasure; alt-key Active F-2✅, role global F-1✅; MemoryItem seed → D-042-01; write-authZ config → D-042-02)**. **10/25 effective.** **Held**: 002 (needs `SurfaceLaunch` option-set add, maker portal), 003 ⏸️. |
 | **Next action** | **Blocked pending maker-portal action** — the `SurfaceLaunch` `sprk_disposition` value add (on `sprk` publisher) unblocks the create-flow chain (010 → 011/012/013/014 → 021 → 022 → 050 → 051/053 → 054 → 090). Same for the `sprk_grounding` predicate column (003 → 044). Nothing else runnable autonomously. **Commits unpushed** (031/032/design/052/020/043/F2/042). |
 | **052 sign-off (2026-07-16)** | F1 app-only read RATIFIED · F2 free-text delimiting APPLIED (StatedProfileRenderer «...» + guard line; 032 byte-golden re-baselined) · F5 GDPR-erasure ACCEPTED into 042. |

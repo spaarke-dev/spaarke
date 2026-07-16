@@ -177,6 +177,32 @@ export function isProfileComplete(row: UserProfileRow | null): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// User-scope memory seed (FR-F3 / D-042-01)
+// ---------------------------------------------------------------------------
+
+/** Stable key for the single stated-preference fact seeded into User-scope memory. */
+export const ASSISTANT_MEMORY_SEED_KEY = 'Assistant preferences';
+
+/** The ONE User-scope memory fact seeded from the questionnaire (server resolves the subject/systemuserid). */
+export interface AssistantMemorySeed {
+  factType: 'keyFact';
+  key: string;
+  value: string;
+}
+
+/**
+ * Composes the ONE User-scope memory seed fact (source=user) from the questionnaire (FR-F3). Only the
+ * free-text `assistantPreferences` is seeded: the structured role + practice-area fields are already
+ * carried into the prompt by the typed stated-profile READ (task 030), so seeding them into memory would
+ * duplicate. Returns null when there is no free-text preference worth seeding (⇒ the caller skips the POST).
+ */
+export function buildAssistantMemorySeed(form: UserProfileFormValues): AssistantMemorySeed | null {
+  const value = sanitizeFreeText(form.assistantPreferences);
+  if (!value) return null;
+  return { factType: 'keyFact', key: ASSISTANT_MEMORY_SEED_KEY, value };
+}
+
+// ---------------------------------------------------------------------------
 // Raw Web API port implementation
 // ---------------------------------------------------------------------------
 

@@ -6,9 +6,9 @@
 
 | ID | Title | Type | Origin | GitHub Issue |
 |----|-------|------|--------|--------------|
-| D-032-01 | FR-E5 BU/team enrichment in the User fragment | Deferral | task 032 (owner sign-off 2026-07-15) | {URL} |
+| D-032-01 | FR-E5 BU/team enrichment in the User fragment | Deferral | task 032 (owner sign-off 2026-07-15) | ✅ RESOLVED 2026-07-16 (built) |
 | D-043-01 | No client-accessible preference source for the SNS chip reorder | Gap | task 043 (FR-G1) | {URL} |
-| D-042-01 | User-scope MemoryItem seed deferred (no client memory-write endpoint) | Deferral | task 042 (FR-F3) | {URL} |
+| D-042-01 | User-scope MemoryItem seed deferred (no client memory-write endpoint) | Deferral | task 042 (FR-F3) | ✅ RESOLVED 2026-07-16 (built) |
 | D-042-02 | Profile-write authZ depends on `sprk_userprofile` Dataverse row-security config | Security follow-up | task 042 (052 write-side hand-off) | ✅ RESOLVED 2026-07-16 |
 
 ---
@@ -24,6 +24,7 @@
   3. It adds a second per-turn hot-path read for unproven bias value.
 - **Cheapest in-boundary path when picked up**: render `- Business Unit: …` / `- Team: …` from the **already-cached** `IdentityNormalizationService.PersonIdentity` (no new Dataverse read), included in the byte-stable render + the (now 700) User budget. This is a small, self-contained follow-up — not a new pipeline.
 - **Trigger to revisit**: owner wants org-unit-aware assistant framing, OR the Organizational slice / Work IQ seam gets wired (natural home for BU/team).
+- ✅ **RESOLVED 2026-07-16 (owner-requested build)**: BU/team **names** folded into the User fragment as a deterministic `### Your Organization` block, via a new `UserOrgContextReader` (reuses the caller's resolved systemuserid + `IIdentityNormalizationService`, Redis-cached 10-min TTL per-systemuserid; soft-fails to null). Preference-only (ADR-039 — never reaches `AgentToolFilterContext`, pinned by test); stays within the 700 User budget (~560 worst); byte-stable (no golden re-baseline needed). This is the profile-fragment *context* form (a prompting hint); record *visibility* remains the membership-resolver's job (the "my open tasks" filter). Note: `notes/fr-e5-bu-team-enrichment-decision.md`.
 
 ## D-043-01 — No client-accessible preference source for the SNS chip reorder
 
@@ -41,6 +42,7 @@
 - **Mitigation (why low-impact)**: the typed profile (primary deliverable) + the shipped stated-profile READ path (task 030 → `ContextBinder.userFragment`) already deliver the User Model to the assistant on the next turn. The seed is redundant-secondary.
 - **What it needs when picked up**: either (a) a narrow user-initiated memory-seed path (justify the BFF surface per §10), or (b) accept that the typed profile is the sole stated-profile channel and formally drop the MemoryItem-seed clause from FR-F3.
 - **Trigger to revisit**: an explicit user-initiated memory-write capability is designed, OR the owner rules the seed clause unnecessary.
+- ✅ **RESOLVED 2026-07-16 (owner-requested build)**: added `POST /api/memory/user/seed` — writes ONE User-scope `MemoryItem` (`source=user`) keyed by the **server-resolved caller** systemuserid (never the body → can't seed another user; 052 discipline; 5 tests pin it), upsert-by-(factType,key) via the existing `IMemoryItemStore` (no second store, ADR-042). §10 Placement Justification embedded; publish-size ~0 delta; no new CVE. Questionnaire submit best-effort-calls it (`@spaarke/auth`), never blocking the save. **Verified: User-memory recall IS live on the interactive chat path** (`PlaybookChatContextProvider → ContextBinder → AppendUserMemoryFragment`), so a seed surfaces next turn.
 
 ## D-042-02 — Profile-write authZ depends on `sprk_userprofile` row-security config (SECURITY)
 

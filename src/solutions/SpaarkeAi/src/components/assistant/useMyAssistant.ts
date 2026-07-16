@@ -8,11 +8,13 @@
  * single time. Fully DEFENSIVE — when no Xrm/user id is available (jsdom tests, non-MDA hosts) it does
  * nothing: no fetch, no auto-open. So it is inert in suites that don't opt in.
  *
- * MEMORY (ADR-042): there is NO client-callable memory-WRITE/seed endpoint (`memory.write` is
- * AI-initiated only), so the User-scope MemoryItem SEED is a documented follow-on (see the report /
- * design notes) — the typed profile + the shipped stated-profile READ path (task 030) already deliver
- * the User Model to the assistant. The ERASURE path DOES honor F5 by calling the EXISTING
- * `DELETE /api/memory/user` governance endpoint (task 052) — reused, NO new BFF surface.
+ * MEMORY (ADR-042): on a successful profile SAVE the hook best-effort SEEDs ONE User-scope MemoryItem
+ * (`source=user`) via `POST /api/memory/user/seed` (FR-F3 / D-042-01 un-deferral) so the stated profile
+ * becomes the baseline the evolvable learned-memory store carries. The subject (systemuserid) is resolved
+ * SERVER-side from the auth context — never sent from the client. The seed is best-effort: a failure NEVER
+ * blocks the profile save (mirrors the erase's best-effort memory call). This is the ONLY user-initiated
+ * memory-WRITE path — `memory.write` (task 057) is AI-initiated only. The ERASURE path honors F5 by calling
+ * the EXISTING `DELETE /api/memory/user` governance endpoint (task 052).
  *
  * @see userProfileService.ts — the write/erase path
  * @see MyAssistantDialog.tsx — the questionnaire UI
@@ -24,6 +26,7 @@ import {
   createDataverseUserProfilePort,
   saveMyAssistantProfile,
   eraseMyAssistantProfile,
+  buildAssistantMemorySeed,
   isProfileComplete,
   type IUserProfilePort,
   type PracticeArea,
@@ -154,6 +157,26 @@ export function useMyAssistant(options: UseMyAssistantOptions = {}): UseMyAssist
         form: values,
         existing,
       });
+
+      // Best-effort User-scope memory SEED (FR-F3 / D-042-01): after the profile save succeeds, seed ONE
+      // User-scope MemoryItem (source=user) so the stated profile becomes the learned-memory baseline. The
+      // subject is resolved SERVER-side from the caller's auth context (never sent from here) — this IS a BFF
+      // call (unlike the host-context Dataverse profile write above). A failure NEVER blocks the profile save.
+      const { authenticatedFetch, bffBaseUrl } = options;
+      const seed = buildAssistantMemorySeed(values);
+      if (seed && authenticatedFetch && bffBaseUrl) {
+        try {
+          await authenticatedFetch(`${bffBaseUrl}/api/memory/user/seed`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(seed),
+          });
+          // Response status is not consulted — the seed is best-effort; the profile save already succeeded.
+        } catch {
+          // Swallow — never block the profile save on the memory seed.
+        }
+      }
+
       // Optimistically reflect completion so a subsequent open prefills + the cold-start gate clears.
       const completedRow: UserProfileRow = {
         id: existing?.id ?? '',
@@ -168,7 +191,7 @@ export function useMyAssistant(options: UseMyAssistantOptions = {}): UseMyAssist
       setExisting(completedRow);
       setColdStart(false);
     },
-    [port, systemUserId, displayName, existing]
+    [port, systemUserId, displayName, existing, options]
   );
 
   const onErase = React.useCallback(async (): Promise<void> => {

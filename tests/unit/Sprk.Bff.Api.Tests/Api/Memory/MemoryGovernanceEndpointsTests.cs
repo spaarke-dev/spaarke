@@ -57,6 +57,127 @@ public class MemoryGovernanceEndpointsTests
     };
 
     // =====================================================================
+    // User-initiated seed (FR-F3 / D-042-01) — source=user, keyed by the SERVER-RESOLVED
+    // caller systemuserid, upsert-by-(factType,key), cross-user seeding impossible.
+    // =====================================================================
+
+    [Fact]
+    public async Task SeedUserMemory_WritesUserScopeItem_KeyedByServerResolvedCallerSubject_SourceUser()
+    {
+        // Arrange — the caller's OWN subject is resolved server-side from the auth context.
+        MemoryItem? captured = null;
+        string? capturedTenant = null;
+        var store = new Mock<IMemoryItemStore>();
+        store.Setup(s => s.UpsertAsync(It.IsAny<MemoryItem>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<MemoryItem, string, CancellationToken>((i, t, _) => { captured = i; capturedTenant = t; })
+            .ReturnsAsync((MemoryItem i, string _, CancellationToken _) => i);
+        var authorizer = new Mock<IMemoryAccessAuthorizer>();
+        authorizer.Setup(a => a.ResolveCallerUserSubjectAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SystemUserId);
+
+        var request = new MemorySeedRequest("keyFact", "Assistant preferences", "Prefers concise, no legalese", null);
+
+        // Act
+        var result = await MemoryGovernanceEndpoints.SeedUserMemoryAsync(
+            request, Ctx(), store.Object, authorizer.Object, NullLogger<MemoryListResponse>.Instance, default);
+
+        // Assert — persisted as a User-scope, source=user item keyed by the caller's own systemuserid.
+        var ok = result.Should().BeOfType<Ok<MemoryItemDto>>().Subject;
+        ok.Value!.Scope.Should().Be(MemoryScope.User);
+        ok.Value.Source.Should().Be(MemoryOrigin.User);
+        captured.Should().NotBeNull();
+        captured!.Scope.Should().Be(MemoryScope.User);
+        captured.UserId.Should().Be(SystemUserId.ToString());
+        captured.Source.Should().Be(MemoryOrigin.User);
+        captured.Fact.Source.Should().Be(MemoryOrigin.User);
+        captured.Fact.ConfirmedByUser.Should().BeTrue();
+        captured.Fact.Key.Should().Be("Assistant preferences");
+        captured.Fact.Value.Should().Be("Prefers concise, no legalese");
+        capturedTenant.Should().Be(TenantId);
+    }
+
+    [Fact]
+    public async Task SeedUserMemory_IgnoresAnySubjectInBody_CannotSeedAnotherUsersMemory()
+    {
+        // Arrange — the resolver returns THIS caller's subject; the endpoint has no body field for a subject,
+        // so no request can target another user's partition. We assert the store is keyed to the resolved
+        // caller subject regardless of anything the caller could send.
+        MemoryItem? captured = null;
+        var store = new Mock<IMemoryItemStore>();
+        store.Setup(s => s.UpsertAsync(It.IsAny<MemoryItem>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<MemoryItem, string, CancellationToken>((i, _, _) => captured = i)
+            .ReturnsAsync((MemoryItem i, string _, CancellationToken _) => i);
+        var authorizer = new Mock<IMemoryAccessAuthorizer>();
+        authorizer.Setup(a => a.ResolveCallerUserSubjectAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SystemUserId);
+
+        var request = new MemorySeedRequest("keyFact", "k", "v", null);
+
+        // Act
+        await MemoryGovernanceEndpoints.SeedUserMemoryAsync(
+            request, Ctx(), store.Object, authorizer.Object, NullLogger<MemoryListResponse>.Instance, default);
+
+        // Assert — the persisted subject is the SERVER-RESOLVED caller systemuserid, full stop.
+        captured!.UserId.Should().Be(SystemUserId.ToString());
+        authorizer.Verify(a => a.ResolveCallerUserSubjectAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SeedUserMemory_WhenCallerIsNotADataverseUser_Returns403_AndDoesNotWrite()
+    {
+        var store = new Mock<IMemoryItemStore>();
+        var authorizer = new Mock<IMemoryAccessAuthorizer>();
+        authorizer.Setup(a => a.ResolveCallerUserSubjectAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null);
+
+        var result = await MemoryGovernanceEndpoints.SeedUserMemoryAsync(
+            new MemorySeedRequest("keyFact", "k", "v", null), Ctx(), store.Object, authorizer.Object,
+            NullLogger<MemoryListResponse>.Instance, default);
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        store.Verify(s => s.UpsertAsync(It.IsAny<MemoryItem>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SeedUserMemory_WhenValueMissing_Returns400_AndDoesNotWrite()
+    {
+        var store = new Mock<IMemoryItemStore>();
+        var authorizer = new Mock<IMemoryAccessAuthorizer>();
+
+        var result = await MemoryGovernanceEndpoints.SeedUserMemoryAsync(
+            new MemorySeedRequest("keyFact", "Assistant preferences", "   ", null), Ctx(),
+            store.Object, authorizer.Object, NullLogger<MemoryListResponse>.Instance, default);
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        store.Verify(s => s.UpsertAsync(It.IsAny<MemoryItem>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SeedUserMemory_ReSeedSameKey_UpsertsSameSubject_ReportsSupersession()
+    {
+        // Arrange — the store reports supersession (UpdatedAt set) on a repeated (Type,Key) capture.
+        var store = new Mock<IMemoryItemStore>();
+        store.Setup(s => s.UpsertAsync(It.IsAny<MemoryItem>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MemoryItem i, string _, CancellationToken _) => i with { UpdatedAt = DateTimeOffset.UtcNow });
+        var authorizer = new Mock<IMemoryAccessAuthorizer>();
+        authorizer.Setup(a => a.ResolveCallerUserSubjectAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SystemUserId);
+
+        var request = new MemorySeedRequest("keyFact", "Assistant preferences", "Prefers bullet points", null);
+
+        // Act
+        var result = await MemoryGovernanceEndpoints.SeedUserMemoryAsync(
+            request, Ctx(), store.Object, authorizer.Object, NullLogger<MemoryListResponse>.Instance, default);
+
+        // Assert — the write is a single upsert (the store keys by (scope,Type,Key) so it supersedes, not dupes).
+        var ok = result.Should().BeOfType<Ok<MemoryItemDto>>().Subject;
+        ok.Value!.UpdatedAt.Should().NotBeNull();
+        store.Verify(s => s.UpsertAsync(
+            It.Is<MemoryItem>(i => i.UserId == SystemUserId.ToString() && i.Fact.Key == "Assistant preferences"),
+            TenantId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // =====================================================================
     // Record-authorization-aligned read (FR-B-03 core)
     // =====================================================================
 
