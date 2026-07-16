@@ -67,6 +67,20 @@ public static class CommunicationModule
         // messaging sender (020), membership reconcile (041), and outbound send (051).
         services.AddAcsThreadPlane();
 
+        // Messaging (ACS Chat) channel seam (messaging-communication-app-r1 task 020 / FR-01). The SECOND
+        // implementation of each ADR-045 seam, keyed to CommunicationType.Message — proving "add a channel
+        // by additive keyed registration alone" (NFR-04): the dispatcher's ToDictionary(SupportedType) picks
+        // these up with NO change to the dispatch site in CommunicationService, the Association Engine, the
+        // enrichment service, the regarding model, or the review UI. Registered UNCONDITIONALLY (ADR-010 /
+        // ADR-032 — the dispatcher consumes them unconditionally; no feature gate). MessagingChannelSender
+        // transmits server-side over ACS Chat using the task-010/011 identity + thread planes registered
+        // above, returning the ACS message id as ProviderMessageId (the echo-dedup key, FR-04);
+        // MessagingArchiver emits a chat-transcript artifact archived to SPE via the same
+        // ICommunicationArchiver → SpeFileStore flow as email's .eml (ADR-007). Placed after the ACS planes
+        // because the sender depends on IAcsIdentityService + IAcsThreadService.
+        services.AddSingleton<ICommunicationChannelSender, MessagingChannelSender>();
+        services.AddSingleton<ICommunicationArchiver, MessagingArchiver>();
+
         // Association Engine (ADR-045 / FR-09/FR-10): the pure Graph→envelope boundary mapper, the
         // ordered rungs, and the envelope-only engine. All unconditional (consumed unconditionally by
         // the inbound processor per ADR-032; no feature gate). Rungs are registered as IAssociationRung
