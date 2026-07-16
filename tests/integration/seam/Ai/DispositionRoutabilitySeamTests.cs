@@ -86,6 +86,43 @@ public sealed class DispositionRoutabilitySeamTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // (1b) SurfaceLaunch (assistant-enhancements-r1 — the create-flow fix) register-once
+    //      vertical slice. A surface_launch-disposition binding dispatches end-to-end:
+    //      admit (would 422 at the admit-gate without the ONE registry row) → route
+    //      (pass-through, no server side-effect) → store (ledger "surface_launch"). The
+    //      ONLY thing that makes this pass is the single DispositionRoutability entry —
+    //      admit-gate, ToLedgerValue, and the router all read it. This is the binding
+    //      dispatch-spine DoD for the SurfaceLaunch leg.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DispatchAsync_SurfaceLaunchDisposition_Admits_Routes_Stores_AndRenders()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.SurfaceLaunch, SelectionInputSchema);
+        h.GivenFlatTextAction("ROLE: Draft the matter-intake fields for the launched wizard.", PassThroughOutputSchema);
+        h.OpenAi.RawJsonToReturn = """{"new_text":"Acme NDA intake"}""";
+
+        var chunks = await h.DispatchAsync(new { selectionText = "draft a matter for the Acme NDA" });
+
+        // ADMIT: surface_launch is routable ⇒ admissible (ADR-043 §3) — the admit-gate no longer 422s
+        // (the exact gap Compose hit). RENDER: a terminal complete frame, no error.
+        chunks.Should().NotContain(c => c.Type == "error",
+            "surface_launch is routable ⇒ admissible (ADR-043 §3) — the admit-gate admits it");
+        chunks.Should().Contain(c => c.Type == "complete", "the dispatch yields a terminal complete frame");
+
+        // STORE: the surface_launch SessionOutput is durably in the ledger BEFORE render, with the ledger
+        // vocabulary member the registry maps (ToLedgerValue derives from the SAME registry). The client
+        // (task 012) re-materializes THIS stored payload into a pre-seeded wizard/OOB-form launch.
+        var stored = await h.GetStoredOutputAsync();
+        stored.Should().NotBeNull("store precedes render — ADR-040");
+        stored!.Disposition.Should().Be(DispositionRoutability.ToLedgerValue(BindingDisposition.SurfaceLaunch))
+            .And.Be("surface_launch");
+        stored.Payload.GetProperty("new_text").GetString().Should().Be("Acme NDA intake");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // (2) LOUD rejection through the registry — a not-yet-routable disposition is
     //     rejected PRE-RUN at the admit-gate (never a silent drop, never
     //     admittable-but-unroutable). No SessionOutput is stored (rejected before run).
@@ -172,8 +209,10 @@ public sealed class DispositionRoutabilitySeamTests
             BindingDisposition.WorkProduct,
             BindingDisposition.Email,
             BindingDisposition.Compose,
-        }, "these four legs are realized in OutputRouter; overlay/record/notification are registered " +
-           "as loud not-yet-routable (they need a new side-effect mechanism — out of E-20 scope)");
+            BindingDisposition.SurfaceLaunch,
+        }, "these five legs are realized in OutputRouter (SurfaceLaunch is a pass-through like Compose — " +
+           "assistant-enhancements-r1); overlay/record/notification are registered as loud not-yet-routable " +
+           "(they need a new side-effect mechanism)");
     }
 
     // ─── Harness ─────────────────────────────────────────────────────────────

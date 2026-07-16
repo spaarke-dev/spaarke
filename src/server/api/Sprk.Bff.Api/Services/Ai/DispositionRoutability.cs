@@ -49,7 +49,7 @@ public static class DispositionRoutability
 
         /// <summary>
         /// The ledger wire vocabulary member written to <c>SessionOutput.Disposition</c>
-        /// (<c>informational | work_product | overlay | email | record | notification | compose</c>
+        /// (<c>informational | work_product | overlay | email | record | notification | compose | surface_launch</c>
         /// — canonical §6.2 / ADR-040). Present for EVERY disposition (store precedes routing).
         /// </summary>
         public required string LedgerValue { get; init; }
@@ -76,6 +76,11 @@ public static class DispositionRoutability
         new Entry { Disposition = BindingDisposition.WorkProduct,   LedgerValue = "work_product",  Routable = true },
         new Entry { Disposition = BindingDisposition.Email,         LedgerValue = "email",         Routable = true },
         new Entry { Disposition = BindingDisposition.Compose,       LedgerValue = ComposeDisposition.DispositionValue, Routable = true },
+        // SurfaceLaunch (assistant-enhancements-r1 — the create-flow fix): a routable PASS-THROUGH like
+        // Compose. The dispatch stores the capability's drafted launch payload; the client re-materializes
+        // it into a pre-seeded wizard/OOB-form/workspace-tab launch (no server side-effect). Routable ⇒
+        // admissible on the dispatch path (ADR-043 §3), so the admit-gate follows automatically.
+        new Entry { Disposition = BindingDisposition.SurfaceLaunch, LedgerValue = "surface_launch", Routable = true },
 
         // Not-yet-routable legs (routable=false ⇒ LOUD rejection, never a silent drop). Realizing any
         // of these requires a NEW side-effect mechanism (out of E-20 scope per the ADR-043 escalation

@@ -111,7 +111,7 @@ public sealed record Binding
 
 /// <summary>
 /// Output routing disposition (canonical §6.2:
-/// <c>informational | work_product | overlay | email | record | notification | compose</c>).
+/// <c>informational | work_product | overlay | email | record | notification | compose | surface_launch</c>).
 /// Enum values are the raw <c>sprk_disposition</c> option-set values.
 /// </summary>
 /// <remarks>
@@ -148,6 +148,20 @@ public enum BindingDisposition
     /// the ledger (render-follows-store, ADR-040). See <see cref="ComposeDisposition"/>.
     /// </summary>
     Compose = 100000006,
+
+    /// <summary>
+    /// Pre-seeded surface-launch output (spaarkeai-assistant-enhancements-r1 — the create-flow fix).
+    /// A ROUTABLE PASS-THROUGH mirroring <see cref="Compose"/>: the capability drafted the fields for a
+    /// launched Class-2 surface (Create-Matter/Event wizard, OOB To-Do form, or an in-app workspace-tab
+    /// view), the stored <see cref="Sprk.Bff.Api.Models.Ai.Chat.SessionOutput"/> carries that launch
+    /// payload (ledger value <c>surface_launch</c>), and the CLIENT re-materializes it into a pre-seeded
+    /// wizard/form launch — no server side-effect (render-follows-store, ADR-040). Rides the existing
+    /// SSE/ledger dispatch surface (ADR-039 — no second dispatch protocol). The client owns the
+    /// hand-off id + <c>sessionStorage</c> rendezvous + target-surface mapping (task 012); the
+    /// dispatch leg only stores the drafted payload. Matches the live Dataverse <c>sprk_disposition</c>
+    /// option value exactly.
+    /// </summary>
+    SurfaceLaunch = 100000007,
 }
 
 /// <summary>

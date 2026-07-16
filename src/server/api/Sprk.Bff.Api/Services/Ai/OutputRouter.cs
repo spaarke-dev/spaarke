@@ -265,6 +265,19 @@ public sealed class OutputRouter : IOutputRouter
             case BindingDisposition.Compose:
                 return new RoutedOutput { Entry = entry, Session = updated, Outcome = outcome };
 
+            // SurfaceLaunch (assistant-enhancements-r1 — the create-flow fix): pre-seeded surface launch.
+            // Pass-through like Compose/Informational — the surface_launch SessionOutput is STORED above
+            // (store-before-render, ADR-040) carrying the capability's drafted launch payload, and the
+            // CLIENT re-materializes it into a pre-seeded wizard / OOB-form / workspace-tab launch. The
+            // leg performs NO server side-effect: "hand the user the pre-seeded UI," not "the server
+            // writes the record" — the client owns the hand-off id + sessionStorage rendezvous +
+            // target-surface mapping (task 012). The router stores + returns; it NEVER parses the opaque
+            // launch payload (the client owns it). Returns the Completion Engine OutcomeCard exactly like
+            // the Informational/Compose cases (Outcome = outcome) — the card rides this same disposition
+            // surface (task 035 / NFR-09); omitting it would silently drop surface-launch outputs' card.
+            case BindingDisposition.SurfaceLaunch:
+                return new RoutedOutput { Entry = entry, Session = updated, Outcome = outcome };
+
             // Email (FR-P3-04, task 043): deliver via the Communication (Email) service.
             // The capability supplies presentation IN the stored payload (`email` object:
             // to[] / subject / htmlBody — see IEmailDispositionSender remarks); the router
@@ -393,7 +406,7 @@ public sealed class OutputRouter : IOutputRouter
 /// <summary>
 /// Maps <see cref="BindingDisposition"/> (raw <c>sprk_disposition</c> option-set values)
 /// to the ledger wire vocabulary on <see cref="SessionOutput.Disposition"/>
-/// (<c>informational | work_product | overlay | email | record | notification | compose</c> —
+/// (<c>informational | work_product | overlay | email | record | notification | compose | surface_launch</c> —
 /// canonical §6.2 / ADR-040).
 /// </summary>
 /// <remarks>

@@ -92,6 +92,35 @@ public class OutputRouterTests
     }
 
     [Fact]
+    public async Task RouteAsync_SurfaceLaunchDisposition_StoresSurfaceLaunchEntryThenReturnsIt()
+    {
+        // SurfaceLaunch (assistant-enhancements-r1 — the create-flow fix): a PASS-THROUGH like
+        // Compose/informational, NOT a loud-NotSupported stub. The surface_launch SessionOutput is
+        // stored (store-before-render, ADR-040) carrying the drafted launch payload OPAQUELY, and the
+        // CLIENT re-materializes it into a pre-seeded wizard/OOB-form/workspace-tab launch (no server
+        // side-effect). The router stores + returns; it never parses the launch payload.
+        var session = BuildSession();
+        var binding = BuildBinding() with { Disposition = BindingDisposition.SurfaceLaunch };
+        var output = ParseJson("""{"target":{"surface":"sprk_creatematterwizard","kind":"wizard"},"draftValues":{"sprk_mattername":"Acme NDA intake"}}""");
+
+        var routed = await CreateSut().RouteAsync(session, binding, output);
+
+        _sessionManager.PersistedSessions.Should().ContainSingle();
+        var persisted = _sessionManager.PersistedSessions[0].Outputs!.Single();
+        routed.Entry.Should().BeSameAs(persisted);
+        // ToLedgerValue mapped BindingDisposition.SurfaceLaunch → the "surface_launch" ledger member.
+        routed.Entry.Disposition.Should().Be("surface_launch")
+            .And.Be(DispositionRoutability.ToLedgerValue(BindingDisposition.SurfaceLaunch));
+        routed.Entry.Key.Should().Be(SessionLedger.BuildOutputKey(BindingId.ToString(), 1));
+        // The router stores the client-owned launch payload verbatim — it never parses it.
+        routed.Entry.Payload.GetProperty("draftValues").GetProperty("sprk_mattername").GetString()
+            .Should().Be("Acme NDA intake");
+        // NFR-09: the surface_launch case returns the Completion Engine OutcomeCard exactly like
+        // Informational/Compose — omitting it would silently drop surface-launch outputs' card.
+        routed.Outcome.Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task RouteAsync_AppendsToExistingOutputs_NeverMutatesOrDrops()
     {
         var existing = BuildOutput("earlier-binding", turn: 1);

@@ -137,8 +137,11 @@ public sealed record SessionOutput
     public required int Turn { get; init; }
 
     /// <summary>
-    /// Rendering contract: <c>informational | work_product | overlay | email | record | notification | compose</c>.
+    /// Rendering contract: <c>informational | work_product | overlay | email | record | notification | compose | surface_launch</c>.
     /// The only contract between storage and rendering (ADR-040).
+    /// The <c>surface_launch</c> member (assistant-enhancements-r1 — the create-flow fix) is a routable
+    /// pass-through like <c>compose</c>: the stored payload carries a pre-seeded surface-launch envelope
+    /// and the CLIENT re-materializes it into a wizard/OOB-form/workspace-tab launch (no server side-effect).
     /// The <c>compose</c> member (ComposeDisposition v1 seam — spaarke-ai-architecture-redesign-r2
     /// task 010, FR-A0-06/08) rides this SAME string field and the existing SSE/ledger surface;
     /// it is NOT a second rendering path. Its SSE frame + supersession keying live in
