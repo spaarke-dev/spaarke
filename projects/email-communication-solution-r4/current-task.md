@@ -27,11 +27,16 @@ Both PCFs imported + placed (Connections bound to `sprk_associationprovenance`+`
 - **Reply does not quote the original thread** (owner noted). Composer prefill (`deriveComposerFields` in Actions PCF) sets To+"Re:" but not a quoted body. Future enhancement.
 - Connections PCF shows nothing on hand-made records (empty `sprk_associationprovenance`) — expected; only inbound-processed emails have provenance.
 
-### ▶️ Next Action (me) — after /compact
-**074 has a SCOPE GAP** (see ↓; needs a NEW BFF suggestion endpoint + real-Outlook test — owner decision pending). W3 030-032 / W5 050-054 coordination-blocked on r2-core. 075 needs multi-index-r2 merge-confirm. W6 060/061 unblocked once 043 deploy fully lands.
+### 🚀 MAJOR UNBLOCK (owner, 2026-07-15) — r2-core CLOSED → Services/Ai gate LIFTED
+`spaarke-ai-architecture-redesign-r2` (prior sole owner of `Services/Ai` internals) is **CLOSED**. The coordination gate that blocked **W3 (030/031/032)**, **W5 (050→051-054)**, and **075** is **LIFTED** — email-r4 now OWNS this work and does the Services/Ai investigation itself. Agents still run `/conflict-check` for OTHER active worktrees, but there is no r2-core owner to defer to. This opens the whole responsive-intelligence + semantic-rung backlog.
 
-### 🔔 074 scope gap (verified 2026-07-15) — needs a BFF suggestion endpoint (POML wrong)
-074's POML claims "no BFF code change — the suggestion surface is owned by W1." **It is NOT.** The W1 engine (`IncomingAssociationResolver`) only runs during INBOUND webhook processing and WRITES `sprk_associationprovenance`; `CommunicationEnrichmentService.EnrichAsync` runs the engine direction-agnostically (since 011) but returns `Task` (writes, doesn't return candidates), and **no endpoint exposes suggestions**. For the add-in save pane to consume suggestions, 074 needs: (1) a **NEW BFF endpoint** that runs the engine on-demand for the saved email + **returns** candidates (target+confidence+provenance) — a candidates-returning method on the enrichment service + endpoint (§10 obligations); (2) add-in save-pane wiring (fetch+render+accept/override via `applyResolverFields`); (3) a **real-Outlook smoke test** (can't be done headless — same limitation as 072). Options: build the buildable parts (endpoint + pane) + owner smoke-tests, OR defer 074. **Owner decision needed.**
+### 🔌 074 decision (owner, 2026-07-15) = Path C + add-in DEFER
+- Owner: **broader add-in strategy pending** (may use a different add-in UI/approach); **do NOT hold up this project for add-ins or external dependencies.**
+- **DEFERRED to future add-in-strategy effort**: the Outlook add-in save-pane UI + live-Outlook smoke test (the add-in-coupled, external-dependency parts). This project no longer waits on it.
+- **BUILD (Path C, UI-agnostic BFF capability)**: an **evaluate-only engine path** (`IncomingAssociationResolver` today WRITES; `EnrichAsync` returns `Task`, not candidates) + a **suggestion endpoint** that runs the engine on-demand and RETURNS candidates (target+confidence+provenance). This is **engine-adjacent** (touches `Services/Communication/Engine` + `CommunicationModule`) → serial in main session with the W3 rungs, NOT a parallel agent. §10 obligations apply.
+
+### ▶️ Next Action (me) — driving the unblocked engine core
+**Engine-touching, SERIAL in main session (current branch — avoids stale-master 3-way + mutual CommunicationModule conflict):** 030 (rung 4 semantic) → 031 (rung 5 AI) → 032 (telemetry+tests) → 074-endpoint (evaluate-path+suggestion). Then **W5** (050 gate now clears → 051/052/053/054, Services/Ai). **Safely-parallel agents RUNNING:** 061 (W6 client wizard migration) + 075 (W7 index-config, Services/Ai). W6 060 still waits on 043 deploy (owner).
 
 ### ✅ 042 owner decisions (2026-07-15) — RESOLVED
 - **Regarding model = MULTIPLE** (one per entity type; per-field slots enforce this), PLUS an explicit **"primary"** designation owning the denorm `Regarding Record` fields. **Both shipped** — additive write (commit `bd773083a`) + ★Primary badge/button (commit `ce5e56672`). Rationale: `notes/042-connections-pcf-completion.md`.
@@ -60,6 +65,12 @@ Both PCFs imported + placed (Connections bound to `sprk_associationprovenance`+`
 - Earlier commits this session: `4154c5049` (015), `bf432e4be` (018 race fix), `09703c355` (017), `4c6594706` (023), `6440217b3` (016), `4eeaf860f` + `b1d5d79dc` + trackers.
 
 ---
+
+## 030 (rung 4 semantic) — IMPLEMENTED, gates in progress
+- **NEW** `Services/Communication/Engine/Rungs/SemanticMatchRung.cs` (Kind=SemanticMatch/4, Order 4) + `Configuration/SemanticMatchOptions.cs` (`Communication:SemanticMatch`; Enabled kill-switch, Limit, MaxCandidates, MinScore 0.50, ScoreCeiling 0.80, MaxQueryChars 1000). **EDIT** `CommunicationModule.cs` (bind options + register rung singleton) + `appsettings.template.json` (SemanticMatch block under Communication).
+- **Zero engine/mapper change**: engine already partitions Kind 4/5 as cost-gated AI rungs (run only when deterministic didn't auto-file); mapper already caps AI rungs to Suggested (auto-file uses deterministic-only confidence). Rung consumes `IRecordMatchingAi` facade (ADR-013) from a per-eval `IServiceScopeFactory` scope (facade scoped, rung singleton). Index name NOT hardcoded (`SearchIndexName=null` → RecordSearchService resolves) — merge-clean with 075. Records index = matter/project/invoice only; org served by rung-2 domain (documented §11). ScoreCeiling 0.80 keeps semantic below 0.85 auto-file threshold. Telemetry: structured fired/skipped/hits/elapsed logs (032 consumes).
+- Build clean (0 err); **327 Communication tests green, 0 failed** (no regression; rung-4 unit tests = 032). §10 publish-size + CVE running; Step 9.5 gates next.
+- ⚠️ appsettings.template.json also edited by 075 (AiSearch region, non-adjacent) — clean 3-way expected.
 
 ## Active Task
 

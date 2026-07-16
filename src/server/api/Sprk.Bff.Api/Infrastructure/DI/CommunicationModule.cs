@@ -24,6 +24,10 @@ public static class CommunicationModule
         // consumed via IOptionsMonitor so a flag/threshold flip takes effect WITHOUT redeploy.
         services.Configure<AutoFileOptions>(configuration.GetSection(AutoFileOptions.SectionName));
 
+        // Semantic-match (rung 4 / FR-14) options. Bound from "Communication:SemanticMatch"; the Enabled
+        // flag is an operational kill-switch for the semantic rung (no redeploy).
+        services.Configure<SemanticMatchOptions>(configuration.GetSection(SemanticMatchOptions.SectionName));
+
         // Core services (singleton: all dependencies are singleton or options)
         services.AddSingleton<CommunicationAccountService>();
         services.AddSingleton<ApprovedSenderValidator>();
@@ -57,6 +61,11 @@ public static class CommunicationModule
         services.AddSingleton<IStructuralDetector, InvoiceNumberDetector>();
         services.AddSingleton<IStructuralDetector, CourtEFilingDetector>();
         services.AddSingleton<IAssociationRung, StructuralDetectorRung>();     // rung 3 — structural detectors
+        // rung 4 — semantic record match (FR-14). AI-tier: the engine evaluates it only when the
+        // deterministic pass did not auto-file, and the mapper caps it to Suggested (never auto-files).
+        // Consumes the IRecordMatchingAi facade (ADR-013) from a per-evaluation scope (facade is scoped,
+        // this rung is a singleton). Registered unconditionally; self-gated by Communication:SemanticMatch:Enabled.
+        services.AddSingleton<IAssociationRung, SemanticMatchRung>();          // rung 4 — semantic match
         // Confidence→status ladder + auto-file gate (FR-11 / ADR-018). Both unconditional (ADR-010):
         // the gate is pure config resolution and the mapper is pure decision logic; no feature gate.
         services.AddSingleton<AutoFileGate>();
