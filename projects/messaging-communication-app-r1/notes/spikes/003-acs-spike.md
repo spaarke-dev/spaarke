@@ -173,3 +173,23 @@ Capture into this report (replace the ESTIMATED labels with MEASURED):
 - **F1 (live latency):** the one number still ESTIMATED. Not a blocker (poll cadence has comfortable headroom) — capture via §7 before the timeline PCF (011/060) locks its interval.
 - **F2 (researcher memory absent):** `acs-chat-integration-2026-07-16.md` referenced by design/plan does not exist; recreate via `researcher` before 010 (facts captured in §6 as interim).
 - **F3 (retention range):** ACS `ThreadCreationDateRetentionPolicy` accepts 30–90 days; design §8.7 says "30-day". Confirm 30 is the intended floor (harness uses 30) vs delete-post-persist for tighter minimization.
+
+---
+
+## LIVE RESULTS (2026-07-16) — resource `spaarke-acs-dev` (endpoint `https://spaarke-acs-dev.unitedstates.communication.azure.com`)
+
+✅ **Live round-trip PASSED** via the harness (`dotnet run -- live`), authenticated with **`DefaultAzureCredential` (az login, ralph.schroeder@spaarke.com)** — the ADR-028 Entra `TokenCredential` path, **no connection string**. This validates the exact auth model tasks 010/011 built.
+
+| Measurement | Result |
+|---|---|
+| createUserAndToken(chat) | ✅ real `communicationUserId`; token scope=chat, lifetime ~24h |
+| createChatThread(retention=30d) | ✅ real `ChatThreadId`; 30-day `ThreadCreationDateRetentionPolicy` accepted live |
+| AddParticipants | ✅ |
+| SendMessage → ACS message id | ✅ `1784231661455` (numeric string) — the echo-dedup key |
+| **send→readback latency (proxy)** | **≈ 518 ms** — well inside the ~5s poll (NFR-07) |
+| id stability (send == readback) | ✅ True |
+| echo-dedup on ACS message id | ✅ own outbound echo → no-op |
+
+**Auth outcome**: Entra data-plane access works for the dev identity — the BFF's central-credential path needs no access key. **Remaining live-only measurement**: true send→Event Grid capture latency (needs the Event Grid subscription + a reachable BFF webhook — deferred to inbound integration, tasks 030/031).
+
+**Net**: W1 (010/011) is now **live-validated**, not just mocked. ACS message id format + SDK surface confirmed for 020/031/051.
