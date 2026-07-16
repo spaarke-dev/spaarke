@@ -10,6 +10,26 @@
 | D-043-01 | No client-accessible preference source for the SNS chip reorder | Gap | task 043 (FR-G1) | {URL} |
 | D-042-01 | User-scope MemoryItem seed deferred (no client memory-write endpoint) | Deferral | task 042 (FR-F3) | ✅ RESOLVED 2026-07-16 (built) |
 | D-042-02 | Profile-write authZ depends on `sprk_userprofile` Dataverse row-security config | Security follow-up | task 042 (052 write-side hand-off) | ✅ RESOLVED 2026-07-16 |
+| D-013-01 | Smart pre-seed **resolvedLookups server enrichment** (wire the 010 resolver into dispatch) | Deferral (part 3 of 013) | task 013 (2026-07-16) | {URL} |
+| D-013-02 | create-todo OOB pre-fill needs **logical-name draftValues** (title→sprk_name, description→sprk_description, priority_suggestion→sprk_priority) | Gap | task 013b (2026-07-16) | {URL} |
+| D-013-03 | create-task Event-subtype **display name** for the dropdown (only the Task GUID is client-side) | Gap | task 013b (2026-07-16) | {URL} |
+| D-013-04 | **completeHandoff(recordId)** not wired into wizard `onFinish` → launches read back as "cancelled" (P5 honest-ack on the launch path) | Gap | task 013b (2026-07-16) | {URL} |
+
+---
+
+## D-013-01 — Smart pre-seed resolvedLookups server enrichment (part 3 of task 013)
+
+- **Concrete behavior deferred**: the create-matter draft's `practice_area_suggestion` / `matter_type_suggestion` LABELS are NOT yet resolved to GUIDs server-side, so the launched Create Matter wizard opens with the name/description pre-filled but the **practice-area / matter-type dropdowns are NOT pre-selected** (the user picks them). The 010 constrained-field resolver is built + tested but **not yet wired into the dispatch path** — it has no live consumer until this lands.
+- **Why deferred**: the enrichment injects a dependency into the core `SessionDispatchOrchestrator` (highest-blast-radius dispatch class) + needs a seam test (ADR-043 DoD). Doing it at the tail of a long session risked breaking the core dispatch class / its test harness. Design fully captured (below) — it's a focused pass, not open-ended.
+- **Design (ready to implement)**: a new `ISurfaceLaunchEnricher` (Services/Ai), injected OPTIONALLY (nullable, last ctor param `= null`, or via `GetService`) into the orchestrator so existing test constructions don't break. Before `RouteAsync` (SessionDispatchOrchestrator.cs ~line 501), when `binding.Disposition == SurfaceLaunch`, call `output = await enricher.EnrichAsync(binding, output, ct)`. The enricher holds an R1 field-map keyed by `sprk_consumertype`: `create-matter → [(practice_area_suggestion → sprk_matter.sprk_practicearea), (matter_type_suggestion → sprk_matter.sprk_mattertype)]`; for each, call `IConstrainedFieldResolver.ResolveAsync` → build a `resolvedLookups` object (keyed by the ATTRIBUTE, value `{recordId, confidence, candidates?}` matching the 012 envelope `ResolvedLookup`) → merge into the payload JSON (JsonNode) → return. The router still stores an opaque payload it never parses. Register unconditionally (deps unconditional). Seam test: surface_launch create-matter dispatch → stored payload carries `resolvedLookups.sprk_practicearea.recordId`.
+- **Client is ready**: 013b's wizard mappers already pre-select a dropdown when a `resolvedLookups` entry has `confidence === 'high'` — so this enrichment lights up the smart pre-select with no further client change.
+- **Trigger to revisit**: next focused dispatch-spine pass (pairs naturally with 021).
+
+## D-013-02/03/04 — 013b launch-path follow-ons
+
+- **D-013-02** (create-todo OOB pre-fill): `launchSurface` passes `draftValues` to the OOB `sprk_todo` form as `defaultValues`, which require Dataverse **logical column names**. The create-todo Action emits `{title, description, priority_suggestion}` — not logical names. Fix: normalize to `{sprk_name, sprk_description, sprk_priority}` (server enrichment for create-todo, OR a client todo key-normalizer at the call-site). Small.
+- **D-013-03** (event-subtype display): the create-task registry preset injects the Task-subtype GUID as a bare `sprk_eventtype_ref`; the event wizard mapper deliberately does NOT bind it to the dropdown (the display NAME is unknown client-side → would blank the label). Fix: server enrichment supplies the name, or an on-mount name resolve in the Event wizard.
+- **D-013-04** (honest-ack on launch path): the launched wizards close via their existing `onClose`/`closeDialog` and do NOT write the committed `SurfaceHandoffResult` (record id) that `launchSurface` reads back — so a successful launch currently reads back as "cancelled". Fix: wire `completeHandoff(recordId)` (from `useWizardPageBootstrap`, shipped in 012) into each wizard's `onFinish`/success path. This is the P5 honest-ack (task 020 invariant) for the *launch* path — 020 shipped the ack contract but predates the 012 `completeHandoff` seam, so this specific wiring is new. Small but needed for a truthful "✅ Created" claim on launches.
 
 ---
 
