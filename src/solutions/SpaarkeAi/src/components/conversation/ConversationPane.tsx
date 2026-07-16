@@ -36,6 +36,9 @@ import { ComposeAssistantCoordination } from "./ComposeAssistantCoordination";
 import { useShellStage, useRestoreContext, usePaneCollapseContext } from "../shell/ThreePaneShell";
 import { HistoryMenu } from "./HistoryOverlay";
 import { AssistantToolMenu } from "./AssistantToolMenu";
+// task 042 (FR-F3 / F5) — the "My Assistant" stated-profile questionnaire + write/erase path.
+import { MyAssistantDialog } from "../assistant/MyAssistantDialog";
+import { useMyAssistant } from "../assistant/useMyAssistant";
 import { CommandHelpPanel } from "./CommandHelpPanel";
 import { HelpAffordance } from "./HelpAffordance";
 import { useInjectionQueue } from "./useInjectionQueue";
@@ -1255,6 +1258,11 @@ export function ConversationPane(): React.JSX.Element {
     [reviseChipsPending, handleDocAction, chips.consumerChipsSlot]
   );
 
+  // task 042 (FR-F3) — My Assistant questionnaire: open-state, cold-start gate, write/erase path.
+  // Defensive by construction (inert with no Xrm user id, e.g. jsdom/non-MDA hosts). MUST live ABOVE
+  // the auth guard below (Rules of Hooks / React #300 — see the transcriptFooter note above).
+  const myAssistant = useMyAssistant({ authenticatedFetch, bffBaseUrl });
+
   // ── Auth loading guard (gate on isAuthenticated — never a token snapshot) ──
   // NOTE (Rules of Hooks): every React.use* call MUST appear ABOVE this early return — see the
   // React #300 note on `transcriptFooter` above. Do not add hooks below this line.
@@ -1295,8 +1303,9 @@ export function ConversationPane(): React.JSX.Element {
                 WorkspacePaneMenu — a second, independent Menu trigger in this
                 rightSlot (History lists past sessions; this lists Assistant
                 tools). Entry behavior is wired in tasks 041/042; see
-                AssistantToolMenu.tsx for the placeholder-handler contract. */}
-            <AssistantToolMenu />
+                AssistantToolMenu.tsx for the placeholder-handler contract.
+                task 042 (FR-F3): "My Assistant" opens the stated-profile questionnaire. */}
+            <AssistantToolMenu onMyAssistant={myAssistant.openDialog} />
             {/* R4-5: New session — clears the persisted session id and remounts
                 SprkChat to mint a fresh session. PaneHeader's rightSlot already
                 stops propagation, so the header collapse never fires. */}
@@ -1460,6 +1469,22 @@ export function ConversationPane(): React.JSX.Element {
           onOpenRecord={() => {
             void previewNavigationService.openRecord("sprk_document", savedPreview.documentId);
           }}
+        />
+      ) : null}
+
+      {/* task 042 (FR-F3 / FR-E1 / F5) — My Assistant questionnaire. Cold-start gate + on-demand
+          launch from the Tools menu; writes sprk_userprofile (keyed upsert + N:N + profilecompletedon)
+          and hosts the GDPR erasure action. Rendered only when a Dataverse user context is available. */}
+      {myAssistant.available ? (
+        <MyAssistantDialog
+          open={myAssistant.open}
+          onClose={myAssistant.closeDialog}
+          coldStart={myAssistant.coldStart}
+          practiceAreas={myAssistant.practiceAreas}
+          initialValues={myAssistant.initialValues}
+          onSubmit={myAssistant.onSubmit}
+          onErase={myAssistant.onErase}
+          loading={myAssistant.loading}
         />
       ) : null}
     </div>

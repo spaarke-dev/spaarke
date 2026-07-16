@@ -26,7 +26,7 @@
 | 032 | Amend `EnvelopeBudget.User` + byte-stable render + eval re-baseline + caching | 4 | NFR-01, NFR-02, NFR-03 | ✅ | 030 | — | FULL | opus / high | ❌ hot-path (eval gate) — **User 300→700 Path-B signed off 2026-07-15; FR-E5 BU/team descoped (D-032-01); cache deferred** |
 | 040 | Assistant-pane tool drop-down (Fluent v9) | 5 | FR-F1 | ✅ | none | 041,042 | STANDARD | sonnet / high | ✅ safe |
 | 041 | Quick Start modal (reuse wizard library) | 5 | FR-F2 | 🔲 | 040 | — | STANDARD | sonnet / high | ❌ dropdown-surface w/040 |
-| 042 | My Assistant questionnaire → keyed upsert + N:N + seed `MemoryItem` | 5 | FR-F3 | 🔲 | 001,040 | — | FULL | opus / high | ❌ write-path + dropdown |
+| 042 | My Assistant questionnaire → keyed upsert + N:N + seed `MemoryItem` | 5 | FR-F3 | ✅ | 001,040 | — | FULL | opus / high | ❌ write-path + dropdown — **keyed upsert + N:N + F5 erasure shipped; alt-key Active (F-2✅), role=global (F-1✅); MemoryItem seed deferred (D-042-01); write-authZ config flag (D-042-02)** |
 | 043 | Suggested Next Steps cards post-dispatch + reorder-for-display | 5 | FR-G1 | ✅ | none | — | STANDARD | sonnet / high | ✅ safe — **reorder mechanism shipped; preference-source not yet client-wired (D-043-01)** |
 | 044 | Grounding-predicate wiring (`PreFilter` branch + `ChatHostContext` thread) | 5 | FR-H1 (code) | 🔲 | 003 | — | FULL | opus / xhigh | ❌ dispatch-spine (seam-test DoD) |
 | 050 | Authoring: richer `sprk_tooldescription` + chips + narrow ambiguity set + Q&A→list | 6 | FR-J1, FR-G2 | 🔲 | 002 | 051 | STANDARD | sonnet / high | ❌ catalog (coord) |

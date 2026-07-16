@@ -50,14 +50,14 @@ The producer (030) renders the **label** for the stored value. Whatever the glob
 
 - **Task 042** writes practice-area selections as **N:N associates** into this intersect.
 - **Task 030** reads related `sprk_practicearea_ref.sprk_practiceareaname` values via this relationship.
-- The relationship schema name presented to the Web API `Associate`/`Disassociate` calls is `sprk_userprofile_sprk_practicearea_ref` (confirm the exact `@odata.bind` navigation-property casing at task 042 against `$metadata`).
+- ⚠️ **CORRECTION (task 042 via live `$metadata`, 2026-07-16)**: the N:N **Associate/Disassociate navigation property** is the relationship **SchemaName** `sprk_UserProfile_sprk_PracticeArea_Ref_sprk_PracticeArea_Ref` — **NOT** the intersect entity name `sprk_userprofile_sprk_practicearea_ref` (that earlier guess was wrong). Web API `$ref` calls use the SchemaName nav property (e.g. `POST /sprk_userprofiles(<id>)/sprk_UserProfile_sprk_PracticeArea_Ref_sprk_PracticeArea_Ref/$ref`). The intersect entity name is still correct for describing the join table itself.
 
 ## Findings / carried-forward confirmations (non-blocking)
 
 | # | Finding | Impact | Owner of follow-up |
 |---|---|---|---|
-| **F-1** | `sprk_primaryrole` describes as a CHOICE with **14 inline options** — the shape of a **local** option set. Owner intent (FR-E1) was to bind to the **existing GLOBAL** role choice set (reusable beyond AI). `describe` cannot distinguish global-vs-local. | If local, the "reusable global set" goal is unmet — but the label↔value map above still serves the producer. Not blocking 030. | Owner to confirm global-vs-local in the maker portal; re-bind to global if needed (schema change — separate from R1 code). |
-| **F-2** | **Alternate key** on `sprk_systemuser` (Option B keyed upsert) could **not be read** — MCP `describe` does not expose `EntityKeyMetadata`. Not confirmed present OR absent. | Task 042's keyed upsert + task 030's keyed retrieve depend on it. | Confirm the alt-key logical name via maker portal / `$metadata` `EntityKeyMetadata` at **task 042** (which already carries an escalation trigger for a missing/misconfigured alt-key). |
+| **F-1** | `sprk_primaryrole` describes as a CHOICE with **14 inline options** — the shape of a **local** option set. Owner intent (FR-E1) was to bind to the **existing GLOBAL** role choice set (reusable beyond AI). `describe` cannot distinguish global-vs-local. | If local, the "reusable global set" goal is unmet — but the label↔value map above still serves the producer. Not blocking 030. | ✅ **RESOLVED 2026-07-16 (task 042 via live `$metadata`)**: `sprk_primaryrole` is bound to the **GLOBAL** option set **`sprk_timekeeperrole`** (`IsGlobal=True`) — owner intent met, no re-bind needed. |
+| **F-2** | **Alternate key** on `sprk_systemuser` (Option B keyed upsert) could **not be read** — MCP `describe` does not expose `EntityKeyMetadata`. Not confirmed present OR absent. | Task 042's keyed upsert + task 030's keyed retrieve depend on it. | ✅ **RESOLVED 2026-07-16 (task 042 via live `$metadata`)**: alt-key present + **Active** — SchemaName `sprk_SystemUser`, KeyAttributes `[sprk_systemuser]`, `EntityKeyIndexStatus=Active` (unique index → enforces 1:1). True keyed upsert confirmed; no escalation. |
 
 ## Escalation decision
 
