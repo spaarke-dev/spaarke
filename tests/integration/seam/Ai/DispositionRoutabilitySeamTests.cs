@@ -329,6 +329,74 @@ public sealed class DispositionRoutabilitySeamTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // (1f) dispatchUncertain routing-confidence tier (assistant-enhancements-r1 task 022 / FR-D2). The
+    //      ConfirmWhenUncertain tier reads request.DispatchUncertain — the single-turn confidence signal
+    //      the CALLER derives (Click = explicit; text-path tool-call = committed; ambiguity resolved
+    //      upstream by a layer-1 clarifying question). It is NOT a second scorer (ADR-039): the gate
+    //      decides STRUCTURALLY from the bool with no model call (asserted: LastPrompt stays null on the
+    //      gated pass). Both R1 entry paths pass false, but the tier is architecturally live — a future
+    //      firing producer sets the flag with no spine change. These tests inject the signal to prove the
+    //      tier wires end-to-end.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DispatchAsync_ConfirmWhenUncertainRisk_UncertainDispatch_SuspendsWithoutScorer()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.Informational, SelectionInputSchema, risk: BindingRisk.ConfirmWhenUncertain);
+        h.GivenFlatTextAction("ROLE: unused — gated before the LLM.", PassThroughOutputSchema);
+
+        var chunks = await h.DispatchAsync(new { selectionText = "maybe do this" }, dispatchUncertain: true);
+
+        // GATED: ConfirmWhenUncertain + an uncertain dispatch suspends BEFORE the LLM — no complete chunk,
+        // no ledger output, and a confirm chip. LastPrompt null proves the decision was STRUCTURAL (the
+        // bool), not a model/scorer call (ADR-039 no second mechanism).
+        h.OpenAi.LastPrompt.Should().BeNull("the tier decides from the structural signal — no scorer runs");
+        chunks.Should().NotContain(c => c.Type == "complete");
+        (await h.GetStoredOutputAsync()).Should().BeNull("a suspended dispatch writes no SessionOutput");
+        var chip = chunks.Should().ContainSingle(c => c.Type == "chips").Subject.Chips.Should().ContainSingle().Subject;
+        var confirmGateId = ((JsonObject)chip.Args!)["confirmGateId"]!.GetValue<string>();
+        PendingPlanManager.GetCurrentGateStatus(await h.GetGatesAsync(), confirmGateId)
+            .Should().Be(PendingPlanManager.GateStatusPending);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ConfirmWhenUncertainRisk_ConfidentDispatch_ExecutesWithoutGate()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.Informational, SelectionInputSchema, risk: BindingRisk.ConfirmWhenUncertain);
+        h.GivenFlatTextAction("ROLE: Explain the clause.", PassThroughOutputSchema);
+        h.OpenAi.RawJsonToReturn = """{"new_text":"An explanation."}""";
+
+        // Confident dispatch (dispatchUncertain=false — the R1 default at both entry paths).
+        var chunks = await h.DispatchAsync(new { selectionText = "a clause" }, dispatchUncertain: false);
+
+        h.OpenAi.LastPrompt.Should().NotBeNull("a confident ConfirmWhenUncertain dispatch runs with no gate");
+        chunks.Should().Contain(c => c.Type == "complete").And.NotContain(c => c.Type == "chips");
+        (await h.GetStoredOutputAsync()).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task DispatchAsync_NoneRisk_UncertainDispatch_ExecutesWithoutGate()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.Informational, SelectionInputSchema, risk: BindingRisk.None);
+        h.GivenFlatTextAction("ROLE: Explain the clause.", PassThroughOutputSchema);
+        h.OpenAi.RawJsonToReturn = """{"new_text":"An explanation."}""";
+
+        // Risk None never gates — even an uncertain dispatch (the uncertainty tier only applies to
+        // ConfirmWhenUncertain). Proves the two axes compose correctly (risk gates the tier selection).
+        var chunks = await h.DispatchAsync(new { selectionText = "a clause" }, dispatchUncertain: true);
+
+        h.OpenAi.LastPrompt.Should().NotBeNull("risk None ignores the uncertainty signal entirely");
+        chunks.Should().Contain(c => c.Type == "complete").And.NotContain(c => c.Type == "chips");
+        (await h.GetStoredOutputAsync()).Should().NotBeNull();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // (2) LOUD rejection through the registry — a not-yet-routable disposition is
     //     rejected PRE-RUN at the admit-gate (never a silent drop, never
     //     admittable-but-unroutable). No SessionOutput is stored (rejected before run).
@@ -523,12 +591,12 @@ public sealed class DispositionRoutabilitySeamTests
                     Temperature = 0.2m,
                 });
 
-        public async Task<IReadOnlyList<AnalysisChunk>> DispatchAsync(object args)
+        public async Task<IReadOnlyList<AnalysisChunk>> DispatchAsync(object args, bool dispatchUncertain = false)
         {
             var argsElement = JsonSerializer.SerializeToElement(args);
             var chunks = new List<AnalysisChunk>();
             await foreach (var chunk in Orchestrator.DispatchAsync(
-                new SessionDispatchRequest(TenantId, SessionId, BindingId, argsElement)))
+                new SessionDispatchRequest(TenantId, SessionId, BindingId, argsElement, DispatchUncertain: dispatchUncertain)))
             {
                 chunks.Add(chunk);
             }

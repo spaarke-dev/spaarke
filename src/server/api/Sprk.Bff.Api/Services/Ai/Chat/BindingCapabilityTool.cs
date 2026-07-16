@@ -264,6 +264,13 @@ public sealed class BindingCapabilityTool : AIFunction
         }
         // ── End DEF-11 routing ───────────────────────────────────────────────────────────────────
 
+        // Task 022 (FR-D2) routing-confidence producer, text/agent path: a capability tool-call that
+        // reaches here is a COMMITTED selection by the one probabilistic decider (ADR-039). Genuine
+        // capability ambiguity is resolved UPSTREAM — the agent turn asks a clarifying question (layer 1)
+        // instead of dispatching — so a dispatch reaching this seam is confident by construction:
+        // DispatchUncertain = false (its record default). This is the honest single-turn-derived signal;
+        // no second scorer/classifier exists (a firing numeric/multi-call producer is a documented
+        // follow-on that sets this flag without any dispatch-spine change).
         var request = new SessionDispatchRequest(_tenantId, dispatchSessionId, _binding.BindingId, args);
 
         try

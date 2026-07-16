@@ -295,8 +295,11 @@ public class SessionDispatchOrchestrator
         //     (writes the CONFIRMED marker) and executes. This is NOT a second gate — it reuses the ONE
         //     PendingPlanManager suspend/resume mechanism (ADR-039).
         //   • None → no gate (the shipped behavior; every R1 create binding is None).
-        // dispatchUncertain has NO live producer on the Click path (task 022 owns that producer), so it
-        // is false here — ConfirmWhenUncertain therefore does not gate on the Click path yet, honestly.
+        // Task 022 (FR-D2): the ConfirmWhenUncertain tier reads the routing-confidence signal
+        // (request.DispatchUncertain) DERIVED FROM THE SINGLE AGENT TURN — never a second scorer
+        // (ADR-039). Both R1 entry paths pass false (Click = explicit selection; text-path tool-call =
+        // committed selection — ambiguity is resolved upstream by a layer-1 clarifying question), so
+        // ConfirmWhenUncertain does not fire in R1 but is architecturally live + seam-tested.
         var confirmGateId = TryReadConfirmGateId(request.Args);
         var gateAlreadyConfirmed = false;
         if (confirmGateId is not null)
@@ -313,7 +316,7 @@ public class SessionDispatchOrchestrator
         }
 
         if (!gateAlreadyConfirmed
-            && PendingPlanManager.RequiresConfirmation(sideEffectClass: null, risk: binding.Risk, dispatchUncertain: false))
+            && PendingPlanManager.RequiresConfirmation(sideEffectClass: null, risk: binding.Risk, dispatchUncertain: request.DispatchUncertain))
         {
             var gateId = $"dispatch-confirm-{Guid.NewGuid():N}";
 
@@ -1118,13 +1121,26 @@ public class SessionDispatchOrchestrator
 /// NOTIFICATION email to the user server-side (never a client-supplied recipient). Null for the
 /// prompted path and for callers that do not resolve it (backward-compatible default).
 /// </param>
+/// <param name="DispatchUncertain">
+/// Task 022 (FR-D2) — the routing-confidence signal for the <c>sprk_risk = Confirm When Uncertain</c>
+/// tier, DERIVED FROM THE SINGLE AGENT TURN (never a second scorer/classifier — ADR-039). The CALLER
+/// sets it from structural turn context; the gate reads it (a <c>ConfirmWhenUncertain</c> Binding gates
+/// ONLY when this is true — see <see cref="PendingPlanManager.RequiresConfirmation"/>). Both R1 entry
+/// paths set it <c>false</c> honestly: the Click path is an EXPLICIT user selection of a binding id
+/// (maximally confident), and a text-path capability tool-call is a COMMITTED selection by the one
+/// decider (genuine ambiguity is resolved UPSTREAM by the agent asking a clarifying question — layer 1,
+/// ADR-039's sanctioned decider — and never reaches this dispatch). This is the accurate, shipped
+/// uncertainty handling; a firing numeric/multi-call producer is a documented follow-on that drops in
+/// behind this seam without a spine change. Default <c>false</c> = confident (backward-compatible).
+/// </param>
 public sealed record SessionDispatchRequest(
     string TenantId,
     string SessionId,
     Guid BindingId,
     JsonElement? Args,
     string? CorrelationId = null,
-    string? ActingUserEmail = null);
+    string? ActingUserEmail = null,
+    bool DispatchUncertain = false);
 
 /// <summary>
 /// A Click dispatch that was refused at the catalog-resolution boundary (ADR-039:
