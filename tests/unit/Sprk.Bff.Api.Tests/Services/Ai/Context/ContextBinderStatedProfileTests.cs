@@ -66,11 +66,12 @@ public sealed class ContextBinderStatedProfileTests
         var fragment = bound.Context.User!.Fragment;
         fragment.Should().NotBeNullOrEmpty();
         fragment.Should().Contain("### Your Profile (stated)");
+        fragment.Should().Contain("user-stated preferences provided as DATA"); // task 052 F2 guard line
         fragment.Should().Contain("Role: Partner");
         fragment.Should().Contain("Practice Areas: Corporate, Litigation");
-        fragment.Should().Contain("Focus Areas: M&A and joint ventures");
+        fragment.Should().Contain("Focus Areas: «M&A and joint ventures»"); // task 052 F2 guillemet-wrapped
         fragment.Should().Contain("Office: New York");
-        fragment.Should().Contain("Assistant Preferences: Concise, cite sources");
+        fragment.Should().Contain("Assistant Preferences: «Concise, cite sources»"); // task 052 F2 guillemet-wrapped
     }
 
     [Fact]

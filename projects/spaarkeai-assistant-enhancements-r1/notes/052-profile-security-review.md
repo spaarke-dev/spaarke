@@ -6,6 +6,14 @@
 
 ---
 
+## Owner sign-off — F1 / F2 / F5 (2026-07-16, ralph.schroeder)
+
+All three conditions resolved; the read path is **signed off**.
+
+- **F1 (app-only Dataverse read) — RATIFIED.** App-only is an established platform pattern (matches `CallerContactResolver` / `CallerSystemUserResolver` / `MemoryItemStore`); isolation is enforced by the server-resolved, non-spoofable caller key + explicit query filter + the new authZ pin test. No code change.
+- **F2 (delimit + label the free-text fields) — ACCEPTED.** Applying the Appendix A delimiting to `StatedProfileRenderer` server-side, with the 032 byte-frozen golden + eval prompt-cache prefix re-baselined (done alongside task 042).
+- **F5 (GDPR erasure) — ACCEPTED into task 042.** No longer just deferred: 042 (the write path) builds a profile delete/disassociate path (row delete + N:N intersect disassociate + the seeded User MemoryItem).
+
 ## Findings (most-severe first)
 
 | # | Finding / concrete failure scenario | Severity | Status | Recommendation |
