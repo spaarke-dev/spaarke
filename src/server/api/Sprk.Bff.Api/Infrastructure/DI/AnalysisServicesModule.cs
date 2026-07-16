@@ -780,6 +780,20 @@ public static class AnalysisServicesModule
                            Sprk.Bff.Api.Services.Ai.Context.StatedProfileReader>();
         Console.WriteLine("✓ IStatedProfileReader registered (task 030 FR-E2; stated sprk_userprofile → User slice userFragment, ahead of memory recall)");
 
+        // IUserOrgContextReader — User-scope ORG (business-unit + team NAME) reader (FR-E5 BU/team half,
+        // un-defer D-032-01). A further SIBLING of IStatedProfileReader / ICallerSystemUserResolver: reuses
+        // IIdentityNormalizationService (Singleton, MembershipModule) for the caller's Redis-cached BU/team
+        // IDs — keyed off the SAME resolved systemuserid, no second identity mechanism — resolves their NAMES,
+        // and Redis-caches them (ITenantCache, per-systemuserid, 10-min TTL, NFR-03). ContextBinder renders
+        // it and folds the block into the User slice's userFragment AFTER the stated-profile block and BEFORE
+        // memory recall. Consumed ONLY by ContextBinder in THIS compound-ON block — same transitively-
+        // conditional rationale as IStatedProfileReader; ContextBinder also self-defaults to
+        // NullUserOrgContextReader internally (ADR-032 P2 quiet no-op), so omitting it stays safe. ADR-039:
+        // preference-only — the org block biases the one turn's prompt, never grounding/dispatch.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.IUserOrgContextReader,
+                           Sprk.Bff.Api.Services.Ai.Context.UserOrgContextReader>();
+        Console.WriteLine("✓ IUserOrgContextReader registered (FR-E5 BU/team; systemuser BU/team names → User slice userFragment, after stated profile, before memory recall)");
+
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.IContextBinder,
                            Sprk.Bff.Api.Services.Ai.Context.ContextBinder>();
         Console.WriteLine("✓ ContextBinder registered (ADR-043 E-10 input-resolution seam; ContextEnvelope + operand; task-038 fingerprint writer)");

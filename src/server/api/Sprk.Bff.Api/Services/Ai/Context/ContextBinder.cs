@@ -41,6 +41,7 @@ public sealed class ContextBinder : IContextBinder
     private readonly ICallerContactResolver _callerContactResolver;
     private readonly ICallerSystemUserResolver _callerSystemUserResolver;
     private readonly IStatedProfileReader _statedProfileReader;
+    private readonly IUserOrgContextReader _userOrgContextReader;
     private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly IMemoryItemStore? _memoryItemStore;
     private readonly TimeProvider _timeProvider;
@@ -110,6 +111,18 @@ public sealed class ContextBinder : IContextBinder
     /// no-op) so the stated-profile fragment stays absent rather than throwing. ADR-042: this is the STATED
     /// typed profile, NOT a memory store. ADR-039: preference-only — never feeds AgentToolFilterContext.
     /// </param>
+    /// <param name="userOrgContextReader">
+    /// User-scope ORG (business-unit + team NAME) reader (FR-E5 BU/team half, un-defer D-032-01) — a further
+    /// SIBLING of the stated-profile + user-memory RECALL fragments. Reuses the SAME resolved systemuserid
+    /// to key <c>IIdentityNormalizationService</c> for the (Redis-cached) BU/team IDs, resolves their NAMES,
+    /// and (Redis-cached, 10-min TTL) returns them; <see cref="ContextBinder"/> renders it
+    /// (<see cref="UserOrgContextRenderer"/>) as its OWN deterministic block folded into the User slice's
+    /// <c>userFragment</c> AFTER the stated-profile block and BEFORE the memory-recall block. Optional —
+    /// when the DI container has no registration (or a caller constructs <see cref="ContextBinder"/> directly,
+    /// e.g. existing tests), the Binder falls back to <see cref="NullUserOrgContextReader"/> (ADR-032 P2 quiet
+    /// no-op) so the org block stays absent rather than throwing. ADR-039: preference-only — this is context
+    /// that biases the one turn's prompt; it never feeds AgentToolFilterContext / grounding / dispatch.
+    /// </param>
     public ContextBinder(
         ChatSessionManager sessionManager,
         ILogger<ContextBinder> logger,
@@ -119,7 +132,8 @@ public sealed class ContextBinder : IContextBinder
         IMemoryItemStore? memoryItemStore = null,
         TimeProvider? timeProvider = null,
         ICallerSystemUserResolver? callerSystemUserResolver = null,
-        IStatedProfileReader? statedProfileReader = null)
+        IStatedProfileReader? statedProfileReader = null,
+        IUserOrgContextReader? userOrgContextReader = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -127,6 +141,7 @@ public sealed class ContextBinder : IContextBinder
         _callerContactResolver = callerContactResolver ?? NullCallerContactResolver.Instance;
         _callerSystemUserResolver = callerSystemUserResolver ?? NullCallerSystemUserResolver.Instance;
         _statedProfileReader = statedProfileReader ?? NullStatedProfileReader.Instance;
+        _userOrgContextReader = userOrgContextReader ?? NullUserOrgContextReader.Instance;
         _httpContextAccessor = httpContextAccessor;
         _memoryItemStore = memoryItemStore;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -477,10 +492,12 @@ public sealed class ContextBinder : IContextBinder
         return (assembled, recordMemoryFragment);
     }
 
-    // ── User-slice fragment composition (task 030, FR-E2): resolve the caller's systemuserid ONCE
-    //    (server-side, deterministic) and compose the STATED-profile block (FIRST) with the USER-scope
-    //    memory RECALL block. Each block soft-fails to null independently; an unresolved caller yields no
-    //    User fragment at all (neither block has a key). A bind is never taken down by either producer. ──
+    // ── User-slice fragment composition (task 030, FR-E2; FR-E5 BU/team half added by un-defer D-032-01):
+    //    resolve the caller's systemuserid ONCE (server-side, deterministic) and compose, in a fixed
+    //    deterministic order, the three sibling producers: the STATED-profile block (FIRST), the ORG
+    //    (BU/team) context block (SECOND), then the USER-scope memory RECALL block (LAST). Each block
+    //    soft-fails to null independently; an unresolved caller yields no User fragment at all (none of the
+    //    blocks has a key). A bind is never taken down by any producer. ──────────────────────────────────
 
     private async Task<string?> ResolveUserFragmentAsync(ContextBindingRequest request, CancellationToken ct)
     {
@@ -491,19 +508,56 @@ public sealed class ContextBinder : IContextBinder
         }
 
         var statedProfileFragment = await ResolveStatedProfileFragmentAsync(systemUserId, ct).ConfigureAwait(false);
+        var orgContextFragment = await ResolveOrgContextFragmentAsync(systemUserId, ct).ConfigureAwait(false);
         var memoryRecallFragment = await ResolveUserMemoryFragmentAsync(systemUserId, ct).ConfigureAwait(false);
 
-        // Deterministic order: stated profile FIRST, then memory recall. Preserves the pre-task-030
-        // behavior when no profile is present (User fragment == memory recall). Both absent → null.
-        if (statedProfileFragment is null)
+        // Deterministic order: stated profile FIRST, then org (BU/team) context, then memory recall. Present
+        // blocks are joined by a blank line. This preserves the prior behavior exactly when the org block is
+        // absent (stated-only → stated; memory-only → memory; stated+memory → stated\n\nmemory). All absent → null.
+        var blocks = new List<string>(3);
+        if (statedProfileFragment is not null)
         {
-            return memoryRecallFragment;
+            blocks.Add(statedProfileFragment);
         }
-        if (memoryRecallFragment is null)
+        if (orgContextFragment is not null)
         {
-            return statedProfileFragment;
+            blocks.Add(orgContextFragment);
         }
-        return statedProfileFragment + "\n\n" + memoryRecallFragment;
+        if (memoryRecallFragment is not null)
+        {
+            blocks.Add(memoryRecallFragment);
+        }
+
+        return blocks.Count == 0 ? null : string.Join("\n\n", blocks);
+    }
+
+    // ── User-scope ORG context (FR-E5 BU/team half, un-defer D-032-01): read the caller's business-unit +
+    //    team NAMES (via IUserOrgContextReader — which reuses the SAME resolved systemuserid to key
+    //    IIdentityNormalizationService, then resolves + Redis-caches the names) and render a deterministic
+    //    block. Soft-fail to null (ADR-032 P2 quiet no-op — an org-less user or any read error degrades the
+    //    org block to absent; the reader already soft-fails internally, and NullUserOrgContextReader returns
+    //    null when unregistered). ADR-039: preference-only — this block only ever biases the one turn's
+    //    PROMPT; it never reaches AgentToolFilterContext / grounding / dispatch. ─────────────────────────────
+
+    private async Task<string?> ResolveOrgContextFragmentAsync(string systemUserId, CancellationToken ct)
+    {
+        try
+        {
+            var context = await _userOrgContextReader.ReadAsync(systemUserId, ct).ConfigureAwait(false);
+            return UserOrgContextRenderer.Render(context);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Defense-in-depth: the reader already soft-fails internally, but the composition never throws.
+            _logger.LogWarning(ex,
+                "ContextBinder: user-org-context (BU/team) read failed for the resolved caller — the org " +
+                "block degrades to absent (soft-fail; a bind is never taken down by the org context). NFR-07.");
+            return null;
+        }
     }
 
     // ── User-scope STATED profile (task 030, FR-E2): read the caller's typed sprk_userprofile row + its N:N
