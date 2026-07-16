@@ -768,6 +768,18 @@ public static class AnalysisServicesModule
                            Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
         Console.WriteLine("✓ ICallerSystemUserResolver registered (F-2 user-memory recall; claims→systemuser, keys the User slice recall fragment)");
 
+        // IStatedProfileReader — User-scope STATED-profile reader (task 030, FR-E2). Reads the caller's typed
+        // sprk_userprofile row (keyed by the resolved systemuserid) + its N:N sprk_practicearea_ref names;
+        // ContextBinder renders it and folds the block into the User slice's userFragment AHEAD of the
+        // memory-recall block. Mirrors ICallerSystemUserResolver exactly (same IDataverseService facade, same
+        // one-hop read, same soft-fail posture) and is consumed ONLY by ContextBinder in THIS compound-ON
+        // block — same transitively-conditional rationale as ICallerSystemUserResolver; ContextBinder also
+        // self-defaults to NullStatedProfileReader internally (ADR-032 P2 quiet no-op), so omitting it stays
+        // safe. ADR-042: STATED typed profile, NOT a memory store. ADR-039: preference-only, never grounding.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.IStatedProfileReader,
+                           Sprk.Bff.Api.Services.Ai.Context.StatedProfileReader>();
+        Console.WriteLine("✓ IStatedProfileReader registered (task 030 FR-E2; stated sprk_userprofile → User slice userFragment, ahead of memory recall)");
+
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.IContextBinder,
                            Sprk.Bff.Api.Services.Ai.Context.ContextBinder>();
         Console.WriteLine("✓ ContextBinder registered (ADR-043 E-10 input-resolution seam; ContextEnvelope + operand; task-038 fingerprint writer)");

@@ -3,7 +3,8 @@
   <metadata>
     <title>User-scope stated-profile producer → ContextBinder.userFragment</title>
     <phase>4: User Model</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-07-15</completed>
     <estimated-hours>4</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>031, 032, 042, 051, 052</blocks>
@@ -94,6 +95,8 @@
 
   <notes>
     Spec FR-E2 / FR-E5. Byte-stability + budget amendment = task 032; negative test = 031; security hardening = 052.
+
+    COMPLETED 2026-07-15 (subagent-implemented, main-session Step 9.5 verified): StatedProfileReader (IStatedProfileReader + StatedProfile DTO + NullStatedProfileReader ADR-032 default) + StatedProfileRenderer + ContextBinder composition (stated-profile block first, memory-recall second; explicit UserFragment still wins; systemuserid resolved once) + DI in AnalysisServicesModule. Build 0 errors; 10 new unit tests green (5 composition + 5 reader), 34 total no regressions. ADR-039/042/032/010 verified. **FR-E5 BU/team NOT implemented — deferred to task 032** (needs sprk_userentityassociation/IMembershipResolverService, a second hot-path read to design with 032's caching/latency decision, NFR-03). FR-E2 + the sprk_primaryrole LABEL portion of FR-E5 ARE covered.
   </notes>
 
   <execution>

@@ -40,6 +40,7 @@ public sealed class ContextBinder : IContextBinder
     private readonly IOrganizationalContextProvider _organizationalContextProvider;
     private readonly ICallerContactResolver _callerContactResolver;
     private readonly ICallerSystemUserResolver _callerSystemUserResolver;
+    private readonly IStatedProfileReader _statedProfileReader;
     private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly IMemoryItemStore? _memoryItemStore;
     private readonly TimeProvider _timeProvider;
@@ -99,6 +100,16 @@ public sealed class ContextBinder : IContextBinder
     /// <see cref="NullCallerSystemUserResolver"/> (ADR-032 empty default) so the User slice's user-memory
     /// fragment stays honestly absent rather than throwing.
     /// </param>
+    /// <param name="statedProfileReader">
+    /// User-scope STATED-profile reader (task 030, FR-E2) — the SIBLING of the user-memory RECALL fragment.
+    /// Reads the caller's typed <c>sprk_userprofile</c> row (keyed by the resolved systemuserid) + its N:N
+    /// practice-area names; <see cref="ContextBinder"/> renders it (<see cref="StatedProfileRenderer"/>) and
+    /// folds the block into the User slice's <c>userFragment</c> AHEAD of the memory-recall block. Optional —
+    /// when the DI container has no registration (or a caller constructs <see cref="ContextBinder"/> directly,
+    /// e.g. existing tests), the Binder falls back to <see cref="NullStatedProfileReader"/> (ADR-032 P2 quiet
+    /// no-op) so the stated-profile fragment stays absent rather than throwing. ADR-042: this is the STATED
+    /// typed profile, NOT a memory store. ADR-039: preference-only — never feeds AgentToolFilterContext.
+    /// </param>
     public ContextBinder(
         ChatSessionManager sessionManager,
         ILogger<ContextBinder> logger,
@@ -107,13 +118,15 @@ public sealed class ContextBinder : IContextBinder
         IHttpContextAccessor? httpContextAccessor = null,
         IMemoryItemStore? memoryItemStore = null,
         TimeProvider? timeProvider = null,
-        ICallerSystemUserResolver? callerSystemUserResolver = null)
+        ICallerSystemUserResolver? callerSystemUserResolver = null,
+        IStatedProfileReader? statedProfileReader = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _organizationalContextProvider = organizationalContextProvider ?? new NullOrganizationalContextProvider();
         _callerContactResolver = callerContactResolver ?? NullCallerContactResolver.Instance;
         _callerSystemUserResolver = callerSystemUserResolver ?? NullCallerSystemUserResolver.Instance;
+        _statedProfileReader = statedProfileReader ?? NullStatedProfileReader.Instance;
         _httpContextAccessor = httpContextAccessor;
         _memoryItemStore = memoryItemStore;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -399,12 +412,12 @@ public sealed class ContextBinder : IContextBinder
             ? EnvironmentFactsProducer.BuildCurrentDateDirective(_timeProvider.GetUtcNow())
             : request.WorkspaceFragment;
 
-        // User: explicit fragment, else the caller's USER-scope memory RECALL fragment (F-2 / D3). Resolves
-        // the caller's systemuserid (claims→systemuser, server-side only) and renders the same-discipline
-        // fragment; the renderer's RenderStablePrefixAdditions already renders User.Fragment, so F-2 recall
-        // ships through the D1 cutover automatically. Soft-fail to null (never takes down a bind).
+        // User: explicit fragment, else the composed User-slice fragment = STATED-profile block (task 030,
+        // FR-E2) FIRST, then the USER-scope memory RECALL fragment (F-2 / D3). Both are resolved off the ONE
+        // server-side systemuserid resolution (claims→systemuser); each soft-fails to null independently so a
+        // profile/store outage never takes down a bind. An explicit request fragment ALWAYS wins.
         var userFragment = string.IsNullOrEmpty(request.UserFragment)
-            ? await ResolveUserMemoryFragmentAsync(request, ct).ConfigureAwait(false)
+            ? await ResolveUserFragmentAsync(request, ct).ConfigureAwait(false)
             : request.UserFragment;
 
         // Memory items: explicit references, else record memory from the store when a host + store are
@@ -464,19 +477,68 @@ public sealed class ContextBinder : IContextBinder
         return (assembled, recordMemoryFragment);
     }
 
-    // ── User-scope memory recall (F-2 / D3): resolve the caller's systemuserid (server-side, deterministic)
-    //    and render the same-discipline USER prompt fragment. Soft-fail to null (a store outage / unresolved
-    //    caller degrades the User recall fragment to absent; a bind is never taken down by memory). ──────
+    // ── User-slice fragment composition (task 030, FR-E2): resolve the caller's systemuserid ONCE
+    //    (server-side, deterministic) and compose the STATED-profile block (FIRST) with the USER-scope
+    //    memory RECALL block. Each block soft-fails to null independently; an unresolved caller yields no
+    //    User fragment at all (neither block has a key). A bind is never taken down by either producer. ──
 
-    private async Task<string?> ResolveUserMemoryFragmentAsync(ContextBindingRequest request, CancellationToken ct)
+    private async Task<string?> ResolveUserFragmentAsync(ContextBindingRequest request, CancellationToken ct)
     {
-        if (_memoryItemStore is null)
+        var systemUserId = await ResolveCallerSystemUserIdAsync(request, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(systemUserId))
         {
             return null;
         }
 
-        var systemUserId = await ResolveCallerSystemUserIdAsync(request, ct).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(systemUserId))
+        var statedProfileFragment = await ResolveStatedProfileFragmentAsync(systemUserId, ct).ConfigureAwait(false);
+        var memoryRecallFragment = await ResolveUserMemoryFragmentAsync(systemUserId, ct).ConfigureAwait(false);
+
+        // Deterministic order: stated profile FIRST, then memory recall. Preserves the pre-task-030
+        // behavior when no profile is present (User fragment == memory recall). Both absent → null.
+        if (statedProfileFragment is null)
+        {
+            return memoryRecallFragment;
+        }
+        if (memoryRecallFragment is null)
+        {
+            return statedProfileFragment;
+        }
+        return statedProfileFragment + "\n\n" + memoryRecallFragment;
+    }
+
+    // ── User-scope STATED profile (task 030, FR-E2): read the caller's typed sprk_userprofile row + its N:N
+    //    practice-area names and render a deterministic block. Soft-fail to null (ADR-032 P2 quiet no-op —
+    //    an absent/unprofiled user or any read error degrades the stated-profile block to absent; the reader
+    //    already swallows Dataverse errors, and NullStatedProfileReader returns null when unregistered). ──
+
+    private async Task<string?> ResolveStatedProfileFragmentAsync(string systemUserId, CancellationToken ct)
+    {
+        try
+        {
+            var profile = await _statedProfileReader.ReadAsync(systemUserId, ct).ConfigureAwait(false);
+            return StatedProfileRenderer.Render(profile);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Defense-in-depth: the reader already soft-fails internally, but the composition never throws.
+            _logger.LogWarning(ex,
+                "ContextBinder: stated-profile read failed for the resolved caller — stated-profile " +
+                "fragment degrades to absent (soft-fail; a bind is never taken down by the profile). NFR-07.");
+            return null;
+        }
+    }
+
+    // ── User-scope memory recall (F-2 / D3): render the same-discipline USER prompt fragment for the
+    //    pre-resolved systemuserid. Soft-fail to null (a store outage degrades the User recall fragment to
+    //    absent; a bind is never taken down by memory). ──────────────────────────────────────────────────
+
+    private async Task<string?> ResolveUserMemoryFragmentAsync(string systemUserId, CancellationToken ct)
+    {
+        if (_memoryItemStore is null)
         {
             return null;
         }

@@ -2,9 +2,10 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | **002 — 🔲 unblocked + reshaped** (owner resolved 2026-07-15; design §10.1) |
-| **Status** | 001 ✅. 002's as-built conflict **resolved**: create capabilities become **surface-launch hand-offs** (matter→Create Matter wizard; Event-Task→Event wizard subtype=Task; To Do→OOB `sprk_todo` form modal); repoint shipped create-matter/create-task off direct `create_record`. design.md §10.1 + spec FR-A1/A2/A3 + task 002/012 updated. BLOCKED.md removed. |
-| **Next action** | Resume wave. 002 now co-designs the surface-launch mechanism with 012 (larger Phase-2 build). Independent unblocked tasks available for momentum: **030** (User Model producer), **020** (action truthfulness). |
+| **Active task** | **Parallel wave: 030 + 040 in flight (subagents)** |
+| **Status** | 001 ✅. 002 unblocked+reshaped (design §10.1; held for owner sign-off on the surface-launch mechanism before mutating shipped capabilities). **003 ⏸️ deferred** (MCP creates wrong publisher prefix on the core routing catalog — needs `sprk`-publisher column). **030** (User Model producer, BFF) + **040** (tool drop-down, client) dispatched to background subagents — no file overlap. |
+| **Next action** | On subagent completion: review each diff → **Step 9.5 gates (code-review + adr-check)** → build-verify → commit → mark ✅. Then continue User Model vertical: **031** (pref≠perm test) + **032** (budget amend, Path B) depend on 030. |
+| **Parallel Execution** | 030 → `Services/Ai/Context/` (BFF, opus). 040 → `SpaarkeAi` + `Spaarke.UI.Components` (client, sonnet). Dispatched 2026-07-15. |
 | **Completed** | **001** ✅ — `notes/userprofile-schema-contract.md`. 2 owner-actionable findings: **F-1** `sprk_primaryrole` may be local (owner wanted global set); **F-2** alt-key name unreadable via MCP (confirm at task 042). |
 | **Branch** | `work/spaarkeai-assistant-enhancements-r1` (synced with origin/master 2026-07-15; clean; seams intact) |
 | **Scope** | R1 only. **R1.5 (proactive push / Azure SignalR) designed, NOT decomposed** — filed as a follow-on spec-pass at wrap-up (task 090). |

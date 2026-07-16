@@ -88,6 +88,8 @@
 
   <notes>
     Spec NFR-01 / NFR-02 / NFR-03; ADR-tension #2 (Path B). Depends on 030's rendered fragment.
+
+    CARRIED FROM 030 (2026-07-15): **FR-E5 BU/team enrichment** was deferred here. Fold role/BU/team read via sprk_userentityassociation + IMembershipResolverService into the same User fragment (the sprk_primaryrole LABEL is already rendered by 030). This adds a SECOND hot-path read — design it under this task's caching/latency decision (NFR-03; cite-or-reject the IdentityNormalizationService Redis 10-min TTL) and include it in the byte-stable render + EnvelopeBudget.User sizing. If BU/team materially grows the fragment, account for it in the amended ceiling.
   </notes>
 
   <execution>
