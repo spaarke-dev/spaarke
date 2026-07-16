@@ -46,7 +46,10 @@ public class ContextBudgetBreachEvalTests
     public void BindingBudgets_MatchTheRatifiedReconciliation()
     {
         EnvelopeBudget.Environment.Should().Be(150, "measured ~111 clock directive; ≤50 estimate predated it");
-        EnvelopeBudget.User.Should().Be(300, "measured ~40; keeps the D-M2 ceiling for long dictated turns");
+        EnvelopeBudget.User.Should().Be(700,
+            "amended 300→700 by assistant-enhancements-r1 task 032 (ADR-tension #2 Path B): the FR-E2 stated-profile block " +
+            "(~282 worst) now composes AHEAD of the 250-capped user-memory recall in the ONE User slice (~532 realistic worst); " +
+            "the r2 ≤300 estimate predated that two-producer composition");
         EnvelopeBudget.Business.Should().Be(1500,
             "measured ~1,118 with a ~968-token unconditional-directive protocol floor; raised from ≤1,200 so playbook content fits");
         EnvelopeBudget.RecordMemory.Should().Be(600, "measured 157; kept (docs target 200–500 at higher density)");
@@ -160,7 +163,7 @@ public class ContextBudgetBreachEvalTests
     [Fact]
     public void CeilingOverflow_AllSlicesUnderTheirOwnBudget_ButSumBreachesCeiling()
     {
-        // business 1,490 (<1,500) + user 290 (<300) + env ~111 (<150) + recordMemory 590 (<600)
+        // business 1,490 (<1,500) + user 290 (<700) + env ~111 (<150) + recordMemory 590 (<600)
         // + conversation 1,990 (<2,000) = 4,471 > 4,200 — ceiling breaches, no per-slice does.
         var envelope = BuildEnvelope(
             userFragment: new string('u', 1_160),          // (1160+3)/4 = 290

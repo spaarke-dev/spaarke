@@ -313,7 +313,7 @@ public sealed record SemanticSlice
 /// failure via <see cref="Evaluate"/> (wired into the golden-utterance merge gate, FR-D-02):
 /// <list type="bullet">
 ///   <item><description><b>Environment</b> 150 — measured ~111 (baseline §4 finding 1; a-priori ≤50 predated the clock directive). Ratified with headroom over the measured every-turn floor.</description></item>
-///   <item><description><b>User</b> 300 — measured ~40; keeps the D-M2 ceiling for long dictated turns.</description></item>
+///   <item><description><b>User</b> 700 — <b>amended by spaarkeai-assistant-enhancements-r1 task 032 (NFR-01, ADR-tension #2 Path B)</b> from the r2-ratified 300. The r2 baseline measured ~40 when the User slice carried only the current message; R1's FR-E2 stated-profile producer now composes TWO producers into this one slice — the uncapped stated-profile block (realistic worst ~282 tokens: role label + N:N practice areas + free-text focus/office/preferences) AHEAD of the 250-token-capped user-memory recall (<c>MemoryItemStore.MaxUserFragmentTokens</c>) — a realistic worst of ~532 the ≤300 estimate predated. 700 = ~532 + ~32% headroom. A pathological (verbose free-text) profile still surfaces as a breach warning, never truncated (FR-B-05). See <c>projects/spaarkeai-assistant-enhancements-r1/notes/032-budget-and-caching-decision.md</c>.</description></item>
 ///   <item><description><b>Business</b> 1,500 — measured ~1,118 and structurally at/over ≤1,200: two unconditional directives (SideEffectHonesty 779 + compact-formatting 189 = 968) consume ~65% of 1,500 as a "protocol floor" BEFORE any playbook persona/knowledge/skills (baseline §4 finding 2). Raised from the ≤1,200 estimate so realistic playbook content fits above the floor.</description></item>
 ///   <item><description><b>RecordMemory</b> 600 — measured 157 this fixture; kept (interface docs target 200–500 at higher fact density).</description></item>
 ///   <item><description><b>Conversation</b> 2,000 — measured ~620–970 on a normal turn but structurally UNBOUNDED to ~8,000 (baseline §4 finding 3, the most consequential). The budget stays at the D-M2 estimate; the structural worst-case is now GATED by the eval (breach-fails-eval) rather than tightening the byte-verbatim R1 constants (053 froze <c>MaxContextOutputs</c>×<c>MaxContextPayloadChars</c>). See the reconciliation note for the path decision.</description></item>
@@ -325,8 +325,13 @@ public static class EnvelopeBudget
     /// <summary>Workspace/Environment slice ceiling — headroom above measured ~111 (D-M2 estimate ≤50 understated).</summary>
     public const int Environment = 150;
 
-    /// <summary>User slice ceiling (D-M2 estimate ≤300; baseline measured ~40).</summary>
-    public const int User = 300;
+    /// <summary>
+    /// User slice ceiling. <b>Amended 300 → 700 by spaarkeai-assistant-enhancements-r1 task 032 (NFR-01,
+    /// ADR-tension #2 Path B)</b>: R1's FR-E2 stated-profile producer composes the uncapped stated-profile
+    /// block (realistic worst ~282) AHEAD of the 250-capped user-memory recall — a ~532 realistic worst the
+    /// r2 ≤300 estimate (message-only slice) predated. 700 keeps ~32% headroom above ~532.
+    /// </summary>
+    public const int User = 700;
 
     /// <summary>Business slice ceiling — raised from ≤1,200 so playbook content fits above the ~968 unconditional-directive protocol floor (baseline §4 finding 2).</summary>
     public const int Business = 1500;

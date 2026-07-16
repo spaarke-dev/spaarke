@@ -42,6 +42,31 @@ public sealed class ContextEnvelopeRendererTests
     }
 
     [Fact]
+    public void RenderStablePrefixAdditions_StatedProfileUserFragment_IsByteStableAndFirst()
+    {
+        // task 032 (NFR-02/04): the FR-E2 stated-profile block travels as the User fragment through the
+        // stable-prefix renderer. Pin that it renders byte-identically twice AND stays ahead of Business —
+        // the composed User slice is a stable-prefix slice, so a drift here moves the prompt-cache prefix.
+        var statedProfile = StatedProfileRenderer.Render(new StatedProfile
+        {
+            RoleLabel = "Partner",
+            PracticeAreaNames = new[] { "Corporate", "Litigation" },
+            AssistantPreferences = "Concise, cite sources",
+        });
+        var a = ContextEnvelopeReferenceProducer.Assemble(
+            userFragment: statedProfile, businessFragment: "BIZ");
+        var b = ContextEnvelopeReferenceProducer.Assemble(
+            userFragment: statedProfile, businessFragment: "BIZ");
+
+        var rendered = ContextEnvelopeRenderer.RenderStablePrefixAdditions(a);
+
+        rendered.Should().Be(ContextEnvelopeRenderer.RenderStablePrefixAdditions(b),
+            "the stated-profile User fragment carries no timestamp/GUID — byte-stable across turns (NFR-04)");
+        rendered.Should().StartWith("### Your Profile (stated)",
+            "the User (stated-profile) fragment is emitted before Business in the stable prefix");
+    }
+
+    [Fact]
     public void RenderStablePrefixAdditions_NoUserOrBusinessFragment_RendersEmpty()
     {
         var envelope = ContextEnvelopeReferenceProducer.Assemble(workspaceFragment: "env-only");

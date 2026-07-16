@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | **Wave complete: 030 ✅ + 040 ✅. Next: 031 + 032 (User Model vertical)** |
-| **Status** | Done: 001 ✅, 030 ✅ (profile producer, committed 24a9d5d5b), 040 ✅ (tool drop-down, Step 9.5 verified). 4/25 effective. Held: 002 (owner sign-off on surface-launch mechanism), 003 ⏸️ (MCP publisher prefix). |
-| **Next action** | **031** (pref≠perm negative test — depends 030) then **032** (budget amend Path B + FR-E5 BU/team — depends 030). Both unblocked. 041/042 also now unblocked by 040. |
-| **Parallel Execution** | 030 (BFF) + 040 (client) ran concurrently, no overlap. Both reviewed + gated in main session; lockfile churn from 040's env-gap npm install reverted (not committed). |
+| **Active task** | **User-Model vertical COMPLETE (030/031/032 ✅). Next: 041/042 (dropdown surface) or 020 (truthfulness, no deps)** |
+| **Status** | Done: 001 ✅, 030 ✅ (24a9d5d5b), 040 ✅, 031 ✅ (28350dc55), **032 ✅ (User 300→700 Path-B signed off 2026-07-15; eval-green; FR-E5 BU/team descoped→D-032-01; cache deferred)**. 6/25 effective. Held: 002 (owner sign-off on surface-launch mechanism), 003 ⏸️ (MCP publisher prefix). |
+| **Next action** | **041** (Quick Start modal — depends 040 ✅) + **042** (My Assistant questionnaire — depends 001+040 ✅; carries F-1/F-2 alt-key escalation trigger) — dropdown surface, both unblocked. OR **020** (action-truthfulness, no deps, ✅ safe client). 021/022 need 002 (held). |
+| **Parallel Execution** | Wave 4: 031 (sonnet subagent, test) ‖ 032 (opus main-session, hot-path) ran concurrently, no file overlap. 031 committed; 032 held at gate. Earlier wave: 030 (BFF) + 040 (client). |
 | **Completed** | **001** ✅ — `notes/userprofile-schema-contract.md`. 2 owner-actionable findings: **F-1** `sprk_primaryrole` may be local (owner wanted global set); **F-2** alt-key name unreadable via MCP (confirm at task 042). |
 | **Branch** | `work/spaarkeai-assistant-enhancements-r1` (synced with origin/master 2026-07-15; clean; seams intact) |
 | **Scope** | R1 only. **R1.5 (proactive push / Azure SignalR) designed, NOT decomposed** — filed as a follow-on spec-pass at wrap-up (task 090). |
