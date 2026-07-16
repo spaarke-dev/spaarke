@@ -35,9 +35,15 @@ public sealed class CommunicationService
     private readonly CommunicationAccountService _accountService;
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly ICommunicationEnrichmentService _enrichmentService;
+    private readonly IThreadResolver? _threadResolver;
     private readonly CommunicationOptions _options;
     private readonly ILogger<CommunicationService> _logger;
 
+    /// <param name="threadResolver">
+    /// Direction-symmetric thread resolver (task 040 / FR-06) — optional so existing unit constructions that
+    /// predate it keep compiling; production DI always supplies it. Invoked best-effort on send to join a
+    /// reply's parent thread (email ancestry) or create a fresh thread (NFR-02, non-fatal).
+    /// </param>
     public CommunicationService(
         CommunicationChannelDispatcher channelDispatcher,
         ApprovedSenderValidator senderValidator,
@@ -49,7 +55,8 @@ public sealed class CommunicationService
         JobSubmissionService jobSubmissionService,
         ICommunicationEnrichmentService enrichmentService,
         IOptions<CommunicationOptions> options,
-        ILogger<CommunicationService> logger)
+        ILogger<CommunicationService> logger,
+        IThreadResolver? threadResolver = null)
     {
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
@@ -60,6 +67,7 @@ public sealed class CommunicationService
         _accountService = accountService;
         _jobSubmissionService = jobSubmissionService;
         _enrichmentService = enrichmentService;
+        _threadResolver = threadResolver;
         _options = options.Value;
         _logger = logger;
     }
@@ -388,6 +396,49 @@ public sealed class CommunicationService
         };
 
     /// <summary>
+    /// Resolves (find-or-create) the outbound message's thread and stamps <c>sprk_communicationthread</c>
+    /// (task 040 / FR-06) — best-effort, non-fatal (NFR-02). For EMAIL, a reply (<c>InReplyToMessageId</c>
+    /// set) joins its parent's thread and a fresh email creates one; the thread anchors to the record's
+    /// regarding (mapped at create time, ADR-024 reuse). For MESSAGE (chat), the authoritative ACS
+    /// <c>ChatThreadId</c> is carried by the inbound echo path (task 031/051), not surfaced here in R1, so
+    /// the resolver skips — no duplicate thread. MUST NOT fail the send.
+    /// </summary>
+    private async Task ResolveOutboundThreadAsync(
+        Guid communicationId, SendCommunicationRequest request, string correlationId, CancellationToken ct)
+    {
+        if (_threadResolver is null)
+            return;
+
+        try
+        {
+            var envelope = new NormalizedMessage
+            {
+                Direction = CommunicationDirection.Outgoing,
+                Subject = request.Subject,
+                InReplyTo = string.IsNullOrWhiteSpace(request.InReplyToMessageId) ? null : request.InReplyToMessageId,
+            };
+
+            await _threadResolver.ResolveAndAssignThreadAsync(
+                new ThreadResolutionRequest
+                {
+                    CommunicationId = communicationId,
+                    ChannelType = request.CommunicationType,
+                    Direction = CommunicationDirection.Outgoing,
+                    Message = envelope,
+                    AcsThreadId = null, // outbound ACS thread id is assigned by the inbound echo path in R1
+                },
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Thread resolution failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
+                correlationId, communicationId);
+        }
+    }
+
+    /// <summary>
     /// Sends a communication via Microsoft Graph sendMail API.
     /// Validates the request, resolves the sender, constructs a Graph Message, and sends.
     /// On failure, throws SdapProblemException immediately (no retry).
@@ -536,6 +587,12 @@ public sealed class CommunicationService
             {
                 await StampInternetMessageIdAsync(
                     communicationId.Value, sendResult.ProviderMessageId, correlationId, cancellationToken);
+            }
+
+            // Step 5c: Resolve the thread (task 040 / FR-06) — best-effort, non-fatal (NFR-02).
+            if (communicationId.HasValue)
+            {
+                await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, cancellationToken);
             }
 
             // Step 6: Archive to SPE if requested (best-effort)
@@ -827,6 +884,12 @@ public sealed class CommunicationService
             {
                 await StampInternetMessageIdAsync(
                     communicationId.Value, sendResult.ProviderMessageId, correlationId, ct);
+            }
+
+            // Step 5c: Resolve the thread (task 040 / FR-06) — best-effort, non-fatal (NFR-02).
+            if (communicationId.HasValue)
+            {
+                await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, ct);
             }
 
             // Step 6: Archive to SPE if requested (best-effort)

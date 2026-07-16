@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Engine.Detectors;
 using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
+using Sprk.Bff.Api.Services.Communication.Threads;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -165,6 +166,21 @@ public static class CommunicationModule
         // no feature gate — no Null-Object peer required). Singleton mirrors IncomingCommunicationProcessor,
         // which already injects the scoped IPostUploadIndexingEnqueuer via the same pattern.
         services.AddSingleton<ICommunicationEnrichmentService, CommunicationEnrichmentService>();
+
+        // Direction-symmetric thread resolver (messaging-communication-app-r1 task 040 / FR-06). The thread
+        // analog of the enrichment orchestrator above: find-or-create a sprk_communicationthread and stamp
+        // the sprk_communicationthread lookup, invoked from BOTH the inbound capture path (email:
+        // IncomingCommunicationProcessor; chat: MessagingIngestor) AND the outbound send path
+        // (CommunicationService) for ALL channels (ADR-045 rule 3). Registered UNCONDITIONALLY (ADR-010 /
+        // ADR-032 — the resolver + its per-channel key strategies are consumed unconditionally by all three
+        // call sites; no feature gate). Per-channel key extraction sits behind CommunicationType-keyed
+        // IThreadKeyStrategy instances resolved via ToDictionary(SupportedType), mirroring the dispatcher —
+        // so adding a future channel's thread key is a purely additive registration (NFR-04). Best-effort /
+        // non-fatal (NFR-02): a resolve/create failure never fails send or capture. Thread anchor REUSES the
+        // ADR-024 regarding family (no second regarding mechanism).
+        services.AddSingleton<IThreadKeyStrategy, EmailThreadKeyStrategy>();
+        services.AddSingleton<IThreadKeyStrategy, MessagingThreadKeyStrategy>();
+        services.AddSingleton<IThreadResolver, ThreadResolver>();
 
         // Messaging attachment materialization (messaging-communication-app-r1 task 070 / FR-14). The net-new
         // messaging step that materializes a chat file: ACS/file → SPE (SpeFileStore facade, ADR-007) →

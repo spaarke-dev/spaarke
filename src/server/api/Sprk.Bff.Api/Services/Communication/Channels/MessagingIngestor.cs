@@ -1,5 +1,6 @@
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
@@ -38,15 +39,23 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
 {
     private readonly IGenericEntityService _genericEntityService;
     private readonly ICommunicationEnrichmentService _enrichmentService;
+    private readonly IThreadResolver? _threadResolver;
     private readonly ILogger<MessagingIngestor> _logger;
 
+    /// <param name="threadResolver">
+    /// Direction-symmetric thread resolver (task 040 / FR-06) — optional so existing unit constructions
+    /// that predate it keep compiling; production DI always supplies it. Invoked best-effort after persist
+    /// to map the ACS <c>ChatThreadId</c> → a <c>sprk_communicationthread</c> (NFR-02, non-fatal).
+    /// </param>
     public MessagingIngestor(
         IGenericEntityService genericEntityService,
         ICommunicationEnrichmentService enrichmentService,
-        ILogger<MessagingIngestor> logger)
+        ILogger<MessagingIngestor> logger,
+        IThreadResolver? threadResolver = null)
     {
         _genericEntityService = genericEntityService;
         _enrichmentService = enrichmentService;
+        _threadResolver = threadResolver;
         _logger = logger;
     }
 
@@ -65,6 +74,34 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
         _logger.LogInformation(
             "Ingested inbound message | CommunicationId: {CommunicationId}, AcsMessageId: {AcsMessageId}, CorrelationId: {CorrelationId}",
             communicationId, request.ProviderMessageId, request.CorrelationId);
+
+        // ── Thread resolution (task 040 / FR-06) — BEST-EFFORT, NON-FATAL (NFR-02) ──
+        // Map the ACS ChatThreadId (request.ProviderThreadId) → a sprk_communicationthread and stamp the
+        // sprk_communicationthread lookup. Same shared seam the email inbound + outbound paths call. A
+        // resolver failure MUST NOT fail the persist — the message already exists (without a thread).
+        if (_threadResolver is not null)
+        {
+            try
+            {
+                await _threadResolver.ResolveAndAssignThreadAsync(
+                    new ThreadResolutionRequest
+                    {
+                        CommunicationId = communicationId,
+                        ChannelType = CommunicationType.Message,
+                        Direction = CommunicationDirection.Incoming,
+                        Message = request.Message,
+                        AcsThreadId = request.ProviderThreadId,
+                    },
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Thread resolution failed (non-fatal) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                    communicationId, request.CorrelationId);
+            }
+        }
 
         // ── Shared enrichment/association — BEST-EFFORT, NON-FATAL (NFR-02) ──
         // Same entry point the email inbound path invokes, so messaging capture is not forked. A thrown
