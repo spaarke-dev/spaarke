@@ -9,9 +9,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Progress** | **33 / 45 done.** W1+W2+W4 done; **030 (rung 4 semantic ✅ `29834f041`) + 061 (wizard migration ✅ `c1360dcd0`) landed this session.** r2-core CLOSED → W3/W5/075 ungated. |
-| **Last commits** | `c1360dcd0` (061 fork retire) · `29834f041` (030 rung 4) · `8f19c2280` (W4 handoff). **075 agent RUNNING** (index-config, Services/Ai). Tree clean. |
-| **Status** | Driving the unblocked engine wave in main session: **031 (rung 5 AI classify) NEXT** → 032 (telemetry+tests) → 074-endpoint → W5 (050 gate clears → 051-054). Agents: 075 running; 061 done+merged. |
+| **Progress** | **34 / 45 done.** W1+W2+W4 done; **030 (rung 4 ✅ `29834f041`) + 061 (wizard migration ✅ `c1360dcd0`) + 075 (index-config ✅ `85ab74a79`) all landed + merged this session.** r2-core CLOSED → W3/W5 ungated. 327 Comm tests green on merged state. |
+| **Last commits** | `85ab74a79` (075 index-config) · `40f2d568d` (checkpoint) · `c1360dcd0` (061) · `29834f041` (030). Tree clean; no agents running. |
+| **Status** | Engine wave, main session: **031 (rung 5 AI classify) NEXT** → 032 (telemetry+tests) → 074-endpoint → W5 (050 gate clears → 051-054). 031 groundwork scouted below (needs new analysis PublicContracts facade + JPS Action). |
 | **⬆️ Actions v1.0.1 to re-import** | `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.0.1.zip` — env-var fallback (reads `sprk_MsalClientId`/`sprk_BffApiAppId`/`sprk_BffApiBaseUrl`) + OOB-compact toolbar (16px icons). Footer will read v1.0.1. Connections stays v1.0.0 (no change). |
 
 ### 🔑 AUTH / DEPLOY FACTS (spaarkedev1) — critical for future
