@@ -1,0 +1,161 @@
+<task id="031" project="messaging-communication-app-r1">
+  <metadata>
+    <title>ACS-event normalizer → `NormalizedMessage` → idempotent persist (dedupe on ACS message id) + DLQ</title>
+    <phase>W3 — Inbound Capture Pipeline</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>030,021</dependencies>
+    <blocks>040,051</blocks>
+    <tags>bff-api, communication, jobs</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Correctness-critical inbound capture: idempotent persist under Event Grid at-least-once + duplicate delivery + our own outbound echo, with dead-lettering — a dedupe error double-persists messages or drops them. BFF-touching (`.cs`, Services/Communication + Services/Jobs hot-path), serial after 030. Requires publish-size + CVE + code-review + adr-check per root §10; NFR-02 + NFR-03 are load-bearing.</rigor-reason>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <fr-refs>FR-02,FR-04</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Build the Service Bus job handler that completes the inbound capture pipeline: it dequeues the job that task 030's Event Grid ingress enqueued, normalizes the ACS chat event, and persists it idempotently.
+
+    • **ACS-event normalizer** — map the ACS `ChatMessageReceivedInThread` (and sibling) event payload to a channel-agnostic `NormalizedMessage` (the envelope the engine/enrichment operate over). This is the ACS analog of `GraphMessageNormalizer` — the mapping happens exactly once, at the pipeline boundary, so nothing downstream sees `Azure.Communication.*`.
+    • **Idempotent persist** — hand the `NormalizedMessage` to task 021's `ICommunicationChannelIngestor` (`MessagingIngestor`) to persist `sprk_communication` (type=Message) and invoke enrichment. The persist MUST be **idempotent**: dedupe on the **ACS message id** via the existing `IIdempotencyService` (`TryAcquireProcessingLockAsync` / `IsEventProcessedAsync` / `MarkEventAsProcessedAsync`). This single dedupe covers three duplicate sources: Event Grid at-least-once redelivery, Event Grid genuine duplicates, and **our own outbound echo** — ACS emits a `ChatMessageReceivedInThread` for a message we sent persist-on-send (task 051), and that echo must be a no-op because the outbound message id is already recorded. (The `sprk_thread` lookup is set later by task 040's `IThreadResolver`; this task persists the record — thread assignment is a downstream concern.)
+    • **Dead-letter from day one** — on repeated processing failure (after the contract's retry/backoff), dead-letter the job to Storage; do NOT silently drop. Enrichment/thread side-effects are best-effort and MUST NOT fail the persist (NFR-02).
+
+    The invariant to hold: **exactly one persisted `sprk_communication` per distinct ACS message id, regardless of how many times the event is delivered or whether it is our own echo.**
+  </prompt>
+
+  <role>
+    Spaarke BFF Communication architect. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/` inbound + `Services/Jobs/` (idempotency, DLQ, retry). Fluent in ADR-045 (channel seams — ingestor), ADR-046 (ACS transport — task 007), ADR-004/ADR-036 (job contract / idempotency / DLQ), ADR-010 (DI), ADR-032 (Null-Object), ADR-038 (integration-heavy tests), and `.claude/constraints/bff-extensions.md`. Reasons carefully about at-least-once delivery, duplicate suppression, and echo-dedup race conditions.
+  </role>
+
+  <goal>
+    A Service Bus job handler dequeues the ACS-event job (from 030), normalizes the event to a `NormalizedMessage` (ACS analog of `GraphMessageNormalizer`), and persists via `MessagingIngestor` idempotently — deduping on the ACS message id through `IIdempotencyService` so at-least-once redelivery, genuine duplicates, and our own outbound echo each yield **exactly one** persisted `sprk_communication`. Repeated failures dead-letter to Storage; enrichment/thread side-effects are best-effort/non-fatal (NFR-02). Build clean; idempotency + echo-dedup + DLQ tests pass; publish-size (vs ~45.30 MB) + CVE + bff-extensions Placement Justification reported; `/conflict-check` before PR.
+  </goal>
+
+  <context>
+    <background>
+      **Mirror the email inbound job; add ACS-specific idempotency.** The email inbound path runs a Service Bus job (`IncomingCommunicationJobHandler` → `IncomingCommunicationProcessor`) over the `Services/Jobs/` contract with `IIdempotencyService` + DLQ. Messaging's job is the ACS analog: dequeue → normalize ACS event → `MessagingIngestor` persist → enrichment (design §4 inbound + §8.3). Task 030 built the Event Grid ingress that enqueues the job; task 021 shipped the `ICommunicationChannelIngestor` seam + `MessagingIngestor`; `NormalizedMessage` already exists as the channel-agnostic envelope. This task writes the ACS normalizer + the idempotent job handler that ties them together.
+
+      **Why xhigh / correctness-critical (design §8.3, §4 echo-dedup):** Event Grid is **at-least-once, unordered, and may duplicate**. Additionally, outbound is **persist-on-send** (ADR-045 rule 3 / FR-04, task 051): when we send a message, we persist it directly AND ACS emits a `ChatMessageReceivedInThread` echo of our own message. Without dedupe, that echo double-persists. The seam that reconciles persist-on-send (outbound) with capture-on-event (inbound) WITHOUT collision is a single idempotency check on the ACS message id — the same key covers redelivery, duplicates, and echo. Getting the lock/mark ordering wrong (e.g. mark-before-persist on a crash, or a race between two concurrent deliveries of the same id) either double-persists or drops the message. Reason about the acquire-lock → check-processed → persist → mark-processed ordering carefully; a concurrent duplicate must lose the race cleanly.
+
+      **§11 Component Justification.** The ACS normalizer is NEW: (Existing) `GraphMessageNormalizer` maps Graph→envelope but cannot read ACS event schema; no ACS normalizer exists (grep); (Extension) it is a sibling normalizer at the same boundary, not a modification of the Graph one (per-channel mapping is the ADR-045 pattern); (Cost-of-doing-nothing) without it, ACS events cannot become a `NormalizedMessage`, so the ingestor/engine/enrichment can't process inbound chat — capture is impossible. The job handler is NEW: without it, jobs 030 enqueues are never processed.
+
+      Scope discipline: normalizer + idempotent job handler + DLQ wiring ONLY. Do NOT set the `sprk_thread` lookup (040's `IThreadResolver`), build the outbound send path (051 — this task only guarantees the echo is a no-op via dedupe), or modify the Event Grid ingress (030). Reuse `IIdempotencyService` + the existing DLQ (`DeadLetterQueueService`) — do NOT hand-roll a dedupe store or a second DLQ.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/IIdempotencyService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/DeadLetterQueueService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/IncomingCommunicationJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/IJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/GraphMessageNormalizer.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/NormalizedMessage.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/ICommunicationChannelIngestor.cs (task 021)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/MessagingIngestor.cs (task 021)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs (email inbound reference)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-02">Complete the capture pipeline: ACS-event normalizer → `NormalizedMessage` → ingestor persists `sprk_communication`. An inbound `ChatMessageReceivedInThread` event results in exactly one persisted `sprk_communication`; the handler dead-letters to Storage on repeated failure.</constraint>
+    <constraint source="FR-04">The Event Grid echo of our own outbound message is a no-op via idempotency on the ACS message id — sending once yields exactly one persisted record despite the echo.</constraint>
+    <constraint source="NFR-03">Capture MUST be idempotent — dedupe on the ACS message id via the EXISTING `IIdempotencyService`. At-least-once redelivery + genuine duplicates + own-echo all collapse to one persist. MUST NOT hand-roll a dedupe store.</constraint>
+    <constraint source="NFR-02">Enrichment + thread-assignment side-effects MUST be best-effort and non-fatal — a failure there MUST NOT fail the inbound-capture persist. Persist every message as `sprk_communication` (Dataverse is the record).</constraint>
+    <constraint source="ADR-004 / ADR-036">Reuse the `Services/Jobs/` contract: `IJobHandler`, `IIdempotencyService`, `DeadLetterQueueService`, exponential-backoff retry. Dead-letter to Storage from day one; do NOT silently drop. Do NOT create a second job/DLQ mechanism.</constraint>
+    <constraint source="ADR-045">Normalize ACS→`NormalizedMessage` exactly once at the boundary (sibling to `GraphMessageNormalizer`); nothing downstream sees `Azure.Communication.*`. Persist through the `ICommunicationChannelIngestor` seam (task 021) — do NOT branch `IncomingCommunicationProcessor` on channel.</constraint>
+    <constraint source="ADR-046">ACS is transport; Dataverse is the record. Follow ADR-046 (task 007) for the echo-dedup / capture posture.</constraint>
+    <constraint source="ADR-010 / ADR-032">Register the normalizer + handler via `CommunicationModule` (unconditional; Null-Object if feature-gated). Endpoints/handlers that map unconditionally must have unconditional service registration.</constraint>
+    <constraint source="project">Do NOT set the `sprk_thread` lookup (040 owns `IThreadResolver`); do NOT build the outbound send path (051). MUST NOT introduce a client-side ACS SDK; server-side only. ACS transport only.</constraint>
+    <constraint source="root §10">bff-extensions Placement Justification in the PR; publish-size delta vs ~45.30 MB baseline; no new HIGH CVE. Run `/conflict-check` before PR (shared `Services/Communication/` + `Services/Jobs/` hot-path).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-004-async-job-contract.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/agent-memory/researcher/acs-chat-integration-2026-07-16.md</file>
+    </files>
+    <patterns>
+      <pattern name="Idempotent job handler with DLQ" location="src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/IncomingCommunicationJobHandler.cs">
+        Acquire processing lock → check-processed → do work → mark-processed; dead-letter on repeated failure. Mirror the ordering; the dedupe KEY here is the ACS message id (covers redelivery + duplicate + echo).
+      </pattern>
+      <pattern name="Boundary normalizer to the envelope" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/GraphMessageNormalizer.cs">
+        Map a channel-specific message to `NormalizedMessage` exactly once at the pipeline boundary. Build the ACS analog: ACS event payload → `NormalizedMessage` (direction=Incoming, from/body/sentAt/attachments, ACS thread id → `ConversationId`).
+      </pattern>
+      <pattern name="Idempotency primitive" location="src/server/api/Sprk.Bff.Api/Services/Jobs/IIdempotencyService.cs">
+        `TryAcquireProcessingLockAsync` / `IsEventProcessedAsync` / `MarkEventAsProcessedAsync` keyed on the ACS message id. Use the lock to make concurrent duplicate deliveries race cleanly (one wins, others no-op).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `IncomingCommunicationJobHandler.cs` (email inbound job — the lock/check/persist/mark + DLQ ordering to mirror), `IIdempotencyService`/`IdempotencyService`/`DeadLetterQueueService`, `GraphMessageNormalizer.cs` (the normalizer shape), `NormalizedMessage.cs`, and task 021's `ICommunicationChannelIngestor`/`MessagingIngestor`. Read the job-envelope contract 030 enqueues.</step>
+    <step order="2">Read `.claude/agent-memory/researcher/acs-chat-integration-2026-07-16.md` + design §4/§8.3 for exact ACS event fields (message id, thread id, sender `communicationUserId`, content, timestamp) and the at-least-once/duplicate/echo semantics. Grep-confirm no ACS normalizer + no messaging job handler exist (§11 evidence).</step>
+    <step order="3">Implement the ACS-event normalizer: map the ACS `ChatMessageReceivedInThread` (+ siblings) payload → `NormalizedMessage` (Direction=Incoming; From = sender; BodyText/BodyHtml; SentAt; ACS `ChatThreadId` → `ConversationId`; attachments as `NormalizedAttachment` descriptors). Map exactly once at the boundary; no `Azure.Communication.*` leaks past it.</step>
+    <step order="4">Implement the Service Bus job handler (`IJobHandler` for the new job kind from 030): (a) `TryAcquireProcessingLockAsync(acsMessageId)` — if not acquired (concurrent duplicate in flight), no-op; (b) `IsEventProcessedAsync(acsMessageId)` — if already processed (redelivery / prior duplicate / our own outbound echo), no-op; (c) normalize + call `MessagingIngestor.IngestAsync(normalizedMessage)` to persist + enrich best-effort; (d) `MarkEventAsProcessedAsync(acsMessageId)`; (e) release the lock. Order (persist before mark) so a crash between persist and mark re-processes but the mark/lock still prevents a second persist — verify the ingestor persist itself tolerates this (or the mark covers it). Ensure the invariant: exactly one `sprk_communication` per ACS message id.</step>
+    <step order="5">Wire DLQ: on repeated failure past the contract's retry/backoff, dead-letter the job to Storage via `DeadLetterQueueService`; never silently drop. Keep enrichment/thread side-effects best-effort (NFR-02) — a persist succeeds even if enrichment throws.</step>
+    <step order="6">Register the normalizer + handler in `CommunicationModule` (ADR-010; ADR-032 Null-Object + unconditional if feature-gated).</step>
+    <step order="7">Write tests (integration-heavy, ADR-038 vertical-slice seam — no `Mock&lt;HttpMessageHandler&gt;`): (a) single inbound event → one `sprk_communication`; (b) SAME event delivered twice → still exactly one record (dedupe); (c) our own outbound message id already marked → the echo event is a no-op (zero new records); (d) two concurrent deliveries of the same id → exactly one persist (lock race); (e) repeated processing failure → job dead-lettered to Storage, not dropped; (f) enrichment throws → the `sprk_communication` is still persisted (NFR-02).</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm existing inbound/job tests still pass.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-031-publish/`; report compressed size + delta vs ~45.30 MB baseline. ≥+5 MB justify; ≥55 MB architecture review; ≥60 MB HARD STOP.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (EXPLICIT focus on the idempotency/echo-dedup correctness + lock ordering + DLQ-not-drop); `adr-check` against `spec.md` (NFR-02/03, FR-02/04, ADR-004/036 reuse, ADR-045 boundary-normalize-once). Resolve Critical findings (path C) or surface an ADR conflict (root §6.5).</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/` + `Services/Jobs/` BFF hot-path).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (031 ✅) + `current-task.md`; record decisions (dedupe key = ACS message id; lock/check/persist/mark ordering; DLQ trigger; the `sprk_thread` field is deliberately left for 040).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect email inbound job, idempotency service, DLQ, GraphMessageNormalizer, NormalizedMessage, MessagingIngestor</tool>
+    <tool name="grep">§11 evidence (no ACS normalizer/handler); confirm reuse of IIdempotencyService + DeadLetterQueueService</tool>
+    <tool name="edit">Implement ACS normalizer + idempotent job handler + DLQ wiring; register in CommunicationModule</tool>
+    <tool name="bash">Build, idempotency/echo-dedup/DLQ tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate incl. idempotency/echo-dedup correctness (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/ (NEW — ACS-event normalizer → NormalizedMessage, sibling to GraphMessageNormalizer)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/ (NEW — idempotent ACS-message job handler; dedupe on ACS message id; DLQ)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — register normalizer + handler)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (single→one; duplicate→one; echo→no-op; concurrent→one; failure→DLQ; enrichment-throws→still persisted)</output>
+    <output type="docs">PR description with §11 Component Justification (no ACS normalizer/handler — grep evidence; capture-impossible failure mode) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An ACS `ChatMessageReceivedInThread` event is normalized to a `NormalizedMessage` (Direction=Incoming; ACS `ChatThreadId` → `ConversationId`) exactly once at the boundary; no `Azure.Communication.*` type appears downstream of the normalizer.</criterion>
+    <criterion testable="true">A single inbound event persists exactly one `sprk_communication` (type=Message) via `MessagingIngestor`.</criterion>
+    <criterion testable="true">Duplicate delivery of the same ACS message id yields exactly one persisted record (dedupe via `IIdempotencyService` on the ACS message id — NFR-03).</criterion>
+    <criterion testable="true">The Event Grid echo of our own outbound message is a no-op — the already-recorded outbound ACS message id causes zero additional persists (FR-04).</criterion>
+    <criterion testable="true">Two concurrent deliveries of the same id result in exactly one persist (processing-lock race resolved cleanly).</criterion>
+    <criterion testable="true">Repeated processing failure dead-letters the job to Storage via `DeadLetterQueueService` — the message is never silently dropped.</criterion>
+    <criterion testable="true">An enrichment/thread-assignment failure does NOT fail the persist — the `sprk_communication` is still written (NFR-02).</criterion>
+    <criterion testable="true">The `sprk_thread` lookup is NOT set by this task (left to 040); no outbound send path is built here (051); no client-side ACS SDK is introduced.</criterion>
+    <criterion testable="true">`dotnet build` clean; existing inbound/job tests pass; publish-size delta reported vs ~45.30 MB (≤60 MB); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 030 (the Event Grid ingress + the job envelope this handler consumes) and 021 (the `ICommunicationChannelIngestor` seam + `MessagingIngestor` this handler calls). Blocks 040 (`IThreadResolver` sets `sprk_thread` on the record this task persists) and 051 (outbound persist-on-send relies on THIS task's echo-dedup to keep the echo a no-op). `parallel-safe: false` — serial after 030 (consumes 030's job contract; correctness-critical idempotency must not race with the ingress change). `sonnet @ xhigh` — the idempotency + echo-dedup + lock-ordering correctness under at-least-once delivery is the crux of the inbound spine.
+
+    Strict scope: normalizer + idempotent handler + DLQ. Thread assignment (040), outbound send (051), and the Event Grid ingress (030) are separate. Reuse `IIdempotencyService` + `DeadLetterQueueService` verbatim — do NOT hand-roll dedupe or a second DLQ. The invariant to defend in review: exactly one persisted `sprk_communication` per distinct ACS message id, across at-least-once redelivery, genuine duplicates, and our own outbound echo.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED, with explicit attention to idempotency/echo-dedup correctness, lock ordering, and DLQ-not-drop. Per root §10: publish-size delta (vs ~45.30 MB) + CVE + bff-extensions Placement Justification + §11 Component Justification in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/` + `Services/Jobs/` hot-path). Model tier `sonnet` @ effort `xhigh` (correctness-critical inbound capture).
+    </protocol>
+  </execution>
+</task>

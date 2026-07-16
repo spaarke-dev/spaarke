@@ -1,0 +1,130 @@
+<task id="002" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Phase-0: decide private-thread grant mechanism (`GrantAccess` vs `sprk_externalrecordaccess`)</title>
+    <phase>W0 — Phase 0 Verification + Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>042</blocks>
+    <tags>spike, security</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Security-sensitive decision spike — no code, no build. Resolves the ONE open architectural question (design §5, §14.5). Output is a decision record that unblocks the highest-risk task (042 privacy enforcement). STANDARD per §8 (investigation/decision), but the decision itself is security-sensitive → escalate per root §6 if the two options materially diverge on correctness.</rigor-reason>
+    <parallel-group>W0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>—</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Phase-0 verification of the single open architectural question in R1 (design §5, §14.5, spec Unresolved Questions): **how do we grant a specific set of named participants access to a PRIVATE communication thread?** The access model is otherwise locked — OPEN (record-anchored) threads derive membership from `MembershipResolverService` (ADR-034); this spike resolves ONLY the *private*-thread grant primitive.
+
+    Two candidate mechanisms, both already present in the codebase; pick one with evidence:
+
+    - **(A) Dataverse `GrantAccess` (Principal-Object-Access / POA)** — the platform-native per-record sharing primitive (the `PlaybookSharingService` precedent uses it). Grants a principal read/append access directly on the thread (and/or message) record; Dataverse security composes it with the caller's base access.
+    - **(B) `sprk_externalrecordaccess` overlay** — a Spaarke-owned overlay table (the `GrantExternalAccessEndpoint` precedent) that records grants as rows the BFF query-filter honours, rather than relying on POA.
+
+    Inspect the two precedents in the actual code — `PlaybookSharingService` (GrantAccess path) and `GrantExternalAccessEndpoint` / `sprk_externalrecordaccess` (overlay path) — and compare on: correctness of enforcement (does the BFF thread-read filter in task 042/050 honour it cleanly?), composition with ADR-034-derived open membership, revocation + point-forward privacy-switch semantics (design §5 D-04), auditability, ACS-membership-reconcile compatibility (design §4/§8.4 — ACS membership is a projection of whichever grant model wins), and internal-vs-external participant reach (R1 internal; R2 BYOI external).
+
+    This is a **decision spike, no code**. Output the decision + rationale + the rejected alternative to `notes/spikes/002-private-grant-decision.md`. Task 042 (privacy/internal-only/privilege enforcement) consumes this decision directly.
+  </prompt>
+
+  <role>
+    Spaarke security architect for the Communication subsystem. Authoritative on Dataverse record security (POA / `GrantAccess`), the `sprk_externalrecordaccess` overlay, `MembershipResolverService` (ADR-034), and the BFF query-filter enforcement pattern. Security-sensitive posture (root §6) — surface correctness risks explicitly rather than defaulting silently.
+  </role>
+
+  <goal>
+    A written decision record at `notes/spikes/002-private-grant-decision.md` that names the chosen private-thread grant mechanism (A `GrantAccess` or B `sprk_externalrecordaccess`), gives evidence-backed rationale across the comparison axes, documents the rejected alternative, and specifies exactly how task 042's BFF query-filter + task 041's ACS-membership reconcile must consume it. The one open architectural question of design §5 is closed; task 042 can be authored/executed against a locked mechanism.
+  </goal>
+
+  <context>
+    <background>
+      Design §5 locks the access boundary to the Dataverse record and locks OPEN-thread membership to ADR-034. The ONLY unresolved detail is the private-grant primitive — design §14.5 and spec Unresolved Questions both flag it as a Phase-0 verification (not a design fork). Getting it wrong is the highest-consequence error in R1: task 042 is the security-sensitive enforcement layer (NFR-06), and ACS membership is a *reconciled projection* of whatever grant model wins (design §4). A grant model the BFF filter cannot cleanly honour, or that has weak revocation / point-forward semantics, would leak privileged content — the concrete cost-of-doing-nothing named by NFR-06.
+
+      §11 Component Justification: this task introduces NO new component — it CHOOSES between two EXISTING precedents (extension over new, per §11). The whole point is to avoid inventing a third access mechanism (design §5 "No new authorization engine").
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/**/PlaybookSharingService.cs (GrantAccess / POA precedent — locate via grep)</file>
+      <file>src/server/api/Sprk.Bff.Api/**/GrantExternalAccessEndpoint*.cs (overlay precedent — locate via grep)</file>
+      <file>src/server/api/Sprk.Bff.Api/**/*externalrecordaccess* (the `sprk_externalrecordaccess` overlay usage — locate via grep)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/**/MembershipResolver* (ADR-034 open-membership derivation, for composition)</file>
+      <file>projects/messaging-communication-app-r1/design.md (§5 privacy/access, §4 membership sync, §8.4 ACS reconcile)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Decision spike — NO code, NO build, NO schema change. Output is a markdown decision record only.</constraint>
+    <constraint source="design §5">MUST NOT propose a new authorization engine or a third access mechanism. Choose between the two named existing precedents; open membership stays on ADR-034.</constraint>
+    <constraint source="root §6 (security-sensitive)">If the two options materially diverge on enforcement correctness or revocation safety, surface it as a 🔔 Human Input Required escalation with a recommendation — do NOT pick silently.</constraint>
+    <constraint source="design §5 D-04">The chosen mechanism MUST support point-forward privacy (opening a thread exposes only messages from that point forward; prior private messages stay restricted) and auditable revocation.</constraint>
+    <constraint source="design §4 / §8.4">The chosen mechanism MUST be reconcilable to ACS thread membership (ACS membership is a projection of Dataverse-derived access — never a second source of truth).</constraint>
+    <constraint source="ADR-034">Private grant COMPOSES WITH ADR-034 open membership; document how the BFF filter unions the two without double-counting or privilege leak.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership-resolution.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="GrantAccess / POA sharing" location="src/server/api/Sprk.Bff.Api/Services/">
+        `PlaybookSharingService`-style per-record share via Dataverse `GrantAccess` — the platform-native option A.
+      </pattern>
+      <pattern name="External-record-access overlay" location="src/server/api/Sprk.Bff.Api/">
+        `GrantExternalAccessEndpoint` + `sprk_externalrecordaccess` rows the BFF query-filter honours — option B.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `design.md` §5 (access model), §4 (membership sync), §8.4 (ACS reconcile), and spec Unresolved Questions to fix the exact decision boundary (private-grant only; open stays ADR-034).</step>
+    <step order="2">Grep + read the `GrantAccess`/POA precedent (`PlaybookSharingService`) — how it shares, revokes, and how a BFF read honours the shared access.</step>
+    <step order="3">Grep + read the overlay precedent (`GrantExternalAccessEndpoint` + `sprk_externalrecordaccess`) — how grants are recorded and how the BFF query-filter reads them.</step>
+    <step order="4">Read the ADR-034 `MembershipResolverService` derivation to determine how each private-grant option composes with open membership at BFF read time.</step>
+    <step order="5">Build a comparison matrix across: enforcement correctness in the BFF filter (042/050), composition with ADR-034, revocation + point-forward (D-04), auditability, ACS-reconcile compatibility (041), internal-now/external-later reach.</step>
+    <step order="6">Make the decision. If the options materially diverge on correctness/safety, raise a 🔔 Human Input Required escalation (root §6) with the recommendation; otherwise record the pick.</step>
+    <step order="7">Write `notes/spikes/002-private-grant-decision.md`: decision, rationale (matrix), rejected alternative, and a "consumed by 042/041/050" section specifying exactly how the enforcement filter + reconcile job must use the chosen mechanism.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md` (002 ✅) + `current-task.md`; confirm task 042 is unblocked (or the escalation is pending).</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Locate the two precedents in code</tool>
+    <tool name="read">Inspect the sharing/overlay/membership implementations</tool>
+    <tool name="write">Author the decision record</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/messaging-communication-app-r1/notes/spikes/002-private-grant-decision.md (decision + rationale matrix + rejected alternative + consumption spec for 042/041/050)</output>
+    <output type="docs">projects/messaging-communication-app-r1/tasks/TASK-INDEX.md (status update 002 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/spikes/002-private-grant-decision.md` exists and names exactly one chosen mechanism (A `GrantAccess` or B `sprk_externalrecordaccess`) for private-thread grants.</criterion>
+    <criterion testable="true">The record includes an evidence-backed comparison across: BFF-filter enforcement correctness, ADR-034 composition, revocation + point-forward (D-04), auditability, ACS-reconcile compatibility, internal/external reach — each citing the actual precedent code inspected.</criterion>
+    <criterion testable="true">The rejected alternative is documented (why not).</criterion>
+    <criterion testable="true">A "consumed by 042/041/050" section specifies exactly how the enforcement filter + reconcile job use the chosen mechanism.</criterion>
+    <criterion testable="true">No new authorization engine / third mechanism is proposed; open membership stays on ADR-034. No code or schema was changed.</criterion>
+    <criterion testable="true">If the options materially diverge on correctness/safety, a 🔔 Human Input Required escalation is recorded with a recommendation.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Blocks 042 (privacy/internal-only/privilege enforcement — R1's highest-risk, security-sensitive task). 042 cannot be authored against an undecided grant primitive.
+
+    Design §5 already resolved the *shape* (record-boundary security; open=ADR-034; private=existing per-record sharing grant). This spike resolves ONLY the *detail* of which existing sharing primitive. Do not reopen the resolved parts.
+
+    ACS membership is a projection (design §4) — whichever primitive wins, task 041's reconcile job must be able to compute the authorized participant set from it. Make that computability an explicit decision axis.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor per `&lt;rigor-hint&gt;` — no code, no Step 9.5 gates — BUT this is security-sensitive (root §6): escalate rather than pick silently if correctness diverges. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

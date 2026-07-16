@@ -1,0 +1,174 @@
+<task id="060" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Polling conversation/timeline component in `@spaarke/ui-components` (Fluent v9): interleaved email+chat, reply nesting, compose box, unread indicator, ~5s poll</title>
+    <phase>W6 — UI (polling timeline + PCF accessories)</phase>
+    <status>not-started</status>
+    <estimated-hours>14</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>061, 063</blocks>
+    <tags>frontend, fluent-ui, react, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New load-bearing shared-library React component (`.tsx`/`.ts` in `@spaarke/ui-components`) that becomes the R1 message surface; architecture-level decisions (poll loop + reducer state, interleaving/ordering model, reply nesting, unread tracking, EmailComposer sub-component reuse); blocks the PCF packaging (061) and quoting (063). ADR-021 (Fluent v9), ADR-012 (shared lib), ADR-028 (auth decoupling) bind; NFR-04 (no client-side ACS SDK) is a hard acceptance gate. FULL is non-negotiable.</rigor-reason>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>All-client TypeScript in `src/client/shared/Spaarke.UI.Components/**`; disjoint by file + language from the concurrent BFF (C#) tracks. Within W6 this is the serial root — 061 packages it and 063 extends its composer — but it runs safely alongside other waves.</parallel-reason>
+    <fr-refs>FR-10</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Build the **polling conversation/timeline component** in `src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/` (Fluent UI v9). This is the R1 message surface — the "Activities / portal-comments" async experience the design describes (§6.2). It renders a single thread and lets a user read + send messages; it stays current by **polling the BFF**, never by talking to ACS.
+
+    The component MUST (FR-10):
+    - **Render a thread** — email AND chat messages interleaved into one ordered list (chronological by sent/received time), each row **channel-badged** (Email vs Message), with **reply nesting** derived from `sprk_inreplyto`. Rows show sender, timestamp, `sprk_body` (respecting `sprk_bodyformat`), and attachment file cards.
+    - **Compose/send box** — a compose area at the foot of the thread to author + send a new message via the BFF (the send endpoint from task 051, surfaced through the injected `authenticatedFetch`). Reuse `<EmailComposer/>` sub-components (`BodyEditor`, `AttachmentList`, `RecipientField` where relevant) rather than re-implementing — extend, do not fork (§11).
+    - **Unread indicator** — surface the unread count from the BFF unread-count endpoint (task 050) and a visual "new messages" affordance; clear/advance last-seen as the user views.
+    - **~5s poll** — poll the BFF thread-read + unread-count endpoints on a configurable ~5s interval (default 5000ms, prop-overridable per NFR-07); reflect newly-captured inbound/outbound messages within one poll cycle. Pause polling when the document/tab is hidden; resume on focus. Debounce/guard against overlapping in-flight polls.
+
+    **Reads persisted `sprk_communication` records ONLY.** There is NO client-side ACS SDK in R1 (NFR-04) — the component never imports `@azure/communication-chat`, `@azure/communication-common`, `@azure/communication-identity`, or `@azure/communication-react`. Viewing history and syncing are pure Dataverse/BFF reads. The live-channel/WebSocket upgrade is the NEXT project and layers onto this same component — do not build it here.
+
+    All network I/O flows through an injected `authenticatedFetch` prop + a small typed `communicationTimelineApi` service (thread-read, unread-count, send) — the component MUST NOT import `@spaarke/auth` directly (ADR-028 / shared-lib decoupling). Fluent UI v9 only (ADR-021): `@fluentui/react-components` + `makeStyles` + `tokens`; dark mode passes through the host `FluentProvider`; no hardcoded colors.
+  </prompt>
+
+  <role>
+    Senior React 18 + TypeScript developer fluent in Fluent UI v9 (`makeStyles`/`tokens`/`FluentProvider`) and polling/data-sync UI patterns (interval loop, visibility-gating, in-flight guard). Familiar with the shipped `<EmailComposer/>` engine + sub-components in `@spaarke/ui-components` and the `authenticatedFetch`-injection idiom (ADR-028 decoupling).
+  </role>
+
+  <goal>
+    A `CommunicationTimeline` component exists in `@spaarke/ui-components`, exported via the lib barrel, that renders a thread's `sprk_communication` rows (email + chat interleaved, channel-badged, ordered, reply-nested from `sprk_inreplyto`), offers a compose/send box reusing `<EmailComposer/>` sub-components, shows an unread indicator, and polls the BFF every ~5s (configurable) reflecting new messages within one cycle. It reads persisted records only and contains NO ACS SDK import. No `@spaarke/auth` import (grep-verified). `npm run build` + `npm run lint` clean; dark-mode + semantic-token compliant (ADR-021).
+  </goal>
+
+  <context>
+    <background>
+      The design (§6.2, §8.6) locks R1's message UX to a **polling** conversation/timeline component — the Activities/portal-comments model — NOT a live open channel. Send → BFF → ACS; receive → Event Grid → BFF persists → the component **polls the BFF** and updates. Because R1 builds no live-channel client, there is no client-side ACS SDK anywhere in R1 (design §8.5/NFR-04); the composites-vs-headless and React-version questions belong to the next project.
+
+      §11 Component Justification (concrete cost-of-doing-nothing): there is **NO** `*Timeline*`/`*Thread*`/`*Conversation*` component in `@spaarke/ui-components` today (design §2 inventory — `<EmailComposer/>` is compose/send-only; viewing is the OOB form one record at a time + a flat subgrid). The failure mode without this component is a named contract failure: FR-10 cannot be satisfied and there is no surface that renders a grouped email+chat thread or drives the unread poll (051/050 have no consumer). This does not overlap `<EmailComposer/>` — it VIEWS a thread and REUSES the composer's sub-components for the send box; it does not re-implement compose/send mechanics. Extension over new: reuse `BodyEditor`/`AttachmentList`/`RecipientField` from `EmailComposer/subcomponents/` rather than cloning them.
+
+      ADR-026 Path-A exception (spec §ADR Tensions): R1's UI surface is the OOB main form + PCFs, not a Code Page — mirroring email-r4's shipped W4 pivot. This component is the render engine that task 061 packages as a form-bound PCF; being form-bound keeps it within ADR-006 (PCF for form binding). Cite the Path-A exception in the PR touching this UI surface.
+
+      Reads are BFF-mediated (`docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`): the timeline reads the BFF thread-read + unread-count endpoints (task 050), which are access-filtered per FR-08 — the component renders whatever the BFF returns and never re-derives privacy client-side.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.types.ts (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.reducer.ts (NEW — thread/unread/poll state)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/hooks/useThreadPoll.ts (NEW — ~5s interval + visibility-gate + in-flight guard)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/MessageRow.tsx + ChannelBadge.tsx + UnreadIndicator.tsx + TimelineComposeBox.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/index.ts (NEW — barrel)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationTimelineApi.ts (NEW — thread-read, unread-count, send; via authenticatedFetch)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (UPDATE — add CommunicationTimeline barrel line)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/ (REUSE — BodyEditor, AttachmentList, RecipientField)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (READ — sendCommunication + error contract to mirror)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-10">Render a thread (email + chat interleaved, channel-badged, ordered, reply nesting from `sprk_inreplyto`), a compose/send box, and an unread indicator; poll the BFF every ~5s; reflect a newly-captured inbound message within one poll cycle.</constraint>
+    <constraint source="NFR-04">R1 client code MUST NOT import ANY ACS SDK (`@azure/communication-*`). The component reads persisted `sprk_communication` records via the BFF only. Grep-verified NO ACS import.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 ONLY (`@fluentui/react-components`); `makeStyles` + `tokens`; dark mode via host `FluentProvider`; no hardcoded colors; no v8/v0.</constraint>
+    <constraint source="ADR-028">Component + sub-components MUST NOT import `@spaarke/auth`. Host injects `authenticatedFetch` via props; the timeline API service forwards it.</constraint>
+    <constraint source="ADR-012">Shared-library rules — the component lives in `@spaarke/ui-components`; no fork; export via the lib barrel; no cross-package source-path imports.</constraint>
+    <constraint source="ADR-026">Path-A exception: this component is packaged as a form-bound PCF (task 061), NOT a Code Page. Cite the exception in the PR. (Being form-bound keeps it within ADR-006.)</constraint>
+    <constraint source="NFR-07">Poll interval is a configurable prop (default ~5000ms); pause when tab hidden; guard overlapping polls to bound BFF load.</constraint>
+    <constraint source="project">§11 — REUSE `<EmailComposer/>` sub-components for the compose box; do not clone `BodyEditor`/`AttachmentList`/`RecipientField`. State the FR-10 failure mode + the "no timeline component exists today" evidence in the PR.</constraint>
+    <constraint source="project">No BFF publish-size / CVE obligations — this is client-only TypeScript (root §10 does not apply). Build via `npm run build` (dev) — NOT dotnet.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-026-code-page-standard.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+    </files>
+    <patterns>
+      <pattern name="EmailComposer sub-component reuse" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/">
+        Import `BodyEditor`, `AttachmentList`, `RecipientField` into the timeline compose box; do not re-implement. The composer's canonical recipient normalization + attachment caps carry over.
+      </pattern>
+      <pattern name="authenticatedFetch injection (ADR-028)" location="src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts">
+        All network I/O goes through an injected `authenticatedFetch` + a typed API service; the component never imports `@spaarke/auth`. Mirror `sendCommunication()`'s error contract.
+      </pattern>
+      <pattern name="Fluent v9 dark-mode tokens" location=".claude/skills/fluent-v9-component/SKILL.md">
+        `makeStyles` + `tokens` only; channel badges + unread affordance use semantic tokens so dark mode passes through the host `FluentProvider`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design §6.2 (polling timeline), §8.6 (OOB form + PCF host), §6.3 (quoting seam that 063 will extend), spec FR-10/FR-11/NFR-04/NFR-07, and the `<EmailComposer/>` sub-components (`BodyEditor`, `AttachmentList`, `RecipientField`) + `communicationApi.ts` error contract. Read the task-050 thread-read + unread-count endpoint shapes to lock the read model.</step>
+    <step order="2">Read ADR-021 + `fluent-v9-component/SKILL.md` for Fluent v9 conventions; read `DATA-ACCESS-DECISION-CRITERIA.md` to confirm BFF-mediated reads.</step>
+    <step order="3">Author `CommunicationTimeline.types.ts`: `TimelineMessage { id; channelType; sender; sentOn; body; bodyFormat; inReplyTo?; attachments[] }`, `TimelineThread`, `UnreadState`, `CommunicationTimelineProps { threadId; authenticatedFetch; bffBaseUrl; pollIntervalMs? (default 5000); onSendComplete? }`, and the reducer state/action union (`SET_THREAD`, `MERGE_POLL`, `SET_UNREAD`, `ADVANCE_LAST_SEEN`, `BEGIN_SEND`, `END_SEND`).</step>
+    <step order="4">Author `communicationTimelineApi.ts`: `readThread(threadId, {authenticatedFetch, bffBaseUrl})`, `getUnreadCount(threadId, ...)`, `sendMessage(request, ...)` — thin typed wrappers over the injected `authenticatedFetch`; mirror `sendCommunication()`'s typed-error contract. NO ACS imports.</step>
+    <step order="5">Author `hooks/useThreadPoll.ts`: a ~5s interval loop (prop-configurable) that calls `readThread` + `getUnreadCount`, pauses on `document.hidden` (Page Visibility), guards overlapping in-flight requests, and dispatches `MERGE_POLL`/`SET_UNREAD`. Clean up the interval on unmount.</step>
+    <step order="6">Author the interleave/nesting model: a pure `buildTimeline(messages)` helper that orders all messages chronologically and computes reply nesting from `sprk_inreplyto` (parent → child indentation), channel-agnostic. Unit-testable in task 080's client scope or a colocated test.</step>
+    <step order="7">Author the sub-components: `MessageRow.tsx` (sender/time/body-by-format/attachment cards + nesting indent), `ChannelBadge.tsx` (Email vs Message, semantic tokens), `UnreadIndicator.tsx` (count + "new messages" affordance), `TimelineComposeBox.tsx` (REUSES `BodyEditor` + `AttachmentList` + `RecipientField`; calls `sendMessage`).</step>
+    <step order="8">Author `CommunicationTimeline.tsx`: `useReducer` state, `useThreadPoll`, render the ordered/nested list + unread indicator + compose box; `role="region"`/`aria-label` landmarks + a live region announcing new inbound messages. On send success, optimistically advance and let the next poll reconcile (echo-dedup is server-side). Three `makeStyles`-driven layout with semantic tokens.</step>
+    <step order="9">Author `CommunicationTimeline/index.ts` barrel; add `export * from './components/CommunicationTimeline';` to shared-lib `src/index.ts`.</step>
+    <step order="10">Run `npm run build` + `npm run lint` in `src/client/shared/Spaarke.UI.Components/` (use `npm install --legacy-peer-deps --no-audit --no-fund` if a fresh install is needed; NOT `npm ci`). Both MUST be clean. Grep-verify NO `@azure/communication` import and NO `@spaarke/auth` import under `CommunicationTimeline/**` + `communicationTimelineApi.ts`.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the new files (focus: no ACS import, no `@spaarke/auth` import, poll-loop cleanup + in-flight guard, Fluent v9 semantic tokens, EmailComposer reuse not clone); `adr-check` against ADR-021/ADR-028/ADR-012/ADR-026 + `spec.md` (FR-10, NFR-04, NFR-07). Address Critical + High findings.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (060 ✅) + `current-task.md`; record decisions (poll cadence default, interleave/nesting algorithm, which EmailComposer sub-components were reused, unread last-seen mechanism).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Design §6.2/§6.3/§8.6, EmailComposer sub-components, communicationApi error contract, task-050 endpoint shapes, ADR-021</tool>
+    <tool name="write">Component, reducer, types, poll hook, sub-components, timeline API service, barrel</tool>
+    <tool name="edit">Shared-lib src/index.ts barrel</tool>
+    <tool name="bash">npm run build + npm run lint + grep for @azure/communication and @spaarke/auth</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.tsx (NEW)</output>
+    <output type="code">CommunicationTimeline/CommunicationTimeline.types.ts + CommunicationTimeline.reducer.ts (NEW)</output>
+    <output type="code">CommunicationTimeline/hooks/useThreadPoll.ts (NEW — ~5s poll, visibility-gate, in-flight guard)</output>
+    <output type="code">CommunicationTimeline/subcomponents/{MessageRow,ChannelBadge,UnreadIndicator,TimelineComposeBox}.tsx (NEW)</output>
+    <output type="code">CommunicationTimeline/index.ts (NEW — barrel)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/communicationTimelineApi.ts (NEW)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (UPDATED — barrel line)</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test>Renders a thread of mixed email + chat messages interleaved in chronological order, each channel-badged, with reply-nested rows from `sprk_inreplyto` — no console errors.</ui-test>
+    <ui-test>Dark mode: the timeline, channel badges, and unread indicator render correctly under a dark `FluentProvider` (semantic tokens; no hardcoded colors).</ui-test>
+    <ui-test>Polling: a message added to the (mocked) BFF thread-read response appears in the rendered list within one poll cycle (~5s) without a manual refresh.</ui-test>
+    <ui-test>Unread indicator reflects the mocked unread-count and clears/advances as the thread is viewed.</ui-test>
+    <ui-test>Compose box reuses `<EmailComposer/>` sub-components (BodyEditor/AttachmentList) and sends via the injected `authenticatedFetch` (mocked); attachment caps follow `CHAT-ATTACHMENT-POLICY.md`.</ui-test>
+    <ui-test>Poll loop pauses when `document.hidden` and resumes on focus; overlapping in-flight polls are guarded; interval is cleaned up on unmount (no leak warning).</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">`CommunicationTimeline` renders email + chat messages interleaved in chronological order, each channel-badged, with reply nesting derived from `sprk_inreplyto`.</criterion>
+    <criterion testable="true">A compose/send box is present and sends via the BFF through the injected `authenticatedFetch`, reusing `<EmailComposer/>` sub-components (grep confirms import-from, not clone).</criterion>
+    <criterion testable="true">An unread indicator reflects the BFF unread-count and advances last-seen as the thread is viewed.</criterion>
+    <criterion testable="true">The component polls the BFF thread-read + unread-count endpoints on a configurable ~5s interval (default 5000ms); a newly-captured inbound message appears within one poll cycle; polling pauses when the tab is hidden and guards overlapping requests.</criterion>
+    <criterion testable="true">The component reads persisted records only and contains NO ACS SDK import — grep confirms no `@azure/communication-*` anywhere under `CommunicationTimeline/**` or `communicationTimelineApi.ts` (NFR-04).</criterion>
+    <criterion testable="true">No `@spaarke/auth` import anywhere under `CommunicationTimeline/**` (ADR-028, grep-verified).</criterion>
+    <criterion testable="true">Only `@fluentui/react-components` + `makeStyles` + `tokens` used for styling; no hardcoded colors; dark mode passes through the host `FluentProvider` (ADR-021).</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean in `@spaarke/ui-components`; the shared-lib barrel exports `CommunicationTimeline`.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Task 061 packages this component as a form-bound PCF and deploys it to the OOB form; task 063 adds the bidirectional "quote into…" action to the compose box. Both build on this — keep the compose box's prefill path (initial body/format) prop-driven so 063 can inject quoted content without re-opening the component.
+
+    The live-channel upgrade (headless `@azure/communication-chat` → WebSocket append/typing/receipts) is the NEXT project and layers onto THIS component (design §6.2). Do NOT add any ACS client SDK or WebSocket path in R1 — NFR-04 is a hard acceptance gate verified by dependency scan (spec Success Criterion 11).
+
+    Reads are BFF-mediated + access-filtered (task 050 enforces FR-08); the component renders what the BFF returns and never re-derives privacy client-side.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor per `&lt;rigor-hint&gt;` — Step 9.5 (code-review + adr-check) MANDATORY. Client-only TypeScript: build via `npm run build` (NOT dotnet); no publish-size/CVE step (root §10 N/A). Cite the ADR-026 Path-A exception in the PR. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

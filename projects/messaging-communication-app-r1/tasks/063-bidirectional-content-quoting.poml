@@ -1,0 +1,138 @@
+<task id="063" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Bidirectional inline content quoting (email↔message) via the channel-agnostic `sprk_body`</title>
+    <phase>W6 — UI (polling timeline + PCF accessories)</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>060</dependencies>
+    <blocks></blocks>
+    <tags>frontend, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies shared `@spaarke/ui-components` `.tsx`/`.ts` (the timeline compose box + EmailComposer prefill path) to add a cross-channel "quote into…" action in both directions; touches the send-side authoring surface consumed by every message + email composer. Fluent v9 (ADR-021) + shared-lib (ADR-012) bind; correctness of the quote-format seam matters. FULL per the frontend-shared-lib bar (mirrors email-r4 020/023 FULL).</rigor-reason>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>All-client TypeScript in `src/client/shared/Spaarke.UI.Components/**`; disjoint from 061 (PCF packaging) and 062 (accessory wiring) file surfaces. Depends on 060 (the compose box + composer prefill path it extends).</parallel-reason>
+    <fr-refs>FR-13</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Add **bidirectional inline content quoting** between email and message, both directions, via the channel-agnostic `sprk_body`/`sprk_bodyformat` (FR-13, design §6.3):
+
+    - **"Quote into message"** — from an email (or any `sprk_communication` row), read its `sprk_body` + `sprk_bodyformat`, format the content as an **inline quote**, and prefill the MESSAGE composer (the timeline compose box, task 060) with it.
+    - **"Quote into email"** — from a message row, read its `sprk_body`, format as an inline quote, and prefill the EMAIL composer (`<EmailComposer/>` in reply/compose mode).
+
+    This is a **read → format → prefill** operation, NOT an extraction — because `sprk_body` is the channel-agnostic body on every message, no `.eml` parsing is required (that is only needed for byte-exact forwarding with original attachments, which is out of R1 scope). Net-new = a "quote into…" action affordance + a shared quote-formatting helper (`quoteBody(sourceBody, sourceFormat, targetFormat)`) that produces inline-quoted content (e.g., `>`-prefixed / blockquote), respecting the target composer's body format.
+
+    Wire the action into both composer surfaces: the timeline compose box (message target) and the `<EmailComposer/>` prefill path (email target). Keep the quote helper channel-agnostic and pure (unit-testable). Fluent v9 (ADR-021); shared-lib rules (ADR-012); no client-side ACS SDK (NFR-04 — this is pure Dataverse-body reformatting).
+  </prompt>
+
+  <role>
+    React 18 + TypeScript developer fluent in Fluent UI v9 and the shipped `<EmailComposer/>` prefill/mode helpers (`deriveReplyState`, body-format handling) + the task-060 timeline compose box. Comfortable authoring a small pure formatting helper reused by both composer surfaces.
+  </role>
+
+  <goal>
+    A "quote into message" action prefills the timeline message composer with an inline-quoted email body, and a "quote into email" action prefills the email composer with an inline-quoted message body — both directions, driven by a shared pure `quoteBody(...)` helper honoring the target body format, with no `.eml` parsing and no ACS SDK. Fluent v9 compliant; `npm run build` + `npm run lint` clean; the helper is unit-tested.
+  </goal>
+
+  <context>
+    <background>
+      Design §6.3: cross-channel content reuse is a read-format-prefill operation because `sprk_body` is the channel-agnostic body. Both directions ship in R1. The net-new surface is a "quote into…" action + quote formatting; no `.eml` parsing is needed.
+
+      §11 Component Justification: the quote helper is a single shared function reused by both composer surfaces — it does NOT overlap any existing helper (the `<EmailComposer/>` `deriveReplyState`/`deriveForwardState` derive same-channel reply/forward state; this is CROSS-channel body quoting into a fresh composer prefill). The concrete failure mode without it is FR-13 unmet: content cannot move between channels as inline quoted text. Extension over new: reuse the composer's existing prefill/initial-body props (task 060 kept the compose box prefill prop-driven for exactly this) rather than adding a second prefill mechanism.
+
+      No ACS SDK, no BFF publish-size/CVE (this is client-only body reformatting reading persisted `sprk_body` already available to the composer/timeline).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/TimelineComposeBox.tsx (UPDATE — accept quoted-content prefill + "quote into message" action)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx (READ/UPDATE — prefill path for "quote into email")</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/MessageRow.tsx (UPDATE — "quote into email" affordance per row)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/quoteBody.ts (NEW — pure quote-formatting helper)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts (READ — deriveReplyState/body-format handling to mirror)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">"Quote into message" and "quote into email" read the source `sprk_body`/`sprk_bodyformat` and prefill the target composer as inline quoted content, both directions — without `.eml` parsing.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 only for any action affordance; semantic tokens; dark mode via host `FluentProvider`.</constraint>
+    <constraint source="ADR-012">Shared-library rules — the quote helper + composer edits live in `@spaarke/ui-components`; export the helper via the barrel; no fork.</constraint>
+    <constraint source="NFR-04">No client-side ACS SDK — this is pure Dataverse-body reformatting; no `@azure/communication-*` import.</constraint>
+    <constraint source="project">The quote helper `quoteBody(sourceBody, sourceFormat, targetFormat)` is PURE + channel-agnostic + unit-tested; respect the target composer's body format (HTML blockquote vs plain-text `>`-prefix).</constraint>
+    <constraint source="project">§11 — reuse the composer's existing prefill/initial-body props (task 060 kept it prop-driven); do NOT add a second prefill mechanism. No `.eml` parsing (out of R1 scope).</constraint>
+    <constraint source="project">No BFF publish-size / CVE (client only, root §10 N/A). Build via `npm run build` (dev).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Composer prefill / reply-state derivation" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts">
+        `deriveReplyState`/body-format handling — mirror the prefill shape; quoting injects an inline-quoted initial body honoring the target format.
+      </pattern>
+      <pattern name="Prop-driven compose-box prefill" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/TimelineComposeBox.tsx">
+        Task 060 kept the compose box prefill prop-driven; quoting sets the initial body via that prop — no second prefill path.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design §6.3, spec FR-13, the `<EmailComposer/>` reducer prefill/`deriveReplyState` + body-format handling, and the task-060 `TimelineComposeBox` prefill prop + `MessageRow`.</step>
+    <step order="2">Author the pure helper `src/client/shared/Spaarke.UI.Components/src/utils/quoteBody.ts`: `quoteBody(sourceBody, sourceFormat, targetFormat)` → inline-quoted content (HTML `&lt;blockquote&gt;` when target is HTML; `>`-prefixed lines when target is plain text), with optional attribution line (sender/date). Channel-agnostic; no ACS/`.eml` dependency. Export via the shared-lib barrel.</step>
+    <step order="3">Wire "quote into message": add an action affordance (Fluent v9) on an email/`sprk_communication` row (or the timeline) that calls `quoteBody(...)` and sets the timeline compose box's prefill prop (message composer prefilled).</step>
+    <step order="4">Wire "quote into email": add a "quote into email" affordance on a message `MessageRow` that calls `quoteBody(...)` and prefills `<EmailComposer/>` (reply/compose mode) via its initial-body/prefill path.</step>
+    <step order="5">Confirm both directions honor the target body format and that no `.eml` parsing is introduced; grep-verify no `@azure/communication-*` import.</step>
+    <step order="6">Write unit tests for `quoteBody(...)`: HTML-target produces a blockquote; plain-text-target produces `>`-prefixed lines; empty/whitespace source handled; format round-trip (email→message→email) is stable enough for inline quoting.</step>
+    <step order="7">Run `npm run build` + `npm run lint` in `@spaarke/ui-components`; both clean.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` (focus: pure helper, no second prefill path, no `.eml` parsing, no ACS import, Fluent v9 tokens); `adr-check` against ADR-021/ADR-012 + `spec.md` (FR-13, NFR-04, §11 reuse). Address Critical + High findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (063 ✅) + `current-task.md`; record decisions (quote-format representation, attribution-line shape, which composer prefill props were reused).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Design §6.3, EmailComposer reducer prefill, task-060 compose box + MessageRow</tool>
+    <tool name="write">quoteBody helper + unit test; action affordances</tool>
+    <tool name="edit">TimelineComposeBox + EmailComposer prefill wiring; MessageRow affordance; shared-lib barrel</tool>
+    <tool name="bash">npm run build + npm run lint + grep for @azure/communication + .eml</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/quoteBody.ts (NEW — pure helper) + barrel export</output>
+    <output type="code">CommunicationTimeline/subcomponents/{TimelineComposeBox,MessageRow}.tsx (UPDATED — quote actions + prefill)</output>
+    <output type="code">EmailComposer/EmailComposer.tsx (UPDATED — quote-into-email prefill path)</output>
+    <output type="test">quoteBody unit tests (HTML/plain-text targets; both directions)</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test>"Quote into message" on an email row prefills the timeline message composer with inline-quoted content honoring the target (message) body format — no console errors.</ui-test>
+    <ui-test>"Quote into email" on a message row prefills the email composer with inline-quoted content honoring the target (email) body format.</ui-test>
+    <ui-test>Dark mode: the quote action affordances render correctly (Fluent v9 tokens).</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Quote into message" reads an email's `sprk_body`/`sprk_bodyformat` and prefills the message composer as inline quoted content.</criterion>
+    <criterion testable="true">"Quote into email" reads a message's `sprk_body` and prefills the email composer as inline quoted content.</criterion>
+    <criterion testable="true">Both directions honor the target composer's body format; no `.eml` parsing is introduced (grep-verified).</criterion>
+    <criterion testable="true">`quoteBody(...)` is a pure, channel-agnostic, unit-tested helper exported via the shared-lib barrel; the composer prefill is reused (no second prefill mechanism, §11).</criterion>
+    <criterion testable="true">No `@azure/communication-*` import (NFR-04); `npm run build` + `npm run lint` clean; only Fluent v9 semantic tokens used for the action affordances (ADR-021).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 060 (the compose box + composer prefill path). `.eml` parsing is explicitly out of scope — it is only needed for byte-exact forwarding with original attachments (design §6.3), which R1 does not do. This is inline quoted text via `sprk_body` only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 (code-review + adr-check) MANDATORY. Client-only TypeScript: build via `npm run build` (NOT dotnet); no publish-size/CVE (root §10 N/A). Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

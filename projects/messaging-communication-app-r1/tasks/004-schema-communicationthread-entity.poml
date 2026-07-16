@@ -1,0 +1,133 @@
+<task id="004" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Schema: `sprk_communicationthread` entity + `sprk_thread` lookup + thread↔channel child table</title>
+    <phase>W0 — Phase 0 Verification + Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>040, 050</blocks>
+    <tags>dataverse, schema</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Creates NEW Dataverse schema (entity + lookup + child table) — no BFF code, no Step 9.5 gates. STANDARD per §8 (new-file/new-surface creation with constraints). §11 Component Justification REQUIRED (a new entity is introduced).</rigor-reason>
+    <parallel-group>W0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-05</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Create the first-class communication thread data model (FR-05, design §6). Today there is NO thread entity — email "threading" is invisible pointer-chasing (`sprk_inreplyto` ancestry) and chat has no home at all (design §2). This task builds the thin, *queryable* grouping key that groups email reply-chains AND chat conversations channel-agnostically. Grouping key is LOCKED to option (A) per design §14.4.
+
+    Create three schema artifacts via the `dataverse-create-schema` skill patterns:
+
+    1. **`sprk_communicationthread` entity** (NEW) — kept deliberately THIN (design §6.1): a **topic** (text; derived from first message subject/participant label — no authoring UI in R1), an **anchor** via the **ADR-024 regarding family** (NOT a new regarding mechanism — reuse the existing polymorphic regarding lookups), a **thread-level privacy state** (the home for D-04 point-forward privacy), and a **participant set** representation. It is also the home for the ACS `ChatThreadId` (via the child table below).
+    2. **`sprk_communication.sprk_thread` lookup** (NEW) — a lookup from every message to its thread. Direction-symmetric thread assignment (task 040) sets it on both inbound + outbound, all channels.
+    3. **thread↔channel child table** (NEW, design D-03) — one row per `(thread, channel, external-ref)`. R1 populates the ACS `ChatThreadId`; email/SMS refs attach later with NO schema change ("channel is an attribute").
+
+    Verify option-set integers (e.g., privacy-state choices) via Dataverse MCP before assignment, and consume task 001's schema-audit report so you add exactly what's missing (do not recreate existing columns). This is schema only — the thread-assignment LOGIC is task 040; the privacy ENFORCEMENT is task 042.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse schema engineer. Fluent in the `dataverse-create-schema` skill (Web API + PowerShell for patterns PAC CLI can't do), the ADR-024 polymorphic regarding family, option-set integer conventions, and intersection/child-table modeling. You add exactly the schema the spec needs — nothing speculative.
+  </role>
+
+  <goal>
+    `sprk_communicationthread` (thin: topic + ADR-024 anchor + privacy state + participants), the `sprk_communication.sprk_thread` lookup, and the thread↔channel child table exist in Dataverse (in the project solution), with verified option-set integers. A query "messages where `sprk_thread` = X" returns a conversation; the child table can hold the ACS `ChatThreadId`. Tasks 040 (resolver) and 050 (thread-read endpoint) can build against the real schema.
+  </goal>
+
+  <context>
+    <background>
+      Design §6.1 rules out the alternatives and locks option (A): a JSON blob can't be filtered by Dataverse; leaning on *regarding* is the wrong dimension (a matter has many conversations). The thread entity gives thread-level privacy (D-04) and participants a real home; the child table makes "channel is an attribute" so SMS/email refs attach later with no schema change.
+
+      §11 Component Justification (a NEW entity is introduced): (1) **Existing overlap** — none; grep/design §2 confirm no thread entity, no thread↔channel table, no `sprk_conversationid` grouping in use (task 001 verifies). (2) **Extension instead** — the lighter fallback (C: a `sprk_conversationid` field on `sprk_communication`) was considered and rejected in design §6.1 because thread-level privacy + participants would have no home; (A) is the locked choice. (3) **Concrete cost-of-doing-nothing** — without a queryable thread key, the timeline component (FR-10) and thread-read endpoint (FR-11) have nothing to filter on, and chat conversations have no grouping at all; "a matter shows a flat list of messages, not grouped threads" (design §2). This is a named contract failure (FR-05 acceptance: "every persisted message carries a `sprk_thread`; the child table holds the ACS thread id"), not "future flexibility."
+    </background>
+    <relevant-files>
+      <file>projects/messaging-communication-app-r1/notes/spikes/001-schema-audit.md (task 001 output — the confirmed column delta; consume it)</file>
+      <file>projects/messaging-communication-app-r1/design.md (§6 threads, §6.1 grouping-key A, D-03 child table, §14.4)</file>
+      <file>projects/messaging-communication-app-r1/spec.md (FR-05 + acceptance)</file>
+      <file>docs/data-model/ (existing Dataverse entity schemas / ERD — for the regarding family + conventions)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">Thread anchor reuses the polymorphic regarding family — MUST NOT add a second regarding mechanism. Use the existing regarding lookups the association engine already writes.</constraint>
+    <constraint source="design §6.1 / §14.4">Grouping key is LOCKED to (A) `sprk_communicationthread` + `sprk_thread` lookup. Do NOT implement option C (`sprk_conversationid`) or option B (regarding+JSON).</constraint>
+    <constraint source="design §6.1">Keep the entity THIN — topic, anchor, privacy state, participant set. No speculative columns; no topic-authoring UI schema.</constraint>
+    <constraint source="design D-03">Thread↔channel child table = one row per `(thread, channel, external-ref)`; R1 populates ACS `ChatThreadId`; SMS/email refs attach later with no schema change.</constraint>
+    <constraint source="project">Verify all option-set integers via Dataverse MCP `describe`/`read_query` BEFORE assignment (privacy-state choice, channel-type on the child table). Consume task 001's audit — do not recreate existing columns.</constraint>
+    <constraint source="ADR-027">Author schema into the project's solution per managed-solution conventions; no direct prod-only unmanaged changes.</constraint>
+    <constraint source="project">Schema ONLY. No thread-assignment logic (that is 040), no privacy enforcement (that is 042), no BFF code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation.md</file>
+      <file>docs/data-model/README.md</file>
+      <file>projects/messaging-communication-app-r1/notes/spikes/001-schema-audit.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse schema creation" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Web API + PowerShell for entity/attribute/relationship/option-set creation (patterns PAC CLI lacks). Verify integers via MCP first.
+      </pattern>
+      <pattern name="Polymorphic regarding family" location=".claude/adr/ADR-024-polymorphic-resolver-pattern.md">
+        The existing regarding lookup set — reuse for the thread anchor; never a new mechanism.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 001's `notes/spikes/001-schema-audit.md` + design §6.1/§14.4 + spec FR-05 to fix the exact schema to add (and confirm nothing already exists).</step>
+    <step order="2">Via Dataverse MCP `describe`, re-confirm the ADR-024 regarding-family lookups available for the thread anchor and the `sprk_communicationtype` member set (for the child-table channel attribute).</step>
+    <step order="3">Create the `sprk_communicationthread` entity (thin: topic text; ADR-024 regarding anchor; thread-level privacy-state choice — verify integers via MCP first; participant-set representation).</step>
+    <step order="4">Create the `sprk_communication.sprk_thread` lookup (message → thread).</step>
+    <step order="5">Create the thread↔channel child table: `(thread lookup, channel-type choice, external-ref text)`; ensure it can hold the ACS `ChatThreadId`; shape it so email/SMS refs attach later with no schema change.</step>
+    <step order="6">Deploy the schema to the project solution (`dataverse-deploy` / skill patterns). Verify: a thread record can be created; a `sprk_communication` can point at it via `sprk_thread`; a child-table row holds an ACS `ChatThreadId`; a filter "`sprk_thread` = X" returns the messages.</step>
+    <step order="7">Document the created schema (logical names, types, option-set integers, relationships) in the task notes / for the 081 architecture doc. Update `tasks/TASK-INDEX.md` (004 ✅) + `current-task.md`; confirm 040 + 050 unblocked.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Consume the 001 audit + design/spec</tool>
+    <tool name="mcp-dataverse-describe">Re-confirm regarding family + option-set integers</tool>
+    <tool name="dataverse-create-schema">Create entity + lookup + child table</tool>
+    <tool name="dataverse-deploy">Deploy schema to the project solution</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Dataverse: `sprk_communicationthread` entity (topic, ADR-024 anchor, privacy state, participants)</output>
+    <output type="schema">Dataverse: `sprk_communication.sprk_thread` lookup</output>
+    <output type="schema">Dataverse: thread↔channel child table (one row per `(thread, channel, external-ref)`)</output>
+    <output type="docs">Task notes: created-schema inventory (logical names + types + option-set integers) for the 081 architecture doc + the §11 justification</output>
+    <output type="docs">projects/messaging-communication-app-r1/tasks/TASK-INDEX.md (status update 004 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_communicationthread` exists with: topic, an ADR-024 regarding-family anchor (no new mechanism), a thread-level privacy-state field, and a participant-set representation.</criterion>
+    <criterion testable="true">The `sprk_communication.sprk_thread` lookup exists (message → thread).</criterion>
+    <criterion testable="true">The thread↔channel child table exists, holds one row per `(thread, channel, external-ref)`, and can store the ACS `ChatThreadId`.</criterion>
+    <criterion testable="true">A query "messages where `sprk_thread` = X" returns the conversation (verified against a test thread + message).</criterion>
+    <criterion testable="true">All option-set integers were verified via Dataverse MCP before assignment; no existing column was recreated (per the 001 audit).</criterion>
+    <criterion testable="true">No thread-assignment logic, no privacy enforcement, no BFF code was added (schema only).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Blocks 040 (`IThreadResolver` find-or-creates this entity + sets `sprk_thread`) and 050 (thread-read endpoint filters on `sprk_thread`). Depends on 001 (the schema-audit delta).
+
+    Point-forward: historical emails have no thread and stay ungrouped until an optional backfill (deferred, out of R1 — design §6.5). Do not build backfill schema.
+
+    Keep it thin. Design §6.1 explicitly warns against over-modeling: topic/anchor/privacy/participants only. The rich timeline is the component (060), not schema.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor per `&lt;rigor-hint&gt;` — schema creation, Step 9.5 gates SKIPPED. State the §11 Component Justification (new entity) in the task notes. Verify option-set integers via MCP before assignment. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

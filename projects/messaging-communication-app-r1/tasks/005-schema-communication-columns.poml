@@ -1,0 +1,134 @@
+<task id="005" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Schema: `sprk_communication` privacy/internal-only/privilege/ACS-key columns + `communicationUserId` on user/contact</title>
+    <phase>W0 — Phase 0 Verification + Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>042, 010</blocks>
+    <tags>dataverse, schema</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Adds columns to an EXISTING entity + a mapping column on user/contact — no BFF code, no Step 9.5 gates. STANDARD per §8. Modifies existing surface (column adds) — no §11 new-component justification required, but the columns must trace to FR-08 / ACS correlation.</rigor-reason>
+    <parallel-group>W0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-08</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Add the `sprk_communication` columns that back privacy enforcement (FR-08) and ACS correlation, plus the ACS identity mapping on the user + contact entities. Schema only — the ENFORCEMENT (BFF query-filter) is task 042; the identity-minting LOGIC is task 010. This task just lands the fields so 042 and 010 have real columns to write/read.
+
+    Add to **`sprk_communication`** (design §5, §8.2):
+    - **privacy flag** — message-level privacy (composes with the thread-level privacy state on `sprk_communicationthread` from task 004).
+    - **internal-only flag** — D-05 visibility attribute; external participants (R2/R3) never see these.
+    - **privilege classification** — classification metadata DISTINCT from privacy; AI may *flag* but never *decide* (ADR-015). Composes with privacy.
+    - **ACS `messageId`** — the ACS chat message id (the idempotency/echo-dedup key, design §4/§8.3).
+    - **ACS `chatThreadId`** — the ACS thread correlation (also lives on the task-004 child table; confirm placement to avoid duplication — see notes).
+
+    Add the ACS identity mapping:
+    - **`communicationUserId`** on the **user** (`systemuser`) and **contact** entities — persists the ACS `communicationUserId` for sender resolution + token re-issue (design §8.2). Follow the 001 audit's confirmed target entities.
+
+    Verify ALL option-set integers via Dataverse MCP before assignment (privacy/privilege choices if modeled as choices). Consume task 001's schema-audit report — add exactly what's MUST-ADD, do not recreate EXISTS columns.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse schema engineer. Fluent in the `dataverse-create-schema` skill, option-set integer conventions, and the `sprk_communication` data model. You add exactly the columns FR-08 + ACS correlation require, verifying against the live schema first.
+  </role>
+
+  <goal>
+    `sprk_communication` carries a message-level privacy flag, an internal-only flag, a privilege classification, and ACS `messageId` + `chatThreadId` correlation keys; the user + contact entities carry `communicationUserId`. All option-set integers verified via MCP; no existing column recreated. Task 042 (privacy enforcement) has real columns to filter on; task 010 (ACS identity) has a real mapping column to persist to.
+  </goal>
+
+  <context>
+    <background>
+      Design §5 composes privacy from a SMALL number of `sprk_communication` + thread fields + BFF filters — "No new authorization engine." These columns are the data half; task 042 is the enforcement half. The ACS keys are the correlation half: `messageId` is the echo-dedup / idempotency key that lets outbound persist-on-send and inbound capture-on-event coexist (design §4); `communicationUserId` maps a Dataverse principal to its ACS identity so the BFF can mint tokens + resolve senders (design §8.2).
+
+      §11 note: this task only ADDS COLUMNS to existing entities (no new component/entity), so the three-question §11 template does not apply (per CLAUDE.md §11 "Tasks that ONLY modify existing files ... do NOT require justification"). Each column still traces to a spec requirement: privacy/internal-only/privilege → FR-08; ACS `messageId` → FR-04/NFR-03; ACS `chatThreadId` → FR-05 correlation; `communicationUserId` → FR-03.
+    </background>
+    <relevant-files>
+      <file>projects/messaging-communication-app-r1/notes/spikes/001-schema-audit.md (task 001 output — the confirmed EXISTS/MUST-ADD delta; consume it)</file>
+      <file>projects/messaging-communication-app-r1/design.md (§5 privacy columns table, §8.2 identity mapping)</file>
+      <file>projects/messaging-communication-app-r1/spec.md (FR-08 + acceptance, FR-03)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="design §5">Privilege classification is DISTINCT from privacy; AI may flag but never decide (ADR-015). Model them as separate fields.</constraint>
+    <constraint source="design §5 D-04">Message-level privacy composes with thread-level privacy (task 004). Point-forward switch logic is task 042 — this task only lands the fields.</constraint>
+    <constraint source="design §4 / §8.3">ACS `messageId` is the idempotency/echo-dedup key — ensure it is queryable/indexable for dedupe lookups (task 031 dedupes on it).</constraint>
+    <constraint source="design §8.2">`communicationUserId` goes on BOTH `systemuser` and `contact` (per the 001 audit's confirmed targets). Persist the ACS identity for sender resolution + token re-issue.</constraint>
+    <constraint source="project">Avoid duplicating the ACS `chatThreadId`: it is the thread↔channel child table's external-ref (task 004). If a per-message `chatThreadId` is also warranted for fast correlation, document WHY both exist (denormalized read key) — do not add it silently.</constraint>
+    <constraint source="project">Verify ALL option-set integers via Dataverse MCP BEFORE assignment. Consume the 001 audit — add only MUST-ADD columns; do not recreate EXISTS.</constraint>
+    <constraint source="ADR-027">Author into the project solution per managed-solution conventions.</constraint>
+    <constraint source="project">Schema ONLY. No BFF enforcement (042), no identity-minting logic (010).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/ADR-015-ai-flag-not-decide.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation.md</file>
+      <file>docs/data-model/README.md</file>
+      <file>projects/messaging-communication-app-r1/notes/spikes/001-schema-audit.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse schema creation" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Web API + PowerShell for attribute/option-set adds; verify integers via MCP first.
+      </pattern>
+      <pattern name="Privacy composed from record security" location="projects/messaging-communication-app-r1/design.md §5">
+        Small field set + BFF filter — no new authorization engine. These fields are the data half of that.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 001's `notes/spikes/001-schema-audit.md` + design §5/§8.2 + spec FR-08/FR-03 to fix the exact MUST-ADD column set + the confirmed `communicationUserId` target entities.</step>
+    <step order="2">Via Dataverse MCP `describe`, re-confirm which of the target columns already exist and verify any option-set integers to be assigned (privacy/privilege choices).</step>
+    <step order="3">Add to `sprk_communication`: privacy flag, internal-only flag, privilege classification (separate from privacy), ACS `messageId` (indexable/queryable for dedupe). Decide + document the ACS `chatThreadId` placement (child-table vs also a denormalized per-message read key).</step>
+    <step order="4">Add `communicationUserId` to `systemuser` and `contact` per the audit.</step>
+    <step order="5">Deploy to the project solution. Verify each column exists + is writable/queryable; verify the `messageId` supports a dedupe lookup.</step>
+    <step order="6">Document the added columns (logical names + types + integers) for the 081 architecture doc + task 042/010 consumption. Update `tasks/TASK-INDEX.md` (005 ✅) + `current-task.md`; confirm 042 + 010 unblocked.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Consume the 001 audit + design/spec</tool>
+    <tool name="mcp-dataverse-describe">Re-confirm existing columns + verify option-set integers</tool>
+    <tool name="dataverse-create-schema">Add the columns + mapping fields</tool>
+    <tool name="dataverse-deploy">Deploy to the project solution</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Dataverse: `sprk_communication` — privacy flag, internal-only flag, privilege classification, ACS `messageId`, ACS `chatThreadId` (placement documented)</output>
+    <output type="schema">Dataverse: `communicationUserId` on `systemuser` + `contact`</output>
+    <output type="docs">Task notes: added-column inventory (logical names + types + integers) for the 081 doc + 042/010 consumption</output>
+    <output type="docs">projects/messaging-communication-app-r1/tasks/TASK-INDEX.md (status update 005 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_communication` carries: a message-level privacy flag, an internal-only flag, a privilege classification (distinct from privacy), an ACS `messageId`, and an ACS `chatThreadId` (with placement rationale documented).</criterion>
+    <criterion testable="true">`communicationUserId` exists on `systemuser` and `contact` (per the 001 audit targets).</criterion>
+    <criterion testable="true">The ACS `messageId` column supports a dedupe/idempotency lookup (queryable/indexable).</criterion>
+    <criterion testable="true">All option-set integers were verified via Dataverse MCP before assignment; no EXISTS column from the 001 audit was recreated.</criterion>
+    <criterion testable="true">No BFF enforcement logic and no identity-minting logic were added (schema only).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Blocks 042 (privacy/internal-only/privilege enforcement filters on these columns) and 010 (ACS identity persists `communicationUserId`). Depends on 001 (the audit delta).
+
+    Watch the `chatThreadId` duplication: task 004 already puts the ACS thread id on the thread↔channel child table. Only add a per-message `chatThreadId` if there is a concrete read-path reason (denormalized correlation for dedupe/capture) — and document it. Do not create two sources of truth silently.
+
+    These fields are inert without task 042's enforcement. Landing them here (W0-B, parallel with 004/006) keeps the security-sensitive enforcement task (042) unblocked on real schema.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor per `&lt;rigor-hint&gt;` — column adds, Step 9.5 gates SKIPPED. Verify option-set integers via MCP before assignment; consume the 001 audit. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>
