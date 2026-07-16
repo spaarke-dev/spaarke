@@ -66,13 +66,13 @@ Both PCFs imported + placed (Connections bound to `sprk_associationprovenance`+`
 
 ---
 
-## 031 (rung 5 AI classify) — SCOUTED, ready to implement (NEXT turn, fresh context)
-Groundwork done so the next turn implements immediately:
-- **Reuse entry**: `AppOnlyAnalysisService.AnalyzeEmailAsync` (`Services/Ai/AppOnlyAnalysisService.cs:1187`, returns `EmailAnalysisResult`) — app-only/MI runtime. Do NOT build a new runner (§11).
-- **⚠️ No analysis facade in PublicContracts yet** (unlike 030's ready-made `IRecordMatchingAi`). ADR-013 requires Communication→AI via PublicContracts, so 031 MUST **add a new `Services/Ai/PublicContracts/` analysis facade** (e.g. `ICommunicationAnalysisAi`) wrapping `AnalyzeEmailAsync` + a Null-Object peer + DI reg. r2-core closed → we own this now.
-- **JPS Action**: author via `jps-action-create` + `jps-validate` skills — `$choices`-constrained record-types + category/urgency/obligations[]/suggestedActions[]. FIRST check whether `AnalyzeEmailAsync` already runs a JPS Action producing category/urgency (read :1187 + EmailAnalysisResult) — may extend rather than author net-new. Output schema must ALSO serve W5 task 053 (Communication Triage) — design once.
-- **Rung**: `Kind=AiClassification` (5), Order 5 — slots in with **zero engine/mapper change** (same as rung 4: engine cost-gates AI rungs, mapper caps to Suggested). Singleton rung → scoped facade via `IServiceScopeFactory` (mirror `SemanticMatchRung`). Never auto-files; privilege FLAG-only (ADR-015); org→sprk_organization; rationale→provenance. Register in `CommunicationModule`. Telemetry hooks (tokens/latency/cache/fired-skipped) for 032.
-- Model tier for 031 = sonnet @ high (POML). Blocks 032 + 053.
+## 031 (rung 5 AI classify) — AGENT RUNNING (dispatched with full design brief)
+Investigation resolved the POML's wrong premise + fully scoped the design; dispatched to a worktree agent.
+- **POML premise WRONG (§6.5 Path-A, documented)**: `AnalyzeEmailAsync` is a heavy DOCUMENT pipeline (needs .eml Document to already exist, keyed by email-activity id, returns success/fail not classification) — WRONG primitive + timing for a rung over the envelope. The playbook orchestrator (`ExecuteAppOnlyAsync`) is also wrong (heavyweight, Dataverse-resident playbooks).
+- **Correct primitive**: `IOpenAiClient.GetStructuredCompletionAsync<T>` (guaranteed-valid JSON structured output; the Finance/`IInvoiceAi` classification pattern). Rung 5 = code-defined structured-output classification, self-contained + unit-testable, NO Dataverse seeding dependency. (System prompt MAY later migrate to a Dataverse playbook per ADR-014 — follow-up.)
+- **Design**: NEW facade `ICommunicationClassificationAi` (+ impl + `NullCommunicationClassificationAi` + DI in `AnalysisServicesModule` mirroring `IInvoiceAi`); NEW `AiClassificationRung` (Kind 5, mirrors `SemanticMatchRung`, scoped facade via `IServiceScopeFactory`); `AiClassificationOptions` kill-switch; register in `CommunicationModule`; appsettings block.
+- **KEY SEMANTIC**: an LLM can't produce record GUIDs → rung 5 emits **metadata-only `RungMatch` SIGNALS** (Category/Obligations/privilege-flag, Target=null) EXACTLY like rung-3 detectors — NOT target-bearing regarding writes. Its value = W5 triage substrate (why 031 blocks 053). Privilege = signal only (ADR-015). Zero engine/mapper change (both already handle Kind-5 + metadata-only).
+- Agent branches from master (lacks 030's CommunicationModule + 075) → expect 3-way on CommunicationModule.cs + appsettings.template.json on integrate (non-adjacent hunks, clean). Blocks 032 (rung-4/5 unit tests) + 053.
 
 ## 030 (rung 4 semantic) — DONE ✅ `29834f041` (gates clean, 327 tests green)
 - **NEW** `Services/Communication/Engine/Rungs/SemanticMatchRung.cs` (Kind=SemanticMatch/4, Order 4) + `Configuration/SemanticMatchOptions.cs` (`Communication:SemanticMatch`; Enabled kill-switch, Limit, MaxCandidates, MinScore 0.50, ScoreCeiling 0.80, MaxQueryChars 1000). **EDIT** `CommunicationModule.cs` (bind options + register rung singleton) + `appsettings.template.json` (SemanticMatch block under Communication).
