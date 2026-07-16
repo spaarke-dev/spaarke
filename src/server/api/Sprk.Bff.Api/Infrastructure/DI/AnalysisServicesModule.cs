@@ -375,6 +375,16 @@ public static class AnalysisServicesModule
 
         // L5 — StandaloneChatContextProvider (deps: IDistributedCache + ILogger).
         services.AddScoped<StandaloneChatContextProvider>();
+
+        // spaarkeai-assistant-enhancements-r1 task 010 (FR-B1) — IConstrainedFieldResolver.
+        // Deterministic constrained-field resolver (field-value analogue of ADR-039 grounding). Registered
+        // UNCONDITIONALLY (typed HttpClient) because it is consumed on the chat/dispatch path by the smart
+        // pre-seed (task 013) + constrained-field exclusion (task 011), which run inside
+        // ChatEndpoints.SendMessageAsync — the same hard-[FromServices] path that forced IWorkingDocumentService
+        // unconditional above. All deps are unconditional (MetadataService via AddDataverseMetadataServices,
+        // IDistributedCache, TokenCredential, IConfiguration), so symmetric registration holds (§10 F.1 —
+        // no ADR-032 kill-switch needed). No LLM dependency injected.
+        services.AddHttpClient<IConstrainedFieldResolver, ConstrainedFieldResolver>();
     }
 
     /// <summary>
