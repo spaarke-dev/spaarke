@@ -1,7 +1,7 @@
 # Current Task — email-communication-solution-r4
 
 > **Purpose**: Active task state tracker for context recovery. Reset by `task-execute` on each task transition.
-> **Last Updated**: 2026-07-15 (by context-handoff, pre-compaction)
+> **Last Updated**: 2026-07-15 (by context-handoff — W4 deployed to spaarkedev1; Actions v1.0.1 ready)
 
 ---
 
@@ -9,12 +9,26 @@
 
 | Field | Value |
 |-------|-------|
-| **Progress** | **31 / 45 tasks done.** W1 + W2 COMPLETE. **042 ✅ + 044 ✅ + 062 ✅** (W4 PCFs). Next = **043 deploy**. |
-| **Last commits** | email-r4 `07fd904d7` (044a archive endpoint) · `ce5e56672` (042 primary) · `bd773083a` (042 PCF). 044b/044c + fixes committing now. |
-| **Status** | in-progress — 042 + 044 done; **043 packaging done (ZIPs built), import = owner.** |
-| **043 ZIPs (owner to import to spaarkedev1)** | `src/client/pcf/CommunicationConnections/Solution/bin/CommunicationConnectionsSolution_v1.0.0.zip` · `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.0.0.zip`. Both validated (type-66 control only, lowercase entries). Rebuild: `cd <pcf>/Solution && powershell -File pack.ps1`. |
-| **043 remainder (owner)** | `pac solution import --path <zip> --publish-changes` (both) → OOB `sprk_communication` form: place **CommunicationConnections** (bind `sprk_associationprovenance` + `sprk_associationstatus`, right/accessories column) + **CommunicationActions** (bind `sprk_communicationtype`, command area; set apiBaseUrl/clientAppId/bffAppId inputs from env vars) → pack the **Awaiting-Association view** (`CommunicationConnections/views/Communications-Awaiting-Association.md`) → remove deployed **Send** web resource + ribbon button (keep Create-To-Do) → UI check (dark+light). |
-| **Next Action (me)** | **074 has a SCOPE GAP** (see ↓). W3 030-032 / W5 050-054 coordination-blocked on r2-core. W6 060/061 depend on 043 deploy. |
+| **Progress** | **31 / 45 done.** W1 + W2 + **W4 (042/043/044/062) COMPLETE & DEPLOYED to spaarkedev1.** Both PCFs render on the OOB form; Actions sign-in works; a test reply SENT. |
+| **Last commits** | `76ef649cb` (Actions v1.0.1 env-var + compact) · `efea8887c` (solution packaging) · `dc532415a` (044b/c) · `07fd904d7` (044a) · `ce5e56672`/`bd773083a` (042). Tree clean. |
+| **Status** | W4 done + deployed. **Next = next wave (owner to direct after /compact).** Actions **v1.0.1** ZIP ready to RE-import (fixes below). |
+| **⬆️ Actions v1.0.1 to re-import** | `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.0.1.zip` — env-var fallback (reads `sprk_MsalClientId`/`sprk_BffApiAppId`/`sprk_BffApiBaseUrl`) + OOB-compact toolbar (16px icons). Footer will read v1.0.1. Connections stays v1.0.0 (no change). |
+
+### 🔑 AUTH / DEPLOY FACTS (spaarkedev1) — critical for future
+- **clientAppId = `170c98e1-d486-4355-bcbe-170454e0207c`** (SDAP-PCF-CLIENT). The value in the OLD `config/environments.json` (`5175798e-…`) was **RETIRED/deleted** → `AADSTS700016`. Fixed in `config/environments.json` (2026-07-15).
+- **bffAppId = `1e40baad-e065-4aea-a8d4-4b7ab273458c`** · **tenant = `a221a95e-6abc-4434-aecc-e48338a1b2f2`** (Spaarke Dev).
+- **Canonical config = Dataverse env vars** (`sprk_MsalClientId=170c98e1`, `sprk_BffApiAppId=1e40baad`, `sprk_BffApiBaseUrl=https://spaarke-bff-dev.azurewebsites.net/api`). PCFs read these via `src/client/pcf/shared/utils/environmentVariables.ts` (`getApiBaseUrl` strips `/api` → host-only; @spaarke/auth re-adds it). Actions v1.0.1 now uses this fallback (SemanticSearch pattern) → **zero form config needed**.
+- App-registration reactivation NOT needed (SP enabled; valid secret to 2027; expired secret irrelevant for SPA/PKCE).
+
+### 📋 043 remainder (owner, maker UI) — mostly done
+Both PCFs imported + placed (Connections bound to `sprk_associationprovenance`+`sprk_associationstatus`; Actions bound to `sprk_communicationtype`). Still open: pack the **Awaiting-Association view** (`CommunicationConnections/views/Communications-Awaiting-Association.md`); remove the deployed **Send** web resource + ribbon button (keep Create-To-Do); re-import Actions **v1.0.1**.
+
+### 🐞 Known follow-ups from live test (not yet done)
+- **Reply does not quote the original thread** (owner noted). Composer prefill (`deriveComposerFields` in Actions PCF) sets To+"Re:" but not a quoted body. Future enhancement.
+- Connections PCF shows nothing on hand-made records (empty `sprk_associationprovenance`) — expected; only inbound-processed emails have provenance.
+
+### ▶️ Next Action (me) — after /compact
+**074 has a SCOPE GAP** (see ↓; needs a NEW BFF suggestion endpoint + real-Outlook test — owner decision pending). W3 030-032 / W5 050-054 coordination-blocked on r2-core. 075 needs multi-index-r2 merge-confirm. W6 060/061 unblocked once 043 deploy fully lands.
 
 ### 🔔 074 scope gap (verified 2026-07-15) — needs a BFF suggestion endpoint (POML wrong)
 074's POML claims "no BFF code change — the suggestion surface is owned by W1." **It is NOT.** The W1 engine (`IncomingAssociationResolver`) only runs during INBOUND webhook processing and WRITES `sprk_associationprovenance`; `CommunicationEnrichmentService.EnrichAsync` runs the engine direction-agnostically (since 011) but returns `Task` (writes, doesn't return candidates), and **no endpoint exposes suggestions**. For the add-in save pane to consume suggestions, 074 needs: (1) a **NEW BFF endpoint** that runs the engine on-demand for the saved email + **returns** candidates (target+confidence+provenance) — a candidates-returning method on the enrichment service + endpoint (§10 obligations); (2) add-in save-pane wiring (fetch+render+accept/override via `applyResolverFields`); (3) a **real-Outlook smoke test** (can't be done headless — same limitation as 072). Options: build the buildable parts (endpoint + pane) + owner smoke-tests, OR defer 074. **Owner decision needed.**
