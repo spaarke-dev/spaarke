@@ -165,7 +165,7 @@ export type {
 } from './dispatchConsumer';
 
 // Typed wrapper around POST /api/communications/send.
-export { sendCommunication } from './communicationApi';
+export { sendCommunication, SendCommunicationError } from './communicationApi';
 export type {
   SendCommunicationOptions,
   SendCommunicationResult,

@@ -72,6 +72,22 @@ public static class CommunicationEndpoints
             .Produces<CommunicationStatusResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
 
+        group.MapPost("/{id:guid}/archive", ArchiveCommunicationAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("ArchiveCommunication")
+            .WithDescription("Archive an existing communication to SharePoint on demand (.eml Document + a Document per attachment). Idempotent — a communication already archived returns AlreadyArchived without duplicating.")
+            .Produces<ArchiveCommunicationResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
+        group.MapPost("/{id:guid}/suggest-associations", SuggestAssociationsAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("SuggestCommunicationAssociations")
+            .WithDescription("Preview the Association Engine's regarding suggestions for a stored communication (target(s) + confidence + provenance). READ-ONLY — evaluates the rungs on demand WITHOUT writing to the record. Auth-scoped via the endpoint filter (NFR-07); AI-flagged privilege is surfaced as a signal, never decided (ADR-015).")
+            .Produces<SuggestAssociationsResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
         group.MapPost("/accounts/{id:guid}/verify", VerifyCommunicationAccountAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("VerifyCommunicationAccount")
@@ -306,6 +322,33 @@ public static class CommunicationEndpoints
         return TypedResults.Ok(response);
     }
 
+    private static async Task<IResult> ArchiveCommunicationAsync(
+        Guid id,
+        CommunicationService communicationService,
+        CancellationToken ct)
+    {
+        var result = await communicationService.ArchiveExistingAsync(id, ct);
+        return TypedResults.Ok(result);
+    }
+
+    /// <summary>
+    /// On-demand Association Engine suggestion preview (task 074, Path C). Loads the stored
+    /// <c>sprk_communication</c> (404 if missing), reconstructs the normalized envelope + context, runs the
+    /// engine's evaluate-only path, and projects the decision into <see cref="SuggestAssociationsResponse"/>.
+    /// READ-ONLY: it never writes the record (that is <see cref="CommunicationService.ArchiveExistingAsync"/> /
+    /// the inbound <c>ResolveAsync</c> path) — the point is a preview of what the engine would suggest.
+    /// </summary>
+    private static async Task<IResult> SuggestAssociationsAsync(
+        Guid id,
+        CommunicationService communicationService,
+        IncomingAssociationResolver associationResolver,
+        CancellationToken ct)
+    {
+        var (message, context) = await communicationService.ReconstructEnvelopeAsync(id, ct);
+        var decision = await associationResolver.EvaluateAsync(message, context, ct);
+        return TypedResults.Ok(SuggestAssociationsResponse.FromDecision(id, decision));
+    }
+
     private static async Task<IResult> VerifyCommunicationAccountAsync(
         Guid id,
         MailboxVerificationService verificationService,
@@ -340,6 +383,7 @@ public static class CommunicationEndpoints
     private static async Task<IResult> HandleIncomingWebhookAsync(
         HttpRequest request,
         JobSubmissionService jobSubmissionService,
+        Services.Communication.GraphSubscriptionManager subscriptionManager,
         IOptions<CommunicationOptions> communicationOptions,
         ILogger<CommunicationService> logger,
         CancellationToken ct)
@@ -421,6 +465,7 @@ public static class CommunicationEndpoints
 
             var expectedClientStateBytes = Encoding.UTF8.GetBytes(expectedClientState);
             var enqueued = 0;
+            var lifecycleHandled = 0;
 
             foreach (var notification in notifications.Value)
             {
@@ -440,6 +485,36 @@ public static class CommunicationEndpoints
                         title: "Unauthorized",
                         detail: "Invalid clientState in notification",
                         statusCode: StatusCodes.Status401Unauthorized);
+                }
+
+                // ─── Step 4.5: Lifecycle notifications (FR-24) ───
+                // Lifecycle notifications carry a `lifecycleEvent` (reauthorizationRequired /
+                // subscriptionRemoved / missed) instead of a changed message. Route them to the
+                // subscription manager, which renews/recreates the subscription or triggers delta
+                // reconciliation. Handling is non-fatal and must not block the fast 202 response.
+                if (!string.IsNullOrEmpty(notification.LifecycleEvent))
+                {
+                    logger.LogInformation(
+                        "Received Graph lifecycle notification | LifecycleEvent={Event}, " +
+                        "SubscriptionId={SubscriptionId}, CorrelationId={CorrelationId}",
+                        notification.LifecycleEvent, notification.SubscriptionId, correlationId);
+
+                    try
+                    {
+                        await subscriptionManager.HandleLifecycleNotificationAsync(
+                            notification.LifecycleEvent, notification.SubscriptionId, notification.Resource, ct);
+                        lifecycleHandled++;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Non-fatal: log and acknowledge; the periodic management cycle is the backstop.
+                        logger.LogWarning(ex,
+                            "Lifecycle notification handling failed (non-fatal) | LifecycleEvent={Event}, " +
+                            "SubscriptionId={SubscriptionId}",
+                            notification.LifecycleEvent, notification.SubscriptionId);
+                    }
+
+                    continue;
                 }
 
                 // ─── Step 5: Deduplication ───
@@ -507,8 +582,8 @@ public static class CommunicationEndpoints
             // ─── Step 8: Return 202 Accepted quickly (Graph requires fast response) ───
             logger.LogInformation(
                 "Webhook processed: {Total} notifications received, {Enqueued} enqueued, " +
-                "CorrelationId={CorrelationId}",
-                notifications.Value.Length, enqueued, correlationId);
+                "{Lifecycle} lifecycle events handled, CorrelationId={CorrelationId}",
+                notifications.Value.Length, enqueued, lifecycleHandled, correlationId);
 
             return Results.Accepted(
                 value: new IncomingWebhookResponse

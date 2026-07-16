@@ -2,7 +2,7 @@
   <metadata>
     <title>Migrate shared `SendEmailStep` (Project/Event/Todo/WorkAssignment) + CreateMatter fork; resolve cross-package import</title>
     <phase>Wave 6 — Client caller migration + retirements</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>021</dependencies>
     <blocks>062</blocks>
@@ -133,6 +133,8 @@
     Client-only (TS); no BFF surface touched — no publish-size / CVE / conflict-check obligations.
 
     Line ~31 for the cross-package import may have drifted; re-grep to relocate.
+
+    COMPLETION NOTE (2026-07-15): Empirical grounding found the POML premise substantially stale — the shared-lib migration was ALREADY DONE upstream. `projects/visual-host-create-button-r1` deleted `CreateRecordWizard/steps/SendEmailStep.tsx` + its barrel exports on 2026-07-08 after migrating the create-record wizards onto `WizardFollowOns/SendEmailFollowOnStep` (a thin, controlled, Fluent-v9 wrapper over the generic `EmailStep/SendEmailStep`, with CC). The 4 wizards were already migrated; the live WA wizard is the shared-lib `CreateWorkAssignmentWizard` (via `src/solutions/CreateWorkAssignmentWizard`). Deliverable #1 (rewrite shared step to mount canonical wrapper) was therefore MOOT and would have been WRONG to force: the barrel `SendEmailStep` is the W2 EmailComposer BFF-send wrapper (uncontrolled, ref-handle, authenticatedFetch) whose prop API is disjoint from the controlled draft-email-activity steps — mounting it would break every caller and change send semantics (Dataverse draft activity → BFF send). Actual work delivered (the genuine remainder): (D1) deleted the orphaned LegalWorkspace `CreateMatter/SendEmailStep.tsx` fork + cleaned its `index.ts` re-exports [AC3]; (D2) fixed the orphaned `CreateWorkAssignment/WorkAssignmentWizardDialog.tsx:31` broken cross-package source-path import (pointed at the already-deleted `CreateRecordWizard/steps/SendEmailStep`) → `import { SendEmailFollowOnStep } from '@spaarke/ui-components'` [AC4]. Used `SendEmailFollowOnStep` (not the literal barrel `SendEmailStep`) because it is the controlled equivalent the live shared-lib twin uses and is prop-compatible with the fork's emailCc usage. Gates: code-review 0 Critical; adr-check 0 violations (ADR-045/021/028 all compliant). Build: shared-lib canonical surface compiles clean (SendEmailFollowOnStep/EmailStep/barrel 0 errors; 2 pre-existing unrelated missing-sibling-module errors from isolated install). LegalWorkspace full build not run (uninitialized worktree, needs full 8-package sibling graph; the changed WA fork is orphaned/tree-shaken from vite build) — changes are dead-code-only + type-safe by inspection + strictly remove a broken import.
   </notes>
 
   <execution>

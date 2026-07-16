@@ -2,7 +2,7 @@
   <metadata>
     <title>Central-auth alignment + per-rung tests + direction-symmetry tests (inbound == outbound)</title>
     <phase>Wave 1 — Server: enrichment + deterministic engine</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>7</estimated-hours>
     <dependencies>012, 013, 014, 015</dependencies>
     <blocks></blocks>

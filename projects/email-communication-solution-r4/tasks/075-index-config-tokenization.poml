@@ -2,7 +2,7 @@
   <metadata>
     <title>Index-config hardening — tokenize `AiSearch` index names + `AllowedIndexes`; consolidate read/write split-brain via `SearchIndexNameResolver`</title>
     <phase>Wave 7 — Microsoft hardening + auth + index</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies></dependencies>
     <blocks></blocks>

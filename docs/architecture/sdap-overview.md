@@ -601,7 +601,7 @@ src/client/shared/Spaarke.UI.Components/              Shared UI library
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) — BFF API endpoints and services
 - [sdap-component-interactions.md](sdap-component-interactions.md) — Component interaction patterns
 - [sdap-workspace-integration-patterns.md](sdap-workspace-integration-patterns.md) — Workspace integration
-- [email-processing-architecture.md](email-processing-architecture.md) — Email automation architecture
+- [communication-intelligence-architecture.md](communication-intelligence-architecture.md) — Communication Intelligence substrate (canonical; absorbs the retired email-processing pipeline)
 - [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) — AI platform architecture
 - [BFF API Architecture Assessment](../../projects/x-ai-spaarke-platform-enhancements-r1/notes/bff-api-architecture-assessment.md) — Full assessment with recommendations
 

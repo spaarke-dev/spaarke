@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication.Engine;
@@ -6,67 +9,85 @@ using Sprk.Bff.Api.Services.Communication.Models;
 namespace Sprk.Bff.Api.Services.Communication;
 
 /// <summary>
-/// The <b>Association Engine</b> (ADR-045 / FR-09). Resolves regarding associations for a
-/// communication by evaluating an ordered set of <see cref="IAssociationRung"/> rungs over the
-/// channel-neutral <see cref="NormalizedMessage"/> envelope — NEVER over
-/// <c>Microsoft.Graph.Message</c>. The first rung (ascending <see cref="IAssociationRung.Order"/>)
-/// that yields any <see cref="RungMatch"/> wins; its matches become the regarding writes.
+/// The <b>Association Engine</b> (ADR-045 / FR-09/FR-11). Resolves regarding associations for a
+/// communication by evaluating <see cref="IAssociationRung"/> rungs over the channel-neutral
+/// <see cref="NormalizedMessage"/> envelope — NEVER over <c>Microsoft.Graph.Message</c> — then maps the
+/// aggregated matches to a <c>sprk_associationstatus</c> + auto-file decision via
+/// <see cref="AssociationStatusMapper"/> (the FR-11 confidence→status ladder).
 ///
 /// <para>
-/// Cascade (preserved from the pre-011 resolver): thread continuity (1) → participant correlation (2)
-/// → subject reference (3). No match → <c>sprk_associationstatus = Pending Review</c>; a match →
-/// <c>Resolved</c> plus the ADR-024 polymorphic resolver fields.
+/// <b>Task 015 rework:</b> the pre-015 engine took the first rung that produced a writable match and
+/// marked the record <c>Resolved</c> unconditionally. That threw away (a) the confidence→status ladder,
+/// (b) cross-rung signal reinforcement, and (c) same-field conflict detection. The engine now runs ALL
+/// deterministic rungs (0–3) unconditionally — so independent rungs reinforce and the always-run
+/// structural-detector pass records category/obligations regardless of the association outcome — then
+/// applies the ladder. AI rungs (4–5, W3) are evaluated ONLY when the deterministic pass did not
+/// auto-file (cost control), and they can never auto-file (enforced in the mapper).
 /// </para>
 ///
 /// <para>
 /// Non-fatal: association failure never prevents communication record creation (NFR-06). Each rung is
 /// evaluated defensively — a rung that throws is treated as a non-match. Registered as a concrete type
-/// in AddCommunicationModule() per ADR-010. The class name is retained (rather than "Engine") to keep
-/// the DI registration + the inbound processor's dependency stable through task 011.
+/// in AddCommunicationModule() per ADR-010.
 /// </para>
 /// </summary>
 public sealed class IncomingAssociationResolver
 {
     private readonly IGenericEntityService _genericEntityService;
     private readonly ICommunicationDataverseService _communicationService;
+    private readonly AssociationStatusMapper _statusMapper;
     private readonly ILogger<IncomingAssociationResolver> _logger;
 
-    /// <summary>Ordered rungs (ascending Order) evaluated over the envelope.</summary>
-    private readonly IReadOnlyList<IAssociationRung> _rungs;
+    /// <summary>Deterministic rungs (Kind 0–3), evaluated unconditionally, in ascending Order.</summary>
+    private readonly IReadOnlyList<IAssociationRung> _deterministicRungs;
 
-    /// <summary>Association status: Resolved.</summary>
-    private const int AssociationStatusResolved = 100000000;
+    /// <summary>AI rungs (Kind 4–5), evaluated only when the deterministic pass did not auto-file.</summary>
+    private readonly IReadOnlyList<IAssociationRung> _aiRungs;
 
-    /// <summary>Association status: Pending Review.</summary>
-    private const int AssociationStatusPendingReview = 100000001;
+    /// <summary>Max length of the <c>sprk_associationprovenance</c> column (data-model doc).</summary>
+    private const int ProvenanceMaxLength = 10000;
+
+    private static readonly JsonSerializerOptions ProvenanceJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false,
+    };
+
+    /// <summary>Structured EventId for the per-rung telemetry record (DEC-8 / NFR-05) — dashboard filter.</summary>
+    private static readonly EventId RungTelemetryEventId = new(4501, "AssociationRungTelemetry");
+
+    /// <summary>Structured EventId for the per-envelope "resolving rung" summary (DEC-8 / NFR-05).</summary>
+    private static readonly EventId ResolvingRungEventId = new(4502, "AssociationResolvingRung");
 
     public IncomingAssociationResolver(
+        IEnumerable<IAssociationRung> rungs,
         ICommunicationDataverseService communicationService,
         IGenericEntityService genericEntityService,
+        AssociationStatusMapper statusMapper,
         ILogger<IncomingAssociationResolver> logger)
     {
         _communicationService = communicationService;
         _genericEntityService = genericEntityService;
+        _statusMapper = statusMapper;
         _logger = logger;
 
-        // Task-011 rung adapters wrapping the current inline logic. Composed internally to keep DI
-        // minimal (ADR-010); tasks 012–014 supply real rung content against IAssociationRung.
-        _rungs =
-        [
-            new ThreadContinuityRung(communicationService),
-            new ParticipantCorrelationRung(communicationService),
-            new SubjectReferenceRung(communicationService),
-        ];
-        _rungs = _rungs.OrderBy(r => r.Order).ToArray();
+        // Rungs are DI-registered (CommunicationModule). Partition into deterministic (0–3) and AI (4–5),
+        // each ordered by Order. Deterministic rungs always run (reinforcement + always-run detectors);
+        // AI rungs are a cost-gated escalation. Tasks 012–014 supply deterministic content; W3 (030/031)
+        // registers the AI rungs — no engine change needed then.
+        var ordered = rungs.OrderBy(r => r.Order).ToArray();
+        _deterministicRungs = ordered.Where(r => IsDeterministic(r.Kind)).ToArray();
+        _aiRungs = ordered.Where(r => !IsDeterministic(r.Kind)).ToArray();
     }
 
     /// <summary>
-    /// Resolves associations for a communication over the normalized envelope. Iterates rungs in
-    /// order and applies the matches of the first rung that yields any; otherwise flags Pending Review.
+    /// Resolves associations for a communication over the normalized envelope and applies the FR-11
+    /// confidence→status ladder (status + regarding writes + provenance JSON). Direction-symmetric: the
+    /// same path serves inbound and outbound (the mapper records direction but does not branch on it).
     /// </summary>
     /// <param name="communicationId">The <c>sprk_communication</c> record to update.</param>
     /// <param name="message">The normalized envelope (channel-neutral).</param>
-    /// <param name="context">Ambient association context (mailbox account, etc.).</param>
+    /// <param name="context">Ambient association context (mailbox account, tenant key, etc.).</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task ResolveAsync(
         Guid communicationId,
@@ -78,65 +99,189 @@ public sealed class IncomingAssociationResolver
             "Starting association resolution for communication {CommunicationId} | Direction: {Direction}",
             communicationId, message.Direction);
 
-        foreach (var rung in _rungs)
+        // Evaluate the rungs + ladder (no write), then apply the decision (the Dataverse write). Split into
+        // EvaluateAsync (task 074) so the on-demand suggestion endpoint can preview the decision WITHOUT
+        // writing. The real communicationId is threaded through so per-rung + resolving-rung telemetry is
+        // unchanged on this path (behavior-preserving).
+        var decision = await EvaluateInternalAsync(message, context, communicationId, ct);
+
+        await ApplyDecisionAsync(communicationId, decision, ct);
+    }
+
+    /// <summary>
+    /// Evaluate-only path (task 074, Path C): runs the deterministic + (cost-gated) AI rungs and applies the
+    /// FR-11 confidence→status ladder, returning the <see cref="AssociationDecision"/> <b>WITHOUT</b> writing
+    /// to Dataverse. Powers the on-demand suggestion endpoint — a read-only preview of what the engine would
+    /// file for a stored communication. <see cref="ResolveAsync"/> = <c>EvaluateAsync</c> + <c>ApplyDecisionAsync</c>.
+    /// </summary>
+    /// <param name="message">The normalized envelope (channel-neutral).</param>
+    /// <param name="context">Ambient association context (mailbox account, tenant key, etc.).</param>
+    /// <param name="ct">Cancellation token.</param>
+    public Task<AssociationDecision> EvaluateAsync(
+        NormalizedMessage message,
+        AssociationContext context,
+        CancellationToken ct)
+        // No record id on the read-only path; telemetry logs with an empty id (preview, no prior behavior to
+        // preserve). ResolveAsync uses the id-carrying overload so inbound/outbound telemetry is unchanged.
+        => EvaluateInternalAsync(message, context, Guid.Empty, ct);
+
+    /// <summary>
+    /// Shared evaluate core: deterministic pass → ladder → cost-gated AI escalation → resolving-rung telemetry.
+    /// Returns the decision; never writes. <paramref name="communicationId"/> is used only for telemetry
+    /// correlation (the real id on the resolve path, <see cref="Guid.Empty"/> on the read-only preview path).
+    /// </summary>
+    private async Task<AssociationDecision> EvaluateInternalAsync(
+        NormalizedMessage message,
+        AssociationContext context,
+        Guid communicationId,
+        CancellationToken ct)
+    {
+        // Deterministic pass: run every deterministic rung and collect all matches (writable + signals).
+        var matches = new List<RungMatch>();
+        await EvaluateRungsAsync(_deterministicRungs, message, context, communicationId, matches, ct);
+
+        var decision = _statusMapper.Decide(matches, message.Direction, context.TenantKey);
+
+        // AI escalation (W3): only when the deterministic pass did not auto-file. AI matches join the
+        // aggregation and can raise Pending Review → Suggested, but never auto-file (mapper-enforced).
+        if (!decision.AutoFiled && _aiRungs.Count > 0)
         {
-            IReadOnlyList<RungMatch> matches;
+            await EvaluateRungsAsync(_aiRungs, message, context, communicationId, matches, ct);
+            decision = _statusMapper.Decide(matches, message.Direction, context.TenantKey);
+        }
+
+        // Per-envelope "resolving rung" telemetry (DEC-8 / NFR-05): a single dashboard-able signal showing
+        // which rung(s) produced the winning tier, emitted for EVERY envelope regardless of outcome.
+        EmitResolvingRungTelemetry(communicationId, decision);
+
+        return decision;
+    }
+
+    /// <summary>
+    /// Evaluates a set of rungs defensively (NFR-06: a rung that throws is treated as a non-match) and
+    /// appends their matches to <paramref name="sink"/>. Emits one structured per-rung telemetry record per
+    /// rung attempt (DEC-8 / NFR-05).
+    /// </summary>
+    private async Task EvaluateRungsAsync(
+        IReadOnlyList<IAssociationRung> rungs,
+        NormalizedMessage message,
+        AssociationContext context,
+        Guid communicationId,
+        List<RungMatch> sink,
+        CancellationToken ct)
+    {
+        foreach (var rung in rungs)
+        {
+            var startTs = Stopwatch.GetTimestamp();
             try
             {
-                matches = await rung.EvaluateAsync(message, context, ct);
+                var matches = await rung.EvaluateAsync(message, context, ct);
+                var elapsed = Stopwatch.GetElapsedTime(startTs);
+                // "fired" ⇒ the rung returned ≥1 match; "skipped" ⇒ zero (disabled kill-switch, empty
+                // input, or genuine non-match — the engine treats them uniformly).
+                EmitRungTelemetry(rung, communicationId,
+                    outcome: matches.Count > 0 ? "fired" : "skipped",
+                    matchCount: matches.Count, elapsed: elapsed, error: null);
+                if (matches.Count > 0)
+                    sink.AddRange(matches);
             }
             catch (Exception ex)
             {
-                // A rung failure is non-fatal (NFR-06): treat as a non-match and continue the cascade.
+                var elapsed = Stopwatch.GetElapsedTime(startTs);
+                EmitRungTelemetry(rung, communicationId,
+                    outcome: "error", matchCount: 0, elapsed: elapsed, error: ex);
                 _logger.LogWarning(ex,
                     "Association rung {Rung} (order {Order}) failed for communication {CommunicationId}; skipping",
                     rung.Kind, rung.Order, communicationId);
-                continue;
             }
-
-            if (matches.Count == 0)
-                continue;
-
-            var fields = new Dictionary<string, object>();
-            foreach (var match in matches)
-            {
-                fields[match.RegardingFieldName] = match.Target;
-            }
-
-            _logger.LogInformation(
-                "Association resolved via rung {Rung} (order {Order}) for communication {CommunicationId} | Fields: {Fields}",
-                matches[0].Rung, rung.Order, communicationId, string.Join(", ", fields.Keys));
-
-            await ApplyAssociationAsync(communicationId, fields, AssociationStatusResolved, ct);
-            return;
         }
-
-        // No rung matched: flag as Pending Review (surfaces for manual review; no default-matter fallback).
-        _logger.LogInformation(
-            "No association found for communication {CommunicationId}. Setting status to Pending Review.",
-            communicationId);
-
-        await ApplyAssociationAsync(communicationId, new Dictionary<string, object>(), AssociationStatusPendingReview, ct);
     }
 
+    /// <summary>
+    /// Emits one structured per-rung telemetry record (DEC-8 / NFR-05) routed through the injected
+    /// <see cref="ILogger{TCategoryName}"/> (the existing BFF sink — no new pipeline). Carries: communication
+    /// id, rung kind + order, whether it is an AI rung, outcome (<c>fired</c>/<c>skipped</c>/<c>error</c>),
+    /// match count, and latency. Emission is cheap (structured log fields only).
+    /// </summary>
+    /// <remarks>
+    /// <b>Token/cost + cache hit/miss for AI rungs (4–5) is a documented follow-up.</b> The AI facades
+    /// (<c>IRecordMatchingAi</c>, <c>ICommunicationClassificationAi</c>, and the underlying
+    /// <c>IOpenAiClient.GetStructuredCompletionAsync</c>) do not currently surface token usage or cache
+    /// hit/miss to the caller. Plumbing them would change the PublicContracts seam (blast radius) and is out
+    /// of scope for this task; <c>IsAiRung</c> is emitted so a dashboard can partition deterministic vs AI
+    /// cost today, and the token/cache dimension can be added once the facades return usage.
+    /// </remarks>
+    private void EmitRungTelemetry(
+        IAssociationRung rung, Guid communicationId, string outcome, int matchCount, TimeSpan elapsed, Exception? error)
+    {
+        _logger.Log(
+            error is null ? LogLevel.Information : LogLevel.Warning,
+            RungTelemetryEventId,
+            error,
+            "Rung telemetry | CommunicationId: {CommunicationId}, Rung: {Rung}, RungOrder: {RungOrder}, " +
+            "IsAiRung: {IsAiRung}, Outcome: {Outcome}, MatchCount: {MatchCount}, ElapsedMs: {ElapsedMs}",
+            communicationId, rung.Kind, rung.Order, !IsDeterministic(rung.Kind), outcome, matchCount,
+            (long)elapsed.TotalMilliseconds);
+    }
+
+    /// <summary>
+    /// Emits the per-envelope "resolving rung" summary (DEC-8 / NFR-05): the resulting tier + which rung(s)
+    /// contributed to the written (winning) target(s), so the deterministic-first ladder is observable on
+    /// real volume. Derived from the decision provenance already computed — no re-evaluation cost.
+    /// </summary>
+    private void EmitResolvingRungTelemetry(Guid communicationId, AssociationDecision decision)
+    {
+        var resolvingRungs = decision.Provenance.Candidates
+            .Where(c => c.Written)
+            .SelectMany(c => c.Contributors.Select(contrib => contrib.Rung))
+            .Distinct()
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToArray();
+
+        var resolvingRungsText = resolvingRungs.Length > 0 ? string.Join(",", resolvingRungs) : "(none)";
+        var rungsFiredText = decision.Provenance.RungsFired.Count > 0
+            ? string.Join(",", decision.Provenance.RungsFired)
+            : "(none)";
+
+        _logger.Log(
+            LogLevel.Information,
+            ResolvingRungEventId,
+            null,
+            "Association resolving-rung summary | CommunicationId: {CommunicationId}, Tier: {Tier}, " +
+            "AutoFiled: {AutoFiled}, ResolvingRungs: {ResolvingRungs}, RungsFired: {RungsFired}",
+            communicationId, AssociationStatusCodes.Name(decision.Status), decision.AutoFiled,
+            resolvingRungsText, rungsFiredText);
+    }
+
+    private static bool IsDeterministic(RungKind kind) =>
+        kind is RungKind.ExplicitReference or RungKind.ThreadContinuity
+             or RungKind.ParticipantCorrelation or RungKind.StructuralDetector;
+
     // ═════════════════════════════════════════════════════════════════════════════
-    // Apply resolved associations to the communication record
+    // Apply the ladder decision to the communication record
     // ═════════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Updates the sprk_communication record with resolved association fields and status.
-    /// Also populates the Polymorphic Resolver fields (ADR-024) for cross-entity views.
+    /// Writes the regarding lookups, status, and provenance JSON. Populates the ADR-024 polymorphic
+    /// resolver fields whenever a regarding lookup was written (Resolved or Suggested). Non-fatal writes.
     /// </summary>
-    private async Task ApplyAssociationAsync(
+    private async Task ApplyDecisionAsync(
         Guid communicationId,
-        Dictionary<string, object> fields,
-        int associationStatus,
+        AssociationDecision decision,
         CancellationToken ct)
     {
-        fields["sprk_associationstatus"] = new OptionSetValue(associationStatus);
+        var fields = new Dictionary<string, object>();
+        foreach (var (fieldName, target) in decision.RegardingWrites)
+        {
+            fields[fieldName] = target;
+        }
 
-        // Populate polymorphic resolver fields from the primary regarding entity
-        if (associationStatus == AssociationStatusResolved)
+        fields["sprk_associationstatus"] = new OptionSetValue(decision.Status);
+        fields["sprk_associationprovenance"] = SerializeProvenance(decision.Provenance);
+
+        // Populate polymorphic resolver fields whenever we asserted a regarding lookup (a Suggested
+        // record surfaces the proposed target too, so the review UI needs the denormalized fields).
+        if (decision.RegardingWrites.Count > 0)
         {
             await PopulateResolverFieldsAsync(fields, ct);
         }
@@ -144,9 +289,34 @@ public sealed class IncomingAssociationResolver
         await _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, ct);
 
         _logger.LogDebug(
-            "Applied association to communication {CommunicationId} | Status: {Status}, FieldCount: {FieldCount}",
-            communicationId, associationStatus == AssociationStatusResolved ? "Resolved" : "PendingReview",
-            fields.Count);
+            "Applied association to communication {CommunicationId} | Status: {Status}, AutoFiled: {AutoFiled}, FieldCount: {FieldCount}",
+            communicationId, AssociationStatusCodes.Name(decision.Status), decision.AutoFiled, fields.Count);
+    }
+
+    /// <summary>
+    /// Serialize the provenance to JSON, bounded to the <c>sprk_associationprovenance</c> column length.
+    /// If the (rare) full document would exceed the cap, fall back to a compact decision-only document so
+    /// the record still carries the essential audit trail.
+    /// </summary>
+    private static string SerializeProvenance(AssociationProvenance provenance)
+    {
+        var json = JsonSerializer.Serialize(provenance, ProvenanceJsonOptions);
+        if (json.Length <= ProvenanceMaxLength)
+            return json;
+
+        var compact = new AssociationProvenance
+        {
+            Version = provenance.Version,
+            Direction = provenance.Direction,
+            Decision = provenance.Decision,
+            RungsFired = provenance.RungsFired,
+            Candidates = Array.Empty<CandidateTrace>(),
+            Signals = Array.Empty<SignalTrace>(),
+        };
+        var compactJson = JsonSerializer.Serialize(compact, ProvenanceJsonOptions);
+        return compactJson.Length <= ProvenanceMaxLength
+            ? compactJson
+            : compactJson[..ProvenanceMaxLength];
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
@@ -154,29 +324,13 @@ public sealed class IncomingAssociationResolver
     // ═════════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Entity-specific regarding fields in priority order for determining the primary record.
-    /// Business entities first (matter, project, etc.), then people/orgs.
-    /// </summary>
-    private static readonly (string FieldName, string EntityLogicalName)[] RegardingFieldPriority =
-    [
-        ("sprk_regardingmatter", "sprk_matter"),
-        ("sprk_regardingproject", "sprk_project"),
-        ("sprk_regardinginvoice", "sprk_invoice"),
-        ("sprk_regardingservicerequest", "sprk_servicerequest"),
-        ("sprk_regardingworkassignment", "sprk_workassignment"),
-        ("sprk_regardingevent", "sprk_event"),
-        ("sprk_regardingbudget", "sprk_budget"),
-        ("sprk_regardinganalysis", "sprk_analysis"),
-        ("sprk_regardingorganization", "sprk_organization"),
-        ("sprk_regardingaccount", "account"),
-        ("sprk_regardingperson", "contact"),
-    ];
-
-    /// <summary>
     /// In-memory cache for sprk_recordtype_ref lookups (entity logical name → GUID + display name).
-    /// Populated lazily, lives for the lifetime of the singleton service.
+    /// Populated lazily, lives for the lifetime of the singleton service. Concurrent because the
+    /// resolver is a singleton and inbound/outbound messages resolve on parallel threads (task 018 —
+    /// a plain Dictionary here was a data race). Read-then-write is not atomic, but the value is
+    /// deterministic per key, so a rare double-query just writes the same entry twice — no corruption.
     /// </summary>
-    private readonly Dictionary<string, (Guid Id, string DisplayName)?> _recordTypeRefCache = new();
+    private readonly ConcurrentDictionary<string, (Guid Id, string DisplayName)?> _recordTypeRefCache = new();
 
     /// <summary>
     /// Populates the 4 denormalized resolver fields based on the highest-priority
@@ -192,11 +346,12 @@ public sealed class IncomingAssociationResolver
         Dictionary<string, object> fields,
         CancellationToken ct)
     {
-        // Find the primary regarding entity (highest priority field that was set)
+        // Find the primary regarding entity (highest priority field that was set). Priority order is the
+        // single source of truth in RegardingFieldMap.All (ADR-024) — the rungs write the same fields.
         EntityReference? primaryRef = null;
         string? primaryEntityLogicalName = null;
 
-        foreach (var (fieldName, entityLogicalName) in RegardingFieldPriority)
+        foreach (var (entityLogicalName, fieldName) in RegardingFieldMap.All)
         {
             if (fields.TryGetValue(fieldName, out var value) && value is EntityReference entityRef)
             {

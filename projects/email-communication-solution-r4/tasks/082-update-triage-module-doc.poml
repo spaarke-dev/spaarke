@@ -2,7 +2,9 @@
   <metadata>
     <title>Update `EMAIL-TRIAGE-MODULE-DESIGN.md` per DEC-10 (fix stale refs; point at R4 substrate; sequence after R4)</title>
     <phase>Wave 8 — Documentation</phase>
-    <status>not-started</status>
+    <status>n/a</status>
+    <!-- N/A (2026-07-16, W8): BROKEN PREMISE. `EMAIL-TRIAGE-MODULE-DESIGN.md` does NOT exist anywhere in the repo (glob-confirmed) — this task assumed a doc to "update per DEC-10" that was never created. The email-triage / Responsive-Intelligence design was re-homed to `projects/spaarke-notification-spine-r1/design.md` + `notes/W5-responsive-intelligence-and-shared-notification-spine.md`. Nothing to author; do NOT create a triage doc here. Resolution recorded in TASK-INDEX.md (082 marked N/A). -->
+    <status-note>N/A — target doc never existed; email-triage/RI design re-homed to spaarke-notification-spine-r1 (see W5 notes).</status-note>
     <estimated-hours>3</estimated-hours>
     <dependencies>011, 015, 051, 052, 053, 054, 080</dependencies>
     <blocks></blocks>

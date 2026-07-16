@@ -2290,6 +2290,26 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return results.Entities.Count > 0 ? results.Entities[0] : null;
     }
 
+    public async Task<IReadOnlyList<Entity>> QueryContactMembershipsAsync(Guid contactId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying contact memberships for {ContactId}", contactId);
+
+        var query = new QueryExpression("sprk_userentityassociation")
+        {
+            ColumnSet = new ColumnSet("sprk_entitylogicalname", "sprk_entityrecordid", "sprk_role")
+        };
+        // Person side = Contact (personidtype 2); personid is stored as a canonical 36-char lowercase GUID.
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("sprk_personid", ConditionOperator.Equal, contactId.ToString("D").ToLowerInvariant()));
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("sprk_personidtype", ConditionOperator.Equal, 2));
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("statecode", ConditionOperator.Equal, 0)); // Active only
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities.ToList();
+    }
+
     public async Task<Entity?> QueryAccountByDomainAsync(string domain, CancellationToken ct = default)
     {
         _logger.LogDebug("Querying account by domain: {Domain}", domain);

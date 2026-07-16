@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="CommunicationConnections" version="1.0.0" display-name-key="Communication Connections" description-key="Virtual PCF: multi-association review for sprk_communication. Renders the task-015 association provenance as typed connection slots (per-slot confidence + confirm/change, Accept-all, Link-another, create-from-email) and writes the chosen regarding via applyResolverFields (ADR-024). Bind to the sprk_associationprovenance multiline column; place in the OOB form right accessories column." control-type="virtual">
+    <external-service-usage enabled="false">
+    </external-service-usage>
+    <!-- PRIMARY bound property: the task-015 association provenance JSON (multiline, up to 10000 chars). -->
+    <property name="associationProvenance" display-name-key="Association Provenance" description-key="Bound to sprk_associationprovenance (the task-015 Association Engine decision trail JSON). Read-only from the PCF; drives the connection slots." of-type="Multiple" usage="bound" required="true" />
+    <!-- Bound property: the association status option-set value (drives confirmed vs suggested rendering + is advanced to Resolved on confirm). -->
+    <property name="associationStatus" display-name-key="Association Status" description-key="Bound to sprk_associationstatus (option-set). Suggested / Pending Review / Ambiguous render the review affordances; Resolved renders as filed. Advanced to Resolved when all review slots are confirmed." of-type="OptionSet" usage="bound" required="true">
+      <value name="Resolved" display-name-key="Resolved" default="false">100000000</value>
+      <value name="PendingReview" display-name-key="Pending Review" default="false">100000001</value>
+      <value name="Unresolved" display-name-key="Unresolved" default="false">100000002</value>
+      <value name="Suggested" display-name-key="Suggested" default="false">100000003</value>
+      <value name="Ambiguous" display-name-key="Ambiguous" default="false">100000004</value>
+    </property>
+    <!-- Host entity logical name (FR-22 lever for the shared write path — no entity-specific code branches). -->
+    <property name="entity" display-name-key="Host Entity" description-key="Dataverse logical name of the host entity (default sprk_communication). Passed to the shared regarding write path (applyResolverFields via ResolverWriteHandler). FR-22 reusability lever." of-type="SingleLine.Text" usage="input" required="false" default-value="sprk_communication" />
+    <!-- Optional explicit read-only override. Otherwise derived from context.mode.isControlDisabled. -->
+    <property name="readOnly" display-name-key="Read Only" description-key="When true, renders the connections as read-only (no confirm/change/create affordances). Auto-detected from form-disabled state when omitted." of-type="TwoOptions" usage="input" required="false" />
+    <!-- Version footer toggle. When true (default), the version footer renders at the bottom of the control. -->
+    <property name="showVersionFooter" display-name-key="Show Version Footer" description-key="When true (default), displays the PCF version footer at the bottom of the control. Set to false to hide it on production forms." of-type="TwoOptions" usage="input" required="false" default-value="true" />
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="1" />
+      <!-- Platform-provided libraries: DO NOT bundle (ADR-022) -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+      <uses-feature name="Navigation" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

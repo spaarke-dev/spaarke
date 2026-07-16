@@ -23,7 +23,8 @@
           "scopeUri": "api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation"
         },
         "msalClient": {
-          "clientId": "5175798e-f23e-41c3-b09b-7a90b9218189"
+          "clientId": "170c98e1-d486-4355-bcbe-170454e0207c",
+          "$comment": "SDAP-PCF-CLIENT — the live SPA client for PCFs + Code Pages (= Dataverse env var sprk_MsalClientId). Previous value 5175798e-... was RETIRED/deleted (az ad app show => not found) and caused AADSTS700016; corrected 2026-07-15."
         },
         "codePageClient": {
           "clientId": "170c98e1-d486-4355-bcbe-170454e0207c"

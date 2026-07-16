@@ -93,12 +93,11 @@ public class AssociationMappingTests
             new UserOperations(fakeGraphFactory, Mock.Of<ILogger<UserOperations>>()));
 
         return new CommunicationService(
-            _graphClientFactoryMock.Object,
+            CommunicationChannelTestFactory.CreateDispatcher(_graphClientFactoryMock.Object, emlGenerationService),
             senderValidator,
             Mock.Of<ICommunicationDataverseService>(),
             _genericEntityServiceMock.Object,
             Mock.Of<IDocumentDataverseService>(),
-            emlGenerationService,
             speFileStore,
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here

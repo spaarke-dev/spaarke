@@ -330,7 +330,7 @@ Phase 1 (A): Foundation — no dependencies
 - [Design](design-communication-accounts.md) — Original design document
 - [Communication Service Architecture](../../docs/architecture/communication-service-architecture.md)
 - [Email-to-Document Architecture](../../docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md)
-- [Email-to-Document Automation](../../docs/architecture/email-to-document-automation.md)
+- [Communication Intelligence Architecture](../../docs/architecture/communication-intelligence-architecture.md) (canonical R4; absorbs the retired email-to-document automation doc)
 - [Communication Account Data Model](../../docs/data-model/sprk_communicationaccount.md)
 - [Communication Admin Guide](../../docs/guides/COMMUNICATION-ADMIN-GUIDE.md)
 - [Communication Deployment Guide](../../docs/guides/COMMUNICATION-DEPLOYMENT-GUIDE.md)

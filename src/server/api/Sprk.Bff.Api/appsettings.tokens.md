@@ -18,8 +18,14 @@ Tokens use the format `#{TOKEN_NAME}#` which is compatible with Azure DevOps and
 | `#{REDIS_INSTANCE_NAME}#` | Redis cache instance prefix | `spaarke:` |
 | `#{SERVICE_BUS_QUEUE_NAME}#` | Service Bus queue name | `sdap-jobs` |
 | `#{AI_SUMMARIZE_MODEL}#` | OpenAI model for summarization | `gpt-4o-mini` |
-| `#{AI_SEARCH_INDEX_NAME}#` | AI Search index for records | `spaarke-records-index` |
-| `#{SHARED_KNOWLEDGE_INDEX_NAME}#` | AI Search index for RAG knowledge | `spaarke-files-index` |
+| `#{AI_SEARCH_INDEX_NAME}#` | AI Search index for records (Analysis + AiSearch:AllowedIndexes) | `spaarke-records-index` |
+| `#{SHARED_KNOWLEDGE_INDEX_NAME}#` | **Canonical single read/write RAG knowledge index** — feeds BOTH `AiSearch:KnowledgeIndexName` (reads) and `Analysis:SharedIndexName` (deprecated writes) per FR-26 / FAILURE-MODES G-9. Set once; both keys resolve to it. | `spaarke-files-index` |
+| `#{DISCOVERY_INDEX_NAME}#` | AI Search discovery-tier index (`AiSearch:DiscoveryIndexName` + AllowedIndexes) | `spaarke-discovery-index` |
+| `#{RAG_REFERENCES_INDEX_NAME}#` | AI Search golden-reference index (`AiSearch:RagReferencesIndexName` + AllowedIndexes) | `spaarke-rag-references` |
+| `#{INSIGHTS_INDEX_NAME}#` | AI Search derived-intelligence index (AllowedIndexes) | `spaarke-insights-index` |
+| `#{SESSION_FILES_INDEX_NAME}#` | AI Search session-scoped chat-upload index (AllowedIndexes) | `spaarke-session-files` |
+| `#{INVOICES_INDEX_NAME}#` | AI Search invoices index (AllowedIndexes) | `spaarke-invoices-index` |
+| `#{PLAYBOOK_EMBEDDINGS_INDEX_NAME}#` | AI Search playbook-embeddings index (AllowedIndexes) | `spaarke-playbook-embeddings` |
 | `#{DEPLOYMENT_ENVIRONMENT}#` | Environment name | `Development`, `Test`, `Production` |
 | `#{CUSTOMER_TENANT_ID}#` | Customer tenant for cross-tenant (or null) | `null` or GUID |
 | `#{RECORD_MATCHING_ENABLED}#` | Enable record matching (boolean) | `true` or `false` |
@@ -98,6 +104,12 @@ SERVICE_BUS_QUEUE_NAME=sdap-jobs
 AI_SUMMARIZE_MODEL=gpt-4o-mini
 AI_SEARCH_INDEX_NAME=spaarke-records-index
 SHARED_KNOWLEDGE_INDEX_NAME=spaarke-files-index
+DISCOVERY_INDEX_NAME=spaarke-discovery-index
+RAG_REFERENCES_INDEX_NAME=spaarke-rag-references
+INSIGHTS_INDEX_NAME=spaarke-insights-index
+SESSION_FILES_INDEX_NAME=spaarke-session-files
+INVOICES_INDEX_NAME=spaarke-invoices-index
+PLAYBOOK_EMBEDDINGS_INDEX_NAME=spaarke-playbook-embeddings
 DEPLOYMENT_ENVIRONMENT=Development
 CUSTOMER_TENANT_ID=null
 RECORD_MATCHING_ENABLED=false

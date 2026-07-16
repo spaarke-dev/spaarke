@@ -19,6 +19,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
@@ -218,8 +219,15 @@ public class InboundPipelineTests
             _dataverseServiceMock.Object,
             accountService,
             new IncomingAssociationResolver(
+                new IAssociationRung[]
+                {
+                    new ExplicitReferenceRung(_dataverseServiceMock.Object),
+                    new ThreadContinuityRung(_dataverseServiceMock.Object),
+                    new ParticipantCorrelationRung(_dataverseServiceMock.Object),
+                },
                 _dataverseServiceMock.Object,
                 _dataverseServiceMock.Object,
+                AssociationTestSupport.Mapper(),
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
             new GraphMessageNormalizer(),
             _attachmentProcessorMock.Object,

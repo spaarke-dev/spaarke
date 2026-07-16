@@ -2,7 +2,9 @@
   <metadata>
     <title>Update `sprk_communication.md` + processing/service arch docs; mark OOB-`email` + fragmented-send docs RETIRED</title>
     <phase>Wave 8 — Documentation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- W8 completion note (2026-07-16): data-model doc already R4-current (task 001/002) → added canonical 080 pointer. Rewrote communication-service-architecture.md send/inbound to R4. Per owner directive (delete, don't maintain superseded docs), DELETED email-processing-architecture.md (after absorbing its idempotency/.eml/attachment→Document/RAG content into 080), email-to-document-architecture.md, and email-to-document-automation.md; fixed 6 inbound links. SOURCE-OF-TRUTH divergence: shipped send DTO field is `AttachmentDocumentIds`, NOT `AttachmentDriveItemIds` — the File-ID rename is designed but unshipped (deferred); documented the shipped name. -->
+    <status-note>completed — see TASK-INDEX.md 081 row for detail.</status-note>
     <estimated-hours>4</estimated-hours>
     <dependencies>001, 006, 007, 011, 015, 060, 061, 062</dependencies>
     <blocks></blocks>

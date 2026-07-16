@@ -85,12 +85,11 @@ public class ArchivalFlowTests
             Mock.Of<ILogger<ApprovedSenderValidator>>());
 
         return new CommunicationService(
-            _graphClientFactoryMock.Object,
+            CommunicationChannelTestFactory.CreateDispatcher(_graphClientFactoryMock.Object, emlGenerationService),
             senderValidator,
             Mock.Of<ICommunicationDataverseService>(),
             dvService,
             Mock.Of<IDocumentDataverseService>(),
-            emlGenerationService ?? null!,
             speFileStore ?? null!,
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here

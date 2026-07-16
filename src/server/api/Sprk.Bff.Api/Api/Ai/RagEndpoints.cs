@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
@@ -493,7 +492,7 @@ public static class RagEndpoints
         FileIndexRequest request,
         IFileIndexingService fileIndexingService,
         IDocumentDataverseService dataverseService,
-        IOptions<AnalysisOptions> analysisOptions,
+        ISearchIndexNameResolver searchIndexNameResolver,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
@@ -555,7 +554,7 @@ public static class RagEndpoints
             // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
             if (!string.IsNullOrEmpty(request.DocumentId))
             {
-                var indexName = analysisOptions.Value.SharedIndexName;
+                var indexName = searchIndexNameResolver.GetDefaultIndexName();
                 var completedAt = DateTime.UtcNow;
                 var updateRequest = new UpdateDocumentRequest
                 {
@@ -601,7 +600,7 @@ public static class RagEndpoints
         [FromBody] SendToIndexRequest request,
         IFileIndexingService fileIndexingService,
         IDocumentDataverseService dataverseService,
-        IOptions<AnalysisOptions> analysisOptions,
+        ISearchIndexNameResolver searchIndexNameResolver,
         HttpContext httpContext,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -630,7 +629,7 @@ public static class RagEndpoints
         }
 
         var results = new List<SendToIndexDocumentResult>();
-        var indexName = analysisOptions.Value.SharedIndexName;
+        var indexName = searchIndexNameResolver.GetDefaultIndexName();
 
         foreach (var documentId in request.DocumentIds)
         {

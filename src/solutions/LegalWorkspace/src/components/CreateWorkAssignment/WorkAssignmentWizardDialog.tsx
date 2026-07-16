@@ -28,7 +28,7 @@ import type {
   IWizardStepConfig,
   IWizardSuccessConfig,
 } from '../../../../../client/shared/Spaarke.UI.Components/src/components/Wizard/wizardShellTypes';
-import { SendEmailStep } from '../../../../../client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/steps/SendEmailStep';
+import { SendEmailFollowOnStep } from '@spaarke/ui-components';
 import { searchUsersAsLookup } from '../CreateMatter/matterService';
 
 import type {
@@ -282,7 +282,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
             }
             if (stepId === 'followon-wa-send-email') {
               return (
-                <SendEmailStep
+                <SendEmailFollowOnStep
                   title="Send Email"
                   emailTo={emailToRef.current}
                   onEmailToChange={setEmailTo}

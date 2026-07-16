@@ -23,7 +23,7 @@
 - [`current-task.md`](current-task.md) — Active task state (context recovery)
 - [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) — All tasks + status + parallel groups + dependency graph
 - [`reference/r3-send-side-design.md`](reference/r3-send-side-design.md) — Absorbed R3 send-side detail (self-contained)
-- Absorbed R3 task POMLs (reuse for W2/W6): [`../x-email-communication-solution-r3/tasks/`](../x-email-communication-solution-r3/tasks/)
+- Absorbed R3 send-side plan: [`reference/r3-send-side-plan.md`](reference/r3-send-side-plan.md) (the R3 project body was deleted in W8 — tombstone at [`../x-email-communication-solution-r3/SUPERSEDED.md`](../x-email-communication-solution-r3/SUPERSEDED.md))
 
 ### Project Metadata
 - **Type**: Mixed — server (C#) engine/enrichment/intelligence + client (TS) composer/Code Page + Dataverse schema + AI + hardening + docs
