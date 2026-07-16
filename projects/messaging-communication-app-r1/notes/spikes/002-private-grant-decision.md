@@ -159,3 +159,9 @@ A remains a legitimate fallback **if** the owner requires private threads to be 
 | `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs` | Option B enforcement in practice: all reads gated to the grant set via the authorization filter; **app-only token** (`:509-520`, `:580-607`). |
 | `.claude/adr/ADR-034-user-record-membership.md` | Open-membership derivation: `IMembershipResolverService.ResolveAsync` → `ids[]`/`byRole` id-sets to union with private grants. |
 | `projects/messaging-communication-app-r1/design.md` §5, §6.1, §8.4 | Access model lock; thread entity as participant-set home; ACS membership as projection. |
+
+---
+
+## OWNER DECISION (2026-07-16)
+
+✅ **APPROVED — Option B** (`sprk_externalrecordaccess`-style overlay grant), unioned with ADR-034 open membership in the BFF thread-read filter. Owner sign-off obtained; this closes the §6 escalation. Tasks 042 (enforcement filter), 041 (ACS membership reconcile), and 050 (thread-read/unread endpoints) are authored/executed against option B. Filter contract: `MembershipResolver(anchor) ∪ activeOverlayGrants(thread, caller)`, point-forward via `createdon ≥ grant.effectiveFrom`.
