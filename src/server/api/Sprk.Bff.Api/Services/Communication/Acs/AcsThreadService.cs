@@ -168,6 +168,33 @@ public sealed class AcsThreadService : IAcsThreadService
         }
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> ListParticipantsAsync(
+        string chatThreadId,
+        CancellationToken ct = default)
+    {
+        var threadClient = GetThreadClient(chatThreadId);
+        var mris = new List<string>();
+
+        try
+        {
+            // GetParticipantsAsync pages internally; enumerate the whole thread membership. Only
+            // CommunicationUserIdentifier participants carry an ACS communicationUserId MRI — that is the only
+            // identity kind the reconcile projects (bots/phone/Teams identities are out of scope for R1).
+            await foreach (var participant in threadClient.GetParticipantsAsync(cancellationToken: ct).ConfigureAwait(false))
+            {
+                if (participant.User is CommunicationUserIdentifier user && !string.IsNullOrWhiteSpace(user.Id))
+                    mris.Add(user.Id);
+            }
+        }
+        catch (RequestFailedException ex) when (ex.Status == 429)
+        {
+            throw RateLimit("list participants", ex);
+        }
+
+        return mris.Distinct(StringComparer.Ordinal).ToList();
+    }
+
     private ChatThreadClient GetThreadClient(string chatThreadId)
     {
         if (string.IsNullOrWhiteSpace(chatThreadId))

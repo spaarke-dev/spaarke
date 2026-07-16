@@ -66,4 +66,19 @@ public interface IAcsThreadService
         string chatThreadId,
         string communicationUserId,
         CancellationToken ct = default);
+
+    // ── task 041: list current participants (the reconcile's remove-leg needs the current ACS set) ──
+
+    /// <summary>
+    /// Lists the ACS <c>communicationUserId</c> MRIs currently in the thread. Added for the
+    /// membership-reconcile job (task 041): the reconcile computes <c>desired</c> from Dataverse-derived
+    /// access and must know the <c>current</c> ACS set to compute the remove-leg
+    /// (<c>Remove = current \ desired</c>) — the over-exposure guard that enforces the projection invariant
+    /// "ACS membership ⊆ Dataverse-derived access". A 429 surfaces as
+    /// <see cref="AcsRateLimitException"/> (retryable). Returns an empty set when the thread has no
+    /// participants; the underlying enumeration pages internally.
+    /// </summary>
+    Task<IReadOnlyList<string>> ListParticipantsAsync(
+        string chatThreadId,
+        CancellationToken ct = default);
 }

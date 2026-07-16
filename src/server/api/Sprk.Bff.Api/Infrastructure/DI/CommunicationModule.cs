@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
@@ -7,7 +8,9 @@ using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Engine.Detectors;
 using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
+using Sprk.Bff.Api.Services.Communication.Membership;
 using Sprk.Bff.Api.Services.Communication.Threads;
+using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -248,6 +251,39 @@ public static class CommunicationModule
 
         // Background service: reset daily send counts at midnight UTC (ADR-001)
         services.AddHostedService<DailySendCountResetService>();
+
+        // ────────────────────────────────────────────────────────────────────────────────────────────
+        // task 041 — Membership derivation + ACS reconcile (FR-07). ACS thread membership is a reconciled
+        // PROJECTION of Dataverse-derived access, NEVER a second ACL. Placement Justification (root §10 /
+        // §11): all pieces live inside Services/Communication/ behind the ADR-045 boundary; the reconcile
+        // reuses the EXISTING ADR-004 Service Bus job contract (no second queue/DLQ) and ADR-034 membership
+        // discovery (no new authorization engine). Registered UNCONDITIONALLY (ADR-010); the sweep is
+        // self-gated by an options flag at runtime (not a DI gate → no asymmetric registration).
+        services.TryAddSingleton(TimeProvider.System); // task 041 (idempotent — matches other modules)
+        services.Configure<MembershipReconcileOptions>(configuration.GetSection(MembershipReconcileOptions.SectionName)); // task 041
+        // task 041 — explicit participant/grant reader: ADR-032 Null-Object default (no explicit grants).
+        // Tasks 042 (private overlay-grant schema) / 043 (direct two-party list) register the concrete reader
+        // behind this SAME seam; the derivation + reconcile then pick up overlay grants with NO code change.
+        services.TryAddSingleton<IThreadExplicitParticipantReader, NullThreadExplicitParticipantReader>(); // task 041
+        // task 041 — shared authorized-set contract: authorized = reverse-ADR-034(anchor) ∪ explicit grants.
+        // Task 042's read-filter computes the SAME set; both consume this service so they agree by construction.
+        services.AddSingleton<IThreadMembershipDerivationService, ThreadMembershipDerivationService>(); // task 041
+        // task 041 — audit sink: one entry per ACS membership change (FR-07). Default = structured logging;
+        // a durable sink can replace it behind this seam with no reconcile change.
+        services.AddSingleton<IMembershipReconcileAuditSink, LoggingMembershipReconcileAuditSink>(); // task 041
+        // task 041 — the reconcile core (desired = derived set → ACS MRIs; current = ACS participants;
+        // Add(desired\current), Remove(current\desired); projection-never-exceeds guard; audit per change).
+        services.AddSingleton<IMembershipReconciler, MembershipReconciler>(); // task 041
+        // task 041 — event-driven + sweep enqueue entry point (best-effort, NFR-02). Consumed by 042/043 for
+        // event-driven reconcile and by the sweep below.
+        services.AddSingleton<MembershipReconcileEnqueuer>(); // task 041
+        // task 041 — reconcile job on the EXISTING shared sdap-jobs queue (ServiceBusJobProcessor resolves it
+        // by JobType via GetServices<IJobHandler>()). Reuses ADR-004/036 idempotency/retry/DLQ.
+        services.AddSingleton<IJobHandler, MembershipReconcileJob>(); // task 041
+        // task 041 — periodic eventual-consistency sweep (design §8.4). Self-gated by
+        // Communication:MembershipReconcile:SweepEnabled (default off — event-driven is the primary path).
+        services.AddHostedService<MembershipReconcileSweepService>(); // task 041
+        // ────────────────────────────────────────────────────────────────────────────────────────────
 
         return services;
     }
