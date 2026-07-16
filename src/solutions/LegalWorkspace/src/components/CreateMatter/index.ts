@@ -24,11 +24,11 @@ export { AssignCounselStep } from './AssignCounselStep';
 export { AssignResourcesStep } from './AssignResourcesStep';
 export { RecipientField } from './RecipientField';
 export { DraftSummaryStep } from './DraftSummaryStep';
-export {
-  SendEmailStep,
-  buildDefaultEmailSubject,
-  buildDefaultEmailBody,
-} from './SendEmailStep';
+// SendEmailStep + buildDefaultEmailSubject/buildDefaultEmailBody removed (email-r4
+// task 061): the LegalWorkspace CreateMatter email-step fork was retired. The
+// canonical wizard email step is `SendEmailFollowOnStep` from @spaarke/ui-components
+// (over the generic `EmailStep`); the Matter wizard composes email via its
+// config-driven followOn model in WizardDialog.tsx (buildEmailSubject/buildEmailBody).
 // SuccessConfirmation removed — shell handles success screen via IWizardSuccessConfig
 
 // Task 024 — Service layer
@@ -83,7 +83,7 @@ export type { IAssignCounselStepProps } from './AssignCounselStep';
 export type { IAssignResourcesStepProps } from './AssignResourcesStep';
 export type { IRecipientItem, IRecipientFieldProps } from './RecipientField';
 export type { IDraftSummaryStepProps } from './DraftSummaryStep';
-export type { ISendEmailStepProps } from './SendEmailStep';
+// ISendEmailStepProps removed — SendEmailStep fork retired (email-r4 task 061)
 // ISuccessConfirmationProps removed — SuccessConfirmation component deleted (T012)
 export type {
   ICreateMatterResult,
