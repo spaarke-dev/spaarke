@@ -342,20 +342,28 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
 
   const handleLinkAnother = React.useCallback((): void => {
     const xrm = getXrm();
-    const lookup = xrm?.Utility?.lookupObjects;
-    if (typeof lookup !== 'function') {
+    if (typeof xrm?.Utility?.lookupObjects !== 'function') {
       setError('The record picker is unavailable in this host.');
       return;
     }
     void (async () => {
       try {
-        const results = await lookup({
+        // Invoke as a METHOD on Xrm.Utility — a detached reference
+        // (`const f = xrm.Utility.lookupObjects; f(...)`) loses its `this` and
+        // throws "Cannot read properties of undefined (reading '_clientApiExecutor')".
+        const results = await xrm.Utility.lookupObjects({
           entityTypes: TODO_REGARDING_CATALOG.map(c => c.entityType),
           allowMultiSelect: false,
         });
         const picked = Array.isArray(results) ? results[0] : undefined;
         if (!picked?.id || !picked?.entityType) return;
-        await fileSelection(`sprk_regarding_${picked.entityType}`, {
+        // Use the catalog's canonical lookup attribute as the confirmed-fields key
+        // (e.g. contact → sprk_regardingcontact) so status-advance tracking matches
+        // the engine's slot fields.
+        const field =
+          TODO_REGARDING_CATALOG.find(c => c.entityType === picked.entityType)?.lookupAttribute ??
+          `sprk_regarding_${picked.entityType}`;
+        await fileSelection(field, {
           entityType: picked.entityType,
           recordId: String(picked.id).replace(/[{}]/g, ''),
           recordName: typeof picked.name === 'string' ? picked.name : String(picked.id),
