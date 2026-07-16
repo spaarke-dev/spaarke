@@ -148,6 +148,94 @@ public sealed class DispositionRoutabilitySeamTests
         complete.ConsumerType.Should().NotBeNullOrEmpty().And.Be(stored!.UcId);
     }
 
+    // (1d) Smart pre-seed enrichment (assistant-enhancements-r1 task 013 part 3 / D-013-01): a
+    //      create-matter surface_launch dispatch resolves the drafted closed-set LABELS
+    //      (practice_area_suggestion / matter_type_suggestion) → record ids via the deterministic
+    //      resolver (010) and merges them into the STORED payload as `resolvedLookups` BEFORE the ledger
+    //      write. The router stores an opaque payload it never parses (ADR-040), so the enriched slot rides
+    //      the ledger untouched; the launched wizard pre-selects a `high` dropdown and defaults a `low`
+    //      picker to the top candidate (client mapper handoffSeedMapping.ts). This is the dispatch-spine
+    //      DoD for wiring the resolver into dispatch (its FIRST live consumer).
+    private const string CreateMatterOutputSchema =
+        """{"type":"object","additionalProperties":false,"required":["matter_name","practice_area_suggestion","matter_type_suggestion"],"properties":{"matter_name":{"type":"string"},"practice_area_suggestion":{"type":"string"},"matter_type_suggestion":{"type":"string"}}}""";
+
+    [Fact]
+    public async Task DispatchAsync_SurfaceLaunch_CreateMatter_EnrichesResolvedLookupsIntoStoredPayload()
+    {
+        var practiceAreaId = "aaaaaaaa-1111-2222-3333-444444444444";
+        var matterTypeId = "bbbbbbbb-1111-2222-3333-444444444444";
+
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.SurfaceLaunch, SelectionInputSchema, consumerType: "create-matter");
+        h.GivenFlatTextAction("ROLE: Draft the matter-intake fields for the launched wizard.", CreateMatterOutputSchema);
+        h.OpenAi.RawJsonToReturn =
+            """{"matter_name":"Acme NDA","practice_area_suggestion":"Commercial Litigation","matter_type_suggestion":"Non-Disclosure Agreement"}""";
+
+        // The deterministic resolver (010) — the ONE doubled boundary. practice-area resolves HIGH (exact),
+        // matter-type resolves LOW (fuzzy → top candidate) so the test covers BOTH the pre-select and the
+        // picker-default legs the client mapper branches on.
+        h.Resolver
+            .Setup(r => r.ResolveAsync("sprk_matter", "sprk_practicearea_ref", "Commercial Litigation", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ConstrainedFieldResolution
+            {
+                Resolved = practiceAreaId,
+                Confidence = ResolutionConfidence.High,
+                Candidates = new[] { new FieldCandidate(practiceAreaId, "Commercial Litigation") },
+            });
+        h.Resolver
+            .Setup(r => r.ResolveAsync("sprk_matter", "sprk_mattertype_ref", "Non-Disclosure Agreement", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ConstrainedFieldResolution
+            {
+                Resolved = matterTypeId,
+                Confidence = ResolutionConfidence.Low,
+                Candidates = new[] { new FieldCandidate(matterTypeId, "NDA Review") },
+            });
+
+        var chunks = await h.DispatchAsync(new { selectionText = "draft a matter for the Acme NDA" });
+        chunks.Should().NotContain(c => c.Type == "error").And.Contain(c => c.Type == "complete");
+
+        // STORE: the enriched resolvedLookups is durably in the ledger BEFORE render (ADR-040). The
+        // free-text draft is untouched; the enricher only ADDED the resolver's closed-set output.
+        var stored = await h.GetStoredOutputAsync();
+        stored.Should().NotBeNull("store precedes render — ADR-040");
+        stored!.Disposition.Should().Be("surface_launch");
+        stored.Payload.GetProperty("matter_name").GetString().Should().Be("Acme NDA", "the drafted free-text survives enrichment");
+
+        var resolvedLookups = stored.Payload.GetProperty("resolvedLookups");
+
+        // HIGH → recordId + confidence "high" (client pre-selects the dropdown). Keyed by the lookup
+        // attribute the client mapper reads (sprk_practicearea_ref).
+        var practiceArea = resolvedLookups.GetProperty("sprk_practicearea_ref");
+        practiceArea.GetProperty("confidence").GetString().Should().Be("high");
+        practiceArea.GetProperty("recordId").GetString().Should().Be(practiceAreaId);
+
+        // LOW → recordId (top candidate) + confidence "low" + candidates (client defaults the picker).
+        var matterType = resolvedLookups.GetProperty("sprk_mattertype_ref");
+        matterType.GetProperty("confidence").GetString().Should().Be("low");
+        matterType.GetProperty("recordId").GetString().Should().Be(matterTypeId);
+        matterType.GetProperty("candidates")[0].GetProperty("label").GetString().Should().Be("NDA Review");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_SurfaceLaunch_UnmappedConsumerType_LeavesPayloadUnenriched()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        // A surface_launch binding whose consumer-type has NO field-map (create-task drafts no closed-set
+        // field in R1). Enrichment is a quiet no-op (ADR-032) — the stored payload carries no resolvedLookups.
+        h.GivenBinding(BindingDisposition.SurfaceLaunch, SelectionInputSchema, consumerType: "create-task");
+        h.GivenFlatTextAction("ROLE: Draft the task fields.", PassThroughOutputSchema);
+        h.OpenAi.RawJsonToReturn = """{"new_text":"Follow up on the NDA"}""";
+
+        var chunks = await h.DispatchAsync(new { selectionText = "create a task to follow up" });
+        chunks.Should().NotContain(c => c.Type == "error").And.Contain(c => c.Type == "complete");
+
+        var stored = await h.GetStoredOutputAsync();
+        stored!.Payload.TryGetProperty("resolvedLookups", out _)
+            .Should().BeFalse("an unmapped consumer-type is a quiet no-op — no resolvedLookups is added");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // (2) LOUD rejection through the registry — a not-yet-routable disposition is
     //     rejected PRE-RUN at the admit-gate (never a silent drop, never
@@ -262,6 +350,12 @@ public sealed class DispositionRoutabilitySeamTests
         public Mock<IConsumerRoutingService> Routing { get; } = new();
         public Mock<IScopeResolverService> Scope { get; } = new();
         public Mock<ISessionFileTextSource> TextSource { get; } = new();
+        // Task 013 part 3 (D-013-01): the constrained-field resolver is the ONE doubled boundary in the
+        // smart-pre-seed slice — it fronts Dataverse metadata (a data boundary the harness legitimately
+        // doubles, like the catalog). The enricher itself (SurfaceLaunchEnricher) is the PRODUCTION type,
+        // wired into the production orchestrator → router → ledger path. Default: resolves nothing (None) —
+        // safe no-op for every existing test whose consumer-type has no field-map.
+        public Mock<IConstrainedFieldResolver> Resolver { get; } = new();
         public SessionDispatchOrchestrator Orchestrator { get; }
 
         public Harness()
@@ -278,23 +372,36 @@ public sealed class DispositionRoutabilitySeamTests
             var pending = new PendingPlanManager(
                 new InMemoryTenantCache(), Sessions, Mock.Of<ILogger<PendingPlanManager>>());
 
+            // Safe default: unless a test sets up a specific resolution, every resolve returns None (empty
+            // candidates) — so a mapped consumer-type still produces NO resolvedLookups entry unless the
+            // test opts in. Keeps the enricher a true no-op for the non-013 tests.
+            Resolver
+                .Setup(r => r.ResolveAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(ConstrainedFieldResolution.NoneResult(Array.Empty<FieldCandidate>()));
+
+            var enricher = new SurfaceLaunchEnricher(
+                Resolver.Object, Mock.Of<ILogger<SurfaceLaunchEnricher>>());
+
             Orchestrator = new SessionDispatchOrchestrator(
                 Sessions, Routing.Object, Scope.Object, runner, binder,
                 Mock.Of<Sprk.Bff.Api.Services.Ai.ICodedWorkflowRegistry>(), TextSource.Object, router, pending,
                 Options.Create(new EventRulesOptions { ReadinessProbeAttempts = 1, ReadinessProbeDelayMs = 0 }),
                 new Sprk.Bff.Api.Telemetry.AiTelemetry(),
-                Mock.Of<ILogger<SessionDispatchOrchestrator>>());
+                Mock.Of<ILogger<SessionDispatchOrchestrator>>(),
+                timeProvider: null,
+                surfaceLaunchEnricher: enricher);
         }
 
         public Task SeedSessionAsync(ChatSession session) => Sessions.UpdateSessionCacheAsync(session);
 
-        public void GivenBinding(BindingDisposition disposition, string inputSchema) =>
+        public void GivenBinding(BindingDisposition disposition, string inputSchema, string consumerType = "disposition-seam-test") =>
             Routing
                 .Setup(c => c.GetBindingByIdAsync(BindingId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new Binding
                 {
                     BindingId = BindingId,
-                    ConsumerType = "disposition-seam-test",
+                    ConsumerType = consumerType,
                     ActionId = ActionId,
                     ActionKind = ActionKind.Prompted,
                     Disposition = disposition,

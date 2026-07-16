@@ -88,6 +88,11 @@ public class SessionDispatchOrchestrator
     private readonly Sprk.Bff.Api.Telemetry.AiTelemetry _aiTelemetry;
     private readonly ILogger<SessionDispatchOrchestrator> _logger;
     private readonly TimeProvider _timeProvider;
+    // Task 013 part 3 (D-013-01): smart pre-seed. OPTIONAL — the real enricher is registered
+    // unconditionally in DI (production always has it), but hand-built test constructions of this
+    // orchestrator omit it and get null → enrichment is skipped (the launch payload is stored
+    // unchanged, exactly the pre-013p3 behavior). Never fails the dispatch (ADR-032).
+    private readonly ISurfaceLaunchEnricher? _surfaceLaunchEnricher;
 
     public SessionDispatchOrchestrator(
         ChatSessionManager sessionManager,
@@ -102,7 +107,8 @@ public class SessionDispatchOrchestrator
         IOptions<EventRulesOptions> manifestProbeOptions,
         Sprk.Bff.Api.Telemetry.AiTelemetry aiTelemetry,
         ILogger<SessionDispatchOrchestrator> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        ISurfaceLaunchEnricher? surfaceLaunchEnricher = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
@@ -125,6 +131,8 @@ public class SessionDispatchOrchestrator
         // inject a FakeTimeProvider for deterministic probe-delay assertions instead of
         // relying on a real (or zeroed) wall-clock wait.
         _timeProvider = timeProvider ?? TimeProvider.System;
+        // Optional (may be null in hand-built test constructions); see field doc.
+        _surfaceLaunchEnricher = surfaceLaunchEnricher;
     }
 
     /// <summary>
@@ -492,6 +500,20 @@ public class SessionDispatchOrchestrator
                 yield return AnalysisChunk.FromError(llmError);
                 yield break;
             }
+        }
+
+        // ── Task 013 part 3 (D-013-01): smart pre-seed. When the resolved Binding routes to a client-owned
+        // surface launch, resolve the drafted closed-set LABELS (practice_area / matter_type) to record ids
+        // via the deterministic resolver (010) and merge them into the payload as `resolvedLookups` BEFORE
+        // the ledger write — the router stores an opaque payload it never parses (ADR-040), and the launched
+        // wizard pre-selects dropdowns from the enriched slot (ADR-039: the LLM never authored the closed-set
+        // value; the resolver did). Optional dependency + quiet no-op (ADR-032): null enricher, a non-launch
+        // disposition, an unmapped consumer-type, or any resolve failure leaves `output` unchanged.
+        if (_surfaceLaunchEnricher is not null && binding.Disposition == BindingDisposition.SurfaceLaunch)
+        {
+            output = await _surfaceLaunchEnricher
+                .EnrichAsync(binding, output, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         // ── ADR-040 SEAM (FR-P1-02): the universal ledger write BEFORE render. The OutputRouter writes

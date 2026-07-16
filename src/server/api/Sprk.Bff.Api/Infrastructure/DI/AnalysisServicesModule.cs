@@ -385,6 +385,15 @@ public static class AnalysisServicesModule
         // IDistributedCache, TokenCredential, IConfiguration), so symmetric registration holds (§10 F.1 —
         // no ADR-032 kill-switch needed). No LLM dependency injected.
         services.AddHttpClient<IConstrainedFieldResolver, ConstrainedFieldResolver>();
+
+        // spaarkeai-assistant-enhancements-r1 task 013 part 3 (FR-B2 / D-013-01) — ISurfaceLaunchEnricher.
+        // Smart pre-seed: resolves a create capability's drafted closed-set LABELS → record ids (via the
+        // resolver above) and merges `resolvedLookups` into the surface_launch payload BEFORE the ledger
+        // write in SessionDispatchOrchestrator. Registered UNCONDITIONALLY (§10 F.1 — the orchestrator takes
+        // it as an OPTIONAL ctor dependency, so production always injects the real enricher while hand-built
+        // test constructions omit it; deps IConstrainedFieldResolver + ILogger are both unconditional, so
+        // symmetric registration holds — no ADR-032 kill-switch needed). No LLM dependency.
+        services.AddScoped<ISurfaceLaunchEnricher, SurfaceLaunchEnricher>();
     }
 
     /// <summary>
