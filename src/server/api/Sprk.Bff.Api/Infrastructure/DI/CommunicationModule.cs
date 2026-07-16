@@ -96,6 +96,18 @@ public static class CommunicationModule
         // dedupe + DLQ (task 031) call INTO this seam's IngestAsync and are NOT registered here.
         services.AddSingleton<ICommunicationChannelIngestor, MessagingIngestor>();
 
+        // ACS Event Grid inbound ingress (messaging-communication-app-r1 task 030 / FR-02). The transport
+        // boundary that turns ACS chat events (delivered by the per-boundary Event Grid subscription task 012
+        // provisions) into IncomingMessaging jobs on the EXISTING Services/Jobs Service Bus contract — it does
+        // NOT create a second queue/pipeline (ADR-004/036 / root §10). Registered UNCONDITIONALLY (ADR-010 /
+        // ADR-032): the ingress ENDPOINT maps unconditionally (AcsEventGridEndpoints), so its service must
+        // register unconditionally too. The endpoint is thin — validate the Event Grid subscription-validation
+        // handshake + topic-origin allow-list (+ optional shared secret), enqueue, return fast; task 031's job
+        // handler consumes IncomingMessagingJobPayload and owns normalize + persist + dedupe + DLQ. AllowedTopics
+        // is the fail-closed origin control (SECURITY BOUNDARY — an unvalidated/spoofed payload never enqueues).
+        services.Configure<AcsEventGridIngressOptions>(configuration.GetSection(AcsEventGridIngressOptions.SectionName));
+        services.AddSingleton<AcsEventGridIngressService>();
+
         // Association Engine (ADR-045 / FR-09/FR-10): the pure Graph→envelope boundary mapper, the
         // ordered rungs, and the envelope-only engine. All unconditional (consumed unconditionally by
         // the inbound processor per ADR-032; no feature gate). Rungs are registered as IAssociationRung

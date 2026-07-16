@@ -86,7 +86,7 @@ az deployment sub create \
       customerId=acme environmentName=prod \
       deployAcsMessaging=true \
       acsDataLocation=UnitedStates \
-      acsWebhookEndpointUrl=https://<bff-host>/api/communication/acs/eventgrid \
+      acsWebhookEndpointUrl=https://<bff-host>/api/communications/acs/eventgrid \
       bffPrincipalId=<bff-app-service-mi-object-id>
 ```
 This creates `sprk-acme-prod-acs` + system topic `sprk-acme-prod-acs-egt` + subscription
@@ -107,7 +107,7 @@ az eventgrid system-topic create --name sprk-acme-prod-acs-egt --resource-group 
 # 3. Subscription: chat events -> BFF webhook + dead-letter (from day one, §8.3)
 az eventgrid system-topic event-subscription create --name chat-events-to-bff \
    --resource-group rg-spaarke-acme-prod --system-topic-name sprk-acme-prod-acs-egt \
-   --endpoint https://<bff-host>/api/communication/acs/eventgrid \
+   --endpoint https://<bff-host>/api/communications/acs/eventgrid \
    --included-event-types \
       Microsoft.Communication.ChatMessageReceivedInThread \
       Microsoft.Communication.ChatMessageEditedInThread \
