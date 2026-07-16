@@ -22,6 +22,18 @@
  *   - The strip renders INLINE IN THE TRANSCRIPT via SprkChat's
  *     `transcriptFooterSlot`, memoized on the actual chip data so the
  *     slot-keyed auto-scroll fires only when chips change (G-P2 finding 1).
+ *
+ * task 043 / FR-G1 (Suggested Next Steps cards + reorder-for-display): the
+ * chips now render as ranked actionable CARDS (see `ConsumerChips.tsx`'s
+ * pill→card visual upgrade) instead of a flat pill strip, with:
+ *   - a deterministic, preference-keyed DISPLAY reorder applied via
+ *     `reorderChipsForDisplay` (`chipDisplayOrder.ts`) BEFORE render — pure
+ *     display-layer sort, no model call, never adds/removes/grants a chip
+ *     (ADR-039). See that module's header for the client-preference-source
+ *     GAP this task surfaced (no preference is wired through today; the
+ *     reorder degrades deterministically to the server-declared order).
+ *   - an optional trailing "More" card (`deps.openLibraryModal`) that opens
+ *     the EXISTING playbook/capability library modal — no new modal surface.
  */
 
 import * as React from "react";
@@ -34,6 +46,7 @@ import {
 } from "@spaarke/ui-components";
 import type { IChatMessage } from "@spaarke/ui-components";
 import { ConsumerChips } from "./ConsumerChips";
+import { reorderChipsForDisplay, type ChipDisplayPreference } from "./chipDisplayOrder";
 import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
 import { makeLocalAssistantMessage } from "./summarizeRouting";
 
@@ -51,6 +64,19 @@ export interface ConsumerChipsDeps {
   enqueueAssistantMessage: (message: IChatMessage) => void;
   /** Single-slot injection (stable dispatch-failure line, ADR-019). */
   inject: (message: IChatMessage) => void;
+  /**
+   * task 043 / FR-G1: opens the EXISTING playbook/capability library modal
+   * (`usePlaybookOptions.handleOpenLibraryModal`) — wired to the SNS cards'
+   * trailing "More" affordance. Omitted → no "More" card renders.
+   */
+  openLibraryModal?: () => void;
+  /**
+   * task 043 / FR-G1: the deterministic, preference-keyed DISPLAY reorder
+   * input (see `chipDisplayOrder.ts`). Omitted/absent → the chips render in
+   * the server-declared order (the documented GAP — no client-accessible
+   * preference source exists yet; see that module's header).
+   */
+  chipDisplayPreference?: ChipDisplayPreference | null;
 }
 
 export interface ConsumerChipsController {
@@ -86,6 +112,8 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
     sessionAttachmentCount,
     enqueueAssistantMessage,
     inject,
+    openLibraryModal,
+    chipDisplayPreference,
   } = deps;
 
   const [consumerChips, setConsumerChips] = React.useState<ReadonlyArray<ConsumerChip>>([]);
@@ -175,15 +203,24 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
     [runBindingDispatch]
   );
 
+  // task 043 / FR-G1: deterministic, preference-keyed DISPLAY reorder — pure
+  // sort, no model call, never adds/removes/grants a chip (ADR-039). See
+  // chipDisplayOrder.ts for the client-preference-source GAP this surfaces.
+  const rankedConsumerChips = React.useMemo(
+    () => reorderChipsForDisplay(consumerChips, chipDisplayPreference),
+    [consumerChips, chipDisplayPreference]
+  );
+
   const consumerChipsSlot = React.useMemo(
     () => (
       <ConsumerChips
-        chips={consumerChips}
+        chips={rankedConsumerChips}
         attachmentCount={sessionAttachmentCount}
         onChipClick={handleConsumerChipClick}
+        onMore={openLibraryModal}
       />
     ),
-    [consumerChips, sessionAttachmentCount, handleConsumerChipClick]
+    [rankedConsumerChips, sessionAttachmentCount, handleConsumerChipClick, openLibraryModal]
   );
 
   const acceptChips = React.useCallback((raw: unknown): void => {

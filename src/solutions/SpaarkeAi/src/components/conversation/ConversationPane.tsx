@@ -342,6 +342,12 @@ export function ConversationPane(): React.JSX.Element {
     onSessionFileUploaded: handleSessionFileUploaded,
   });
 
+  // task 043 / FR-G1: same stable-ref indirection as acceptChipsRef above —
+  // `usePlaybookOptions.handleOpenLibraryModal` is declared further below
+  // (needs bffBaseUrl/authenticatedFetch/chatSessionId already in scope
+  // here), so the SNS cards' "More" affordance reaches it through a ref
+  // rather than reordering hook declarations.
+  const openLibraryModalRef = React.useRef<() => void>(() => undefined);
   const chips = useConsumerChips({
     bffBaseUrl,
     getAccessToken,
@@ -350,6 +356,7 @@ export function ConversationPane(): React.JSX.Element {
     sessionAttachmentCount: attachments.sessionAttachmentCount,
     enqueueAssistantMessage: injection.enqueue,
     inject: injection.inject,
+    openLibraryModal: React.useCallback(() => openLibraryModalRef.current(), []),
   });
   acceptChipsRef.current = chips.acceptChips;
 
@@ -994,6 +1001,13 @@ export function ConversationPane(): React.JSX.Element {
     inject: injection.inject,
     getLastSentMessage: eventBatch.getLastSentMessage,
   });
+  // task 043 / FR-G1: the SNS cards' "More" affordance opens the SAME
+  // existing library modal the `/playbooks` hard slash + playbook_options
+  // Library link already use — no parallel modal surface. Empty attachment
+  // ids: the SNS "More" entry is a generic library browse, not tied to a
+  // specific candidate-confidence flow (mirrors useCommandRouting's
+  // `openLibraryModal([])` call for the same reason).
+  openLibraryModalRef.current = () => playbookOptions.handleOpenLibraryModal([]);
   const commands = useCommandRouting({
     bffBaseUrl,
     authenticatedFetch,

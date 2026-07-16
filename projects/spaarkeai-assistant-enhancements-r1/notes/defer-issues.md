@@ -7,6 +7,7 @@
 | ID | Title | Type | Origin | GitHub Issue |
 |----|-------|------|--------|--------------|
 | D-032-01 | FR-E5 BU/team enrichment in the User fragment | Deferral | task 032 (owner sign-off 2026-07-15) | {URL} |
+| D-043-01 | No client-accessible preference source for the SNS chip reorder | Gap | task 043 (FR-G1) | {URL} |
 
 ---
 
@@ -21,3 +22,11 @@
   3. It adds a second per-turn hot-path read for unproven bias value.
 - **Cheapest in-boundary path when picked up**: render `- Business Unit: …` / `- Team: …` from the **already-cached** `IdentityNormalizationService.PersonIdentity` (no new Dataverse read), included in the byte-stable render + the (now 700) User budget. This is a small, self-contained follow-up — not a new pipeline.
 - **Trigger to revisit**: owner wants org-unit-aware assistant framing, OR the Organizational slice / Work IQ seam gets wired (natural home for BU/team).
+
+## D-043-01 — No client-accessible preference source for the SNS chip reorder
+
+- **Decision**: the FR-G1 reorder mechanism shipped (task 043) but its preference input is **not yet wired** — surfaced, not fabricated (per the task's anti-guessing instruction).
+- **Concrete behavior deferred**: the Suggested-Next-Steps chip reorder (`reorderChipsForDisplay` in `chipDisplayOrder.ts`) is deterministic + preference-keyed + ADR-039-clean, but **no client-accessible source of the user's chip-ordering preference exists**, so every call site passes none and the reorder deterministically falls back to the server-declared (`sprk_chiptransitions`) order. A user whose stated/learned preference should re-rank their suggestions gets the default order.
+- **Why deferred**: the stated profile (`sprk_userprofile`) is read **server-side only** (`StatedProfileReader` → `ContextBinder.userFragment` as LLM prompt text); there is no GET endpoint / session-bootstrap field / SSE frame projecting it to the browser, and there is no structured "chip-ordering preference" field in the User Model yet (only free-text `sprk_assistantpreferences`).
+- **What it needs when picked up** (two parts, both small, no sort-mechanics change): (1) a **structured chip-order preference** in the User Model (a `preferredBindingOrder`-shaped signal, stated via the questionnaire and/or learned via the "shape suggestions over time" capability, spec §5); (2) a **client projection** of it — either a session-bootstrap field or a client-side Dataverse read of `sprk_userprofile` — passed into `useConsumerChips` as `chipDisplayPreference`. The comparator already accepts it verbatim.
+- **Trigger to revisit**: task 042 (My Assistant questionnaire) or the preference-update capability (spec §5) lands, OR a session-bootstrap profile projection is added. Natural pairing with 042.

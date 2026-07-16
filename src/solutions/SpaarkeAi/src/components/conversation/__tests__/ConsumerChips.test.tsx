@@ -112,4 +112,41 @@ describe('ConsumerChips', () => {
     );
     expect(withInlineColor).toHaveLength(0);
   });
+
+  // task 043 / FR-G1 — trailing "More" card opening the existing library modal.
+  describe('"More" affordance (task 043 / FR-G1)', () => {
+    it('does not render when onMore is omitted', () => {
+      renderChips();
+      expect(screen.queryByTestId('consumer-chips-more')).not.toBeInTheDocument();
+    });
+
+    it('renders a "More" card when onMore is supplied, and clicking it calls onMore', () => {
+      const onMore = jest.fn();
+      render(
+        <FluentProvider theme={webLightTheme}>
+          <ConsumerChips
+            chips={[{ bindingId: 'binding-create-matter', label: 'Create matter' }]}
+            attachmentCount={1}
+            onChipClick={jest.fn()}
+            onMore={onMore}
+          />
+        </FluentProvider>
+      );
+
+      const more = screen.getByTestId('consumer-chips-more');
+      expect(more).toBeInTheDocument();
+      fireEvent.click(more);
+      expect(onMore).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not render "More" when the chip list itself is empty (whole component renders nothing)', () => {
+      render(
+        <FluentProvider theme={webLightTheme}>
+          <ConsumerChips chips={[]} attachmentCount={1} onChipClick={jest.fn()} onMore={jest.fn()} />
+        </FluentProvider>
+      );
+      expect(screen.queryByTestId('consumer-chips')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('consumer-chips-more')).not.toBeInTheDocument();
+    });
+  });
 });
