@@ -122,6 +122,32 @@ public sealed class DispositionRoutabilitySeamTests
         stored.Payload.GetProperty("new_text").GetString().Should().Be("Acme NDA intake");
     }
 
+    // (1c) SurfaceLaunch terminal-chunk metadata (assistant-enhancements-r1 task 013): the terminal
+    //      `complete` chunk carries the dispatch metadata (disposition + consumertype) so the client can
+    //      branch a surface_launch dispatch to the pre-seeded launch (task 012 launchSurface) WITHOUT a
+    //      second intent mechanism — it reads the server's routing decision off the wire. Additive fields;
+    //      JsonIgnore-when-null keeps other consumers unaffected. Dispatch-spine DoD for the 013 wire-up.
+    [Fact]
+    public async Task DispatchAsync_SurfaceLaunch_CompleteChunk_CarriesDispositionAndConsumerType()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.SurfaceLaunch, SelectionInputSchema);
+        h.GivenFlatTextAction("ROLE: Draft the matter-intake fields for the launched wizard.", PassThroughOutputSchema);
+        h.OpenAi.RawJsonToReturn = """{"new_text":"Acme NDA intake"}""";
+
+        var chunks = await h.DispatchAsync(new { selectionText = "draft a matter for the Acme NDA" });
+
+        var complete = chunks.Should().ContainSingle(c => c.Type == "complete").Subject;
+        var stored = await h.GetStoredOutputAsync();
+
+        // The terminal chunk's disposition IS the server's routing decision (== the stored ledger value),
+        // and the consumertype is the SAME id the ledger carries (UcId = Ucid ?? ConsumerType) — one source
+        // of truth, so the client maps it via its static registry with no re-derivation.
+        complete.Disposition.Should().Be("surface_launch");
+        complete.ConsumerType.Should().NotBeNullOrEmpty().And.Be(stored!.UcId);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // (2) LOUD rejection through the registry — a not-yet-routable disposition is
     //     rejected PRE-RUN at the admit-gate (never a silent drop, never

@@ -519,7 +519,13 @@ public class SessionDispatchOrchestrator
         // EXCLUSIVELY from the entry ProgressiveRenderGuard confirms was actually written to the ledger
         // (ADR-040 storage-precedes-rendering), never from the pre-store `output` local above.
         var storedEntry = ProgressiveRenderGuard.EnsureStored(routed.Entry);
-        yield return DeserializeResultChunk(storedEntry.Payload.GetRawText());
+        // Task 013: surface the dispatch metadata (disposition + consumertype) on the terminal chunk so a
+        // surface_launch dispatch is actionable client-side. Both come from the SAME source the ledger uses
+        // (binding.Disposition.ToLedgerValue() + UcId = Ucid ?? ConsumerType, OutputRouter) — one source of truth.
+        yield return DeserializeResultChunk(
+            storedEntry.Payload.GetRawText(),
+            disposition: storedEntry.Disposition,
+            consumerType: storedEntry.UcId);
 
         // ── Next-step chips: the dispatched Binding's curated sprk_chiptransitions follow the terminal
         // complete chunk so the conversation surface always shows the CURRENT next steps.
@@ -784,7 +790,24 @@ public class SessionDispatchOrchestrator
     ///     completion — the client always sees a terminal <c>complete</c> chunk, never a silent EOF.</item>
     /// </list>
     /// </summary>
-    private static AnalysisChunk DeserializeResultChunk(string jsonContent)
+    private static AnalysisChunk DeserializeResultChunk(
+        string jsonContent,
+        string? disposition = null,
+        string? consumerType = null)
+    {
+        var chunk = BuildResultChunk(jsonContent);
+
+        // ── Task 013: attach the dispatch metadata to the terminal `complete` chunk. Additive +
+        // JsonIgnore-when-null (email-r4 / daily-update-r5 unaffected). The disposition IS the server's
+        // routing decision (ADR-039); the client branches `surface_launch` → the pre-seeded launch
+        // (task 012 launchSurface) with NO second intent mechanism — it only reads what the server decided.
+        return (disposition is null && consumerType is null)
+            ? chunk
+            : chunk with { Disposition = disposition, ConsumerType = consumerType };
+    }
+
+    /// <summary>Builds the terminal chunk from the stored payload (disposition metadata is applied by the caller).</summary>
+    private static AnalysisChunk BuildResultChunk(string jsonContent)
     {
         try
         {
