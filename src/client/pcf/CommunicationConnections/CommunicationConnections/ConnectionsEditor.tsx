@@ -92,6 +92,13 @@ export interface ConnectionsEditorProps extends ConnectionsCallbacks {
    * confirmed slot in priority order.
    */
   primaryField?: string;
+  /**
+   * Resolve a friendly display name for a target (entity + GUID). The App supplies
+   * this from the catalog-driven name resolution; returns undefined when no name
+   * has been resolved yet, in which case the slot's own `targetName` (GUID
+   * fallback) is used. Keeps the editor free of any webApi dependency.
+   */
+  resolveDisplayName?: (entity: string, id: string) => string | undefined;
 }
 
 const ENTITY_ICON: Record<string, JSX.Element> = {
@@ -200,6 +207,7 @@ function ConnectionRow({
   isPrimary,
   readOnly,
   busy,
+  resolveDisplayName,
   onConfirm,
   onChange,
   onSetPrimary,
@@ -209,12 +217,14 @@ function ConnectionRow({
   isPrimary: boolean;
   readOnly: boolean;
   busy: boolean;
+  resolveDisplayName?: (entity: string, id: string) => string | undefined;
   onConfirm: (conn: Connection, chosen?: ProvenanceCandidate) => void;
   onChange: (conn: Connection) => void;
   onSetPrimary: (conn: Connection) => void;
 }): JSX.Element {
   const s = useStyles();
   const isConfirmed = confirmed || conn.status === 'confirmed';
+  const targetName = resolveDisplayName?.(conn.entity, conn.targetId) ?? conn.targetName;
 
   return (
     <>
@@ -230,7 +240,7 @@ function ConnectionRow({
             </Text>
           ) : (
             <Text className={s.targetName} size={300} truncate wrap={false}>
-              {conn.targetName}
+              {targetName}
             </Text>
           )}
         </div>
@@ -282,12 +292,7 @@ function ConnectionRow({
             </Button>
           ) : (
             <>
-              <Button
-                size="small"
-                appearance="primary"
-                disabled={busy}
-                onClick={() => onConfirm(conn)}
-              >
+              <Button size="small" appearance="primary" disabled={busy} onClick={() => onConfirm(conn)}>
                 Confirm
               </Button>
               <Tooltip content="Pick a different record" relationship="label">
@@ -308,7 +313,7 @@ function ConnectionRow({
         conn.alternatives?.map((alt, i) => (
           <div key={i} className={s.altRow}>
             <Text size={200} weight="semibold">
-              {alt.targetName}
+              {resolveDisplayName?.(alt.targetEntity, alt.targetId) ?? alt.targetName ?? alt.targetId}
             </Text>
             <Text size={200} className={confClass(s, alt.reinforcedConfidence)}>
               {confText(alt.reinforcedConfidence)}
@@ -364,6 +369,7 @@ function EditorBody({
   busy,
   confirmedFields,
   primaryField,
+  resolveDisplayName,
   onConfirm,
   onAcceptAll,
   onChange,
@@ -377,6 +383,7 @@ function EditorBody({
   busy: boolean;
   confirmedFields: Set<string>;
   primaryField?: string;
+  resolveDisplayName?: (entity: string, id: string) => string | undefined;
   onConfirm: (conn: Connection, chosen?: ProvenanceCandidate) => void;
   onAcceptAll: (conns: Connection[]) => void;
   onChange: (conn: Connection) => void;
@@ -436,6 +443,7 @@ function EditorBody({
           isPrimary={c.field === effectivePrimary}
           readOnly={readOnly}
           busy={busy}
+          resolveDisplayName={resolveDisplayName}
           onConfirm={onConfirm}
           onChange={onChange}
           onSetPrimary={onSetPrimary}
@@ -444,13 +452,7 @@ function EditorBody({
 
       {!readOnly && (
         <div className={s.addRow}>
-          <Button
-            size="small"
-            appearance="subtle"
-            icon={<Link20Regular />}
-            disabled={busy}
-            onClick={onLinkAnother}
-          >
+          <Button size="small" appearance="subtle" icon={<Link20Regular />} disabled={busy} onClick={onLinkAnother}>
             Link another record…
           </Button>
         </div>
@@ -479,6 +481,7 @@ export function ConnectionsEditor(props: ConnectionsEditorProps): JSX.Element | 
     busy,
     confirmedFields: props.confirmedFields ?? new Set<string>(),
     primaryField: props.primaryField,
+    resolveDisplayName: props.resolveDisplayName,
     onConfirm: props.onConfirm ?? (() => undefined),
     onAcceptAll: props.onAcceptAll ?? (() => undefined),
     onChange: props.onChange ?? (() => undefined),

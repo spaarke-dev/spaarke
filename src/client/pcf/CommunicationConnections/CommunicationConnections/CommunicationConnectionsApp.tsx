@@ -35,7 +35,12 @@ import {
   Textarea,
   Button,
 } from '@fluentui/react-components';
-import { TODO_REGARDING_CATALOG } from '@spaarke/ui-components';
+import {
+  TODO_REGARDING_CATALOG,
+  cleanGuid,
+  resolveRecordDisplayNameFieldName,
+  type IPolymorphicWebApi,
+} from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { AssociationStatus, type ICommunicationRecord } from './types';
 import { parseProvenance, deriveConnections, connectionTarget, type Connection, type CreateAction } from './provenance';
@@ -68,6 +73,29 @@ const CREATE_TARGET_ENTITY: Record<CreateAction['kind'], string> = {
   todo: 'sprk_todo',
   invoice: 'sprk_invoice',
 };
+
+// Fallback primary-name field per entity, used ONLY when the `sprk_recordtype_ref`
+// catalog has no `sprk_recorddisplaynamefield` row (resolveRecordDisplayNameFieldName
+// returns null). The catalog is authoritative (SRFR-052); this map just guarantees
+// the common targets never fall back to a raw GUID. OOB entities are certain;
+// sprk_* entries follow the platform naming convention (a wrong guess simply 400s
+// on $select and degrades to the GUID — no worse than before).
+const PRIMARY_NAME_FALLBACK: Record<string, string> = {
+  contact: 'fullname',
+  account: 'name',
+  sprk_matter: 'sprk_mattername',
+  sprk_organization: 'sprk_name',
+  sprk_project: 'sprk_name',
+  sprk_invoice: 'sprk_name',
+  sprk_event: 'sprk_name',
+  sprk_servicerequest: 'sprk_name',
+  sprk_workassignment: 'sprk_name',
+};
+
+/** Stable key for the resolved-display-name map: entity + normalized GUID. */
+function displayNameKey(entity: string, id: string): string {
+  return `${entity}:${cleanGuid(id)}`;
+}
 
 /** Walk window/parent frames to locate Xrm (PCF runs in an iframe). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -134,6 +162,60 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   const showVersionFooter = showVersionFooterRaw !== false;
 
   const provenance = React.useMemo(() => parseProvenance(provenanceRaw), [provenanceRaw]);
+
+  // Resolve friendly display names for the suggested targets. The Association
+  // Engine writes only the target GUID into the provenance JSON (no `targetName`),
+  // so without this the review slots render a raw GUID. We resolve the per-entity
+  // display-name field from the `sprk_recordtype_ref` catalog (the same SRFR-052
+  // mechanism the write path uses) and read that field off each target record.
+  // Best-effort: any failure leaves the slot on its GUID fallback (S-nonfatal).
+  const [displayNames, setDisplayNames] = React.useState<ReadonlyMap<string, string>>(new Map());
+
+  React.useEffect(() => {
+    if (!provenance) return;
+    let cancelled = false;
+    const api = context.webAPI as unknown as IPolymorphicWebApi;
+
+    // Unique (entity, id) pairs that still need a name (engine supplied none).
+    const seen = new Set<string>();
+    const pairs: { entity: string; id: string; key: string }[] = [];
+    for (const c of provenance.candidates) {
+      if (!c.targetEntity || !c.targetId || c.targetName) continue;
+      const key = displayNameKey(c.targetEntity, c.targetId);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pairs.push({ entity: c.targetEntity, id: cleanGuid(c.targetId), key });
+    }
+    if (pairs.length === 0) return;
+
+    void (async () => {
+      const next = new Map<string, string>();
+      await Promise.all(
+        pairs.map(async ({ entity, id, key }) => {
+          try {
+            const field = (await resolveRecordDisplayNameFieldName(api, entity)) ?? PRIMARY_NAME_FALLBACK[entity];
+            if (!field) return;
+            const rec = await context.webAPI.retrieveRecord(entity, id, `?$select=${field}`);
+            const name = rec?.[field];
+            if (typeof name === 'string' && name.trim().length > 0) next.set(key, name.trim());
+          } catch (err) {
+            console.warn(`[CommunicationConnections] display-name resolve failed for ${entity} ${id}:`, err);
+          }
+        })
+      );
+      if (!cancelled && next.size > 0) setDisplayNames(next);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [provenance, context.webAPI]);
+
+  /** Look up a resolved friendly name for a target, or undefined to use the fallback. */
+  const resolveDisplayName = React.useCallback(
+    (entity: string, id: string): string | undefined => displayNames.get(displayNameKey(entity, id)),
+    [displayNames]
+  );
 
   // Host record GUID is stable for the lifetime of a review surface (the record
   // always exists) — capture once (S5).
@@ -358,6 +440,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
         busy={busy}
         confirmedFields={confirmedFields}
         primaryField={primaryField ?? undefined}
+        resolveDisplayName={resolveDisplayName}
         onConfirm={handleConfirm}
         onAcceptAll={handleAcceptAll}
         onChange={handleChange}
