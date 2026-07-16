@@ -80,6 +80,14 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
+        group.MapPost("/{id:guid}/suggest-associations", SuggestAssociationsAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("SuggestCommunicationAssociations")
+            .WithDescription("Preview the Association Engine's regarding suggestions for a stored communication (target(s) + confidence + provenance). READ-ONLY — evaluates the rungs on demand WITHOUT writing to the record. Auth-scoped via the endpoint filter (NFR-07); AI-flagged privilege is surfaced as a signal, never decided (ADR-015).")
+            .Produces<SuggestAssociationsResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
         group.MapPost("/accounts/{id:guid}/verify", VerifyCommunicationAccountAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("VerifyCommunicationAccount")
@@ -321,6 +329,24 @@ public static class CommunicationEndpoints
     {
         var result = await communicationService.ArchiveExistingAsync(id, ct);
         return TypedResults.Ok(result);
+    }
+
+    /// <summary>
+    /// On-demand Association Engine suggestion preview (task 074, Path C). Loads the stored
+    /// <c>sprk_communication</c> (404 if missing), reconstructs the normalized envelope + context, runs the
+    /// engine's evaluate-only path, and projects the decision into <see cref="SuggestAssociationsResponse"/>.
+    /// READ-ONLY: it never writes the record (that is <see cref="CommunicationService.ArchiveExistingAsync"/> /
+    /// the inbound <c>ResolveAsync</c> path) — the point is a preview of what the engine would suggest.
+    /// </summary>
+    private static async Task<IResult> SuggestAssociationsAsync(
+        Guid id,
+        CommunicationService communicationService,
+        IncomingAssociationResolver associationResolver,
+        CancellationToken ct)
+    {
+        var (message, context) = await communicationService.ReconstructEnvelopeAsync(id, ct);
+        var decision = await associationResolver.EvaluateAsync(message, context, ct);
+        return TypedResults.Ok(SuggestAssociationsResponse.FromDecision(id, decision));
     }
 
     private static async Task<IResult> VerifyCommunicationAccountAsync(

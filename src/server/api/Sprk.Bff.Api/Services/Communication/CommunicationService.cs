@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Communication.Channels;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -186,6 +187,86 @@ public sealed class CommunicationService
         string.IsNullOrWhiteSpace(raw)
             ? Array.Empty<string>()
             : raw.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>
+    /// Reconstructs the channel-neutral <see cref="NormalizedMessage"/> envelope + <see cref="AssociationContext"/>
+    /// from a STORED <c>sprk_communication</c> record (task 074, Path C — the on-demand suggestion path). Reuses
+    /// the same record-read + <see cref="SplitRecipients"/> plumbing as <see cref="ArchiveExistingAsync"/>; there
+    /// is no live Graph message here. <b>Read-only</b> — never writes. Throws <see cref="SdapProblemException"/>
+    /// (404) when the record does not exist (mirrors the archive/status not-found mapping).
+    /// </summary>
+    /// <param name="communicationId">The <c>sprk_communication</c> record to reconstruct from.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<(NormalizedMessage Message, AssociationContext Context)> ReconstructEnvelopeAsync(
+        Guid communicationId, CancellationToken ct)
+    {
+        DataverseEntity record;
+        try
+        {
+            // Only columns that exist on sprk_communication (verified against IncomingCommunicationProcessor
+            // + CreateDataverseRecord*). sprk_conversationid is NOT persisted yet (see ThreadContinuityRung),
+            // and there is no sprk_references column — so thread continuity re-evaluates via In-Reply-To /
+            // Internet-Message-Id only, exactly as the inbound path stamped them.
+            record = await _genericEntityService.RetrieveAsync(
+                "sprk_communication",
+                communicationId,
+                new[]
+                {
+                    "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_bodyformat",
+                    "sprk_communicationtype", "sprk_direction", "sprk_sentat",
+                    "sprk_internetmessageid", "sprk_inreplyto", "sprk_graphmessageid",
+                },
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Communication {CommunicationId} not found for suggestion", communicationId);
+            throw new SdapProblemException(
+                code: "COMMUNICATION_NOT_FOUND",
+                title: "Communication not found",
+                detail: $"Communication with ID '{communicationId}' does not exist.",
+                statusCode: 404);
+        }
+
+        var to = SplitRecipients(record.GetAttributeValue<string>("sprk_to"));
+        var cc = SplitRecipients(record.GetAttributeValue<string>("sprk_cc"));
+
+        // Direction: Outgoing when explicitly stamped outbound; otherwise Incoming (the engine decision is
+        // direction-symmetric — direction is recorded in provenance, not branched on).
+        var directionValue = record.GetAttributeValue<OptionSetValue>("sprk_direction")?.Value;
+        var direction = directionValue == (int)CommunicationDirection.Outgoing
+            ? CommunicationDirection.Outgoing
+            : CommunicationDirection.Incoming;
+
+        var body = record.GetAttributeValue<string>("sprk_body");
+        var isHtml = record.GetAttributeValue<OptionSetValue>("sprk_bodyformat")?.Value == (int)BodyFormat.HTML;
+
+        var sentAtDt = record.GetAttributeValue<DateTime?>("sprk_sentat");
+        var sentAt = sentAtDt.HasValue
+            ? new DateTimeOffset(DateTime.SpecifyKind(sentAtDt.Value, DateTimeKind.Utc), TimeSpan.Zero)
+            : (DateTimeOffset?)null;
+
+        var message = new NormalizedMessage
+        {
+            Direction = direction,
+            From = record.GetAttributeValue<string>("sprk_from"),
+            To = to,
+            Cc = cc,
+            Subject = record.GetAttributeValue<string>("sprk_subject"),
+            BodyText = isHtml ? null : body,
+            BodyHtml = isHtml ? body : null,
+            InternetMessageId = record.GetAttributeValue<string>("sprk_internetmessageid"),
+            InReplyTo = record.GetAttributeValue<string>("sprk_inreplyto"),
+            SentAt = sentAt,
+        };
+
+        // Mirror IncomingCommunicationProcessor's AssociationContext construction. On this stored-record path
+        // there is no live mailbox account or tenant key to hand the engine, so both are left null (Account is
+        // unused by the deterministic rungs; a null TenantKey ⇒ the global auto-file kill-switch applies).
+        var context = new AssociationContext();
+
+        return (message, context);
+    }
 
     /// <summary>
     /// Returns the id of an existing email-archive <c>sprk_document</c> for the communication, or null.

@@ -80,6 +80,13 @@ Investigation resolved the POML's wrong premise + fully scoped the design; dispa
 - Build clean (0 err); **327 Communication tests green, 0 failed** (no regression; rung-4 unit tests = 032). §10 publish-size + CVE running; Step 9.5 gates next.
 - ⚠️ appsettings.template.json also edited by 075 (AiSearch region, non-adjacent) — clean 3-way expected.
 
+## 074-BFF suggestion capability (SCOPED SUBSET, Path C) — IMPLEMENTED (agent worktree, base b4483f00e)
+- **Evaluate-only refactor** (`IncomingAssociationResolver.cs`): extracted rungs+ladder+AI-escalation+resolving-rung telemetry into private `EvaluateInternalAsync(msg, ctx, commId, ct)`; new public `EvaluateAsync(msg, ctx, ct)` (Guid.Empty for telemetry) returns the decision WITHOUT `ApplyDecisionAsync`. `ResolveAsync` = `EvaluateInternalAsync(real id)` + `ApplyDecisionAsync` → **behavior-preserving** (RungTelemetry tests assert real id on resolve path). **352 Communication tests green** (349 + 3 new), 0 failed.
+- **Envelope reconstruction** (`CommunicationService.ReconstructEnvelopeAsync`): reuses record-read + `SplitRecipients`; retrieves only existing columns (no `sprk_conversationid`/`sprk_references`); 404 on missing (mirrors archive/status). AssociationContext mirrors inbound (Account/TenantKey null).
+- **Endpoint** `POST /api/communications/{id}/suggest-associations` (mirrors `/archive`: filter + Produces 200/404/500). READ-ONLY handler: reconstruct → `EvaluateAsync` → `SuggestAssociationsResponse.FromDecision`. Injects `CommunicationService` + `IncomingAssociationResolver` (both DI singletons).
+- **New model** `SuggestAssociationsResponse` (+ SuggestedCandidate/Contributor/Signal) projecting `AssociationProvenance`.
+- §10: publish 45.30 MB compressed (+0.02 vs 45.28); CVE 1 pre-existing High (Kiota 1.21.2), 0 new. Add-in UI DEFERRED (Path C).
+
 ## Active Task
 
 - **Task**: **015 ✅ DONE (uncommitted → committing now).** W1 rungs 0–3 (012/013/014) + **015 (confidence→status ladder + auto-file + ADR-018 kill-switch + provenance JSON + engine aggregation rework)** all complete. **22 of 45 tasks done.**

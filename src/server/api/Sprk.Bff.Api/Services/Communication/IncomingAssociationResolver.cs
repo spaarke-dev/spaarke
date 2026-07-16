@@ -99,6 +99,43 @@ public sealed class IncomingAssociationResolver
             "Starting association resolution for communication {CommunicationId} | Direction: {Direction}",
             communicationId, message.Direction);
 
+        // Evaluate the rungs + ladder (no write), then apply the decision (the Dataverse write). Split into
+        // EvaluateAsync (task 074) so the on-demand suggestion endpoint can preview the decision WITHOUT
+        // writing. The real communicationId is threaded through so per-rung + resolving-rung telemetry is
+        // unchanged on this path (behavior-preserving).
+        var decision = await EvaluateInternalAsync(message, context, communicationId, ct);
+
+        await ApplyDecisionAsync(communicationId, decision, ct);
+    }
+
+    /// <summary>
+    /// Evaluate-only path (task 074, Path C): runs the deterministic + (cost-gated) AI rungs and applies the
+    /// FR-11 confidence→status ladder, returning the <see cref="AssociationDecision"/> <b>WITHOUT</b> writing
+    /// to Dataverse. Powers the on-demand suggestion endpoint — a read-only preview of what the engine would
+    /// file for a stored communication. <see cref="ResolveAsync"/> = <c>EvaluateAsync</c> + <c>ApplyDecisionAsync</c>.
+    /// </summary>
+    /// <param name="message">The normalized envelope (channel-neutral).</param>
+    /// <param name="context">Ambient association context (mailbox account, tenant key, etc.).</param>
+    /// <param name="ct">Cancellation token.</param>
+    public Task<AssociationDecision> EvaluateAsync(
+        NormalizedMessage message,
+        AssociationContext context,
+        CancellationToken ct)
+        // No record id on the read-only path; telemetry logs with an empty id (preview, no prior behavior to
+        // preserve). ResolveAsync uses the id-carrying overload so inbound/outbound telemetry is unchanged.
+        => EvaluateInternalAsync(message, context, Guid.Empty, ct);
+
+    /// <summary>
+    /// Shared evaluate core: deterministic pass → ladder → cost-gated AI escalation → resolving-rung telemetry.
+    /// Returns the decision; never writes. <paramref name="communicationId"/> is used only for telemetry
+    /// correlation (the real id on the resolve path, <see cref="Guid.Empty"/> on the read-only preview path).
+    /// </summary>
+    private async Task<AssociationDecision> EvaluateInternalAsync(
+        NormalizedMessage message,
+        AssociationContext context,
+        Guid communicationId,
+        CancellationToken ct)
+    {
         // Deterministic pass: run every deterministic rung and collect all matches (writable + signals).
         var matches = new List<RungMatch>();
         await EvaluateRungsAsync(_deterministicRungs, message, context, communicationId, matches, ct);
@@ -117,7 +154,7 @@ public sealed class IncomingAssociationResolver
         // which rung(s) produced the winning tier, emitted for EVERY envelope regardless of outcome.
         EmitResolvingRungTelemetry(communicationId, decision);
 
-        await ApplyDecisionAsync(communicationId, decision, ct);
+        return decision;
     }
 
     /// <summary>

@@ -115,6 +115,18 @@
     Depends on the W1 deterministic rungs (task 012) producing suggestions and task 072's NAA foundation. Client-only feature over an existing BFF surface — no BFF code change here, so no publish-size / CVE obligations (the BFF suggestion surface is owned by W1).
 
     Mirrors the Code Page review surface (task 042); reuse the same suggestion contract to avoid divergence.
+
+    ── SPLIT (owner 2026-07-15, Path C) — BFF suggestion capability ✅ DONE; add-in UI DEFERRED ──
+    The original notes assumed the BFF suggestion surface already existed ("no BFF code change here"). It did NOT — the engine only WROTE (ResolveAsync) with no on-demand read-only preview. The UI-agnostic half was therefore built here (base b4483f00e), while the add-in save-pane UI + live-Outlook smoke test were DEFERRED to a future add-in-strategy effort.
+
+    BFF capability delivered (Path C, no client work — src/client/office-addins untouched):
+    - Evaluate-only refactor: IncomingAssociationResolver.EvaluateAsync(message, context, ct) runs rungs + ladder + AI-escalation + resolving-rung telemetry and RETURNS the AssociationDecision WITHOUT ApplyDecisionAsync. ResolveAsync = private EvaluateInternalAsync(real communicationId, for telemetry) + ApplyDecisionAsync — behavior-preserving (349 existing Communication tests + 3 new = 352 green; RungTelemetryTests real-id assertion preserved).
+    - Envelope reconstruction: CommunicationService.ReconstructEnvelopeAsync(id, ct) rebuilds NormalizedMessage + AssociationContext from the stored sprk_communication (reuses record-read + SplitRecipients; existing columns only — no sprk_conversationid/sprk_references); 404 SdapProblemException on missing (mirrors /archive + /status).
+    - Endpoint: POST /api/communications/{id}/suggest-associations (CommunicationAuthorizationFilter, Produces 200/404/500) — READ-ONLY: reconstruct → EvaluateAsync → SuggestAssociationsResponse.FromDecision. Never writes the record.
+    - New model: SuggestAssociationsResponse (+ SuggestedCandidate/Contributor/Signal) projecting AssociationProvenance (target + confidence + provenance + AutoFileEligible + signals). Privilege surfaced-not-decided (NFR-07/ADR-015).
+    - §10: publish 45.30 MB compressed (+0.02 vs 45.28); 0 new CVE (1 pre-existing High Kiota 1.21.2). §11: extends the resolver + reuses CommunicationService plumbing (no new engine/framework). Step 9.5: code-review + adr-check both 0 Critical / 0 violations. Currently UNWIRED (no in-project consumer — the 042 Connections PCF could later add a "re-suggest" button); intentional per Path C.
+
+    STILL DEFERRED (future add-in-strategy effort): the Outlook save-pane UI (fetch via authenticatedFetch/NAA, render target+confidence+provenance, 1-click accept/override via PolymorphicResolverService.applyResolverFields) + the live-Outlook dev smoke test. Acceptance criteria for those client rows remain open.
   </notes>
 
   <execution>
