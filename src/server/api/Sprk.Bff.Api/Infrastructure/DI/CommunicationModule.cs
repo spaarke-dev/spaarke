@@ -1,6 +1,7 @@
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Acs;
 using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
@@ -193,6 +194,26 @@ public static class CommunicationModule
         // ISpeFileOperations facade lifetime (the Singleton IGenericEntityService composes safely into a Scoped
         // consumer). Consumed by the messaging inbound/file-share wiring (task 031 / 060), not registered here.
         services.AddScoped<MessageAttachmentMaterializer>(); // task 070
+
+        // BFF read-path privacy / internal-only / privilege enforcement (messaging-communication-app-r1 task 042 /
+        // FR-08 / NFR-06). The DEFAULT-DENY composition filter task 050's thread-read + unread-count endpoints apply
+        // to every returned sprk_communication row: a row is visible only if it passes internal-only (D-05) AND
+        // privacy (ADR-034 open membership ∪ owner-approved option-B overlay grant, point-forward) — privilege
+        // (ADR-015) rides along as composed metadata and NEVER gates the read / NEVER calls AI. Registered
+        // UNCONDITIONALLY (ADR-010 / ADR-032 — the endpoint that consumes it maps unconditionally; no feature gate).
+        // Composes from EXISTING Dataverse record security (IMembershipResolverService, ADR-034) — NOT a new
+        // authorization engine (design §5, root §11). The visible set is always a subset of Dataverse-derived
+        // access and agrees with task 041's ACS-membership projection (same union; neither may exceed it).
+        //
+        // IThreadPrivateGrantProvider is the ONE private-thread seam, following the sprk_externalrecordaccess /
+        // ExternalParticipationService overlay-grant pattern (owner decision 2026-07-16, option B). The FAIL-CLOSED
+        // DenyAllThreadPrivateGrantProvider is the R1 default (ADR-032 Null-Object) because the thread-scoped overlay
+        // schema does not exist yet (task 004 created thread + channelref only; sprk_externalrecordaccess is
+        // project-scoped) — private threads are invisible to everyone until a Dataverse-backed provider replaces this
+        // registration when the overlay schema lands. Default-deny is the correct, safe posture (NFR-06); the
+        // point-forward + grant logic is fully implemented and unit-tested against a mock provider.
+        services.AddSingleton<IThreadPrivateGrantProvider, DenyAllThreadPrivateGrantProvider>();
+        services.AddSingleton<ICommunicationAccessFilter, CommunicationAccessFilter>();
 
         // Job handler: processes incoming email notifications from Graph webhooks (Task 072)
         // Extracts message details from Graph, creates sprk_communication record, handles attachments.
