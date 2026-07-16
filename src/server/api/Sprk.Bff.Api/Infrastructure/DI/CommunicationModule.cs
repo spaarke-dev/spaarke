@@ -81,6 +81,21 @@ public static class CommunicationModule
         services.AddSingleton<ICommunicationChannelSender, MessagingChannelSender>();
         services.AddSingleton<ICommunicationArchiver, MessagingArchiver>();
 
+        // Inbound ingestor seam (messaging-communication-app-r1 task 021 / FR-02). The NET-NEW inbound leg of
+        // the ADR-045 channel seams — the counterpart to the sender/archiver legs above, completing the seam
+        // triad ADR-045 STATED but left unbuilt (R4 shipped outbound only; inbound stayed concrete + email-only
+        // via IncomingCommunicationProcessor). MessagingIngestor is the FIRST implementation, keyed to
+        // CommunicationType.Message: it persists an already-normalized inbound ACS message (task 031's normalizer
+        // supplies the NormalizedMessage) as a sprk_communication (Direction=Incoming) record via the canonical
+        // IGenericEntityService, then invokes the SAME ICommunicationEnrichmentService the email inbound path
+        // uses (best-effort, NFR-02) — so inbound capture is channel-agnostic, not forked per channel. Registered
+        // UNCONDITIONALLY (ADR-010 / ADR-032 — the dispatcher's ToDictionary(SupportedType) resolver consumes
+        // ingestors unconditionally; no feature gate). Email inbound stays on IncomingCommunicationProcessor and
+        // is UNCHANGED by this task (no email ingestor registered → ResolveIngestor(Email) throws
+        // CHANNEL_NOT_SUPPORTED by design). The Event Grid ingress (task 030) + Service Bus job + idempotent
+        // dedupe + DLQ (task 031) call INTO this seam's IngestAsync and are NOT registered here.
+        services.AddSingleton<ICommunicationChannelIngestor, MessagingIngestor>();
+
         // Association Engine (ADR-045 / FR-09/FR-10): the pure Graph→envelope boundary mapper, the
         // ordered rungs, and the envelope-only engine. All unconditional (consumed unconditionally by
         // the inbound processor per ADR-032; no feature gate). Rungs are registered as IAssociationRung

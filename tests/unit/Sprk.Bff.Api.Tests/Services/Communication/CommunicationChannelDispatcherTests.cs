@@ -92,11 +92,68 @@ public class CommunicationChannelDispatcherTests
         act.Should().Throw<ArgumentException>("one sender per CommunicationType is an invariant");
     }
 
+    // ── Ingestor seam (ADR-045 net-new inbound leg — task 021 / FR-02) ──
+    // Mirrors the sender/archiver dispatch contract: the ingestor resolves by CommunicationType, and a type
+    // with no registered ingestor throws CHANNEL_NOT_SUPPORTED. Email has NO ingestor in R1 (email inbound
+    // stays on IncomingCommunicationProcessor), so ResolveIngestor(Email) throws BY DESIGN.
+
+    [Fact]
+    public void ResolveIngestor_ForRegisteredMessageType_ReturnsThatIngestor()
+    {
+        var messaging = new StubChannelIngestor { SupportedType = CommunicationType.Message };
+
+        var dispatcher = new CommunicationChannelDispatcher(
+            new ICommunicationChannelSender[] { EmailSender() },
+            new ICommunicationArchiver[] { EmailArchiver() },
+            new ICommunicationChannelIngestor[] { messaging });
+
+        dispatcher.ResolveIngestor(CommunicationType.Message).Should().BeSameAs(messaging);
+    }
+
+    [Fact]
+    public void ResolveIngestor_ForUnregisteredEmailType_ThrowsChannelNotSupported()
+    {
+        // Only a messaging ingestor is registered (R1). Email inbound is not routed through the seam, so
+        // resolving an email ingestor is an unsupported channel by design.
+        var dispatcher = new CommunicationChannelDispatcher(
+            new ICommunicationChannelSender[] { EmailSender() },
+            new ICommunicationArchiver[] { EmailArchiver() },
+            new ICommunicationChannelIngestor[] { new StubChannelIngestor { SupportedType = CommunicationType.Message } });
+
+        var act = () => dispatcher.ResolveIngestor(CommunicationType.Email);
+
+        act.Should().Throw<SdapProblemException>()
+            .Which.Code.Should().Be("CHANNEL_NOT_SUPPORTED");
+    }
+
+    [Fact]
+    public void Constructor_WithTwoIngestorsForSameType_Throws()
+    {
+        var act = () => new CommunicationChannelDispatcher(
+            new ICommunicationChannelSender[] { EmailSender() },
+            new ICommunicationArchiver[] { EmailArchiver() },
+            new ICommunicationChannelIngestor[]
+            {
+                new StubChannelIngestor { SupportedType = CommunicationType.Message },
+                new StubChannelIngestor { SupportedType = CommunicationType.Message }
+            });
+
+        act.Should().Throw<ArgumentException>("one ingestor per CommunicationType is an invariant");
+    }
+
     private sealed class StubChannelSender : ICommunicationChannelSender
     {
         public CommunicationType SupportedType { get; init; }
 
         public Task<ChannelSendResult> SendAsync(ChannelSendRequest request, CancellationToken cancellationToken = default)
             => Task.FromResult(new ChannelSendResult { FromAddress = request.FromAddress });
+    }
+
+    private sealed class StubChannelIngestor : ICommunicationChannelIngestor
+    {
+        public CommunicationType SupportedType { get; init; }
+
+        public Task<ChannelIngestResult> IngestAsync(ChannelIngestRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new ChannelIngestResult { CommunicationId = Guid.NewGuid() });
     }
 }
