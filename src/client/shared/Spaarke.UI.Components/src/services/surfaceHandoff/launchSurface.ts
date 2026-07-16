@@ -90,6 +90,50 @@ export interface LaunchSurfaceOutcome {
 }
 
 /**
+ * Per-consumer key maps that translate the Assistant Action's draft field keys
+ * into Dataverse **logical column names** for an `oob-form` launch (D-013-02).
+ *
+ * OOB `entityrecord` forms pre-fill from `defaultValues` keyed by logical
+ * column name, but a create Action emits its own field vocabulary (e.g.
+ * CREATE-TODO@v1 emits `{title, description, priority_suggestion}`), so the raw
+ * draft keys never match a column and nothing pre-fills. The `wizard` kind does
+ * NOT need this — custom wizards map the seed themselves (`mapMatterHandoffSeed`
+ * / `mapEventHandoffSeed`), so this normalization is scoped to `oob-form` only.
+ *
+ * VALUE COERCION IS OUT OF SCOPE: only the KEY is mapped. `priority_suggestion`
+ * may carry an enum label rather than the `sprk_priority` option-set integer;
+ * the value is passed through as-is. A follow-up owns value coercion if the OOB
+ * form requires the numeric option-set value (D-013-02 note).
+ */
+const OOB_FORM_DRAFT_KEY_MAPS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  'create-todo': {
+    title: 'sprk_name',
+    description: 'sprk_description',
+    priority_suggestion: 'sprk_priority',
+  },
+};
+
+/**
+ * Normalize an `oob-form` launch's draft values so their keys are Dataverse
+ * logical column names (the OOB `entityrecord` form's `defaultValues` contract).
+ * Pure + tolerant: only keys present in the consumer's map are renamed; unknown
+ * keys (and unmapped consumer types) pass through unchanged. Exported for unit
+ * testing (D-013-02).
+ */
+export function normalizeOobFormDefaults(
+  consumerType: string,
+  draftValues: Record<string, unknown>
+): Record<string, unknown> {
+  const map = OOB_FORM_DRAFT_KEY_MAPS[consumerType];
+  if (!map) return draftValues;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(draftValues)) {
+    out[map[key] ?? key] = value; // rename mapped keys; pass through the rest
+  }
+  return out;
+}
+
+/**
  * Build the entry-payload envelope for a launch. Exported for unit testing +
  * for callers that want the envelope without launching (e.g. a dry-run preview).
  * Merges the registry preset into `draftValues` AUTHORITATIVELY (preset wins).
@@ -157,10 +201,14 @@ export async function launchSurface(input: LaunchSurfaceInput): Promise<LaunchSu
       // OOB form: pre-seed rides the navigate `data` (thinner); the outcome rides
       // the navigate resolve (savedEntityReference) — an OOB form has no custom
       // code to write the sessionStorage result.
+      // D-013-02: the Action's draft keys (e.g. create-todo `{title, description,
+      // priority_suggestion}`) are NOT logical column names — normalize them so the
+      // OOB form actually pre-fills. Tolerant no-op for consumers without a key map.
+      const defaultValues = normalizeOobFormDefaults(input.consumerType, envelope.draftValues);
       const outcome = await navigateToEntityRecordSurfaceAsync({
         entityName: entry.surface,
         title: entry.title,
-        defaultValues: envelope.draftValues,
+        defaultValues,
       });
       if (!outcome.launched) {
         clearHandoff(handoffId);

@@ -98,6 +98,23 @@ export function completeHandoff(handoffId: string, recordId?: string): void {
 }
 
 /**
+ * Choose a launched wizard's SUCCESS-screen close behavior (D-013-04). When the
+ * host supplied an `onComplete` — the surface-launch honest-ack seam
+ * (`useWizardPageBootstrap.completeHandoff`, which writes the committed
+ * `SurfaceHandoffResult`) — call it with the freshly created record id so a
+ * launched create reads back as committed (P5 / task 020). Otherwise fall back
+ * to the plain `onClose` (unchanged behavior for every non-launch caller).
+ *
+ * The CANCEL path deliberately never routes through here: it calls `onClose`
+ * directly, writing no result, so the orchestrator infers cancellation from the
+ * absence of a written outcome.
+ */
+export function completeOrClose(recordId: string, onClose: () => void, onComplete?: (recordId: string) => void): void {
+  if (onComplete) onComplete(recordId);
+  else onClose();
+}
+
+/**
  * Write a CANCELLED outcome for a hand-off id (user dismissed without committing).
  * The orchestrator also infers cancellation when no result was written, so this
  * is belt-and-suspenders — but writing it explicitly makes the intent unambiguous.

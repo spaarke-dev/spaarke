@@ -32,6 +32,7 @@ function App() {
         navigationService={b.navigationService}
         embedded={true}
         onClose={b.closeDialog}
+        onComplete={b.completeHandoff}
         authenticatedFetch={b.authenticatedFetch}
         bffBaseUrl={b.bffBaseUrl}
         resolveSpeContainerId={b.resolveSpeContainerId}

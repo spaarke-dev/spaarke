@@ -52,6 +52,7 @@ import {
   searchMatterTypes,
   searchPracticeAreas,
 } from '../CreateWorkAssignmentWizard/workAssignmentService';
+import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for unit testing — see __tests__/CreateEventWizard.associateToStep.test.ts)
@@ -198,6 +199,20 @@ export interface ICreateEventWizardProps {
    * opened directly — the wizard then opens empty exactly as before.
    */
   initialFormValues?: Partial<ICreateEventFormState>;
+  /**
+   * Optional success callback (spaarkeai-assistant-enhancements-r1 D-013-04).
+   * Invoked with the created event's record id when the wizard reaches its
+   * success screen and the user closes/views it — INSTEAD of {@link onClose}.
+   * The Assistant surface-launch host (`useWizardPageBootstrap.completeHandoff`)
+   * wires this to write the committed `SurfaceHandoffResult` so a launched
+   * `create-task` reads back as committed (P5 honest-ack) rather than
+   * "cancelled" (which the orchestrator infers from the absence of a result).
+   *
+   * When omitted, the success screen falls back to {@link onClose} — behavior
+   * is unchanged for every non-launch caller. The CANCEL path always uses
+   * {@link onClose} (no result write → cancellation is inferred).
+   */
+  onComplete?: (recordId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +252,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
   lockAssociation,
   showAssociateToStep,
   initialFormValues,
+  onComplete,
 }) => {
   // Assistant hand-off pre-seed (task 013): merge drafted values over the empty
   // defaults so the wizard opens PRE-FILLED. Stable per `initialFormValues` identity.
@@ -430,11 +446,17 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
 
         const hasWarnings = warnings.length > 0;
 
+        // D-013-04: on the SUCCESS path a real record exists, so route the close
+        // through `onComplete(eventId)` (honest-ack) when the host supplied it;
+        // otherwise fall back to the plain `onClose` (unchanged for non-launch
+        // callers). The CANCEL path elsewhere still uses bare `onClose`.
+        const finishSuccess = () => completeOrClose(eventId, onClose, onComplete);
+
         const viewEvent = () => {
           if (navigationService) {
             navigationService.openRecord('sprk_event', eventId);
           }
-          onClose();
+          finishSuccess();
         };
 
         return {
@@ -454,7 +476,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
               <Button appearance="primary" onClick={viewEvent} aria-label={`View event: ${eventName}`}>
                 View Event
               </Button>
-              <Button appearance="secondary" onClick={onClose}>
+              <Button appearance="secondary" onClick={finishSuccess}>
                 Close
               </Button>
             </>
@@ -473,6 +495,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       handleSearchMatterTypes,
       handleSearchPracticeAreas,
       onClose,
+      onComplete,
       authFetch,
       bffBaseUrl,
       navigationService,

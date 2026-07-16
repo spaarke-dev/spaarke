@@ -4,7 +4,7 @@
  * read on close + cleanup, OOB-form launch + savedEntityReference return, unmapped
  * consumertype, and no-Xrm-host degradation.
  */
-import { buildHandoffEnvelope, launchSurface } from '../surfaceHandoff/launchSurface';
+import { buildHandoffEnvelope, launchSurface, normalizeOobFormDefaults } from '../surfaceHandoff/launchSurface';
 import { resolveSurfaceLaunch, EVENT_SUBTYPE_TASK_GUID } from '../surfaceHandoff/surfaceLaunchRegistry';
 import { writeHandoffResult } from '../surfaceHandoff/handoffStorage';
 
@@ -33,6 +33,40 @@ describe('buildHandoffEnvelope', () => {
     expect(env.source.consumerType).toBe('create-task');
     expect(env.target).toEqual({ surface: 'sprk_createeventwizard', kind: 'wizard' });
     expect(env.resolvedLookups).toEqual({}); // task 013 slot, empty now
+  });
+});
+
+describe('normalizeOobFormDefaults (D-013-02)', () => {
+  it('maps the create-todo Action draft keys to sprk_ logical column names', () => {
+    const out = normalizeOobFormDefaults('create-todo', {
+      title: 'Call client',
+      description: 'Re: NDA',
+      priority_suggestion: 'High',
+    });
+    expect(out).toEqual({
+      sprk_name: 'Call client',
+      sprk_description: 'Re: NDA',
+      // KEY mapped; VALUE passed through as-is (option-set coercion is a follow-up).
+      sprk_priority: 'High',
+    });
+  });
+
+  it('passes through unknown keys unchanged (tolerant partial map)', () => {
+    const out = normalizeOobFormDefaults('create-todo', {
+      title: 'Call client',
+      sprk_regardingcommunication: 'abc', // already a logical name — untouched
+      note: 'freeform', // unmapped — untouched
+    });
+    expect(out).toEqual({
+      sprk_name: 'Call client',
+      sprk_regardingcommunication: 'abc',
+      note: 'freeform',
+    });
+  });
+
+  it('returns the draft values unchanged for a consumer without a key map', () => {
+    const draft = { title: 'x', foo: 1 };
+    expect(normalizeOobFormDefaults('create-matter', draft)).toBe(draft);
   });
 });
 
@@ -125,6 +159,30 @@ describe('launchSurface — oob-form kind', () => {
     expect(outcome.launched).toBe(true);
     // GUID normalized (braces stripped)
     expect(outcome.result).toEqual({ committed: true, recordId: 'TODO-42' });
+  });
+
+  it('normalizes the create-todo Action draft keys to logical names on the form data (D-013-02)', async () => {
+    const navigateTo = jest.fn(async () => ({
+      savedEntityReference: [{ id: 'todo-7', entityType: 'sprk_todo', name: 'Call client' }],
+    }));
+    installXrm(navigateTo);
+
+    // The CREATE-TODO@v1 Action emits its own field vocabulary — NOT logical names.
+    const outcome = await launchSurface({
+      consumerType: 'create-todo',
+      bffBaseUrl: 'https://bff',
+      draftValues: { title: 'Call client', description: 'Re: NDA', priority_suggestion: 'High' },
+    });
+
+    const [pageInput] = navigateTo.mock.calls[0];
+    expect(pageInput.pageType).toBe('entityrecord');
+    // Keys are renamed to sprk_ logical columns so the OOB form actually pre-fills.
+    expect(pageInput.data).toEqual({
+      sprk_name: 'Call client',
+      sprk_description: 'Re: NDA',
+      sprk_priority: 'High',
+    });
+    expect(outcome.result).toEqual({ committed: true, recordId: 'todo-7' });
   });
 
   it('treats a dismissed OOB form (no savedEntityReference) as cancelled', async () => {

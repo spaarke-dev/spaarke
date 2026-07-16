@@ -40,8 +40,8 @@ export {
   clearHandoff,
 } from './handoffStorage';
 
-export { launchSurface, buildHandoffEnvelope } from './launchSurface';
+export { launchSurface, buildHandoffEnvelope, normalizeOobFormDefaults } from './launchSurface';
 export type { LaunchSurfaceInput, LaunchSurfaceOutcome } from './launchSurface';
 
-export { readHandoffFromUrl, handoffSeed, completeHandoff, cancelHandoff } from './readHandoff';
+export { readHandoffFromUrl, handoffSeed, completeHandoff, completeOrClose, cancelHandoff } from './readHandoff';
 export type { HandoffContext, HandoffSeed } from './readHandoff';

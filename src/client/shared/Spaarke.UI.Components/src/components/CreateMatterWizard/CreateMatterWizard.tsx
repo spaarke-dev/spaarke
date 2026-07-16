@@ -49,6 +49,7 @@ import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../Create
 import type { AuthenticatedFetchFn, IUserBuCascadeDefaults } from '../../services/EntityCreationService';
 import type { AssociationResult } from '../AssociateToStep/types';
 import { resolveCurrentUserAsContactAssignee } from '../../services/userLookup';
+import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 
 // ---------------------------------------------------------------------------
 // Dataverse client URL helper
@@ -238,6 +239,20 @@ export interface ICreateMatterWizardProps {
    * then opens empty exactly as before (no regression).
    */
   initialFormValues?: Partial<ICreateMatterFormState>;
+  /**
+   * Optional success callback (spaarkeai-assistant-enhancements-r1 D-013-04).
+   * Invoked with the created matter's record id when the wizard reaches its
+   * success screen and the user closes/views it — INSTEAD of {@link onClose}.
+   * The Assistant surface-launch host (`useWizardPageBootstrap.completeHandoff`)
+   * wires this to write the committed `SurfaceHandoffResult` so a launched
+   * create reads back as committed (P5 honest-ack) rather than "cancelled"
+   * (which the orchestrator infers from the absence of a written result).
+   *
+   * When omitted, the success screen falls back to {@link onClose} — behavior
+   * is unchanged for every non-launch caller. The CANCEL path always uses
+   * {@link onClose} (no result write → cancellation is inferred).
+   */
+  onComplete?: (recordId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +290,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   resolveUserBuDefaults,
   tenantId,
   initialFormValues,
+  onComplete,
 }) => {
   // Assistant hand-off pre-seed (task 013): merge the drafted values over the empty
   // defaults so the wizard opens PRE-FILLED. Stable per `initialFormValues` identity
@@ -579,11 +595,17 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
 
         const hasWarnings = result.warnings.length > 0;
 
+        // D-013-04: on the SUCCESS path a real record exists, so route the close
+        // through `onComplete(matterId)` (honest-ack) when the host supplied it;
+        // otherwise fall back to the plain `onClose` (unchanged for non-launch
+        // callers). The CANCEL path elsewhere still uses bare `onClose`.
+        const finishSuccess = () => completeOrClose(matterId, onClose, onComplete);
+
         const viewMatter = () => {
           if (navigationService) {
             navigationService.openRecord('sprk_matter', matterId);
           }
-          onClose();
+          finishSuccess();
         };
 
         return {
@@ -603,7 +625,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
               <Button appearance="primary" onClick={viewMatter} aria-label={`View matter: ${matterName}`}>
                 View Matter
               </Button>
-              <Button appearance="secondary" onClick={onClose}>
+              <Button appearance="secondary" onClick={finishSuccess}>
                 Close
               </Button>
             </>
@@ -624,6 +646,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
       handleSearchMatterTypes,
       handleSearchPracticeAreas,
       onClose,
+      onComplete,
       navigationService,
       resolveSpeContainerId,
     ]

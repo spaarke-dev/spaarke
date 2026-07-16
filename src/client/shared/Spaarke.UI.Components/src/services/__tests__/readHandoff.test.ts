@@ -3,7 +3,13 @@
  * Covers: read id from URL data envelope, envelope hydration, seed extraction,
  * committed/cancelled result writes, and the "opened directly" (no handoff) branch.
  */
-import { readHandoffFromUrl, handoffSeed, completeHandoff, cancelHandoff } from '../surfaceHandoff/readHandoff';
+import {
+  readHandoffFromUrl,
+  handoffSeed,
+  completeHandoff,
+  completeOrClose,
+  cancelHandoff,
+} from '../surfaceHandoff/readHandoff';
 import { writeHandoffEnvelope, readHandoffResult, DEFAULT_HANDOFF_TTL_SECONDS } from '../surfaceHandoff/handoffStorage';
 import type { SurfaceHandoffEnvelope } from '../surfaceHandoff/types';
 
@@ -90,5 +96,22 @@ describe('completeHandoff / cancelHandoff (return path)', () => {
   it('cancelHandoff writes an explicit cancelled result', () => {
     cancelHandoff('h-x');
     expect(readHandoffResult('h-x')).toEqual({ committed: false, cancelled: true });
+  });
+});
+
+describe('completeOrClose (D-013-04 honest-ack wiring)', () => {
+  it('routes a launched wizard SUCCESS through onComplete(recordId), not onClose', () => {
+    const onClose = jest.fn();
+    const onComplete = jest.fn();
+    completeOrClose('matter-99', onClose, onComplete);
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenCalledWith('matter-99');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('falls back to onClose when the wizard was opened directly (no onComplete)', () => {
+    const onClose = jest.fn();
+    completeOrClose('matter-99', onClose, undefined);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
