@@ -10,13 +10,13 @@
 
 | # | Title | Wave | Tags | FR | Deps | Blocks | Parallel-safe | Rigor | Model/Effort | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 001 | Phase-0: audit live `sprk_communication` schema + confirm `Message=100000004` choice integer (MCP read) | W0 | dataverse, spike | — | — | 004,005,006 | true | STANDARD | sonnet/high | 🔲 |
-| 002 | Phase-0: decide private-thread grant mechanism (`GrantAccess` vs `sprk_externalrecordaccess`) | W0 | spike, security | — | — | 042 | true | STANDARD | sonnet/high | 🔲 |
-| 003 | Phase-0: ACS spike (identity + server-minted chat token + thread + Event Grid round-trip; latency, echo-dedup, publish-size) | W0 | spike, acs | — | — | 010,011,012,020,030 | true | STANDARD | sonnet/high | 🔲 |
+| 001 | Phase-0: audit live `sprk_communication` schema + confirm `Message=100000004` choice integer (MCP read) | W0 | dataverse, spike | — | — | 004,005,006 | true | STANDARD | sonnet/high | ✅ (live Dataverse MCP; Message=100000004 confirmed; 6 cols + communicationUserId absent→clean adds; grouping stays (A)) |
+| 002 | Phase-0: decide private-thread grant mechanism (`GrantAccess` vs `sprk_externalrecordaccess`) | W0 | spike, security | — | — | 042 | true | STANDARD | sonnet/high | ✅ (recommends **option B** sprk_externalrecordaccess overlay — BFF read is app-only so native POA not honored; 🔔 owner sign-off advised, non-blocking; binds 042/041/050) |
+| 003 | Phase-0: ACS spike (identity + server-minted chat token + thread + Event Grid round-trip; latency, echo-dedup, publish-size) | W0 | spike, acs | — | — | 010,011,012,020,030 | true | STANDARD | sonnet/high | ✅ (ACS harness compile-verified vs real SDKs; publish delta **+0.22 MB MEASURED**→~45.52; echo-dedup key=ACS msg id; latency needs live infra; researcher-memory gap flagged) |
 | 004 | Schema: `sprk_communicationthread` entity + `sprk_thread` lookup + thread↔channel child table | W0 | dataverse, schema | FR-05 | 001 | 040,050 | true | STANDARD | sonnet/high | 🔲 |
 | 005 | Schema: `sprk_communication` privacy/internal-only/privilege/ACS-key columns + `communicationUserId` on user/contact | W0 | dataverse, schema | FR-08 | 001 | 042,010 | true | STANDARD | sonnet/high | 🔲 |
-| 006 | `CommunicationType.Message = 100000004` C# enum extension | W0 | bff-api | FR-16 | 001 | 020 | true | FULL | sonnet/high | 🔲 |
-| 007 | Author **ADR-046** (ACS messaging channel) — concise + full; INDEX placeholder → Accepted | W0 | adr, docs | FR-17 | — | 020,021 | **false** (`.claude/`) | STANDARD | opus/high | 🔲 |
+| 006 | `CommunicationType.Message = 100000004` C# enum extension | W0 | bff-api | FR-16 | 001 | 020 | true | FULL | sonnet/high | ✅ (enum +Message=100000004; build clean, 352 Comm tests pass; gates PASS; publish ~0 delta; pre-existing Kiota HIGH CVE noted, not a regression) |
+| 007 | Author **ADR-046** (ACS messaging channel) — concise + full; INDEX placeholder → Accepted | W0 | adr, docs | FR-17 | — | 020,021 | **false** (`.claude/`) | STANDARD | opus/high | ✅ (main-session; ADR-046 concise→Accepted + full docs/adr authored + INDEX updated; ADR-047 reserved for notification-spine) |
 | 010 | ACS identity + server-side chat-token minting (`communicationUserId ↔ Dataverse`; uniform minting) | W1 | bff-api, acs, auth | FR-03 | 003,005 | 011,020,051 | true | FULL | sonnet/high | 🔲 |
 | 011 | ACS thread + membership ops (create thread w/ 30-day retention; Add/RemoveParticipants) | W1 | bff-api, acs | FR-15 | 010 | 020,041,051 | true | FULL | sonnet/high | 🔲 |
 | 012 | ACS provisioning: per-customer resource + Event Grid system topic/subscriptions (ADR-027) | W1 | bff-api, acs, provisioning | FR-18 | 003 | 030 | true | FULL | sonnet/high | 🔲 |

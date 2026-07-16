@@ -10,16 +10,18 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — pipeline just completed |
-| **Step** | — |
-| **Status** | none (not-started) |
-| **Next Action** | Run `task-execute` on **task 001** (`tasks/001-phase0-communication-schema-audit.poml`) to begin Wave 0 |
+| **Task** | Wave 0 in progress — 001,002,003,006,007 ✅ done; **004,005 pending** (live Dataverse schema) |
+| **Step** | W0-B remainder |
+| **Status** | in-progress |
+| **Next Action** | 2 open decisions (private-grant sign-off; live-schema go-ahead), then run 004+005; then W1 (010/011/012) |
 
-### Files Modified This Session
-- Pipeline initialization only (README, plan, CLAUDE, current-task, tasks/)
+### Files Modified This Session (W0)
+- `src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs` — +`Message=100000004` (task 006)
+- `.claude/adr/ADR-046-*.md` (concise→Accepted) + `docs/adr/ADR-046-*.md` (full) + `.claude/adr/INDEX.md` (task 007)
+- `notes/spikes/001-schema-audit.md`, `002-private-grant-decision.md`, `003-acs-spike.md` + `acs-harness/` (spikes)
 
 ### Critical Context
-Project initialized via `/project-pipeline` 2026-07-16. 28 tasks across 9 waves + wrap-up. Wave 0 = Phase-0 spikes (ACS, schema, private-grant) + schema/enum/ADR foundation. This project edits shared `Services/Communication/` code (task 040) — run `/conflict-check` before every BFF wave.
+Wave 0 spikes done on LIVE infra: 001 confirmed `Message=100000004` + all 6 columns absent (clean adds) via Dataverse MCP; 003 measured ACS publish delta +0.22 MB (GO), harness compile-verified; 002 recommends **option B** (sprk_externalrecordaccess overlay) for private threads — 🔔 owner sign-off advised. This project edits shared `Services/Communication/` code (task 040) — run `/conflict-check` before every BFF wave.
 
 ---
 
