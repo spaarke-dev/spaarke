@@ -20,6 +20,7 @@
  */
 import type { IDataService } from '../types/serviceInterfaces';
 import type { ILookupItem } from '../types/LookupTypes';
+import { getCurrentUserId, getCurrentUserName } from '../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -168,4 +169,94 @@ export function extractEmailKey(name: string): string | null {
   const candidate = match[1].trim().toLowerCase();
   // Loose validation -- it just needs an "@" to count as an email key.
   return candidate.includes('@') ? candidate : null;
+}
+
+// ---------------------------------------------------------------------------
+// Current-user "Assign to me" resolution
+// ---------------------------------------------------------------------------
+//
+// spaarkeai-assistant-enhancements-r1 task 014 / FR-A4: "assign it to me" on
+// a Create*Wizard sets the assignee to the current user. Per the binding
+// project constraint, assignee resolution MUST reuse the current-user
+// identity mechanism already available to the client (`getCurrentUserId` /
+// `getCurrentUserName` in `utils/xrmContext.ts`) — it must NOT introduce a
+// second identity mechanism.
+//
+// Some assignee-style fields target `systemuser` directly (e.g.
+// `sprk_workassignment.sprk_assignedto`) — for those, the Xrm current-user
+// identity applies as-is (see `getCurrentUserAsLookupItem`). Others target
+// `contact` (e.g. `sprk_event.sprk_assignedto`, `sprk_todo.sprk_assignedto`
+// per the 2026-06-21 UAT migration) — for those, the current systemuser must
+// be translated to their own contact record. That translation chain
+// (systemuser id -> internalemailaddress -> matching contact by email) is
+// NOT a new identity mechanism: it is the exact pattern already established
+// in `CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.resolveCurrentUserEmail`
+// (systemuser lookup) chained onto the existing `contact` search already used
+// throughout this file — just composed once, here, for reuse.
+
+/**
+ * The current Dataverse user's own identity, straight from the Xrm host
+ * context — no data round-trip. Use for `systemuser`-targeted assignee
+ * fields (e.g. `sprk_workassignment.sprk_assignedto`).
+ *
+ * @returns `{ id, name }` or `null` when no Xrm host context is reachable.
+ */
+export function getCurrentUserAsLookupItem(): ILookupItem | null {
+  const id = getCurrentUserId();
+  const name = getCurrentUserName();
+  if (!id || !name) return null;
+  return { id, name };
+}
+
+/**
+ * Resolve the current Dataverse user onto their own OOB `contact` record.
+ * Use for `contact`-targeted assignee fields (e.g. `sprk_event.sprk_assignedto`,
+ * `sprk_matter`'s Assigned Attorney/Paralegal).
+ *
+ * Resolution chain (graceful at every step — returns `null` rather than
+ * throwing, so callers can fall back to manual search):
+ *   1. Current systemuser id (`getCurrentUserId` — Xrm host context)
+ *   2. `systemuser.internalemailaddress`
+ *   3. `contact` where `emailaddress1` equals that email (top 1)
+ *
+ * @param dataService - Abstracted Dataverse Web API.
+ * @param options.getCurrentUserId - Test-injection seam overriding the Xrm
+ *   probe (mirrors the established `eventService`/`workAssignmentService`
+ *   `getCurrentUserId` override convention).
+ * @returns The matching contact as an `ILookupItem`, or `null` when the
+ *   current user is unresolvable or has no corresponding contact record.
+ */
+export async function resolveCurrentUserAsContactAssignee(
+  dataService: IDataService,
+  options?: { getCurrentUserId?: () => string | undefined }
+): Promise<ILookupItem | null> {
+  const resolveUserId = options?.getCurrentUserId ?? getCurrentUserId;
+  const userId = resolveUserId();
+  if (!userId) return null;
+
+  try {
+    const user = await dataService.retrieveRecord(
+      'systemuser',
+      userId.replace(/[{}]/g, ''),
+      '?$select=internalemailaddress,fullname'
+    );
+    const email = user['internalemailaddress'] as string | undefined;
+    if (!email) return null;
+
+    const safeEmail = escapeODataLiteral(email);
+    const result = await dataService.retrieveMultipleRecords(
+      'contact',
+      `?$select=contactid,fullname&$filter=emailaddress1 eq '${safeEmail}'&$top=1`
+    );
+    const match = result.entities[0];
+    if (!match) return null;
+
+    return { id: match['contactid'] as string, name: match['fullname'] as string };
+  } catch (err) {
+    console.warn(
+      '[userLookup] resolveCurrentUserAsContactAssignee failed (non-fatal):',
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  }
 }

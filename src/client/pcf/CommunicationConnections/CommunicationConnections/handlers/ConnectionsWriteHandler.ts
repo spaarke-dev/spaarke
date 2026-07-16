@@ -98,11 +98,11 @@ export async function discoverHostNavProps(
     }
 
     const json = (await resp.json()) as {
-      value?: Array<{
+      value?: {
         ReferencingAttribute: string;
         ReferencingEntityNavigationPropertyName: string;
         ReferencedEntity: string;
-      }>;
+      }[];
     };
 
     const entries: INavPropEntry[] = (json.value ?? []).map(r => ({
@@ -144,7 +144,7 @@ export function _resetNavPropCacheForTests(): void {
  */
 export function resolveAllowedCatalog(
   regardingTargetsRaw: string | null | undefined
-): ReadonlyArray<ITodoRegardingTargetCatalogEntry> {
+): readonly ITodoRegardingTargetCatalogEntry[] {
   if (!regardingTargetsRaw || !regardingTargetsRaw.trim()) {
     return TODO_REGARDING_CATALOG;
   }
@@ -194,7 +194,7 @@ export function resolveAllowedCatalog(
 export async function applyRegardingSelection(
   ctx: IResolverWriteContext,
   selection: IRegardingSelection,
-  catalog: ReadonlyArray<ITodoRegardingTargetCatalogEntry> = TODO_REGARDING_CATALOG,
+  catalog: readonly ITodoRegardingTargetCatalogEntry[] = TODO_REGARDING_CATALOG,
   fetchImpl: typeof fetch = globalThis.fetch
 ): Promise<IResolverWriteResult> {
   const catalogEntry = catalog.find(c => c.entityType === selection.entityType);
