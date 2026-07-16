@@ -158,8 +158,15 @@ export interface Connection {
   targetId: string;
   confidence: number;
   status: 'confirmed' | 'suggested' | 'ambiguous';
-  /** Competing candidates when the slot is ambiguous. */
+  /** Competing candidates when the slot is ambiguous (conflict). */
   alternatives?: ProvenanceCandidate[];
+  /**
+   * Runner-up candidates for a NON-ambiguous slot (the engine had a clear top
+   * pick but also recorded lower-confidence alternatives). Surfaced behind an
+   * "other candidates" expander so a reviewer can file a different one. Empty/
+   * undefined when the slot had a single candidate.
+   */
+  otherCandidates?: ProvenanceCandidate[];
   order: number;
 }
 
@@ -196,6 +203,10 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
     const meta = SLOT_META[field] ?? { label: entityLabel(cands[0].targetEntity), order: 99 };
     const conflict = cands.length >= 2 && cands.some(c => c.conflict);
     const primary = cands.reduce((a, b) => (b.reinforcedConfidence > a.reinforcedConfidence ? b : a));
+    // Non-conflict runners-up (everything but the primary), highest-confidence first.
+    const others = conflict
+      ? undefined
+      : cands.filter(c => c !== primary).sort((a, b) => b.reinforcedConfidence - a.reinforcedConfidence);
     out.push({
       field,
       entity: primary.targetEntity,
@@ -205,6 +216,7 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
       confidence: primary.reinforcedConfidence,
       status: conflict ? 'ambiguous' : isResolved ? 'confirmed' : 'suggested',
       alternatives: conflict ? cands : undefined,
+      otherCandidates: others && others.length > 0 ? others : undefined,
       order: meta.order,
     });
   });

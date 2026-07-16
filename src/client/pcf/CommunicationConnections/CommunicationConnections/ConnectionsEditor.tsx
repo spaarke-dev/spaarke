@@ -21,7 +21,21 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, Text, Button, Badge, Divider, Tooltip } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  Text,
+  Button,
+  Badge,
+  Divider,
+  Tooltip,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItem,
+} from '@fluentui/react-components';
+import { TODO_REGARDING_CATALOG } from '@spaarke/ui-components';
 import {
   Briefcase20Regular,
   Building20Regular,
@@ -67,8 +81,12 @@ export interface ConnectionsCallbacks {
    * shown in the Regarding Record fields (owner requirement, 2026-07-15).
    */
   onSetPrimary?: (conn: Connection) => void;
-  /** Open the regarding picker to add a missing dimension. */
-  onLinkAnother?: () => void;
+  /**
+   * Open the regarding picker to add a missing dimension. Called with the chosen
+   * record type so the host can scope the side-pane lookup to that one entity
+   * (type-first UX). Called with no argument = all-types fallback.
+   */
+  onLinkAnother?: (entityType?: string) => void;
   /** Launch a create-from-email flow (Event / To Do / Invoice). */
   onCreate?: (action: CreateAction) => void;
 }
@@ -119,6 +137,42 @@ const CREATE_ICON = {
 } as const;
 
 const BAND_WORD = { high: 'High', medium: 'Medium', low: 'Low' } as const;
+
+// Record types offered by "Link another record…". The reviewer picks the TYPE
+// first (Regarding-Resolver UX), then the side-pane lookup opens scoped to that
+// one entity. Only types the shared regarding catalog can actually write are
+// offered (a picked type must have a lookup attribute to file into).
+const LINK_TYPE_LABEL: Record<string, string> = {
+  sprk_matter: 'Matter',
+  sprk_project: 'Project',
+  sprk_organization: 'Organization',
+  contact: 'Contact',
+  sprk_invoice: 'Invoice',
+  sprk_event: 'Event',
+  sprk_workassignment: 'Work Assignment',
+  sprk_budget: 'Budget',
+  sprk_analysis: 'Analysis',
+  sprk_document: 'Document',
+  sprk_communication: 'Communication',
+  sprk_reportcard: 'Report Card',
+};
+const LINK_TYPE_ORDER = [
+  'sprk_matter',
+  'sprk_project',
+  'sprk_organization',
+  'contact',
+  'sprk_invoice',
+  'sprk_event',
+  'sprk_workassignment',
+  'sprk_budget',
+  'sprk_analysis',
+  'sprk_document',
+  'sprk_communication',
+  'sprk_reportcard',
+];
+const LINK_ANOTHER_TYPES: { entityType: string; label: string }[] = LINK_TYPE_ORDER.filter(et =>
+  TODO_REGARDING_CATALOG.some(c => c.entityType === et)
+).map(et => ({ entityType: et, label: LINK_TYPE_LABEL[et] ?? et }));
 
 const useStyles = makeStyles({
   wrap: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
@@ -174,6 +228,7 @@ const useStyles = makeStyles({
     paddingLeft: '108px',
     paddingBlock: '2px',
   },
+  expanderRow: { paddingLeft: '100px', paddingBlock: '0px' },
 
   summaryBar: {
     display: 'flex',
@@ -225,6 +280,9 @@ function ConnectionRow({
   const s = useStyles();
   const isConfirmed = confirmed || conn.status === 'confirmed';
   const targetName = resolveDisplayName?.(conn.entity, conn.targetId) ?? conn.targetName;
+  const [showOthers, setShowOthers] = React.useState(false);
+  const others = conn.otherCandidates ?? [];
+  const hasOthers = conn.status !== 'ambiguous' && !readOnly && others.length > 0;
 
   return (
     <>
@@ -308,6 +366,34 @@ function ConnectionRow({
           )}
         </div>
       </div>
+      {hasOthers && (
+        <div className={s.expanderRow}>
+          <Button
+            size="small"
+            appearance="transparent"
+            icon={showOthers ? <ChevronUp16Regular /> : <ChevronDown16Regular />}
+            onClick={() => setShowOthers(v => !v)}
+          >
+            {showOthers ? 'Hide other candidates' : `${others.length} other candidate${others.length === 1 ? '' : 's'}`}
+          </Button>
+        </div>
+      )}
+      {hasOthers &&
+        showOthers &&
+        others.map((alt, i) => (
+          <div key={i} className={s.altRow}>
+            <Text size={200} weight="semibold">
+              {resolveDisplayName?.(alt.targetEntity, alt.targetId) ?? alt.targetName ?? alt.targetId}
+            </Text>
+            <Text size={200} className={confClass(s, alt.reinforcedConfidence)}>
+              {confText(alt.reinforcedConfidence)}
+            </Text>
+            <div className={s.grow} />
+            <Button size="small" appearance="primary" disabled={busy} onClick={() => onConfirm(conn, alt)}>
+              File here
+            </Button>
+          </div>
+        ))}
       {conn.status === 'ambiguous' &&
         !readOnly &&
         conn.alternatives?.map((alt, i) => (
@@ -388,7 +474,7 @@ function EditorBody({
   onAcceptAll: (conns: Connection[]) => void;
   onChange: (conn: Connection) => void;
   onSetPrimary: (conn: Connection) => void;
-  onLinkAnother: () => void;
+  onLinkAnother: (entityType?: string) => void;
   onCreate: (action: CreateAction) => void;
 }): JSX.Element {
   const s = useStyles();
@@ -452,9 +538,26 @@ function EditorBody({
 
       {!readOnly && (
         <div className={s.addRow}>
-          <Button size="small" appearance="subtle" icon={<Link20Regular />} disabled={busy} onClick={onLinkAnother}>
-            Link another record…
-          </Button>
+          <Menu>
+            <MenuTrigger disableButtonEnhancement>
+              <Button size="small" appearance="subtle" icon={<Link20Regular />} disabled={busy}>
+                Link another record…
+              </Button>
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                {LINK_ANOTHER_TYPES.map(t => (
+                  <MenuItem
+                    key={t.entityType}
+                    icon={entityIcon(t.entityType)}
+                    onClick={() => onLinkAnother(t.entityType)}
+                  >
+                    {t.label}
+                  </MenuItem>
+                ))}
+              </MenuList>
+            </MenuPopover>
+          </Menu>
         </div>
       )}
 
