@@ -200,6 +200,21 @@ export interface AnalysisChunk {
    * Raw wire value; parse with {@link parseConsumerChips}.
    */
   chips?: unknown;
+  /**
+   * The dispatched Binding's disposition ledger value on the terminal `complete`
+   * chunk (assistant-enhancements-r1 task 013a — additive). `surface_launch` for a
+   * create capability whose drafted output opens a pre-seeded surface; the client
+   * branches on it WITHOUT any second intent mechanism (the server's disposition IS
+   * the routing decision — ADR-039 / ADR-040). Absent on non-create dispatches.
+   */
+  disposition?: string;
+  /**
+   * The dispatched Binding's `sprk_consumertype` on the terminal `complete` chunk
+   * (task 013a — additive). The static-registry key the client resolves the launch
+   * surface from (`create-matter` / `create-task` / `create-todo`). Absent when the
+   * disposition is not `surface_launch`.
+   */
+  consumerType?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -347,6 +362,19 @@ export interface DispatchConsumerResult {
    * Binding's `sprk_chiptransitions`), parsed. Undefined when none arrived.
    */
   readonly chips?: ReadonlyArray<ConsumerChip>;
+  /**
+   * The dispatched Binding's disposition (assistant-enhancements-r1 task 013),
+   * surfaced verbatim from the terminal `complete` chunk. `surface_launch` tells the
+   * host to open a pre-seeded create surface via `launchSurface`; undefined when the
+   * stream carried no disposition. The client never re-derives this (ADR-039).
+   */
+  readonly disposition?: string;
+  /**
+   * The dispatched Binding's `sprk_consumertype` (task 013), surfaced from the
+   * terminal `complete` chunk — the static-registry key for the launch surface.
+   * Undefined unless `disposition === 'surface_launch'`.
+   */
+  readonly consumerType?: string;
 }
 
 /**
@@ -482,6 +510,12 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
     // Event path — every chip click permanently emptied the strip).
     let terminalResult: unknown;
     let capturedChips: ConsumerChip[] | undefined;
+    // task 013: the terminal chunk's disposition + consumerType (013a additive
+    // fields) — the SERVER's create-flow routing decision. Surfaced verbatim to
+    // the host, which branches `surface_launch` → the pre-seeded surface launch
+    // (ADR-039 — the client re-derives nothing).
+    let terminalDisposition: string | undefined;
+    let terminalConsumerType: string | undefined;
     // task 039 / D-F5: the terminal chunk's section reveal is staggered (see
     // progressiveSectionReveal.ts), so it outlives the synchronous consumeChunk call.
     // Tracked here so the dispatch doesn't resolve until pacing + streaming_complete
@@ -533,6 +567,14 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
 
         case 'complete': {
           terminalResult = chunk.result ?? chunk.summary ?? undefined;
+          // task 013a: capture the create-flow routing decision off the terminal
+          // chunk (additive; absent on non-create dispatches → stays undefined).
+          if (typeof chunk.disposition === 'string' && chunk.disposition.length > 0) {
+            terminalDisposition = chunk.disposition;
+          }
+          if (typeof chunk.consumerType === 'string' && chunk.consumerType.length > 0) {
+            terminalConsumerType = chunk.consumerType;
+          }
           sawComplete = true;
 
           if (
@@ -664,9 +706,23 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
         streamId,
         completionStatus: 'empty',
       });
-      return { streamId, status: 'empty', result: terminalResult, chips: capturedChips };
+      return {
+        streamId,
+        status: 'empty',
+        result: terminalResult,
+        chips: capturedChips,
+        disposition: terminalDisposition,
+        consumerType: terminalConsumerType,
+      };
     }
 
-    return { streamId, status: 'complete', result: terminalResult, chips: capturedChips };
+    return {
+      streamId,
+      status: 'complete',
+      result: terminalResult,
+      chips: capturedChips,
+      disposition: terminalDisposition,
+      consumerType: terminalConsumerType,
+    };
   };
 }

@@ -187,6 +187,17 @@ export interface ICreateEventWizardProps {
    * unaffected.
    */
   showAssociateToStep?: boolean;
+  /**
+   * Assistant hand-off pre-seed (spaarkeai-assistant-enhancements-r1 task 013).
+   * When launched from the Assistant's `create-task` `surface_launch` flow (task
+   * 012 `launchSurface`), the solution `main.tsx` maps the hand-off seed
+   * (`useWizardPageBootstrap.handoffSeed` -> `mapEventHandoffSeed`) into these initial
+   * form values so the wizard opens PRE-FILLED with the drafted event name /
+   * description (and any high-confidence resolved event-type). Merged over
+   * {@link EMPTY_EVENT_FORM}; omitted keys keep their empty default. `undefined` when
+   * opened directly — the wizard then opens empty exactly as before.
+   */
+  initialFormValues?: Partial<ICreateEventFormState>;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,20 +236,29 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
   initialAssociation,
   lockAssociation,
   showAssociateToStep,
+  initialFormValues,
 }) => {
+  // Assistant hand-off pre-seed (task 013): merge drafted values over the empty
+  // defaults so the wizard opens PRE-FILLED. Stable per `initialFormValues` identity.
+  const seededFormState = React.useMemo<ICreateEventFormState>(
+    () => ({ ...EMPTY_EVENT_FORM, ...(initialFormValues ?? {}) }),
+    [initialFormValues]
+  );
+
   // -- Entity-specific form state --------------------------------------------
   const [formValid, setFormValid] = React.useState(false);
-  const [formValues, setFormValues] = React.useState<ICreateEventFormState>(EMPTY_EVENT_FORM);
+  const [formValues, setFormValues] = React.useState<ICreateEventFormState>(seededFormState);
   const formValuesRef = React.useRef(formValues);
   formValuesRef.current = formValues;
 
-  // Reset form state on open
+  // Reset form state on open (to the seeded values, not bare empties, so a
+  // hand-off-launched wizard re-opens pre-filled).
   React.useEffect(() => {
     if (open) {
       setFormValid(false);
-      setFormValues(EMPTY_EVENT_FORM);
+      setFormValues(seededFormState);
     }
-  }, [open]);
+  }, [open, seededFormState]);
 
   // -- Search callbacks ------------------------------------------------------
   const handleSearchContacts = React.useCallback(

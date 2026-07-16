@@ -41,8 +41,10 @@ import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import {
   createConsumerDispatcher,
   parseConsumerChips,
+  launchSurface,
   type ConsumerChip,
   type DispatchWorkspaceEvent,
+  type ResolvedLookup,
 } from "@spaarke/ui-components";
 import type { IChatMessage } from "@spaarke/ui-components";
 import { ConsumerChips } from "./ConsumerChips";
@@ -167,6 +169,31 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           if (dispatched.chips && dispatched.chips.length > 0) {
             setConsumerChips(dispatched.chips);
           }
+
+          // Surface-launch disposition (assistant-enhancements-r1 task 013): the
+          // SERVER decided this create capability opens a pre-seeded surface. The
+          // client re-materializes the drafted output into the surface via the ONE
+          // shared launchSurface (task 012) — a static-registry lookup on
+          // consumerType, ZERO intent detection (ADR-039). Fire-and-forget: it
+          // never throws and it does NOT block the transcript render above.
+          if (dispatched.disposition === "surface_launch" && dispatched.consumerType) {
+            const draft =
+              dispatched.result && typeof dispatched.result === "object"
+                ? (dispatched.result as Record<string, unknown>)
+                : {};
+            // The constrained-field resolver's output rides `result.resolvedLookups`
+            // (server enrichment — task 013 part 3; `{}` until then). Lift it out of
+            // draftValues so it never lands in a form free-text field.
+            const { resolvedLookups: rawResolved, ...draftValues } = draft as Record<string, unknown> & {
+              resolvedLookups?: Record<string, ResolvedLookup>;
+            };
+            void launchSurface({
+              consumerType: dispatched.consumerType,
+              draftValues,
+              resolvedLookups: rawResolved ?? {},
+              bffBaseUrl,
+            });
+          }
         })
         .catch(() => {
           inject(
@@ -174,7 +201,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           );
         });
     },
-    [sessionAttachmentCount, dispatchConsumer, enqueueAssistantMessage, inject]
+    [sessionAttachmentCount, dispatchConsumer, enqueueAssistantMessage, inject, bffBaseUrl]
   );
 
   /**

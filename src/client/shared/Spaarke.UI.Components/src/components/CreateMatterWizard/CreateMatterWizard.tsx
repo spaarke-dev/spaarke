@@ -226,6 +226,18 @@ export interface ICreateMatterWizardProps {
    * Typically sourced from solution `config.tenantId` in `main.tsx`.
    */
   tenantId?: string;
+  /**
+   * Assistant hand-off pre-seed (spaarkeai-assistant-enhancements-r1 task 013).
+   * When the wizard was launched from the Assistant's `surface_launch` create flow
+   * (task 012 `launchSurface`), the solution `main.tsx` maps the hand-off seed
+   * (`useWizardPageBootstrap.handoffSeed` → `mapMatterHandoffSeed`) into these
+   * initial form values so the wizard opens PRE-FILLED with the drafted matter
+   * name / description (and any high-confidence resolved matter-type / practice-area
+   * dropdown). Merged over {@link EMPTY_FORM_STATE}; omitted keys keep their empty
+   * default. `undefined` when opened directly (not via a hand-off) — the wizard
+   * then opens empty exactly as before (no regression).
+   */
+  initialFormValues?: Partial<ICreateMatterFormState>;
 }
 
 // ---------------------------------------------------------------------------
@@ -262,20 +274,30 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   resolveSpeContainerId,
   resolveUserBuDefaults,
   tenantId,
+  initialFormValues,
 }) => {
+  // Assistant hand-off pre-seed (task 013): merge the drafted values over the empty
+  // defaults so the wizard opens PRE-FILLED. Stable per `initialFormValues` identity
+  // (the host memoizes it) — degrades to EMPTY_FORM_STATE when nothing was seeded.
+  const seededFormState = React.useMemo<ICreateMatterFormState>(
+    () => ({ ...EMPTY_FORM_STATE, ...(initialFormValues ?? {}) }),
+    [initialFormValues]
+  );
+
   // -- Entity-specific form state --
   const [step2Valid, setStep2Valid] = React.useState(false);
-  const [step2FormValues, setStep2FormValues] = React.useState<ICreateMatterFormState>(EMPTY_FORM_STATE);
+  const [step2FormValues, setStep2FormValues] = React.useState<ICreateMatterFormState>(seededFormState);
   const step2FormValuesRef = React.useRef(step2FormValues);
   step2FormValuesRef.current = step2FormValues;
 
-  // Reset form state on open
+  // Reset form state on open (to the seeded values, not bare empties, so a
+  // hand-off-launched wizard re-opens pre-filled).
   React.useEffect(() => {
     if (open) {
       setStep2Valid(false);
-      setStep2FormValues(EMPTY_FORM_STATE);
+      setStep2FormValues(seededFormState);
     }
-  }, [open]);
+  }, [open, seededFormState]);
 
   // -- Search callbacks --
   const handleSearchContacts = React.useCallback(

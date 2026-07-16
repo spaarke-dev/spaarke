@@ -584,6 +584,51 @@ describe('dispatchConsumer result + chips capture (G-P1 Defect 1)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Surface-launch routing decision (spaarkeai-assistant-enhancements-r1 task 013a):
+// the terminal `complete` chunk carries the SERVER's create-flow routing decision
+// (`disposition` + `consumerType`, additive). The helper surfaces them verbatim so
+// the host can branch `surface_launch` → the pre-seeded surface launch (ADR-039 —
+// the client re-derives nothing).
+// ---------------------------------------------------------------------------
+
+describe('dispatchConsumer disposition + consumerType surfacing (task 013a)', () => {
+  it('surfaces disposition + consumerType from the terminal complete chunk', async () => {
+    const { publish } = makePublishSpy();
+    const dispatchConsumer = makeDispatcher(publish);
+    mockFetch.mockResolvedValueOnce(
+      sseResponse([
+        JSON.stringify({
+          type: 'complete',
+          done: true,
+          disposition: 'surface_launch',
+          consumerType: 'create-matter',
+          result: { matter_name: 'Acme v. Beta', matter_description: 'Contract dispute.' },
+        }),
+      ])
+    );
+
+    const result = await dispatchConsumer(BINDING_ID);
+
+    expect(result.status).toBe('complete');
+    expect(result.disposition).toBe('surface_launch');
+    expect(result.consumerType).toBe('create-matter');
+    expect(result.result).toEqual({ matter_name: 'Acme v. Beta', matter_description: 'Contract dispute.' });
+  });
+
+  it('leaves disposition + consumerType undefined on a non-create dispatch (absent by default)', async () => {
+    const { publish } = makePublishSpy();
+    const dispatchConsumer = makeDispatcher(publish);
+    mockFetch.mockResolvedValueOnce(sseResponse(['{"type":"complete","done":true,"result":{"tldr":"T."}}']));
+
+    const result = await dispatchConsumer(BINDING_ID);
+
+    expect(result.status).toBe('complete');
+    expect(result.disposition).toBeUndefined();
+    expect(result.consumerType).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Progressive section reveal pacing (task 039 / D-F5, FR-A1-10)
 //
 // D-F5 wants long dispatched outputs to render progressively (≥2 visible
