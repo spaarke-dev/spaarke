@@ -28,6 +28,10 @@ public static class CommunicationModule
         // flag is an operational kill-switch for the semantic rung (no redeploy).
         services.Configure<SemanticMatchOptions>(configuration.GetSection(SemanticMatchOptions.SectionName));
 
+        // AI extract+classify (rung 5 / FR-15) options. Bound from "Communication:AiClassification"; the
+        // Enabled flag is an operational kill-switch for the AI-classify rung (no redeploy).
+        services.Configure<AiClassificationOptions>(configuration.GetSection(AiClassificationOptions.SectionName));
+
         // Core services (singleton: all dependencies are singleton or options)
         services.AddSingleton<CommunicationAccountService>();
         services.AddSingleton<ApprovedSenderValidator>();
@@ -66,6 +70,12 @@ public static class CommunicationModule
         // Consumes the IRecordMatchingAi facade (ADR-013) from a per-evaluation scope (facade is scoped,
         // this rung is a singleton). Registered unconditionally; self-gated by Communication:SemanticMatch:Enabled.
         services.AddSingleton<IAssociationRung, SemanticMatchRung>();          // rung 4 — semantic match
+        // rung 5 — AI extract + classify (FR-15). AI-tier: the engine evaluates it only when the
+        // deterministic pass did not auto-file, and it emits metadata-only signals (no target) — so it never
+        // auto-files and never forces a regarding write; its output is the W5 triage substrate (task 053).
+        // Consumes the ICommunicationClassificationAi facade (ADR-013) from a per-evaluation scope (facade is
+        // scoped, this rung is a singleton). Registered unconditionally; self-gated by Communication:AiClassification:Enabled.
+        services.AddSingleton<IAssociationRung, AiClassificationRung>();       // rung 5 — AI extract + classify
         // Confidence→status ladder + auto-file gate (FR-11 / ADR-018). Both unconditional (ADR-010):
         // the gate is pure config resolution and the mapper is pure decision logic; no feature gate.
         services.AddSingleton<AutoFileGate>();

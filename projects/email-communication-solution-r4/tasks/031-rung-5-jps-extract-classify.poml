@@ -2,7 +2,7 @@
   <metadata>
     <title>Rung 5 — new JPS extract+classify Action run via `AppOnlyAnalysisService`</title>
     <phase>Wave 3 — Server: semantic + AI rungs</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>9</estimated-hours>
     <dependencies>015</dependencies>
     <blocks>032, 053</blocks>
@@ -141,6 +141,27 @@
   </acceptance-criteria>
 
   <notes>
+    COMPLETED 2026-07-16 (§6.5 Path-A deviation — pre-investigated, not re-litigated): The POML's core
+    mechanism premise ("reuse AppOnlyAnalysisService.AnalyzeEmailAsync" / IPlaybookOrchestrationService) is
+    WRONG for rung 5. AnalyzeEmailAsync is a heavy DOCUMENT pipeline: it requires the .eml Document to already
+    exist in Dataverse (GetDocumentByEmailLookupAsync), is keyed by email-activity id (NOT the envelope), runs
+    a fixed summarization playbook, and produces NO structured classification. Rung 5 runs during association
+    resolution over the NormalizedMessage envelope BEFORE that Document exists. Correct primitive =
+    IOpenAiClient.GetStructuredCompletionAsync&lt;T&gt; (the guaranteed-valid-JSON structured-output call the
+    Finance classification path uses via IInvoiceAi). Implemented as: NEW ICommunicationClassificationAi facade
+    (+ CommunicationClassificationAi impl + NullCommunicationClassificationAi) wrapping IOpenAiClient (ADR-013
+    seam); NEW CommunicationClassificationResult model; NEW AiClassificationRung (Kind 5, mirrors
+    SemanticMatchRung) emitting METADATA-ONLY signals (no target ⇒ never auto-files, never forces a regarding
+    write; category/obligations/rationale flow to provenance.signals); privilege flag-only (ADR-015); candidate
+    record TYPES only via $choices enum (org→sprk_organization). NEW AiClassificationOptions
+    (Communication:AiClassification kill-switch). The code-defined system prompt is the self-contained
+    equivalent of the POML-requested Dataverse-resident JPS Action (works with no seeding, unit-testable); it
+    MAY later migrate to a Dataverse playbook Description per ADR-014 (follow-up). ZERO engine/mapper change —
+    IncomingAssociationResolver already partitions Kind 5 as AI (runs only on deterministic-miss) and
+    AssociationStatusMapper already records metadata-only matches into provenance.signals. Build clean; 327
+    Communication tests green (rung-5 unit tests deferred to 032); publish 45.30 MB compressed (~0 delta, ≤60
+    ceiling); CVE = pre-existing transitive Kiota High only (0 new); Step 9.5 gates 0 Critical / 0 ADR violations.
+
     Per-rung telemetry + rung-5 unit tests land in task 032 — expose hooks here. This Action's structured output is reused by W5 task 053 ("Communication Triage" → `DeliverComposite`) — design the output schema so it serves both association-suggestion (here) and triage-summary (053) without a second LLM call where avoidable. `Services/Ai` internals are sole-owned by r2-core: consume PublicContracts, coordinate via `/conflict-check`, escalate a missing seam rather than forking.
   </notes>
 

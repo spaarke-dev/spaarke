@@ -426,6 +426,14 @@ public static class AnalysisServicesModule
         // compound-OFF DI graph remains uniform across all four PublicContracts facades.
         services.AddScoped<IRecordMatchingAi, NullRecordMatchingAi>();
 
+        // L1 — ICommunicationClassificationAi (email-r4 task 031 / FR-15). Real impl registered in
+        // AddPublicContractsFacade. Consumed by the Association Engine's rung 5 (AiClassificationRung),
+        // which resolves the facade from a per-evaluation scope. NOTE: unlike the fail-fast peers above,
+        // the Null peer here RETURNS NULL rather than throwing — rung 5 is a best-effort AI escalation
+        // whose contract is "null ⇒ no signal" (NFR-06: association never fails the capture path), so
+        // graceful degradation (ADR-032 P2) is correct, not P3 fail-fast.
+        services.AddScoped<ICommunicationClassificationAi, NullCommunicationClassificationAi>();
+
         // L1 — IInsightsAi (P3 Fail-Fast). Real impl (InsightsOrchestrator) registered in
         // AddPublicContractsFacade. Consumed by /api/insights/ask + /api/insights/search +
         // /api/insights/assistant/query endpoints (Zone B) AND by the D-P8 SPE-upload
@@ -1114,6 +1122,13 @@ public static class AnalysisServicesModule
         services.AddScoped<IInvoiceAi, InvoiceAi>();
         services.AddScoped<IWorkspacePrefillAi, WorkspacePrefillAi>();
         services.AddScoped<IRecordMatchingAi, RecordMatchingAi>();
+
+        // ICommunicationClassificationAi → CommunicationClassificationAi (email-r4 task 031 / FR-15):
+        // the ADR-013 PublicContracts seam for communication extract+classify. Thin wrapper over
+        // IOpenAiClient.GetStructuredCompletionAsync<T> (reuses the guaranteed-valid-JSON primitive the
+        // Finance classification path uses; no new LLM runner). Null peer (NullCommunicationClassificationAi)
+        // is registered in AddNullObjectsForCompoundOff. Scoped to match IOpenAiClient's transitive lifetime.
+        services.AddScoped<ICommunicationClassificationAi, CommunicationClassificationAi>();
 
         // FR-P3-05 (spaarke-ai-architecture-redesign-r1 task 044): the generic playbook-
         // invocation facade triangle and the engine shell that backed the loop's playbook
