@@ -9,9 +9,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Progress** | **37 / 45 done. W3 COMPLETE** (030 rung 4 ✅ + 031 rung 5 ✅ + **032 telemetry+tests ✅**). AI rungs land as Suggested/signals, never auto-file; deterministic-short-circuit + AI-never-auto-file invariants now locked by tests. Plus 061 + 075 merged. r2-core CLOSED → W5 ungated. |
-| **Last commits** | 032 telemetry+rung 4/5 tests (`f3ce4d85c`) · `1803b2f80` (031) · `85ab74a79` (075) · `c1360dcd0` (061) · `29834f041` (030). |
-| **Status** | **W3 done.** **074-endpoint AGENT RUNNING** (base `b4483f00e`: behavior-preserving `EvaluateAsync` refactor + envelope reconstruction from stored record + read-only `POST /{id}/suggest-associations`; Path C, no client). Then **W5** (050 gate clears → 051 OutputRouter → 052/053 [053 reuses 031] → 054). Telemetry follow-up: token/cache for AI rungs needs facade usage-surfacing (out of scope for 032). |
+| **Progress** | **38 / 45 done. W3 COMPLETE + 074-endpoint ✅.** All 6 rungs + telemetry + read-only `POST /{id}/suggest-associations` (behavior-preserving `EvaluateAsync` extract; 352 Comm tests green). Plus 061 + 075 merged. |
+| **Last commits** | `400885a6e` (074 suggest endpoint) · `b4483f00e` (032) · `1803b2f80` (031) · `85ab74a79` (075) · `29834f041` (030). Tree clean. |
+| **Status** | **NEXT = W5 Responsive Intelligence** (r2-core closed → **050 gate CLEARED**; email-r4 owns Services/Ai). Sequence: **051** OutputRouter record/notification dispositions → **052** enrichment→EventRules (CreateEvent/Task/Notification) → **053** Communication Triage JPS (reuses 031 classification) → **054** rule config. NEEDS SCOPING FIRST (deep Services/Ai — investigate OutputRouter/EventRulesService state, like 031 needed; don't dispatch blind). Then W8 docs (080-082) + owner 043 deploy. |
 | **⬆️ Actions v1.0.1 to re-import** | `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.0.1.zip` — env-var fallback (reads `sprk_MsalClientId`/`sprk_BffApiAppId`/`sprk_BffApiBaseUrl`) + OOB-compact toolbar (16px icons). Footer will read v1.0.1. Connections stays v1.0.0 (no change). |
 
 ### 🔑 AUTH / DEPLOY FACTS (spaarkedev1) — critical for future
