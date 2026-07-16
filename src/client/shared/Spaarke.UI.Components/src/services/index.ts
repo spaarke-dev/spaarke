@@ -198,3 +198,9 @@ export type {
 // types/FieldMappingTypes.ts with different (configuration-time) shapes.
 export { FieldMappingHandler, createFieldMappingHandler } from './FieldMappingHandler';
 export type { IFieldMappingHandlerConfig, IFieldMappingApplicationResult } from './FieldMappingHandler';
+
+// surfaceHandoff — Assistant → launched-surface entry-payload hand-off (task 012,
+// spaarkeai-assistant-enhancements-r1). The client transport carrying a
+// draft-in-chat create flow into a pre-seeded wizard / OOB form. Files by
+// reference; `resolvedLookups` slot filled by task 013.
+export * from './surfaceHandoff';
