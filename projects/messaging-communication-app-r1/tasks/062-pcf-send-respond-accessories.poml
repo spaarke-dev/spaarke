@@ -2,7 +2,7 @@
   <metadata>
     <title>PCF send/respond accessory control(s) on the OOB `sprk_communication`/thread form (mirror email-r4 `CommunicationActions`)</title>
     <phase>W6 — UI (polling timeline + PCF accessories)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <dependencies>051, 060</dependencies>
     <blocks></blocks>

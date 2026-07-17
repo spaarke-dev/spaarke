@@ -130,7 +130,8 @@ public class CommunicationServiceMessageSendTests
         IIdempotencyService idempotency,
         IThreadResolver? threadResolver = null,
         ICommunicationEnrichmentService? enrichment = null,
-        ICommunicationDataverseService? communicationDataverse = null)
+        ICommunicationDataverseService? communicationDataverse = null,
+        Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService? directThreadAccess = null)
     {
         var options = MinimalOptions();
 
@@ -164,7 +165,8 @@ public class CommunicationServiceMessageSendTests
             Options.Create(options),
             Mock.Of<ILogger<CommunicationService>>(),
             threadResolver,
-            ScopeFactoryFor(idempotency));
+            ScopeFactoryFor(idempotency),
+            directThreadAccess);
     }
 
     private static ICommunicationDataverseService DataverseResolvingSystemUser()
@@ -349,6 +351,96 @@ public class CommunicationServiceMessageSendTests
 
         (await act.Should().ThrowAsync<Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException>())
             .Which.Code.Should().Be("SENDER_NOT_RESOLVED");
+    }
+
+    // ── task 062 / FR-12 (A): explicit ThreadId stamps sprk_communicationthread directly, bypassing
+    //    the find-or-create IThreadResolver entirely, and chains the task-043 message-access grant ──
+    [Fact]
+    public async Task SendAsync_ForMessageType_WithThreadId_StampsThreadLookupDirectlyAndGrantsAccess()
+    {
+        var explicitThreadId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var entity = EntityServiceCreating();
+        Guid? updatedCommunicationId = null;
+        Dictionary<string, object>? updatedFields = null;
+        entity.Setup(s => s.UpdateAsync(
+                "sprk_communication", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, id, fields, _) =>
+            {
+                updatedCommunicationId = id;
+                updatedFields = fields;
+            })
+            .Returns(Task.CompletedTask);
+
+        // Never touched — the explicit-target branch bypasses find-or-create entirely.
+        var resolver = new Mock<IThreadResolver>(MockBehavior.Strict);
+
+        var grantAccess = new Mock<Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService>();
+        grantAccess
+            .Setup(g => g.GrantMessageAccessAsync(It.IsAny<Guid>(), explicitThreadId, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var sut = BuildOutboundSut(
+            new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService(),
+            threadResolver: resolver.Object, directThreadAccess: grantAccess.Object);
+
+        var request = MessageRequest() with { ThreadId = explicitThreadId };
+        var response = await sut.SendAsync(request, AuthenticatedContext(), CancellationToken.None);
+
+        updatedFields.Should().NotBeNull();
+        updatedFields!["sprk_communicationthread"].Should().BeOfType<EntityReference>()
+            .Which.Id.Should().Be(explicitThreadId);
+        updatedCommunicationId.Should().Be(response.CommunicationId);
+
+        resolver.Invocations.Should().BeEmpty(); // find-or-create resolver never called
+        grantAccess.Verify(
+            g => g.GrantMessageAccessAsync(response.CommunicationId!.Value, explicitThreadId, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    // ── task 062 / FR-12 (A): omitting ThreadId leaves the existing find-or-create resolver path
+    //    unchanged (email-send parity — regression guard for the additive contract) ──
+    [Fact]
+    public async Task SendAsync_ForMessageType_WithoutThreadId_StillUsesFindOrCreateResolver()
+    {
+        var resolvedThreadId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var resolver = new Mock<IThreadResolver>();
+        resolver
+            .Setup(r => r.ResolveAndAssignThreadAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(resolvedThreadId);
+
+        var entity = EntityServiceCreating();
+        var sut = BuildOutboundSut(
+            new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService(), threadResolver: resolver.Object);
+
+        var response = await sut.SendAsync(MessageRequest(), AuthenticatedContext(), CancellationToken.None);
+
+        response.CommunicationId.Should().NotBeNull();
+        resolver.Verify(
+            r => r.ResolveAndAssignThreadAsync(
+                It.Is<ThreadResolutionRequest>(req => req.ChannelType == CommunicationType.Message),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        entity.Verify(s => s.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── task 062: InReplyToMessageId is now stamped on the Message channel's persisted record
+    //    (previously only wired for Email) ──
+    [Fact]
+    public async Task SendAsync_ForMessageType_WithInReplyToMessageId_StampsSprkInReplyToOnPersistedRecord()
+    {
+        var entity = EntityServiceCreating();
+        Entity? persisted = null;
+        entity.Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => persisted = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        var sut = BuildOutboundSut(new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService());
+
+        var request = MessageRequest() with { InReplyToMessageId = "parent-comm-id-123" };
+        await sut.SendAsync(request, AuthenticatedContext(), CancellationToken.None);
+
+        persisted.Should().NotBeNull();
+        persisted!.GetAttributeValue<string>("sprk_inreplyto").Should().Be("parent-comm-id-123");
     }
 
     // ── Inbound-echo scaffolding: the REAL handler + REAL ingestor over the shared boundary ──

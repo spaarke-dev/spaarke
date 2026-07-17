@@ -10,10 +10,14 @@
 | Field | Value |
 |-------|-------|
 | **Project** | messaging-communication-app-r1 — 2nd communication channel (ACS Chat) over ADR-045 seams |
-| **Progress** | **23 of 28 tasks ✅** — server-side + timeline component done. Owner config gates: Delegate role + User-level Read SATISFIED; **app-user Share privilege on `sprk_communicationthread` + `sprk_communication`** needed for GrantAccess/POA (043/052). |
-| **Active task** | **060 COMPLETE** ✅ (`CommunicationTimeline` in @spaarke/ui-components). Remaining: **061** (PCF package + DEPLOY — needs Dataverse env/auth), **062** (send/respond accessories), **063** (quoting), then **080/081** (tests/docs), **090** (wrap). |
-| **Next Action** | **task 061** — package `CommunicationTimeline` as a form-bound PCF + deploy to the OOB `sprk_communication`/thread form + UI tests. ⚠️ Deploy step needs the owner's Dataverse env (pac auth). Then 062/063 (client, parallelizable), 080/081, 090. |
-| **Status** | in-progress (timeline done; PCF packaging + deploy next) |
+| **Progress** | **24 of 28 tasks ✅** — server-side + timeline + send/respond accessories + send-contract closure done. Owner config gates: Delegate role + User-level Read SATISFIED; **app-user Share privilege on `sprk_communicationthread` + `sprk_communication`** needed for GrantAccess/POA (043/052). |
+| **Active task** | **062 COMPLETE** ✅ (`CommunicationMessageActions` PCF + send-contract closure). Remaining: **063** (quoting — client), **061** (timeline-PCF package + DEPLOY — needs owner env), **080/081** (tests/docs), **090** (wrap). |
+| **Next Action** | **task 063** (bidirectional inline content quoting email↔message via `sprk_body`; client TS; extends the 060 compose box prefill). Then 061 (package + owner deploy), 080/081, 090. |
+| **Status** | in-progress (send/respond done; quoting next) |
+
+### 🚚 OWNER DEPLOY HANDOFFS (packaged, awaiting owner's Dataverse env)
+- **062 PCF**: `src/client/pcf/CommunicationMessageActions/Solution/bin/CommunicationMessageActionsSolution_v1.0.0.zip` — `pac solution import --path ... --publish-changes`; place on `sprk_communicationthread` + `sprk_communication` forms; uses existing `sprk_MsalClientId`/`sprk_BffApiAppId`/`sprk_BffApiBaseUrl` env vars (no new ones). Full steps in the 062 commit body.
+- **061 (pending)**: will package `CommunicationTimeline` as a form-bound PCF similarly for owner import.
 
 ### 🔔 OPEN FINDINGS (status)
 1. ✅ **RESOLVED — Open-thread message access gap** (was HIGH): closed by **task 052** (grant Open-thread msgs to the 041-derived set at persist — option b). Task-050 impersonated reads now return matter-thread msgs.

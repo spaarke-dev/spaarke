@@ -720,6 +720,12 @@ public sealed class CommunicationService
         if (request.Cc is { Length: > 0 })
             communication["sprk_cc"] = string.Join("; ", request.Cc);
 
+        // Reply-thread continuity (task 062): stamp the parent message id when provided — mirrors the
+        // email path's sprk_inreplyto stamp (CreateDataverseRecordAsync / CreateAsUserRecordAsync). Not
+        // previously wired for the Message channel.
+        if (!string.IsNullOrWhiteSpace(request.InReplyToMessageId))
+            communication["sprk_inreplyto"] = request.InReplyToMessageId;
+
         // Map primary association (regarding lookup + denormalized fields) — same ADR-024 mechanism as email.
         MapAssociationFields(communication, request.Associations, _logger);
 
@@ -771,15 +777,23 @@ public sealed class CommunicationService
     }
 
     /// <summary>
-    /// Resolves (find-or-create) the outbound message's <c>sprk_communicationthread</c> via the task-040
-    /// <see cref="IThreadResolver"/>, passing the authoritative ACS thread id so the messaging key strategy
-    /// groups by it. Best-effort / non-fatal (NFR-02) — a resolve failure MUST NOT fail the send. Returns the
-    /// resolved thread id (or null on failure/no resolver) so the caller can chain the task-043 Direct-thread
-    /// message access grant.
+    /// Resolves the outbound message's <c>sprk_communicationthread</c>. Two paths (task 062 / FR-12):
+    /// <b>(1) Explicit target</b> — when <see cref="SendCommunicationRequest.ThreadId"/> is supplied (the
+    /// "respond into the current thread" case), the lookup is stamped DIRECTLY to that thread, bypassing the
+    /// ACS-thread find-or-create resolver below entirely (R1 has no live channel — see the field's doc
+    /// comment; ACS-thread-session reuse is R2). <b>(2) Find-or-create</b> — otherwise, the task-040
+    /// <see cref="IThreadResolver"/> groups by the authoritative ACS thread id. Both paths are best-effort /
+    /// non-fatal (NFR-02) — a resolve failure MUST NOT fail the send. Returns the resolved thread id (or null
+    /// on failure/no resolver) so the caller can chain the task-043 Direct-thread message access grant.
     /// </summary>
     private async Task<Guid?> ResolveOutboundMessageThreadAsync(
         Guid communicationId, SendCommunicationRequest request, string? acsThreadId, string correlationId, CancellationToken ct)
     {
+        if (request.ThreadId.HasValue)
+        {
+            return await AssignExplicitThreadAsync(communicationId, request.ThreadId.Value, correlationId, ct);
+        }
+
         if (_threadResolver is null)
             return null;
 
@@ -819,6 +833,51 @@ public sealed class CommunicationService
                 ex,
                 "Thread resolution failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
                 correlationId, communicationId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// R1 "respond into the current thread" explicit-target path (task 062 / FR-12). Stamps
+    /// <c>sprk_communication.sprk_communicationthread</c> directly to <paramref name="threadId"/> — no
+    /// find-or-create, no ACS-thread key lookup (see <see cref="SendCommunicationRequest.ThreadId"/> for the
+    /// R1-vs-R2 scope note). Chains the SAME task-043 Direct-thread message-access grant the find-or-create
+    /// path uses, so a message stamped this way is equally visible under the impersonated read (task 050).
+    /// Best-effort / non-fatal (NFR-02): a stamp failure MUST NOT fail the already-sent + persisted message.
+    /// </summary>
+    private async Task<Guid?> AssignExplicitThreadAsync(
+        Guid communicationId, Guid threadId, string correlationId, CancellationToken ct)
+    {
+        try
+        {
+            await _genericEntityService.UpdateAsync(
+                "sprk_communication",
+                communicationId,
+                new Dictionary<string, object>
+                {
+                    ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", threadId),
+                },
+                ct);
+
+            _logger.LogInformation(
+                "Stamped explicit thread target {ThreadId} (respond-into-thread) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                threadId, communicationId, correlationId);
+
+            // task 043 CRITICAL RISK fix applies here too — grant this ONE message to the target thread's
+            // current participants (Direct two-party list or Open derived set; no-op for neither).
+            if (_directThreadAccess is not null)
+            {
+                await _directThreadAccess.GrantMessageAccessAsync(communicationId, threadId, ct);
+            }
+
+            return threadId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Explicit thread stamp failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}, ThreadId: {ThreadId}",
+                correlationId, communicationId, threadId);
             return null;
         }
     }

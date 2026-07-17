@@ -173,6 +173,7 @@ export type {
   ICommunicationAssociation,
   CommunicationBodyFormat,
   CommunicationSendMode,
+  CommunicationChannelType,
 } from './communicationApi';
 
 // Typed wrapper around the polling-timeline read endpoints (task 050) +

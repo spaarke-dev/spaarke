@@ -246,13 +246,15 @@ export async function getUnreadCount(
  * contract (task 060 constraint: "Do NOT invent a new send contract"). Throws
  * {@link SendCommunicationError} on failure exactly as `sendCommunication()` does.
  *
- * KNOWN GAP (documented, not silently swallowed): `SendCommunicationOptions`
- * has no `communicationType` or `inReplyToMessageId` field, so every message
- * sent through the timeline's compose box is created as `CommunicationType.Email`
- * (the BFF's default) with no `sprk_inreplyto` stamped — reply-threading via this
- * path is NOT wired in R1. `communicationApi.ts` is READ-only for this task
- * (task 050/051 boundary) so extending its request shape is out of scope here;
- * flagged for the project owner / a follow-up task rather than worked around.
+ * GAP CLOSED (task 062, FR-12 prerequisite): `SendCommunicationOptions` now carries
+ * `communicationType` / `threadId` / `inReplyToMessageId` (additive — email send is
+ * unchanged when omitted). Callers that want a THREADED Message send (the
+ * send/respond accessory PCF's "respond into the current thread" action) pass
+ * `communicationType: 'message'` + `threadId: <target sprk_communicationthread id>`.
+ * This timeline component's OWN compose box (`<CommunicationTimeline/>` / task 060)
+ * still calls `sendTimelineMessage` without those fields, so its replies remain
+ * Email-typed/unthreaded by default — extending the timeline's own reply UX to
+ * default to a threaded Message send is a follow-up, not part of this closure.
  */
 export async function sendTimelineMessage(
   options: SendCommunicationOptions,
