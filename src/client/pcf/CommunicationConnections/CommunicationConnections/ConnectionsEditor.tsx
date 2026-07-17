@@ -27,7 +27,6 @@ import {
   Text,
   Button,
   Badge,
-  Divider,
   Tooltip,
   Menu,
   MenuTrigger,
@@ -45,7 +44,10 @@ import {
   DocumentText20Regular,
   Sparkle16Regular,
   CheckmarkCircle20Filled,
+  Checkmark16Regular,
   ArrowSwap16Regular,
+  Add16Regular,
+  Link16Regular,
   Link20Regular,
   ChevronDown16Regular,
   ChevronUp16Regular,
@@ -58,8 +60,10 @@ import {
   type ProvenanceCandidate,
   type Connection,
   type FiledAssociation,
+  type AiSuggestedType,
   confidenceBand,
   deriveConnections,
+  deriveAiSuggestedTypes,
   mergeFiledConnections,
   topCandidate,
 } from './provenance';
@@ -87,6 +91,12 @@ export interface ConnectionsCallbacks {
    * (type-first UX). Called with no argument = all-types fallback.
    */
   onLinkAnother?: (entityType?: string) => void;
+  /**
+   * Launch the create form for an AI-suggested record type (e.g. "Create Matter" when the
+   * classifier flags a new-matter email). Distinct from onLinkAnother (which files an
+   * existing record).
+   */
+  onCreateType?: (entityType: string) => void;
 }
 
 export interface ConnectionsEditorProps extends ConnectionsCallbacks {
@@ -215,16 +225,41 @@ const useStyles = makeStyles({
   grow: { flex: 1 },
   rollup: { color: tokens.colorNeutralForeground2 },
 
-  row: {
-    display: 'flex',
+  // One shared column template drives header + every row so columns align like a grid.
+  gridRow: {
+    display: 'grid',
+    gridTemplateColumns: '160px minmax(0, 1fr) 120px 110px 108px',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
+    columnGap: tokens.spacingHorizontalM,
     paddingBlock: tokens.spacingVerticalSNudge,
+    paddingInline: tokens.spacingHorizontalS,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke3}`,
   },
+  gridHeader: {
+    display: 'grid',
+    gridTemplateColumns: '160px minmax(0, 1fr) 120px 110px 108px',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalM,
+    paddingBlock: tokens.spacingVerticalXS,
+    paddingInline: tokens.spacingHorizontalS,
+    borderBottom: `2px solid ${tokens.colorNeutralStroke2}`,
+    position: 'sticky',
+    top: 0,
+    backgroundColor: tokens.colorNeutralBackground1,
+    zIndex: 1,
+  },
+  colHead: {
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.03em',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  typeCell: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS, minWidth: 0 },
   slotIcon: { color: tokens.colorNeutralForeground3, display: 'flex', flexShrink: 0 },
-  slotLabel: { width: '92px', flexShrink: 0, color: tokens.colorNeutralForeground3 },
-  target: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 },
-  targetName: { fontWeight: tokens.fontWeightSemibold },
+  slotLabel: { color: tokens.colorNeutralForeground2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  target: { display: 'flex', flexDirection: 'column', minWidth: 0 },
+  targetName: { fontWeight: tokens.fontWeightSemibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   confHigh: { color: tokens.colorPaletteGreenForeground1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' },
   confMedium: {
     color: tokens.colorPaletteMarigoldForeground1,
@@ -239,14 +274,28 @@ const useStyles = makeStyles({
   createRow: { display: 'flex', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
   suggestedChip: { border: `1px dashed ${tokens.colorBrandStroke1}` },
   ambigNote: { color: tokens.colorPaletteRedForeground1 },
-  altRow: {
-    display: 'flex',
+
+  // ── grid layout (the review modal's main surface) ──
+  gridWrap: { display: 'flex', flexDirection: 'column', height: '100%', gap: tokens.spacingVerticalS, minHeight: 0 },
+  gridScroll: { flex: 1, overflowY: 'auto', minHeight: 0 },
+  colType: { width: '150px' },
+  colConf: { width: '130px' },
+  colStatus: { width: '120px' },
+  colActions: { width: '120px' },
+  actionsCell: { display: 'flex', gap: tokens.spacingHorizontalXS, justifyContent: 'flex-end', width: '100%' },
+  subCell: { color: tokens.colorNeutralForeground2, paddingLeft: tokens.spacingHorizontalL, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  newTag: { color: tokens.colorNeutralForeground3, fontStyle: 'italic' },
+  emptyGrid: { color: tokens.colorNeutralForeground3, padding: tokens.spacingVerticalM },
+  subRow: {
+    display: 'grid',
+    gridTemplateColumns: '160px minmax(0, 1fr) 120px 110px 108px',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    paddingLeft: '108px',
+    columnGap: tokens.spacingHorizontalM,
     paddingBlock: '2px',
+    paddingInline: tokens.spacingHorizontalS,
+    backgroundColor: tokens.colorNeutralBackground2,
   },
-  expanderRow: { paddingLeft: '100px', paddingBlock: '0px' },
+  expanderRow: { justifySelf: 'start' },
 
   summaryBar: {
     display: 'flex',
@@ -274,6 +323,67 @@ function confText(v: number): string {
   return `${Math.round(v * 100)}% · ${BAND_WORD[confidenceBand(v)]}`;
 }
 
+const STATUS_META: Record<Connection['status'], { label: string; color: 'success' | 'brand' | 'danger' }> = {
+  confirmed: { label: 'Filed', color: 'success' },
+  suggested: { label: 'Suggested', color: 'brand' },
+  ambiguous: { label: 'Ambiguous', color: 'danger' },
+};
+
+/** The Status-column badge — Primary wins over the raw status when a confirmed slot is primary. */
+function StatusBadge({ status, isPrimary, isConfirmed }: {
+  status: Connection['status'];
+  isPrimary: boolean;
+  isConfirmed: boolean;
+}): JSX.Element {
+  if (isConfirmed && isPrimary) {
+    return (
+      <Badge appearance="tint" color="warning" icon={<Star16Filled />}>
+        Primary
+      </Badge>
+    );
+  }
+  const meta = STATUS_META[isConfirmed ? 'confirmed' : status];
+  return (
+    <Badge appearance="tint" color={meta.color}>
+      {meta.label}
+    </Badge>
+  );
+}
+
+/** An indented candidate sub-row (ambiguous alternative / other candidate) with a File action. */
+function SubRow({
+  s,
+  name,
+  confidence,
+  busy,
+  onFile,
+}: {
+  s: ReturnType<typeof useStyles>;
+  name: string;
+  confidence: number;
+  busy: boolean;
+  onFile: () => void;
+}): JSX.Element {
+  return (
+    <div className={s.subRow}>
+      <span />
+      <Text size={200} weight="semibold" className={s.subCell}>
+        {name}
+      </Text>
+      <Text size={200} className={confClass(s, confidence)}>
+        {confText(confidence)}
+      </Text>
+      <span />
+      <div className={s.actionsCell}>
+        <Tooltip content="File this one" relationship="label">
+          <Button size="small" appearance="primary" icon={<Checkmark16Regular />} disabled={busy} onClick={onFile} />
+        </Tooltip>
+      </div>
+    </div>
+  );
+}
+
+/** One connection = a grid row (+ any alternative / other-candidate sub-rows). Actions are icon-only. */
 function ConnectionRow({
   conn,
   confirmed,
@@ -301,76 +411,101 @@ function ConnectionRow({
   const [showOthers, setShowOthers] = React.useState(false);
   const others = conn.otherCandidates ?? [];
   const hasOthers = conn.status !== 'ambiguous' && !readOnly && others.length > 0;
+  const alternatives = conn.status === 'ambiguous' && !readOnly ? (conn.alternatives ?? []) : [];
+  const nameOf = (alt: ProvenanceCandidate) =>
+    resolveDisplayName?.(alt.targetEntity, alt.targetId) ?? alt.targetName ?? alt.targetId;
 
   return (
     <>
-      <div className={s.row}>
-        <span className={s.slotIcon}>{entityIcon(conn.entity)}</span>
-        <Text size={200} className={s.slotLabel}>
-          {conn.slotLabel}
-        </Text>
+      <div className={s.gridRow}>
+        {/* Type */}
+        <div className={s.typeCell}>
+          <span className={s.slotIcon}>{entityIcon(conn.entity)}</span>
+          <Text size={300} className={s.slotLabel}>
+            {conn.slotLabel}
+          </Text>
+        </div>
+        {/* Record */}
         <div className={s.target}>
           {conn.status === 'ambiguous' ? (
-            <Text className={s.ambigNote} weight="semibold" size={300}>
+            <Text className={s.ambigNote} size={300}>
               Two possible matches — choose one
             </Text>
           ) : (
-            <Text className={s.targetName} size={300} truncate wrap={false}>
+            <Text className={s.targetName} size={300}>
               {targetName}
             </Text>
           )}
+          {hasOthers && (
+            <Button
+              className={s.expanderRow}
+              size="small"
+              appearance="transparent"
+              icon={showOthers ? <ChevronUp16Regular /> : <ChevronDown16Regular />}
+              onClick={() => setShowOthers(v => !v)}
+            >
+              {showOthers ? 'Hide other candidates' : `${others.length} other candidate${others.length === 1 ? '' : 's'}`}
+            </Button>
+          )}
         </div>
-        {conn.status !== 'ambiguous' && (
+        {/* Confidence */}
+        {conn.status === 'ambiguous' ? (
+          <Text size={200} className={s.confLow}>
+            —
+          </Text>
+        ) : (
           <Text size={200} className={confClass(s, conn.confidence)}>
             {confText(conn.confidence)}
           </Text>
         )}
-        <div className={s.rowActions}>
-          {isConfirmed ? (
+        {/* Status */}
+        <StatusBadge status={conn.status} isPrimary={isPrimary} isConfirmed={isConfirmed} />
+        {/* Actions (icon-only) */}
+        <div className={s.actionsCell}>
+          {readOnly ? null : isConfirmed ? (
             <>
-              <span className={s.confirmedTick}>
-                <CheckmarkCircle20Filled />
-              </span>
-              {isPrimary ? (
-                <Badge appearance="tint" color="warning" icon={<Star16Filled />}>
-                  Primary
-                </Badge>
-              ) : (
-                !readOnly && (
-                  <Tooltip content="Show this record in the Regarding Record fields" relationship="label">
-                    <Button
-                      size="small"
-                      appearance="subtle"
-                      icon={<Star16Regular />}
-                      disabled={busy}
-                      onClick={() => onSetPrimary(conn)}
-                    >
-                      Primary
-                    </Button>
-                  </Tooltip>
-                )
+              {!isPrimary && (
+                <Tooltip content="Make primary (show in Regarding Record)" relationship="label">
+                  <Button
+                    size="small"
+                    appearance="subtle"
+                    icon={<Star16Regular />}
+                    disabled={busy}
+                    onClick={() => onSetPrimary(conn)}
+                  />
+                </Tooltip>
               )}
-              {!readOnly && (
+              <Tooltip content="Change / override" relationship="label">
                 <Button
                   size="small"
                   appearance="subtle"
                   icon={<ArrowSwap16Regular />}
                   disabled={busy}
                   onClick={() => onChange(conn)}
-                >
-                  Change
-                </Button>
-              )}
+                />
+              </Tooltip>
             </>
-          ) : readOnly ? null : conn.status === 'ambiguous' ? (
-            <Button size="small" appearance="secondary" disabled={busy} onClick={() => onChange(conn)}>
-              Review
-            </Button>
+          ) : conn.status === 'ambiguous' ? (
+            <Tooltip content="Change / override" relationship="label">
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={<ArrowSwap16Regular />}
+                disabled={busy}
+                onClick={() => onChange(conn)}
+              />
+            </Tooltip>
           ) : (
             <>
-              <Button size="small" appearance="primary" disabled={busy} onClick={() => onConfirm(conn)}>
-                Confirm
-              </Button>
+              <Tooltip content="Confirm" relationship="label">
+                <Button
+                  size="small"
+                  appearance="primary"
+                  icon={<Checkmark16Regular />}
+                  disabled={busy}
+                  onClick={() => onConfirm(conn)}
+                />
+              </Tooltip>
               <Tooltip content="Pick a different record" relationship="label">
                 <Button
                   size="small"
@@ -384,51 +519,77 @@ function ConnectionRow({
           )}
         </div>
       </div>
-      {hasOthers && (
-        <div className={s.expanderRow}>
-          <Button
-            size="small"
-            appearance="transparent"
-            icon={showOthers ? <ChevronUp16Regular /> : <ChevronDown16Regular />}
-            onClick={() => setShowOthers(v => !v)}
-          >
-            {showOthers ? 'Hide other candidates' : `${others.length} other candidate${others.length === 1 ? '' : 's'}`}
-          </Button>
-        </div>
-      )}
       {hasOthers &&
         showOthers &&
         others.map((alt, i) => (
-          <div key={i} className={s.altRow}>
-            <Text size={200} weight="semibold">
-              {resolveDisplayName?.(alt.targetEntity, alt.targetId) ?? alt.targetName ?? alt.targetId}
-            </Text>
-            <Text size={200} className={confClass(s, alt.reinforcedConfidence)}>
-              {confText(alt.reinforcedConfidence)}
-            </Text>
-            <div className={s.grow} />
-            <Button size="small" appearance="primary" disabled={busy} onClick={() => onConfirm(conn, alt)}>
-              File here
-            </Button>
-          </div>
+          <SubRow key={`o${i}`} s={s} busy={busy} name={nameOf(alt)} confidence={alt.reinforcedConfidence} onFile={() => onConfirm(conn, alt)} />
         ))}
-      {conn.status === 'ambiguous' &&
-        !readOnly &&
-        conn.alternatives?.map((alt, i) => (
-          <div key={i} className={s.altRow}>
-            <Text size={200} weight="semibold">
-              {resolveDisplayName?.(alt.targetEntity, alt.targetId) ?? alt.targetName ?? alt.targetId}
-            </Text>
-            <Text size={200} className={confClass(s, alt.reinforcedConfidence)}>
-              {confText(alt.reinforcedConfidence)}
-            </Text>
-            <div className={s.grow} />
-            <Button size="small" appearance="primary" disabled={busy} onClick={() => onConfirm(conn, alt)}>
-              File here
-            </Button>
-          </div>
-        ))}
+      {alternatives.map((alt, i) => (
+        <SubRow key={`a${i}`} s={s} busy={busy} name={nameOf(alt)} confidence={alt.reinforcedConfidence} onFile={() => onConfirm(conn, alt)} />
+      ))}
     </>
+  );
+}
+
+/** An AI-classifier suggested record TYPE with no matching record yet (e.g. "looks like a new Matter"). */
+function AiSuggestionRow({
+  suggestion,
+  readOnly,
+  busy,
+  onCreateType,
+  onLinkAnother,
+}: {
+  suggestion: AiSuggestedType;
+  readOnly: boolean;
+  busy: boolean;
+  onCreateType: (entityType: string) => void;
+  onLinkAnother: (entityType?: string) => void;
+}): JSX.Element {
+  const s = useStyles();
+  return (
+    <div className={s.gridRow}>
+      <div className={s.typeCell}>
+        <span className={s.slotIcon}>{entityIcon(suggestion.entityType)}</span>
+        <Text size={300} className={s.slotLabel}>
+          {suggestion.label}
+        </Text>
+      </div>
+      <Tooltip content={suggestion.reason} relationship="label">
+        <Text size={300} className={s.newTag}>
+          Looks like a new {suggestion.label} (AI)
+        </Text>
+      </Tooltip>
+      <Badge appearance="tint" color="brand" icon={<Sparkle16Regular />}>
+        AI
+      </Badge>
+      <Badge appearance="outline" color="informative">
+        Suggested
+      </Badge>
+      <div className={s.actionsCell}>
+        {!readOnly && (
+          <>
+            <Tooltip content={`Create a new ${suggestion.label}`} relationship="label">
+              <Button
+                size="small"
+                appearance="primary"
+                icon={<Add16Regular />}
+                disabled={busy}
+                onClick={() => onCreateType(suggestion.entityType)}
+              />
+            </Tooltip>
+            <Tooltip content={`Link an existing ${suggestion.label}`} relationship="label">
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={<Link16Regular />}
+                disabled={busy}
+                onClick={() => onLinkAnother(suggestion.entityType)}
+              />
+            </Tooltip>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -447,6 +608,7 @@ function EditorBody({
   onChange,
   onSetPrimary,
   onLinkAnother,
+  onCreateType,
 }: {
   record: ICommunicationRecord;
   provenance: ProvenanceDoc;
@@ -461,6 +623,7 @@ function EditorBody({
   onChange: (conn: Connection) => void;
   onSetPrimary: (conn: Connection) => void;
   onLinkAnother: (entityType?: string) => void;
+  onCreateType: (entityType: string) => void;
 }): JSX.Element {
   const s = useStyles();
   const isResolved = record.sprk_associationstatus === AssociationStatus.Resolved;
@@ -469,6 +632,11 @@ function EditorBody({
   const connections = React.useMemo(
     () => mergeFiledConnections(deriveConnections(provenance, isResolved), filedAssociations ?? []),
     [provenance, isResolved, filedAssociations]
+  );
+  // AI-classifier suggested types with no matching slot (e.g. a brand-new matter).
+  const aiSuggestions = React.useMemo(
+    () => deriveAiSuggestedTypes(provenance, new Set(connections.map(c => c.entity))),
+    [provenance, connections]
   );
 
   // Controlled by the App (write-success only) — no local optimistic state (W1).
@@ -487,8 +655,10 @@ function EditorBody({
   const toReview = connections.filter(c => c.status !== 'confirmed' && !confirmedFields.has(c.field)).length;
   const confirmedCount = connections.length - toReview;
 
+  const hasRows = connections.length > 0 || aiSuggestions.length > 0;
+
   return (
-    <div className={s.wrap}>
+    <div className={s.gridWrap}>
       <div className={s.headRow}>
         <Text size={200} weight="semibold" className={s.kicker}>
           Connections
@@ -510,20 +680,45 @@ function EditorBody({
         )}
       </div>
 
-      {connections.map(c => (
-        <ConnectionRow
-          key={c.field}
-          conn={c}
-          confirmed={confirmedFields.has(c.field)}
-          isPrimary={c.field === effectivePrimary}
-          readOnly={readOnly}
-          busy={busy}
-          resolveDisplayName={resolveDisplayName}
-          onConfirm={onConfirm}
-          onChange={onChange}
-          onSetPrimary={onSetPrimary}
-        />
-      ))}
+      <div className={s.gridScroll}>
+        <div className={s.gridHeader}>
+          <Text className={s.colHead}>Type</Text>
+          <Text className={s.colHead}>Record</Text>
+          <Text className={s.colHead}>Confidence</Text>
+          <Text className={s.colHead}>Status</Text>
+          <Text className={s.colHead} style={{ textAlign: 'right' }}>
+            Actions
+          </Text>
+        </div>
+
+        {connections.map(c => (
+          <ConnectionRow
+            key={c.field}
+            conn={c}
+            confirmed={confirmedFields.has(c.field)}
+            isPrimary={c.field === effectivePrimary}
+            readOnly={readOnly}
+            busy={busy}
+            resolveDisplayName={resolveDisplayName}
+            onConfirm={onConfirm}
+            onChange={onChange}
+            onSetPrimary={onSetPrimary}
+          />
+        ))}
+
+        {aiSuggestions.map(sug => (
+          <AiSuggestionRow
+            key={sug.entityType}
+            suggestion={sug}
+            readOnly={readOnly}
+            busy={busy}
+            onCreateType={onCreateType}
+            onLinkAnother={onLinkAnother}
+          />
+        ))}
+
+        {!hasRows && <Text className={s.emptyGrid}>No connections yet — use “Link another record” to add one.</Text>}
+      </div>
 
       {!readOnly && (
         <div className={s.addRow}>
@@ -573,6 +768,7 @@ export function ConnectionsEditor(props: ConnectionsEditorProps): JSX.Element | 
     onChange: props.onChange ?? (() => undefined),
     onSetPrimary: props.onSetPrimary ?? (() => undefined),
     onLinkAnother: props.onLinkAnother ?? (() => undefined),
+    onCreateType: props.onCreateType ?? (() => undefined),
   };
 
   // Nothing to show: no engine provenance AND nothing filed → only a bare

@@ -282,6 +282,43 @@ export function mergeFiledConnections(connections: Connection[], filed: FiledAss
   return out.sort((a, b) => a.order - b.order);
 }
 
+/** A record type the AI classifier flagged (e.g. "looks like a new Matter") with no matching record yet. */
+export interface AiSuggestedType {
+  entityType: string;
+  label: string;
+  reason: string;
+}
+
+/**
+ * Parse the AI-classification signals for suggested record TYPES that aren't already
+ * represented by a candidate/filed slot — e.g. an email about a brand-new matter that
+ * doesn't exist yet. The engine embeds these as `types=[sprk_matter]` in the signal's
+ * provenance string (there is no dedicated structured field today). Surfaced in the grid
+ * as a "Create <Type>" affordance so the reviewer can act on the AI's intent.
+ */
+export function deriveAiSuggestedTypes(doc: ProvenanceDoc, existingEntityTypes: ReadonlySet<string>): AiSuggestedType[] {
+  const out: AiSuggestedType[] = [];
+  const seen = new Set<string>();
+  for (const sig of doc.signals ?? []) {
+    const match = /types=\[([^\]]*)\]/.exec(sig.provenance ?? '');
+    if (!match) continue;
+    const types = match[1]
+      .split(',')
+      .map(t => t.trim())
+      .filter(Boolean);
+    for (const et of types) {
+      if (existingEntityTypes.has(et) || seen.has(et)) continue;
+      seen.add(et);
+      out.push({
+        entityType: et,
+        label: entityLabel(et),
+        reason: `The AI classifier flagged this email as relating to a ${entityLabel(et)}.`,
+      });
+    }
+  }
+  return out;
+}
+
 /** Turn structural signals/obligations into "create from this email" suggestions. */
 export function deriveCreateActions(doc: ProvenanceDoc): CreateAction[] {
   const suggested = new Map<string, CreateAction>();

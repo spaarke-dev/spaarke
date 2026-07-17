@@ -37,7 +37,7 @@ import {
   Badge,
   Tooltip,
 } from '@fluentui/react-components';
-import { ArrowExpand16Regular } from '@fluentui/react-icons';
+import { Open16Regular } from '@fluentui/react-icons';
 import {
   TODO_REGARDING_CATALOG,
   cleanGuid,
@@ -108,8 +108,9 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
   },
   emptyText: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase300 },
-  modalSurface: { maxWidth: '640px', width: '90vw' },
-  modalBody: { maxHeight: '70vh', overflowY: 'auto' },
+  // Wizard-standard modal footprint (~80vw × 80vh) so the review grid has room.
+  modalSurface: { width: '80vw', maxWidth: '1200px', height: '80vh', maxHeight: '80vh' },
+  modalBody: { height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
 });
 
 // Fallback primary-name field per entity, used ONLY when the `sprk_recordtype_ref`
@@ -480,6 +481,32 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     [fileSelection]
   );
 
+  // Launch the create form for an AI-suggested type (e.g. "Create Matter"). R4 launches
+  // the quick-create form; full create-and-link is the Notification-Spine project.
+  const handleCreateType = React.useCallback((entityType: string): void => {
+    const xrm = getXrm();
+    const onLaunchError = (err: unknown) =>
+      console.warn('[CommunicationConnections] create-type launch failed:', err);
+    try {
+      if (typeof xrm?.Navigation?.openForm === 'function') {
+        Promise.resolve(xrm.Navigation.openForm({ entityName: entityType, useQuickCreateForm: true })).catch(
+          onLaunchError
+        );
+      } else if (typeof xrm?.Navigation?.navigateTo === 'function') {
+        Promise.resolve(
+          xrm.Navigation.navigateTo(
+            { pageType: 'entityrecord', entityName: entityType },
+            { target: 2, width: { value: 60, unit: '%' }, height: { value: 80, unit: '%' } }
+          )
+        ).catch(onLaunchError);
+      } else {
+        setError('Create is unavailable in this host.');
+      }
+    } catch (err) {
+      onLaunchError(err);
+    }
+  }, []);
+
   const handleSetPrimary = React.useCallback(
     (conn: Connection): void => {
       // The primary owns the denormalized Regarding Record fields. Re-filing the
@@ -544,7 +571,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
             <Button
               size="small"
               appearance="subtle"
-              icon={<ArrowExpand16Regular />}
+              icon={<Open16Regular />}
               aria-label="Review connections"
               onClick={() => setModalOpen(true)}
             />
@@ -586,6 +613,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
                 onChange={handleChange}
                 onSetPrimary={handleSetPrimary}
                 onLinkAnother={handleLinkAnother}
+                onCreateType={handleCreateType}
               />
             </DialogContent>
             <DialogActions>
