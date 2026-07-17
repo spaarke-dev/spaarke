@@ -3,7 +3,7 @@
     <title>Add `Docxodus` 7.1.0 (SkiaSharp excluded) + bump OpenXml 3.4.1→3.5.1; publish-size + CVE baseline</title>
     <phase>0 Foundations</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>opus</model-tier>
     <effort>high</effort>
@@ -128,4 +128,43 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    **Completed 2026-07-16** (Opus 4.8 @ high, FULL rigor).
+
+    **§6.5 Path-C deviation — Docxodus 7.1.0 → 6.4.0**: 7.x targets net10.0 ONLY (NU1202 on the
+    net8.0 BFF). 6.4.0 is the highest release on the net8.0 line of the same MIT fork ("upgraded to
+    .NET 8.0"), same WmlComparer engine, and pulls DocumentFormat.OpenXml 3.5.1 transitively (matches
+    the task's bump target). The S1/S1b/S3 spikes validated engine behavior on a net10 scratchpad
+    harness and did NOT catch net8 consumability — spike-coverage gap noted for the hardening gate
+    (task 003). DOC-RECONCILE FOLLOW-UP: design §12.3 + tasks 010/020/021/022 prose still say "7.1.0";
+    update to "6.4.0 (net8.0 line)".
+
+    **SkiaSharp exclusion (linux-x64 RID)**: 6.4.0 delivers the native via
+    SkiaSharp.NativeAssets.Linux.NoDependencies 3.119.4 (not the win-x64 native). Excluded
+    runtime;native on BOTH `SkiaSharp` 3.119.4 and `SkiaSharp.NativeAssets.Linux.NoDependencies`
+    3.119.4. Verified: 0 SkiaSharp managed dll, 0 native, no runtimes/ dir in publish.
+
+    **Measurements** (deploy/api-publish, compressed incl. PDBs via Compress-Archive Optimal):
+    - Fresh pre-change baseline: 46.66 MB compressed / 140.89 MB uncompressed / 240 files
+      (below the documented 49.63 MB baseline because this worktree is rebased past ai-redesign-r1's
+      ~11.8k-line deletion sweep).
+    - Post-change: 47.26 MB compressed / 142.72 MB uncompressed / 241 files.
+    - Delta: +0.60 MB compressed (+1.83 MB uncompressed = Docxodus.dll 1.82 MB). Under +5 MB
+      escalation threshold; far under 55/60 MB ceilings.
+    - CVE: no NEW HIGH from Docxodus/OpenXml. Pre-existing HIGH = Microsoft.Kiota.Abstractions
+      1.21.2 (GHSA-7j59-v9qr-6fq9), Graph SDK chain, accepted risk per ADR-029 — NOT introduced here.
+
+    **Placement Justification (§10)**: csproj-only packaging change reusing the existing Sprk.Bff.Api
+    project; no new project/service. All R3 server work lives in the BFF (Services/Compose). Per
+    bff-extensions.md decision criteria the addition belongs in-BFF (consumed only by the BFF Compose
+    save path). No new endpoint, DI registration, or AI-internal injection.
+
+    **Quality gate (Step 9.5, inline)**: ADR-029 four MUST rules intact (linux-x64 framework-dependent,
+    sourcemap exclusion, transitive-CVE overrides, ≤60 MB); no new HIGH CVE. Full /code-review +
+    /adr-check skills not spawned (single declarative csproj); available on request.
+
+    **Files modified**: src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (Docxodus 6.4.0 +
+    SkiaSharp×2 exclusion + OpenXml 3.4.1→3.5.1).
+  </notes>
 </task>

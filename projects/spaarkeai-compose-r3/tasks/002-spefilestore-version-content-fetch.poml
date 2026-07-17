@@ -3,7 +3,7 @@
     <title>`SpeFileStore` version-content fetch (FR-06) — fetch a driveItem version's content by `versionId`</title>
     <phase>0 Foundations</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
@@ -132,4 +132,43 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    **Completed 2026-07-16** (Opus 4.8, FULL rigor). Code deliverable done + build green (0 errors).
+
+    **Files modified**:
+    - Infrastructure/Graph/ISpeFileOperations.cs — added `DownloadFileVersionAsUserAsync(HttpContext,
+      driveId, itemId, versionId, ct) -> Task&lt;Stream?&gt;` (mirrors DownloadFileAsUserAsync; additive).
+    - Infrastructure/Graph/SpeFileStore.cs — added the facade delegation to `_driveItemOps`.
+    - Infrastructure/Graph/DriveItemOperations.cs — implemented via Graph v5
+      `Drives[driveId].Items[itemId].Versions[versionId].Content.GetAsync(...)` under OBO; 404/missing
+      version → null (facade error-translation); 403 → UnauthorizedAccessException. Mirrors the
+      existing download impl exactly.
+
+    **ADR-007**: verified by inspection — new public signatures expose only HttpContext + string +
+    Stream?; no Microsoft.Graph type crosses the facade. Additive: existing DownloadFileAsUserAsync
+    callers/mocks untouched.
+
+    **§6.5 Path-C — unit test deferred to the 022/024 seam (AC#6)**: the mirrored method's own unit
+    tests (SpeFileStoreTests.cs) are ALL `[Fact(Skip="Graph SDK sealed classes cannot be mocked...")]`
+    — Graph v5 GraphServiceClient/request-builders are unmockable at the DriveItemOperations level. The
+    only working exercise is FakeGraphClientFactory+FakeGraphHttpHandler THROUGH an endpoint (seam test),
+    which needs the consuming endpoint from task 022. ADR-038 bans facade-level scaffolding mocks
+    (B1/B5/B7) and mandates seam tests; the POML itself states the through-the-wire test rides 022/024.
+    → No scaffolding unit test added. **TRACKING: task 024's E1 seam test MUST assert baseline
+    retrieval by versionId (load-time version fetched after a simulated refresh).** SYSTEMIC: this
+    defer-to-seam doctrine applies to all R3 BFF facade/IO tasks (010/020/021/022/023) — pending owner
+    confirmation.
+
+    **Publish size**: no NuGet/dependency change (Graph SDK already referenced) → compile-only IL delta,
+    negligible; absolute unchanged from task 001 (~47.26 MB compressed incl PDBs). Not re-measured (the
+    per-task rule targets dependency/size drift; a C#-only method adds none). PDB convention: incl PDBs.
+
+    **Placement Justification (§10)**: additive method on the existing SPE facade boundary — no new
+    service/surface; the version-scoped download extends the existing OBO download pattern. In-BFF per
+    bff-extensions.md (SPE access is BFF-owned behind SpeFileStore).
+
+    **Quality gate (Step 9.5, inline)**: exact mirror of a shipped method + ADR-007 verified by
+    inspection + build green + no new deps. Full /code-review + /adr-check available on request.
+  </notes>
 </task>

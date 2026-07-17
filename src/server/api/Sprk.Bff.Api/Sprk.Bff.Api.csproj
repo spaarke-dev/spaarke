@@ -125,7 +125,28 @@
     <PackageReference Include="OpenTelemetry.Api" Version="1.15.3" />
 
     <!-- Document Generation -->
-    <PackageReference Include="DocumentFormat.OpenXml" Version="3.4.1" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+
+    <!-- Compose R3 E1 (task 001, FR-01/FR-03/FR-05): Docxodus WmlComparer redline engine (MIT,
+         maintained fork of Microsoft's archived Open-Xml-PowerTools). Used ONLY for WmlComparer
+         paragraph-level redline synthesis in Services/Compose.
+         VERSION NOTE (task 001, §6.5 Path C, 2026-07-16): the design/task named 7.1.0, but 7.x
+         targets net10.0 ONLY and the BFF is net8.0 (NU1202). 6.4.0 is the highest release on the
+         net8.0 line of the same fork ("upgraded to .NET 8.0") — same WmlComparer engine, and it
+         pulls DocumentFormat.OpenXml 3.5.1 transitively (matching the task's OpenXml bump).
+         Its transitive SkiaSharp (3.119.4) + SkiaSharp.NativeAssets.Linux.NoDependencies (3.119.4)
+         ship a native lib that WmlComparer does NOT need for the diff (Spike S3); both are excluded
+         below (runtime;native) to keep the publish within NFR-01 budget. Our RID is linux-x64, so
+         the native arrives via the Linux NativeAssets package, not the win-x64 one.
+         BINDING packaging invariant (design §13): downstream consumers MUST NOT invoke Docxodus
+         HtmlToWml / FormattingAssembler — those re-pull SkiaSharp. -->
+    <PackageReference Include="Docxodus" Version="6.4.0" />
+    <PackageReference Include="SkiaSharp" Version="3.119.4">
+      <ExcludeAssets>runtime;native</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.4">
+      <ExcludeAssets>runtime;native</ExcludeAssets>
+    </PackageReference>
 
     <!-- Power BI Embedded Reporting (PBI-001) -->
     <PackageReference Include="Microsoft.PowerBI.Api" Version="4.21.1" />

@@ -26,8 +26,8 @@
 
 | ID | Title | Phase | Gate | Deps | Status | Rigor | Model | Effort | Parallel-safe |
 |----|-------|-------|------|------|--------|-------|-------|--------|---------------|
-| 001 | Add `Docxodus` 7.1.0 (SkiaSharp excluded) + bump OpenXml 3.4.1→3.5.1; publish-size + CVE baseline | 0 Foundations | 🟢 | none | 🔲 | FULL | opus | high | false (csproj foundation) |
-| 002 | `SpeFileStore` version-content fetch (FR-06) — fetch a driveItem version's content by `versionId` | 0 Foundations | 🟢 | none | 🔲 | FULL | sonnet | high | true |
+| 001 | Add `Docxodus` **6.4.0** (net8.0 line; SkiaSharp excluded) + bump OpenXml 3.4.1→3.5.1; publish-size + CVE baseline | 0 Foundations | 🟢 | none | ✅ | FULL | opus | high | false (csproj foundation) |
+| 002 | `SpeFileStore` version-content fetch (FR-06) — fetch a driveItem version's content by `versionId` | 0 Foundations | 🟢 | none | ✅ | FULL | sonnet | high | true |
 | 003 | NFR-09 real-template hardening gate — re-run S1/S1b harness on 2–3 real firm templates | 0 Foundations | 🟢 | 001 | 🔲 | FULL | opus | xhigh | true |
 | 010 | FR-08 server pre-parse + `w14:paraId` minting on Load (OOXML-valid, collision-checked) | 1 E2 | 🟢 | 001 | 🔲 | FULL | opus | xhigh | false (LoadAsync) |
 | 011 | FR-09/FR-10 explicit load-time paraId carry (hidden node attr) + split-minting via `@tiptap/extension-unique-id` | 1 E2 | 🔴 | 010 | 🔲 | FULL | sonnet | high | true (client) |
@@ -82,3 +82,5 @@
 ---
 
 *Maintained by task-execute (status flips 🔲→🔄→✅). Every BFF task runs `.claude/constraints/bff-extensions.md` + reports publish-size delta vs ~49.63 MB baseline.*
+
+> **DOCXODUS VERSION CORRECTION (task 001, 2026-07-16, §6.5 Path C)**: The adopted engine is **Docxodus `6.4.0`** (net8.0 line of the same MIT fork), NOT `7.1.0` — 7.x targets net10.0 only and the BFF is net8.0. Same `WmlComparer` engine; pulls OpenXml 3.5.1 transitively. **Doc-reconcile follow-up**: design §12.3 + tasks 010/020/021/022 prose still say "7.1.0" — update to 6.4.0 when those tasks execute. Fresh publish baseline this worktree: **46.66 MB** compressed incl PDBs (not 49.63 — rebased past ai-redesign-r1 deletions); task-001 delta +0.60 MB.
