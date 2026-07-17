@@ -375,6 +375,25 @@ public static class AnalysisServicesModule
 
         // L5 — StandaloneChatContextProvider (deps: IDistributedCache + ILogger).
         services.AddScoped<StandaloneChatContextProvider>();
+
+        // spaarkeai-assistant-enhancements-r1 task 010 (FR-B1) — IConstrainedFieldResolver.
+        // Deterministic constrained-field resolver (field-value analogue of ADR-039 grounding). Registered
+        // UNCONDITIONALLY (typed HttpClient) because it is consumed on the chat/dispatch path by the smart
+        // pre-seed (task 013) + constrained-field exclusion (task 011), which run inside
+        // ChatEndpoints.SendMessageAsync — the same hard-[FromServices] path that forced IWorkingDocumentService
+        // unconditional above. All deps are unconditional (MetadataService via AddDataverseMetadataServices,
+        // IDistributedCache, TokenCredential, IConfiguration), so symmetric registration holds (§10 F.1 —
+        // no ADR-032 kill-switch needed). No LLM dependency injected.
+        services.AddHttpClient<IConstrainedFieldResolver, ConstrainedFieldResolver>();
+
+        // spaarkeai-assistant-enhancements-r1 task 013 part 3 (FR-B2 / D-013-01) — ISurfaceLaunchEnricher.
+        // Smart pre-seed: resolves a create capability's drafted closed-set LABELS → record ids (via the
+        // resolver above) and merges `resolvedLookups` into the surface_launch payload BEFORE the ledger
+        // write in SessionDispatchOrchestrator. Registered UNCONDITIONALLY (§10 F.1 — the orchestrator takes
+        // it as an OPTIONAL ctor dependency, so production always injects the real enricher while hand-built
+        // test constructions omit it; deps IConstrainedFieldResolver + ILogger are both unconditional, so
+        // symmetric registration holds — no ADR-032 kill-switch needed). No LLM dependency.
+        services.AddScoped<ISurfaceLaunchEnricher, SurfaceLaunchEnricher>();
     }
 
     /// <summary>

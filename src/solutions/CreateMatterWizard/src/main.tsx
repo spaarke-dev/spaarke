@@ -6,8 +6,9 @@ import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmUploadService } from "@spaarke/ui-components/utils/adapters/xrmUploadServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
-import { CreateMatterWizard } from "@spaarke/ui-components/components/CreateMatterWizard";
+import { CreateMatterWizard, mapMatterHandoffSeed } from "@spaarke/ui-components/components/CreateMatterWizard";
 import { EntityCreationService, type IUserBuCascadeDefaults } from "@spaarke/ui-components/services/EntityCreationService";
+import { readHandoffFromUrl, handoffSeed as computeHandoffSeed, completeHandoff as writeCompleteHandoff } from "@spaarke/ui-components/services/surfaceHandoff";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
 function App() {
@@ -51,9 +52,33 @@ function App() {
   const uploadService = React.useMemo(() => createXrmUploadService(resolvedBffBaseUrl), [resolvedBffBaseUrl]);
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
 
+  // Assistant → surface hand-off pre-seed (spaarkeai-assistant-enhancements-r1
+  // task 013): when this wizard was launched from the Assistant's surface_launch
+  // create flow (task 012 `launchSurface`), read this page's own hand-off envelope
+  // from the launch URL and map the drafted seed onto the wizard's initial form
+  // values. `undefined` when opened directly (no `handoffId` on the URL) — the
+  // wizard opens empty exactly as before. Read once (URL is static per mount).
+  // Read this page's own hand-off context once (URL is static per mount).
+  const handoff = React.useMemo(() => readHandoffFromUrl(), []);
+  const initialFormValues = React.useMemo(
+    () => mapMatterHandoffSeed(computeHandoffSeed(handoff)),
+    [handoff]
+  );
+
   const handleClose = React.useCallback(() => {
     navigationService.closeDialog({ confirmed: true });
   }, [navigationService]);
+
+  // D-013-04 honest-ack: on a SUCCESSFUL create, write the committed
+  // SurfaceHandoffResult (record id) for the active hand-off, then close. No-op
+  // (just closes) when opened directly (no hand-off) — mirrors
+  // `useWizardPageBootstrap.completeHandoff`. Cancellation is INFERRED by the
+  // orchestrator from the absence of a written result, so the cancel path
+  // (handleClose) intentionally writes nothing.
+  const handleComplete = React.useCallback((recordId?: string) => {
+    if (handoff?.handoffId) writeCompleteHandoff(handoff.handoffId, recordId);
+    navigationService.closeDialog({ confirmed: true });
+  }, [handoff, navigationService]);
 
   const resolveSpeContainerId = React.useCallback(async (): Promise<string> => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -100,11 +125,13 @@ function App() {
         navigationService={navigationService}
         embedded={true}
         onClose={handleClose}
+        onComplete={handleComplete}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={resolvedBffBaseUrl}
         resolveSpeContainerId={resolveSpeContainerId}
         resolveUserBuDefaults={resolveUserBuDefaults}
         tenantId={resolvedTenantId}
+        initialFormValues={initialFormValues}
       />
     </FluentProvider>
   );

@@ -3,7 +3,7 @@
   <metadata>
     <title>Author create-flow surface-launch capabilities (matter / Event-Task / To Do) + repoint shipped create-matter/create-task</title>
     <phase>1: Catalog &amp; Schema Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>010, 012, 021, 050</blocks>
@@ -98,6 +98,16 @@
 
   <notes>
     Spec FR-A2 / FR-A1 / P4; design §10.1. Was BLOCKED 2026-07-15 (as-built conflict) → resolved by owner decision (wizard/form-launch hand-off, intent-routed). Co-design the hand-off contract with task 012. Owner reviews content (FR-J1).
+
+    COMPLETED 2026-07-16 (main-session, Opus/FULL). Live spaarkedev1 catalog authored:
+    - create-matter Binding (89cd91f6…) → disposition=SurfaceLaunch (100000007); tool description rewritten (draft → pre-seeded Create Matter wizard; NO dataverse.create_record, NO in-turn GUID resolution); next-step chips → create-task, create-todo.
+    - create-task Binding (3d9724e5…) → disposition=SurfaceLaunch; tool description rewritten (Event-Task → Event wizard, subtype preset Task, sprk_eventtype_ref=Task GUID 124f5fc9…; NO create_record; disambiguation authored); one-tap chip → create-todo ("Make it a To Do instead").
+    - create-todo Binding (b78b1cf5-3381-f111-ab0f-7ced8ddc4cc6, NEW) → disposition=SurfaceLaunch, consumertype=create-todo, ucid UC-H-2, surfaces=assistant; tool description encodes explicit-To-Do trigger + disambiguation; one-tap chip → create-task ("Make it an Event-Task instead").
+    - CREATE-TODO@v1 Action (6035a8e5-3381-f111-ab0f-7ced8ddc4cc6, NEW) → Prompted, JSON, allowstools=false; mirrors CREATE-TASK@v1 output {title,description,priority_suggestion,cited_refs}; framing = draft → OOB sprk_todo form pre-seeded.
+    - CREATE-MATTER@v1 (63f086d3…) + CREATE-TASK@v1 (b66c8dda…) Actions → allowstools=false (P1: drafting turn produces only JSON, no create_record/GUID resolution). CREATE-TASK@v1 input `required` relaxed to [] (due_date/assign_to now optional pre-seed hints; surface collects them — kills the loop-elicitation dead-end). capturemode left as-is (inert; arg-elicitation = task 011).
+    - Both Actions already emitted structured drafted-fields JSON pre-repoint (ai-architecture-redesign-r1) → NO output redesign needed; repoint = disposition + tool description + allowstools.
+    - Server does NO write: OutputRouter SurfaceLaunch pass-through already coded+merged; seam test DispatchAsync_SurfaceLaunchDisposition_Admits_Routes_Stores_AndRenders pins it.
+    Deliverables: notes/surface-launch-mechanism.md (contract for 012), notes/owed-eval-cases.md (E-002-01..17 for 051). Step 9.5: no code files modified (catalog rows + docs) → code gates N/A; ADR-039/024/040/043 self-checked clean. Escalation trigger (new option-set value) already resolved (owner added 100000007). Interim: rows are SurfaceLaunch before 012 client hand-off ships → dev degrades to "draft shown, no launch" (pass-through, not error) until 012/013.
   </notes>
 
   <execution>

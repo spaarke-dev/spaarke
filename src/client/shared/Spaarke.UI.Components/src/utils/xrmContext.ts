@@ -322,3 +322,26 @@ export function getCurrentUserId(): string | undefined {
   }
   return undefined;
 }
+
+/**
+ * Get the current user's display name from Xrm context.
+ *
+ * Companion to {@link getCurrentUserId} — together they are THE current-user
+ * identity mechanism shared client-wide (spaarkeai-assistant-enhancements-r1
+ * task 014 / FR-A4). Consumers needing to resolve the current user onto a
+ * different entity's assignee field (e.g. a `contact`-targeted lookup) build
+ * on top of this identity, rather than introducing a second mechanism.
+ *
+ * @returns User display name (`userSettings.userName`) or undefined
+ */
+export function getCurrentUserName(): string | undefined {
+  try {
+    const xrm = getXrm();
+    if (xrm?.Utility) {
+      return xrm.Utility.getGlobalContext().userSettings.userName;
+    }
+  } catch {
+    // Unable to get user name
+  }
+  return undefined;
+}

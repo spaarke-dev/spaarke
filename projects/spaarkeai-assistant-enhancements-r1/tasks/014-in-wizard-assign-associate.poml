@@ -3,7 +3,7 @@
   <metadata>
     <title>In-wizard assign-to-me + association picker; grounding-optional</title>
     <phase>2: Structured Creation Core</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>012</dependencies>
     <blocks>none</blocks>

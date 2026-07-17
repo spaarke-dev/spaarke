@@ -18,6 +18,10 @@ export type { ICreateMatterWizardProps } from './CreateMatterWizard';
 // Sub-components internal to the wizard (CreateRecordStep is matter-specific)
 export { CreateRecordStep } from './CreateRecordStep';
 
+// Assistant hand-off pre-seed mapper (spaarkeai-assistant-enhancements-r1 task 013):
+// maps a 012 hand-off seed onto the wizard's initial form values.
+export { mapMatterHandoffSeed } from './handoffSeedMapping';
+
 // Task 024 -- matter-specific step components
 export { AssignCounselStep } from './AssignCounselStep';
 // NOTE: The local NextStepsStep.tsx + SendEmailStep.tsx were duplicate copies of
