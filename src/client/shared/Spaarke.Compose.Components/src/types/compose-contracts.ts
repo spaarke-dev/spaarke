@@ -205,6 +205,38 @@ export interface ComposeActionHistoryEntry {
 }
 
 // ---------------------------------------------------------------------------
+// R3 FR-08/FR-09 — server pre-parsed `w14:paraId` identity map (design §5)
+// ---------------------------------------------------------------------------
+//
+// Client mirror of `Sprk.Bff.Api.Services.Compose.ParaIdMapEntry` (spaarkeai-
+// compose-r3 task 010). The server pre-parses the loaded `.docx`, collects each
+// paragraph's existing `w14:paraId` (or mints an OOXML-valid one where absent),
+// and projects an ORDERED `paraId → paragraph` map onto the Load response. This
+// client carries those ids into the editor as hidden ProseMirror node attributes
+// (task 011) so edited paragraphs map back to their original OOXML paragraphs on
+// the retained-original delta save (FR-12 / task 020). Field names are camelCase
+// per the Web serializer; do NOT fork this shape.
+//
+// Privacy: identifiers only (Tier 1 safe) — a `w14:paraId` is an opaque 8-hex
+// document-structure token, never user content.
+
+/**
+ * One entry of the server pre-parse paraId map (design §5, FR-08). `index` is the
+ * paragraph's position in document order (matching `body.Descendants<Paragraph>()`
+ * on the server, which flattens table-cell + nested-table paragraphs); `paraId`
+ * is the 8-hex `w14:paraId` (`ST_LongHexNumber`, `0 < x < 0x80000000`); `isMinted`
+ * is true when the server minted the id (the source `.docx` paragraph had none).
+ */
+export interface ParaIdMapEntry {
+  /** Paragraph position in document order (server `body.Descendants<Paragraph>()` order). */
+  index: number;
+  /** The 8-hex `w14:paraId` (`ST_LongHexNumber`, `0 < x < 0x80000000`). */
+  paraId: string;
+  /** True when the server minted this id (source paragraph had no `w14:paraId`). */
+  isMinted: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Shared types — pointers, not entities
 // ---------------------------------------------------------------------------
 

@@ -43,6 +43,10 @@ jest.mock('@spaarke/auth', () => ({
 jest.mock('../utils/docxBridge', () => ({
   docxToTipTapHtml: jest.fn(async () => ({ html: '<p>Loaded document body</p>', messages: [] })),
   tipTapToDocxBytes: jest.fn(async () => new ArrayBuffer(0)),
+  // task 011: ComposeEditor calls stampParaIds after the docx import; a no-op is
+  // correct here (this suite asserts dirty-reporting, not paraId carry) and — being
+  // a no-op — dispatches nothing, so it does not perturb the onDirtyChange signal.
+  stampParaIds: jest.fn(),
 }));
 
 // Wave 6 (DEF-G): the editor now gates the mammoth import on a valid DOCX byte

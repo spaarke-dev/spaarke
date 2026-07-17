@@ -30,7 +30,7 @@
 | 002 | `SpeFileStore` version-content fetch (FR-06) — fetch a driveItem version's content by `versionId` | 0 Foundations | 🟢 | none | ✅ | FULL | sonnet | high | true |
 | 003 | NFR-09 real-template hardening gate — re-run S1/S1b harness on 2–3 real firm templates | 0 Foundations | 🟢 | 001 | 🔲 | FULL | opus | xhigh | true |
 | 010 | FR-08 server pre-parse + `w14:paraId` minting on Load (OOXML-valid, collision-checked) | 1 E2 | 🟢 | 001 | ✅ | FULL | opus | xhigh | false (LoadAsync) |
-| 011 | FR-09/FR-10 explicit load-time paraId carry (hidden node attr) + split-minting via `@tiptap/extension-unique-id` | 1 E2 | 🔴 | 010 | 🔲 | FULL | sonnet | high | true (client) |
+| 011 | FR-09/FR-10 explicit load-time paraId carry (hidden node attr) + split-minting via `@tiptap/extension-unique-id` | 1 E2 | 🔴 | 010 | ✅ | FULL | sonnet | high | true (client) |
 | 012 | FR-11/FR-12 paraId-primary anchoring + fuzzy fallback (`AnnotationReanchorService`) + paraId as splice key | 1 E2 | 🔴 | 010,011 | 🔲 | FULL | opus | high | false (reanchor svc) |
 | 020 | FR-02 edited-paragraph rebuild + paraId-keyed splice orchestration (server) | 2 E1 | 🔴 | 010,012 | 🔲 | FULL | opus | xhigh | false (Services/Compose) |
 | 021 | FR-03/FR-05 Docxodus `WmlComparer` redline synthesis adapter (minimal ins/del + format-change) | 2 E1 | 🔴 | 001,020 | 🔲 | FULL | opus | xhigh | false (Services/Compose) |
@@ -83,4 +83,6 @@
 
 *Maintained by task-execute (status flips 🔲→🔄→✅). Every BFF task runs `.claude/constraints/bff-extensions.md` + reports publish-size delta vs ~49.63 MB baseline.*
 
+> **TIPTAP VERSION CORRECTION (task 011, 2026-07-17, §6.5 Path C)**: POML/S2 name `@tiptap/extension-unique-id` **3.28.0**, but 3.x is a **TipTap v3** extension (peer `@tiptap/core: 3.28.0`) and the ComposeEditor is **TipTap v2**. Adopted **2.27.2** (v2-latest, MIT — NOT `@tiptap-pro/*`, NFR-03 ✅). `npm install` bumped the whole `@tiptap/*` v2 stack `2.10.3 → 2.27.2` uniformly (all MIT); **accepted** (uniform-version is TipTap's supported consumption model) and validated by full suite **201/201 green** + build green. **Directional refinement**: extension `types` + `stampParaIds` cover `paragraph` **AND** `heading` (an OOXML heading is a `<w:p>` counted by the server map, so paragraph-only stamping misaligned every id after the first heading). New module `src/widgets/paraIdExtension.ts` (extracted for headless testability). **Doc-reconcile follow-up**: design §5 / task-012 prose say "3.28.0" → 2.27.2.
+>
 > **DOCXODUS VERSION CORRECTION (task 001, 2026-07-16, §6.5 Path C)**: The adopted engine is **Docxodus `6.4.0`** (net8.0 line of the same MIT fork), NOT `7.1.0` — 7.x targets net10.0 only and the BFF is net8.0. Same `WmlComparer` engine; pulls OpenXml 3.5.1 transitively. **Doc-reconcile follow-up**: design §12.3 + tasks 010/020/021/022 prose still say "7.1.0" — update to 6.4.0 when those tasks execute. Fresh publish baseline this worktree: **46.66 MB** compressed incl PDBs (not 49.63 — rebased past ai-redesign-r1 deletions); task-001 delta +0.60 MB.

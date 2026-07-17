@@ -2,8 +2,8 @@
   <metadata>
     <title>FR-09/FR-10 explicit load-time paraId carry (hidden node attr) + split-minting via `@tiptap/extension-unique-id`</title>
     <phase>1 E2</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>startable</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>

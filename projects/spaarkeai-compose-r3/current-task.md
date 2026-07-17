@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 011 — FR-09/FR-10 client load-time paraId carry + split-minting (next; CLIENT) |
-| **Step** | — (not started) |
-| **Status** | not-started |
-| **Next Action** | ✅ Task 010 COMPLETE (ParaIdPreParser + LoadAsync map projection; 8 tests green; 47.28 MB). Run `task-execute` on `tasks/011-client-paraid-carry-and-minting.poml` (client TS/Jest, `@tiptap/extension-unique-id` per S2). |
+| **Task** | 012 — FR-11/FR-12 paraId-primary anchoring + fuzzy fallback (`AnnotationReanchorService`) + paraId as splice key (deps 010✅,011✅ — UNBLOCKED) |
+| **Step** | not started |
+| **Status** | ready |
+| **Next Action** | Execute task 012 via task-execute (FULL, opus @ high). Consumes the paraId substrate from 010 (server map) + 011 (client hidden-attr carry). Note the **residual best-effort** from 011: mammoth drops/merges some `<w:p>` (empty paras, headers/footers) → positional paraId drift; 012's fuzzy fallback (textPattern + paragraphHint) is exactly the compensator. |
 
 ### Critical Context
 All six pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed — no design pivots. The fidelity core sequences E2 (paraId substrate) → E1 (delta save); toolset + E3 parallelize; import depends on E1/E2. The NFR-09 real-template hardening gate (Phase 6) gates the E1 delta-save cutover.
@@ -46,6 +46,7 @@ All six pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed — no design pivots. The fi
 - 2026-07-16: Pipeline stopped at "ready to execute" (operator chose "generate + stop"); task 001 NOT auto-started. — Reason: FULL-rigor BFF blast radius + hot-path overlap with compose-r2 warrants owner coordination first.
 - 2026-07-16: Owner confirmed `spaarkeai-compose-r2` completed/closed + all work on master. — E1-cutover coordination gate (task 022 pre-condition) CLEARED. Residual gate before any BFF PR: run `/conflict-check` for `Services/Compose/` hot-path.
 - 2026-07-16: **Task 001 COMPLETE.** §6.5 Path-C: adopted Docxodus **6.4.0** (net8.0 line) instead of spec-named 7.1.0 — 7.x is net10.0-only (NU1202), 6.4.0 is same MIT fork + engine + pulls OpenXml 3.5.1. SkiaSharp×2 (managed + Linux native pkg) excluded runtime;native → 0 SkiaSharp in publish, no runtimes/. Publish 47.26 MB incl PDBs (+0.60 MB vs fresh 46.66 MB baseline). No new HIGH CVE (only pre-existing Kiota, accepted per ADR-029). **DOC-RECONCILE**: design §12.3 + tasks 010/020/021/022 say "7.1.0" → 6.4.0. **OPEN**: confirm 6.4.0/net8 acceptable (or plan net10 migration → 7.1.0).
+- 2026-07-17: **Task 011 COMPLETE** (E2 client paraId carry). NEW `src/widgets/paraIdExtension.ts` (`generateOoxmlParaId` CSPRNG 8-hex `0<x<0x80000000` + `COMPOSE_R3_PARAID` = `@tiptap/extension-unique-id` `.extend`(renderHTML→{} = OFF DOM, FR-09)`.configure`(types paragraph+heading, attributeName paraId, generateID)); `stampParaIds` in docxBridge (explicit tr after setContent, doc-order, addToHistory:false); `ParaIdMapEntry` mirror in compose-contracts; `paraIdMap` prop + stamp-call wired in ComposeEditor. **§6.5 Path-C**: unique-id **2.27.2** (v2-latest MIT, NOT 3.28.0/v3, NOT @tiptap-pro ✅); whole `@tiptap/*` stack bumped 2.10.3→2.27.2 uniformly — **accepted** (TipTap's supported lockstep model), validated by **201/201 suite green** + build green. **Directional refinement (code-review-found correctness fix)**: extension `types` + stamp cover `paragraph` AND `heading` — server `body.Descendants<Paragraph>()` counts headings (OOXML `<w:p>`), so paragraph-only stamping misaligned every id after the first heading. **Module extraction**: paraIdExtension split out (from literal "config in ComposeEditor.tsx") so the headless FR-09/FR-10 tests don't drag the auth/toolbar graph (which needs a SharedLibs dist build). 12 new paraId tests; 2 existing docxBridge mocks got no-op `stampParaIds`. adr-check + code-review PASS (0 crit). **META (spike-hygiene, already noted)**: this is the 2nd platform pivot (Docxodus net10→net8, now TipTap v3→v2) tracing to spikes run on newer majors than the codebase. **DOC-RECONCILE**: design §5 / task-012 prose say unique-id "3.28.0" → 2.27.2.
 - 2026-07-17: **Task 010 COMPLETE** (E2 substrate). NEW `ParaIdPreParser` (OpenXML `body.Descendants<Paragraph>()` covers table-cell/nested recursively; collect verbatim + mint `0<x<0x80000000` collision-checked) → additive `ParaIdMap` on LoadComposeDocumentResult, projected best-effort in LoadAsync; DI singleton. 8 tests green; 47.28 MB (+0.02); CVE clean; ADR013 ComposeFacade PASS. **§6.5 Path-C**: HTTP through-the-wire seam rides task 024 (map assertion covered at ComposeService seam now). **PRE-EXISTING FINDING (not compose-r3)**: `ADR007_GraphIsolationTests` RED on branch — violators are Services.Communication (GraphAttachmentAdapter/GraphMessageToEmlConverter) + Api/Office/Errors, all pre-existing on master. Out of scope; surfaced to owner.
 - 2026-07-17: **Merged origin/master into branch** (merge aaf45f7cd; process-gap fix — pipeline should have synced at init). Brought 26 assistant-r1 commits + **Kiota 1.21.2→1.22.0** (CVE-2026-44503 fix). ZERO conflicts; my 001/002 changes preserved; merged base builds green; **CVE scan now fully clean (0 vulnerable)** — task-001's pre-existing Kiota HIGH is gone. 001+002 committed as 857d06099.
 - 2026-07-16: **Task 002 COMPLETE.** Added `DownloadFileVersionAsUserAsync` to SPE facade (ISpeFileOperations + SpeFileStore + DriveItemOperations) via Graph v5 `/versions/{id}/content` OBO; 404→null; ADR-007 clean; build green. **§6.5 Path-C: unit test DEFERRED to 022/024 seam** — Graph v5 unmockable at DriveItemOperations level (all 5 existing SpeFileStoreTests are `[Fact(Skip)]`); ADR-038 bans facade-mock scaffolding + mandates seam tests; POML says seam rides 022/024. **SYSTEMIC OPEN**: confirm defer-to-seam doctrine for all R3 BFF-IO tasks (010/020/021/022/023), or require unit tests. **TRACKING**: task 024 seam MUST assert baseline-by-versionId retrieval.
@@ -83,7 +84,54 @@ All six pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed — no design pivots. The fi
 ### Key Learnings
 - Engine frozen (ADR-039): E3 is server-derived, NOT a new Action output — no catalog rows change.
 
-### Handoff Notes — Task 010 (E2 paraId pre-parse) analysis + plan (2026-07-17)
+### Handoff Notes — Task 011 (client paraId carry) analysis + plan (2026-07-17)
+
+**Rigor**: FULL · sonnet @ high · directional · client-only (no BFF/publish). Deps 010 ✅.
+
+**🔔 §6.5 Path-C — TipTap version pivot (VERIFIED, non-blocking, same as Docxodus)**: POML/S2 name
+`@tiptap/extension-unique-id` **3.28.0**, but that's a **v3** extension (peerDeps `@tiptap/core: 3.28.0`)
+and the ComposeEditor is **TipTap v2.10.3** (package.json: core/react/starter-kit/all extensions ^2.10.3).
+Use **`@tiptap/extension-unique-id@^2.27.2`** — the MIT **v2-latest** line (peerDeps `@tiptap/core: ^2.7.0`
+✓ compatible; name is `@tiptap/extension-unique-id` NOT `@tiptap-pro/*` ✓ NFR-03; deps: uuid only; same
+`attributeName`/`generateID`/`types` config surface). Avoids a TipTap v2→v3 editor migration (the "big
+decision", like net10). **package.json already edited to ^2.27.2; `npm install --legacy-peer-deps` running.**
+
+**META-FINDING for the procedure/spike team**: BOTH platform pivots this project (Docxodus net10→net8
+6.4.0, TipTap v3→v2 2.27.2) trace to **spikes run on newer MAJOR versions than the actual codebase**.
+S2 used headless TipTap v3; S1/S3 used Docxodus net10. The spikes validated the recipe but not
+consumability against the shipped major. Spike-hygiene gap worth a checklist item ("run the spike against
+the target project's actual dependency majors"). Parallel to the earlier POML-template-drift finding.
+
+**Integration points located**:
+- `ComposeEditor.tsx`: `LOCKED_EXTENSIONS` array @ line 182 (+ additive arrays `COMPOSE_R2_MARKS`,
+  `COMPOSE_R2_QA_HIGHLIGHT`); `useEditor` @ 1027, `extensions: [...LOCKED, ...MARKS, ...QA]` @ 1030.
+  DOCX import effect @ 1091-1180: `docxToTipTapHtml(docxBytes).then(({html}) => editor.commands.setContent(html))`
+  @ 1140-1143 (docx path) + `initialHtml` seed path @ 1103. `docxBytes: ArrayBuffer|null` prop @ 334.
+- `docxBridge.ts`: `docxToTipTapHtml` @ 91 (mammoth convert → {html, messages}); setContent is called by
+  ComposeEditor, NOT here. Add a `stampParaIds(editor, map)` helper here (testable) called after setContent.
+- `compose-contracts.ts`: has AnchoredAnnotation etc. but **NO Load-response type** — add a `ParaIdMapEntry`
+  mirror `{ index:number; paraId:string; isMinted:boolean }` (matches server ParaIdMapEntry JSON) here.
+
+**⚠️ Install side-effect (DECIDE before build)**: `npm install` resolved `@tiptap/extension-unique-id`
+**2.27.2** (MIT, no Pro ✅) BUT also bumped the whole `@tiptap/*` v2 stack **2.10.3 → 2.27.2**
+(package.json declares `^2.10.3`, so npm took latest-satisfying 2.x). Semver-minor within v2 — safe in
+principle, validated by build + existing ComposeEditor tests. OPTION to minimize churn: add
+`"overrides": { "@tiptap/core": "2.10.3", ... }` so unique-id (peer `^2.7.0`) runs against the pinned
+2.10.3 stack. Owner/reviewer call: accept the 2.27.x bump (simpler) vs pin back (minimal blast radius).
+package-lock.json + node_modules currently reflect the 2.27.2 bump (uncommitted).
+
+**Remaining steps**: (1) install DONE — resolved 2.27.2 MIT, no @tiptap-pro (verified); (2) add
+`ParaIdMapEntry` to compose-contracts.ts; (3) `stampParaIds` helper in docxBridge (explicit tr over
+doc, set each paragraph node's `paraId` attr from map in doc order); (4) ComposeEditor: add `paraIdMap?`
+prop + call stampParaIds after both setContent sites; add `UniqueID.configure({ types:['paragraph'],
+attributeName:'paraId', generateID: <8-hex <0x80000000> })` to extensions with `renderHTML:()=>({})` so it
+stays OFF the DOM (FR-09); (5) Jest tests (ids-after-mount, ids-absent-from-DOM, split re-mints one/keeps
+one, resolved dep is @tiptap/extension-unique-id MIT not pro); (6) `npm run build` (tsc). Then 011→012.
+
+**Resume**: `work on task 011` (or `continue`). package.json already has the dep; install running/done.
+
+---
+### Handoff Notes — Task 010 (E2 paraId pre-parse) — COMPLETE 2026-07-17 (kept for reference)
 
 **Rigor**: FULL · opus @ xhigh · directional. Deps 001 ✅ (OpenXml 3.5.1 present).
 
