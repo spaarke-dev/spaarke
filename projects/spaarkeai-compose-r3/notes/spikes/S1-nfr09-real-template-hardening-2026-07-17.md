@@ -77,7 +77,29 @@ A throwaway net10 console ran the SAME edit + `WmlComparer.Compare` on the SAME 
 - **Path B-alt (DEPRIORITIZED) — Codeuctivity fork.** Same Open-Xml-PowerTools lineage; with both Docxodus versions behaving identically, almost certainly the same behavior. A ~1-hour probe could confirm, but do not build the plan around it.
 - **Path C (REJECTED) — accept degraded + fuzzy fallback.** The **table drop is a hard NFR-07 violation** — Approach A cannot ship. Reject.
 
-**Recommendation**: commit to **Path A/B (Approach B)** and re-scope task 022. The net8-vs-net10 decision is **decoupled** from this bug (net10 does not fix it) — evaluate net10 migration on its own merits (net8 LTS EOL ~Nov 2026), not as a Compose fix. Task 003 re-runs THIS harness to certify the Approach-B output before task 022 proceeds.
+### Option C — SELF-SYNTHESIZED REDLINE (no WmlComparer) — ✅ VALIDATED (spike 2026-07-17)
+
+A fourth option, spiked and **proven on the real CSA** (`OptionC_SelfSynthesizedRedlineSpikeTests`): since we already KNOW the edits (paraId-keyed from the client), don't run a general differ at all. For each edited paragraph, locate it in the retained original by `w14:paraId`, run a small **word-level LCS diff** (old→new text), and emit native `w:ins`/`w:del` **in place** on that one paragraph. Every other paragraph + all structure is byte-untouched.
+
+**Spike result on the real CSA — clears the bar WmlComparer FAILED:**
+
+| Check | WmlComparer (6.4.0 & 7.1.0) | **Option C** |
+|---|---|---|
+| `w14:paraId` preserved | 0 / 345 | **345 / 345** |
+| `pt14:Unid` introduced | 345 | **0** |
+| tables (total / top-level) | 5 / 2 | **6 / 3** |
+| minimal authored `w:ins`/`w:del` | ✅ | ✅ |
+| untouched paragraphs byte-identical | — | ✅ |
+
+- **Perfect fidelity by construction** — only the K edited paragraphs are touched (the `w14:paraId` is a `w:p` attribute that survives a run-content rewrite).
+- **Drops the Docxodus dependency entirely** — removes 2.44 MB + the SkiaSharp-exclusion complexity + the whole task-001 packaging saga; runs on net8.
+- **Reuses existing machinery** — the `w:ins`/`w:del`/`w:delText` emission is exactly what `DocxAnnotationWriter` (task 050) already does; the only new piece is the ~60-line word diff.
+- **Honest residual**: the spike proved the TEXT-diff fidelity path. **FR-05 format-change** (bold-a-word → `rPr`/`pPrChange` not del+ins) is the one thing WmlComparer gave "for free" — under Option C we handle it explicitly (compare run properties → emit `rPrChange`). Bounded, and we control it.
+- **Downstream**: adopting C **retires the task-021 comparer adapter from the save path** (could serve import round-trip verification instead) and makes **task 001 Docxodus droppable**.
+
+## Recommendation (updated)
+
+**Adopt Option C for task 022** (self-synthesized paragraph redline). It is the only option proven to clear the fidelity bar on real documents, it simplifies the platform (one fewer dependency), and it keeps the redline logic under our control. Approach B (graft WmlComparer revisions) remains the fallback if Option C's FR-05 handling proves unexpectedly costly. The net8-vs-net10 decision is **decoupled** from this bug (net10 does not fix it) — evaluate net10 migration on its own merits (net8 LTS EOL ~Nov 2026), not as a Compose fix. Task 003's harness re-certifies the chosen synthesis output before task 022 proceeds.
 
 ---
 
