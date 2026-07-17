@@ -1,0 +1,136 @@
+# Messaging R1 — Dataverse Schema Spec (maker-ready) — tasks 004 + 005
+
+> **For**: owner to create in `spaarkedev1`. **Grounded in**: task-001 live audit (`notes/spikes/001-schema-audit.md`), design §5/§6.1/§6.4, spec FR-05/FR-08. Publisher prefix **`sprk`**.
+> **Status**: ✅ **CREATED + VERIFIED live in spaarkedev1 (2026-07-16, MCP `describe`)**. Tasks 004/005 done. Two field names as-built differ from the original spec — see the AS-BUILT table below; **downstream code MUST use the as-built names**.
+
+---
+
+## ⭐ AS-BUILT FIELD NAMES (authoritative — verified live 2026-07-16)
+
+| Concept | As-built logical name | On entity | Note |
+|---|---|---|---|
+| Message → thread lookup | **`sprk_communicationthread`** | `sprk_communication` | ⚠️ NOT `sprk_thread`. Timeline/read filters + `IThreadResolver` write use THIS name. |
+| Channel-ref → thread lookup | **`sprk_thread`** | `sprk_communicationchannelref` | This one IS `sprk_thread` (child table). Don't confuse with the message lookup above. |
+| ACS message id (dedupe key) | **`sprk_acsmessageid`** | `sprk_communication` | echo-dedup / idempotency key |
+| ACS thread id | **`sprk_acsthreadid`** | `sprk_communication` | ⚠️ NOT `sprk_acschatthreadid` |
+| Channel-ref external ref (ACS ChatThreadId) | `sprk_externalref` | `sprk_communicationchannelref` | NVARCHAR(500) |
+| Message-level privacy / internal-only | `sprk_isprivate` / `sprk_isinternalonly` | `sprk_communication` | BIT (two-option) |
+| Privilege | `sprk_privilegeclassification` | `sprk_communication` | None/Potentially Privileged/Privileged (100000000/1/2) |
+| Thread anchor (regarding) | `sprk_regardingrecordid` / `sprk_regardingrecordtype` / `sprk_regardingrecordname` / `sprk_regardingrecordurl` | `sprk_communicationthread` | reused regarding pointer (no `sprk_anchor*`) |
+| ACS identity map | `sprk_communicationuserid` | `systemuser` + `contact` | present on both |
+
+> POML task files were authored against the pre-build draft names (`sprk_thread` for the message lookup, `sprk_acschatthreadid`). Those are shorthand — **the table above wins**. The orchestrator passes as-built names to each implementing agent; agents also `describe` live before writing.
+> **Confirmed by 001 audit**: none of the below exist yet (clean adds); `sprk_communicationtype` global choice already has `Message = 100000004`; `sprk_communication` already carries the full ADR-024 regarding family (11 typed `sprk_regarding*` + 5 polymorphic `sprk_regardingrecord*`).
+
+---
+
+## Task 004 — NEW entity `sprk_communicationthread` + child table + relationships
+
+### 4.1 Entity: `sprk_communicationthread` (the queryable grouping key, design §6.1 option A)
+
+| Property | Value |
+|---|---|
+| Display name / Plural | Communication Thread / Communication Threads |
+| Schema (logical) name | `sprk_communicationthread` |
+| Ownership | **User/Team** (so record security composes with ADR-034 + option-B grants) |
+| Primary column | `sprk_name` (Text, 200) — thread topic; derived from first message subject (email) or a participant/default label (chat), editable |
+| Enable notes/activities | **No** (thin entity; MUST NOT use Activities per owner-lock) |
+| Audit | On |
+
+**Columns on `sprk_communicationthread`:**
+
+| Schema name | Type | Details | Source |
+|---|---|---|---|
+| `sprk_name` | Text | 200; primary column = topic | design §6.1 "topic" |
+| `sprk_threadtype` | Choice (local) | `Record-Anchored = 100000000`, `Direct 1:1 = 100000001` | design §6 topologies; drives 043 |
+| `sprk_privacystate` | Choice (local) | `Open = 100000000`, `Private = 100000001` | design §5/§6.1 "thread-level privacy state" (D-04) |
+| `sprk_privacyeffectivefrom` | Date and Time | nullable; set when flipped to Private/Open — drives **point-forward** switch (prior messages keep prior visibility) | design §5 "point-forward (D-04)" |
+| **Anchor (regarding)** — REUSE the existing regarding family, see 4.1a | | — | design §6.1 "anchor (ADR-024 regarding family, **not a new mechanism**)" |
+
+#### 4.1a Anchor = REUSE the existing ADR-024 regarding family (NOT new fields)
+
+**Do NOT invent `sprk_anchor*` fields.** `sprk_communication` already carries the ADR-024 regarding family, populated by the existing **RegardingResolver / `RegardingFieldMap`** (`.claude/adr/ADR-024`). The thread anchors with the **same field names + the same resolver** — one regarding mechanism, applied to a second entity. Add to `sprk_communicationthread`:
+
+| Schema name (identical to `sprk_communication`) | Type | Purpose |
+|---|---|---|
+| `sprk_regardingrecordid` | Text (100) | anchor record GUID — the denormalized polymorphic pointer |
+| `sprk_regardingrecordtype` | Text (100) | anchor entity logical name (e.g. `sprk_matter`) |
+| `sprk_regardingrecordname` | Text (400) | display name (for the thread form/grid) |
+| `sprk_regardingrecordurl` | Text (400) | deep link (optional, mirror parity) |
+
+- This **denormalized set is required + sufficient**: `sprk_regardingrecordid` + `sprk_regardingrecordtype` is exactly what `MembershipResolverService` (ADR-034) needs to derive open-thread membership for the anchor record, and what the timeline filters on.
+- **Optional**: the typed `sprk_regarding{matter,project,invoice,servicerequest,workassignment,event,person,organization,account,budget,analysis}` lookups — add these to the thread **only** if you want native lookup controls / rollups on the thread form. Not required for R1.
+- **Population**: `IThreadResolver` (task 040) sets these by calling the **existing** `RegardingFieldMap` the association engine already runs for communications — **no new resolver, catalog, or PCF**. Task 040 copies the message's resolved regarding onto its thread, same as `ThreadContinuityRung` already copies regarding onto email replies.
+
+### 4.2 Child table: `sprk_communicationchannelref` (thread↔channel, design §6.1 D-03)
+
+One row per `(thread, channel, external-ref)`. R1 populates the ACS `ChatThreadId` for the Message channel; email/SMS refs attach later with no schema change ("channel is an attribute").
+
+| Property | Value |
+|---|---|
+| Display name / Plural | Communication Channel Ref / Communication Channel Refs |
+| Schema name | `sprk_communicationchannelref` |
+| Ownership | User/Team (or org-owned — child of thread; follow thread) |
+| Primary column | `sprk_name` (Text, 200; auto/label) |
+
+**Columns:**
+
+| Schema name | Type | Details |
+|---|---|---|
+| `sprk_name` | Text | 200; primary (e.g. "ACS: {chatThreadId}") |
+| `sprk_thread` | **Lookup → `sprk_communicationthread`** | Required; N:1 (see 4.3) |
+| `sprk_channeltype` | Choice | reuse the **global** `sprk_communicationtype` option set if it is global; else local choice mirroring `Email=100000000 … Message=100000004`. R1 rows = `Message` |
+| `sprk_externalref` | Text | 400; the channel's external id — R1 = ACS `ChatThreadId` |
+
+### 4.3 Relationships
+
+| Relationship | Type | Fields |
+|---|---|---|
+| `sprk_communicationthread` → `sprk_communicationchannelref` | 1:N | via `sprk_communicationchannelref.sprk_thread` |
+| `sprk_communicationthread` → `sprk_communication` | 1:N | via `sprk_communication.sprk_communicationthread` (as-built; created in task 005) |
+
+---
+
+## Task 005 — Columns on existing entities
+
+### 5.1 On `sprk_communication`
+
+| Schema name | Type | Details | FR |
+|---|---|---|---|
+| `sprk_communicationthread` *(as-built; draft said `sprk_thread`)* | **Lookup → `sprk_communicationthread`** | nullable; the grouping key; set by `IThreadResolver` (040) both directions | FR-05/FR-06 |
+| `sprk_isprivate` | Two-Option (Yes/No) | default **No**; message-level privacy | FR-08 |
+| `sprk_isinternalonly` | Two-Option (Yes/No) | default **No**; hidden from external participants (R2/R3) | FR-08 (D-05) |
+| `sprk_privilegeclassification` | Choice (local) | `None = 100000000`, `Potentially Privileged = 100000001`, `Privileged = 100000002` | FR-08; AI may FLAG never decide (ADR-015) |
+| `sprk_acsmessageid` | Text | 200; **the idempotency/echo-dedup key** (ACS `SendChatMessageResult.Id`); index for dedupe lookups | FR-04, NFR-03 |
+| `sprk_acsthreadid` *(as-built; draft said `sprk_acschatthreadid`)* | Text | 200; the ACS thread this message belongs to (denormalized convenience; canonical home is the channel-ref row) | FR-02 |
+
+> **Do NOT reuse** `sprk_graphmessageid` / `sprk_internetmessageid` / `sprk_correlationid` / `sprk_inreplyto` for the ACS message id — the 001 audit confirmed those are email/Graph-specific. `sprk_acsmessageid` is net-new.
+
+### 5.2 On `systemuser` AND `contact` (both)
+
+| Schema name | Type | Details |
+|---|---|---|
+| `sprk_communicationuserid` | Text | 500; the ACS `communicationUserId` (MRI) mapped to this identity; set on first use by task 010. Add to **both** `systemuser` and `contact`. |
+
+---
+
+## Verification (tasks 004/005 close-out, after owner creates)
+
+Run via Dataverse MCP `describe` and confirm each of the above exists with the stated type. Checklist:
+- [ ] `sprk_communicationthread` entity exists (User/Team owned) with `sprk_threadtype`, `sprk_privacystate`, `sprk_privacyeffectivefrom`, and the reused regarding pointer (`sprk_regardingrecordid/type/name/url` — NOT `sprk_anchor*`)
+- [ ] `sprk_communicationchannelref` exists with `sprk_thread` lookup + `sprk_channeltype` + `sprk_externalref`
+- [x] `sprk_communication.sprk_communicationthread` lookup → thread; `sprk_isprivate`, `sprk_isinternalonly`, `sprk_privilegeclassification`, `sprk_acsmessageid`, `sprk_acsthreadid` — VERIFIED live 2026-07-16
+- [ ] `sprk_communicationuserid` on BOTH `systemuser` and `contact`
+- [ ] Option-set integers match exactly (`sprk_privilegeclassification`, `sprk_threadtype`, `sprk_privacystate`)
+- [ ] Add all to the messaging solution; publish
+
+## Option-set integer summary (reserve these)
+
+| Choice field | Members (name = int) |
+|---|---|
+| `sprk_threadtype` | Record-Anchored=100000000, Direct 1:1=100000001 |
+| `sprk_privacystate` | Open=100000000, Private=100000001 |
+| `sprk_privilegeclassification` | None=100000000, Potentially Privileged=100000001, Privileged=100000002 |
+| `sprk_channeltype` | reuse global `sprk_communicationtype` (Email=100000000 … Message=100000004) if global |
+
+> Verify these integers aren't already taken in your environment before creating (task 001 pattern: MCP `describe` the option set). Adjust and tell me if any collide — downstream tasks read them by logical name, not hardcoded int, but 005's verification records the actual values.

@@ -1,0 +1,117 @@
+<task id="081" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Extend the communication architecture doc(s) with the thread model + ACS transport + inbound ingestor seam; wire in ADR-046</title>
+    <phase>W8 — Tests + Docs</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>040, 007</dependencies>
+    <blocks></blocks>
+    <tags>docs</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Extends existing architecture documentation to describe the delivered thread model + ACS transport + ingestor seam; no code, no ADR authoring (ADR-046 is task 007). STANDARD rigor — Step 9.5 gates skipped, but the source-of-truth rule (root §2) binds: the doc must match shipped code.</rigor-reason>
+    <parallel-group>W8</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Authors/updates docs under `docs/architecture/` — disjoint from 080 (tests). Depends on 040 (the shipped thread resolver / thread model) + 007 (ADR-046, to cross-reference).</parallel-reason>
+    <fr-refs>FR-17</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Extend the existing communication architecture documentation in `docs/architecture/` to describe the messaging channel as-built, and wire in **ADR-046** (ACS messaging channel, authored in task 007). Use the `docs-architecture` skill.
+
+    Prefer EXTENDING the canonical R4 substrate doc `docs/architecture/communication-intelligence-architecture.md` (and/or `communication-service-architecture.md`) rather than authoring a new standalone doc (§11 — the communication platform is ONE platform; messaging is its second channel, not a new subsystem). Add, grounded in the shipped code:
+
+    - **The first-class thread data model** — `sprk_communicationthread` entity + `sprk_communication.sprk_thread` lookup + the thread↔channel child table (one row per `(thread, channel, external-ref)`; R1 populates ACS `ChatThreadId`); thread topologies (record-anchored via the ADR-024 regarding family + 1:1 direct); thread-level privacy state; point-forward switch.
+    - **The `IThreadResolver`** (direction-symmetric find-or-create) — invoked by both inbound capture and outbound send, for all channels; email uses `sprk_inreplyto` ancestry, chat uses ACS `ChatThreadId`; the extension of `ThreadContinuityRung` (inbound) + `CommunicationService` (outbound); the "email conversations become grouped threads" feature (design §6.5).
+    - **ACS transport** — ACS Chat is transport, Dataverse is the record; server-side identity mapping + token minting; thread create with 30-day retention; membership as a reconciled projection of Dataverse-derived access (ADR-034); NO client-side ACS SDK in R1 (polling timeline reads persisted records).
+    - **The inbound ingestor seam** — the net-new `ICommunicationChannelIngestor` + `MessagingIngestor`; the Event Grid capture pipeline (webhook → Service Bus job → normalizer → `NormalizedMessage` → idempotent persist → enrichment); echo-dedup on ACS message id.
+    - **Cross-reference ADR-046** (canonical ACS messaging-channel ADR) + related ADRs (045 channel seams, 024 regarding, 034 membership, 028 auth, 027 provisioning, 004/036 jobs, 007 SPE). Keep it a design/rationale doc (WHY + structure) with code entry-point pointers — no implementation dumps.
+  </prompt>
+
+  <role>
+    Spaarke architecture writer authoritative on the Communication subsystem. Uses the `docs-architecture` skill and follows repo architecture-doc conventions (decisions + rationale + code entry-point pointers). Extends the canonical R4 communication docs rather than forking a new one.
+  </role>
+
+  <goal>
+    The communication architecture doc(s) in `docs/architecture/` accurately describe the as-built messaging channel — thread data model, `IThreadResolver`, ACS transport, and the inbound ingestor seam — cross-referencing ADR-046 and related ADRs. The doc matches shipped code and is extended (not forked) from the canonical R4 substrate.
+  </goal>
+
+  <context>
+    <background>
+      email-r4 W8 authored `docs/architecture/communication-intelligence-architecture.md` as the canonical R4 substrate (absorbing the retired email-processing doc) and refreshed `communication-service-architecture.md`. R1 adds the SECOND channel + a NEW thread model + a NEW ingestor seam — the biggest as-built additions since R4. This task documents them by extending those docs, keeping ONE communication architecture narrative (§11: messaging is a channel, not a new subsystem).
+
+      ADR-046 (task 007) is the canonical ACS messaging-channel ADR (concise + full). This doc is the architecture-level companion: it describes the delivered structure and rationale and points at ADR-046 for the codified decision, and at code entry points (thread resolver, ingestor, ACS folder) for implementation.
+
+      Source-of-truth (root §2): verify each described behavior against shipped code (040 resolver, 021/030/031 ingestor + capture, 004/005 schema, 010/011 ACS) before documenting it. Do NOT document plan-only intentions.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/communication-intelligence-architecture.md (EXTEND — add thread model + ACS transport + ingestor seam sections)</file>
+      <file>docs/architecture/communication-service-architecture.md (EXTEND if send/inbound narrative needs the messaging channel)</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md (READ — cross-reference; authored in task 007)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (IThreadResolver, MessagingIngestor, Acs/, ThreadContinuityRung, CommunicationService — code entry points)</file>
+      <file>docs/data-model/ (sprk_communicationthread + sprk_thread + child table — cross-link)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-17 (support)">Extend the communication architecture doc(s) with the thread model + ACS transport + inbound ingestor seam; wire in ADR-046. (ADR-046 authoring itself is task 007.)</constraint>
+    <constraint source="root §2 source-of-truth">Code wins — verify each described behavior against shipped code before documenting it; no plan-only content.</constraint>
+    <constraint source="docs conventions">Architecture doc = decisions + rationale + code entry-point pointers; NO implementation detail / code dumps.</constraint>
+    <constraint source="project">§11 — EXTEND the canonical R4 communication doc(s); do NOT author a new standalone subsystem doc (messaging is a channel, not a new subsystem). Justify if a new file is unavoidable.</constraint>
+    <constraint source="project">Cross-reference ADR-046 + related ADRs (045/024/034/028/027/004/036/007); do not restate ADR content verbatim.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>docs/architecture-authoring</topic>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/communication-intelligence-architecture.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec FR-17 + design (§6.2/§6.5/§8), ADR-046 (task 007), ADR-045, the `docs-architecture` skill, and the existing `communication-intelligence-architecture.md` + `communication-service-architecture.md` to find the right insertion points.</step>
+    <step order="2">Verify against code: read the shipped 040 resolver, 021/030/031 ingestor + capture pipeline, 004/005 schema, 010/011 ACS integration — ground each section in real code entry points.</step>
+    <step order="3">Extend the canonical doc with: thread data model (entity + lookup + child table + topologies + privacy/point-forward), `IThreadResolver` (direction-symmetric; email vs chat threading; the email-grouping feature), ACS transport (transport-vs-record, identity/token, retention, membership projection, no client SDK), and the inbound ingestor seam (Event Grid pipeline + idempotency/echo-dedup).</step>
+    <step order="4">Cross-reference ADR-046 + related ADRs; cross-link the data-model doc for the schema detail. Use code entry-point pointers, not code dumps.</step>
+    <step order="5">Self-check: verify every claim matches shipped code; remove anything speculative or plan-only; confirm the doc reads as ONE communication architecture (messaging = second channel).</step>
+    <step order="6">Update `tasks/TASK-INDEX.md` (081 ✅) + `current-task.md`. If a CLAUDE.md §17 pointer update is warranted, note it for the main session (sub-agents cannot write `.claude/`).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Shipped code (resolver, ingestor, ACS, schema) + existing arch docs + ADR-046</tool>
+    <tool name="docs-architecture">Extend the architecture doc(s)</tool>
+    <tool name="edit">Update the canonical communication doc(s)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/communication-intelligence-architecture.md (EXTENDED — thread model + ACS transport + ingestor seam)</output>
+    <output type="docs">docs/architecture/communication-service-architecture.md (EXTENDED if the send/inbound narrative needs the messaging channel)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The communication architecture doc(s) describe the thread data model (`sprk_communicationthread` + `sprk_thread` + child table + topologies + privacy/point-forward), each matching shipped code.</criterion>
+    <criterion testable="true">They describe the `IThreadResolver` (direction-symmetric; email `sprk_inreplyto` vs chat ACS `ChatThreadId`; the ThreadContinuityRung + CommunicationService extension).</criterion>
+    <criterion testable="true">They describe ACS transport (transport-vs-record, server-side identity/token, 30-day retention, membership projection, no client-side ACS SDK) and the inbound ingestor seam (Event Grid pipeline + idempotency/echo-dedup).</criterion>
+    <criterion testable="true">They cross-reference ADR-046 + related ADRs (045/024/034/028/027/004/036/007) and are extended from the canonical R4 doc (not a new standalone subsystem doc), per §11.</criterion>
+    <criterion testable="true">The doc is design/rationale + code entry-point pointers, with no implementation dumps, and contains no plan-only content (root §2).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    STANDARD rigor — no Step 9.5 gates, but the source-of-truth rule (root §2) binds: verify against shipped code. Authored after 040 lands (the thread resolver/model is real) + 007 lands (ADR-046 to cross-reference). ADR-046 AUTHORING is task 007, not here — this is the architecture-doc companion.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load `&lt;knowledge&gt;&lt;files&gt;`. Apply STANDARD rigor — Step 9.5 SKIPPED. Verify every documented behavior against shipped code before writing. Extend the canonical R4 doc(s) per §11 — do not fork a new subsystem doc. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

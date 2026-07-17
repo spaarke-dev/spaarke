@@ -1,0 +1,151 @@
+<task id="051" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Outbound send path — persist-on-send + echo-dedup wiring (messaging dispatch)</title>
+    <phase>W5 — BFF Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <dependencies>020,031,040,010,011</dependencies>
+    <blocks>062</blocks>
+    <tags>bff-api, communication, acs</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Wires the outbound messaging send end-to-end through the BFF (authZ → channel dispatch → server-side ACS SendMessage → persist-on-send → enrichment) and MUST guarantee exactly-once persistence despite the Event Grid echo of our own message (idempotent dedupe on ACS message id). Correctness-critical concurrency/idempotency wiring across the send + inbound-capture seams; BFF-touching (publish-size + CVE + Placement Justification); code-review + adr-check at Step 9.5.</rigor-reason>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-04</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Wire the **outbound messaging send** path, per ADR-045 rule 3 (persist-on-send) and design §4:
+
+    `PCF send/respond accessory → BFF (authZ) → CommunicationService dispatches to the messaging ICommunicationChannelSender (task 020) → ACS SendMessage (server-side, using the sending user's server-minted token from task 010) → persist sprk_communication (type=Message, sprk_thread set via the task-040 IThreadResolver) → enrichment (association + RAG, best-effort/non-fatal)`.
+
+    **The echo-dedup invariant is the load-bearing correctness property.** ACS emits an Event Grid `ChatMessageReceivedInThread` for our own outbound message; the inbound ingestor (task 031) dedupes on the ACS message id via `IIdempotencyService`, so the echo is a **no-op**. The seam: outbound persists on send AND records the ACS message id so the inbound capture recognizes and skips the echo — inbound stays capture-on-event, outbound stays persist-on-send, with no collision and no double-write.
+
+    **Acceptance MUST include: sending once yields exactly one persisted `sprk_communication` record despite the echo.** Enrichment and thread assignment MUST be best-effort and MUST NOT fail the send (NFR-02). Token minting is server-side only; no ACS token or admin capability reaches the client (NFR-05); no client-side ACS SDK (NFR-04).
+  </prompt>
+
+  <role>
+    Spaarke BFF architect for the Communication subsystem. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/` (send path + channel dispatch), the net-new `Services/Communication/Acs/` (identity/token/thread ops), and the inbound capture idempotency seam. Fluent in ADR-045 (channel seams / rule 3 persist-on-send), ADR-028 (server-side token minting; no `new` credential), ADR-003/ADR-008/ADR-019 (authZ seams / endpoint filters / ProblemDetails), the `IIdempotencyService` contract, NFR-02 (best-effort enrichment), NFR-03 (idempotent capture), §10 BFF Hygiene, §11 Component Justification.
+  </role>
+
+  <goal>
+    Outbound messaging send is wired end-to-end: BFF authZ → `CommunicationService` dispatches by `CommunicationType.Message` to the messaging `ICommunicationChannelSender` → server-side ACS `SendMessage` with the sender's minted token → persist-on-send `sprk_communication` (thread lookup set via `IThreadResolver`) → best-effort enrichment. The Event Grid echo of our own message is a proven no-op via idempotency on the ACS message id — sending once yields exactly one persisted record. Enrichment/thread-assignment never fail the send. No ACS token or SDK reaches the client. Build clean; send + echo-dedup + best-effort tests pass; publish-size delta + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      Design §4 resolves the synopsis's D-02 in favor of the platform's outbound pattern: persist-on-send (ADR-045 rule 3). Only inbound persists on event; both directions invoke enrichment (direction symmetry). The subtlety unique to a live-transport channel is the echo: ACS delivers our own outbound message back as an Event Grid `ChatMessageReceivedInThread`. Without dedupe, the outbound persist AND the inbound capture would both write the same message → two `sprk_communication` rows. The dedupe seam (task 031, `IIdempotencyService` keyed on the ACS message id) makes the echo a no-op — this task WIRES the outbound side of that seam: it must capture the ACS message id at send time and persist it so the inbound path recognizes the echo and skips it.
+
+      Component Justification (§11): (1) Existing — the channel dispatch (`CommunicationChannelDispatcher`), the messaging sender (task 020), the ACS identity/token/thread ops (tasks 010/011), the `IThreadResolver` (task 040), and the idempotency service already exist; this task adds NO new service — it is wiring across existing seams. (2) Extension — extends the existing `CommunicationService` send path to dispatch the `Message` type and set the thread + ACS correlation on persist; reuses the outbound send endpoint contract. (3) Cost-of-doing-nothing (concrete): without this wiring an outbound message either never reaches ACS (no live delivery to future surfaces) or double-persists on echo (FR-04 acceptance "exactly one persisted record" fails) — named contract failures, not "future flexibility."
+
+      NFR-02 discipline: enrichment (association + RAG) and thread assignment are best-effort and MUST NOT fail the send. A send that reached ACS + persisted MUST succeed to the caller even if enrichment throws — enrichment failures are logged/deferred, never surfaced as a send failure. NFR-05/NFR-04: the ACS token is minted server-side (task 010) and used by the BFF to act as the sending participant; no token or ACS SDK reaches the browser in R1.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (send path — dispatch Message + persist-on-send + thread set)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/ (MessagingChannelSender from task 020; CommunicationChannelDispatcher)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Acs/ (identity/token minting task 010; thread/membership ops task 011)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (IThreadResolver task 040; IIdempotencyService echo-dedup seam task 031)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ (outbound send endpoint)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-04 / ADR-045 rule 3">Outbound: BFF authZ → messaging sender dispatch → server-side ACS SendMessage → persist-on-send `sprk_communication` (thread set) → enrichment. Persist-on-send (NOT capture-on-event for outbound).</constraint>
+    <constraint source="FR-04 / NFR-03">Echo-dedup: the Event Grid echo of our own message is a no-op via idempotency on the ACS message id. Sending once yields EXACTLY ONE persisted record. Capture the ACS message id at send time so the inbound path (task 031) recognizes + skips the echo.</constraint>
+    <constraint source="NFR-02">Enrichment + thread assignment are best-effort and MUST NOT fail the send. A send that reached ACS + persisted succeeds to the caller even if enrichment throws.</constraint>
+    <constraint source="NFR-05 / ADR-028">ACS token minted server-side only; the BFF uses the sender's minted token to act as the participant; MUST NOT `new` a credential / `ConfidentialClientApplication`; inject central `TokenCredential` + canonical Dataverse interfaces.</constraint>
+    <constraint source="NFR-04">No client-side ACS SDK; no ACS token or admin capability reaches the client.</constraint>
+    <constraint source="ADR-045">Dispatch by `CommunicationType` (`Message` = 100000004) through the existing `CommunicationChannelDispatcher`; `CommunicationService` stays Graph-free; MUST NOT fork a second send path.</constraint>
+    <constraint source="ADR-003 / ADR-008 / ADR-019">Send endpoint carries the authorization seam + endpoint filter; errors return RFC 7807 ProblemDetails.</constraint>
+    <constraint source="ADR-024">Thread anchor via the existing regarding family through `IThreadResolver`; MUST NOT add a second regarding mechanism.</constraint>
+    <constraint source="ADR-032 / ADR-018">Registration unconditional / Null-Object for any feature-gated dependency; no asymmetric registration.</constraint>
+    <constraint source="project">§11 Component Justification: state the concrete FR-04 failure modes prevented (no delivery / double-persist). §10 bff-extensions Placement Justification in the PR; publish-size delta vs ~45.30 MB baseline; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-003-lean-authorization-seams.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-http-standardization.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+    <patterns>
+      <pattern name="Type-keyed channel dispatch" location="src/server/api/Sprk.Bff.Api/Services/Communication/Channels/CommunicationChannelDispatcher.cs">
+        `ResolveSender(Message)` returns the messaging sender; `CommunicationService` dispatches by `CommunicationType` — no dispatch-site edit per channel (email-r4 task 016 pattern).
+      </pattern>
+      <pattern name="Persist-on-send + direction-symmetric enrichment" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs">
+        Outbound persists on send and invokes enrichment; mirror the email outbound path (ADR-045 rule 3). Thread set via `IThreadResolver`.
+      </pattern>
+      <pattern name="Idempotent echo-dedup" location="src/server/api/Sprk.Bff.Api/Services/Communication/ (IIdempotencyService)">
+        Persist the ACS message id at send time; the inbound normalizer (task 031) dedupes on that id so the Event Grid echo is a no-op — the seam that lets outbound persist-on-send coexist with inbound capture-on-event.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `CommunicationService` send path + `CommunicationChannelDispatcher` + the task-020 `MessagingChannelSender` + the task-010/011 ACS identity/token/thread ops + the task-031 `IIdempotencyService` echo-dedup contract + the task-040 `IThreadResolver` to map the exact wiring points. Read `.claude/constraints/bff-extensions.md` §F + §11.</step>
+    <step order="2">Wire dispatch: `CommunicationService` resolves the messaging sender for `CommunicationType.Message` via the dispatcher (no new send path; no Graph in `CommunicationService`).</step>
+    <step order="3">Wire ACS send: the messaging sender calls server-side ACS `SendMessage` using the sending user's server-minted token (task 010); capture the returned ACS message id.</step>
+    <step order="4">Wire persist-on-send: persist `sprk_communication` (type=Message) with `sprk_thread` set via `IThreadResolver` (find-or-create) and the ACS message id + chat thread id recorded on the record (the correlation keys the echo-dedup uses).</step>
+    <step order="5">Wire echo-dedup coordination: ensure the ACS message id is registered/persisted such that the inbound ingestor (task 031) recognizes the echo and skips re-persisting. Confirm the idempotency key contract matches on both sides.</step>
+    <step order="6">Wire enrichment as best-effort/non-fatal (NFR-02): invoke after persist; a thrown enrichment/thread-assignment error is logged/deferred and MUST NOT fail the send.</step>
+    <step order="7">Confirm the send endpoint carries the ADR-003/ADR-008 authorization seam + filter + ADR-019 ProblemDetails; registration unconditional (ADR-032). No ACS token/SDK leaves the server (NFR-04/NFR-05).</step>
+    <step order="8">Write tests: (a) send dispatches through `ResolveSender(Message)` → ACS SendMessage → one persisted `sprk_communication` (type=Message) with thread set; (b) **ECHO-DEDUP: sending once, then delivering the ACS echo event through the inbound path, yields EXACTLY ONE persisted record** (dedupe on ACS message id); (c) a duplicate echo delivery still yields one record; (d) BEST-EFFORT: an enrichment/thread-assignment exception does NOT fail the send (record still persisted, caller still succeeds); (e) NEGATIVE: no ACS token is returned to the caller (server-side only).</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm existing send tests still pass.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~45.30 MB baseline (ACS SDKs are thin over `Azure.Core`).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus echo-dedup exactly-once + best-effort non-fatal enrichment + no token leak); `adr-check` against `spec.md` (focus FR-04, ADR-045 rule 3, NFR-02/03/04/05, §11). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; shared `Services/Communication/`; coordinate with `notification-spine-r1`).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (051 ✅) + `current-task.md`; record decisions (dedupe key/registration point, where the ACS message id is persisted, best-effort enrichment wiring).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect send path, dispatcher, messaging sender, ACS ops, idempotency + thread-resolver seams</tool>
+    <tool name="edit">Wire dispatch → ACS send → persist-on-send → echo-dedup coordination → best-effort enrichment</tool>
+    <tool name="bash">Build, send + echo-dedup + best-effort tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (UPDATED — dispatch Message, persist-on-send, thread set, ACS correlation, best-effort enrichment)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/ (MessagingChannelSender wiring to ACS SendMessage + message-id capture)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (echo-dedup coordination via IIdempotencyService — ACS message id registered for the inbound skip)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ — send dispatch + exactly-once echo-dedup + duplicate-echo + best-effort-enrichment + no-token-leak tests</output>
+    <output type="docs">PR description with §11 Component Justification (FR-04 failure modes) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An outbound message dispatches through `CommunicationChannelDispatcher.ResolveSender(Message)` to the messaging sender and calls server-side ACS `SendMessage` with the sender's minted token; `CommunicationService` remains Graph-free.</criterion>
+    <criterion testable="true">The message persists once as `sprk_communication` (type=Message) with `sprk_thread` set via `IThreadResolver` and the ACS message id + chat thread id recorded.</criterion>
+    <criterion testable="true">ECHO-DEDUP: sending once and then delivering the ACS Event Grid echo through the inbound path yields EXACTLY ONE persisted record (dedupe on ACS message id).</criterion>
+    <criterion testable="true">A duplicate echo delivery still yields exactly one record (idempotent).</criterion>
+    <criterion testable="true">BEST-EFFORT: an enrichment or thread-assignment exception does NOT fail the send — the record is still persisted and the caller still succeeds (NFR-02).</criterion>
+    <criterion testable="true">NEGATIVE: no ACS token or admin capability is returned to the caller; no client-side ACS SDK is introduced (NFR-04/NFR-05).</criterion>
+    <criterion testable="true">Send endpoint carries the authorization seam/filter + ProblemDetails; registration is unconditional (ADR-032).</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta reported vs ~45.30 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 020 (messaging sender), 031 (idempotent echo-dedup seam), 040 (`IThreadResolver`), 010 (server-minted token), 011 (thread/membership ops). Blocks 062 (PCF send/respond accessory drives this path). The exactly-once echo-dedup invariant is the reason this task is effort `xhigh`: hand-trace the send → ACS → echo → inbound-skip sequence and reproduce it empirically before trusting the wiring (§10 F.3 empirical-reproduction-first). The dedupe key MUST match on both the outbound-register and inbound-skip sides — a key mismatch silently double-persists.
+
+    Coordinate on the `threadId` contract with `notification-spine-r1` (messaging is its R2 consumer) — not an R1 blocker (R1 polls), but keep the persisted correlation shape aligned.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED. The echo-dedup exactly-once invariant is correctness-critical: empirically reproduce it (§10 F.3). Per CLAUDE.md §10 + §11: publish-size delta (baseline ~45.30 MB) + CVE + bff-extensions Placement Justification + Component Justification (FR-04 failure modes) in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `xhigh`.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,33 @@
+<!--
+  THROWAWAY SPIKE HARNESS (task 003). NOT production code.
+
+  Isolation: this project is deliberately OUTSIDE the solution/product build.
+    * It lives under projects/messaging-communication-app-r1/notes/spikes/acs-harness/.
+    * It MUST NOT be added to Sprk.Bff.Api.csproj or to any .sln (verified: no ACS ref
+      leaked into the product project; see 003-acs-spike.md section 6).
+    * Build/run it standalone via: dotnet run . mode  (mode = live or simulate).
+
+  Package pins match design 8.9 / task 003:
+    Azure.Communication.Identity 1.3.1  (identity + server-side chat-token minting)
+    Azure.Communication.Chat     1.4.0  (thread create w/ retention, AddParticipants, SendMessage)
+    Azure.Identity                      (DefaultAzureCredential; ADR-028 central credential path)
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Acs.Spike.Harness</RootNamespace>
+    <AssemblyName>AcsSpikeHarness</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Communication.Identity" Version="1.3.1" />
+    <PackageReference Include="Azure.Communication.Chat" Version="1.4.0" />
+    <!-- ADR-028: central TokenCredential (DefaultAzureCredential) for the ACS admin plane.
+         The BFF resolves managed identity in Azure; ClientSecretCredential is local-dev fallback ONLY.
+         MUST NOT `new` a ConfidentialClientApplication anywhere (constraint ADR-028). -->
+    <PackageReference Include="Azure.Identity" Version="1.17.1" />
+  </ItemGroup>
+</Project>

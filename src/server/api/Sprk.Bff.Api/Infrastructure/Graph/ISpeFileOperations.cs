@@ -70,6 +70,27 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
+    /// Create a NEW small (&lt;4 MB) drive-item in a container/drive under APP-ONLY (managed identity,
+    /// ADR-028) auth — the background/server-side counterpart to
+    /// <see cref="UploadSmallAsUserAsync(HttpContext, string, string, Stream, CancellationToken)"/>.
+    /// PUTs the stream to <c>drives/{driveId}/root:/{path}:/content</c> and returns the created
+    /// item's <see cref="FileHandleDto"/> (id + name + size + etag + resolved drive id).
+    /// </summary>
+    /// <remarks>
+    /// ADR-007: no <c>Microsoft.Graph</c> type crosses this boundary — the facade returns the
+    /// <see cref="FileHandleDto"/> shape only. Surfaced on the interface (2026-07-16,
+    /// messaging-communication-app-r1 task 070) so background materializers with no acting user
+    /// (e.g. inbound message-attachment materialization) inject the same mockable SPE facade the
+    /// email/AI/Compose services already do, rather than the concrete type. The concrete
+    /// <c>SpeFileStore</c> already implements this exact signature — the addition is declaration-only.
+    /// </remarks>
+    Task<FileHandleDto?> UploadSmallAsync(
+        string driveId,
+        string path,
+        Stream content,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Replace the content of an existing drive-item by itemId (OBO flow). PUTs the
     /// stream to the drive-item's /content endpoint, committing a new SPE version.
     /// Returns null when the drive-item doesn't exist. Throws

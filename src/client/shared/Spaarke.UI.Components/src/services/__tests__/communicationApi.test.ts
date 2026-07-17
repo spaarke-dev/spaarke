@@ -223,6 +223,69 @@ describe('sendCommunication — error path', () => {
   });
 });
 
+describe('sendCommunication — message channel (task 062 send-contract closure)', () => {
+  it('sends communicationType/threadId/inReplyToMessageId through to the BFF, defaulting to/subject', async () => {
+    const authenticatedFetch = jest
+      .fn()
+      .mockResolvedValue(
+        fakeResponse({ status: 200, contentType: 'application/json', jsonBody: { communicationId: 'c' } })
+      );
+
+    await sendCommunication(
+      {
+        body: 'hello there',
+        communicationType: 'message',
+        threadId: '11111111-1111-1111-1111-111111111111',
+        inReplyToMessageId: 'parent-comm-id',
+      },
+      { authenticatedFetch }
+    );
+
+    const body = JSON.parse(authenticatedFetch.mock.calls[0][1].body);
+    expect(body.communicationType).toBe('Message');
+    expect(body.threadId).toBe('11111111-1111-1111-1111-111111111111');
+    expect(body.inReplyToMessageId).toBe('parent-comm-id');
+    // `to`/`subject` are `required` members on the BFF DTO — always present, defaulted when omitted.
+    expect(body.to).toEqual([]);
+    expect(body.subject).toBe('');
+  });
+
+  it('defaults communicationType to Email when omitted (back-compat)', async () => {
+    const authenticatedFetch = jest
+      .fn()
+      .mockResolvedValue(
+        fakeResponse({ status: 200, contentType: 'application/json', jsonBody: { communicationId: 'c' } })
+      );
+
+    await sendCommunication(validOptions(), { authenticatedFetch });
+    const body = JSON.parse(authenticatedFetch.mock.calls[0][1].body);
+    expect(body.communicationType).toBe('Email');
+    expect(body.threadId).toBeUndefined();
+    expect(body.inReplyToMessageId).toBeUndefined();
+  });
+
+  it('does NOT require to/subject for a message send (only body)', async () => {
+    const authenticatedFetch = jest
+      .fn()
+      .mockResolvedValue(
+        fakeResponse({ status: 200, contentType: 'application/json', jsonBody: { communicationId: 'c' } })
+      );
+
+    await expect(
+      sendCommunication({ body: 'hi', communicationType: 'message' }, { authenticatedFetch })
+    ).resolves.toEqual({ communicationId: 'c' });
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('still requires a non-empty body for a message send', async () => {
+    const authenticatedFetch = jest.fn();
+    await expect(
+      sendCommunication({ body: '   ', communicationType: 'message' }, { authenticatedFetch })
+    ).rejects.toThrow(/body is required/);
+    expect(authenticatedFetch).not.toHaveBeenCalled();
+  });
+});
+
 describe('sendCommunication — argument guards (throw before any network call)', () => {
   it('requires at least one recipient', async () => {
     const authenticatedFetch = jest.fn();

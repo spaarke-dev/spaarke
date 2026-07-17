@@ -1,0 +1,151 @@
+<task id="030" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Event Grid webhook ingress (subscription-validation handshake) → Service Bus job</title>
+    <phase>W3 — Inbound Capture Pipeline</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>012,021</dependencies>
+    <blocks>031</blocks>
+    <tags>bff-api, communication, jobs</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Adds a NEW public webhook endpoint (Event Grid ingress) + Service Bus job enqueue to `Sprk.Bff.Api` — inbound-facing, security-relevant (unvalidated webhook must not enqueue), BFF-touching (`.cs`, endpoint + Services/Communication + Services/Jobs hot-path). Requires publish-size + CVE + code-review + adr-check per root §10.</rigor-reason>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-02</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Build the ACS Event Grid **webhook ingress** — the transport boundary that turns ACS chat events into a queued job for downstream normalize-and-persist (task 031):
+
+    • **Event Grid webhook ingress endpoint** — a BFF endpoint that receives Event Grid deliveries for the ACS system topic. It MUST handle the Event Grid **subscription-validation handshake**: on a `Microsoft.EventGrid.SubscriptionValidationEvent`, echo back the `validationCode` (synchronous validation-response) so Event Grid activates the subscription; on real chat events (`Microsoft.Communication.ChatMessageReceivedInThread` and siblings), accept the batch and enqueue.
+    • **Enqueue a Service Bus job** — for each validated chat event, enqueue a job onto the existing `Services/Jobs/` contract (reuse `JobSubmissionService` / the job envelope — do NOT invent a new queue or job pipeline). The endpoint's job is thin: validate the webhook, handle the handshake, enqueue, return fast. It MUST NOT persist `sprk_communication`, normalize the event, or run enrichment inline — that is task 031's Service Bus job handler.
+
+    Only a **validated** webhook enqueues: reject/ignore deliveries that fail the Event Grid validation (subscription-validation handshake for activation; and, where ACS/Event Grid supports it, verify the delivery is genuinely from the subscribed system topic before enqueue). No unvalidated payload reaches the job queue.
+  </prompt>
+
+  <role>
+    Spaarke BFF Communication architect. Authority on `src/server/api/Sprk.Bff.Api/` inbound capture + `Services/Jobs/`. Fluent in ADR-045 (channel seams — ingestor), ADR-046 (ACS transport — task 007), ADR-004/ADR-036 (job contract / background-job infra), ADR-008 (endpoint filters), ADR-019 (ProblemDetails), ADR-027 (per-customer ACS + Event Grid provisioning — task 012), and `.claude/constraints/bff-extensions.md`.
+  </role>
+
+  <goal>
+    A BFF Event Grid ingress endpoint receives ACS system-topic deliveries, correctly answers the subscription-validation handshake (echo `validationCode`), and for each validated chat event enqueues a job onto the existing `Services/Jobs/` contract. The endpoint is thin — validate, handshake, enqueue, return; it does NOT normalize/persist/enrich. Unvalidated webhooks do not enqueue. Build clean; endpoint + handshake + enqueue tests pass; publish-size (vs ~45.30 MB) + CVE + bff-extensions Placement Justification reported; `/conflict-check` before PR.
+  </goal>
+
+  <context>
+    <background>
+      **Mirror the email inbound rails; reuse the job contract.** The email inbound path already flows Graph webhook → job → `IncomingCommunicationProcessor` over the `Services/Jobs/` contract (idempotency, DLQ, retry). Messaging's inbound is the ACS analog: `participant sends → ACS → Event Grid → webhook ingress (validated) → Service Bus job → normalizer → ingestor persists → enrichment` (design §4, §8.3). This task builds ONLY the first hop — the Event Grid webhook ingress and the job enqueue. Task 021 shipped the `ICommunicationChannelIngestor` seam + `MessagingIngestor`; task 031 builds the Service Bus job handler that normalizes the ACS event into a `NormalizedMessage` and calls the ingestor with idempotent dedupe + DLQ. Task 012 provisions the per-customer ACS resource + Event Grid system topic/subscription pointing at this endpoint (+ dead-letter Storage).
+
+      **Event Grid delivery semantics (design §8.3):** subscription-validation handshake on activation (echo `validationCode`); events are **at-least-once, unordered, may duplicate** — so the endpoint is deliberately thin and idempotency lives in 031's handler (dedupe on ACS message id). The endpoint returns 200 fast to avoid Event Grid retries piling up; real processing is async on the queue.
+
+      **§11 Component Justification.** The ingress endpoint is NEW public surface: (Existing) no ACS/Event Grid ingress exists — grep confirms no Event Grid webhook in the BFF; (Extension) the email Graph-webhook ingress is Graph-subscription-specific and cannot receive Event Grid schema/handshake — a distinct transport; (Cost-of-doing-nothing) without this endpoint, no inbound ACS message can enter the pipeline at all — Event Grid has nowhere to deliver, so chat is send-only.
+
+      Scope discipline: webhook ingress + validation handshake + job enqueue ONLY. Do NOT normalize the event, persist `sprk_communication`, run enrichment, implement idempotency/dedupe, or wire the DLQ inline — all of that is 031's Service Bus job handler.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/JobSubmissionService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/JobContract.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/IncomingCommunicationJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/ICommunicationChannelIngestor.cs (task 021)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Acs/ (task 012 — Event Grid provisioning + system topic/subscription config)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ (webhook validation precedents — Graph subscription validation)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs (endpoint registration)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-02">Implement ACS Event Grid ingress: a validated webhook → a Service Bus job. Acceptance is completed jointly with 031 (exactly-one idempotent persist); this task delivers the validated ingress + enqueue leg.</constraint>
+    <constraint source="ADR-046">ACS is transport; Event Grid is the inbound transport for ACS chat events per ADR-046 (task 007). The endpoint receives transport events only — it does not touch the Dataverse record.</constraint>
+    <constraint source="ADR-004 / ADR-036">Enqueue onto the EXISTING `Services/Jobs/` contract (`JobSubmissionService` / job envelope); reuse the Service Bus job pipeline. Do NOT create a second queue or job mechanism (§11 / root §10 — extend, don't fork).</constraint>
+    <constraint source="ADR-008 / ADR-019">Endpoint hygiene: thin handler, ProblemDetails on error; the ingress must return the Event Grid validation response synchronously on the handshake and 200 fast on real events. Follow existing webhook-validation precedent (Graph subscription validation) for structure.</constraint>
+    <constraint source="security">Only a VALIDATED webhook enqueues. The Event Grid subscription-validation handshake activates the subscription; verify deliveries originate from the subscribed ACS system topic before enqueue. An unvalidated/spoofed payload MUST NOT reach the job queue. (Security-relevant — call out in code-review.)</constraint>
+    <constraint source="project">Thin ingress only — MUST NOT normalize the ACS event, persist `sprk_communication`, run enrichment, dedupe, or DLQ inline (all 031). MUST NOT introduce a client-side ACS SDK. Server-side only.</constraint>
+    <constraint source="ADR-028">Any Azure/ACS/Event Grid client uses the central `TokenCredential`; MUST NOT `new` a credential / `ConfidentialClientApplication`.</constraint>
+    <constraint source="ADR-032">If the ingress endpoint is feature-gated, register any gated service as ADR-032 Null-Object with UNCONDITIONAL endpoint registration (endpoints that map unconditionally must have unconditional service registration).</constraint>
+    <constraint source="root §10">bff-extensions Placement Justification in the PR (Event Grid ingress lives in BFF — sole policy point); publish-size delta vs ~45.30 MB baseline; no new HIGH CVE. Run `/conflict-check` before PR (shared `Services/Communication/` hot-path).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-004-async-job-contract.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/agent-memory/researcher/acs-chat-integration-2026-07-16.md</file>
+    </files>
+    <patterns>
+      <pattern name="Job enqueue via the shared contract" location="src/server/api/Sprk.Bff.Api/Services/Jobs/JobSubmissionService.cs">
+        Build a job envelope + submit onto Service Bus using the existing contract; a new job type is a new handler + envelope kind, not a new queue. The ingress enqueues; 031's handler consumes.
+      </pattern>
+      <pattern name="Webhook validation handshake" location="src/server/api/Sprk.Bff.Api/Infrastructure/Auth/">
+        The Graph subscription webhook already answers a validation handshake + verifies client state. Mirror the shape for Event Grid: detect `SubscriptionValidationEvent`, echo `validationCode`; verify topic origin on real events before enqueue.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the `Services/Jobs/` contract (`JobSubmissionService`, `JobContract`, `ServiceBusJobProcessor`, `IncomingCommunicationJobHandler`) to see how the email inbound job is enqueued + the envelope shape. Read the existing Graph webhook-validation precedent in `Infrastructure/Auth/`. Read task 012's Event Grid system-topic/subscription config + task 021's `ICommunicationChannelIngestor` (the eventual consumer).</step>
+    <step order="2">Read `.claude/constraints/bff-extensions.md` §F/§G + `.claude/agent-memory/researcher/acs-chat-integration-2026-07-16.md` (Event Grid handshake + at-least-once/duplicate/unordered semantics + dead-letter). Grep-confirm no Event Grid ingress exists (§11 evidence).</step>
+    <step order="3">Add the Event Grid ingress endpoint: on `Microsoft.EventGrid.SubscriptionValidationEvent`, return the synchronous validation response echoing `validationCode`; on ACS chat events (`ChatMessageReceivedInThread` + siblings), verify the delivery originates from the subscribed ACS system topic, then continue. Return fast; ProblemDetails on malformed input.</step>
+    <step order="4">For each validated chat event, build a job envelope (carry the ACS event payload / message id + thread id needed by 031) and enqueue via `JobSubmissionService` onto the existing Service Bus contract. Define the new job kind/handler-name that 031 will implement — but do NOT implement the handler body here (031 owns normalize+persist+dedupe+DLQ).</step>
+    <step order="5">Register the endpoint + any new service in `Program.cs` / `CommunicationModule` (ADR-010; ADR-032 Null-Object + unconditional registration if feature-gated).</step>
+    <step order="6">Write tests: a `SubscriptionValidationEvent` yields the correct validation-code echo (subscription activates); a `ChatMessageReceivedInThread` event enqueues exactly one job with the expected envelope; an unvalidated/wrong-topic delivery does NOT enqueue; a malformed payload returns ProblemDetails and enqueues nothing. Prefer vertical-slice seam tests per ADR-038 (no `Mock&lt;HttpMessageHandler&gt;`).</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm existing inbound/job tests still pass.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-030-publish/`; report compressed size + delta vs ~45.30 MB baseline (any Event Grid/ACS SDK add is thin). ≥+5 MB justify; ≥55 MB architecture review; ≥60 MB HARD STOP.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (EXPLICIT focus on the webhook-validation / unvalidated-payload security boundary); `adr-check` against `spec.md` (ADR-004/036 reuse-the-job-contract, ADR-046 transport, ADR-008/019 endpoint hygiene). Resolve Critical findings (path C) or surface an ADR conflict (root §6.5).</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/` + `Services/Jobs/` BFF hot-path).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (030 ✅) + `current-task.md`; record decisions (endpoint route, validation approach, job kind/envelope contract 031 consumes).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect job contract, Graph webhook-validation precedent, task 012 Event Grid config, task 021 ingestor</tool>
+    <tool name="grep">§11 evidence (no Event Grid ingress); confirm reuse of existing job pipeline</tool>
+    <tool name="edit">Add ingress endpoint + job enqueue; register in Program.cs/CommunicationModule</tool>
+    <tool name="bash">Build, endpoint/handshake/enqueue tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate incl. webhook-validation security boundary (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ (NEW — ACS Event Grid ingress endpoint w/ subscription-validation handshake)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (NEW — thin ingress service + job-envelope builder for the ACS event)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs + Program.cs (UPDATED — endpoint + service registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (validation-code echo; chat event enqueues one job; unvalidated/wrong-topic does not enqueue; malformed → ProblemDetails)</output>
+    <output type="docs">PR description with §11 Component Justification (no ingress exists — grep evidence; chat send-only failure mode) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Event Grid ingress endpoint answers the subscription-validation handshake — a `Microsoft.EventGrid.SubscriptionValidationEvent` yields a response echoing the `validationCode` so the subscription activates.</criterion>
+    <criterion testable="true">A validated `ChatMessageReceivedInThread` (and sibling) event enqueues exactly one job onto the EXISTING `Services/Jobs/` Service Bus contract (no new queue/pipeline), carrying the ACS message id + thread id 031 needs.</criterion>
+    <criterion testable="true">An unvalidated / wrong-topic delivery does NOT enqueue a job; a malformed payload returns ProblemDetails and enqueues nothing.</criterion>
+    <criterion testable="true">The endpoint is thin — it does NOT persist `sprk_communication`, normalize the event, run enrichment, dedupe, or DLQ inline (those are 031).</criterion>
+    <criterion testable="true">No client-side ACS SDK is introduced; any Event Grid/ACS client uses the central `TokenCredential` (no `new` credential).</criterion>
+    <criterion testable="true">If feature-gated, the endpoint is registered unconditionally with an ADR-032 Null-Object service.</criterion>
+    <criterion testable="true">`dotnet build` clean; existing inbound/job tests pass; publish-size delta reported vs ~45.30 MB (≤60 MB); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 012 (per-customer ACS resource + Event Grid system topic/subscription + dead-letter Storage — the endpoint is the subscription target) and 021 (the `ICommunicationChannelIngestor` seam the eventual job handler calls). Blocks 031 (the Service Bus job handler that normalizes + persists idempotently + DLQs). `parallel-safe: true` within W3, but 031 is serial after 030 (031 consumes this task's job envelope contract).
+
+    Strict scope: validated webhook ingress + handshake + enqueue. Idempotency/echo-dedup, the ACS-event→`NormalizedMessage` normalizer, the persist via `MessagingIngestor`, and the DLQ are ALL 031. Keep the endpoint fast + thin so Event Grid's at-least-once retries don't stack — durability + dedupe are the queue's + 031's job.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED, with explicit attention to the webhook-validation security boundary. Per root §10: publish-size delta (vs ~45.30 MB) + CVE + bff-extensions Placement Justification + §11 Component Justification in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/` + `Services/Jobs/` hot-path). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

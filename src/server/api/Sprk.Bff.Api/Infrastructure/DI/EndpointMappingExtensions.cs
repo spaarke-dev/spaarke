@@ -264,6 +264,11 @@ public static class EndpointMappingExtensions
         app.MapFinanceRollupEndpoints();
         app.MapCommunicationEndpoints();
 
+        // ACS Event Grid inbound ingress (messaging-communication-app-r1 task 030 / FR-02). Public webhook
+        // (AllowAnonymous — Event Grid presents no OAuth token); authenticity enforced inside the ingress
+        // service (subscription-validation handshake + fail-closed topic allow-list + optional ?sig= secret).
+        app.MapAcsEventGridEndpoints();
+
         // Insights Engine admin endpoints (/api/insights/admin/*) — manual SME authoring
         // of Precedents (D-P3 Phase 1 mode of D-61). Zone B per SPEC §3.5 — consumes
         // IPrecedentBoard which calls IDataverseService directly, no AI internals.

@@ -211,3 +211,11 @@ export * from './EmailComposer';
 // preserved and still reachable via the `pcf-safe` subpath + its explicit path
 // until task 060 (W6) migrates FilePreviewDialog off the old `onSend` API.
 export { SendEmailDialog, type ISendEmailDialogProps } from './EmailComposer';
+
+// CommunicationTimeline - Polling conversation/timeline component (task 060,
+// FR-10, ADR-026 Path-A exception). Renders a thread's persisted
+// `sprk_communication` rows (email + chat interleaved, reply-nested), a
+// compose box reusing `<EmailComposer/>` sub-components, an unread
+// indicator, and polls the BFF thread-read + unread-count endpoints
+// (task 050) on a configurable ~5s interval. NO client-side ACS SDK (NFR-04).
+export * from './CommunicationTimeline';

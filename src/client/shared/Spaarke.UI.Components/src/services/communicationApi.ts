@@ -58,6 +58,14 @@ export type CommunicationSendMode = 'sharedMailbox' | 'user';
 /** Body format options. Matches BFF `BodyFormat`. */
 export type CommunicationBodyFormat = 'html' | 'text';
 
+/**
+ * Channel to send on. Matches BFF `CommunicationType` (string form via
+ * JsonStringEnumConverter — see `Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs`).
+ * Defaults to `'email'` when omitted (BFF default `CommunicationType.Email`).
+ * `'message'` = ACS Chat (`CommunicationType.Message` = 100000004; task 062).
+ */
+export type CommunicationChannelType = 'email' | 'message';
+
 /** Entity link to attach to the generated `sprk_communication` record. */
 export interface ICommunicationAssociation {
   /** Dataverse logical name (e.g. "sprk_matter", "sprk_document"). */
@@ -72,18 +80,47 @@ export interface ICommunicationAssociation {
 
 /** Options accepted by {@link sendCommunication}. */
 export interface SendCommunicationOptions {
-  /** Recipient email addresses (required, ≥ 1). */
-  to: string[];
+  /**
+   * Recipient email addresses. Required (≥ 1) when `communicationType` is
+   * `'email'` (default). Not required for `'message'` — ACS Chat addresses by
+   * thread, not by recipient list (the BFF's `MessagingChannelSender` does
+   * not read `to`); omit or pass `[]`.
+   */
+  to?: string[];
   /** Optional CC addresses. */
   cc?: string[];
   /** Optional BCC addresses. */
   bcc?: string[];
-  /** Subject line (required). */
-  subject: string;
+  /**
+   * Subject line. Required when `communicationType` is `'email'` (default).
+   * Optional for `'message'` (ACS Chat has no subject concept — the BFF
+   * defaults an internal topic when creating a new ACS thread).
+   */
+  subject?: string;
   /** Body content (required). HTML by default. */
   body: string;
   /** Body content format. Default `'html'`. */
   bodyFormat?: CommunicationBodyFormat;
+  /**
+   * Channel to send on. Default `'email'`. Set to `'message'` to send an ACS
+   * Chat message (task 062) — dispatches server-side by `sprk_communicationtype`,
+   * NOT a second send contract.
+   */
+  communicationType?: CommunicationChannelType;
+  /**
+   * R1 "respond into the current thread" target (task 062, FR-12): the target
+   * `sprk_communicationthread` record id. Only meaningful when
+   * `communicationType` is `'message'` — stamps the sent message's thread
+   * lookup directly onto this thread (Dataverse grouping only; NOT ACS-thread
+   * session reuse, which is R2). Ignored for `'email'` sends.
+   */
+  threadId?: string;
+  /**
+   * Parent message id for reply/respond continuity. For `'email'` this is the
+   * RFC-2822 `Internet-Message-Id`; for `'message'` this is the parent
+   * `sprk_communication` id. Stamped onto `sprk_communication.sprk_inreplyto`.
+   */
+  inReplyToMessageId?: string;
   /**
    * `sprk_document` GUIDs for files to attach. See file-level note above —
    * despite historical confusion, this field correctly expects Dataverse
@@ -215,6 +252,11 @@ function toBffBodyFormat(format: CommunicationBodyFormat | undefined): 'HTML' | 
   return format === 'text' ? 'PlainText' : 'HTML';
 }
 
+/** Map our friendly channel string to the BFF `CommunicationType` enum value. */
+function toBffCommunicationType(channel: CommunicationChannelType | undefined): 'Email' | 'Message' {
+  return channel === 'message' ? 'Message' : 'Email';
+}
+
 /** Resolve the request URL using the optional base. */
 function resolveUrl(base: string | undefined): string {
   const path = '/api/communications/send';
@@ -263,13 +305,20 @@ export async function sendCommunication(
   opts: SendCommunicationOptions,
   client: ICommunicationApiClientOptions
 ): Promise<SendCommunicationResult> {
-  if (!opts.to || opts.to.length === 0) {
-    throw new Error('sendCommunication: at least one recipient is required.');
+  const isMessage = opts.communicationType === 'message';
+
+  // Email (default) keeps its original required-field contract exactly. Message (ACS Chat) only
+  // requires a body — `to`/`subject` are email concepts the BFF's messaging send path does not
+  // read (see SendCommunicationOptions.to/.subject docs; task 062).
+  if (!isMessage) {
+    if (!opts.to || opts.to.length === 0) {
+      throw new Error('sendCommunication: at least one recipient is required.');
+    }
+    if (!opts.subject || !opts.subject.trim()) {
+      throw new Error('sendCommunication: subject is required.');
+    }
   }
-  if (!opts.subject || !opts.subject.trim()) {
-    throw new Error('sendCommunication: subject is required.');
-  }
-  if (typeof opts.body !== 'string') {
+  if (typeof opts.body !== 'string' || (isMessage && !opts.body.trim())) {
     throw new Error('sendCommunication: body is required.');
   }
   if (!client.authenticatedFetch) {
@@ -277,12 +326,17 @@ export async function sendCommunication(
   }
 
   const requestBody = {
-    to: opts.to,
+    // `to`/`subject` are `required` members on the BFF DTO (System.Text.Json enforces PRESENCE at
+    // deserialize time even though Message doesn't need them) — always send a value, never omit.
+    to: opts.to ?? [],
     cc: opts.cc,
     bcc: opts.bcc,
-    subject: opts.subject,
+    subject: opts.subject ?? '',
     body: opts.body,
     bodyFormat: toBffBodyFormat(opts.bodyFormat),
+    communicationType: toBffCommunicationType(opts.communicationType),
+    threadId: opts.threadId,
+    inReplyToMessageId: opts.inReplyToMessageId,
     fromMailbox: opts.fromMailbox,
     sendMode: toBffSendMode(opts.sendMode),
     archiveToSpe: opts.archiveToSpe ?? false,

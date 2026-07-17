@@ -1,0 +1,154 @@
+<task id="050" project="messaging-communication-app-r1">
+  <metadata>
+    <title>BFF thread-read + unread-count endpoints (access-filtered per FR-08)</title>
+    <phase>W5 — BFF Endpoints</phase>
+    <status>completed</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>040,042,004</dependencies>
+    <blocks>060</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Adds two new BFF endpoints to `Sprk.Bff.Api` that drive the ~5s poll and MUST enforce FR-08 privacy/internal-only/privilege filtering on every read (NFR-06 security-sensitive downstream of 042). BFF-touching: publish-size + CVE + bff-extensions Placement Justification required; access-filter correctness demands code-review + adr-check at Step 9.5.</rigor-reason>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-11, NFR-07</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Add two BFF read endpoints that drive the polling timeline (task 060) over the thread model:
+
+    • **Thread-read** — return a thread's `sprk_communication` rows for rendering: `sprk_body` + `sprk_bodyformat`, channel type (`sprk_communicationtype`), sender, timestamp, reply-parent pointer (`sprk_inreplyto`), and attachment references (`sprk_document` links via the `sprk_communicationattachment` intersection). Ordered, groupable by `sprk_thread`.
+    • **Unread-count** — return the count of messages in a thread (or across the caller's authorized threads, per the read model chosen) that are newer than the caller's last-seen marker.
+
+    **BOTH endpoints MUST be access-filtered per FR-08** — they return ONLY messages the caller may read: record-scoped (open) threads via `MembershipResolverService` (ADR-034)-derived access, private threads via the per-record sharing grant, message-level privacy + internal-only + privilege composed exactly as the task-042 BFF query-filter enforces. The unread count reflects only messages the caller may read, since the caller's last-seen. Reuse the task-042 filter path — do NOT author a second, divergent filter. Both endpoints MUST be **lightweight** to bound poll load at ~5s cadence (NFR-07): projected/paged reads, no per-row fan-out, no ACS call (Dataverse is the record). No client-side ACS SDK is involved (server read only).
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication subsystem. Authority on `src/server/api/Sprk.Bff.Api/Api/` endpoints + `Services/Communication/`. Fluent in ADR-008 (endpoint filters), ADR-003 (authorization seams), ADR-019 (ProblemDetails), ADR-024 (regarding family / thread anchor), the FR-08 privacy model (task 042), NFR-07 (bound poll load), `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` (BFF read vs `Xrm.WebApi`), §10 BFF Hygiene, and §11 Component Justification.
+  </role>
+
+  <goal>
+    Two BFF endpoints exist — thread-read (a thread's messages with body/channel/sender/attachments) and unread-count (since caller's last-seen) — both routing reads through the task-042 access-filter so a caller sees ONLY authorized messages, private/internal-only/privileged content never leaks, and unread reflects only readable messages. Reads are lightweight (projected/paged, no ACS call) to bound ~5s poll load (NFR-07). Endpoints carry ADR-008 filters + ADR-019 ProblemDetails, are registered unconditionally, and drive task 060. Build clean; endpoint + access-filter tests pass; publish-size delta + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      The polling conversation/timeline component (task 060, FR-10) reads persisted `sprk_communication` rows from the BFF and polls a thread-read endpoint on a ~5s interval; an unread indicator polls an unread-count endpoint (design §6.2). Neither endpoint exists today — the current communication surface is a flat OOB subgrid + one-record-at-a-time form (design §2). These two reads are the server read model for the whole R1 UI.
+
+      Component Justification (§11): (1) Existing — no endpoint returns a thread's messages grouped by `sprk_thread` with attachment references, and no unread-count endpoint exists (grep-verify before claiming). The task-042 filter enforces privacy but exposes no read endpoint; existing communication endpoints are send/regarding-review, not thread-read. (2) Extension — these are additive read endpoints on the existing communication `Api/` surface reusing the task-042 filter path; they do NOT introduce a new service or a second filter. (3) Cost-of-doing-nothing (concrete): without the thread-read endpoint the timeline component has nothing to render and no way to reflect a newly-captured inbound message within a poll cycle (FR-10/FR-11 acceptance fails); without access-filtering on these reads, a private/internal-only/privileged message leaks to an unauthorized caller (NFR-06 security failure). These are named contract failures, not "future flexibility."
+
+      NFR-07 discipline: at ~5s cadence with many concurrent open forms, an unbounded read or per-row fan-out floods the BFF. Keep reads projected (only the columns the timeline needs), paged, and free of ACS calls (Dataverse is the record — no ACS read needed to view/sync history, design §6.2). Tune/monitor; escalate to spine push (R2) only if load warrants.
+
+      Privacy is the load-bearing correctness property (FR-08 / NFR-06). Task 042 owns the BFF query-filter that composes message-level + thread-level privacy, internal-only (D-05 user attribute), and privilege classification over `MembershipResolverService`-derived access. This task MUST consume that filter, not re-derive access. Point-forward semantics (a thread flipped to open exposes only messages from that point forward) come from the filter, not from these endpoints.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ (communication endpoints — add thread-read + unread-count here)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (task-042 privacy query-filter; task-040 IThreadResolver / sprk_thread lookup)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (endpoint + service registration)</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md (BFF read for the timeline vs Xrm.WebApi)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-11">Thread-read returns a thread's `sprk_communication` rows (`sprk_body`, channel type, sender, attachments); unread-count returns messages since the caller's last-seen. BOTH access-filtered.</constraint>
+    <constraint source="FR-08 / NFR-06">Both endpoints return ONLY messages the caller may read: open via `MembershipResolverService` (ADR-034), private via per-record sharing grant, message/thread privacy + internal-only + privilege composed via the task-042 filter. No privileged/private/internal-only content leaks. Reuse the 042 filter path; do NOT author a second filter. Point-forward privacy honored.</constraint>
+    <constraint source="NFR-07">Lightweight to bound ~5s poll load: projected columns only, paged, no per-row fan-out, NO ACS call (Dataverse is the record). Tunable/monitorable.</constraint>
+    <constraint source="ADR-008">Both endpoints carry the standard authorization endpoint filter; auth posture consistent with the communication surface.</constraint>
+    <constraint source="ADR-003">Authorization derives from the canonical authorization seams / Dataverse-derived access — never a bespoke ACL.</constraint>
+    <constraint source="ADR-019">Errors (thread not found, forbidden, bad request) return RFC 7807 ProblemDetails.</constraint>
+    <constraint source="ADR-024">Thread anchor uses the existing regarding family via `sprk_communicationthread`; MUST NOT add a second regarding mechanism.</constraint>
+    <constraint source="ADR-032 / ADR-018">Endpoints registered unconditionally; any feature-gated dependency uses the Null-Object pattern (no asymmetric registration).</constraint>
+    <constraint source="ADR-028">Inject central `TokenCredential` + canonical Dataverse interfaces; MUST NOT `new` a credential.</constraint>
+    <constraint source="NFR-04">Server read only — MUST NOT import or introduce any client-side ACS SDK.</constraint>
+    <constraint source="project">§11 Component Justification: state the concrete FR-11/NFR-06 failure modes prevented. §10 bff-extensions Placement Justification in the PR; publish-size delta vs ~45.30 MB baseline; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>.claude/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-003-lean-authorization-seams.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-http-standardization.md</file>
+      <file>.claude/adr/ADR-024-regarding-family.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Access-filtered communication read" location="src/server/api/Sprk.Bff.Api/Services/Communication/">
+        Route both reads through the task-042 BFF query-filter so open/private/internal-only/privilege access is composed once; the endpoint never re-derives access.
+      </pattern>
+      <pattern name="Thread grouping query" location="src/server/api/Sprk.Bff.Api/Services/Communication/">
+        Timeline query = filter `sprk_communication` where `sprk_thread` = X (design §6.1); projected columns only; paged; ordered for interleave + reply nesting.
+      </pattern>
+      <pattern name="ProblemDetails endpoint" location="src/server/api/Sprk.Bff.Api/Api/">
+        ADR-019 ProblemDetails on error; ADR-008 authorization endpoint filter; unconditional mapping (ADR-032).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` (confirms BFF read for the timeline, not `Xrm.WebApi`) + `.claude/constraints/bff-extensions.md` §F/§G + §11 Component Justification before adding endpoints.</step>
+    <step order="2">Read the task-042 privacy query-filter + the task-040 `IThreadResolver` / `sprk_thread` lookup + the task-004 thread schema to identify the exact filter entry point to reuse and the `sprk_communication` columns to project.</step>
+    <step order="3">Grep the existing communication `Api/` surface to confirm no thread-read or unread-count endpoint exists (§11 existing-question evidence).</step>
+    <step order="4">Implement the thread-read endpoint: input = thread id (+ optional paging/since cursor); route through the task-042 access-filter; project `sprk_body`, `sprk_bodyformat`, `sprk_communicationtype`, sender, timestamp, `sprk_inreplyto`, and attachment references (`sprk_document` via `sprk_communicationattachment`); ordered + paged. No ACS call.</step>
+    <step order="5">Implement the unread-count endpoint: count access-filtered messages newer than the caller's last-seen marker (define the last-seen source — per-caller marker; scope to the thread or authorized threads per the read model). Lightweight aggregate, no row materialization.</step>
+    <step order="6">Apply ADR-008 authorization endpoint filter + ADR-019 ProblemDetails (not-found / forbidden / bad-request) to both endpoints; register both unconditionally via `CommunicationModule` (ADR-010/ADR-032).</step>
+    <step order="7">Write tests: (a) thread-read returns a thread's messages with body/channel/sender/attachment refs; (b) a caller WITHOUT access to a private thread receives NONE of its messages (negative); (c) an internal-only message is absent for a non-internal caller (negative); (d) a privileged message is filtered per the 042 filter (negative); (e) unread-count reflects only readable messages since last-seen and excludes a private/internal-only message the caller can't read (negative); (f) reads are projected/paged (no unbounded fetch) — NFR-07 shape assertion.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm existing communication tests still pass.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~45.30 MB baseline. Expected ≈ 0 (no new packages).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus access-filter correctness / no-leak); `adr-check` against `spec.md` (focus FR-08/NFR-06 filtering, ADR-008/003/019, §11 justification, NFR-07 bound load). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; shared `Services/Communication/`; coordinate with `notification-spine-r1`).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (050 ✅) + `current-task.md`; record decisions (read-model scope, last-seen source, filter-reuse entry point, paging shape).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect the 042 filter, 040 resolver / thread lookup, 004 schema, existing communication endpoints</tool>
+    <tool name="grep">Confirm no existing thread-read / unread-count endpoint (§11 evidence)</tool>
+    <tool name="edit">Add both endpoints; wire the access-filter; register in CommunicationModule</tool>
+    <tool name="bash">Build, endpoint/access-filter tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ — thread-read endpoint (NEW) + unread-count endpoint (NEW), access-filtered</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ — read/query support routing through the task-042 access-filter (no second filter)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — unconditional endpoint/service registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ — thread-read + unread-count access-filter tests incl. private/internal-only/privilege negative cases + NFR-07 projected/paged shape</output>
+    <output type="docs">PR description with §11 Component Justification (FR-11/NFR-06 failure modes) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A thread-read endpoint returns a thread's `sprk_communication` rows including `sprk_body`, `sprk_bodyformat`, channel type, sender, timestamp, `sprk_inreplyto`, and attachment references — ordered and filterable by `sprk_thread`.</criterion>
+    <criterion testable="true">An unread-count endpoint returns the count of readable messages newer than the caller's last-seen marker.</criterion>
+    <criterion testable="true">Both endpoints route through the task-042 access-filter — no second/divergent filter is introduced (grep/diff-verifiable).</criterion>
+    <criterion testable="true">NEGATIVE: a caller without a grant to a private thread receives NONE of its messages from thread-read, and the private messages are NOT counted in unread-count.</criterion>
+    <criterion testable="true">NEGATIVE: an internal-only message is absent from thread-read and excluded from unread-count for a non-internal caller.</criterion>
+    <criterion testable="true">NEGATIVE: a privileged message is filtered exactly as the 042 filter dictates (no leak beyond the composed access set).</criterion>
+    <criterion testable="true">Reads are projected + paged and make NO ACS call (NFR-07 bound poll load; server read only, no ACS SDK import).</criterion>
+    <criterion testable="true">Both endpoints carry the ADR-008 authorization filter + ADR-019 ProblemDetails and are registered unconditionally (ADR-032).</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta ≈ 0 vs ~45.30 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 040 (`sprk_thread` lookup / `IThreadResolver`), 042 (the access-filter this endpoint MUST reuse), and 004 (thread schema). Blocks 060 (the timeline component consumes both endpoints). The single most important correctness property is no-leak: the negative access-filter cases are non-negotiable (NFR-06, security-sensitive). If reusing the 042 filter would force a change to it, coordinate — do NOT fork a parallel filter into the endpoint.
+
+    NFR-07: these two reads are the ~5s poll surface for every open form. Keep them cheap by construction (projection + paging + no ACS). Note monitoring hooks in the PR so poll load is observable; spine-push escalation is an R2 concern, not R1.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED (access-filter no-leak is security-sensitive per NFR-06). Per CLAUDE.md §10 + §11: publish-size delta (baseline ~45.30 MB) + CVE + bff-extensions Placement Justification + Component Justification (FR-11/NFR-06 failure modes) in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

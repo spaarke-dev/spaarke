@@ -88,9 +88,23 @@ public sealed record SendCommunicationRequest
     public string[]? AttachmentDocumentIds { get; init; }
 
     /// <summary>
-    /// For reply/forward sends: the parent message's RFC-2822 <c>Internet-Message-Id</c>.
-    /// When provided, it is stamped onto <c>sprk_communication.sprk_inreplyto</c> to preserve
-    /// reply-thread continuity (feeds the W1 thread-continuity association rung). Optional.
+    /// For reply/forward sends: the parent message's RFC-2822 <c>Internet-Message-Id</c> (Email) or the
+    /// parent message's <c>sprk_communication</c> id (Message — task 062). When provided, it is stamped
+    /// onto <c>sprk_communication.sprk_inreplyto</c> to preserve reply-thread continuity (feeds the W1
+    /// thread-continuity association rung for Email; a display/threading hint for Message). Optional.
     /// </summary>
     public string? InReplyToMessageId { get; init; }
+
+    /// <summary>
+    /// R1 "respond into the current thread" target (FR-12, task 062): the target
+    /// <c>sprk_communicationthread</c> record id. When provided on a <see cref="Models.CommunicationType.Message"/>
+    /// send, the outbound thread-resolution step stamps <c>sprk_communication.sprk_communicationthread</c>
+    /// directly to this id instead of running the ACS-thread find-or-create resolver (<c>ThreadResolver</c> /
+    /// <c>MessagingThreadKeyStrategy</c>). R1 has no live channel (design §6.2/§8.5): the polling timeline
+    /// reads persisted <c>sprk_communication</c> rows grouped by this lookup, so "respond into the thread"
+    /// is satisfied by the Dataverse stamp alone — ACS-thread-session reuse (posting into the SAME ACS chat
+    /// thread for live delivery) is explicitly out of scope for R1 (deferred to R2). Ignored for Email sends.
+    /// Optional.
+    /// </summary>
+    public Guid? ThreadId { get; init; }
 }

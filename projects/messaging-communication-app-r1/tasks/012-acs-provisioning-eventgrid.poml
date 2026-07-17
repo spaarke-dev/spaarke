@@ -1,0 +1,154 @@
+<task id="012" project="messaging-communication-app-r1">
+  <metadata>
+    <title>ACS provisioning: per-customer resource + Event Grid system topic/subscriptions (ADR-027)</title>
+    <phase>W1 — ACS Integration (server-side only)</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>030</blocks>
+    <tags>bff-api, acs, provisioning</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Extends the ADR-027 provisioning orchestrator with a first-of-kind external Azure resource (ACS) + Event Grid system topic/subscriptions wiring, with data-residency implications (immutable ACS data location → per-boundary resource). Tag `bff-api`; provisioning/infra surface; blocks the inbound capture path (030); publish-size + CVE governance applies.</rigor-reason>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-18</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Add **per-customer ACS resource + Event Grid provisioning** to the Spaarke provisioning orchestrator (ADR-027), so a new customer boundary gets its own ACS resource and the Event Grid system topic + subscriptions that feed the BFF inbound webhook. Responsibilities:
+
+    • **Per-customer ACS resource** — because **ACS data location is immutable at create time** (design §8.7, D-01), residency is achieved by provisioning a **separate ACS resource per boundary**. Add this to the provisioning orchestrator (ADR-027) alongside the existing per-customer resource creation, with the data-location parameter chosen per boundary.
+    • **Event Grid system topic + subscriptions** — create the ACS Event Grid **system topic** and subscribe the relevant chat events (`ChatMessageReceivedInThread`, `...Edited/Deleted`, `ParticipantAdded/RemovedToThread`) to the **BFF webhook** (task 030's ingress), with a **dead-letter Storage** destination configured from day one (design §8.3).
+    • **Document data-residency** — record that data location is immutable → per-boundary resource is the residency mechanism, in the provisioning notes / ADR-046 context (task 007 owns the ADR body).
+
+    This is provisioning/infra wiring, not runtime message handling. Do NOT build the webhook handler itself (task 030 — subscription-validation handshake + Service Bus job) or the normalizer/persist (task 031). This task stands up the resources + subscriptions that 030 consumes. Align with ADR-027's existing orchestrator so this is an *extension*, not a parallel provisioning path (§11).
+  </prompt>
+
+  <role>
+    Spaarke BFF architect for the Communication + provisioning subsystems, specializing in ACS server integration and ADR-027 subscription isolation. Authority on the provisioning orchestrator and `Services/Communication/Acs/`. Fluent in ADR-027 (subscription isolation / per-customer resource provisioning), ADR-028 (central credential; no `new` credential), ADR-010 (DI via `CommunicationModule`), ADR-032 (Null-Object kill-switch), §10 BFF Hygiene, §11 Component Justification, and `.claude/constraints/bff-extensions.md`.
+  </role>
+
+  <goal>
+    The ADR-027 provisioning orchestrator provisions a **per-customer ACS resource** (data location per boundary) and the **Event Grid system topic + subscriptions** wiring ACS chat events to the BFF webhook (task 030) with a **dead-letter Storage** destination. Data-residency rationale (immutable location → per-boundary resource) is documented for ADR-046. Provisioning uses the injected central `TokenCredential`/canonical management interfaces (ADR-028); no credential is `new`'d. Extension of the existing orchestrator, not a parallel path (§11). Build clean; provisioning-shape tests pass; publish-size delta + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      Messaging inbound capture (030/031) depends on ACS emitting Event Grid events to a BFF webhook. Those resources must be provisioned per customer boundary: ACS data location is **immutable at create time** (design §8.7, decision D-01), so data residency is achieved by a *separate ACS resource per boundary* — exactly the concern ADR-027 (subscription isolation / per-customer resource management) already governs. This task extends that orchestrator rather than forking a second provisioning mechanism.
+
+      The Event Grid path is at-least-once, unordered, and may duplicate (design §8.3) — the *handler's* idempotency is task 031's problem; this task's job is only to create the **system topic**, the **subscriptions** (chat events → BFF webhook), and the **dead-letter Storage** destination so failures are captured from day one. ACS management SDK usage is thin; measure the publish-size delta anyway (NFR-01).
+
+      **§11 Component Justification (concrete cost-of-doing-nothing):** without ACS + Event Grid provisioning there is **no inbound event source** — ACS has nowhere to deliver chat events, so task 030's webhook has nothing to validate/receive and inbound capture (031) never fires; and without a per-boundary resource, the immutable-data-location constraint makes residency unachievable. The failure mode is a named contract failure (FR-18 unmet; 030 blocked; D-01 residency broken), not "future flexibility." This is an **extension** of the ADR-027 orchestrator (question 2 of §11 answered "extend, not new") — a parallel provisioning path would fork isolation logic ADR-027 already owns.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs (provisioning orchestrator surface — the ADR-027 per-customer provisioning to extend)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs + Dtos/ProvisionProjectRequest.cs (provisioning entry-point shape to mirror/extend)</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/DemoProvisioningOptions.cs (provisioning options — add ACS resource + Event Grid + dead-letter config here)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Acs/ (from tasks 010/011 — ACS endpoint/resource identity this provisioning targets)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (register any provisioning helper, unconditional per ADR-032)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs (central credential precedent — inject for management calls, do NOT `new`)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-18">Provisioning creates/wires a per-customer ACS resource + an Event Grid system topic/subscription to the BFF webhook + dead-letter Storage; document data-residency (immutable location → per-boundary resource).</constraint>
+    <constraint source="ADR-027">Extend the existing per-customer provisioning orchestrator; do NOT fork a second provisioning/isolation path. Per-customer ACS resource honors the subscription-isolation boundary.</constraint>
+    <constraint source="design §8.7 / D-01">ACS data location is immutable at create time → residency = a separate ACS resource per boundary; choose the data-location parameter per boundary at create time.</constraint>
+    <constraint source="design §8.3">Subscribe chat events (`ChatMessageReceivedInThread`, Edited/Deleted, ParticipantAdded/RemovedToThread) to the BFF webhook; configure a dead-letter Storage destination from day one.</constraint>
+    <constraint source="NFR-05">Use the injected central `TokenCredential`/canonical management interface (ADR-028); MUST NOT `new` a credential inline.</constraint>
+    <constraint source="ADR-010">Register any provisioning helper via `CommunicationModule` only.</constraint>
+    <constraint source="ADR-032">Registration is unconditional (Null-Object if feature-gated).</constraint>
+    <constraint source="project">MUST NOT build the webhook handler (030 — subscription-validation handshake + Service Bus job) or the normalizer/persist (031). This task provisions the resources 030 consumes.</constraint>
+    <constraint source="§11">State the concrete FR-18 failure mode prevented (no inbound event source → 030 blocked; residency broken) and answer the extend-vs-new question (extend ADR-027 orchestrator) in the PR.</constraint>
+    <constraint source="§10">bff-extensions Placement Justification in the PR; publish-size delta (baseline ~45.30 MB post-R4); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+    <patterns>
+      <pattern name="Extend the provisioning orchestrator (ADR-027)" location="src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs">
+        Add the ACS resource + Event Grid steps as an extension of the existing per-customer provisioning flow; keep the isolation boundary ADR-027 defines.
+      </pattern>
+      <pattern name="Provisioning options" location="src/server/api/Sprk.Bff.Api/Configuration/DemoProvisioningOptions.cs">
+        Add ACS resource, Event Grid topic/subscription, and dead-letter Storage settings here; drive the create from options, per boundary.
+      </pattern>
+      <pattern name="Central credential injection (ADR-028)" location="src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs">
+        Resolve the `TokenCredential` from DI for management-plane calls; never `new` a credential.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design §8.3/§8.7 (Event Grid events + retention/residency) + spec FR-18/NFR-05, and `.claude/agent-memory/researcher/acs-chat-integration-2026-07-16.md` if present. Read ADR-027 to lock the extend-not-fork boundary.</step>
+    <step order="2">Read `DemoProvisioningService.cs` + `ProvisionProjectEndpoint.cs` + `DemoProvisioningOptions.cs` to identify the exact per-customer provisioning extension point. Confirm task 003's ACS spike output (resource shape, Event Grid round-trip) and the tasks 010/011 ACS endpoint the webhook will subscribe against.</step>
+    <step order="3">Add the ACS management dependency (Event Grid / ACS management SDK as required) to `Sprk.Bff.Api.csproj` only if a management call is made in-process; if provisioning is script/Bicep-driven, extend that path instead and keep the BFF footprint minimal. Record which path was chosen and why.</step>
+    <step order="4">Extend the provisioning orchestrator: add a **per-customer ACS resource** create step with the data-location parameter chosen per boundary (immutable-at-create — D-01). Add ACS resource + data-location settings to `DemoProvisioningOptions`.</step>
+    <step order="5">Add the **Event Grid system topic** + **subscription** steps: subscribe the chat events (`ChatMessageReceivedInThread`, Edited/Deleted, ParticipantAdded/RemovedToThread) to the **BFF webhook** endpoint (task 030's ingress URL, from options), with a **dead-letter Storage** destination configured from day one.</step>
+    <step order="6">Wire management-plane calls through the injected central `TokenCredential`/canonical interface (ADR-028, NFR-05 — no inline credential). Register any provisioning helper in `CommunicationModule` (ADR-010), unconditional (ADR-032).</step>
+    <step order="7">Document the data-residency rationale (immutable data location → per-boundary ACS resource) in the provisioning notes and as ADR-046 input context (task 007 owns the ADR body; leave a pointer, do not edit `.claude/adr/` here — sub-agent write boundary, root §3).</step>
+    <step order="8">Write tests in `tests/unit/Sprk.Bff.Api.Tests/` at the shape/config level: (a) provisioning options carry ACS resource + data-location + Event Grid subscription + dead-letter settings; (b) the orchestrator invokes the ACS + Event Grid steps as an extension of the existing per-customer flow (assert wiring, not a live Azure call); (c) management calls use the injected credential (no `new`). Do not attempt live resource creation in unit tests.</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Provision`; build clean, tests green.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-012-publish/`; report compressed size + delta vs ~45.30 MB baseline (NFR-01). If provisioning is script/Bicep-driven the BFF delta is ≈0; if a management SDK was added, justify any ≥+5 MB.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus: extends ADR-027 orchestrator not forks it, per-boundary data location, dead-letter from day one, credential injected not `new`'d); `adr-check` against `spec.md` (ADR-027 isolation, ADR-028 credential, ADR-010/032, §11 extend-vs-new). Resolve Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path — shared `Services/Communication/` + provisioning; coordinate with email-r4 + notification-spine-r1).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (012 ✅) + `current-task.md`; record decisions (in-process management SDK vs script/Bicep provisioning, event subset subscribed, dead-letter destination, data-location strategy, publish-size delta).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Design §8.3/§8.7, ADR-027, provisioning orchestrator + options, task-003 spike output</tool>
+    <tool name="edit">Extend orchestrator + options; Event Grid subscription wiring; DI; residency doc pointer</tool>
+    <tool name="bash">Build, provisioning-shape tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs (UPDATED — ACS resource + Event Grid provisioning steps, extension of the ADR-027 flow)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/DemoProvisioningOptions.cs (UPDATED — ACS resource + data-location + Event Grid subscription + dead-letter settings)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Acs/ (NEW provisioning helper if needed — registered in CommunicationModule)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — register provisioning helper if added, unconditional)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (provisioning-options + orchestrator-wiring + injected-credential tests)</output>
+    <output type="docs">Provisioning notes documenting data-residency (immutable location → per-boundary resource) as ADR-046 input; PR description with §11 Component Justification (FR-18 failure mode + extend-vs-new) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The ADR-027 provisioning orchestrator provisions a per-customer ACS resource with the data-location parameter chosen per boundary (immutable-at-create — D-01), as an extension of the existing flow (not a parallel path).</criterion>
+    <criterion testable="true">An Event Grid system topic + subscription is wired to subscribe chat events to the BFF webhook (task 030's ingress) with a dead-letter Storage destination configured from day one.</criterion>
+    <criterion testable="true">Provisioning options carry ACS resource, data-location, Event Grid subscription, and dead-letter settings; tests assert the wiring at config/shape level (no live Azure call in unit tests).</criterion>
+    <criterion testable="true">Management-plane calls use the injected central `TokenCredential`/canonical interface; no `new` credential appears inline (ADR-028 / NFR-05).</criterion>
+    <criterion testable="true">Data-residency rationale (immutable location → per-boundary resource) is documented as ADR-046 input; no `.claude/adr/` file is edited by this task (root §3 write boundary — task 007 owns the ADR body).</criterion>
+    <criterion testable="true">Any provisioning helper is registered via `CommunicationModule`, unconditional (ADR-010/032).</criterion>
+    <criterion testable="true">`dotnet build` clean; tests green; publish-size delta reported vs ~45.30 MB (≈0 if script/Bicep-driven); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 003 (ACS spike — proves the Event Grid round-trip + resource shape). Blocks 030 (the webhook ingress consumes the Event Grid subscription this task creates). Parallel with 010/011 within W1 (distinct surface — provisioning/infra vs identity/thread ops).
+
+    Strict scope: provisioning/infra wiring only. This task does NOT implement the webhook subscription-validation handshake, the Service Bus job, the normalizer, or idempotent persist — those are 030/031. If a step seems to require handling an actual event payload, stop — that is 030.
+
+    Sub-agent write boundary (root §3): do NOT write to `.claude/adr/`. The data-residency rationale is captured as *input* for ADR-046 (task 007, main-session). Leave a pointer in the provisioning notes / `current-task.md`.
+
+    Prefer the smallest BFF footprint: if the existing provisioning path is script/Bicep-driven, extend that rather than pulling an in-process management SDK into the BFF (keeps publish-size delta ≈0). Record the chosen path and its size impact.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED. Per CLAUDE.md §10 + §11: publish-size delta + CVE + bff-extensions Placement Justification + Component Justification (FR-18 failure mode + extend-vs-new) in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/` + provisioning). Respect the root §3 sub-agent write boundary (no `.claude/adr/` edits). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

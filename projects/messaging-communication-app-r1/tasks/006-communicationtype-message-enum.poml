@@ -1,0 +1,130 @@
+<task id="006" project="messaging-communication-app-r1">
+  <metadata>
+    <title>`CommunicationType.Message = 100000004` C# enum extension</title>
+    <phase>W0 — Phase 0 Verification + Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>020</blocks>
+    <tags>bff-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Touches `src/server/api/Sprk.Bff.Api/` (root §10 BFF hot-path). Even a one-line enum add is FULL rigor per CLAUDE.md §8 (modifying `.cs` in the BFF) — publish-size + CVE + `/conflict-check` + Step 9.5 gates REQUIRED. The value is a shared contract (enum = Dataverse choice) that the channel dispatcher keys on.</rigor-reason>
+    <parallel-group>W0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-16</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Add `Message = 100000004` to the C# `CommunicationType` enum so the code contract matches the EXISTING Dataverse `sprk_communicationtype` choice (FR-16, design §14.6). The enum currently has `Email=100000000`, `TeamsMessage=100000001`, `SMS=100000002`, `Notification=100000003` and is MISSING `Message`. This single value is load-bearing: `CommunicationChannelDispatcher` keys on `CommunicationType`, so the messaging sender/archiver (task 020) can only be dispatched once `Message` exists as an enum member.
+
+    File: `src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs`.
+
+    Confirm the integer against task 001's schema-audit (it verified the Dataverse `Message` choice = `100000004`). If 001 flagged a mismatch, STOP and escalate — do NOT hardcode a value that disagrees with Dataverse (the whole point of FR-16 is enum = Dataverse). Because this is a BFF-touching change (root §10), it carries the FULL BFF-hygiene protocol: build, publish-size delta vs the ~45.30 MB baseline, CVE scan, Step 9.5 quality gates, and `/conflict-check` before the PR — even though the change is one line, the protocol is unconditional for BFF edits.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication subsystem. Authoritative on `Services/Communication/Models/` + the `CommunicationChannelDispatcher` keyed-dispatch pattern. Disciplined on root §10 BFF hygiene (publish-size, CVE, placement, conflict-check) even for small edits.
+  </role>
+
+  <goal>
+    `CommunicationType.Message = 100000004` exists in the enum, matching the confirmed Dataverse choice. The BFF builds clean; the channel dispatcher can key on `Message`; publish-size delta (≈0 expected) + CVE result reported; Step 9.5 gates pass; `/conflict-check` run before the PR. Task 020 (messaging sender/archiver) can register + dispatch by `Message`.
+  </goal>
+
+  <context>
+    <background>
+      Design §14.6 resolved: reuse the EXISTING `Message` Dataverse choice (not `TeamsMessage`), and extend the C# enum to match. FR-16 acceptance is literally "enum + Dataverse option-set agree on 100000004." Task 001 verifies the Dataverse side; this task fixes the code side.
+
+      §11 note: this MODIFIES an existing file (adds one enum member) — no new component, so the §11 three-question template does not apply. The value's justification is the FR-16 contract (enum must match Dataverse for the dispatcher to resolve the messaging channel).
+
+      Placement Justification (root §10): the enum lives in the existing BFF `Services/Communication/Models/` — it is a communication-domain contract already owned by the BFF; no new service, package, or DI registration is introduced. Cite `.claude/constraints/bff-extensions.md`; the placement answer is "in BFF, in the existing model file — no new surface."
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs (the enum to extend)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/CommunicationChannelDispatcher.cs (keys on CommunicationType — the consumer)</file>
+      <file>projects/messaging-communication-app-r1/notes/spikes/001-schema-audit.md (confirms the Dataverse Message integer = 100000004)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-16">The enum value MUST be exactly `100000004` and MUST match the Dataverse `sprk_communicationtype` `Message` choice. If task 001 flagged a mismatch, STOP + escalate (root §6) — do not silently hardcode.</constraint>
+    <constraint source="project">Change is additive: add the `Message` member only. Do NOT renumber/reorder the existing members (Email/TeamsMessage/SMS/Notification) — they are a persisted contract.</constraint>
+    <constraint source="root §10">FULL BFF hygiene: `dotnet build` + publish-size delta vs ~45.30 MB (expect ≈0 for an enum add) + `dotnet list package --vulnerable --include-transitive` (no new HIGH CVE) + Placement Justification citing `.claude/constraints/bff-extensions.md` + `/conflict-check` before PR.</constraint>
+    <constraint source="root §10 bullet 6">If any code consumes `CommunicationType` in a way that must handle the new value (e.g., an exhaustive switch without a default), update the corresponding tests in `tests/unit/Sprk.Bff.Api.Tests/`. Grep for switch/dispatch sites on `CommunicationType`.</constraint>
+    <constraint source="ADR-032">The dispatcher stays unconditional; adding `Message` to the enum does NOT itself register a channel (that is task 020) — do not add conditional registration here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r1/notes/spikes/001-schema-audit.md</file>
+    </files>
+    <patterns>
+      <pattern name="Type-keyed channel dispatch" location="src/server/api/Sprk.Bff.Api/Services/Communication/Channels/CommunicationChannelDispatcher.cs">
+        Dispatch resolves the sender/archiver by `CommunicationType`. Adding `Message` makes the messaging channel dispatchable in task 020.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm the Dataverse `Message` integer from task 001's audit (= `100000004`). If mismatched, STOP + escalate (root §6).</step>
+    <step order="2">Read `CommunicationType.cs`; grep for switch/dispatch sites consuming `CommunicationType` to see whether the new value needs handling anywhere (dispatcher, serialization, tests).</step>
+    <step order="3">Add `Message = 100000004` to the enum (additive; do not renumber existing members).</step>
+    <step order="4">Update any exhaustive `CommunicationType` switch that would silently mis-handle `Message`, and the corresponding tests in `tests/unit/Sprk.Bff.Api.Tests/` (root §10 bullet 6). If no such site exists, note that (the dispatcher resolves the impl in 020, not here).</step>
+    <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/` — clean.</step>
+    <step order="6">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication` — confirm existing communication tests pass with the added value.</step>
+    <step order="7" name="9.1 publish-size">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-006-publish/`; report the compressed size + delta vs the ~45.30 MB baseline (expected ≈0 for an enum add).</step>
+    <step order="8" name="9.2 CVE">Run `dotnet list package --vulnerable --include-transitive`; confirm no new HIGH-severity CVE (none expected — no package change).</step>
+    <step order="9" name="9.5 quality gates">FULL-rigor gates: `code-review` on the diff; `adr-check` against `spec.md` (focus FR-16 enum=Dataverse contract + ADR-045 dispatch). Cite the `.claude/constraints/bff-extensions.md` Placement Justification (in BFF, existing model file, no new surface). Address Critical findings.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; `Services/Communication/` overlaps email-r4 + notification-spine).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (006 ✅) + `current-task.md`; confirm task 020 unblocked. Record the decision (integer source = 001 audit).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Enum + dispatcher + 001 audit</tool>
+    <tool name="grep">Find `CommunicationType` switch/dispatch/serialization sites</tool>
+    <tool name="edit">Add the enum member + any required switch/test update</tool>
+    <tool name="bash">Build, test, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs (UPDATED — add `Message = 100000004`)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (UPDATED only if an exhaustive `CommunicationType` switch requires it)</output>
+    <output type="docs">PR description: FR-16 enum=Dataverse contract + `.claude/constraints/bff-extensions.md` Placement Justification + publish-size delta + CVE result</output>
+    <output type="docs">projects/messaging-communication-app-r1/tasks/TASK-INDEX.md (status update 006 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`CommunicationType` contains `Message = 100000004`; existing members (Email/TeamsMessage/SMS/Notification) are unchanged and not renumbered.</criterion>
+    <criterion testable="true">The value matches the Dataverse `sprk_communicationtype` `Message` choice per the 001 audit (FR-16: enum = Dataverse agree on 100000004).</criterion>
+    <criterion testable="true">`dotnet build` is clean; existing communication tests pass; any exhaustive `CommunicationType` switch that needed the new value is handled (or its absence noted).</criterion>
+    <criterion testable="true">Publish-size delta vs ~45.30 MB reported (≈0 expected); no new HIGH CVE.</criterion>
+    <criterion testable="true">Step 9.5 gates (code-review + adr-check) run; Placement Justification cited; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Blocks 020 (the messaging sender/archiver dispatch by `Message`). Depends on 001 (the confirmed integer).
+
+    One line of code, full protocol — the BFF-hygiene gates are unconditional for any `Sprk.Bff.Api` edit (root §10). The disproportion is intentional: it keeps the hot-path discipline uniform.
+
+    Do NOT register the messaging channel here. Adding the enum member makes `Message` dispatchable; the sender/archiver impls + registration are task 020 (over the ADR-045 seams).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 gates REQUIRED. Per root §10: publish-size delta + CVE + `.claude/constraints/bff-extensions.md` Placement Justification in the PR; run `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>
