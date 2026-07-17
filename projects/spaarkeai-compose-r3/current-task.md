@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-16
+> **Last Updated**: 2026-07-17 (by context-handoff — pre-compaction checkpoint)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
