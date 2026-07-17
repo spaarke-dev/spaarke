@@ -58,9 +58,11 @@ import {
   type ProvenanceCandidate,
   type Connection,
   type CreateAction,
+  type FiledAssociation,
   confidenceBand,
   deriveConnections,
   deriveCreateActions,
+  mergeFiledConnections,
   topCandidate,
 } from './provenance';
 
@@ -117,6 +119,12 @@ export interface ConnectionsEditorProps extends ConnectionsCallbacks {
    * fallback) is used. Keeps the editor free of any webApi dependency.
    */
   resolveDisplayName?: (entity: string, id: string) => string | undefined;
+  /**
+   * The record's actually-filed regarding lookups (incl. manual "Link another"
+   * ones the engine never suggested). Merged into the slots so the surface shows
+   * every association, not just engine suggestions.
+   */
+  filedAssociations?: FiledAssociation[];
 }
 
 const ENTITY_ICON: Record<string, JSX.Element> = {
@@ -137,6 +145,26 @@ const CREATE_ICON = {
 } as const;
 
 const BAND_WORD = { high: 'High', medium: 'Medium', low: 'Low' } as const;
+
+// Empty decision doc — used when every association was filed manually (no engine
+// provenance) so the surface can still render the filed rows.
+const EMPTY_PROVENANCE: ProvenanceDoc = {
+  version: 1,
+  direction: '',
+  decision: {
+    status: '',
+    autoFiled: false,
+    killSwitchEnabled: false,
+    autoFileThreshold: 0.85,
+    topDeterministicConfidence: 0,
+    topConfidence: 0,
+    aiInvolved: false,
+    reason: '',
+  },
+  rungsFired: [],
+  candidates: [],
+  signals: [],
+};
 
 // Record types offered by "Link another record…". The reviewer picks the TYPE
 // first (Regarding-Resolver UX), then the side-pane lookup opens scoped to that
@@ -456,6 +484,7 @@ function EditorBody({
   confirmedFields,
   primaryField,
   resolveDisplayName,
+  filedAssociations,
   onConfirm,
   onAcceptAll,
   onChange,
@@ -470,6 +499,7 @@ function EditorBody({
   confirmedFields: Set<string>;
   primaryField?: string;
   resolveDisplayName?: (entity: string, id: string) => string | undefined;
+  filedAssociations?: FiledAssociation[];
   onConfirm: (conn: Connection, chosen?: ProvenanceCandidate) => void;
   onAcceptAll: (conns: Connection[]) => void;
   onChange: (conn: Connection) => void;
@@ -479,7 +509,12 @@ function EditorBody({
 }): JSX.Element {
   const s = useStyles();
   const isResolved = record.sprk_associationstatus === AssociationStatus.Resolved;
-  const connections = React.useMemo(() => deriveConnections(provenance, isResolved), [provenance, isResolved]);
+  // Merge the engine's suggested slots with what's actually filed on the record
+  // (authoritative — includes manual "Link another" associations).
+  const connections = React.useMemo(
+    () => mergeFiledConnections(deriveConnections(provenance, isResolved), filedAssociations ?? []),
+    [provenance, isResolved, filedAssociations]
+  );
   const createActions = React.useMemo(() => deriveCreateActions(provenance), [provenance]);
 
   // Controlled by the App (write-success only) — no local optimistic state (W1).
@@ -579,12 +614,14 @@ export function ConnectionsEditor(props: ConnectionsEditorProps): JSX.Element | 
   const s = useStyles();
   const [open, setOpen] = React.useState(false);
 
+  const filedAssociations = props.filedAssociations ?? [];
   const bodyProps = {
     readOnly,
     busy,
     confirmedFields: props.confirmedFields ?? new Set<string>(),
     primaryField: props.primaryField,
     resolveDisplayName: props.resolveDisplayName,
+    filedAssociations,
     onConfirm: props.onConfirm ?? (() => undefined),
     onAcceptAll: props.onAcceptAll ?? (() => undefined),
     onChange: props.onChange ?? (() => undefined),
@@ -593,8 +630,9 @@ export function ConnectionsEditor(props: ConnectionsEditorProps): JSX.Element | 
     onCreate: props.onCreate ?? (() => undefined),
   };
 
-  // Resolved with no provenance: simple confirmation.
-  if (!provenance) {
+  // Nothing to show: no engine provenance AND nothing filed → only a bare
+  // "filed to X" line when Resolved, else render nothing.
+  if (!provenance && filedAssociations.length === 0) {
     if (record.sprk_associationstatus === AssociationStatus.Resolved) {
       return (
         <div className={layout === 'rail' ? s.rail : s.card}>
@@ -610,14 +648,17 @@ export function ConnectionsEditor(props: ConnectionsEditorProps): JSX.Element | 
     return null;
   }
 
+  // Provenance may be absent (all associations filed manually); synthesize an empty
+  // decision doc so EditorBody can still render the filed rows.
+  const doc: ProvenanceDoc = provenance ?? EMPTY_PROVENANCE;
   const isResolved = record.sprk_associationstatus === AssociationStatus.Resolved;
-  const connections = deriveConnections(provenance, isResolved);
+  const connections = mergeFiledConnections(deriveConnections(doc, isResolved), filedAssociations);
   const toReview = connections.filter(c => c.status !== 'confirmed').length;
 
   if (layout === 'rail') {
     return (
       <aside className={s.rail}>
-        <EditorBody record={record} provenance={provenance} {...bodyProps} />
+        <EditorBody record={record} provenance={doc} {...bodyProps} />
       </aside>
     );
   }
@@ -625,13 +666,13 @@ export function ConnectionsEditor(props: ConnectionsEditorProps): JSX.Element | 
   if (layout === 'card') {
     return (
       <div className={s.card}>
-        <EditorBody record={record} provenance={provenance} {...bodyProps} />
+        <EditorBody record={record} provenance={doc} {...bodyProps} />
       </div>
     );
   }
 
   // summary: one-line bar that expands.
-  const top = topCandidate(provenance);
+  const top = topCandidate(doc);
   return (
     <>
       <div className={s.summaryBar}>
@@ -669,7 +710,7 @@ export function ConnectionsEditor(props: ConnectionsEditorProps): JSX.Element | 
       </div>
       {open && (
         <div className={s.summaryExpand}>
-          <EditorBody record={record} provenance={provenance} {...bodyProps} />
+          <EditorBody record={record} provenance={doc} {...bodyProps} />
         </div>
       )}
     </>

@@ -34,7 +34,10 @@ import {
   DialogActions,
   Textarea,
   Button,
+  Badge,
+  Tooltip,
 } from '@fluentui/react-components';
+import { ArrowExpand16Regular } from '@fluentui/react-icons';
 import {
   TODO_REGARDING_CATALOG,
   cleanGuid,
@@ -43,7 +46,14 @@ import {
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { AssociationStatus, type ICommunicationRecord } from './types';
-import { parseProvenance, deriveConnections, connectionTarget, type Connection, type CreateAction } from './provenance';
+import {
+  parseProvenance,
+  deriveConnections,
+  mergeFiledConnections,
+  connectionTarget,
+  type Connection,
+  type CreateAction,
+} from './provenance';
 import { ConnectionsEditor } from './ConnectionsEditor';
 import {
   applyRegardingSelection,
@@ -65,6 +75,42 @@ const useStyles = makeStyles({
   },
   versionText: { fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 },
   dialogHint: { color: tokens.colorNeutralForeground3, paddingBottom: tokens.spacingVerticalS },
+
+  // Collapsed on-form card (mirrors the RegardingResolver "RELATED RECORD" look:
+  // primary number + name, with an expand affordance into the review modal).
+  card: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    paddingBlock: tokens.spacingVerticalM,
+    paddingInline: tokens.spacingHorizontalL,
+  },
+  cardHeadRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
+  kicker: {
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  grow: { flex: 1 },
+  primaryRow: { display: 'flex', alignItems: 'baseline', gap: tokens.spacingHorizontalM, minWidth: 0 },
+  primaryNumber: {
+    color: tokens.colorBrandForegroundLink,
+    fontWeight: tokens.fontWeightSemibold,
+    whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase300,
+  },
+  primaryName: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  emptyText: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase300 },
+  modalSurface: { maxWidth: '640px', width: '90vw' },
+  modalBody: { maxHeight: '70vh', overflowY: 'auto' },
 });
 
 // The create-from-email action → target entity logical name.
@@ -95,6 +141,13 @@ const PRIMARY_NAME_FALLBACK: Record<string, string> = {
 /** Stable key for the resolved-display-name map: entity + normalized GUID. */
 function displayNameKey(entity: string, id: string): string {
   return `${entity}:${cleanGuid(id)}`;
+}
+
+/** A regarding lookup that is actually populated on the communication (a filed association). */
+export interface IFiledAssociation {
+  entityType: string;
+  recordId: string;
+  recordName: string;
 }
 
 /** Walk window/parent frames to locate Xrm (PCF runs in an iframe). */
@@ -239,6 +292,58 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     [context.webAPI, hostEntity, hostRecordId]
   );
 
+  // ── Collapsed card + authoritative filed list ──────────────────────────────
+  // The collapsed card shows the denormalized PRIMARY (number + name — the same
+  // fields RegardingResolver surfaces). The modal lists EVERY filed association by
+  // reading each populated typed `sprk_regarding*` lookup — so records added via
+  // "Link another" (never in the engine's provenance) still appear. Re-read on a
+  // `reloadKey` bump after each successful write.
+  const [modalOpen, setModalOpen] = React.useState(false);
+  const [reloadKey, setReloadKey] = React.useState(0);
+  const [primaryDenorm, setPrimaryDenorm] = React.useState<{ number: string | null; name: string | null }>({
+    number: null,
+    name: null,
+  });
+  const [filedAssociations, setFiledAssociations] = React.useState<IFiledAssociation[]>([]);
+
+  React.useEffect(() => {
+    if (!hostRecordId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const select = [
+          'sprk_regardingrecordname',
+          'sprk_regardingrecordnumber',
+          ...TODO_REGARDING_CATALOG.map(c => c.lookupAttribute),
+        ].join(',');
+        const rec = await context.webAPI.retrieveRecord('sprk_communication', hostRecordId, `?$select=${select}`);
+        if (cancelled) return;
+        setPrimaryDenorm({
+          number: (rec['sprk_regardingrecordnumber'] as string) ?? null,
+          name: (rec['sprk_regardingrecordname'] as string) ?? null,
+        });
+        const filed: IFiledAssociation[] = [];
+        for (const c of TODO_REGARDING_CATALOG) {
+          const val = rec[`_${c.lookupAttribute}_value`];
+          if (typeof val === 'string' && val) {
+            const nm = rec[`_${c.lookupAttribute}_value@OData.Community.Display.V1.FormattedValue`];
+            filed.push({
+              entityType: c.entityType,
+              recordId: cleanGuid(val),
+              recordName: typeof nm === 'string' && nm ? nm : cleanGuid(val),
+            });
+          }
+        }
+        setFiledAssociations(filed);
+      } catch (err) {
+        console.warn('[CommunicationConnections] filed-association read failed:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hostRecordId, context.webAPI, reloadKey]);
+
   // Full review slot set (used to decide when to advance status to Resolved).
   const reviewSlots = React.useMemo<Connection[]>(() => {
     if (!provenance) return [];
@@ -280,6 +385,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
         setConfirmedFields(next);
         await maybeAdvanceStatus(next);
         await refreshForm();
+        setReloadKey(k => k + 1);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unexpected error while filing.');
       } finally {
@@ -329,6 +435,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
           setConfirmedFields(next);
           await maybeAdvanceStatus(next);
           await refreshForm();
+          setReloadKey(k => k + 1);
         } catch (err) {
           setConfirmedFields(next);
           setError(err instanceof Error ? err.message : 'Unexpected error while filing.');
@@ -437,6 +544,14 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     })();
   }, [overrideConn, overrideReason, provenanceRaw, writeCtx]);
 
+  const connectionsForCount = mergeFiledConnections(
+    provenance ? deriveConnections(provenance, status === AssociationStatus.Resolved) : [],
+    filedAssociations
+  );
+  const toReviewCount = connectionsForCount.filter(
+    c => c.status !== 'confirmed' && !confirmedFields.has(c.field)
+  ).length;
+
   return (
     <div className={s.root}>
       {error && (
@@ -447,28 +562,73 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
         </div>
       )}
 
-      <ConnectionsEditor
-        record={record}
-        provenance={provenance}
-        layout="rail"
-        readOnly={readOnly}
-        busy={busy}
-        confirmedFields={confirmedFields}
-        primaryField={primaryField ?? undefined}
-        resolveDisplayName={resolveDisplayName}
-        onConfirm={handleConfirm}
-        onAcceptAll={handleAcceptAll}
-        onChange={handleChange}
-        onSetPrimary={handleSetPrimary}
-        onLinkAnother={handleLinkAnother}
-        onCreate={handleCreate}
-      />
-
-      {showVersionFooter && (
-        <div className={s.footer}>
-          <Text className={s.versionText}>v{version} • Built 2026-07-16</Text>
+      {/* Collapsed on-form card — primary number + name, expand into the review modal. */}
+      <div className={s.card}>
+        <div className={s.cardHeadRow}>
+          <Text className={s.kicker}>Related Record</Text>
+          <div className={s.grow} />
+          {toReviewCount > 0 && (
+            <Badge appearance="tint" color="warning">
+              {toReviewCount} to review
+            </Badge>
+          )}
+          <Tooltip content="Review connections" relationship="label">
+            <Button
+              size="small"
+              appearance="subtle"
+              icon={<ArrowExpand16Regular />}
+              aria-label="Review connections"
+              onClick={() => setModalOpen(true)}
+            />
+          </Tooltip>
         </div>
-      )}
+        {primaryDenorm.name ? (
+          <div className={s.primaryRow}>
+            {primaryDenorm.number && <Text className={s.primaryNumber}>{primaryDenorm.number}</Text>}
+            <Text className={s.primaryName}>{primaryDenorm.name}</Text>
+          </div>
+        ) : (
+          <Text className={s.emptyText}>
+            {toReviewCount > 0
+              ? `${toReviewCount} suggestion${toReviewCount === 1 ? '' : 's'} to review`
+              : 'No connection filed yet'}
+          </Text>
+        )}
+        {showVersionFooter && <Text className={s.versionText}>v{version}</Text>}
+      </div>
+
+      {/* Review / reconcile modal — the full connections surface. */}
+      <Dialog open={modalOpen} onOpenChange={(_, d) => setModalOpen(d.open)}>
+        <DialogSurface className={s.modalSurface}>
+          <DialogBody>
+            <DialogTitle>Connections</DialogTitle>
+            <DialogContent className={s.modalBody}>
+              <ConnectionsEditor
+                record={record}
+                provenance={provenance}
+                layout="rail"
+                readOnly={readOnly}
+                busy={busy}
+                confirmedFields={confirmedFields}
+                primaryField={primaryField ?? undefined}
+                resolveDisplayName={resolveDisplayName}
+                filedAssociations={filedAssociations}
+                onConfirm={handleConfirm}
+                onAcceptAll={handleAcceptAll}
+                onChange={handleChange}
+                onSetPrimary={handleSetPrimary}
+                onLinkAnother={handleLinkAnother}
+                onCreate={handleCreate}
+              />
+            </DialogContent>
+            <DialogActions>
+              <Button appearance="secondary" onClick={() => setModalOpen(false)}>
+                Close
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
 
       <Dialog open={overrideConn !== null} onOpenChange={(_, d) => !d.open && setOverrideConn(null)}>
         <DialogSurface>

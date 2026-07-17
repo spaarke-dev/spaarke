@@ -223,6 +223,65 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
   return out.sort((a, b) => a.order - b.order);
 }
 
+/** entityType → display slot (reverse of SLOT_META) so filed lookups map to a labelled slot. */
+const ENTITY_TO_SLOT: Record<string, { field: string; label: string; order: number }> = {
+  sprk_matter: { field: 'sprk_regardingmatter', label: 'Matter', order: 1 },
+  sprk_project: { field: 'sprk_regardingproject', label: 'Project', order: 2 },
+  sprk_organization: { field: 'sprk_regardingorganization', label: 'Organization', order: 3 },
+  account: { field: 'sprk_regardingaccount', label: 'Account', order: 4 },
+  contact: { field: 'sprk_regardingperson', label: 'Contact', order: 5 },
+  sprk_invoice: { field: 'sprk_regardinginvoice', label: 'Invoice', order: 6 },
+  sprk_servicerequest: { field: 'sprk_regardingservicerequest', label: 'Service Request', order: 7 },
+  sprk_event: { field: 'sprk_regardingevent', label: 'Event', order: 8 },
+  sprk_workassignment: { field: 'sprk_regardingworkassignment', label: 'Work Assignment', order: 9 },
+};
+
+/** A regarding lookup that is actually populated on the host record (a filed association). */
+export interface FiledAssociation {
+  entityType: string;
+  recordId: string;
+  recordName: string;
+}
+
+/**
+ * Fold the record's actually-filed regarding lookups into the engine-derived slots
+ * so the surface is authoritative — it shows EVERY association, not just what the
+ * engine suggested. For a filed entity type that already has a slot, the filed
+ * record is the truth (mark confirmed, adopt its identity, drop review affordances);
+ * a filed type with no slot (e.g. a manual "Link another") becomes a new confirmed row.
+ */
+export function mergeFiledConnections(connections: Connection[], filed: FiledAssociation[]): Connection[] {
+  if (!filed || filed.length === 0) return connections;
+  const out = connections.map(c => ({ ...c }));
+  for (const f of filed) {
+    const existing = out.find(c => c.entity === f.entityType);
+    if (existing) {
+      existing.status = 'confirmed';
+      existing.targetName = f.recordName;
+      existing.targetId = f.recordId;
+      existing.alternatives = undefined;
+      existing.otherCandidates = undefined;
+    } else {
+      const slot = ENTITY_TO_SLOT[f.entityType] ?? {
+        field: `sprk_regarding_${f.entityType}`,
+        label: entityLabel(f.entityType),
+        order: 99,
+      };
+      out.push({
+        field: slot.field,
+        entity: f.entityType,
+        slotLabel: slot.label,
+        targetName: f.recordName,
+        targetId: f.recordId,
+        confidence: 1,
+        status: 'confirmed',
+        order: slot.order,
+      });
+    }
+  }
+  return out.sort((a, b) => a.order - b.order);
+}
+
 /** Turn structural signals/obligations into "create from this email" suggestions. */
 export function deriveCreateActions(doc: ProvenanceDoc): CreateAction[] {
   const suggested = new Map<string, CreateAction>();
