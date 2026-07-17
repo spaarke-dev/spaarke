@@ -1,8 +1,8 @@
 # Current Task State — messaging-communication-app-r1
 
-> **Last Updated**: 2026-07-17 (task 061 COMPLETE — timeline PCF packaged, deploy deferred to owner)
+> **Last Updated**: 2026-07-17 (task 080 COMPLETE — seam tests; reuse-first, additive-only)
 > **Recovery**: Read "Quick Recovery" first, then "Remaining Plan". Branch `work/messaging-communication-app-r1`, PR #655 (draft). All work committed + pushed; tree clean.
-> **Note**: total task count is now **29** (task **052** open-thread-grant was added mid-project). **26 ✅, 3 🔲 (080, 081, 090)**.
+> **Note**: total task count is now **29** (task **052** open-thread-grant was added mid-project). **27 ✅, 2 🔲 (081, 090)**.
 
 ---
 
@@ -11,10 +11,10 @@
 | Field | Value |
 |-------|-------|
 | **Project** | messaging-communication-app-r1 — 2nd communication channel (ACS Chat) over ADR-045 seams |
-| **Progress** | **26 of 29 tasks ✅** — server-side + all client UI (timeline, accessories, quoting) + send-contract closure + **timeline PCF packaged (061)** done. Owner config gates: Delegate role + User-level Read SATISFIED; **app-user Share privilege on `sprk_communicationthread` + `sprk_communication`** needed for GrantAccess/POA (043/052). |
-| **Active task** | **061 COMPLETE** ✅ (timeline PCF packaged, deploy deferred to owner). Remaining: **080** (vertical-slice seam tests, TEST-MODIFYING), **081** (architecture doc), **090** (wrap-up + `/test-diet`). |
-| **Next Action** | **task 080** — vertical-slice seam tests (C#, `tests/integration/seam/**`); TEST-MODIFYING → 9.5 gates UNCONDITIONAL. Then 081 (arch doc), 090 (wrap). All remaining are code/docs — no more design-decision forks. |
-| **Status** | in-progress (all UI + PCF packaging done; seam tests + docs + wrap remain) |
+| **Progress** | **27 of 29 tasks ✅** — server-side + all client UI + send-contract closure + timeline PCF (061) + **seam tests (080)** done. Owner config gates: Delegate role + User-level Read SATISFIED; **app-user Share privilege on `sprk_communicationthread` + `sprk_communication`** needed for GrantAccess/POA (043/052). |
+| **Active task** | **080 COMPLETE** ✅ (seam tests, reuse-first/additive-only, 487 pass). Remaining: **081** (architecture doc), **090** (wrap-up + `/test-diet`). |
+| **Next Action** | **task 081** — architecture doc: extend/refresh a `docs/architecture/` communication doc with the thread model + ACS-as-transport + ingestor seam + impersonation access model (043/050/052) + send-contract/thread-stamp (062); wire ADR-046. Then 090 (wrap). |
+| **Status** | in-progress (all code + tests done; arch doc + wrap remain) |
 
 ### 🚚 OWNER DEPLOY HANDOFFS (packaged, awaiting owner's Dataverse env)
 - **062 PCF**: `src/client/pcf/CommunicationMessageActions/Solution/bin/CommunicationMessageActionsSolution_v1.0.0.zip` — `pac solution import --path ... --publish-changes`; place on `sprk_communicationthread` + `sprk_communication` forms; uses existing `sprk_MsalClientId`/`sprk_BffApiAppId`/`sprk_BffApiBaseUrl` env vars (no new ones). Full steps in the 062 commit body.
@@ -25,6 +25,7 @@
 2. **Send-into-existing-thread gap** (MED, OPEN): `/api/communications/send` always creates a NEW ACS thread (`AcsThreadId` always null; `SendCommunicationRequest` has no `ThreadId`). Multi-message continuity into an existing thread isn't wired via the generic send path. Pre-existing 051 limitation, out of 043/052 scope. **Follow-up task candidate for R1-polish or R2** — surface to owner; does NOT block the polling timeline (which reads persisted rows, not ACS).
 3. ✅ **Owner config gate recorded**: app-user **Share** privilege on both messaging tables (access-model-decision.md prereq #4).
 4. **Code-quality Suggestion (LOW, deferred)**: 052 broke a real DI cycle with `Lazy<>`; a cleaner future refactor could extract the Direct participant-reader to remove the cycle structurally.
+5. **Messaging-archival gap (MED, OPEN — found by 080)**: the Message send path (`CommunicationService.SendMessageAsync`) NEVER invokes `ResolveArchiver`/`ArchiveToSpeAsync` — only the general/email send + inbound-email archival do. So chat messages are persisted as `sprk_communication` but NOT SPE-archived as a transcript. `MessagingArchiver` + its `CommunicationType.Message` registration ARE real + wired into the dispatcher, just never called from the send path. Spec FR-01 / task-080 AC1 imply per-message transcript archival; task 051 (shipped) didn't wire it. **Non-blocking**; either a follow-up product task (wire `ArchiveToSpeAsync` into `SendMessageAsync`) or an R1 spec/AC correction (chat archival descoped). Full evidence in `notes/080-seam-coverage-map.md` Finding 1. Surface to owner at 090.
 
 ### Task 050 — design decisions (locked)
 - **New Scoped service** `CommunicationThreadReadService` (Services/Communication/). Rationale: reuses Scoped `ICallerSystemUserResolver` → can't live in Singleton `CommunicationService` (captive-dependency). §11-justified.
@@ -46,13 +47,12 @@
 
 ---
 
-## Remaining Plan (3 tasks) — resume order: 080 → 081 → 090
+## Remaining Plan (2 tasks) — resume order: 081 → 090
 
 | # | Task | Notes for the implementer |
 |---|---|---|
-| **080** | Vertical-slice seam tests (C#) | ADR-038 `tests/integration/seam/**`: send/archive/ingest, `IThreadResolver`, privacy/access; preserve email characterization. **TEST-MODIFYING → 9.5 gates UNCONDITIONAL** (root §8). Deps 031✅/040✅/042✅/051✅/052✅. Note: also exercise the 052 open-thread grant + 043 direct-thread membership if feasible. |
-| **081** | Architecture doc | Extend/refresh a `docs/architecture/` communication doc with the thread model + ACS-as-transport + ingestor seam + **the impersonation access model** (043/050/052) + the send-contract/thread-stamp (062). Wire ADR-046. Deps 040✅/007✅. |
-| **090** | Wrap-up | README→Complete, lessons-learned, **`/test-diet`** (mandatory at project close per root §7), archive, final TASK-INDEX reconcile, portfolio sync. Main-session (touches `.claude/`). Surface the 2 open findings (send-into-existing-thread MED; DI-cycle-refactor LOW) + config gate (Share privilege) in the wrap-up PR. |
+| **081** | Architecture doc | Extend/refresh a `docs/architecture/` communication doc with the thread model + ACS-as-transport + ingestor seam + **the impersonation access model** (043/050/052) + the send-contract/thread-stamp (062). Wire ADR-046. Deps 040✅/007✅. Note: touches `docs/` not `.claude/` → subagent-safe. |
+| **090** | Wrap-up | README→Complete, lessons-learned, **`/test-diet`** (mandatory at project close per root §7 — the `notes/080-seam-coverage-map.md` map is the reconciliation input), archive, final TASK-INDEX reconcile, portfolio sync. Main-session (touches `.claude/`). Surface ALL open findings in the wrap-up PR: send-into-existing-thread (MED), DI-cycle-refactor (LOW), **messaging-archival gap (MED, finding #5)**, + config gate (Share privilege). Owner PCF imports (061+062 ZIPs). |
 
 ### Orchestration notes (what worked this session — reuse next session)
 - **Subagent-per-task pattern (proven for 043/052/060/062/063)**: dispatch a `general-purpose` subagent (model `sonnet`) with a precise brief (inject exact contracts + pre-decide scope forks so it doesn't rabbit-hole); instruct it to leave changes uncommitted + NOT touch `TASK-INDEX.md`/`current-task.md`/`.claude/` + return a factual report. Main session then independently verifies (build + tests + hard-gate greps + review the highest-risk diff), runs 9.5 gates, updates the index, commits + pushes. Subagents edit non-`.claude/` files fine.

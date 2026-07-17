@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
 using FluentAssertions;
@@ -116,6 +117,33 @@ public class CommunicationThreadReadServiceTests
         result.Count.Should().Be(0);
         _query.Verify(q => q.QueryAsync(AttachmentSet, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never, "no visible messages ⇒ no per-row/attachment fan-out (NFR-07)");
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_PrivateThreadOpenedPointForward_ReturnsOnlyPostBoundaryMessages()
+    {
+        // Point-forward-open (task 080 / NFR-06): flipping a private thread to Open must expose ONLY messages
+        // from that point forward. The grant boundary is enforced upstream by Dataverse impersonation — the
+        // impersonated query below returns ONLY the post-boundary rows; the pre-boundary (pre-open) messages
+        // are never present in the impersonated set, mirroring how the private-thread no-leak test above
+        // proves total exclusion (empty set) and CommunicationAccessFilterTests proves the internal-only/
+        // privilege axis. CommunicationAccessFilter itself does not do date-based filtering — point-forward is
+        // a WHICH-ROWS-COME-BACK contract, not a filter-predicate one, so this models it at the query seam.
+        var preBoundaryId1 = Guid.NewGuid(); // pre-open messages — must never surface, even implicitly
+        var preBoundaryId2 = Guid.NewGuid();
+        var postBoundaryId1 = Guid.NewGuid();
+        var postBoundaryId2 = Guid.NewGuid();
+
+        SetupMessages(
+            MessageRow(postBoundaryId1, body: "opened — welcome to the thread"),
+            MessageRow(postBoundaryId2, body: "follow-up after open"));
+        SetupAttachments();
+
+        var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
+
+        result.Messages.Should().HaveCount(2);
+        result.Messages.Select(m => m.MessageId).Should().BeEquivalentTo(new[] { postBoundaryId1, postBoundaryId2 });
+        result.Messages.Select(m => m.MessageId).Should().NotContain(new[] { preBoundaryId1, preBoundaryId2 });
     }
 
     [Fact]
