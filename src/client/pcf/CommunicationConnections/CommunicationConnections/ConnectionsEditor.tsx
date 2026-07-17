@@ -257,9 +257,19 @@ const useStyles = makeStyles({
   },
   typeCell: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS, minWidth: 0 },
   slotIcon: { color: tokens.colorNeutralForeground3, display: 'flex', flexShrink: 0 },
-  slotLabel: { color: tokens.colorNeutralForeground2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  slotLabel: {
+    color: tokens.colorNeutralForeground2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
   target: { display: 'flex', flexDirection: 'column', minWidth: 0 },
-  targetName: { fontWeight: tokens.fontWeightSemibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  targetName: {
+    fontWeight: tokens.fontWeightSemibold,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
   confHigh: { color: tokens.colorPaletteGreenForeground1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' },
   confMedium: {
     color: tokens.colorPaletteMarigoldForeground1,
@@ -283,7 +293,13 @@ const useStyles = makeStyles({
   colStatus: { width: '120px' },
   colActions: { width: '120px' },
   actionsCell: { display: 'flex', gap: tokens.spacingHorizontalXS, justifyContent: 'flex-end', width: '100%' },
-  subCell: { color: tokens.colorNeutralForeground2, paddingLeft: tokens.spacingHorizontalL, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  subCell: {
+    color: tokens.colorNeutralForeground2,
+    paddingLeft: tokens.spacingHorizontalL,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
   newTag: { color: tokens.colorNeutralForeground3, fontStyle: 'italic' },
   emptyGrid: { color: tokens.colorNeutralForeground3, padding: tokens.spacingVerticalM },
   subRow: {
@@ -330,7 +346,11 @@ const STATUS_META: Record<Connection['status'], { label: string; color: 'success
 };
 
 /** The Status-column badge — Primary wins over the raw status when a confirmed slot is primary. */
-function StatusBadge({ status, isPrimary, isConfirmed }: {
+function StatusBadge({
+  status,
+  isPrimary,
+  isConfirmed,
+}: {
   status: Connection['status'];
   isPrimary: boolean;
   isConfirmed: boolean;
@@ -444,7 +464,9 @@ function ConnectionRow({
               icon={showOthers ? <ChevronUp16Regular /> : <ChevronDown16Regular />}
               onClick={() => setShowOthers(v => !v)}
             >
-              {showOthers ? 'Hide other candidates' : `${others.length} other candidate${others.length === 1 ? '' : 's'}`}
+              {showOthers
+                ? 'Hide other candidates'
+                : `${others.length} other candidate${others.length === 1 ? '' : 's'}`}
             </Button>
           )}
         </div>
@@ -522,10 +544,24 @@ function ConnectionRow({
       {hasOthers &&
         showOthers &&
         others.map((alt, i) => (
-          <SubRow key={`o${i}`} s={s} busy={busy} name={nameOf(alt)} confidence={alt.reinforcedConfidence} onFile={() => onConfirm(conn, alt)} />
+          <SubRow
+            key={`o${i}`}
+            s={s}
+            busy={busy}
+            name={nameOf(alt)}
+            confidence={alt.reinforcedConfidence}
+            onFile={() => onConfirm(conn, alt)}
+          />
         ))}
       {alternatives.map((alt, i) => (
-        <SubRow key={`a${i}`} s={s} busy={busy} name={nameOf(alt)} confidence={alt.reinforcedConfidence} onFile={() => onConfirm(conn, alt)} />
+        <SubRow
+          key={`a${i}`}
+          s={s}
+          busy={busy}
+          name={nameOf(alt)}
+          confidence={alt.reinforcedConfidence}
+          onFile={() => onConfirm(conn, alt)}
+        />
       ))}
     </>
   );
