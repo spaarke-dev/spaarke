@@ -1,8 +1,8 @@
 # Current Task State — messaging-communication-app-r1
 
-> **Last Updated**: 2026-07-17 (context-handoff — 25 done, 4 remain; ready for /compact)
-> **Recovery**: Read "Quick Recovery" first, then "Remaining Plan". Branch `work/messaging-communication-app-r1` (HEAD `872ff6d56`), PR #655 (draft). All work committed + pushed; tree clean.
-> **Note**: total task count is now **29** (task **052** open-thread-grant was added mid-project). 25 ✅, 4 🔲 (061, 080, 081, 090).
+> **Last Updated**: 2026-07-17 (task 061 COMPLETE — timeline PCF packaged, deploy deferred to owner)
+> **Recovery**: Read "Quick Recovery" first, then "Remaining Plan". Branch `work/messaging-communication-app-r1`, PR #655 (draft). All work committed + pushed; tree clean.
+> **Note**: total task count is now **29** (task **052** open-thread-grant was added mid-project). **26 ✅, 3 🔲 (080, 081, 090)**.
 
 ---
 
@@ -11,14 +11,14 @@
 | Field | Value |
 |-------|-------|
 | **Project** | messaging-communication-app-r1 — 2nd communication channel (ACS Chat) over ADR-045 seams |
-| **Progress** | **25 of 28 tasks ✅** — server-side + all client UI (timeline, accessories, quoting) + send-contract closure done. Owner config gates: Delegate role + User-level Read SATISFIED; **app-user Share privilege on `sprk_communicationthread` + `sprk_communication`** needed for GrantAccess/POA (043/052). |
-| **Active task** | **063 COMPLETE** ✅ (quoteBody + quote actions). Remaining: **061** (package `CommunicationTimeline` as PCF + DEPLOY — needs owner env), **080** (vertical-slice seam tests, TEST-MODIFYING), **081** (architecture doc), **090** (wrap-up + `/test-diet`). |
-| **Next Action** | **task 061** — package `CommunicationTimeline` as a form-bound PCF (build + pack ZIP; DEFER `pac solution import` to owner like 062). Then 080 (seam tests), 081 (arch doc), 090 (wrap). All remaining are code/docs — no more design-decision forks. |
-| **Status** | in-progress (all UI logic done; PCF packaging + tests + docs + wrap remain) |
+| **Progress** | **26 of 29 tasks ✅** — server-side + all client UI (timeline, accessories, quoting) + send-contract closure + **timeline PCF packaged (061)** done. Owner config gates: Delegate role + User-level Read SATISFIED; **app-user Share privilege on `sprk_communicationthread` + `sprk_communication`** needed for GrantAccess/POA (043/052). |
+| **Active task** | **061 COMPLETE** ✅ (timeline PCF packaged, deploy deferred to owner). Remaining: **080** (vertical-slice seam tests, TEST-MODIFYING), **081** (architecture doc), **090** (wrap-up + `/test-diet`). |
+| **Next Action** | **task 080** — vertical-slice seam tests (C#, `tests/integration/seam/**`); TEST-MODIFYING → 9.5 gates UNCONDITIONAL. Then 081 (arch doc), 090 (wrap). All remaining are code/docs — no more design-decision forks. |
+| **Status** | in-progress (all UI + PCF packaging done; seam tests + docs + wrap remain) |
 
 ### 🚚 OWNER DEPLOY HANDOFFS (packaged, awaiting owner's Dataverse env)
 - **062 PCF**: `src/client/pcf/CommunicationMessageActions/Solution/bin/CommunicationMessageActionsSolution_v1.0.0.zip` — `pac solution import --path ... --publish-changes`; place on `sprk_communicationthread` + `sprk_communication` forms; uses existing `sprk_MsalClientId`/`sprk_BffApiAppId`/`sprk_BffApiBaseUrl` env vars (no new ones). Full steps in the 062 commit body.
-- **061 (pending)**: will package `CommunicationTimeline` as a form-bound PCF similarly for owner import.
+- **061 PCF** ✅ packaged: `src/client/pcf/CommunicationTimeline/Solution/bin/CommunicationTimelineSolution_v1.0.0.zip` (639 KB) — `pac solution import --path ... --publish-changes`; place the **Communication Timeline** control (namespace `Spaarke.Controls`) as a form-section component on the `sprk_communicationthread` main form (and/or the `sprk_communication` form). Reuses the SAME `sprk_MsalClientId`/`sprk_BffApiAppId`/`sprk_BffApiBaseUrl` env vars as 062 (no new ones). Renders the polling timeline (viewer + internal compose); UI smoke-test (render/dark-mode/poll-cycle) deferred to owner's live env post-import.
 
 ### 🔔 OPEN FINDINGS (status)
 1. ✅ **RESOLVED — Open-thread message access gap** (was HIGH): closed by **task 052** (grant Open-thread msgs to the 041-derived set at persist — option b). Task-050 impersonated reads now return matter-thread msgs.
@@ -46,11 +46,10 @@
 
 ---
 
-## Remaining Plan (4 tasks) — resume order: 061 → 080 → 081 → 090
+## Remaining Plan (3 tasks) — resume order: 080 → 081 → 090
 
 | # | Task | Notes for the implementer |
 |---|---|---|
-| **061** | Package `CommunicationTimeline` as a form-bound PCF + deploy | Wrap the shipped `@spaarke/ui-components` `CommunicationTimeline` (task 060 ✅) in a PCF host (mirror the **062** `CommunicationMessageActions` PCF just built — same host/auth/manifest pattern, `src/client/pcf/CommunicationMessageActions/` is the template). React 16/17 platform libs (ADR-022); Fluent v9; `@spaarke/auth` at boundary only; **grep the bundle for no `@azure/communication`** (NFR-04 hard gate); `npm run build:prod` (NOT `build`); pack the Solution ZIP. **DEFER `pac solution import` to owner** (owner has env) — document form/section placement (bind to `sprk_communication`/thread form) in the commit like 062. Deps 060✅. |
 | **080** | Vertical-slice seam tests (C#) | ADR-038 `tests/integration/seam/**`: send/archive/ingest, `IThreadResolver`, privacy/access; preserve email characterization. **TEST-MODIFYING → 9.5 gates UNCONDITIONAL** (root §8). Deps 031✅/040✅/042✅/051✅/052✅. Note: also exercise the 052 open-thread grant + 043 direct-thread membership if feasible. |
 | **081** | Architecture doc | Extend/refresh a `docs/architecture/` communication doc with the thread model + ACS-as-transport + ingestor seam + **the impersonation access model** (043/050/052) + the send-contract/thread-stamp (062). Wire ADR-046. Deps 040✅/007✅. |
 | **090** | Wrap-up | README→Complete, lessons-learned, **`/test-diet`** (mandatory at project close per root §7), archive, final TASK-INDEX reconcile, portfolio sync. Main-session (touches `.claude/`). Surface the 2 open findings (send-into-existing-thread MED; DI-cycle-refactor LOW) + config gate (Share privilege) in the wrap-up PR. |
