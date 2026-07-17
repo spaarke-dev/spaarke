@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="Virtual PCF: message send/respond accessory (Compose/Send/Respond) for sprk_communication / sprk_communicationthread (task 062, FR-12)." languagecode="1033" />
     </Descriptions>
-    <Version>1.0.1</Version>
+    <Version>1.0.2</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>

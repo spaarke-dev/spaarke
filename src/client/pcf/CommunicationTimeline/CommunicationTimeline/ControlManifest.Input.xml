@@ -1,18 +1,20 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="CommunicationTimeline" version="1.0.0" display-name-key="Communication Timeline" description-key="Virtual PCF: form-bound viewer for the shared CommunicationTimeline polling message timeline (task 060) on the OOB sprk_communication and sprk_communicationthread forms. Renders persisted messages (email + chat interleaved), unread indicator, and compose/send box, polling the BFF via @spaarke/auth. No Code Page host, no FCC swap (ADR-026 Path-A exception; task 061)." control-type="virtual">
+  <control namespace="Spaarke.Controls" constructor="CommunicationTimeline" version="1.0.1" display-name-key="Communication Timeline" description-key="Virtual PCF: form-bound viewer for the shared CommunicationTimeline polling message timeline (task 060) on the OOB sprk_communication and sprk_communicationthread forms. Renders persisted messages (email + chat interleaved), unread indicator, and compose/send box, polling the BFF via @spaarke/auth. No Code Page host, no FCC swap (ADR-026 Path-A exception; task 061)." control-type="virtual">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
     </external-service-usage>
     <!--
-      No bound properties (deliberate — mirrors CommunicationMessageActions,
-      task 062 §11 micro-decision): this control reads the host record's
-      thread lookup via context.webAPI.retrieveRecord itself. Placing this
-      control with no bound properties lets it be added as a form-section
-      component on EITHER sprk_communication OR sprk_communicationthread
-      without per-entity field-binding friction.
+      One bound property (REQUIRED): a model-driven-app code component only appears in the form
+      component library if it declares a bound field or a dataset. This control reads the host record
+      from the Xrm page context (thread id via context.webAPI), NOT from the bound value — so the
+      binding is only a form anchor. Bind it to the primary Name (sprk_name), which exists on both
+      sprk_communicationthread and sprk_communication, giving cross-entity placement with no
+      per-entity friction. (The prior "no bound properties" note was wrong: such a control is hidden
+      from the component picker entirely.)
     -->
+    <property name="anchorField" display-name-key="Bound Field (anchor)" description-key="Bind to the record primary Name (sprk_name). Anchors the control to the form; the control reads the record from context, not from this value." of-type="SingleLine.Text" usage="bound" required="true" />
     <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL" of-type="SingleLine.Text" usage="input" required="false" />
     <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID" of-type="SingleLine.Text" usage="input" required="false" />
     <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD application (client) ID for PCF MSAL authentication" of-type="SingleLine.Text" usage="input" required="false" />

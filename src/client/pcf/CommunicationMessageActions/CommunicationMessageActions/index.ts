@@ -18,7 +18,7 @@ import * as React from 'react';
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import { CommunicationMessageActionsHost } from './CommunicationMessageActionsHost';
 
-const CONTROL_VERSION = '1.0.1';
+const CONTROL_VERSION = '1.0.2';
 
 export class CommunicationMessageActions implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   public init(
