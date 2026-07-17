@@ -1,7 +1,7 @@
-# Current Task — email-communication-solution-r4
+# Current Task State — email-communication-solution-r4
 
-> **Purpose**: Active task state tracker for context recovery. Reset by `task-execute` on each task transition.
-> **Last Updated**: 2026-07-16 (by context-handoff — project COMPLETE + MERGED + DEPLOYED; pre-compact)
+> **Last Updated**: 2026-07-17 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. Project is COMPLETE + MERGED + DEPLOYED; this is a live **UAT bug-fix cycle**.
 
 ---
 
@@ -9,198 +9,56 @@
 
 | Field | Value |
 |-------|-------|
-| **STATUS** | ✅ **email-r4 COMPLETE, MERGED TO MASTER, and DEPLOYED to dev.** Only owner-side maker-UI (043 form config) remains. Nothing else pending from Claude. |
-| **Merge state** | Worktree HEAD = `origin/master` = **`04b13daa1`** (in sync). All r4 work is on master. CI on master was GREEN (build/test/security/quality). |
-| **BFF deploy** | ✅ Live on **`spaarke-bff-dev`** (RG `rg-spaarke-dev`). Verified: `/healthz` 200; `POST /communications/{id}/suggest-associations` + `/{id}/archive` → 401 (routes live); SHA-256 hash-verify passed. Config set: `Communication__SemanticMatch__Enabled=true`, `Communication__AiClassification__Enabled=true`. Deploy via `pwsh scripts/Deploy-BffApi.ps1`. |
-| **SpaarkeAi code page** | ✅ Auto-deployed by CI (`Deploy SpaarkeAi` workflow on master push). email-r4 did NOT touch SpaarkeAi — no manual deploy needed. |
-| **PCF — Actions** | ✅ **v1.0.1 already imported by owner** (unchanged since `76ef649cb`; env-var auth fallback + compact toolbar). No action. |
-| **PCF — Connections** | 📦 **v1.0.1 ZIP READY for owner upload** (proper 5-location version bump per /pcf-deploy + lint fix): `src/client/pcf/CommunicationConnections/Solution/bin/CommunicationConnectionsSolution_v1.0.1.zip` (546 KB, 6 entries). Footer will read v1.0.1 • Built 2026-07-16. |
-| **⏳ REMAINING (owner, 043 form config)** | Import Connections v1.0.1; place both PCFs on the OOB `sprk_communication` form (Connections→`sprk_associationprovenance`+`sprk_associationstatus`; Actions→`sprk_communicationtype`; auth auto-resolves from env vars); remove the deployed **Send** ribbon button/web resource (KEEP Create-To-Do); pack the **Awaiting-Association** view. Then 090 wrap-up. |
-| **Full deploy checklist** | `notes/DEPLOYMENT-CHECKLIST.md` |
+| **Phase** | Post-ship UAT iteration (owner testing on spaarkedev1) |
+| **Branch** | `work/email-communication-solution-r4` · HEAD = **`2ce3ed416`** = origin/master (everything merged) |
+| **Tree** | clean (only `.claude/worktrees/` untracked scaffold) |
+| **BFF** | LIVE on `spaarke-bff-dev` (healthz 200) — all UAT fixes deployed + hash-verified |
+| **Next action** | OWNER imports the 2 PCF ZIPs + re-sends the "Smith v Smith" test email; verify status=Suggested, contact Filed, "Create Matter (AI)" row surfaces |
 
-### What shipped (this session: 31→complete)
-- **W3 engine COMPLETE**: rung 4 semantic (`SemanticMatchRung`/`IRecordMatchingAi`), rung 5 AI-classify (`AiClassificationRung`/`ICommunicationClassificationAi` structured-output facade), per-rung telemetry (EventId 4501/4502), read-only suggestion endpoint (behavior-preserving `EvaluateAsync` extract — `ResolveAsync`=evaluate+apply). 352 Comm tests green.
-- **W6/W7**: 061 wizard migration ✅, 075 index-config ✅, 074 split (BFF suggestion capability built; add-in UI deferred to future add-in-strategy).
-- **W8 docs**: 080 authored (`docs/architecture/communication-intelligence-architecture.md`); 081 updated `communication-service-architecture.md` + `sprk_communication.md`; **DELETED** `email-processing-architecture.md` + 2 `email-to-document-*` dups + the whole `x-email-communication-solution-r3/` body (kept `SUPERSEDED.md`); 082 = N/A (target doc never existed). All inbound links fixed.
+### PCF ZIPs ready for owner import (Dataverse)
+- `src/client/pcf/CommunicationConnections/Solution/bin/CommunicationConnectionsSolution_v1.1.4.zip`
+- `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.1.1.zip`
+- Import via `pac solution import --path <zip> --publish-changes` (temp-rename `Directory.Packages.props` if CPM blocks).
 
-### 🚀 W5 RE-HOMED → new project `spaarke-notification-spine-r1`
-W5 (Responsive Intelligence — auto-create Event/Task/Notification from `communication_assessed`) could NOT be built in r4: `EventRulesService.FireAsync` is SSE/user/session-shaped (task-010 **E5**, wrong for fire-and-forget); OutputRouter record/notification legs are unbuilt = the shared `kind`-typed notification spine that `spaarkeai-assistant-enhancements-r1.5` is already building + `messaging` will consume (both designs say build ONCE, coordinated). **Full architecture (4-layer: domain-actions + kind-typed outbox + Azure SignalR delivery + per-source policy; SSE = chat-presentation only) in `notes/W5-responsive-intelligence-and-shared-notification-spine.md` + `projects/spaarke-notification-spine-r1/design.md`** (for review alongside messaging-r1 + assistant-r1; key open decision = who owns spine Layers A–C). Memory: [[responsive-intelligence-shared-spine]].
-
-### Notes / possible follow-ups
-- ⚠️ **`pack.ps1` quirk**: writes its output zip to a `$PWD`-relative `bin/` (not `$PSScriptRoot`), so it only lands in `Solution/bin/` when CWD = the Solution folder; mis-fired here → packed with absolute paths instead. One-line `$PSScriptRoot` fix would harden it.
-- **Source-of-truth**: shipped send DTO field is `AttachmentDocumentIds` (Document GUIDs); the R3 `AttachmentDriveItemIds` rename is designed-but-unshipped (owner W0 decision — [[email-r4-attachment-id-semantics]]).
-- **Master is a busy/moving branch** — other projects (assistant-r1, messaging) merge frequently; fetch+merge before any master push.
-
-### 🔑 AUTH / DEPLOY FACTS (spaarkedev1) — critical for future
-- **clientAppId = `170c98e1-d486-4355-bcbe-170454e0207c`** (SDAP-PCF-CLIENT). The value in the OLD `config/environments.json` (`5175798e-…`) was **RETIRED/deleted** → `AADSTS700016`. Fixed in `config/environments.json` (2026-07-15).
-- **bffAppId = `1e40baad-e065-4aea-a8d4-4b7ab273458c`** · **tenant = `a221a95e-6abc-4434-aecc-e48338a1b2f2`** (Spaarke Dev).
-- **Canonical config = Dataverse env vars** (`sprk_MsalClientId=170c98e1`, `sprk_BffApiAppId=1e40baad`, `sprk_BffApiBaseUrl=https://spaarke-bff-dev.azurewebsites.net/api`). PCFs read these via `src/client/pcf/shared/utils/environmentVariables.ts` (`getApiBaseUrl` strips `/api` → host-only; @spaarke/auth re-adds it). Actions v1.0.1 now uses this fallback (SemanticSearch pattern) → **zero form config needed**.
-- App-registration reactivation NOT needed (SP enabled; valid secret to 2027; expired secret irrelevant for SPA/PKCE).
-
-### 📋 043 remainder (owner, maker UI) — mostly done
-Both PCFs imported + placed (Connections bound to `sprk_associationprovenance`+`sprk_associationstatus`; Actions bound to `sprk_communicationtype`). Still open: pack the **Awaiting-Association view** (`CommunicationConnections/views/Communications-Awaiting-Association.md`); remove the deployed **Send** web resource + ribbon button (keep Create-To-Do); re-import Actions **v1.0.1**.
-
-### 🐞 Known follow-ups from live test (not yet done)
-- **Reply does not quote the original thread** (owner noted). Composer prefill (`deriveComposerFields` in Actions PCF) sets To+"Re:" but not a quoted body. Future enhancement.
-- Connections PCF shows nothing on hand-made records (empty `sprk_associationprovenance`) — expected; only inbound-processed emails have provenance.
-
-### 🚀 MAJOR UNBLOCK (owner, 2026-07-15) — r2-core CLOSED → Services/Ai gate LIFTED
-`spaarke-ai-architecture-redesign-r2` (prior sole owner of `Services/Ai` internals) is **CLOSED**. The coordination gate that blocked **W3 (030/031/032)**, **W5 (050→051-054)**, and **075** is **LIFTED** — email-r4 now OWNS this work and does the Services/Ai investigation itself. Agents still run `/conflict-check` for OTHER active worktrees, but there is no r2-core owner to defer to. This opens the whole responsive-intelligence + semantic-rung backlog.
-
-### 🔌 074 decision (owner, 2026-07-15) = Path C + add-in DEFER
-- Owner: **broader add-in strategy pending** (may use a different add-in UI/approach); **do NOT hold up this project for add-ins or external dependencies.**
-- **DEFERRED to future add-in-strategy effort**: the Outlook add-in save-pane UI + live-Outlook smoke test (the add-in-coupled, external-dependency parts). This project no longer waits on it.
-- **BUILD (Path C, UI-agnostic BFF capability)**: an **evaluate-only engine path** (`IncomingAssociationResolver` today WRITES; `EnrichAsync` returns `Task`, not candidates) + a **suggestion endpoint** that runs the engine on-demand and RETURNS candidates (target+confidence+provenance). This is **engine-adjacent** (touches `Services/Communication/Engine` + `CommunicationModule`) → serial in main session with the W3 rungs, NOT a parallel agent. §10 obligations apply.
-
-### ▶️ Next Action (me) — driving the unblocked engine core
-**Engine-touching, SERIAL in main session (current branch — avoids stale-master 3-way + mutual CommunicationModule conflict):** 030 (rung 4 semantic) → 031 (rung 5 AI) → 032 (telemetry+tests) → 074-endpoint (evaluate-path+suggestion). Then **W5** (050 gate now clears → 051/052/053/054, Services/Ai). **Safely-parallel agents RUNNING:** 061 (W6 client wizard migration) + 075 (W7 index-config, Services/Ai). W6 060 still waits on 043 deploy (owner).
-
-### ✅ 042 owner decisions (2026-07-15) — RESOLVED
-- **Regarding model = MULTIPLE** (one per entity type; per-field slots enforce this), PLUS an explicit **"primary"** designation owning the denorm `Regarding Record` fields. **Both shipped** — additive write (commit `bd773083a`) + ★Primary badge/button (commit `ce5e56672`). Rationale: `notes/042-connections-pcf-completion.md`.
-
-### 🔨 044 — owner decisions + findings (ready to build)
-- **Archive scope = FULL** (.eml Document + per-attachment Documents). The on-demand `POST /api/communications/{id}/archive` must generate the `.eml` from the STORED communication (via `EmlGenerationService`/`EmailArchiver.GenerateEml` — NOT a live Graph `Message`) then create `sprk_document` (sourcetype Email Archive 659490003) + per-attachment `sprk_document` (Email Attachment 659490004). Reuse pattern: `IncomingCommunicationProcessor.ArchiveEmlAsync` (:646) + attachment loop (:560-640). §10 BFF hygiene applies (placement justification, publish-size, CVE, tests).
-- **Ribbon SEND retirement**: `RibbonDiff.xml` (send button only) + both `sprk_communication_send.js` copies (`src/client/webresources/js/` + `infrastructure/.../CommunicationRibbons/WebResources/`) + the send CustomAction/Command in packed `Other/Customizations.xml`. Deletion takes effect at 043 re-import.
-- **🔎 KEEP the Create-To-Do button** (`createtodo-button.xml`, separate file, Sequence 220): it is a LIVE feature from `smart-todo-decoupling-r3` (launches `openCreateTodoWizard` → real CreateTodoWizard). Owner suspected dead-end; VERIFIED it is not. Do NOT delete. (Retiring Send doesn't touch it — separate file.)
-- **Ribbon send button/script deletion in 044**: owner leaning delete-now; recommend build+verify equivalence FIRST, then surgical send-only removal. conflict-check CLEAR on `CommunicationEndpoints.cs`.
-- **Next**: build `/archive` endpoint (+ tests, §10) → Actions PCF `src/client/pcf/CommunicationActions/` hosting `<SendEmailPage/>` (Reply/Forward/Send/Save/Save-to-SharePoint over existing endpoints) → verify → surgical send retirement → 9.5 gates.
-
-### 🔀 W4 ARCHITECTURE PIVOT (the big thing this session) — OOB form + PCFs, NOT a Code Page
-- **Decision (owner, 2026-07-15)**: keep the OOB `sprk_communication` model-driven form; enhance with PCFs (RELATED RECORD PCF v1.4.6 already proves the pattern). Full record + capability audit + ADR-026 Path-A: **`notes/W4-architecture-pivot-oob-form-pcf.md`**.
-- **Capability audit (grounded)**: send endpoint, `.eml`+per-attachment→Document archival, attachment entity+subgrid, EmailComposer — **all already built**. Net-new = **Connections PCF (042)** + small **Actions PCF (044)** + thin `POST /{id}/archive`.
-- **POMLs formalized**: 042→Connections PCF (`042-connections-pcf.poml`, old Code-Page 042 deleted); NEW `044-communication-actions-pcf.poml` (absorbs 062 ribbon retirement); 040/041 FCC-swap dropped (superseded-as-form-host); 043 re-targeted to PCF deploy; TASK-INDEX + spec.md ADR-Tensions (ADR-026 Path-A) updated.
-- **Design source to PORT into the PCF**: `src/client/code-pages/CommunicationPage/src/components/{ConnectionsEditor,provenance,CommunicationHeader}.tsx` (the converged multi-connection review: typed slots per entity + per-slot confidence/confirm + Accept-all + Link-another + create-from-email actions engine-suggested from task-014 signals). Chosen host layout = right-rail at OOB 66/34 (34% accessories column).
-- **Prototype harness**: `spaarke-prototype/projects/email-comm-r4-uat`, dev server **bgxvvu62m still running at localhost:5173** (restart: `cd c:/code_files/spaarke-prototype/projects/email-comm-r4-uat && SPAARKE_REPO_ROOT="c:/code_files/spaarke-wt-email-communication-solution-r4" npx vite --port 5173`).
-
-### Other open threads
-- **Coordination enquiries delivered to owner** (relay to r2-core): W5 non-SSE `communication_assessed` publish seam + OutputRouter record/notification dispositions; W3 `RecordSearchService`/JPS-Action stability; **075** now unblocked (multi-index-r2 done — needs merge-confirm + I reconcile). See prior turn's enquiry text.
-- **074** (add-in suggestions) needs the OUTBOUND suggestion path (not wired) — sequence after 042.
-- **W3 030/031/032, W5 050-054** coordination-blocked on r2-core replies.
-
-### Files Modified This Session (committed)
-- email-r4 `cc68bcd96`: `tasks/042-connections-pcf.poml` (new), `tasks/044-communication-actions-pcf.poml` (new), `tasks/042-code-page-review-regarding-resolver.poml` (deleted), `tasks/TASK-INDEX.md`, `spec.md`, `current-task.md`, `notes/W4-architecture-pivot-oob-form-pcf.md` (new), `CommunicationPage/src/components/{ConnectionsEditor,provenance,CommunicationHeader}.tsx` (new — design source), `CommunicationLayout.tsx` + `types/communication.ts`.
-- Earlier commits this session: `4154c5049` (015), `bf432e4be` (018 race fix), `09703c355` (017), `4c6594706` (023), `6440217b3` (016), `4eeaf860f` + `b1d5d79dc` + trackers.
+### Critical context
+The project shipped (W0–W8, merged to master, BFF + SpaarkeAi deployed) earlier. This session was an **owner UAT loop** that found + fixed real bugs. All code is committed + on master (`2ce3ed416`). Only remaining = owner-side PCF import + re-test.
 
 ---
 
-## 031 (rung 5 AI classify) — AGENT RUNNING (dispatched with full design brief)
-Investigation resolved the POML's wrong premise + fully scoped the design; dispatched to a worktree agent.
-- **POML premise WRONG (§6.5 Path-A, documented)**: `AnalyzeEmailAsync` is a heavy DOCUMENT pipeline (needs .eml Document to already exist, keyed by email-activity id, returns success/fail not classification) — WRONG primitive + timing for a rung over the envelope. The playbook orchestrator (`ExecuteAppOnlyAsync`) is also wrong (heavyweight, Dataverse-resident playbooks).
-- **Correct primitive**: `IOpenAiClient.GetStructuredCompletionAsync<T>` (guaranteed-valid JSON structured output; the Finance/`IInvoiceAi` classification pattern). Rung 5 = code-defined structured-output classification, self-contained + unit-testable, NO Dataverse seeding dependency. (System prompt MAY later migrate to a Dataverse playbook per ADR-014 — follow-up.)
-- **Design**: NEW facade `ICommunicationClassificationAi` (+ impl + `NullCommunicationClassificationAi` + DI in `AnalysisServicesModule` mirroring `IInvoiceAi`); NEW `AiClassificationRung` (Kind 5, mirrors `SemanticMatchRung`, scoped facade via `IServiceScopeFactory`); `AiClassificationOptions` kill-switch; register in `CommunicationModule`; appsettings block.
-- **KEY SEMANTIC**: an LLM can't produce record GUIDs → rung 5 emits **metadata-only `RungMatch` SIGNALS** (Category/Obligations/privilege-flag, Target=null) EXACTLY like rung-3 detectors — NOT target-bearing regarding writes. Its value = W5 triage substrate (why 031 blocks 053). Privilege = signal only (ADR-015). Zero engine/mapper change (both already handle Kind-5 + metadata-only).
-- Agent branches from master (lacks 030's CommunicationModule + 075) → expect 3-way on CommunicationModule.cs + appsettings.template.json on integrate (non-adjacent hunks, clean). Blocks 032 (rung-4/5 unit tests) + 053.
+## What was fixed this session (all on master + BFF deployed)
 
-## 030 (rung 4 semantic) — DONE ✅ `29834f041` (gates clean, 327 tests green)
-- **NEW** `Services/Communication/Engine/Rungs/SemanticMatchRung.cs` (Kind=SemanticMatch/4, Order 4) + `Configuration/SemanticMatchOptions.cs` (`Communication:SemanticMatch`; Enabled kill-switch, Limit, MaxCandidates, MinScore 0.50, ScoreCeiling 0.80, MaxQueryChars 1000). **EDIT** `CommunicationModule.cs` (bind options + register rung singleton) + `appsettings.template.json` (SemanticMatch block under Communication).
-- **Zero engine/mapper change**: engine already partitions Kind 4/5 as cost-gated AI rungs (run only when deterministic didn't auto-file); mapper already caps AI rungs to Suggested (auto-file uses deterministic-only confidence). Rung consumes `IRecordMatchingAi` facade (ADR-013) from a per-eval `IServiceScopeFactory` scope (facade scoped, rung singleton). Index name NOT hardcoded (`SearchIndexName=null` → RecordSearchService resolves) — merge-clean with 075. Records index = matter/project/invoice only; org served by rung-2 domain (documented §11). ScoreCeiling 0.80 keeps semantic below 0.85 auto-file threshold. Telemetry: structured fired/skipped/hits/elapsed logs (032 consumes).
-- Build clean (0 err); **327 Communication tests green, 0 failed** (no regression; rung-4 unit tests = 032). §10 publish-size + CVE running; Step 9.5 gates next.
-- ⚠️ appsettings.template.json also edited by 075 (AiSearch region, non-adjacent) — clean 3-way expected.
+**BFF (Sprk.Bff.Api) — merged + deployed:**
+1. **Body-blind classifier** (`GraphMessageNormalizer`): HTML emails set `BodyText=null` → classifier saw only the subject. Now strips HTML → plain text into `BodyText`.
+2. **Attachments not materialized** (`IncomingCommunicationProcessor`): inline `$expand=attachments` omits `contentBytes` → 0 `sprk_document`. Now re-fetches the attachments collection when bytes are missing.
+3. **Multi-association — AI pass always runs** (`IncomingAssociationResolver`): removed the `!decision.AutoFiled` gate. Semantic (rung 4) + classification (rung 5) now always run so the engine finds matter/project/invoice even when a contact matched.
+4. **Contact is a fallback, not a match** (`AssociationStatusMapper`, owner Option A): auto-file/Resolved now requires a **substantive** target (matter/project/invoice/servicerequest/event/workassignment). `FallbackFields = {sprk_regardingperson, sprk_regardingorganization, sprk_regardingaccount}` are still written (filed) but don't clear the auto-file bar → contact-only email = **Suggested** (stays in the review queue). Tests: Communication suite **325 green** (+2 mapper contract tests, +1 ladder test updated).
 
-## 074-BFF suggestion capability (SCOPED SUBSET, Path C) — IMPLEMENTED (agent worktree, base b4483f00e)
-- **Evaluate-only refactor** (`IncomingAssociationResolver.cs`): extracted rungs+ladder+AI-escalation+resolving-rung telemetry into private `EvaluateInternalAsync(msg, ctx, commId, ct)`; new public `EvaluateAsync(msg, ctx, ct)` (Guid.Empty for telemetry) returns the decision WITHOUT `ApplyDecisionAsync`. `ResolveAsync` = `EvaluateInternalAsync(real id)` + `ApplyDecisionAsync` → **behavior-preserving** (RungTelemetry tests assert real id on resolve path). **352 Communication tests green** (349 + 3 new), 0 failed.
-- **Envelope reconstruction** (`CommunicationService.ReconstructEnvelopeAsync`): reuses record-read + `SplitRecipients`; retrieves only existing columns (no `sprk_conversationid`/`sprk_references`); 404 on missing (mirrors archive/status). AssociationContext mirrors inbound (Account/TenantKey null).
-- **Endpoint** `POST /api/communications/{id}/suggest-associations` (mirrors `/archive`: filter + Produces 200/404/500). READ-ONLY handler: reconstruct → `EvaluateAsync` → `SuggestAssociationsResponse.FromDecision`. Injects `CommunicationService` + `IncomingAssociationResolver` (both DI singletons).
-- **New model** `SuggestAssociationsResponse` (+ SuggestedCandidate/Contributor/Signal) projecting `AssociationProvenance`.
-- §10: publish 45.30 MB compressed (+0.02 vs 45.28); CVE 1 pre-existing High (Kiota 1.21.2), 0 new. Add-in UI DEFERRED (Path C).
+**PCF Connections (v1.1.0 → v1.1.4):**
+- Collapsed **primary card** (number+name from `sprk_regardingrecordname/number`) + **Open** icon → **modal** (80vw×80vh, X close top-right + Close lower-left).
+- Review surface is a **grid** (Type│Record│Confidence│Status│Actions) with per-row **icon** actions (Confirm/Change/Set-Primary; File-here on sub-rows).
+- **Authoritative filed list**: reads the record's real `sprk_communication` regarding lookups via `COMMUNICATION_REGARDING_FIELDS` (NOT the sprk_todo `TODO_REGARDING_CATALOG` names — that was the "card says not filed / modal says filed" bug; wrong field names threw the `$select`).
+- Per-slot filed state from each candidate's **`written`** flag (not global Resolved) → filed contact + unfiled matter-suggestion coexist.
+- **"Create Matter (AI)"** row (`deriveAiSuggestedTypes` parses `types=[...]` from the classification signal) + AI suggestions count toward "to review".
+- `Link another` type-first menu; Create-from-email removed (moved to Actions).
 
-## Active Task
+**PCF Actions (v1.0.1 → v1.1.1):**
+- Toolbar: **Reply · Reply All · Forward · New** (left) + spacer + **right-justified** icon-only group (Save-to-SharePoint · Create Event/To-Do/Invoice, ✨ when engine-suggested). Dropped Send/Save-Draft. OOB-matched typography. Composer gained `initialCc` for Reply All.
 
-- **Task**: **015 ✅ DONE (uncommitted → committing now).** W1 rungs 0–3 (012/013/014) + **015 (confidence→status ladder + auto-file + ADR-018 kill-switch + provenance JSON + engine aggregation rework)** all complete. **22 of 45 tasks done.**
-- **015 delivered**: `AssociationStatusMapper` (FR-11 ladder + noisy-OR signal reinforcement + AI-never-autofile + conflict→Ambiguous), `AutoFileGate`+`AutoFileOptions` (ADR-018 IOptionsMonitor kill-switch, per-tenant), provenance JSON (`sprk_associationprovenance`, 10000-cap), engine now aggregates ALL deterministic rungs (reinforcement + always-run detector pass) + conditional AI escalation. 310 Comm tests (275→+35); gates 0 Critical/0 ADR violations; publish 45.28MB (+0.01); Path A cited. Contract: `notes/015-status-ladder-behavior-contract.md`.
-- **W1 ENGINE SPINE COMPLETE**: 010→011→012→013→014→015→017 all done + **018** (owner-directed race fix). **25 of 45 tasks done.** 017 delivered: central-auth grep-clean (NFR-03 already satisfied — no `new` credential in W1 surface); **direction-symmetry suite** (`AssociationDirectionSymmetryTests`, the load-bearing R4 invariant — inbound==outbound identical writes/status/provenance) + **spine seam tests** (`tests/integration/seam/Communication/AssociationSpineSeamTests`, real rungs+mapper+gate composition, Dataverse boundary only); per-rung confidence/provenance covered by 012–014 (no clone per ADR-038). 317 Comm unit tests green.
-- **AGENTS MERGED ✅**: **023** (W2 composer/wrapper tests) cherry-picked `4c6594706` (8 suites/100 tests, 80.39% cov). **016** (channel seams) cherry-picked `6440217b3` (3-way merged CommunicationModule seam block + my engine block; CommunicationService now Graph-free). **Post-merge build clean + 325 Communication tests green; publish 45.28MB (~0); CVE unchanged.** **W1 + W2 both COMPLETE. 27 of 45 tasks done.**
-- **W4 IN PROGRESS**: **040 ✅ merged** (`102351c4b`, Code Page shell — channel-aware layout switch, `@spaarke/auth` bootstrap, seams for 041/042). **041** (mount `<SendEmailPage/>` + FCC plan) — background agent RUNNING; cherry-pick + build-verify when done.
-- **🎨 PROTOTYPE-FIRST DECISION (owner, 2026-07-15)**: before finalizing the design-heavy W4 UI, run a **comprehensive `/prototype` pass covering ALL Communication Code Page UI** (chrome, channel-aware layout, composer framing, association review surface [suggestion+confidence+provenance→accept/override], awaiting-association triage view, read-only channel views) to iterate look/feel/UX holistically. **Brief: `notes/W4-prototype-brief.md`** (full surface/state inventory + 7 open UX questions + mock-data shapes). **042's build is HELD** until owner signs off on the prototype. `/prototype` is owner-triggered ("when ready"); runs in `spaarke-prototype` harness (mock data, no BFF). Post-signoff: build 042/043 to the approved design + visual-refine 040/041.
-- **After W4**: **074** (add-in suggestions — needs the OUTBOUND suggestion path, not yet wired; 042 reads persisted provenance so 042 needs NO new BFF endpoint, but 074 does). W7 **075** + W3/W5 remain COORDINATION-BLOCKED (r2-core `Services/Ai` — see W4-prototype-brief sibling + coordination explanation to owner).
+---
 
-## 🔀 W4 ARCHITECTURE PIVOT (owner, 2026-07-15) — OOB form + PCFs (NOT Code Page)
-- **Decision**: keep the OOB `sprk_communication` model-driven form; enhance with PCFs (the pattern already deployed — RELATED RECORD PCF v1.4.6 in the right column). Multi-connection **association review → Connections PCF** in the OOB 34% accessories column; compose/send → **Communication Actions PCF** (Reply/Send/Save, owner's idea) + W2 EmailComposer PCF-hosted/dialog. **Full decision record + capability audit + re-scope + ADR-026 tension: `notes/W4-architecture-pivot-oob-form-pcf.md`.**
-- **Capability audit (grounded in code)**: Send endpoint ✅ built (`/api/communications/send`; current UI = 1,150-LOC ribbon `sprk_communication_send.js`, task 062 retires it). .eml→Document + per-attachment→Document ✅ built + automatic (`IncomingCommunicationProcessor.cs:570-701`, EmlGenerationService/EmailArchiver-016). Attachment entity+subgrid ✅ built; "Add Existing" doc picker = native subgrid config (R1 task 036). EmailComposer ✅ built (W2). **Net-new = Connections PCF + small Actions PCF (+ optional `POST /{id}/archive`).**
-- **Re-scope (PROPOSED, pending confirm→POMLs)**: 040/041 FCC form-swap DROPPED (composer-mount reused as PCF/dialog); **042 REFOCUS → Connections PCF**; NEW Actions PCF task (retires ribbon send.js); 043 re-target to PCF deploy + OOB form config. ADR-026 → Path-A exception (§6.5).
-- **Prototype**: ConnectionsEditor now renders at OOB 66/34 (rail = 34% accessories col, default). Ports directly into the Connections PCF. `spaarke-prototype/projects/email-comm-r4-uat`, localhost:5173.
-- **Rigor**: FULL · main-session Opus @ high · directional.
-- **Master**: `origin/master` at fb4012cb3 (through 076). Branch now well ahead (011/012/021/022/070/071 + tracking) — merge to master again before the NEXT agent wave to keep agents on a current base.
-- **Merged to master ✅ (2026-07-15)**: `origin/master` fast-forwarded `240d0e5c5..fb4012cb3` — all 19 branch commits now on remote master. Future agent worktrees branch from `origin/master` (confirmed pattern: 073 branched from origin/master's value, not local master) → **stale-base 3-way tax eliminated.** (Local master ref in `C:/code_files/spaarke` left at `bcc15973a` — FF blocked by pre-existing untracked files there; cosmetic, does not affect agent branching.)
-- **Next Action**: next wave — **012→013→014 serial in main session** (all edit the engine's shared `_rungs` composition point; not cleanly parallel regardless of base) ‖ **021/022 (W2) + 070/071/075 (W7) as clean worktree agents** (now branch from current master).
-- **Rigor Level**: FULL · **Model**: opus @ xhigh · **Step mode**: directional (R-7 order binding).
-- **011 scoping decision (directional)**: engine refactor is **inbound-only** in 011. Running the engine over OUTBOUND via `EnrichAsync` would change outbound behavior (client-supplied associations) and needs direction-aware rung content (012/013/015) — deferred there. 011 delivers: finalized envelope + rung abstraction + Graph→envelope normalizer + refactored inbound engine, behavior preserved. Enrichment `RunAssociationAsync` stays a documented seam (doc updated).
+## Engine behavior model (post-change — for anyone reasoning about associations)
+- Deterministic rungs 0–3 always run; **AI rungs 4–5 now ALSO always run** (bounded by kill-switches + ADR-016 budget + ADR-014 cache).
+- **Auto-file → Resolved** requires a SUBSTANTIVE deterministic winner ≥ 0.85 (ADR-018 kill-switch). AI never auto-files.
+- **Fallback** (contact/org/account) matches are written but land **Suggested**, not Resolved.
+- PCF reads status + per-candidate `written` + live regarding lookups; surfaces filed vs to-review per slot.
 
-## 013 results (rung 2 — participant correlation) — gate clean, committing
-- **NEW**: `Engine/Rungs/ParticipantCorrelationRung.cs` (from/to/cc; sender→contact[0.70]+memberships[0.80]+domain org/account[0.65]; recipients→memberships[0.70]; dedup by field+targetId keep-highest; recipient cap 25). **NEW Dataverse query**: `QueryContactMembershipsAsync` (sprk_userentityassociation junction, personidtype=2 Contact) in all 3 Spaarke.Dataverse files. **Deleted** 011 adapter `Engine/ParticipantCorrelationRung.cs`. Tests: `ParticipantCorrelationRungTests` (7, incl. FR-04 org-target guard + symmetry).
-- **261 Communication tests green** (011 baseline preserved). Build clean; publish 45.26 MB (~0 delta); CVE unchanged. Gate: **0 Critical, ADR-024/010/032/045 PASS, FR-04 org-target=sprk_organization CORRECT, no 011 regression**. S1 (recipient cap) applied.
-- **FR-04/DEC-3**: org→`sprk_organization`, account→`account`, separate lookups; a test proves no path writes `account` into the org lookup.
-- **Note (S4)**: membership matches are dormant until R3 membership Phase-2 populates `sprk_userentityassociation`; query is correct + graceful-when-empty (degrades to person+domain).
+## Deploy facts
+- BFF: `spaarke-bff-dev` / RG `rg-spaarke-dev`; deploy = `pwsh scripts/Deploy-BffApi.ps1` (hash-verify + healthz). App settings for the rungs already set (`Communication__SemanticMatch__Enabled=true`, `Communication__AiClassification__Enabled=true`, AutoFile 0.85).
+- Dataverse org: `spaarkedev1.crm.dynamics.com`. Monitored mailboxes: `testuser1@spaarke.com`, `mailbox-central@spaarke.com` (active Graph subs, auto-renewing via `GraphSubscriptionManager`). Inbound poll backstop = 5 min (`EmailProcessing__PollingIntervalMinutes`).
+- Live-query Dataverse: `TOKEN=$(az account get-access-token --resource https://spaarkedev1.crm.dynamics.com --query accessToken -o tsv)` then curl the Web API. Note: `sprk_communication` regarding lookup for Contact is **`sprk_regardingperson`** (not sprk_regardingcontact).
 
-## 014 results (rung 3 — structural detectors) — gate PASS, committing
-- **NEW `Engine/Detectors/`**: `IStructuralDetector` + `StructuralMatch` + `DetectorText` + 4 detectors (Calendar-invite→event/calendar-response 0.90; ESign-completion→executed-document 0.88 [requires provider+verb, S2-tightened]; Invoice-number→invoice 0.80; Court/e-filing→deadline-response 0.80 [digit-required case#, S3-tightened]). **NEW** `Engine/Rungs/StructuralDetectorRung.cs` (rung 3, Order 3, DI `IEnumerable<IStructuralDetector>`, logs detected signals — S1). **CHANGED** `RungMatch` (RegardingFieldName+Target NULLABLE + Category + Obligations); engine apply-loop filters to target-bearing matches for the Resolved decision (metadata-only matches don't resolve). CommunicationModule: 4 detectors + rung 3 unconditional.
-- **275 Communication tests green** (261→+14; 011 baseline preserved; engine-guard test proves calendar-only email → PendingReview). Build clean; publish 45.27 MB (~0 delta); CVE unchanged. Gate PASS (0 Critical; ADR-024/010/032/045; §11 justified; W1 nullable warnings fixed, S1/S2/S3 applied).
-- **Detectors are metadata-only in 014**: specific entity-target resolution (sprk_invoice by #, sprk_event by iCal UID) deferred (no query — like 012 invoice/SR); category/obligations feed W5 (052, gated) — currently logged (S1), not persisted.
-
-## 🔑 CARRY-FORWARDS FOR TASK 015 (confidence→status + auto-file) — BINDING
-1. **Engine apply-loop conflict consumption (gate W1, from 013)**: `IncomingAssociationResolver` currently applies matches via `fields[field] = target` (last-wins), which SILENTLY COLLAPSES conflicting same-field matches that rung 2 correctly surfaces (two participants → two different matters). 015 MUST change the apply-loop to collect `List<RungMatch>` per field and drive **Ambiguous** status on conflict (per spec Ambiguous logic) — otherwise the ambiguity signal is thrown away.
-2. **Confidence-based arbitration, not rung-order (from 012 W1)**: 015 must pick the winning association by CONFIDENCE across rungs, not first-rung-wins. Confidences already assigned: caller-supplied 1.0 > thread 1.0 > subject-token 0.9 > rung-2 (0.60–0.85). This makes thread outrank a subject-regex token (resolves the 012 owner heads-up) and sets the ≥0.85 auto-file gate. AI rungs (4–5) NEVER auto-file (always Suggested/Ambiguous).
-3. **Detectors must be an ALWAYS-RUN pass, not a first-match-wins cascade rung (gate W2, from 014)**: rung 3 (structural detectors) currently only evaluates when rungs 0–2 all miss (engine `return`s on first writable rung), so category/obligations are suppressed whenever an association already resolved — but W5 wants the category REGARDLESS. 015's engine rework must run the detectors as a separate always-run pass (collect category/obligations independent of the association decision). The detector metadata is currently logged (S1) but not persisted/consumed (W5/052 gated).
-
-### 🎯 OWNER PRIORITY (2026-07-15) — AUTO-ROUTING IS THE CORE VALUE; MAXIMIZE CONFIDENT AUTO-FILE
-Auto-routing (auto-file) is the primary value driver. Pre-selection that still requires user review recaptures little value — the win is the system confidently routing without a review step. Build 015 to auto-route the reliable cases aggressively while keeping misfiles rare + bounded. Binding design requirements:
-- **(a) Configurable per-tenant threshold**, NOT hardcoded 0.85. Config: `{ autoFileEnabled (kill-switch), autoFileThreshold (default 0.85, tunable up/down) }`. Flip + tune without redeploy (ADR-018).
-- **(b) SIGNAL REINFORCEMENT (the key accuracy lever)**: when INDEPENDENT rungs agree on the SAME target, COMBINE/boost confidence (not just max) — e.g. thread(1.0)+participant-membership(0.8)→Matter A = boosted → auto-file. This is what lets the common case (reply in a filed thread w/ known participants) auto-route with high confidence instead of hedging to Suggested. Design a bounded reinforcement fn (e.g. noisy-OR / capped additive) so agreement raises confidence toward 1.0.
-- **(c) Conflict → Ambiguous** (never auto-file a wrong guess): strong signals disagreeing on the SAME field = Ambiguous, not a coin-flip. (This is also carry-forward #1.)
-- **(d) Bounded downside justifies aggressiveness**: misfile = re-file (audited), NEVER delete (R-1). A wrong auto-route is cheap to correct; a correct one saves the whole review. Economics favor a looser threshold than pure caution; kill-switch is the per-tenant escape hatch.
-- **(e) Provenance JSON enables data-driven tuning**: record rungs fired + per-signal confidence + reinforcement applied + chosen status + auto-file decision/reason, so thresholds are tuned from real hit/misfile outcomes.
-- Deterministic rungs (0–3) only for auto-file; AI rungs (4–5) NEVER auto-file (Suggested/Ambiguous) regardless of score — unchanged.
-
-## 012 results (rungs 0–1) — gate clean, committing
-- **NEW**: `Engine/Rungs/ExplicitReferenceRung.cs` (rung 0), `Engine/Rungs/ThreadContinuityRung.cs` (rung 1), `Engine/RegardingFieldMap.cs`. **Modified**: `AssociationContext` (+`CallerSuppliedRegarding`), `IncomingAssociationResolver` (DI-injected `IEnumerable<IAssociationRung>`; now consumes `RegardingFieldMap.All` — W3 dedup), `CommunicationModule` (3 rung regs). **Deleted**: 011 adapters `Engine/{ThreadContinuityRung,SubjectReferenceRung}.cs` (kept `ParticipantCorrelationRung` → 013). Tests: `ExplicitReferenceRungTests`, `ThreadContinuityRungTests` (+direction-symmetry); 3 engine-ctor sites updated.
-- **244 Communication tests green** (011 characterization baseline preserved). Build clean; publish 45.25 MB (0 delta); CVE unchanged. Step 9.5 gate: **0 Critical, ADR-check PASS, no 011 regression**.
-- **Gate warnings actioned**: W3 (resolver now consumes shared `RegardingFieldMap`), S1 (subject-token confidence 1.0→0.9, heuristic vs caller-supplied), S2/S3 (doc fixes).
-- ⚠️ **W1 (OWNER HEADS-UP — filing behavior change)**: subject explicit-ref (rung 0) now precedes thread continuity (rung 1). A reply inside a thread already filed to Matter A whose subject contains `MAT-999` now files to **Matter 999**, overriding thread inheritance. This follows FR-10's rung-0 taxonomy (explicit reference = highest determinism) and the POML (subject-regex is part of rung 0); the reliability trade-off (thread vs subject regex) is definitively resolved by **task 015**'s confidence→status ladder (subject-token already lowered to 0.9). Flag if you want thread to outrank subject-regex instead — that's a one-line reorder.
-- **W2 (intentional)**: thread rung now copies ALL 11 regarding fields from the parent (was 3: matter/org/person) — per FR-10 "inherit the thread's regarding across all targets."
-- **Deferred (per 011 note)**: engine outbound production invocation stays `CommunicationService.MapAssociationFields`; rung 0's caller-supplied branch is implemented + tested but production-dormant until 015/017 wires it. Gate agreed this is correctly deferred.
-
-## 011 implementation results (pre-commit — awaiting Step 9.5 gate)
-- **New**: `Engine/{RungKind,RungMatch,AssociationContext,IAssociationRung,GraphMessageNormalizer,ThreadContinuityRung,ParticipantCorrelationRung,SubjectReferenceRung}.cs`. **Refactored**: `IncomingAssociationResolver.cs` (engine over envelope; ADR-024 write path preserved verbatim; dropped `IGraphClientFactory`). **Updated**: `IncomingCommunicationProcessor.cs` (normalize at boundary, Select `internetMessageHeaders`+`conversationId`, reuse envelope for enrichment, removed `BuildInboundEnvelope`), `CommunicationEnrichmentService.cs` (association-seam doc), `CommunicationModule.cs` (+`GraphMessageNormalizer` singleton), `Models/NormalizedMessage.cs` (finalized). **Tests**: migrated `IncomingAssociationResolverTests` to envelope (assertions verbatim), new `GraphMessageNormalizerTests`, ctor fixes in `InboundPipelineTests` + `CommunicationIntegrationTests`.
-- **R-7**: baseline 10/10 green pre-refactor → **234 Communication tests green post-refactor** (identical write-contract assertions). Behavior contract: `notes/011-resolver-behavior-contract.md`.
-- **§10**: build clean (0 err); publish **45.25 MB compressed incl PDBs** (~0 delta vs ~49.63 baseline; ≤60 ceiling); CVE = 1 **pre-existing** High (`Microsoft.Kiota.Abstractions 1.21.2`, transitive via Graph, inherited from master — NOT introduced; 0 packages added). Placement Justification: refactor-in-place of existing `Services/Communication`, no new endpoints/packages, +1 unconditional DI reg (normalizer).
-
-## 073 (W7) — parallel agent DONE, patch staged for merge
-- Agent committed `d7411989a` (off stale master 240d0e5c5). Wired ALL mapped Office endpoints (9 baseline + 2 job-ownership + 1 entity-access; 0 `TODO: Task 033` left). 155 Office tests green; 0 Critical/0 ADR violations. Patch at `/c/tmp/073.patch` (3 files: OfficeEndpoints.cs + 2 tests) — apply via 3-way after 011 commit.
-
-## W0 Commits (this session)
-- **007** `051a098d2` — retire OOB-`email` (partial: 3 shared-infra files retained; −3.06 MB)
-- **003** `89e599293` — `sprk_servicerequest` association target (+ data-model doc)
-- **004 + 006** `bbffb4532` — `sprk_event` + org/account domain match; send-path thread-id capture
-- (001, 002, 005 committed earlier session)
-
-## Key W0 decisions (owner-confirmed 2026-07-14)
-- **Attachment field: NO rename.** `AttachmentDocumentIds` correctly carries Dataverse **Document GUIDs** (email attachments are always tracked Documents; server resolves each to its SPE File). The R3 "rename to DriveItemIds" premise was a misread. DocumentEmailWizard is **correct**, not buggy. Ripples: FR-13 (022) + FR-21 (060) carry the same corrected premise — do NOT re-introduce the rename. See [[email-r4-attachment-id-semantics]].
-- **org vs account: distinct, never mixed.** `sprk_organization` = legal entity → `sprk_regardingorganization`; OOB `account` = vendor/payment → `sprk_regardingaccount`. Domain match writes both, each to its own lookup, matched by `sprk_domain` (owner added to both tables). See [[sprk-organization-vs-account]].
-- **007 partial retirement accepted.** 3 files in `Services/Email/` are live shared infra (Office worker + inbound pipeline + RAG) — retained by design.
-
-## Owner-created Dataverse fields (this session)
-- `sprk_communication`: `sprk_regardingservicerequest` (001), `sprk_regardingaccount`, `sprk_regardingevent`
-- `sprk_organization`: `sprk_domain`; `account`: `sprk_domain`
-
-## W1 in progress
-- **010 ✅** (merged via 3-way onto W0 — worktree had stale master base, reconciled cleanly; build+239 tests green). Landed `ICommunicationEnrichmentService` + `NormalizedMessage` skeleton, wired into both send paths + inbound processor, delivered outbound RAG indexing. Escalation triage:
-  - **E2/E3 → task 011's job** (refactor `IncomingAssociationResolver`→engine over the envelope; centralize inbound so full direction-symmetry is atomic). Confirmed staging.
-  - **E4/E6 resolved** (E4: RAG needs SPE ids → extra sprk_document retrieve, done; E6: stale-worktree-base, merged correctly).
-  - **⛔ E1 (owner decision, non-blocking):** categorization (content-class + urgency) has NO schema home on `sprk_communication`. Options: add columns, OR accept it's subsumed by the FR-15 AI rung (which already outputs category+urgency) → step 2 redundant. Likely the latter.
-  - **⛔ E5 (owner/coordination, for gated task 052):** `IEventRulesService.FireAsync` is chat/SSE-shaped — wrong for a fire-and-forget `communication_assessed` emission. 052 must design a non-SSE publish seam under `Services/Ai/PublicContracts/` (coordinate w/ r2-core; don't fork). FR-19 as written doesn't match the current seam.
-- **Worktree-base lesson:** isolation:worktree agents branch from `master`, NOT my branch. Disjoint-file tasks (client/add-in/docs) merge clean; BFF-engine tasks that edit W0's files need a 3-way merge or should run in the **main session**. → Run 011+ (engine spine) in main session, serial.
-
-## W2 / W7 parallel results (this session)
-- **020 ✅** (`8e2baa85e`) — EmailComposer engine + 6 subcomponents + 18 smoke tests (agent worktree). Client TS, clean disjoint merge. Unblocks 021/041. Scope boundaries: saveDraft needs host `onSaveDraftRequest`; local-file upload deferred.
-- **072 ✅** (build-verified) — Outlook add-in onto `@spaarke/auth` `OfficeNaaStrategy`. Agent found the task's named deprecated triad was ALREADY dead; the real ADR-028 violation was `shared/services/AuthService.ts` self-bootstrapping MSAL (NAA hard-disabled) — fixed it (rewrote as thin `SpaarkeAuthProvider`+`OfficeNaaStrategy` wrapper, `IAuthService` preserved so consumers unchanged). Unified manifest onto `outlook/manifest.json` (v1.0.20), deleted `outlook-manifest.xml`+orphan `manifest.prod.json`+dead `shared/api/*`, org-URL→`ORG_URL` env, new script-free `auth-callback.html`. −5,436 LOC. **⛔ FOLLOW-UP TO CLOSE 072: live NAA smoke-test needs real Outlook + Azure AD app-reg + BFF (via `office-addins-deploy`) — not doable in sandbox.** Minor: `initAuth()` public signature lacks a `strategy` override (used `new SpaarkeAuthProvider(config, strategy)` directly) — API-surface polish candidate.
-
-## Follow-ups / debts to carry
-- **006 dev smoke-test (REQUIRED before relying on threading):** the post-send Internet-Message-Id auto-capture uses a subject+recency Graph query (best-effort, non-fatal). Needs a dev-mailbox smoke-test to confirm hit-rate (R3 UQ3). Hardening path = correlationId extended property on send.
-- **Formal gates batched to W0 PR:** code-review + adr-check + publish-size measurement for 004/006 deferred to the W0 PR gate (changes add no packages → publish delta ~0; ADR self-check: ADR-024 additive, ADR-028 injected client, ADR-010 no new DI, ADR-019 no new error path).
-- **007 dead-code follow-ups (deferred, tracked):** orphaned `EmailProcessingOptions` props; `DeadLetterQueueService` lost its only consumer; ADR-045 background text slightly imprecise re Services/Email.
-- **Solution-export** of new sprk_communication columns into managed Spaarke solution (ADR-027) — deploy-time.
-
-## Recovery Notes
-- Project initialized via `/design-to-spec` → `/project-pipeline` on 2026-07-14.
-- W1‖W2‖W7 run after W0. **W5 gated on task 050 (r2-core Services/Ai coordination).**
-- Before any BFF PR: run `/conflict-check`.
+## Open / not-blocking
+- PCF commits are on master already (part of the merged branch); ZIPs still need owner import to Dataverse.
+- UAT helpers: `notes/uat-mock-provenance.md` (console script to seed multi-slot provenance), `notes/UAT-CHECKLIST.md`, `notes/DEPLOYMENT-CHECKLIST.md`.
+- No pending decisions; owner approved Option A (fallback no-auto-file).
+</content>
