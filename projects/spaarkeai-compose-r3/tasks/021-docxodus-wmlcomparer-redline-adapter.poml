@@ -3,7 +3,7 @@
     <title>FR-03/FR-05 Docxodus `WmlComparer` redline synthesis adapter (minimal ins/del + format-change)</title>
     <phase>2 E1</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>opus</model-tier>
     <effort>xhigh</effort>
@@ -136,4 +136,42 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    COMPLETE 2026-07-17 (opus @ xhigh, FULL rigor, directional).
+
+    NEW `Services/Compose/ComposeRedlineComparerService.cs` — thin Docxodus WmlComparer adapter:
+    `byte[] SynthesizeRedline(ReadOnlyMemory&lt;byte&gt; retainedOriginal, ReadOnlyMemory&lt;byte&gt;
+    splicedEdited, string author, DateTimeOffset? revisionTimestamp = null)`. Mirrors the
+    DocxAnnotationWriter byte-in/byte-out shape. NEW `ComposeRedlineException`. DI: unconditional
+    singleton in ComposeModule (symmetric per bff-extensions.md §F.1).
+
+    §6.5 Path-C (API-shape delta from S1 recipe, NON-blocking — same fork lineage): S1 validated on
+    Docxodus 7.1.0 (net10); task 001 shipped 6.4.0 (net8). Verified the 6.4.0 public surface by
+    reflection FIRST: `WmlComparer.Compare(WmlDocument, WmlDocument, WmlComparerSettings)` identical;
+    byte-in ctor is `WmlDocument(string fileName, byte[])` (NOT bare `(byte[])` — used a synthetic
+    "original.docx"/"edited.docx" name to satisfy its extension sniff); output via
+    `WmlDocument.DocumentByteArray`; format-change is the explicit `WmlComparerSettings.DetectFormatChanges`
+    bool (set true for FR-05); author via `AuthorForRevisions`, date via `DateTimeForRevisions`.
+
+    Diff path = WmlComparer ONLY — no HtmlToWml/FormattingAssembler (design §12 bullet 3); publish
+    verified 0 libSkiaSharp assets, Docxodus.dll present (MIT).
+
+    Tests: NEW ComposeRedlineComparerServiceTests (12) — text edits produce ins/del + single author
+    attribution; untouched paras keep w14:paraId + carry no revisions (minimal, S1); identical docs →
+    0 revisions; bold-a-word → rPr/pPrChange asserted NOT del+ins (FR-05/D4, DeletedText never contains
+    the reformatted word); S1/S1b no-throw on nested tables (2 tables survive) / 3-level numbering /
+    whole-para delete (→ w:del) / paragraph split; empty/whitespace/malformed → ArgumentException /
+    ComposeRedlineException. Text-edit fixtures produced through ComposeParagraphSpliceService (task 020)
+    so the tests exercise the real 020→021 pipeline. Fixtures include a StyleDefinitionsPart (WmlComparer
+    reads it via AddFootnotesEndnotesStyles — real Word docs always have one).
+
+    Gates: Compose suite 429 ✅ (+12); ADR013_ComposeFacade PASS; publish 45.94 MB compressed incl PDBs
+    (0 delta vs 012/020 — Docxodus counted since task 001), ≤60 MB; 0 vulnerable packages; ADR-007 no
+    Graph type; ADR-010 concrete singleton. §9.5 code-review + adr-check PASS. PR MUST include §10
+    Placement Justification (new adapter; §11 justified — no existing component diffs two whole docs;
+    DocxAnnotationWriter writes caller-supplied markup, does not diff).
+
+    Consumed by task 022 (SaveAsync inversion — NOT wired here). NFR-06 seam obligation rides task 022.
+  </notes>
 </task>

@@ -33,7 +33,7 @@
 | 011 | FR-09/FR-10 explicit load-time paraId carry (hidden node attr) + split-minting via `@tiptap/extension-unique-id` | 1 E2 | 🔴 | 010 | ✅ | FULL | sonnet | high | true (client) |
 | 012 | FR-11/FR-12 paraId-primary anchoring + fuzzy fallback (`AnnotationReanchorService`) + paraId as splice key | 1 E2 | 🟢 | 010,011 | ✅ | FULL | opus | high | false (reanchor svc) |
 | 020 | FR-02 edited-paragraph rebuild + paraId-keyed splice orchestration (server) | 2 E1 | 🟢 | 010,012 | ✅ | FULL | opus | xhigh | false (Services/Compose) |
-| 021 | FR-03/FR-05 Docxodus `WmlComparer` redline synthesis adapter (minimal ins/del + format-change) | 2 E1 | 🔴 | 001,020 | 🔲 | FULL | opus | xhigh | false (Services/Compose) |
+| 021 | FR-03/FR-05 Docxodus `WmlComparer` redline synthesis adapter (minimal ins/del + format-change) | 2 E1 | 🟢 | 001,020 | ✅ | FULL | opus | xhigh | false (Services/Compose) |
 | 022 | FR-01 baseline inversion in `SaveAsync` + drop `docx.js` export (**E1 cutover — keystone**) | 2 E1 | 🔴 | 002,003,020,021 | 🔲 | FULL | opus | xhigh | false (SaveAsync + docxBridge) |
 | 023 | FR-04 AI redlines/comments reuse — apply via existing `DocxAnnotationWriter` onto retained-original baseline | 2 E1 | 🔴 | 022 | 🔲 | FULL | sonnet | high | false (Services/Compose) |
 | 024 | FR-07/NFR-06 through-the-wire fidelity seam slice test (untouched OOXML preserved on dirty save) | 2 E1 | 🔴 | 022,023 | 🔲 | FULL | sonnet | xhigh | true (tests) |

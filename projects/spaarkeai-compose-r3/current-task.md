@@ -10,14 +10,18 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 021 — FR-03/FR-05 Docxodus `WmlComparer` redline synthesis adapter (NOT STARTED — fresh-session recommended) |
-| **Step** | 0 of 4 (context-budget stop before starting; 012+020 done & committed) |
-| **Status** | not-started |
-| **Next Action** | `work on task 021` in a FRESH session. FULL · opus @ xhigh · directional. Deps 001✅ 020✅. See Handoff Notes — Task 021 below (WmlComparer API recipe + the 6.4.0-vs-7.1.0 verification risk are pre-captured). |
+| **Task** | 021 — FR-03/FR-05 Docxodus `WmlComparer` redline synthesis adapter — ✅ COMPLETE (uncommitted) |
+| **Step** | 4 of 4 done — verify PASS |
+| **Status** | complete, uncommitted (batch-commit with 020 per operator "push after a few more tasks") |
+| **Next Action** | Commit task 021, then batch-push 020+021 to PR #656 (operator deferred push). OR `continue` → task 022 (FR-01 SaveAsync baseline inversion — E1 keystone; deps 002,003,020,021 all ✅; carries NFR-06 seam obligation for the save path). Alt startable: task 030 (E3 confidence, deps 012✅). |
 
 ### Committed this session
 - `5aed0f2d5` — task 012 (FR-11/FR-12 paraId-primary anchoring + splice key) — **pushed** to PR #656.
 - `e492e1844` — task 020 (FR-02 rebuild+splice) — **committed, NOT pushed**.
+- task 021 (FR-03/FR-05 WmlComparer adapter) — **DONE, NOT yet committed** (3 files: ComposeRedlineComparerService.cs NEW, ComposeModule.cs +1 line, ComposeRedlineComparerServiceTests.cs NEW).
+
+### Task 021 completion (2026-07-17)
+NEW `ComposeRedlineComparerService.SynthesizeRedline(retainedOriginal, splicedEdited, author, revisionTimestamp?)` — thin Docxodus WmlComparer adapter (byte[]→byte[]); NEW `ComposeRedlineException`; DI unconditional singleton. **§6.5 Path-C**: 6.4.0 (net8) API-shape delta from S1's 7.1.0 recipe — verified by reflection: `WmlComparer.Compare` identical, byte-in ctor is `WmlDocument(string fileName, byte[])`, output `.DocumentByteArray`, format-change = explicit `DetectFormatChanges=true`. Diff path = WmlComparer only (no HtmlToWml/FormattingAssembler; publish has 0 libSkiaSharp). Tests: NEW 12 (ins/del+author, untouched keep paraId + no revisions, identical→0, bold→rPr/pPrChange NOT del+ins, S1/S1b no-throw on nested-table/numbering/delete/split, negatives). Text-edit fixtures via ComposeParagraphSpliceService (real 020→021 pipeline). Fixtures include StyleDefinitionsPart (WmlComparer reads it). Compose suite 429✅ (+12); ADR013_ComposeFacade PASS; publish 45.94 MB compressed incl PDBs (0 delta); 0 CVE; ADR-007 no Graph. §9.5 PASS. PR MUST cite §10 Placement Justification. Consumed by 022; NFR-06 seam rides 022.
 
 ### Handoff Notes — Task 021 (Docxodus WmlComparer adapter) — NOT STARTED 2026-07-17
 
