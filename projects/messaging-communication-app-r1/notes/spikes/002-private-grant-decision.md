@@ -165,3 +165,23 @@ A remains a legitimate fallback **if** the owner requires private threads to be 
 ## OWNER DECISION (2026-07-16)
 
 ✅ **APPROVED — Option B** (`sprk_externalrecordaccess`-style overlay grant), unioned with ADR-034 open membership in the BFF thread-read filter. Owner sign-off obtained; this closes the §6 escalation. Tasks 042 (enforcement filter), 041 (ACS membership reconcile), and 050 (thread-read/unread endpoints) are authored/executed against option B. Filter contract: `MembershipResolver(anchor) ∪ activeOverlayGrants(thread, caller)`, point-forward via `createdon ≥ grant.effectiveFrom`.
+
+---
+
+## UPDATE (2026-07-16) — pivot to OOB "Manage access" (POA) + research pending
+
+Owner raised: can we use the OOB Power Apps/Dataverse **"Manage access"** feature (record sharing) instead of a custom overlay table? **YES — and it's preferred.** Precedent: `PlaybookSharingService.GetSharedTeamsAsync` already reads `principalobjectaccessset` (POA) app-only via Web API.
+
+**Revised direction (supersedes the custom-table framing of option B):**
+- **Granting** = OOB "Manage access" on the `sprk_communicationthread` record (User/Team owned → shareable) → writes POA (`principalobjectaccess`). **No new grant table, no new grant endpoint.**
+- **Enforcement** = the `IThreadPrivateGrantProvider` / `IThreadExplicitParticipantReader` seam (built deny-all in 041/042) gets a concrete **POA-backed** impl reading `principalobjectaccessset` for the thread, mirroring `PlaybookSharingService`. Composes with ADR-034 open membership.
+
+**CRITICAL access-model fact (owner-confirmed direction, being verified by researcher):** Dataverse sharing (POA) is **additive only — grants, never restricts**. Effective access = UNION of ownership + security-role (by depth) + teams (owner/access/AAD-group) + shares. Therefore:
+- Sharing a record to an "internal" team does NOT remove an external user who already has access via their team (must control the SOURCE).
+- Sharing extends access (add external team → external gets access). ✅
+- **"Private / only named individuals" = a base-OWNERSHIP/scoping decision**, not achievable by sharing alone — the thread record's base scope must be narrow, then explicitly shared with the named individuals.
+
+**Open (researcher `a3470467b6e2fac1a`, 2026-07-16):** confirm composition rule + `RetrievePrincipalAccess` (does it return the FULL effective union? callable app-only?) → decide whether the BFF filter computes the union itself or delegates per-(user,thread) to `RetrievePrincipalAccess`; internal/external team orchestration; owner-team vs access-team vs AAD-group-team. Findings will finalize the private-thread provider impl (043/050 gated on this).
+
+## OWNER DECISION — Privilege gating (2026-07-16)
+✅ **Metadata-only, composes with privacy** (as built in 042). Privilege classification drives review/labeling; read visibility governed by privacy + internal-only; AI may FLAG never DECIDE (ADR-015). No independent privilege fail-closed. Confirmed by owner.
