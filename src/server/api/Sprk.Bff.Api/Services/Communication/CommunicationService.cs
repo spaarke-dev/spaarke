@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -36,6 +37,7 @@ public sealed class CommunicationService
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly IThreadResolver? _threadResolver;
+    private readonly IServiceScopeFactory? _scopeFactory;
     private readonly CommunicationOptions _options;
     private readonly ILogger<CommunicationService> _logger;
 
@@ -43,6 +45,12 @@ public sealed class CommunicationService
     /// Direction-symmetric thread resolver (task 040 / FR-06) — optional so existing unit constructions that
     /// predate it keep compiling; production DI always supplies it. Invoked best-effort on send to join a
     /// reply's parent thread (email ancestry) or create a fresh thread (NFR-02, non-fatal).
+    /// </param>
+    /// <param name="scopeFactory">
+    /// Scope factory used to reach the Scoped <see cref="IIdempotencyService"/> from this Singleton service
+    /// (the codebase's canonical Singleton→Scoped bridge). Used on the outbound MESSAGE path (task 051 / FR-04)
+    /// to mark our own ACS message id processed so the Event Grid echo of our outbound message is a no-op inbound
+    /// (echo-dedup). Optional so existing unit constructions keep compiling; production DI always supplies it.
     /// </param>
     public CommunicationService(
         CommunicationChannelDispatcher channelDispatcher,
@@ -56,7 +64,8 @@ public sealed class CommunicationService
         ICommunicationEnrichmentService enrichmentService,
         IOptions<CommunicationOptions> options,
         ILogger<CommunicationService> logger,
-        IThreadResolver? threadResolver = null)
+        IThreadResolver? threadResolver = null,
+        IServiceScopeFactory? scopeFactory = null)
     {
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
@@ -68,6 +77,7 @@ public sealed class CommunicationService
         _jobSubmissionService = jobSubmissionService;
         _enrichmentService = enrichmentService;
         _threadResolver = threadResolver;
+        _scopeFactory = scopeFactory;
         _options = options.Value;
         _logger = logger;
     }
@@ -439,6 +449,355 @@ public sealed class CommunicationService
     }
 
     /// <summary>
+    /// Outbound MESSAGE (ACS Chat) send path — persist-on-send + echo-dedup (task 051 / FR-04 / ADR-045 rule 3).
+    /// Dispatches through the EXISTING <see cref="CommunicationChannelDispatcher"/> (NOT a forked send path) to the
+    /// messaging <see cref="Channels.ICommunicationChannelSender"/>, which posts server-side over ACS Chat AS the
+    /// sending participant using a server-minted chat token (NFR-05 — no token reaches the client). It then persists
+    /// exactly ONE <c>sprk_communication</c> (type=Message, Direction=Outgoing) recording the ACS message id
+    /// (<c>sprk_acsmessageid</c>) + thread id (<c>sprk_acsthreadid</c>), and MARKS that ACS message id processed on
+    /// the shared <see cref="IIdempotencyService"/> using the SAME key the inbound handler dedupes on
+    /// (<see cref="IncomingMessagingJobHandler.IdempotencyKeyFor"/>) — so the Event Grid echo of our own outbound
+    /// message is a no-op inbound (the load-bearing exactly-once property). Thread resolution (task 040) and
+    /// enrichment are best-effort / non-fatal (NFR-02): a failure there never fails an already-sent + persisted
+    /// message. No ACS token or admin capability is returned to the caller (NFR-04/NFR-05).
+    /// </summary>
+    private async Task<SendCommunicationResponse> SendMessageAsync(
+        SendCommunicationRequest request,
+        HttpContext? httpContext,
+        string correlationId,
+        CancellationToken ct)
+    {
+        // A message must carry content. Recipients/subject are optional for chat — the ACS thread is the
+        // addressing unit and a chat thread may have no subject (the sender defaults a topic).
+        if (string.IsNullOrWhiteSpace(request.Body))
+        {
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: "Message body is required.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        // The BFF posts AS the authenticated user (server-minted token — NFR-05). A message has no shared-mailbox
+        // concept, so an authenticated user context is required to identify the sending participant.
+        if (httpContext is null)
+        {
+            throw new SdapProblemException(
+                code: "OBO_CONTEXT_REQUIRED",
+                title: "HttpContext Required",
+                detail: "Sending a message requires an authenticated HttpContext to resolve the sending participant.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        var (senderParticipant, senderEmail, senderDisplayName) =
+            await ResolveMessageSenderAsync(httpContext, correlationId, ct);
+
+        try
+        {
+            // Dispatch by CommunicationType through the EXISTING dispatcher (ADR-045 — no second send path). The
+            // messaging sender resolves the sender's ACS identity (task 010), mints their chat token, resolves or
+            // creates the ACS thread (task 011), posts the message, and returns the ACS message id
+            // (ProviderMessageId = the echo-dedup key, FR-04) + ACS thread id (ProviderThreadId).
+            var sendResult = await _channelDispatcher.ResolveSender(CommunicationType.Message).SendAsync(
+                new ChannelSendRequest
+                {
+                    Communication = request,
+                    FromAddress = senderEmail,
+                    FromDisplayName = senderDisplayName,
+                    UserMode = false,
+                    CorrelationId = correlationId,
+                    SenderParticipant = senderParticipant,
+                    // R1 has no live client to supply a thread; the messaging sender creates/looks up the ACS
+                    // thread and returns it as ProviderThreadId (persisted + used for thread grouping below).
+                    AcsThreadId = null
+                },
+                ct);
+
+            // Persist-on-send (ADR-045 rule 3): exactly ONE sprk_communication, recording the ACS correlation ids.
+            Guid? communicationId = null;
+            try
+            {
+                communicationId = await CreateMessageDataverseRecordAsync(
+                    request, senderEmail, sendResult, correlationId, ct);
+            }
+            catch (Exception dvEx)
+            {
+                // Non-fatal: the message reached ACS. Without a persisted record we deliberately do NOT mark the
+                // echo processed below, so the inbound echo persists it instead (at-least-once backstop — still
+                // exactly one record). This mirrors the inbound handler's persist-before-mark ordering.
+                _logger.LogWarning(
+                    dvEx,
+                    "Message Dataverse record creation failed (non-fatal) | CorrelationId: {CorrelationId}",
+                    correlationId);
+            }
+
+            // Echo-dedup mark (FR-04 / NFR-03) — the load-bearing exactly-once seam. Mark the SAME key the inbound
+            // handler dedupes on so the Event Grid echo of our own outbound message is a no-op inbound. Marked
+            // AFTER a successful persist so a failed persist lets the echo capture the message rather than dropping
+            // it. Best-effort: a mark failure MUST NOT fail an already-sent + persisted message (NFR-02).
+            if (communicationId.HasValue && !string.IsNullOrWhiteSpace(sendResult.ProviderMessageId))
+            {
+                await MarkOutboundEchoProcessedAsync(sendResult.ProviderMessageId!, correlationId, ct);
+            }
+
+            // Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02). Unlike the email path the
+            // outbound message HAS its authoritative ACS thread id (ProviderThreadId), so the messaging key
+            // strategy can group by it now (find-or-create sprk_communicationthread + channel-ref row).
+            if (communicationId.HasValue)
+            {
+                await ResolveOutboundMessageThreadAsync(
+                    communicationId.Value, request, sendResult.ProviderThreadId, correlationId, ct);
+            }
+
+            // Direction-symmetric enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-02).
+            if (communicationId.HasValue)
+            {
+                try
+                {
+                    await _enrichmentService.EnrichAsync(
+                        communicationId.Value,
+                        CommunicationDirection.Outgoing,
+                        BuildOutboundEnvelope(request, senderEmail),
+                        archivedDocumentId: null,
+                        ct);
+                }
+                catch (Exception enrichEx)
+                {
+                    _logger.LogWarning(
+                        enrichEx,
+                        "Enrichment failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
+                        correlationId, communicationId.Value);
+                }
+            }
+
+            // The response carries only the tracking record id + status — NO ACS token or admin capability
+            // reaches the caller (NFR-04/NFR-05).
+            return new SendCommunicationResponse
+            {
+                CommunicationId = communicationId,
+                GraphMessageId = correlationId,
+                Status = CommunicationStatus.Send,
+                SentAt = DateTimeOffset.UtcNow,
+                From = senderEmail,
+                CorrelationId = correlationId
+            };
+        }
+        catch (Exception ex) when (ex is not SdapProblemException)
+        {
+            _logger.LogError(
+                ex,
+                "Unexpected error sending message | CorrelationId: {CorrelationId}",
+                correlationId);
+
+            throw new SdapProblemException(
+                code: "CHANNEL_SEND_FAILED",
+                title: "Message Send Failed",
+                detail: $"Unexpected error: {ex.Message}",
+                statusCode: 500,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+    }
+
+    /// <summary>
+    /// Resolves the outbound message's sending participant from the authenticated user's claims: the Entra
+    /// <c>oid</c> → Dataverse <c>systemuserid</c> (the durable key <see cref="Acs.IAcsIdentityService"/> maps to
+    /// an ACS <c>communicationUserId</c>). Returns the participant plus the user's email + display name for the
+    /// persisted record + sender display. Throws RFC 7807 <see cref="SdapProblemException"/> (400) when the
+    /// claims or the systemuser mapping cannot be resolved — a message cannot be sent without a sending identity.
+    /// </summary>
+    private async Task<(ParticipantReference Participant, string Email, string? DisplayName)> ResolveMessageSenderAsync(
+        HttpContext httpContext, string correlationId, CancellationToken ct)
+    {
+        var userEmail = httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+            ?? httpContext.User.FindFirst("preferred_username")?.Value
+            ?? httpContext.User.FindFirst("email")?.Value
+            ?? httpContext.User.FindFirst("upn")?.Value
+            ?? httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.Upn)?.Value
+            ?? httpContext.User.FindFirst("unique_name")?.Value;
+
+        var userObjectId = httpContext.User.FindFirst("oid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
+        if (string.IsNullOrWhiteSpace(userObjectId))
+        {
+            throw new SdapProblemException(
+                code: "SENDER_NOT_RESOLVED",
+                title: "Sender Not Resolved",
+                detail: "Could not resolve the sending user's object id (oid) from authentication claims.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        Guid? systemUserId;
+        try
+        {
+            systemUserId = await _communicationService.QuerySystemUserByAzureAdOidAsync(userObjectId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to resolve systemuser for message sender (oid={UserObjectId}) | CorrelationId: {CorrelationId}",
+                userObjectId, correlationId);
+            throw new SdapProblemException(
+                code: "SENDER_NOT_RESOLVED",
+                title: "Sender Not Resolved",
+                detail: "Failed to resolve the sending user's Dataverse identity.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        if (!systemUserId.HasValue)
+        {
+            throw new SdapProblemException(
+                code: "SENDER_NOT_RESOLVED",
+                title: "Sender Not Resolved",
+                detail: "The sending user has no Dataverse systemuser record; cannot act as an ACS participant.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        var displayName = httpContext.User.FindFirst("name")?.Value
+            ?? httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+
+        return (ParticipantReference.SystemUser(systemUserId.Value),
+                string.IsNullOrWhiteSpace(userEmail) ? userObjectId : userEmail,
+                displayName);
+    }
+
+    /// <summary>
+    /// Persists the outbound message as exactly one <c>sprk_communication</c> (type=Message, Direction=Outgoing),
+    /// recording the ACS correlation ids under the AS-BUILT schema names — <c>sprk_acsmessageid</c> (the
+    /// echo-dedup key) and <c>sprk_acsthreadid</c>. Mirrors <see cref="Channels.MessagingIngestor"/>'s persist
+    /// shape for the inbound direction so both directions land one comparable record.
+    /// </summary>
+    private async Task<Guid> CreateMessageDataverseRecordAsync(
+        SendCommunicationRequest request,
+        string senderEmail,
+        Channels.ChannelSendResult sendResult,
+        string correlationId,
+        CancellationToken ct)
+    {
+        var subject = string.IsNullOrWhiteSpace(request.Subject) ? "(No Subject)" : request.Subject;
+
+        var communication = new DataverseEntity("sprk_communication")
+        {
+            ["sprk_name"] = $"Message: {TruncateTo(subject, 200)}",
+            ["sprk_communicationtype"] = new OptionSetValue((int)CommunicationType.Message),   // 100000004
+            ["statuscode"] = new OptionSetValue((int)CommunicationStatus.Send),
+            ["statecode"] = new OptionSetValue(0), // Active
+            ["sprk_direction"] = new OptionSetValue((int)CommunicationDirection.Outgoing),      // 100000001
+            ["sprk_bodyformat"] = new OptionSetValue((int)request.BodyFormat),
+            ["sprk_to"] = request.To is { Length: > 0 } ? string.Join("; ", request.To) : string.Empty,
+            ["sprk_from"] = senderEmail,
+            ["sprk_subject"] = subject,
+            ["sprk_body"] = request.Body,
+            ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
+            ["sprk_correlationid"] = correlationId
+        };
+
+        // ACS transport ids (AS-BUILT schema names): the dedupe key + denormalized thread id. The
+        // sprk_communicationthread LOOKUP (grouping key) is set by task 040's resolver, NOT here.
+        if (!string.IsNullOrWhiteSpace(sendResult.ProviderMessageId))
+            communication["sprk_acsmessageid"] = sendResult.ProviderMessageId;
+        if (!string.IsNullOrWhiteSpace(sendResult.ProviderThreadId))
+            communication["sprk_acsthreadid"] = sendResult.ProviderThreadId;
+
+        if (request.Cc is { Length: > 0 })
+            communication["sprk_cc"] = string.Join("; ", request.Cc);
+
+        // Map primary association (regarding lookup + denormalized fields) — same ADR-024 mechanism as email.
+        MapAssociationFields(communication, request.Associations, _logger);
+
+        var recordId = await _genericEntityService.CreateAsync(communication, ct);
+
+        _logger.LogInformation(
+            "Persisted outbound message | CommunicationId: {RecordId}, AcsMessageId: {AcsMessageId}, AcsThreadId: {AcsThreadId}, CorrelationId: {CorrelationId}",
+            recordId, sendResult.ProviderMessageId, sendResult.ProviderThreadId, correlationId);
+
+        return recordId;
+    }
+
+    /// <summary>
+    /// Marks the outbound ACS message id processed on the shared <see cref="IIdempotencyService"/> using the
+    /// canonical key (<see cref="IncomingMessagingJobHandler.IdempotencyKeyFor"/>), so the Event Grid echo of our
+    /// own message hits the inbound handler's fast-path dedupe and is a no-op — exactly-once persistence (FR-04 /
+    /// NFR-03). Reaches the Scoped idempotency service from this Singleton via the scope factory (the codebase's
+    /// canonical Singleton→Scoped bridge). Best-effort / non-fatal (NFR-02): a mark failure never fails an
+    /// already-sent + persisted message (a rare double-persist on echo is preferable to failing the send).
+    /// </summary>
+    private async Task MarkOutboundEchoProcessedAsync(string acsMessageId, string correlationId, CancellationToken ct)
+    {
+        var key = IncomingMessagingJobHandler.IdempotencyKeyFor(acsMessageId);
+        try
+        {
+            if (_scopeFactory is null)
+            {
+                _logger.LogWarning(
+                    "No scope factory available to mark echo-dedup key {Key} (non-fatal) | CorrelationId: {CorrelationId}",
+                    key, correlationId);
+                return;
+            }
+
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var idempotency = scope.ServiceProvider.GetRequiredService<IIdempotencyService>();
+            await idempotency.MarkEventAsProcessedAsync(key, expiration: null, ct);
+
+            _logger.LogInformation(
+                "Marked outbound ACS message {AcsMessageId} processed for echo-dedup (key={Key}) | CorrelationId: {CorrelationId}",
+                acsMessageId, key, correlationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Echo-dedup mark failed (non-fatal) for ACS message {AcsMessageId} | CorrelationId: {CorrelationId}",
+                acsMessageId, correlationId);
+        }
+    }
+
+    /// <summary>
+    /// Resolves (find-or-create) the outbound message's <c>sprk_communicationthread</c> via the task-040
+    /// <see cref="IThreadResolver"/>, passing the authoritative ACS thread id so the messaging key strategy
+    /// groups by it. Best-effort / non-fatal (NFR-02) — a resolve failure MUST NOT fail the send.
+    /// </summary>
+    private async Task ResolveOutboundMessageThreadAsync(
+        Guid communicationId, SendCommunicationRequest request, string? acsThreadId, string correlationId, CancellationToken ct)
+    {
+        if (_threadResolver is null)
+            return;
+
+        try
+        {
+            var envelope = new NormalizedMessage
+            {
+                Direction = CommunicationDirection.Outgoing,
+                Subject = request.Subject,
+            };
+
+            await _threadResolver.ResolveAndAssignThreadAsync(
+                new ThreadResolutionRequest
+                {
+                    CommunicationId = communicationId,
+                    ChannelType = CommunicationType.Message,
+                    Direction = CommunicationDirection.Outgoing,
+                    Message = envelope,
+                    AcsThreadId = string.IsNullOrWhiteSpace(acsThreadId) ? null : acsThreadId,
+                },
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Thread resolution failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
+                correlationId, communicationId);
+        }
+    }
+
+    /// <summary>
     /// Sends a communication via Microsoft Graph sendMail API.
     /// Validates the request, resolves the sender, constructs a Graph Message, and sends.
     /// On failure, throws SdapProblemException immediately (no retry).
@@ -462,6 +821,15 @@ public sealed class CommunicationService
             request.To.Length,
             request.CommunicationType,
             request.SendMode);
+
+        // Branch: MESSAGE (ACS Chat) sends take the persist-on-send + echo-dedup path (task 051 / FR-04).
+        // Dispatch still flows through the SAME CommunicationChannelDispatcher (ADR-045 — no second send path);
+        // this branch only supplies the messaging-specific sender-identity + persistence shape (participant, not
+        // mailbox; ACS correlation ids; echo-dedup mark), mirroring the SendMode.User branch below.
+        if (request.CommunicationType == CommunicationType.Message)
+        {
+            return await SendMessageAsync(request, httpContext, correlationId, cancellationToken);
+        }
 
         // Branch: User mode sends via OBO as the authenticated user
         if (request.SendMode == SendMode.User)
