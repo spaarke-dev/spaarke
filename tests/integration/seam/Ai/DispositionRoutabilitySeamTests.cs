@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -122,6 +123,286 @@ public sealed class DispositionRoutabilitySeamTests
         stored.Payload.GetProperty("new_text").GetString().Should().Be("Acme NDA intake");
     }
 
+    // (1c) SurfaceLaunch terminal-chunk metadata (assistant-enhancements-r1 task 013): the terminal
+    //      `complete` chunk carries the dispatch metadata (disposition + consumertype) so the client can
+    //      branch a surface_launch dispatch to the pre-seeded launch (task 012 launchSurface) WITHOUT a
+    //      second intent mechanism — it reads the server's routing decision off the wire. Additive fields;
+    //      JsonIgnore-when-null keeps other consumers unaffected. Dispatch-spine DoD for the 013 wire-up.
+    [Fact]
+    public async Task DispatchAsync_SurfaceLaunch_CompleteChunk_CarriesDispositionAndConsumerType()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        // Regression (assistant-enhancements-r1 UAT 2026-07-17): a Binding whose sprk_ucid DIVERGES from
+        // sprk_consumertype (the live create-matter row: consumertype="create-matter", ucid="UC-B-6"). The
+        // terminal chunk's consumerType MUST be the sprk_consumertype (the client launch-registry key), NOT
+        // the ledger UcId — emitting "UC-B-6" made resolveSurfaceLaunch() miss and the wizard never opened.
+        h.GivenBinding(BindingDisposition.SurfaceLaunch, SelectionInputSchema, consumerType: "create-matter", ucid: "UC-B-6");
+        h.GivenFlatTextAction("ROLE: Draft the matter-intake fields for the launched wizard.", PassThroughOutputSchema);
+        h.OpenAi.RawJsonToReturn = """{"new_text":"Acme NDA intake"}""";
+
+        var chunks = await h.DispatchAsync(new { selectionText = "draft a matter for the Acme NDA" });
+
+        var complete = chunks.Should().ContainSingle(c => c.Type == "complete").Subject;
+        var stored = await h.GetStoredOutputAsync();
+
+        // The terminal chunk's disposition IS the server's routing decision (== the stored ledger value).
+        complete.Disposition.Should().Be("surface_launch");
+        // The consumertype MUST be the Binding's sprk_consumertype (the CLIENT registry key), even when the
+        // ledger UcId differs — the client maps THIS to a surface via surfaceLaunchRegistry.ts.
+        complete.ConsumerType.Should().Be("create-matter");
+        // The ledger still records the divergent UcId (ucid ?? consumertype) — documents the divergence the
+        // regression guards: consumerType on the wire is NOT the UcId.
+        stored!.UcId.Should().Be("UC-B-6");
+    }
+
+    // (1d) Smart pre-seed enrichment (assistant-enhancements-r1 task 013 part 3 / D-013-01): a
+    //      create-matter surface_launch dispatch resolves the drafted closed-set LABELS
+    //      (practice_area_suggestion / matter_type_suggestion) → record ids via the deterministic
+    //      resolver (010) and merges them into the STORED payload as `resolvedLookups` BEFORE the ledger
+    //      write. The router stores an opaque payload it never parses (ADR-040), so the enriched slot rides
+    //      the ledger untouched; the launched wizard pre-selects a `high` dropdown and defaults a `low`
+    //      picker to the top candidate (client mapper handoffSeedMapping.ts). This is the dispatch-spine
+    //      DoD for wiring the resolver into dispatch (its FIRST live consumer).
+    private const string CreateMatterOutputSchema =
+        """{"type":"object","additionalProperties":false,"required":["matter_name","practice_area_suggestion","matter_type_suggestion"],"properties":{"matter_name":{"type":"string"},"practice_area_suggestion":{"type":"string"},"matter_type_suggestion":{"type":"string"}}}""";
+
+    [Fact]
+    public async Task DispatchAsync_SurfaceLaunch_CreateMatter_EnrichesResolvedLookupsIntoStoredPayload()
+    {
+        var practiceAreaId = "aaaaaaaa-1111-2222-3333-444444444444";
+        var matterTypeId = "bbbbbbbb-1111-2222-3333-444444444444";
+
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.SurfaceLaunch, SelectionInputSchema, consumerType: "create-matter");
+        h.GivenFlatTextAction("ROLE: Draft the matter-intake fields for the launched wizard.", CreateMatterOutputSchema);
+        h.OpenAi.RawJsonToReturn =
+            """{"matter_name":"Acme NDA","practice_area_suggestion":"Commercial Litigation","matter_type_suggestion":"Non-Disclosure Agreement"}""";
+
+        // The deterministic resolver (010) — the ONE doubled boundary. practice-area resolves HIGH (exact),
+        // matter-type resolves LOW (fuzzy → top candidate) so the test covers BOTH the pre-select and the
+        // picker-default legs the client mapper branches on.
+        h.Resolver
+            .Setup(r => r.ResolveAsync("sprk_matter", "sprk_practicearea_ref", "Commercial Litigation", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ConstrainedFieldResolution
+            {
+                Resolved = practiceAreaId,
+                Confidence = ResolutionConfidence.High,
+                Candidates = new[] { new FieldCandidate(practiceAreaId, "Commercial Litigation") },
+            });
+        h.Resolver
+            .Setup(r => r.ResolveAsync("sprk_matter", "sprk_mattertype_ref", "Non-Disclosure Agreement", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ConstrainedFieldResolution
+            {
+                Resolved = matterTypeId,
+                Confidence = ResolutionConfidence.Low,
+                Candidates = new[] { new FieldCandidate(matterTypeId, "NDA Review") },
+            });
+
+        var chunks = await h.DispatchAsync(new { selectionText = "draft a matter for the Acme NDA" });
+        chunks.Should().NotContain(c => c.Type == "error").And.Contain(c => c.Type == "complete");
+
+        // STORE: the enriched resolvedLookups is durably in the ledger BEFORE render (ADR-040). The
+        // free-text draft is untouched; the enricher only ADDED the resolver's closed-set output.
+        var stored = await h.GetStoredOutputAsync();
+        stored.Should().NotBeNull("store precedes render — ADR-040");
+        stored!.Disposition.Should().Be("surface_launch");
+        stored.Payload.GetProperty("matter_name").GetString().Should().Be("Acme NDA", "the drafted free-text survives enrichment");
+
+        var resolvedLookups = stored.Payload.GetProperty("resolvedLookups");
+
+        // HIGH → recordId + confidence "high" (client pre-selects the dropdown). Keyed by the lookup
+        // attribute the client mapper reads (sprk_practicearea_ref).
+        var practiceArea = resolvedLookups.GetProperty("sprk_practicearea_ref");
+        practiceArea.GetProperty("confidence").GetString().Should().Be("high");
+        practiceArea.GetProperty("recordId").GetString().Should().Be(practiceAreaId);
+
+        // LOW → recordId (top candidate) + confidence "low" + candidates (client defaults the picker).
+        var matterType = resolvedLookups.GetProperty("sprk_mattertype_ref");
+        matterType.GetProperty("confidence").GetString().Should().Be("low");
+        matterType.GetProperty("recordId").GetString().Should().Be(matterTypeId);
+        matterType.GetProperty("candidates")[0].GetProperty("label").GetString().Should().Be("NDA Review");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_SurfaceLaunch_UnmappedConsumerType_LeavesPayloadUnenriched()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        // A surface_launch binding whose consumer-type has NO field-map (create-task drafts no closed-set
+        // field in R1). Enrichment is a quiet no-op (ADR-032) — the stored payload carries no resolvedLookups.
+        h.GivenBinding(BindingDisposition.SurfaceLaunch, SelectionInputSchema, consumerType: "create-task");
+        h.GivenFlatTextAction("ROLE: Draft the task fields.", PassThroughOutputSchema);
+        h.OpenAi.RawJsonToReturn = """{"new_text":"Follow up on the NDA"}""";
+
+        var chunks = await h.DispatchAsync(new { selectionText = "create a task to follow up" });
+        chunks.Should().NotContain(c => c.Type == "error").And.Contain(c => c.Type == "complete");
+
+        var stored = await h.GetStoredOutputAsync();
+        stored!.Payload.TryGetProperty("resolvedLookups", out _)
+            .Should().BeFalse("an unmapped consumer-type is a quiet no-op — no resolvedLookups is added");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // (1e) sprk_risk confirmation gate (assistant-enhancements-r1 task 021 / FR-D1). The resolved
+    //      Binding's declared sprk_risk feeds the ONE metadata gate decision
+    //      (PendingPlanManager.RequiresConfirmation — ADR-041 tier × risk × origin). AlwaysConfirm
+    //      SUSPENDS the dispatch (pending Gate marker BEFORE render, ADR-040) and presents a
+    //      suggestion-that-launches confirm chip INSTEAD of executing — no LLM spend, no ledger
+    //      output; the confirm click re-dispatches with the token, consumes the gate (CONFIRMED
+    //      marker), and executes. None (and ConfirmWhenUncertain, absent a dispatch-uncertain
+    //      producer on the Click path) runs with no gate. This is the dispatch-spine DoD for wiring
+    //      the Binding-risk axis LIVE (it was accepted by RequiresConfirmation but never fed from
+    //      the Click dispatch seam until this task).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DispatchAsync_AlwaysConfirmRisk_SuspendsWithoutExecuting()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.Informational, SelectionInputSchema, risk: BindingRisk.AlwaysConfirm);
+        h.GivenFlatTextAction("ROLE: unused — gated before the LLM.", PassThroughOutputSchema);
+
+        var chunks = await h.DispatchAsync(new { selectionText = "do the risky thing" });
+
+        // NOT EXECUTED: the gate fires BEFORE the LLM spend — no complete chunk, no ledger output.
+        h.OpenAi.LastPrompt.Should().BeNull("AlwaysConfirm suspends BEFORE the LLM spend");
+        chunks.Should().NotContain(c => c.Type == "complete");
+        (await h.GetStoredOutputAsync()).Should().BeNull("a suspended dispatch writes no SessionOutput");
+
+        // PRESENTED: a single suggestion-that-launches confirm chip re-dispatching THIS binding and
+        // carrying the confirm token.
+        var chip = chunks.Should().ContainSingle(c => c.Type == "chips").Subject
+            .Chips.Should().ContainSingle().Subject;
+        chip.TargetBindingId.Should().Be(BindingId.ToString());
+        var confirmGateId = ((JsonObject)chip.Args!)["confirmGateId"]!.GetValue<string>();
+        confirmGateId.Should().NotBeNullOrEmpty();
+
+        // LEDGER (ADR-040): a PENDING Gate marker for the gate id landed (store-precedes-presentation).
+        PendingPlanManager.GetCurrentGateStatus(await h.GetGatesAsync(), confirmGateId)
+            .Should().Be(PendingPlanManager.GateStatusPending);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_AlwaysConfirmRisk_ConfirmTokenReDispatch_ExecutesAndConfirmsGate()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.Informational, SelectionInputSchema, risk: BindingRisk.AlwaysConfirm);
+        h.GivenFlatTextAction("ROLE: Explain the clause.", PassThroughOutputSchema);
+        h.OpenAi.RawJsonToReturn = """{"new_text":"An explanation."}""";
+
+        // 1st dispatch → suspend + confirm chip (carrying the token).
+        var first = await h.DispatchAsync(new { selectionText = "a clause" });
+        var confirmGateId = ((JsonObject)first.Single(c => c.Type == "chips").Chips!.Single().Args!)["confirmGateId"]!
+            .GetValue<string>();
+        h.OpenAi.LastPrompt.Should().BeNull("the first pass did not execute");
+
+        // 2nd dispatch = the confirm click: re-dispatch THIS binding with the token → the gate is
+        // consumed and the Action executes.
+        var second = await h.DispatchAsync(new { selectionText = "a clause", confirmGateId });
+
+        h.OpenAi.LastPrompt.Should().NotBeNull("the confirmed re-dispatch executes the Action");
+        second.Should().Contain(c => c.Type == "complete").And.NotContain(c => c.Type == "error");
+        var stored = await h.GetStoredOutputAsync();
+        stored.Should().NotBeNull("the confirmed dispatch writes its SessionOutput");
+        stored!.Payload.GetProperty("new_text").GetString().Should().Be("An explanation.");
+
+        // The gate is now CONFIRMED (ADR-040 append-only resolution of the same gate id).
+        PendingPlanManager.GetCurrentGateStatus(await h.GetGatesAsync(), confirmGateId)
+            .Should().Be(PendingPlanManager.GateStatusConfirmed);
+    }
+
+    [Theory]
+    [InlineData(BindingRisk.None)]
+    [InlineData(BindingRisk.ConfirmWhenUncertain)]
+    public async Task DispatchAsync_NonAlwaysConfirmRisk_ExecutesWithoutGate(BindingRisk risk)
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.Informational, SelectionInputSchema, risk: risk);
+        h.GivenFlatTextAction("ROLE: Explain the clause.", PassThroughOutputSchema);
+        h.OpenAi.RawJsonToReturn = """{"new_text":"An explanation."}""";
+
+        var chunks = await h.DispatchAsync(new { selectionText = "a clause" });
+
+        // None never gates; ConfirmWhenUncertain does NOT gate on the Click path (dispatchUncertain has
+        // no live producer here — task 022) — the gate stays honestly unfired and the Action executes.
+        h.OpenAi.LastPrompt.Should().NotBeNull("a non-AlwaysConfirm risk executes with no gate on the Click path");
+        chunks.Should().Contain(c => c.Type == "complete").And.NotContain(c => c.Type == "chips");
+        (await h.GetStoredOutputAsync()).Should().NotBeNull();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // (1f) dispatchUncertain routing-confidence tier (assistant-enhancements-r1 task 022 / FR-D2). The
+    //      ConfirmWhenUncertain tier reads request.DispatchUncertain — the single-turn confidence signal
+    //      the CALLER derives (Click = explicit; text-path tool-call = committed; ambiguity resolved
+    //      upstream by a layer-1 clarifying question). It is NOT a second scorer (ADR-039): the gate
+    //      decides STRUCTURALLY from the bool with no model call (asserted: LastPrompt stays null on the
+    //      gated pass). Both R1 entry paths pass false, but the tier is architecturally live — a future
+    //      firing producer sets the flag with no spine change. These tests inject the signal to prove the
+    //      tier wires end-to-end.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DispatchAsync_ConfirmWhenUncertainRisk_UncertainDispatch_SuspendsWithoutScorer()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.Informational, SelectionInputSchema, risk: BindingRisk.ConfirmWhenUncertain);
+        h.GivenFlatTextAction("ROLE: unused — gated before the LLM.", PassThroughOutputSchema);
+
+        var chunks = await h.DispatchAsync(new { selectionText = "maybe do this" }, dispatchUncertain: true);
+
+        // GATED: ConfirmWhenUncertain + an uncertain dispatch suspends BEFORE the LLM — no complete chunk,
+        // no ledger output, and a confirm chip. LastPrompt null proves the decision was STRUCTURAL (the
+        // bool), not a model/scorer call (ADR-039 no second mechanism).
+        h.OpenAi.LastPrompt.Should().BeNull("the tier decides from the structural signal — no scorer runs");
+        chunks.Should().NotContain(c => c.Type == "complete");
+        (await h.GetStoredOutputAsync()).Should().BeNull("a suspended dispatch writes no SessionOutput");
+        var chip = chunks.Should().ContainSingle(c => c.Type == "chips").Subject.Chips.Should().ContainSingle().Subject;
+        var confirmGateId = ((JsonObject)chip.Args!)["confirmGateId"]!.GetValue<string>();
+        PendingPlanManager.GetCurrentGateStatus(await h.GetGatesAsync(), confirmGateId)
+            .Should().Be(PendingPlanManager.GateStatusPending);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ConfirmWhenUncertainRisk_ConfidentDispatch_ExecutesWithoutGate()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.Informational, SelectionInputSchema, risk: BindingRisk.ConfirmWhenUncertain);
+        h.GivenFlatTextAction("ROLE: Explain the clause.", PassThroughOutputSchema);
+        h.OpenAi.RawJsonToReturn = """{"new_text":"An explanation."}""";
+
+        // Confident dispatch (dispatchUncertain=false — the R1 default at both entry paths).
+        var chunks = await h.DispatchAsync(new { selectionText = "a clause" }, dispatchUncertain: false);
+
+        h.OpenAi.LastPrompt.Should().NotBeNull("a confident ConfirmWhenUncertain dispatch runs with no gate");
+        chunks.Should().Contain(c => c.Type == "complete").And.NotContain(c => c.Type == "chips");
+        (await h.GetStoredOutputAsync()).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task DispatchAsync_NoneRisk_UncertainDispatch_ExecutesWithoutGate()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(BindingDisposition.Informational, SelectionInputSchema, risk: BindingRisk.None);
+        h.GivenFlatTextAction("ROLE: Explain the clause.", PassThroughOutputSchema);
+        h.OpenAi.RawJsonToReturn = """{"new_text":"An explanation."}""";
+
+        // Risk None never gates — even an uncertain dispatch (the uncertainty tier only applies to
+        // ConfirmWhenUncertain). Proves the two axes compose correctly (risk gates the tier selection).
+        var chunks = await h.DispatchAsync(new { selectionText = "a clause" }, dispatchUncertain: true);
+
+        h.OpenAi.LastPrompt.Should().NotBeNull("risk None ignores the uncertainty signal entirely");
+        chunks.Should().Contain(c => c.Type == "complete").And.NotContain(c => c.Type == "chips");
+        (await h.GetStoredOutputAsync()).Should().NotBeNull();
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // (2) LOUD rejection through the registry — a not-yet-routable disposition is
     //     rejected PRE-RUN at the admit-gate (never a silent drop, never
@@ -236,6 +517,12 @@ public sealed class DispositionRoutabilitySeamTests
         public Mock<IConsumerRoutingService> Routing { get; } = new();
         public Mock<IScopeResolverService> Scope { get; } = new();
         public Mock<ISessionFileTextSource> TextSource { get; } = new();
+        // Task 013 part 3 (D-013-01): the constrained-field resolver is the ONE doubled boundary in the
+        // smart-pre-seed slice — it fronts Dataverse metadata (a data boundary the harness legitimately
+        // doubles, like the catalog). The enricher itself (SurfaceLaunchEnricher) is the PRODUCTION type,
+        // wired into the production orchestrator → router → ledger path. Default: resolves nothing (None) —
+        // safe no-op for every existing test whose consumer-type has no field-map.
+        public Mock<IConstrainedFieldResolver> Resolver { get; } = new();
         public SessionDispatchOrchestrator Orchestrator { get; }
 
         public Harness()
@@ -252,28 +539,54 @@ public sealed class DispositionRoutabilitySeamTests
             var pending = new PendingPlanManager(
                 new InMemoryTenantCache(), Sessions, Mock.Of<ILogger<PendingPlanManager>>());
 
+            // Safe default: unless a test sets up a specific resolution, every resolve returns None (empty
+            // candidates) — so a mapped consumer-type still produces NO resolvedLookups entry unless the
+            // test opts in. Keeps the enricher a true no-op for the non-013 tests.
+            Resolver
+                .Setup(r => r.ResolveAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(ConstrainedFieldResolution.NoneResult(Array.Empty<FieldCandidate>()));
+
+            var enricher = new SurfaceLaunchEnricher(
+                Resolver.Object, Mock.Of<ILogger<SurfaceLaunchEnricher>>());
+
             Orchestrator = new SessionDispatchOrchestrator(
                 Sessions, Routing.Object, Scope.Object, runner, binder,
                 Mock.Of<Sprk.Bff.Api.Services.Ai.ICodedWorkflowRegistry>(), TextSource.Object, router, pending,
                 Options.Create(new EventRulesOptions { ReadinessProbeAttempts = 1, ReadinessProbeDelayMs = 0 }),
                 new Sprk.Bff.Api.Telemetry.AiTelemetry(),
-                Mock.Of<ILogger<SessionDispatchOrchestrator>>());
+                Mock.Of<ILogger<SessionDispatchOrchestrator>>(),
+                timeProvider: null,
+                surfaceLaunchEnricher: enricher);
         }
 
         public Task SeedSessionAsync(ChatSession session) => Sessions.UpdateSessionCacheAsync(session);
 
-        public void GivenBinding(BindingDisposition disposition, string inputSchema) =>
+        public void GivenBinding(
+            BindingDisposition disposition,
+            string inputSchema,
+            string consumerType = "disposition-seam-test",
+            BindingRisk risk = BindingRisk.None,
+            string? ucid = null) =>
             Routing
                 .Setup(c => c.GetBindingByIdAsync(BindingId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new Binding
                 {
                     BindingId = BindingId,
-                    ConsumerType = "disposition-seam-test",
+                    ConsumerType = consumerType,
+                    Ucid = ucid,
                     ActionId = ActionId,
                     ActionKind = ActionKind.Prompted,
                     Disposition = disposition,
                     InputSchemaJson = inputSchema,
+                    Risk = risk,
                 });
+
+        public async Task<IReadOnlyList<SessionGate>?> GetGatesAsync()
+        {
+            var session = await Sessions.GetSessionAsync(TenantId, SessionId);
+            return session?.Gates;
+        }
 
         public void GivenFlatTextAction(string systemPrompt, string outputSchema) =>
             Scope
@@ -287,12 +600,12 @@ public sealed class DispositionRoutabilitySeamTests
                     Temperature = 0.2m,
                 });
 
-        public async Task<IReadOnlyList<AnalysisChunk>> DispatchAsync(object args)
+        public async Task<IReadOnlyList<AnalysisChunk>> DispatchAsync(object args, bool dispatchUncertain = false)
         {
             var argsElement = JsonSerializer.SerializeToElement(args);
             var chunks = new List<AnalysisChunk>();
             await foreach (var chunk in Orchestrator.DispatchAsync(
-                new SessionDispatchRequest(TenantId, SessionId, BindingId, argsElement)))
+                new SessionDispatchRequest(TenantId, SessionId, BindingId, argsElement, DispatchUncertain: dispatchUncertain)))
             {
                 chunks.Add(chunk);
             }

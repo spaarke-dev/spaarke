@@ -264,12 +264,21 @@ public sealed class BindingCapabilityTool : AIFunction
         }
         // ── End DEF-11 routing ───────────────────────────────────────────────────────────────────
 
+        // Task 022 (FR-D2) routing-confidence producer, text/agent path: a capability tool-call that
+        // reaches here is a COMMITTED selection by the one probabilistic decider (ADR-039). Genuine
+        // capability ambiguity is resolved UPSTREAM — the agent turn asks a clarifying question (layer 1)
+        // instead of dispatching — so a dispatch reaching this seam is confident by construction:
+        // DispatchUncertain = false (its record default). This is the honest single-turn-derived signal;
+        // no second scorer/classifier exists (a firing numeric/multi-call producer is a documented
+        // follow-on that sets this flag without any dispatch-spine change).
         var request = new SessionDispatchRequest(_tenantId, dispatchSessionId, _binding.BindingId, args);
 
         try
         {
             string? summary = null;
             string? error = null;
+            string? disposition = null;
+            JsonElement? launchPayload = null;
             await foreach (var chunk in orchestrator.DispatchAsync(request, cancellationToken).ConfigureAwait(false))
             {
                 if (!chunk.Done)
@@ -279,6 +288,11 @@ public sealed class BindingCapabilityTool : AIFunction
 
                 error = chunk.Error;
                 summary = chunk.Summary ?? chunk.Content;
+                disposition = chunk.Disposition;
+                if (chunk.Result is JsonElement resultElement)
+                {
+                    launchPayload = resultElement.Clone();
+                }
             }
 
             if (error is not null)
@@ -288,6 +302,66 @@ public sealed class BindingCapabilityTool : AIFunction
                     _binding.BindingId, _binding.ConsumerType, _sessionId);
                 return $"The '{_binding.ConsumerType}' capability failed: {error}. Tell the user honestly; do not fabricate its output.";
             }
+
+            // ── P0(b) (spaarkeai-assistant-enhancements-r1 UAT 2026-07-17) TEXT-path surface launch ──────
+            // A capability whose Binding routes to a client-owned SURFACE LAUNCH (create-matter/-event/-task,
+            // list-tasks grid, …) must open the pre-seeded surface on the CLIENT. The Click path already
+            // branches on chunk.Disposition == "surface_launch" (task 013), but on the TEXT/agent path the
+            // terminal chunk is consumed INSIDE this loop and never reaches the client. Mirror the shipped
+            // elicitation_modal escape: emit a surface_launch SSE event carrying the enriched draft payload
+            // (draftValues + resolvedLookups + fileIds, already ledger-written — ADR-040) so the SpaarkeAi
+            // chat client calls launchSurface() with the same registry the chip path uses, and return an
+            // agent message that STOPS the write-tool call — the surface owns the create; dispatching a raw
+            // create_record here was the P0 hallucinated-GUID failure this project targets. Scoped strictly
+            // to the surface_launch disposition, so every other capability keeps the generate-then-write
+            // message below.
+            if (string.Equals(
+                    disposition,
+                    DispositionRoutability.ToLedgerValue(BindingDisposition.SurfaceLaunch),
+                    StringComparison.Ordinal))
+            {
+                // Route on the Binding's sprk_consumertype (e.g. "create-matter") — the key the client
+                // launch registry (surfaceLaunchRegistry.ts) resolves. NOT the chunk's consumerType, which
+                // is sourced upstream from the ledger UcId (sprk_ucid, e.g. "UC-B-6") and would miss the
+                // registry (assistant-enhancements-r1 UAT 2026-07-17 root cause). _binding.ConsumerType is
+                // unambiguous here — this tool IS the dispatched Binding.
+                var launchConsumerType = _binding.ConsumerType;
+
+                if (_sseWriter is not null)
+                {
+                    await _sseWriter(
+                        new Api.Ai.ChatSseEvent(
+                            "surface_launch",
+                            null,
+                            new Api.Ai.ChatSseSurfaceLaunchData(
+                                BindingId: _binding.BindingId.ToString(),
+                                ConsumerType: launchConsumerType,
+                                Payload: launchPayload)),
+                        cancellationToken).ConfigureAwait(false);
+
+                    _logger.LogInformation(
+                        "[agent-turn.capability] surface_launch emitted — binding={BindingId} consumerType={ConsumerType} " +
+                        "session={SessionId} hasPayload={HasPayload}",
+                        _binding.BindingId, launchConsumerType, _sessionId, launchPayload is not null);
+
+                    return $"A pre-seeded {launchConsumerType} surface is now opening for the user to review and " +
+                           "complete. This capability produced a DRAFT only — it did NOT create, save, or modify any " +
+                           "record. Do NOT invoke any write tool (for example create_record / update_record) and do NOT " +
+                           "ask the user to confirm creation in chat: the surface that just opened owns the create/save " +
+                           $"step. Briefly tell the user their {launchConsumerType} is opening with the details pre-filled.";
+                }
+
+                // Degraded: no chat SSE surface on this invocation (e.g. a non-chat host). The surface cannot be
+                // opened client-side from here — be honest rather than falling through to the write-tool message.
+                _logger.LogWarning(
+                    "[agent-turn.capability] surface_launch but no SSE surface on this invocation — cannot launch. " +
+                    "binding={BindingId} consumerType={ConsumerType} session={SessionId}",
+                    _binding.BindingId, launchConsumerType, _sessionId);
+
+                return $"The {launchConsumerType} surface could not be opened automatically in this context. Tell the " +
+                       "user to open it from the assistant's create menu; do NOT attempt to create the record via a write tool.";
+            }
+            // ── End P0(b) surface launch ─────────────────────────────────────────────────────────────────
 
             var text = summary ?? string.Empty;
             if (text.Length > MaxResultChars)

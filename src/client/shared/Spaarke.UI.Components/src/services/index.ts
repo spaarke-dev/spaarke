@@ -143,6 +143,11 @@ export { SprkChatBridge } from './SprkChatBridge';
 // '@spaarke/ui-components/services/userLookup'`).
 export { searchUsersAndContacts, extractEmailKey } from './userLookup';
 
+// "Assign to me" current-user resolution (spaarkeai-assistant-enhancements-r1
+// task 014 / FR-A4) — reuses the Xrm current-user identity mechanism; see
+// `./userLookup` doc comments for the systemuser-vs-contact target rationale.
+export { getCurrentUserAsLookupItem, resolveCurrentUserAsContactAssignee } from './userLookup';
+
 // THE client capability-dispatch helper (Click path, ai-architecture-redesign-r1
 // task 023 / FR-P1-04 / ADR-039). Chips carry binding_id; dispatchConsumer is the
 // ONLY client dispatch entry (SSE consumption + PaneEventBus bridging inside).
@@ -217,3 +222,9 @@ export type {
 // types/FieldMappingTypes.ts with different (configuration-time) shapes.
 export { FieldMappingHandler, createFieldMappingHandler } from './FieldMappingHandler';
 export type { IFieldMappingHandlerConfig, IFieldMappingApplicationResult } from './FieldMappingHandler';
+
+// surfaceHandoff — Assistant → launched-surface entry-payload hand-off (task 012,
+// spaarkeai-assistant-enhancements-r1). The client transport carrying a
+// draft-in-chat create flow into a pre-seeded wizard / OOB form. Files by
+// reference; `resolvedLookups` slot filled by task 013.
+export * from './surfaceHandoff';

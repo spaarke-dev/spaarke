@@ -48,6 +48,48 @@ public class AssociationStatusMapperTests
     }
 
     [Fact]
+    public void Decide_FallbackContactMatchOnly_AtOrAboveThreshold_DoesNotAutoFile_ButWritesTheContact()
+    {
+        // A contact/participant match is a fallback identity signal — not what the email is about. Even at
+        // high deterministic confidence it must NOT auto-file to Resolved; it lands Suggested (review for the
+        // substantive matter/project/invoice) while the contact is still written (a correct association).
+        var contactId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[] { Match(PersonField, contactId, 0.95, RungKind.ParticipantCorrelation, entity: "contact") },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Suggested);
+        decision.AutoFiled.Should().BeFalse();
+        decision.RegardingWrites.Should().ContainKey(PersonField); // fallback still written (filed)
+        decision.RegardingWrites[PersonField].Id.Should().Be(contactId);
+    }
+
+    [Fact]
+    public void Decide_SubstantiveMatterPlusFallbackContact_AutoFilesOnTheMatter()
+    {
+        // A substantive matter match ≥ threshold auto-files Resolved; the co-occurring contact fallback is
+        // written too. (The contact no longer suppresses — nor is required for — the substantive auto-file.)
+        var matterId = Guid.NewGuid();
+        var contactId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[]
+            {
+                Match(MatterField, matterId, 0.90, RungKind.ExplicitReference),
+                Match(PersonField, contactId, 0.95, RungKind.ParticipantCorrelation, entity: "contact"),
+            },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Resolved);
+        decision.AutoFiled.Should().BeTrue();
+        decision.RegardingWrites.Should().ContainKey(MatterField);
+        decision.RegardingWrites.Should().ContainKey(PersonField);
+    }
+
+    [Fact]
     public void Decide_SameDeterministicMatch_KillSwitchOff_DowngradesToSuggested()
     {
         var matterId = Guid.NewGuid();

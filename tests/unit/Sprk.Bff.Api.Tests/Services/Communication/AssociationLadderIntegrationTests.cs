@@ -69,22 +69,31 @@ public class AssociationLadderIntegrationTests
     private int CapturedStatus => ((OptionSetValue)_capturedFields!["sprk_associationstatus"]).Value;
 
     [Fact]
-    public async Task Resolve_WhenDeterministicHighConfidence_AutoFilesResolved_AndNeverInvokesAiRungs()
+    public async Task Resolve_WhenDeterministicHighConfidence_AutoFilesResolved_AndStillRunsAiRungs()
     {
-        // Seed a strong (0.95 ≥ 0.85) deterministic match ⇒ auto-file Resolved; the AI rungs (4/5) MUST NOT
-        // run (cost containment + the deterministic-short-circuit invariant).
+        // A strong (0.95 ≥ 0.85) deterministic match auto-files Resolved. The AI rungs (4/5) now ALSO run —
+        // a multi-association engine must still search for the substantive targets (matter/project/invoice)
+        // and classify content even when a participant/contact match already auto-filed; a "known sender"
+        // must not short-circuit finding the matter the email is about. The AI pass adds candidates/signals
+        // but never overrides the deterministic auto-file (AI never auto-files).
         var det = new FakeRung(RungKind.ExplicitReference, 0,
             DeterministicMatterMatch(Guid.NewGuid(), 0.95));
+
+        _matcher.Setup(m => m.SearchAsync(It.IsAny<RecordSearchRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RungTestSupport.SearchResponse()); // no additional hits ⇒ outcome unchanged
+        _classifier.Setup(
+                c => c.ClassifyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((CommunicationClassificationResult?)null);
 
         await BuildEngine(det).ResolveAsync(
             CommunicationId, RungTestSupport.Envelope(), new AssociationContext(), CancellationToken.None);
 
-        CapturedStatus.Should().Be(AssociationStatusCodes.Resolved);            // 100000000, auto-filed
+        CapturedStatus.Should().Be(AssociationStatusCodes.Resolved);            // auto-file decision unchanged
         _matcher.Verify(m => m.SearchAsync(It.IsAny<RecordSearchRequest>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);                                                        // AI pass now always runs
         _classifier.Verify(
             c => c.ClassifyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
     }
 
     [Fact]

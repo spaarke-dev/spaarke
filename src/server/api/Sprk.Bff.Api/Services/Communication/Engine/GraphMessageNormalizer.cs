@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text.RegularExpressions;
 using Microsoft.Graph.Models;
 using Sprk.Bff.Api.Services.Communication.Models;
 
@@ -25,6 +27,7 @@ public sealed class GraphMessageNormalizer
         var cc = AddressesOf(message.CcRecipients);
 
         var isHtml = message.Body?.ContentType == BodyType.Html;
+        var bodyContent = message.Body?.Content;
 
         return new NormalizedMessage
         {
@@ -33,8 +36,12 @@ public sealed class GraphMessageNormalizer
             To = to,
             Cc = cc,
             Subject = message.Subject,
-            BodyText = isHtml ? null : message.Body?.Content,
-            BodyHtml = isHtml ? message.Body?.Content : null,
+            // BodyText is the text-consuming rungs' input (AI classification, semantic
+            // match). For HTML bodies — the common case — reduce to plain text; leaving
+            // it null (the old behavior) made the classifier body-blind, so it saw only
+            // the subject line. BodyHtml keeps the original markup for anything that wants it.
+            BodyText = isHtml ? HtmlToPlainText(bodyContent) : bodyContent,
+            BodyHtml = isHtml ? bodyContent : null,
             InternetMessageId = message.InternetMessageId,
             InReplyTo = Header(message, "In-Reply-To"),
             References = ParseReferences(Header(message, "References")),
@@ -42,6 +49,30 @@ public sealed class GraphMessageNormalizer
             SentAt = message.ReceivedDateTime ?? message.SentDateTime,
             Attachments = MapAttachments(message.Attachments),
         };
+    }
+
+    private static readonly Regex ScriptStylePattern = new(
+        "<(script|style)[^>]*>.*?</\\1>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex TagPattern = new("<[^>]+>", RegexOptions.Compiled);
+    private static readonly Regex WhitespacePattern = new(@"\s+", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Reduce an HTML body to plain text for the text-consuming rungs. Drops script/style
+    /// blocks, strips tags, decodes entities, and collapses whitespace. Not a full HTML
+    /// renderer — deliberately lightweight (no new dependency, per §10 BFF hygiene); it only
+    /// needs to be good enough as classifier / semantic-search input. Returns null for a
+    /// blank/empty result so downstream "no body" checks still hold.
+    /// </summary>
+    internal static string? HtmlToPlainText(string? html)
+    {
+        if (string.IsNullOrWhiteSpace(html))
+            return html;
+
+        var text = ScriptStylePattern.Replace(html, " ");
+        text = TagPattern.Replace(text, " ");
+        text = WebUtility.HtmlDecode(text);
+        text = WhitespacePattern.Replace(text, " ").Trim();
+        return text.Length == 0 ? null : text;
     }
 
     private static IReadOnlyList<string> AddressesOf(IList<Recipient>? recipients) =>

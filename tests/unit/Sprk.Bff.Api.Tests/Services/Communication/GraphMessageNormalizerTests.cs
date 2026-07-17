@@ -56,8 +56,40 @@ public class GraphMessageNormalizerTests
         envelope.References.Should().Equal("<a@contoso.com>", "<parent@contoso.com>");
         envelope.ConversationId.Should().Be("conv-123");
         envelope.BodyHtml.Should().Be("<p>hi</p>");
-        envelope.BodyText.Should().BeNull();
+        // BodyText is now the stripped plain-text of the HTML body (was null before the
+        // classifier-body-blind fix), so the text-consuming rungs see the content.
+        envelope.BodyText.Should().Be("hi");
         envelope.SentAt.Should().Be(DateTimeOffset.Parse("2026-07-15T10:00:00Z"));
+    }
+
+    [Fact]
+    public void Normalize_WhenHtmlBody_PopulatesBodyTextFromStrippedHtml()
+    {
+        // The text-consuming rungs (AI classification, semantic match) read BodyText.
+        // Before the fix, an HTML body left BodyText null → the classifier saw only the
+        // subject line ("empty body" in the provenance). BodyText must now carry the text.
+        var message = new Message
+        {
+            Subject = "New Matter",
+            From = new Recipient { EmailAddress = new EmailAddress { Address = "s@acme.com" } },
+            Body = new ItemBody
+            {
+                ContentType = BodyType.Html,
+                Content =
+                    "<html><head><style>p{color:red}</style></head><body>" +
+                    "<p>Please open a <b>new&nbsp;matter</b>:</p>\r\n<ul><li>Smith v Smith</li></ul>" +
+                    "</body></html>",
+            },
+        };
+
+        var envelope = _normalizer.Normalize(message, CommunicationDirection.Incoming);
+
+        envelope.BodyHtml.Should().Contain("<b>new");          // original markup preserved
+        envelope.BodyText.Should().NotBeNullOrWhiteSpace();
+        envelope.BodyText.Should().NotContain("<");            // tags stripped
+        envelope.BodyText.Should().NotContain("color:red");    // <style> block dropped
+        envelope.BodyText.Should().Contain("new matter");      // &nbsp; decoded + whitespace collapsed
+        envelope.BodyText.Should().Contain("Smith v Smith");
     }
 
     [Fact]

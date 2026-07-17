@@ -5,7 +5,7 @@ techStack: [all]
 appliesTo: ["projects/*/plan.md", "create tasks", "decompose plan"]
 alwaysApply: false
 exemplar: projects/ai-procedure-quality-r1/tasks/
-last-reviewed: 2026-05-17
+last-reviewed: 2026-07-16
 ---
 
 # task-create
@@ -41,7 +41,7 @@ Transforms `plan.md` work breakdown structure (WBS) into individual, executable 
 EXTRACT project-name from provided path
 LOAD: projects/{project-name}/plan.md
 LOAD: projects/{project-name}/README.md  # For context
-LOAD: .claude/templates/task-execution.template.md  # POML format
+LOAD: .claude/templates/task-execution.template.md  # POML SKELETON (pointer) — this skill's Steps 3.5.x–3.85 + Step 4 are the AUTHORITATIVE field set; the template mirrors them for copy-paste
 
 EXTRACT from plan.md:
   - WBS phases (Section 5)
@@ -168,18 +168,18 @@ FOR each task identified:
     - Inventory/checklist creation
     - Simple configuration updates
 
-  ADD to task <metadata>:
-    <rigor-hint>{FULL | STANDARD | MINIMAL}</rigor-hint>
+  ADD to task <metadata> (canonical field is <rigor>; <rigor-hint> is a deprecated alias — do NOT emit it):
+    <rigor>{FULL | STANDARD | MINIMAL}</rigor>
     <rigor-reason>{Why this level - reference specific trigger from decision tree}</rigor-reason>
 
-  EXAMPLE rigor hints:
-    <rigor-hint>FULL</rigor-hint>
+  EXAMPLE rigor values:
+    <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'bff-api' (code implementation)</rigor-reason>
 
-    <rigor-hint>STANDARD</rigor-hint>
+    <rigor>STANDARD</rigor>
     <rigor-reason>Task tags include 'testing', 'integration-test'</rigor-reason>
 
-    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation task (no code implementation)</rigor-reason>
 
   PURPOSE:
@@ -621,20 +621,26 @@ For each task, create `tasks/{NNN}-{task-slug}.poml` as a **valid XML document**
 <task id="{NNN}" project="{project-name}">
   <metadata>
     <title>{Task Title}</title>
-    <phase>{Phase Number}: {Phase Name}</phase>
+    <phase>{N} {Phase Name}</phase>
+    <gate>startable | blocked | {dep-condition}</gate>       <!-- readiness -->
     <status>not-started</status>
-    <estimated-hours>{2-4}</estimated-hours>
-    <dependencies>{comma-separated task IDs or "none"}</dependencies>
-    <blocks>{comma-separated task IDs or "none"}</blocks>
-    <tags>{context tags for Claude Code focus - see Standard Tag Vocabulary}</tags>
-    <rigor-hint>{FULL | STANDARD | MINIMAL}</rigor-hint>
+    <rigor>{FULL | STANDARD | MINIMAL}</rigor>                <!-- Step 3.5.5 (author hint; task-execute may override) -->
     <rigor-reason>{Why this level - from Step 3.5.5 decision tree}</rigor-reason>
-    <model-tier>{sonnet | opus | fable}</model-tier>
+    <model-tier>{sonnet | opus | fable}</model-tier>         <!-- Step 3.5.5b; sonnet default -->
     <model-tier-reason>{Why this tier - from Step 3.5.5b}</model-tier-reason>
-    <effort>{low | medium | high | xhigh}</effort>  <!-- from Step 3.5.5b effort rubric; default high -->
+    <effort>{low | medium | high | xhigh}</effort>           <!-- from Step 3.5.5b effort rubric; default high -->
     <parallel-group>{A/B/C/... or "none" - from Step 3.8}</parallel-group>
     <parallel-safe>{true/false - can this run in parallel?}</parallel-safe>
+    <parallel-reason>{why, when parallel-safe is false}</parallel-reason>
+    <deps>{comma-separated task IDs or "none"}</deps>
+    <tags>{context tags for Claude Code focus - see Standard Tag Vocabulary}</tags>
+    <estimated-effort>{optional, e.g. 2-4 hours}</estimated-effort>
   </metadata>
+
+  <!-- CANONICAL METADATA FIELD NAMES (reconciled 2026-07-16 to match live practice + the shared skeleton in
+       .claude/templates/task-execution.template.md). Deprecated aliases accepted for back-compat but NOT emitted:
+       <rigor-hint> → <rigor>; <dependencies> (metadata sibling) → <deps>. The <dependencies> element remains
+       valid INSIDE <context> to describe prerequisite tasks. <blocks> is dropped — the DAG lives in TASK-INDEX.md. -->
 
   <prompt>
     {Natural language instruction for AI agent. 1-3 sentences describing 
@@ -852,7 +858,7 @@ Default to "medium" unless user specifies otherwise.
 ### POML Tag Requirements
 Every task file MUST have these POML sections (valid XML):
 - `<task>` - Root element with id and project attributes
-- `<metadata>` - id, title, phase, status, estimated-hours, dependencies, blocks, **tags**
+- `<metadata>` - title, phase, gate, status, **rigor** (+ rigor-reason), **deps**, **tags** (canonical names; `<deps>` not `<dependencies>`)
 - `<prompt>` - Natural language task instruction for AI agent
 - `<role>` - Persona/expertise for the AI to adopt
 - `<goal>` - Clear definition of done
@@ -863,8 +869,10 @@ Every task file MUST have these POML sections (valid XML):
 - `<acceptance-criteria>` - Testable criteria with testable="true" attribute
 
 Required metadata (added 2026-07-08 for Sonnet-5 execution):
+- `<rigor>` + `<rigor-reason>` - rigor level (Step 3.5.5; canonical name — `<rigor-hint>` deprecated)
 - `<model-tier>` + `<model-tier-reason>` - execution tier (Step 3.5.5b)
 - `<effort>` - low/medium/high/xhigh (Step 3.5.5b effort rubric; default `high`)
+- `<parallel-group>` + `<parallel-safe>` - wave grouping (Step 3.8; EVERY task)
 - `<steps mode="...">` - `directional` (default) or `prescriptive` (Step 3.5.5c)
 
 Recommended sections:
@@ -885,7 +893,7 @@ Recommended sections:
 ## Resources
 
 ### Templates (Auto-loaded)
-- `.claude/templates/task-execution.template.md`
+- `.claude/templates/task-execution.template.md` — **POML skeleton (pointer only)**. It mirrors this skill's Step 4 block for copy-paste; the AUTHORITATIVE field set + per-field decision logic is THIS skill (Steps 3.5.5 / 3.5.5b / 3.5.5c / 3.5.6 / 3.8 / 3.65 / 3.85). Keep the two in sync (`ai-procedure-maintenance` Checklist F).
 
 ### Related Skills
 - **project-init**: Creates plan.md that this skill consumes
@@ -924,7 +932,7 @@ Before completing task-create, verify:
 - [ ] Project CLAUDE.md updated with task summary
 - [ ] PCF/frontend tasks have `<ui-tests>` sections (Step 3.65)
 - [ ] UI tests include dark mode compliance check for Fluent UI tasks (ADR-021)
-- [ ] Each task has `<rigor-hint>` and `<rigor-reason>` in metadata (Step 3.5.5)
+- [ ] Each task has `<rigor>` and `<rigor-reason>` in metadata (Step 3.5.5) — canonical field is `<rigor>`, not the deprecated `<rigor-hint>`
 - [ ] Rigor levels match task characteristics (FULL for code, STANDARD for tests, MINIMAL for docs)
 - [ ] Each task has `<model-tier>` + `<model-tier-reason>` + `<effort>` in metadata (Step 3.5.5b); `xhigh` only where the effort rubric justifies it (not blanket)
 - [ ] Each task's `<steps>` has an explicit `mode` (directional default; prescriptive for migrations/deploys) (Step 3.5.5c)
@@ -935,6 +943,28 @@ Before completing task-create, verify:
 - [ ] Each task has `<parallel-group>` and `<parallel-safe>` in metadata
 - [ ] TASK-INDEX.md includes "Parallel Execution Groups" section
 - [ ] No tasks in same parallel group modify the same files
+
+### Completeness Lint (REQUIRED — added 2026-07-16 to prevent silent metadata drift)
+
+**Run this mechanical check on every generated POML before declaring task-create complete.** It is the forcing
+function the 2026-07-16 template-drift finding recommended (rec C): the omissions it catches are silent otherwise —
+a well-formed POML missing `<model-tier>` just falls back to a default at dispatch, and nothing flags it.
+
+```
+FOR each tasks/*.poml:
+  REQUIRE present + non-empty: <model-tier>, <effort>, <rigor>, <parallel-group>, <parallel-safe>
+  REQUIRE <steps> carries an explicit mode="directional|prescriptive"
+  IF the task adds NEW surface (new .cs/.ts/.tsx file, endpoint, DI registration, package,
+     Dataverse column, or a <relevant-files> entry with role="new"):
+     REQUIRE a non-hollow <justification> (existing / extension / cost-of-doing-nothing) — Step 3.5.6
+  IF tags include pcf|frontend|fluent-ui|e2e-test: REQUIRE <ui-tests>
+  REJECT the deprecated <rigor-hint> / metadata-sibling <dependencies> field names (use <rigor> / <deps>)
+FAIL the checklist (do not report task-create complete) if any POML is missing a required field.
+```
+
+- Automatable via `scripts/Validate-TaskPoml.ps1` (run `pwsh scripts/Validate-TaskPoml.ps1 projects/{name}/tasks`).
+- The same gate runs again at PR time in `code-review` (Step 6.7 — POML completeness) so a hand-edited task can't
+  slip an incomplete POML past review.
 
 ---
 

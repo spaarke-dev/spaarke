@@ -19,6 +19,7 @@ import {
   Toolbar,
   ToolbarButton,
   ToolbarDivider,
+  Tooltip,
   Spinner,
   Dialog,
   DialogSurface,
@@ -29,16 +30,19 @@ import {
 } from '@fluentui/react-components';
 import {
   ArrowReply16Regular,
+  ArrowReplyAll16Regular,
   ArrowForward16Regular,
-  Send16Regular,
-  Save16Regular,
+  Mail16Regular,
   CloudArrowUp16Regular,
+  CalendarLtr16Regular,
+  CheckmarkCircle16Regular,
+  Receipt16Regular,
 } from '@fluentui/react-icons';
 import { authenticatedFetch } from '@spaarke/auth';
 import { SendEmailPage, type ISendEmailPageProps, type EmailComposerMode } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
-import { deriveComposerFields } from './composerPrefill';
+import { deriveComposerFields, type ComposerMode } from './composerPrefill';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 
 // React 16 type seam: the shared lib's .d.ts is emitted against React 19 types,
@@ -49,6 +53,39 @@ const SendEmailPageR16 = SendEmailPage as unknown as React.ComponentType<ISendEm
 
 // sprk_communicationtype = Email (task-002 verified) — the only interactive channel.
 const COMMUNICATION_TYPE_EMAIL = 100000000;
+
+// "Create from this email" → target entity logical name (moved here from the
+// Connections PCF — these are actions on the email, not association review).
+const CREATE_TARGET_ENTITY = {
+  event: 'sprk_event',
+  todo: 'sprk_todo',
+  invoice: 'sprk_invoice',
+} as const;
+type CreateKind = keyof typeof CREATE_TARGET_ENTITY;
+
+/**
+ * Parse the association provenance JSON and decide which "create from this email"
+ * actions the engine's structural signals suggest (mirrors the Connections PCF's
+ * deriveCreateActions). Best-effort: bad/empty JSON → no suggestions.
+ */
+function deriveSuggestedCreates(provenanceRaw: string | null | undefined): Set<CreateKind> {
+  const out = new Set<CreateKind>();
+  if (!provenanceRaw) return out;
+  try {
+    const doc = JSON.parse(provenanceRaw) as {
+      signals?: { category?: string; obligations?: string[] }[];
+    };
+    for (const sig of doc.signals ?? []) {
+      const obligations = sig.obligations ?? [];
+      if (sig.category === 'invoice') out.add('invoice');
+      if (sig.category === 'event' || obligations.includes('calendar-response')) out.add('event');
+      if (obligations.includes('deadline-response') || obligations.includes('payment-review')) out.add('todo');
+    }
+  } catch {
+    /* ignore malformed provenance */
+  }
+  return out;
+}
 
 const useStyles = makeStyles({
   root: { height: '100%', width: '100%', display: 'flex', flexDirection: 'column' },
@@ -61,7 +98,16 @@ const useStyles = makeStyles({
     paddingInline: tokens.spacingHorizontalXS,
     minHeight: '32px',
   },
-  bar: { flexWrap: 'wrap' },
+  bar: { flexWrap: 'wrap', flexGrow: 1 },
+  // Match the OOB command-bar typography — 14px, regular weight (the default
+  // ToolbarButton renders heavier/larger than the native bar).
+  toolbarBtn: {
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightRegular,
+  },
+  rightGroup: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS },
+  // Suggested-by-engine create icons get a subtle brand tint (the icon-only ✨ cue).
+  suggestedIcon: { color: tokens.colorBrandForeground1 },
   grow: { flex: 1 },
   notice: { paddingInline: tokens.spacingHorizontalM, paddingBottom: tokens.spacingVerticalXS },
   dialogSurface: { maxWidth: '900px', width: '90vw', height: '85vh', padding: 0 },
@@ -98,19 +144,6 @@ function getHostRecordId(): string | undefined {
   return undefined;
 }
 
-async function saveHostForm(): Promise<void> {
-  const xrm = getXrm();
-  try {
-    const save = xrm?.Page?.data?.entity?.save;
-    if (typeof save === 'function') {
-      const r = save.call(xrm.Page.data.entity);
-      if (r && typeof r.then === 'function') await r;
-    }
-  } catch (err) {
-    console.warn('[CommunicationActions] form save failed:', err);
-  }
-}
-
 async function refreshHostForm(): Promise<void> {
   const xrm = getXrm();
   try {
@@ -127,6 +160,7 @@ async function refreshHostForm(): Promise<void> {
 interface IRecordPrefill {
   from: string;
   to: string;
+  cc: string;
   subject: string;
   body: string;
 }
@@ -156,8 +190,11 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   const [error, setError] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
-  const [composerMode, setComposerMode] = React.useState<EmailComposerMode | null>(null);
+  const [composerMode, setComposerMode] = React.useState<ComposerMode | null>(null);
   const [prefill, setPrefill] = React.useState<IRecordPrefill | null>(null);
+  // Which "create from this email" actions the engine flagged (from the provenance
+  // signals) — drives the subtle ✨ brand tint on the icon-only create buttons.
+  const [suggestedCreates, setSuggestedCreates] = React.useState<Set<CreateKind>>(new Set());
 
   // Bootstrap @spaarke/auth once. Config resolves from the PCF manifest inputs FIRST,
   // then falls back to the Dataverse environment variables (sprk_MsalClientId /
@@ -202,15 +239,17 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
         const rec = await context.webAPI.retrieveRecord(
           'sprk_communication',
           communicationId,
-          '?$select=sprk_from,sprk_to,sprk_subject,sprk_body'
+          '?$select=sprk_from,sprk_to,sprk_cc,sprk_subject,sprk_body,sprk_associationprovenance'
         );
         if (cancelled) return;
         setPrefill({
           from: (rec.sprk_from as string) ?? '',
           to: (rec.sprk_to as string) ?? '',
+          cc: (rec.sprk_cc as string) ?? '',
           subject: (rec.sprk_subject as string) ?? '',
           body: (rec.sprk_body as string) ?? '',
         });
+        setSuggestedCreates(deriveSuggestedCreates(rec.sprk_associationprovenance as string | null));
       } catch (err) {
         console.warn('[CommunicationActions] prefill retrieve failed:', err);
       }
@@ -220,26 +259,35 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     };
   }, [communicationId, context.webAPI]);
 
-  const openComposer = (mode: EmailComposerMode) => {
+  const openComposer = (mode: ComposerMode) => {
     setError(null);
     setStatus(null);
     setComposerMode(mode);
   };
 
-  const handleSaveDraft = React.useCallback(() => {
-    void (async () => {
-      setBusy(true);
-      setError(null);
-      setStatus(null);
-      try {
-        await saveHostForm();
-        setStatus('Draft saved.');
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not save the draft.');
-      } finally {
-        setBusy(false);
+  // Launch a "create from this email" form (Event / To Do / Invoice). R4 launches
+  // the target create form; full create-and-link is the Notification-Spine project.
+  const handleCreate = React.useCallback((kind: CreateKind) => {
+    const xrm = getXrm();
+    const entityName = CREATE_TARGET_ENTITY[kind];
+    const onLaunchError = (err: unknown) =>
+      console.warn('[CommunicationActions] create-from-email launch failed:', err);
+    try {
+      if (typeof xrm?.Navigation?.openForm === 'function') {
+        Promise.resolve(xrm.Navigation.openForm({ entityName, useQuickCreateForm: true })).catch(onLaunchError);
+      } else if (typeof xrm?.Navigation?.navigateTo === 'function') {
+        Promise.resolve(
+          xrm.Navigation.navigateTo(
+            { pageType: 'entityrecord', entityName },
+            { target: 2, width: { value: 60, unit: '%' }, height: { value: 80, unit: '%' } }
+          )
+        ).catch(onLaunchError);
+      } else {
+        setError('Create is unavailable in this host.');
       }
-    })();
+    } catch (err) {
+      onLaunchError(err);
+    }
   }, []);
 
   const handleArchive = React.useCallback(() => {
@@ -273,12 +321,15 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     })();
   }, [communicationId]);
 
-  // Compose/reply/forward pre-fill derived from the loaded record (pure helper).
+  // Compose/reply/replyAll/forward pre-fill derived from the loaded record (pure helper).
   const composerProps = React.useMemo<ISendEmailPageProps | null>(() => {
     if (!composerMode) return null;
+    // Reply All reuses the shared 'reply' composer mode (Re:, reply chrome) but with
+    // the wider recipient set; '+ New' is a blank 'compose' not tied to this record.
+    const sendMode: EmailComposerMode = composerMode === 'replyAll' ? 'reply' : composerMode;
     return {
-      mode: composerMode,
-      communicationId,
+      mode: sendMode,
+      communicationId: composerMode === 'compose' ? undefined : communicationId,
       authenticatedFetch,
       bffBaseUrl,
       onSent: () => {
@@ -328,7 +379,9 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     <div className={s.root}>
       <div className={s.barRow}>
         <Toolbar size="small" className={s.bar} aria-label="Communication actions">
+          {/* Left group — the email verbs (icon + label). All open the composer. */}
           <ToolbarButton
+            className={s.toolbarBtn}
             icon={<ArrowReply16Regular />}
             disabled={composeDisabled}
             onClick={() => openComposer('reply')}
@@ -336,22 +389,80 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
             Reply
           </ToolbarButton>
           <ToolbarButton
+            className={s.toolbarBtn}
+            icon={<ArrowReplyAll16Regular />}
+            disabled={composeDisabled}
+            onClick={() => openComposer('replyAll')}
+          >
+            Reply All
+          </ToolbarButton>
+          <ToolbarButton
+            className={s.toolbarBtn}
             icon={<ArrowForward16Regular />}
             disabled={composeDisabled}
             onClick={() => openComposer('forward')}
           >
             Forward
           </ToolbarButton>
-          <ToolbarButton icon={<Send16Regular />} disabled={composeDisabled} onClick={() => openComposer('draft')}>
-            Send
+          <ToolbarButton
+            className={s.toolbarBtn}
+            icon={<Mail16Regular />}
+            disabled={disabled}
+            onClick={() => openComposer('compose')}
+          >
+            New
           </ToolbarButton>
+
+          {/* Spacer pushes the record/email action icons to the far right (Outlook-web style). */}
+          <div className={s.grow} />
           <ToolbarDivider />
-          <ToolbarButton icon={<Save16Regular />} disabled={disabled} onClick={handleSaveDraft}>
-            Save Draft
-          </ToolbarButton>
-          <ToolbarButton icon={<CloudArrowUp16Regular />} disabled={disabled} onClick={handleArchive}>
-            Save to SharePoint
-          </ToolbarButton>
+
+          {/* Right group — record/email actions (icon-only, tooltip). ✨ = engine-suggested. */}
+          <div className={s.rightGroup}>
+            <Tooltip content="Save to SharePoint" relationship="label">
+              <ToolbarButton
+                icon={<CloudArrowUp16Regular />}
+                aria-label="Save to SharePoint"
+                disabled={disabled}
+                onClick={handleArchive}
+              />
+            </Tooltip>
+            <Tooltip
+              content={suggestedCreates.has('event') ? 'Create Event (suggested from this email)' : 'Create Event'}
+              relationship="label"
+            >
+              <ToolbarButton
+                icon={<CalendarLtr16Regular className={suggestedCreates.has('event') ? s.suggestedIcon : undefined} />}
+                aria-label="Create Event"
+                disabled={disabled}
+                onClick={() => handleCreate('event')}
+              />
+            </Tooltip>
+            <Tooltip
+              content={suggestedCreates.has('todo') ? 'Create To Do (suggested from this email)' : 'Create To Do'}
+              relationship="label"
+            >
+              <ToolbarButton
+                icon={
+                  <CheckmarkCircle16Regular className={suggestedCreates.has('todo') ? s.suggestedIcon : undefined} />
+                }
+                aria-label="Create To Do"
+                disabled={disabled}
+                onClick={() => handleCreate('todo')}
+              />
+            </Tooltip>
+            <Tooltip
+              content={suggestedCreates.has('invoice') ? 'Link Invoice (suggested from this email)' : 'Link Invoice'}
+              relationship="label"
+            >
+              <ToolbarButton
+                icon={<Receipt16Regular className={suggestedCreates.has('invoice') ? s.suggestedIcon : undefined} />}
+                aria-label="Link Invoice"
+                disabled={disabled}
+                onClick={() => handleCreate('invoice')}
+              />
+            </Tooltip>
+          </div>
         </Toolbar>
         <div className={s.grow} />
         {showVersionFooter && <Text className={s.versionText}>v{version}</Text>}

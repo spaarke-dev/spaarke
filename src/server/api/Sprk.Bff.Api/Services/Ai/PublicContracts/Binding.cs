@@ -88,6 +88,17 @@ public sealed record Binding
     /// <summary>Placement surface tokens parsed from comma-separated <c>sprk_surfaces</c> (§4.1 vocabulary: <c>assistant</c>, <c>record-form</c>, <c>wizard</c>, <c>office</c>, <c>external-spa</c>, <c>scheduler</c>, <c>inbound-email</c>). Empty = offered on ALL surfaces (per column dictionary).</summary>
     public IReadOnlyList<string> Surfaces { get; init; } = Array.Empty<string>();
 
+    /// <summary>
+    /// Grounding precondition (<c>sprk_requiresnoattachedrecord</c>, FR-H1): when <c>true</c>, this
+    /// capability is offered ONLY when the host chat context has NO attached/regarding record. The
+    /// deterministic <c>AgentToolProjection.PreFilter</c> (task 044) removes the capability when the
+    /// session's <see cref="Chat.AgentToolFilterContext.HasAttachedRecord"/> fact is true — e.g. it
+    /// hides "Create matter" when already inside a matter. A pure predicate (removes-the-impossible),
+    /// NOT a ranking weight and NEVER a model call or a tool-name list (ADR-039 §3.2). Null/unset =
+    /// <c>false</c> (offered regardless of host record — the default for the vast majority of rows).
+    /// </summary>
+    public bool RequiresNoAttachedRecord { get; init; }
+
     /// <summary>Per-Binding model-tier override (<c>sprk_modeltieroverride</c>, global set <c>sprk_aimodeltier</c>). Null = use the Action's default tier.</summary>
     public AiModelTier? ModelTierOverride { get; init; }
 

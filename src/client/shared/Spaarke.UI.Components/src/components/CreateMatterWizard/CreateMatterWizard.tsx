@@ -48,6 +48,8 @@ import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignm
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
 import type { AuthenticatedFetchFn, IUserBuCascadeDefaults } from '../../services/EntityCreationService';
 import type { AssociationResult } from '../AssociateToStep/types';
+import { resolveCurrentUserAsContactAssignee } from '../../services/userLookup';
+import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 
 // ---------------------------------------------------------------------------
 // Dataverse client URL helper
@@ -82,10 +84,19 @@ function getDataverseClientUrl(): string {
  *
  * - sprk_project: uses the N:N relationship sprk_Project_Matter_nn
  * - account: uses a direct $ref association on the matter's account lookup
+ * - sprk_invoice: updates the SELECTED invoice's own `sprk_Matter` lookup to
+ *   point at the new matter (reverse direction from account/project — an
+ *   invoice references its matter directly; the matter holds no reference
+ *   back. Confirmed live schema per `INVOICE_REGARDING_TARGETS` /
+ *   visual-host-create-button-r1 task 030 field manifest. Added
+ *   spaarkeai-assistant-enhancements-r1 task 014 / FR-A5.)
  *
  * Returns a success/failure result; never throws.
+ *
+ * Exported for unit testing (spaarkeai-assistant-enhancements-r1 task 014) —
+ * see `__tests__/CreateMatterWizard.associateToRecord.test.ts`.
  */
-async function associateToRecord(
+export async function associateToRecord(
   dataService: IDataService,
   matterId: string,
   association: AssociationResult
@@ -134,6 +145,20 @@ async function associateToRecord(
       console.info(
         '[CreateMatterWizard] Account association set:',
         `account(${recordId}) -> sprk_matter(${cleanMatterId})`
+      );
+      return { success: true };
+    }
+
+    if (entityType === 'sprk_invoice') {
+      // For invoice: update the SELECTED invoice's own Matter lookup to point
+      // at the newly created matter. Reverse direction from account/project —
+      // see doc comment above.
+      await dataService.updateRecord('sprk_invoice', recordId, {
+        'sprk_Matter@odata.bind': `/sprk_matters(${cleanMatterId})`,
+      });
+      console.info(
+        '[CreateMatterWizard] Invoice association set:',
+        `sprk_invoice(${recordId}) -> sprk_matter(${cleanMatterId})`
       );
       return { success: true };
     }
@@ -202,6 +227,32 @@ export interface ICreateMatterWizardProps {
    * Typically sourced from solution `config.tenantId` in `main.tsx`.
    */
   tenantId?: string;
+  /**
+   * Assistant hand-off pre-seed (spaarkeai-assistant-enhancements-r1 task 013).
+   * When the wizard was launched from the Assistant's `surface_launch` create flow
+   * (task 012 `launchSurface`), the solution `main.tsx` maps the hand-off seed
+   * (`useWizardPageBootstrap.handoffSeed` → `mapMatterHandoffSeed`) into these
+   * initial form values so the wizard opens PRE-FILLED with the drafted matter
+   * name / description (and any high-confidence resolved matter-type / practice-area
+   * dropdown). Merged over {@link EMPTY_FORM_STATE}; omitted keys keep their empty
+   * default. `undefined` when opened directly (not via a hand-off) — the wizard
+   * then opens empty exactly as before (no regression).
+   */
+  initialFormValues?: Partial<ICreateMatterFormState>;
+  /**
+   * Optional success callback (spaarkeai-assistant-enhancements-r1 D-013-04).
+   * Invoked with the created matter's record id when the wizard reaches its
+   * success screen and the user closes/views it — INSTEAD of {@link onClose}.
+   * The Assistant surface-launch host (`useWizardPageBootstrap.completeHandoff`)
+   * wires this to write the committed `SurfaceHandoffResult` so a launched
+   * create reads back as committed (P5 honest-ack) rather than "cancelled"
+   * (which the orchestrator infers from the absence of a written result).
+   *
+   * When omitted, the success screen falls back to {@link onClose} — behavior
+   * is unchanged for every non-launch caller. The CANCEL path always uses
+   * {@link onClose} (no result write → cancellation is inferred).
+   */
+  onComplete?: (recordId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -238,20 +289,31 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   resolveSpeContainerId,
   resolveUserBuDefaults,
   tenantId,
+  initialFormValues,
+  onComplete,
 }) => {
+  // Assistant hand-off pre-seed (task 013): merge the drafted values over the empty
+  // defaults so the wizard opens PRE-FILLED. Stable per `initialFormValues` identity
+  // (the host memoizes it) — degrades to EMPTY_FORM_STATE when nothing was seeded.
+  const seededFormState = React.useMemo<ICreateMatterFormState>(
+    () => ({ ...EMPTY_FORM_STATE, ...(initialFormValues ?? {}) }),
+    [initialFormValues]
+  );
+
   // -- Entity-specific form state --
   const [step2Valid, setStep2Valid] = React.useState(false);
-  const [step2FormValues, setStep2FormValues] = React.useState<ICreateMatterFormState>(EMPTY_FORM_STATE);
+  const [step2FormValues, setStep2FormValues] = React.useState<ICreateMatterFormState>(seededFormState);
   const step2FormValuesRef = React.useRef(step2FormValues);
   step2FormValuesRef.current = step2FormValues;
 
-  // Reset form state on open
+  // Reset form state on open (to the seeded values, not bare empties, so a
+  // hand-off-launched wizard re-opens pre-filled).
   React.useEffect(() => {
     if (open) {
       setStep2Valid(false);
-      setStep2FormValues(EMPTY_FORM_STATE);
+      setStep2FormValues(seededFormState);
     }
-  }, [open]);
+  }, [open, seededFormState]);
 
   // -- Search callbacks --
   const handleSearchContacts = React.useCallback(
@@ -286,13 +348,16 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
 
       // Associate To step — optional step 1.
       // Requires navigationService (for the Dataverse lookup dialog).
-      // Allows linking the new matter to a Project or Account before creation.
+      // Allows linking the new matter to a Project, Account, or Invoice
+      // before creation ("none" = Skip). Invoice added
+      // spaarkeai-assistant-enhancements-r1 task 014 / FR-A5.
       ...(navigationService
         ? {
             associateToStep: {
               entityTypes: [
                 { label: 'Project', entityType: 'sprk_project' },
                 { label: 'Account', entityType: 'account' },
+                { label: 'Invoice', entityType: 'sprk_invoice' },
               ],
               navigationService,
             },
@@ -330,6 +395,12 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         assignWorkPracticeAreaId: step2FormValuesRef.current.practiceAreaId,
         assignWorkPracticeAreaName: step2FormValuesRef.current.practiceAreaName,
       }),
+
+      // "Assign to me" on the Assign Work follow-on's Attorney field
+      // (spaarkeai-assistant-enhancements-r1 task 014 / FR-A4). Reuses the
+      // shared current-user -> contact resolution chain (see
+      // services/userLookup.ts doc comment) — no new identity mechanism.
+      resolveCurrentUserAssignee: () => resolveCurrentUserAsContactAssignee(dataService),
 
       resolveSpeContainerId: resolveSpeContainerId ? resolveSpeContainerId : () => Promise.resolve(''),
 
@@ -488,6 +559,8 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
               description: context.followOn.createEventDescription,
               regardingRecordId: matterId,
               regardingRecordName: matterName,
+              assignedToId: '',
+              assignedToName: '',
             };
             const eventResult = await eventService.createEvent(eventFormValues, 'sprk_matter');
             if (eventResult.warnings.length > 0) result.warnings.push(...eventResult.warnings);
@@ -522,11 +595,17 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
 
         const hasWarnings = result.warnings.length > 0;
 
+        // D-013-04: on the SUCCESS path a real record exists, so route the close
+        // through `onComplete(matterId)` (honest-ack) when the host supplied it;
+        // otherwise fall back to the plain `onClose` (unchanged for non-launch
+        // callers). The CANCEL path elsewhere still uses bare `onClose`.
+        const finishSuccess = () => completeOrClose(matterId, onClose, onComplete);
+
         const viewMatter = () => {
           if (navigationService) {
             navigationService.openRecord('sprk_matter', matterId);
           }
-          onClose();
+          finishSuccess();
         };
 
         return {
@@ -546,7 +625,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
               <Button appearance="primary" onClick={viewMatter} aria-label={`View matter: ${matterName}`}>
                 View Matter
               </Button>
-              <Button appearance="secondary" onClick={onClose}>
+              <Button appearance="secondary" onClick={finishSuccess}>
                 Close
               </Button>
             </>
@@ -567,6 +646,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
       handleSearchMatterTypes,
       handleSearchPracticeAreas,
       onClose,
+      onComplete,
       navigationService,
       resolveSpeContainerId,
     ]

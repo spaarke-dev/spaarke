@@ -19,7 +19,7 @@
 import * as React from "react";
 import { Button, Tooltip } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular } from "@fluentui/react-icons";
-import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService } from "@spaarke/ui-components";
+import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, launchSurface } from "@spaarke/ui-components";
 import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type {
@@ -27,6 +27,7 @@ import type {
   DispatchWorkspaceEvent,
   DispatchConsumerResult,
   INextStepChip,
+  ResolvedLookup,
 } from "@spaarke/ui-components";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
@@ -362,6 +363,35 @@ export function ConversationPane(): React.JSX.Element {
     openLibraryModal: React.useCallback(() => openLibraryModalRef.current(), []),
   });
   acceptChipsRef.current = chips.acceptChips;
+
+  // ── spaarkeai-assistant-enhancements-r1 P0(b): TEXT/agent-path surface launch ──
+  // The BFF's BindingCapabilityTool emits a `surface_launch` SSE event when the
+  // agent turn selected a create capability whose Binding routes to a client-owned
+  // surface (create-matter/-event/-task, …). Open the pre-seeded surface via the
+  // SAME shared launchSurface + resolvedLookups-lift the chip/Click path uses
+  // (useConsumerChips) — ZERO intent detection (ADR-039: consumerType IS the
+  // server's routing decision; the server already grounded the draft + ids).
+  const handleSurfaceLaunch = React.useCallback(
+    (payload: { consumerType: string; payload?: Record<string, unknown> | null }) => {
+      if (!payload.consumerType) {
+        return;
+      }
+      const draft =
+        payload.payload && typeof payload.payload === "object" ? payload.payload : {};
+      // Lift the server-enriched `resolvedLookups` out of draftValues so the
+      // closed-set ids pre-select dropdowns and never land in a free-text field.
+      const { resolvedLookups: rawResolved, ...draftValues } = draft as Record<string, unknown> & {
+        resolvedLookups?: Record<string, ResolvedLookup>;
+      };
+      void launchSurface({
+        consumerType: payload.consumerType,
+        draftValues,
+        resolvedLookups: rawResolved ?? {},
+        bffBaseUrl,
+      });
+    },
+    [bffBaseUrl]
+  );
 
   // ── Serial action queue (FR-18) ────────────────────────────────────────
   // Rapid, distinct AI actions (e.g. FR-14 toolbar's Compare then Draft) must
@@ -1415,6 +1445,10 @@ export function ConversationPane(): React.JSX.Element {
               onSelectPlaybook={playbookOptions.handleSelectPlaybook}
               onOpenLibraryModal={playbookOptions.handleOpenLibraryModal}
               onContextEvent={contextBridge.handleContextEvent}
+              // spaarkeai-assistant-enhancements-r1 P0(b): TEXT/agent-path create-flow
+              // launch — opens the pre-seeded surface (matter/event/task wizard) when
+              // the agent selects a `surface_launch`-disposition capability.
+              onSurfaceLaunch={handleSurfaceLaunch}
               onCitations={docQaCitation.onCitations}
               // R4 — "Insert into document": one-click insert of a completed Assistant suggestion's
               // text into the Compose editor as a tracked change at the current selection/cursor.
