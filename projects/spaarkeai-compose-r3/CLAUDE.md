@@ -10,7 +10,7 @@
 - **Phase**: Pipeline-initialized — ~28 tasks generated; ready to execute.
 - **Last Updated**: 2026-07-16
 - **Current Task**: Not started (see [current-task.md](current-task.md)).
-- **Next Action**: Confirm `spaarkeai-compose-r2` merged/frozen before the E1 cutover, then execute Phase 0 (task 001). See [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md).
+- **Next Action**: ✅ `spaarkeai-compose-r2` confirmed completed/closed + on master (2026-07-16) — E1-cutover gate cleared. Execute Phase 0 (task 001). See [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md).
 
 ---
 
@@ -86,7 +86,7 @@ If a new ADR conflict surfaces during execution, invoke the **root CLAUDE.md §6
 
 Per [`projects/INDEX.md`](../INDEX.md), R3's BFF `Services/Compose/` surface overlaps active peers:
 
-- **`spaarkeai-compose-r2`** — direct predecessor; R3 extends its merged seams. **Confirm R2 merged/frozen before the E1 cutover (Phase 2).**
+- **`spaarkeai-compose-r2`** — direct predecessor; R3 extends its merged seams. ✅ **Confirmed completed/closed + on master (owner, 2026-07-16)** — the E1-cutover (Phase 2) coordination gate is CLEARED.
 - **`spaarke-ai-architecture-redesign-r2`** — sole owner of `Services/Ai/` internals. R3's E3 is server-derived + additive on `ComposeDraftPayload` — **consume `PublicContracts` seams, NO fork of `Services/Ai/`.**
 
 Run `/conflict-check` before opening any BFF PR.

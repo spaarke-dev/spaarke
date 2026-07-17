@@ -20,7 +20,7 @@
 040/042/043/044 (toolset, independent) · 041 deps 011
 ```
 
-**Coordination**: Confirm `spaarkeai-compose-r2` merged/frozen before the E1 cutover (022). Consume `spaarke-ai-architecture-redesign-r2` `PublicContracts` seams — no fork of `Services/Ai/`. `/conflict-check` before each BFF PR. (See [`../../INDEX.md`](../../INDEX.md).)
+**Coordination**: ✅ `spaarkeai-compose-r2` confirmed completed/closed + on master (2026-07-16) — E1-cutover (022) gate CLEARED. Consume `spaarke-ai-architecture-redesign-r2` `PublicContracts` seams — no fork of `Services/Ai/`. `/conflict-check` before each BFF PR. (See [`../../INDEX.md`](../../INDEX.md).)
 
 ## Task Roster
 

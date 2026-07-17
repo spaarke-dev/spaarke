@@ -13,7 +13,7 @@
 | **Task** | none — project pipeline-initialized, no task started |
 | **Step** | — |
 | **Status** | not-started |
-| **Next Action** | Confirm `spaarkeai-compose-r2` merged/frozen before the E1 cutover; then run `task-execute` on `tasks/001-*.poml` (Phase 0). See [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md). |
+| **Next Action** | ✅ `spaarkeai-compose-r2` confirmed completed/closed + on master (owner, 2026-07-16) — E1-cutover coordination gate CLEARED. Run `task-execute` on `tasks/001-*.poml` (Phase 0). See [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md). |
 
 ### Critical Context
 All six pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed — no design pivots. The fidelity core sequences E2 (paraId substrate) → E1 (delta save); toolset + E3 parallelize; import depends on E1/E2. The NFR-09 real-template hardening gate (Phase 6) gates the E1 delta-save cutover.
@@ -44,6 +44,7 @@ All six pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed — no design pivots. The fi
 ### Decisions Made
 - 2026-07-16: Seed README moved to `notes/seed-README.md`; canonical README generated (operator chose "regenerate canonical"). — Reason: preserve lineage while giving a standard project overview.
 - 2026-07-16: Pipeline stopped at "ready to execute" (operator chose "generate + stop"); task 001 NOT auto-started. — Reason: FULL-rigor BFF blast radius + hot-path overlap with compose-r2 warrants owner coordination first.
+- 2026-07-16: Owner confirmed `spaarkeai-compose-r2` completed/closed + all work on master. — E1-cutover coordination gate (task 022 pre-condition) CLEARED. Residual gate before any BFF PR: run `/conflict-check` for `Services/Compose/` hot-path.
 
 ---
 
@@ -52,8 +53,8 @@ All six pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed — no design pivots. The fi
 **Next Step**: Execute task 001 (Phase 0 — Docxodus packaging + publish-size/CVE baseline).
 
 **Pre-conditions**:
-- Owner confirms `spaarkeai-compose-r2` is merged/frozen (avoids `Services/Compose/` collision on the E1 cutover).
-- `/conflict-check` run for BFF hot-path.
+- ✅ Owner confirmed `spaarkeai-compose-r2` completed/closed + on master (2026-07-16) — `Services/Compose/` collision risk on the E1 cutover cleared.
+- `/conflict-check` run for BFF hot-path (still recommended before opening any BFF PR).
 
 **Key Context**:
 - Load [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) before any BFF task; report publish-size delta vs ~49.63 MB baseline.
@@ -65,7 +66,7 @@ All six pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed — no design pivots. The fi
 
 ## Blockers
 
-**Status**: None (soft gate: owner coordination with compose-r2 recommended before E1 cutover)
+**Status**: None. Prior soft gate (compose-r2 coordination) CLEARED 2026-07-16 — R2 completed/closed + on master.
 
 ---
 
