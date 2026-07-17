@@ -207,6 +207,11 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
     const others = conflict
       ? undefined
       : cands.filter(c => c !== primary).sort((a, b) => b.reinforcedConfidence - a.reinforcedConfidence);
+    // Per-candidate `written` is authoritative for filed state — the engine may mark the
+    // communication Resolved on a deterministic (contact) auto-file while an AI-suggested
+    // matter/project on ANOTHER field is NOT written; that one must still read as "suggested"
+    // (to review), not "confirmed". Fall back to the global isResolved only if `written` is absent.
+    const isWritten = primary.written ?? isResolved;
     out.push({
       field,
       entity: primary.targetEntity,
@@ -214,7 +219,7 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
       targetName: primary.targetName ?? primary.targetId,
       targetId: primary.targetId,
       confidence: primary.reinforcedConfidence,
-      status: conflict ? 'ambiguous' : isResolved ? 'confirmed' : 'suggested',
+      status: conflict ? 'ambiguous' : isWritten ? 'confirmed' : 'suggested',
       alternatives: conflict ? cands : undefined,
       otherCandidates: others && others.length > 0 ? others : undefined,
       order: meta.order,

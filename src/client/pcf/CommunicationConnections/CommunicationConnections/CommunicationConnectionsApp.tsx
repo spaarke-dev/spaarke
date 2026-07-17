@@ -50,6 +50,7 @@ import {
   parseProvenance,
   deriveConnections,
   mergeFiledConnections,
+  deriveAiSuggestedTypes,
   connectionTarget,
   COMMUNICATION_REGARDING_FIELDS,
   type Connection,
@@ -548,9 +549,14 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     provenance ? deriveConnections(provenance, status === AssociationStatus.Resolved) : [],
     filedAssociations
   );
-  const toReviewCount = connectionsForCount.filter(
-    c => c.status !== 'confirmed' && !confirmedFields.has(c.field)
-  ).length;
+  // AI-suggested types (e.g. a "new Matter") are review items too — count them so the card
+  // flags there's something to act on even when a contact already auto-filed.
+  const aiSuggestionCount = provenance
+    ? deriveAiSuggestedTypes(provenance, new Set(connectionsForCount.map(c => c.entity))).length
+    : 0;
+  const toReviewCount =
+    connectionsForCount.filter(c => c.status !== 'confirmed' && !confirmedFields.has(c.field)).length +
+    aiSuggestionCount;
 
   return (
     <div className={s.root}>

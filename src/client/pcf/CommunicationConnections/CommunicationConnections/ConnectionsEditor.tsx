@@ -652,8 +652,10 @@ function EditorBody({
       ? primaryField
       : connections.find(isSlotConfirmed)?.field;
 
-  const toReview = connections.filter(c => c.status !== 'confirmed' && !confirmedFields.has(c.field)).length;
-  const confirmedCount = connections.length - toReview;
+  const connReview = connections.filter(c => c.status !== 'confirmed' && !confirmedFields.has(c.field)).length;
+  const confirmedCount = connections.length - connReview;
+  // AI-suggested types (e.g. "Create Matter") are also review items, so they count toward "to review".
+  const toReview = connReview + aiSuggestions.length;
 
   const hasRows = connections.length > 0 || aiSuggestions.length > 0;
 
@@ -667,7 +669,7 @@ function EditorBody({
           · {confirmedCount} filed · {toReview} to review
         </Text>
         <div className={s.grow} />
-        {!readOnly && toReview > 0 && (
+        {!readOnly && connReview > 0 && (
           <Button
             size="small"
             appearance="primary"
