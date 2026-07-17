@@ -5,18 +5,23 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Communication.Membership;
+using Sprk.Bff.Api.Services.Communication.Models;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Communication;
 
 /// <summary>
 /// Behavior of <see cref="DirectThreadAccessService"/> — the Direct 1:1 thread access mechanics (task 043 /
-/// FR-09). Protects the closed set the acceptance criteria name: exactly-two membership (owner ∪ POA share),
-/// ordered-pair reuse (no duplicate thread on a second "start"), no ADR-024 regarding anchor on a Direct
-/// thread, a THIRD user never receiving a grant, and the message-access grant being a no-op for a non-Direct
-/// thread. Module boundaries (<see cref="IGenericEntityService"/> — SDK Dataverse — and
-/// <see cref="IDataverseAccessGrantService"/> — the POA testing seam, ADR-010) are mocked; no
-/// <c>Mock&lt;HttpMessageHandler&gt;</c> (ADR-038).
+/// FR-09) AND the generalized Open/record-anchored message-access grant (task 052 / FR-11). Protects the
+/// closed set the acceptance criteria name: exactly-two membership (owner ∪ POA share), ordered-pair reuse
+/// (no duplicate thread on a second "start"), no ADR-024 regarding anchor on a Direct thread, a THIRD user
+/// never receiving a grant, a Direct thread's grant being UNCHANGED (no regression), an Open thread granting
+/// EXACTLY the task-041 derived systemuser set, a non-member never being granted, a contact participant
+/// being skipped (R2), and a derivation/grant failure being swallowed (best-effort, NFR-02). Module
+/// boundaries (<see cref="IGenericEntityService"/> — SDK Dataverse — <see cref="IDataverseAccessGrantService"/>
+/// — the POA testing seam, ADR-010 — and <see cref="IThreadMembershipDerivationService"/> — task 041's shared
+/// derivation contract) are mocked; no <c>Mock&lt;HttpMessageHandler&gt;</c> (ADR-038).
 /// </summary>
 public class DirectThreadAccessServiceTests
 {
@@ -31,9 +36,13 @@ public class DirectThreadAccessServiceTests
 
     private readonly Mock<IGenericEntityService> _entityService = new();
     private readonly Mock<IDataverseAccessGrantService> _accessGrant = new();
+    private readonly Mock<IThreadMembershipDerivationService> _membershipDerivation = new();
 
     private DirectThreadAccessService BuildSut() => new(
-        _entityService.Object, _accessGrant.Object, Mock.Of<ILogger<DirectThreadAccessService>>());
+        _entityService.Object,
+        _accessGrant.Object,
+        new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
+        Mock.Of<ILogger<DirectThreadAccessService>>());
 
     // ── FindOrCreateDirectThreadAsync: create + no regarding anchor ────────────────────────────
 
@@ -178,12 +187,19 @@ public class DirectThreadAccessServiceTests
         _accessGrant.Verify(
             g => g.GrantAccessAsync("sprk_communications", CommunicationId, ThirdUser, It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
+        // No regression (task 052): the Direct branch returns before ever touching the task-041 derivation —
+        // one grant mechanism per topology, not a second path layered on top.
+        _membershipDerivation.Verify(
+            m => m.DeriveAuthorizedSetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task GrantMessageAccessAsync_RecordAnchoredThread_GrantsNoAccess()
+    public async Task GrantMessageAccessAsync_RecordAnchoredThreadWithNoDerivedMembership_GrantsNoAccess()
     {
         SetupThread(ThreadId, ThreadTypeRecordAnchored, ownerId: Caller);
+        _membershipDerivation
+            .Setup(m => m.DeriveAuthorizedSetAsync(ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ThreadAuthorizedSet.Empty(ThreadId));
 
         await BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
 
@@ -209,6 +225,90 @@ public class DirectThreadAccessServiceTests
         _accessGrant.Verify(
             g => g.GrantAccessAsync("sprk_communications", CommunicationId, Other, "ReadAccess", It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    // ── GrantMessageAccessAsync: OPEN/record-anchored thread — task 052 / FR-11 gap closure ──────
+
+    [Fact]
+    public async Task GrantMessageAccessAsync_OpenThread_GrantsReadAccessToExactlyTheDerivedSystemUserSet()
+    {
+        SetupThread(ThreadId, ThreadTypeRecordAnchored, ownerId: Caller);
+        _membershipDerivation
+            .Setup(m => m.DeriveAuthorizedSetAsync(ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ThreadAuthorizedSet
+            {
+                ThreadId = ThreadId,
+                Participants = new[]
+                {
+                    new AuthorizedParticipant { Participant = ParticipantReference.SystemUser(Caller), Reason = AuthorizationReason.RecordMembership },
+                    new AuthorizedParticipant { Participant = ParticipantReference.SystemUser(Other), Reason = AuthorizationReason.RecordMembership },
+                },
+            });
+
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
+
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, Caller, "ReadAccess", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, Other, "ReadAccess", It.IsAny<CancellationToken>()),
+            Times.Once);
+        // Negative: a user NOT in the task-041 derived set is never granted (a non-member's impersonated
+        // read must still return nothing).
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, ThirdUser, It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        // EXACTLY the derived set — no more, no less (no over-grant).
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task GrantMessageAccessAsync_OpenThreadWithContactParticipant_SkipsTheContact()
+    {
+        SetupThread(ThreadId, ThreadTypeRecordAnchored, ownerId: Caller);
+        var contactId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        _membershipDerivation
+            .Setup(m => m.DeriveAuthorizedSetAsync(ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ThreadAuthorizedSet
+            {
+                ThreadId = ThreadId,
+                Participants = new[]
+                {
+                    new AuthorizedParticipant { Participant = ParticipantReference.SystemUser(Caller), Reason = AuthorizationReason.RecordMembership },
+                    new AuthorizedParticipant { Participant = ParticipantReference.Contact(contactId), Reason = AuthorizationReason.RecordMembership },
+                },
+            });
+
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
+
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, Caller, "ReadAccess", It.IsAny<CancellationToken>()),
+            Times.Once);
+        // R2 scope: contact (external) participants are skipped in R1.
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, contactId, It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once); // exactly one grant — the systemuser only
+    }
+
+    [Fact]
+    public async Task GrantMessageAccessAsync_OpenThreadWhenDerivationThrows_SwallowsAndGrantsNothing()
+    {
+        SetupThread(ThreadId, ThreadTypeRecordAnchored, ownerId: Caller);
+        _membershipDerivation
+            .Setup(m => m.DeriveAuthorizedSetAsync(ThreadId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("derivation boom"));
+
+        var act = () => BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
+
+        await act.Should().NotThrowAsync(); // best-effort (NFR-02) — a derivation failure never fails ingest/send
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

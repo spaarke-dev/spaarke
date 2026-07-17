@@ -1,6 +1,7 @@
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Communication.Membership;
 
 namespace Sprk.Bff.Api.Services.Communication.Access;
 
@@ -8,7 +9,7 @@ namespace Sprk.Bff.Api.Services.Communication.Access;
 /// Default <see cref="IDirectThreadAccessService"/> — see the interface for the mechanism + Component
 /// Justification. Reads/writes <c>sprk_communicationthread</c> via the canonical
 /// <see cref="IGenericEntityService"/> (SDK) and POA shares via <see cref="IDataverseAccessGrantService"/>
-/// (Web API). Singleton-safe: both dependencies are stateless singletons.
+/// (Web API). Singleton-safe: all three dependencies are stateless singletons.
 /// </summary>
 public sealed class DirectThreadAccessService : IDirectThreadAccessService
 {
@@ -31,15 +32,28 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
 
     private readonly IGenericEntityService _entityService;
     private readonly IDataverseAccessGrantService _accessGrant;
+    private readonly Lazy<IThreadMembershipDerivationService> _membershipDerivation;
     private readonly ILogger<DirectThreadAccessService> _logger;
 
+    /// <param name="membershipDerivation">
+    /// Lazily-resolved (task 052 / FR-11): <see cref="IThreadMembershipDerivationService"/>'s default
+    /// implementation depends on <c>IThreadExplicitParticipantReader</c>, whose Direct-topology
+    /// implementation depends back on THIS service (<see cref="IDirectThreadAccessService"/>) — a genuine
+    /// 3-node DI cycle (DirectThreadAccessService → IThreadMembershipDerivationService →
+    /// IThreadExplicitParticipantReader → IDirectThreadAccessService) that the default container cannot
+    /// construct eagerly. <see cref="Lazy{T}"/> defers resolution to first use inside
+    /// <see cref="GrantMessageAccessAsync"/> (well after this singleton is already constructed and cached),
+    /// which breaks the cycle without changing either dependency's shape.
+    /// </param>
     public DirectThreadAccessService(
         IGenericEntityService entityService,
         IDataverseAccessGrantService accessGrant,
+        Lazy<IThreadMembershipDerivationService> membershipDerivation,
         ILogger<DirectThreadAccessService> logger)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _accessGrant = accessGrant ?? throw new ArgumentNullException(nameof(accessGrant));
+        _membershipDerivation = membershipDerivation ?? throw new ArgumentNullException(nameof(membershipDerivation));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -128,38 +142,97 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Generalized (task 052 / FR-11): topology decides the principal source, the grant call is the SAME
+    /// one call in both branches. <b>Direct</b> → the existing owner ∪ POA two-party list (task 043,
+    /// UNCHANGED). <b>Open / record-anchored</b> (topology gate on <see cref="GetParticipantSystemUserIdsAsync"/>
+    /// returns empty) → the task-041 <see cref="IThreadMembershipDerivationService.DeriveAuthorizedSetAsync"/>
+    /// systemuser participants (contacts skipped — R2 scope). No second grant mechanism: both branches call
+    /// the SAME <see cref="IDataverseAccessGrantService.GrantAccessAsync"/>.
+    /// </remarks>
     public async Task GrantMessageAccessAsync(Guid communicationId, Guid threadId, CancellationToken ct = default)
     {
         try
         {
-            var participants = await GetParticipantSystemUserIdsAsync(threadId, ct);
-            if (participants.Count == 0)
-                return; // not a Direct thread (or no participants on record yet) — nothing to grant
-
-            foreach (var participantId in participants)
+            var directParticipants = await GetParticipantSystemUserIdsAsync(threadId, ct);
+            if (directParticipants.Count > 0)
             {
-                try
-                {
-                    await _accessGrant.GrantAccessAsync(MessageEntitySet, communicationId, participantId, ReadAccessRights, ct);
-                }
-                catch (Exception ex)
-                {
-                    // Best-effort (NFR-02): the message already persisted; a missed grant degrades to
-                    // "not yet visible to this participant", never fails the send/ingest.
-                    _logger.LogWarning(
-                        ex,
-                        "Direct-thread message access grant failed (non-fatal) | CommunicationId={CommunicationId}, ThreadId={ThreadId}, Principal={Principal}",
-                        communicationId, threadId, participantId);
-                }
+                // Direct 1:1 thread — existing owner ∪ POA two-party grant. UNCHANGED from task 043.
+                await GrantReadAccessToPrincipalsAsync(communicationId, threadId, directParticipants, ct);
+                return;
             }
+
+            // Topology gate returned empty ⇒ not a Direct thread (or a Direct thread with no participants
+            // on record yet). Try the Open/record-anchored path: grant to the task-041 ADR-034-derived
+            // membership set's systemuser participants (skip contacts — R2 scope, R1 is internal-only).
+            var derivedParticipants = await GetDerivedSystemUserParticipantsAsync(communicationId, threadId, ct);
+            if (derivedParticipants.Count > 0)
+                await GrantReadAccessToPrincipalsAsync(communicationId, threadId, derivedParticipants, ct);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 ex,
-                "Direct-thread message access grant lookup failed (non-fatal) | CommunicationId={CommunicationId}, ThreadId={ThreadId}",
+                "Message access grant lookup failed (non-fatal) | CommunicationId={CommunicationId}, ThreadId={ThreadId}",
                 communicationId, threadId);
         }
+    }
+
+    /// <summary>
+    /// Grants Read access on <paramref name="communicationId"/> to each principal — the ONE grant call
+    /// shared by both the Direct two-party branch and the Open derived-set branch. Best-effort per
+    /// principal (NFR-02): one failed grant never blocks the rest.
+    /// </summary>
+    private async Task GrantReadAccessToPrincipalsAsync(
+        Guid communicationId, Guid threadId, IReadOnlyList<Guid> principalIds, CancellationToken ct)
+    {
+        foreach (var principalId in principalIds)
+        {
+            try
+            {
+                await _accessGrant.GrantAccessAsync(MessageEntitySet, communicationId, principalId, ReadAccessRights, ct);
+            }
+            catch (Exception ex)
+            {
+                // Best-effort (NFR-02): the message already persisted; a missed grant degrades to
+                // "not yet visible to this participant", never fails the send/ingest.
+                _logger.LogWarning(
+                    ex,
+                    "Message access grant failed (non-fatal) | CommunicationId={CommunicationId}, ThreadId={ThreadId}, Principal={Principal}",
+                    communicationId, threadId, principalId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Open/record-anchored branch: reuses task 041's <see cref="IThreadMembershipDerivationService"/> (no
+    /// second derivation), then narrows to systemuser participants — contact (external) participants are
+    /// R2 scope, skipped for R1. De-duplicated. Derivation failure is swallowed (best-effort, NFR-02) and
+    /// returns empty, which the caller treats as a no-op.
+    /// </summary>
+    private async Task<IReadOnlyList<Guid>> GetDerivedSystemUserParticipantsAsync(
+        Guid communicationId, Guid threadId, CancellationToken ct)
+    {
+        ThreadAuthorizedSet authorizedSet;
+        try
+        {
+            authorizedSet = await _membershipDerivation.Value.DeriveAuthorizedSetAsync(threadId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Open-thread membership derivation failed (non-fatal) | CommunicationId={CommunicationId}, ThreadId={ThreadId}",
+                communicationId, threadId);
+            return Array.Empty<Guid>();
+        }
+
+        return authorizedSet.Participants
+            .Select(p => p.Participant)
+            .Where(p => string.Equals(p.EntityLogicalName, SystemUserEntity, StringComparison.OrdinalIgnoreCase))
+            .Select(p => p.RecordId)
+            .Distinct()
+            .ToList();
     }
 
     // ── find-or-create helper ───────────────────────────────────────────────────────────────────────

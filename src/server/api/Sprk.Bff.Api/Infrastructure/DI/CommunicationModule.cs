@@ -282,8 +282,18 @@ public static class CommunicationModule
         // GrantAccess). POA-based (owner ∪ POA share), NOT a new grant table (owner decision 2026-07-16,
         // notes/access-model-decision.md). IDataverseAccessGrantService is the ADR-010 testing seam over the
         // concrete DataverseWebApiService's GrantAccess/POA primitives (mirrors IImpersonatedCommunicationQuery
-        // below — the same singleton, a second thin seam over it).
+        // below — the same singleton, a second thin seam over it). GrantMessageAccessAsync (the per-message
+        // grant hook) was GENERALIZED by task 052 (FR-11) to ALSO grant Open/record-anchored threads — see
+        // that task's comment below for the DI-cycle note this required.
         services.AddSingleton<IDataverseAccessGrantService, DataverseAccessGrantService>(); // task 043
+        // task 052 — Lazy<IThreadMembershipDerivationService> breaks a genuine 3-node DI cycle:
+        // DirectThreadAccessService → IThreadMembershipDerivationService → IThreadExplicitParticipantReader
+        // (DirectThreadExplicitParticipantReader) → IDirectThreadAccessService. All three are singletons;
+        // deferring resolution to first use (inside GrantMessageAccessAsync, well after DirectThreadAccessService
+        // itself is constructed and cached) lets the container satisfy the cycle without changing any of the
+        // three services' shapes.
+        services.AddSingleton(sp => new Lazy<IThreadMembershipDerivationService>(
+            () => sp.GetRequiredService<IThreadMembershipDerivationService>()));
         services.AddSingleton<IDirectThreadAccessService, DirectThreadAccessService>(); // task 043
         // task 041/043 — explicit participant/grant reader. Task 041 registered the ADR-032 Null-Object default
         // (no explicit grants); task 043 replaces it with the REAL Direct-topology reader (owner ∪ POA share).

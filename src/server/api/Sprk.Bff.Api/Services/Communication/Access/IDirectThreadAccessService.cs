@@ -52,11 +52,14 @@ public interface IDirectThreadAccessService
     Task<IReadOnlyList<Guid>> GetParticipantSystemUserIdsAsync(Guid threadId, CancellationToken ct = default);
 
     /// <summary>
-    /// Grants Read access on <paramref name="communicationId"/> to <paramref name="threadId"/>'s current
-    /// explicit Direct-topology participants. A no-op for a non-Direct thread (nothing to grant — Open
-    /// threads rely on their own, separate access story). Best-effort / non-fatal (NFR-02): failures are
-    /// logged and swallowed — the message already persisted; a missed grant degrades to "not yet visible",
-    /// never fails the send/ingest.
+    /// Grants Read access on <paramref name="communicationId"/> so its thread's authorized principals can
+    /// see it under the impersonated read (task 050). Topology decides the principal source (task 052 / FR-11):
+    /// <b>Direct</b> → <paramref name="threadId"/>'s current explicit two-party list (<c>ownerid</c> ∪
+    /// POA-shared principal, UNCHANGED from task 043). <b>Open / record-anchored</b> → the task-041
+    /// <c>IThreadMembershipDerivationService.DeriveAuthorizedSetAsync</c> systemuser participants (contacts
+    /// skipped — R2 scope). A no-op when the thread has no derivable membership either way. Best-effort /
+    /// non-fatal (NFR-02): failures are logged and swallowed — the message already persisted; a missed
+    /// grant degrades to "not yet visible", never fails the send/ingest.
     /// </summary>
     Task GrantMessageAccessAsync(Guid communicationId, Guid threadId, CancellationToken ct = default);
 }
