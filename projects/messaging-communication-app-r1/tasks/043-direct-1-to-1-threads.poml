@@ -2,7 +2,7 @@
   <metadata>
     <title>1:1 direct threads — explicit two-participant membership</title>
     <phase>W4 — Thread Resolver + Membership + Privacy</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>040</dependencies>
     <blocks></blocks>

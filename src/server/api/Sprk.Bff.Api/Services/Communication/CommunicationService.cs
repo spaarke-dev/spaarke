@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai.Jobs;
+using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
@@ -38,6 +39,7 @@ public sealed class CommunicationService
     private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly IThreadResolver? _threadResolver;
     private readonly IServiceScopeFactory? _scopeFactory;
+    private readonly IDirectThreadAccessService? _directThreadAccess;
     private readonly CommunicationOptions _options;
     private readonly ILogger<CommunicationService> _logger;
 
@@ -52,6 +54,14 @@ public sealed class CommunicationService
     /// to mark our own ACS message id processed so the Event Grid echo of our outbound message is a no-op inbound
     /// (echo-dedup). Optional so existing unit constructions keep compiling; production DI always supplies it.
     /// </param>
+    /// <param name="directThreadAccess">
+    /// Direct 1:1 thread access mechanics (task 043 / FR-09) — invoked best-effort right after an outbound
+    /// MESSAGE persists into a Direct-topology thread, to grant that ONE message Read access to the thread's
+    /// explicit participants (the CRITICAL RISK task 043 closes: <c>sprk_communication</c> is User-level and
+    /// every row is owned by the app-only identity, so without this grant neither participant can read a
+    /// Direct-thread message via the impersonated read, task 050). No-op for a non-Direct thread. Optional so
+    /// existing unit constructions keep compiling; production DI always supplies it.
+    /// </param>
     public CommunicationService(
         CommunicationChannelDispatcher channelDispatcher,
         ApprovedSenderValidator senderValidator,
@@ -65,7 +75,8 @@ public sealed class CommunicationService
         IOptions<CommunicationOptions> options,
         ILogger<CommunicationService> logger,
         IThreadResolver? threadResolver = null,
-        IServiceScopeFactory? scopeFactory = null)
+        IServiceScopeFactory? scopeFactory = null,
+        IDirectThreadAccessService? directThreadAccess = null)
     {
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
@@ -78,6 +89,7 @@ public sealed class CommunicationService
         _enrichmentService = enrichmentService;
         _threadResolver = threadResolver;
         _scopeFactory = scopeFactory;
+        _directThreadAccess = directThreadAccess;
         _options = options.Value;
         _logger = logger;
     }
@@ -761,13 +773,15 @@ public sealed class CommunicationService
     /// <summary>
     /// Resolves (find-or-create) the outbound message's <c>sprk_communicationthread</c> via the task-040
     /// <see cref="IThreadResolver"/>, passing the authoritative ACS thread id so the messaging key strategy
-    /// groups by it. Best-effort / non-fatal (NFR-02) — a resolve failure MUST NOT fail the send.
+    /// groups by it. Best-effort / non-fatal (NFR-02) — a resolve failure MUST NOT fail the send. Returns the
+    /// resolved thread id (or null on failure/no resolver) so the caller can chain the task-043 Direct-thread
+    /// message access grant.
     /// </summary>
-    private async Task ResolveOutboundMessageThreadAsync(
+    private async Task<Guid?> ResolveOutboundMessageThreadAsync(
         Guid communicationId, SendCommunicationRequest request, string? acsThreadId, string correlationId, CancellationToken ct)
     {
         if (_threadResolver is null)
-            return;
+            return null;
 
         try
         {
@@ -777,7 +791,7 @@ public sealed class CommunicationService
                 Subject = request.Subject,
             };
 
-            await _threadResolver.ResolveAndAssignThreadAsync(
+            var threadId = await _threadResolver.ResolveAndAssignThreadAsync(
                 new ThreadResolutionRequest
                 {
                     CommunicationId = communicationId,
@@ -787,6 +801,17 @@ public sealed class CommunicationService
                     AcsThreadId = string.IsNullOrWhiteSpace(acsThreadId) ? null : acsThreadId,
                 },
                 ct);
+
+            // task 043 CRITICAL RISK fix: sprk_communication is User-level and this message is owned by the
+            // app-only identity, so a Direct-thread message is invisible to BOTH participants under the
+            // impersonated read (task 050) unless explicitly shared. Best-effort inside GrantMessageAccessAsync
+            // itself (no-op for a non-Direct thread; failures are logged and swallowed).
+            if (threadId.HasValue && _directThreadAccess is not null)
+            {
+                await _directThreadAccess.GrantMessageAccessAsync(communicationId, threadId.Value, ct);
+            }
+
+            return threadId;
         }
         catch (Exception ex)
         {
@@ -794,6 +819,7 @@ public sealed class CommunicationService
                 ex,
                 "Thread resolution failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
                 correlationId, communicationId);
+            return null;
         }
     }
 

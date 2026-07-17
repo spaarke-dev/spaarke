@@ -1,6 +1,7 @@
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Models;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
@@ -40,6 +41,7 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
     private readonly IGenericEntityService _genericEntityService;
     private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly IThreadResolver? _threadResolver;
+    private readonly IDirectThreadAccessService? _directThreadAccess;
     private readonly ILogger<MessagingIngestor> _logger;
 
     /// <param name="threadResolver">
@@ -47,15 +49,25 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
     /// that predate it keep compiling; production DI always supplies it. Invoked best-effort after persist
     /// to map the ACS <c>ChatThreadId</c> → a <c>sprk_communicationthread</c> (NFR-02, non-fatal).
     /// </param>
+    /// <param name="directThreadAccess">
+    /// Direct 1:1 thread access mechanics (task 043 / FR-09) — invoked best-effort right after an INBOUND
+    /// message resolves into a Direct-topology thread, to grant that ONE message Read access to the
+    /// thread's explicit participants (same CRITICAL RISK fix as the outbound send path, task 051 /
+    /// <see cref="CommunicationService"/> — inbound messages need it too, since either participant may be
+    /// the sender). No-op for a non-Direct thread. Optional so existing unit constructions keep compiling;
+    /// production DI always supplies it.
+    /// </param>
     public MessagingIngestor(
         IGenericEntityService genericEntityService,
         ICommunicationEnrichmentService enrichmentService,
         ILogger<MessagingIngestor> logger,
-        IThreadResolver? threadResolver = null)
+        IThreadResolver? threadResolver = null,
+        IDirectThreadAccessService? directThreadAccess = null)
     {
         _genericEntityService = genericEntityService;
         _enrichmentService = enrichmentService;
         _threadResolver = threadResolver;
+        _directThreadAccess = directThreadAccess;
         _logger = logger;
     }
 
@@ -83,7 +95,7 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
         {
             try
             {
-                await _threadResolver.ResolveAndAssignThreadAsync(
+                var threadId = await _threadResolver.ResolveAndAssignThreadAsync(
                     new ThreadResolutionRequest
                     {
                         CommunicationId = communicationId,
@@ -93,6 +105,15 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
                         AcsThreadId = request.ProviderThreadId,
                     },
                     cancellationToken);
+
+                // task 043 CRITICAL RISK fix: sprk_communication is User-level and this message is owned by
+                // the app-only identity, so a Direct-thread message is invisible to BOTH participants under
+                // the impersonated read (task 050) unless explicitly shared. Best-effort inside
+                // GrantMessageAccessAsync itself (no-op for a non-Direct thread; failures logged + swallowed).
+                if (threadId.HasValue && _directThreadAccess is not null)
+                {
+                    await _directThreadAccess.GrantMessageAccessAsync(communicationId, threadId.Value, cancellationToken);
+                }
             }
             catch (Exception ex)
             {

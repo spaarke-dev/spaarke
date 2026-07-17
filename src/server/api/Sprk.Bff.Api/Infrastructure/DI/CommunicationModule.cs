@@ -278,10 +278,19 @@ public static class CommunicationModule
         // self-gated by an options flag at runtime (not a DI gate → no asymmetric registration).
         services.TryAddSingleton(TimeProvider.System); // task 041 (idempotent — matches other modules)
         services.Configure<MembershipReconcileOptions>(configuration.GetSection(MembershipReconcileOptions.SectionName)); // task 041
-        // task 041 — explicit participant/grant reader: ADR-032 Null-Object default (no explicit grants).
-        // Tasks 042 (private overlay-grant schema) / 043 (direct two-party list) register the concrete reader
-        // behind this SAME seam; the derivation + reconcile then pick up overlay grants with NO code change.
-        services.TryAddSingleton<IThreadExplicitParticipantReader, NullThreadExplicitParticipantReader>(); // task 041
+        // task 043 — Direct 1:1 thread access mechanics (find-or-create, explicit two-party read, per-message
+        // GrantAccess). POA-based (owner ∪ POA share), NOT a new grant table (owner decision 2026-07-16,
+        // notes/access-model-decision.md). IDataverseAccessGrantService is the ADR-010 testing seam over the
+        // concrete DataverseWebApiService's GrantAccess/POA primitives (mirrors IImpersonatedCommunicationQuery
+        // below — the same singleton, a second thin seam over it).
+        services.AddSingleton<IDataverseAccessGrantService, DataverseAccessGrantService>(); // task 043
+        services.AddSingleton<IDirectThreadAccessService, DirectThreadAccessService>(); // task 043
+        // task 041/043 — explicit participant/grant reader. Task 041 registered the ADR-032 Null-Object default
+        // (no explicit grants); task 043 replaces it with the REAL Direct-topology reader (owner ∪ POA share).
+        // For a Direct thread it returns the two participants; for any non-Direct thread it returns EMPTY, so
+        // Open/record-anchored threads are unaffected. Task 042's private-overlay-grant reader is a FUTURE
+        // registration behind this SAME seam — the derivation + reconcile pick it up with no code change.
+        services.TryAddSingleton<IThreadExplicitParticipantReader, DirectThreadExplicitParticipantReader>(); // task 043
         // task 041 — shared authorized-set contract: authorized = reverse-ADR-034(anchor) ∪ explicit grants.
         // Task 042's read-filter computes the SAME set; both consume this service so they agree by construction.
         services.AddSingleton<IThreadMembershipDerivationService, ThreadMembershipDerivationService>(); // task 041

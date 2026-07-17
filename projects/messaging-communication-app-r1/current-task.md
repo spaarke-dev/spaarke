@@ -10,10 +10,15 @@
 | Field | Value |
 |-------|-------|
 | **Project** | messaging-communication-app-r1 — 2nd communication channel (ACS Chat) over ADR-045 seams |
-| **Progress** | **20 of 28 tasks ✅**; owner config gates SATISFIED (Delegate role + User-level Read on messaging tables, 2026-07-16) |
-| **Active task** | **050 COMPLETE** ✅ — committing next. |
-| **Next Action** | **task 043** (1:1 direct threads — narrow thread ownership to the two participants; fills 041's `IThreadExplicitParticipantReader` Null-Object seam; `sprk_threadtype=Direct 1:1`=100000001). Deps 040✅. Then UI wave 060–063, then 080/081, then 090. |
-| **Status** | in-progress (050 done) |
+| **Progress** | **21 of 28 tasks ✅** — SERVER-SIDE COMPLETE. Owner config gates: Delegate role + User-level Read SATISFIED; **NEW gate from 043 → app-user Share privilege on `sprk_communicationthread` + `sprk_communication`** (needed for GrantAccess/POA). |
+| **Active task** | **043 COMPLETE** ✅ (committed next). Remaining: UI wave (060→061/062/063), then 080/081, then 090. |
+| **Next Action** | **UI wave — task 060** (polling conversation/timeline component, `@spaarke/ui-components`, Fluent v9; consumes 050's endpoints; NO client ACS SDK). Client TS surface (different from BFF). Then 061 (PCF package+deploy), 062 (send/respond accessories), 063 (quoting). |
+| **Status** | in-progress (server done; UI wave next) |
+
+### 🔔 OPEN FINDINGS from 043 (need owner decisions — surfaced, not silently fixed)
+1. **Open-thread message access gap** (HIGH): `sprk_communication` rows are app-owned + Read=User-level, so task-050's impersonated read may return EMPTY for **Open/record-anchored** threads (matter-team members aren't the owner/shared). 043 fixed this for **Direct** threads (grants each msg to the 2 participants); Open threads have no analogous grant. Options in [`notes/access-model-decision.md`](notes/access-model-decision.md) "OPEN ARCHITECTURAL FINDING": (a) matter owner-team ownership, (b) grant msgs to the 041 derived set at persist, (c) confirm existing coverage. **Likely a follow-up task.**
+2. **Send-into-existing-thread gap** (MED): `/api/communications/send` always creates a NEW ACS thread (`AcsThreadId` always null; `SendCommunicationRequest` has no `ThreadId`). So multi-message continuity into an existing thread (Direct or Open) isn't wired via the generic send path. Pre-existing 051 limitation; correctly out of 043 scope. **Follow-up task candidate.**
+3. **New owner config gate**: app-user **Share** privilege on both messaging tables (recorded in access-model-decision.md prereq #4).
 
 ### Task 050 — design decisions (locked)
 - **New Scoped service** `CommunicationThreadReadService` (Services/Communication/). Rationale: reuses Scoped `ICallerSystemUserResolver` → can't live in Singleton `CommunicationService` (captive-dependency). §11-justified.

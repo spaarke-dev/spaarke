@@ -10,7 +10,9 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Jobs;
 
@@ -72,6 +74,18 @@ public static class CommunicationEndpoints
             .WithDescription("Get the status of a sent communication")
             .Produces<CommunicationStatusResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
+
+        // POST /threads/direct — start (or reuse) a 1:1 direct thread with another Spaarke user (task 043 / FR-09).
+        // Not anchored to a record (no ADR-024 regarding); membership is the EXPLICIT two-party list (thread
+        // ownership + a POA "Manage access" share to the other participant) — see IDirectThreadAccessService.
+        // Ordered-pair dedup: starting a 1:1 with the same person twice reuses the SAME thread.
+        group.MapPost("/threads/direct", StartDirectThreadAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("StartDirectThread")
+            .WithDescription("Start (or reuse) a 1:1 direct thread with another Spaarke user. Not record-anchored; membership is the explicit two-party list.")
+            .Produces<StartDirectThreadResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
         // GET /threads/{threadId}/messages — the polling timeline's thread-read (task 050 / FR-11). Returns the
         // caller's READABLE sprk_communication rows in the thread, impersonated (Dataverse row-level security) +
@@ -158,6 +172,57 @@ public static class CommunicationEndpoints
     {
         var response = await communicationService.SendAsync(request, context, ct);
         return TypedResults.Ok(response);
+    }
+
+    /// <summary>
+    /// Starts (or reuses) a 1:1 direct thread with another Spaarke user (task 043 / FR-09). Resolves the
+    /// caller server-side (never client-supplied — a caller cannot start a thread "as" someone else) and
+    /// delegates find-or-create to <see cref="IDirectThreadAccessService"/>. Exactly-two-participant only —
+    /// N-party group threads are deferred (root project scope; NOT built here).
+    /// </summary>
+    private static async Task<IResult> StartDirectThreadAsync(
+        StartDirectThreadRequest request,
+        IDirectThreadAccessService directThreadAccess,
+        ICallerSystemUserResolver callerResolver,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var resolution = await callerResolver.ResolveAsync(context.User, ct);
+        if (!resolution.IsResolved || !Guid.TryParse(resolution.SystemUserId, out var callerId) || callerId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "SENDER_NOT_RESOLVED",
+                title: "Sender Not Resolved",
+                detail: "The caller could not be resolved to a Dataverse systemuser; cannot start a direct thread.",
+                statusCode: 403);
+        }
+
+        if (request.OtherParticipantSystemUserId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: "otherParticipantSystemUserId is required.",
+                statusCode: 400);
+        }
+
+        if (request.OtherParticipantSystemUserId == callerId)
+        {
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: "Cannot start a direct thread with yourself.",
+                statusCode: 400);
+        }
+
+        var threadId = await directThreadAccess.FindOrCreateDirectThreadAsync(callerId, request.OtherParticipantSystemUserId, ct);
+
+        return TypedResults.Ok(new StartDirectThreadResponse
+        {
+            ThreadId = threadId,
+            CallerSystemUserId = callerId,
+            OtherParticipantSystemUserId = request.OtherParticipantSystemUserId,
+        });
     }
 
     /// <summary>
