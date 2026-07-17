@@ -307,16 +307,18 @@ The BFF API uses Microsoft.Graph SDK which depends on Kiota packages. **All Kiot
 
 ```xml
 <!-- Microsoft Graph SDK -->
-<PackageReference Include="Microsoft.Graph" Version="5.99.0" />
+<PackageReference Include="Microsoft.Graph" Version="5.101.0" />
 
-<!-- Kiota packages - ALL must match -->
-<PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.21.1" />
-<PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.21.1" />
-<PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="1.21.1" />
-<PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="1.21.1" />
-<PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="1.21.1" />
-<PackageReference Include="Microsoft.Kiota.Serialization.Multipart" Version="1.21.1" />
-<PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="1.21.1" />
+<!-- Kiota packages - ALL must match. Floor 1.22.0: remediates CVE-2026-44503
+     (GHSA-7j59-v9qr-6fq9, High) — RedirectHandler leaked Cookie/Proxy-Authorization
+     headers on cross-host redirects < 1.22.0. Do NOT downgrade below 1.22.0. -->
+<PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.22.0" />
+<PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.22.0" />
+<PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="1.22.0" />
+<PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="1.22.0" />
+<PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="1.22.0" />
+<PackageReference Include="Microsoft.Kiota.Serialization.Multipart" Version="1.22.0" />
+<PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="1.22.0" />
 ```
 
 #### Why This Matters
