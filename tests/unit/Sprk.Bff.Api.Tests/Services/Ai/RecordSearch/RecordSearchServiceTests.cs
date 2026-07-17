@@ -5,6 +5,7 @@ using Azure.Search.Documents.Models;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -41,6 +42,10 @@ public class RecordSearchServiceTests
     private readonly Mock<IKnowledgeDeploymentService> _deploymentServiceMock;
     private readonly Mock<IHttpContextAccessor> _httpContextAccessorMock;
     private readonly IOptions<DocumentIntelligenceOptions> _docIntelOptions;
+    // Supplies AzureAd:TenantId so the no-user tenant fallback resolves to the same tenant
+    // RecordSyncJob stamps on indexed records (see RecordSearchService._noUserTenantFallback).
+    private const string TestTenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2";
+    private readonly IConfiguration _configuration;
 
     // Test embedding (3072 dimensions like text-embedding-3-large)
     private readonly ReadOnlyMemory<float> _testEmbedding;
@@ -62,6 +67,13 @@ public class RecordSearchServiceTests
         {
             AiSearchIndexName = TestIndexName
         });
+
+        _configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AzureAd:TenantId"] = TestTenantId
+            })
+            .Build();
 
         // Create a test embedding vector (3072 dimensions for text-embedding-3-large)
         var embedding = new float[3072];
@@ -99,6 +111,7 @@ public class RecordSearchServiceTests
             _docIntelOptions,
             _loggerMock.Object,
             _deploymentServiceMock.Object,
+            _configuration,
             _httpContextAccessorMock.Object);
     }
 
@@ -650,6 +663,38 @@ public class RecordSearchServiceTests
         capturedOptions.IncludeTotalCount.Should().BeTrue();
     }
 
+    // Regression: the inbound Communication Association Engine semantic-match rung runs from a
+    // background/job caller (InboundPollingBackupService / IncomingCommunicationJobHandler) with NO
+    // user 'tid' claim. Before the fix, the tenant filter fell back to the literal "system" while
+    // RecordSyncJob stamps every indexed record with AzureAd:TenantId — so the OData filter matched
+    // ZERO records and the rung could never surface an existing matter/project. The fallback must be
+    // the configured AzureAd:TenantId so the search-side tenant matches the sync-side tenant.
+    [Fact]
+    public async Task SearchAsync_WhenNoUserContext_FiltersOnConfiguredTenant_NotSystemLiteral()
+    {
+        // Arrange — HttpContext present but no authenticated user (background/job caller shape).
+        _httpContextAccessorMock.Setup(x => x.HttpContext).Returns((HttpContext?)null);
+        var service = CreateService();
+        var request = CreateValidRequest(RecordHybridSearchMode.KeywordOnly);
+
+        SearchOptions? capturedOptions = null;
+        _searchClientMock
+            .Setup(x => x.SearchAsync<SearchIndexDocument>(
+                It.IsAny<string>(),
+                It.IsAny<SearchOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, SearchOptions, CancellationToken>((text, opts, ct) => capturedOptions = opts)
+            .ReturnsAsync(CreateEmptySearchResponse());
+
+        // Act
+        await service.SearchAsync(request);
+
+        // Assert — filter scopes to the real tenant the records are indexed under, never "system".
+        capturedOptions.Should().NotBeNull();
+        capturedOptions!.Filter.Should().Contain($"tenantId eq '{TestTenantId}'");
+        capturedOptions.Filter.Should().NotContain("tenantId eq 'system'");
+    }
+
     #endregion
 
     #region SearchAsync - Uses Correct Index Name Tests
@@ -689,6 +734,7 @@ public class RecordSearchServiceTests
             emptyOptions,
             _loggerMock.Object,
             _deploymentServiceMock.Object,
+            _configuration,
             _httpContextAccessorMock.Object);
 
         var request = CreateValidRequest(RecordHybridSearchMode.KeywordOnly);

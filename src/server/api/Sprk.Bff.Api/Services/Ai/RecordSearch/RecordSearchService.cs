@@ -4,6 +4,7 @@ using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
@@ -71,6 +72,16 @@ public sealed class RecordSearchService : IRecordSearchService
     // an HttpContext mock.
     private readonly IHttpContextAccessor? _httpContextAccessor;
 
+    // Tenant to filter on when there is NO user context (background/job callers such as the
+    // Communication Association Engine's semantic-match rung, run from InboundPollingBackupService /
+    // IncomingCommunicationJobHandler — neither carries a 'tid' claim). The records index is populated
+    // by RecordSyncJob, which stamps every document with AzureAd:TenantId (see RecordSyncJob.SyncEntityAsync).
+    // Filtering on the literal "system" here yielded ZERO matches for all no-user callers (the semantic
+    // rung could never find an existing matter/project). This fallback keeps the search-side tenant
+    // symmetric with the sync-side tenant so background callers match the same records an interactive
+    // (single-tenant) user would. Empty config → "system" (defensive; there are no "system"-stamped records).
+    private readonly string _noUserTenantFallback;
+
     // Index name for record search
     private const string RecordsIndexName = "spaarke-records-index";
 
@@ -127,6 +138,7 @@ public sealed class RecordSearchService : IRecordSearchService
         IOptions<DocumentIntelligenceOptions> docIntelOptions,
         ILogger<RecordSearchService> logger,
         IKnowledgeDeploymentService deploymentService,
+        IConfiguration configuration,
         IHttpContextAccessor? httpContextAccessor = null)
     {
         _searchIndexClient = searchIndexClient;
@@ -137,6 +149,11 @@ public sealed class RecordSearchService : IRecordSearchService
         _logger = logger;
         _deploymentService = deploymentService ?? throw new ArgumentNullException(nameof(deploymentService));
         _httpContextAccessor = httpContextAccessor;
+
+        // AzureAd:TenantId is the canonical single-tenant identity for background/no-user callers —
+        // exactly the value RecordSyncJob stamps on every indexed record. See _noUserTenantFallback remarks.
+        var configuredTenant = configuration?["AzureAd:TenantId"];
+        _noUserTenantFallback = string.IsNullOrWhiteSpace(configuredTenant) ? "system" : configuredTenant;
     }
 
     /// <inheritdoc />
@@ -165,7 +182,7 @@ public sealed class RecordSearchService : IRecordSearchService
             // this is purely cache-side scoping; security is enforced at Dataverse.
             var tenantIdForCache = _httpContextAccessor?.HttpContext?.User?.FindFirst("tid")?.Value
                 ?? _httpContextAccessor?.HttpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-                ?? "system";
+                ?? _noUserTenantFallback;
             var cacheId = BuildCacheId(request);
             var cachedResult = await GetFromCacheAsync(tenantIdForCache, cacheId, cancellationToken);
             if (cachedResult is not null)
