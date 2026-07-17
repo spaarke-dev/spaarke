@@ -1,6 +1,6 @@
 # Current Task State — messaging-communication-app-r1
 
-> **Last Updated**: 2026-07-16 (by context-handoff)
+> **Last Updated**: 2026-07-16 (task-execute — task 050 in progress)
 > **Recovery**: Read "Quick Recovery" first, then "Remaining Plan". Branch `work/messaging-communication-app-r1`, PR #655 (draft).
 
 ---
@@ -10,10 +10,21 @@
 | Field | Value |
 |-------|-------|
 | **Project** | messaging-communication-app-r1 — 2nd communication channel (ACS Chat) over ADR-045 seams |
-| **Progress** | **19 of 28 tasks ✅**; branch green; all committed + pushed (HEAD `4ab250d7f`) |
-| **Server-side** | COMPLETE: send (051) · receive (030/031) · channel provider (020/021) · thread resolver (040) · membership reconcile (041) · privacy (042, impersonation) · ACS integration (010/011/012, live-validated) · attachments (070) |
-| **Next Action** | Resume with **task 050** (thread-read + unread endpoints, impersonated) then **043** (1:1 direct threads). Run each via `task-execute`. Then UI wave 060–063, then 080/081, then 090. |
-| **Status** | in-progress (paused at clean milestone for context compaction) |
+| **Progress** | **20 of 28 tasks ✅**; owner config gates SATISFIED (Delegate role + User-level Read on messaging tables, 2026-07-16) |
+| **Active task** | **050 COMPLETE** ✅ — committing next. |
+| **Next Action** | **task 043** (1:1 direct threads — narrow thread ownership to the two participants; fills 041's `IThreadExplicitParticipantReader` Null-Object seam; `sprk_threadtype=Direct 1:1`=100000001). Deps 040✅. Then UI wave 060–063, then 080/081, then 090. |
+| **Status** | in-progress (050 done) |
+
+### Task 050 — design decisions (locked)
+- **New Scoped service** `CommunicationThreadReadService` (Services/Communication/). Rationale: reuses Scoped `ICallerSystemUserResolver` → can't live in Singleton `CommunicationService` (captive-dependency). §11-justified.
+- **Reads via impersonation**: `IImpersonatedCommunicationQuery` (thin ADR-010 test-seam adapter over `DataverseWebApiService.RetrieveMultipleImpersonatedAsync`) — record access = Dataverse's job (MSCRMCallerID=caller systemuserid).
+- **Filter reuse**: map impersonated JSON rows → `Entity` → `ICommunicationAccessFilter.FilterMessages` (internal-only + privilege). NO second filter.
+- **Caller resolution**: reuse `ICallerSystemUserResolver` (oid→systemuserid). Unresolved/Empty → 403 ProblemDetails (fail closed; no app-only fallback).
+- **Last-seen source**: caller-supplied `since` query param (ISO-8601). NO new marker table (R1 §11 minimalism; polling client tracks newest rendered).
+- **Attachments**: ONE bulk impersonated query on `sprk_communicationattachment` filtered by the page's message ids, grouped in-memory (2 queries/read total — no per-row fan-out, NFR-07).
+- **IsInternalUser = true** for R1 (resolved systemuser = internal; external contacts = R2).
+- **Routes**: `GET /api/communications/threads/{threadId:guid}/messages` + `.../unread-count` (existing group, `.RequireAuthorization()` + `CommunicationAuthorizationFilter`).
+- **As-built names**: message→thread lookup `sprk_communicationthread` (OData `_sprk_communicationthread_value`); `sprk_bodyformat`/`sprk_communicationtype`/`sprk_privilegeclassification` = optionsets (int in JSON); `sprk_isinternalonly` = bool.
 
 ### Critical Context
 - **Access model DECIDED (impersonation)** — read enforcement = Dataverse impersonation (`MSCRMCallerID` = caller **systemuserid**, resolved from oid). 042 reworked to app-flags only (internal-only + privilege-metadata). Full detail: [`notes/access-model-decision.md`](notes/access-model-decision.md). Granting = OOB "Manage access" (POA), no custom grant table.

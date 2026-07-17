@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -71,6 +72,30 @@ public static class CommunicationEndpoints
             .WithDescription("Get the status of a sent communication")
             .Produces<CommunicationStatusResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
+
+        // GET /threads/{threadId}/messages — the polling timeline's thread-read (task 050 / FR-11). Returns the
+        // caller's READABLE sprk_communication rows in the thread, impersonated (Dataverse row-level security) +
+        // the shared internal-only/privilege filter (task 042). Optional ?since=<iso> for incremental polls;
+        // ?top=<n> pages. NO ACS call (Dataverse is the record). "No visible messages" returns an empty 200 (never
+        // 404) so a private thread's existence is not leaked (NFR-06).
+        group.MapGet("/threads/{threadId:guid}/messages", GetThreadMessagesAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("GetThreadMessages")
+            .WithDescription("Read a thread's messages for the polling timeline (access-filtered; impersonated). Optional ?since=<iso8601> and ?top=<n>.")
+            .Produces<ThreadReadResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
+        // GET /threads/{threadId}/unread-count — the unread indicator's poll (task 050 / FR-11). Count of READABLE
+        // messages newer than the caller's last-seen marker (?since=<iso>; omitted = all). Same access filter as
+        // thread-read — a message the caller cannot read is never counted (NFR-06). Projected + bounded (NFR-07).
+        group.MapGet("/threads/{threadId:guid}/unread-count", GetThreadUnreadCountAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("GetThreadUnreadCount")
+            .WithDescription("Count a thread's unread (readable) messages since the caller's last-seen marker (?since=<iso8601>).")
+            .Produces<UnreadCountResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
         group.MapPost("/{id:guid}/archive", ArchiveCommunicationAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
@@ -329,6 +354,61 @@ public static class CommunicationEndpoints
     {
         var result = await communicationService.ArchiveExistingAsync(id, ct);
         return TypedResults.Ok(result);
+    }
+
+    /// <summary>
+    /// Thread-read for the polling timeline (task 050 / FR-11). Parses the optional <c>?since</c> (ISO-8601) +
+    /// <c>?top</c>, resolves the caller server-side (never client-supplied), and delegates to the impersonated,
+    /// access-filtered read. A malformed <c>since</c> is a 400 ProblemDetails (ADR-019).
+    /// </summary>
+    private static async Task<IResult> GetThreadMessagesAsync(
+        Guid threadId,
+        CommunicationThreadReadService readService,
+        HttpContext context,
+        [FromQuery] string? since,
+        [FromQuery] int? top,
+        CancellationToken ct)
+    {
+        var sinceValue = ParseSince(since);
+        var result = await readService.ReadThreadAsync(threadId, context.User, sinceValue, top, ct);
+        return TypedResults.Ok(result);
+    }
+
+    /// <summary>
+    /// Unread-count for the polling indicator (task 050 / FR-11). Parses the optional <c>?since</c> (the caller's
+    /// last-seen marker), resolves the caller server-side, and delegates to the impersonated, access-filtered count.
+    /// </summary>
+    private static async Task<IResult> GetThreadUnreadCountAsync(
+        Guid threadId,
+        CommunicationThreadReadService readService,
+        HttpContext context,
+        [FromQuery] string? since,
+        CancellationToken ct)
+    {
+        var sinceValue = ParseSince(since);
+        var result = await readService.GetUnreadCountAsync(threadId, context.User, sinceValue, ct);
+        return TypedResults.Ok(result);
+    }
+
+    /// <summary>
+    /// Parses an optional ISO-8601 <c>since</c> query value. Null/blank → null (no lower bound); a non-parseable
+    /// value → 400 ProblemDetails (ADR-019). Round-trip kind so an offset (or trailing Z) is honored.
+    /// </summary>
+    private static DateTimeOffset? ParseSince(string? since)
+    {
+        if (string.IsNullOrWhiteSpace(since))
+            return null;
+
+        if (!DateTimeOffset.TryParse(since, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
+        {
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: "'since' must be an ISO-8601 timestamp (e.g. 2026-07-16T10:00:00Z).",
+                statusCode: 400);
+        }
+
+        return parsed;
     }
 
     /// <summary>

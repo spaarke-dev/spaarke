@@ -2,7 +2,7 @@
   <metadata>
     <title>BFF thread-read + unread-count endpoints (access-filtered per FR-08)</title>
     <phase>W5 — BFF Endpoints</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>040,042,004</dependencies>
     <blocks>060</blocks>

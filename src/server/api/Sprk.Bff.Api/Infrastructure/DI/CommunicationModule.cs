@@ -218,6 +218,23 @@ public static class CommunicationModule
         // Registered UNCONDITIONALLY (ADR-010 / ADR-032 — the endpoint that consumes it maps unconditionally).
         services.AddSingleton<ICommunicationAccessFilter, CommunicationAccessFilter>();
 
+        // BFF thread-read + unread-count read model (messaging-communication-app-r1 task 050 / FR-11 / NFR-06/07).
+        // The ~5s poll surface for the timeline (task 060): both GET endpoints issue the sprk_communication query
+        // IMPERSONATED (MSCRMCallerID = caller systemuserid) so Dataverse enforces record-level access natively,
+        // then apply the SAME task-042 ICommunicationAccessFilter (internal-only + privilege) on top — no second
+        // filter. Registered UNCONDITIONALLY (ADR-010 / ADR-032 — the endpoints map unconditionally).
+        //   • IImpersonatedCommunicationQuery — thin ADR-010 test-seam over DataverseWebApiService's impersonated
+        //     read (the no-leak negative cases are non-negotiable, NFR-06; ADR-038 bans Mock<HttpMessageHandler>).
+        //     Stateless pass-through over the singleton DataverseWebApiService → singleton.
+        //   • CommunicationThreadReadService — SCOPED, because it consumes the Scoped ICallerSystemUserResolver
+        //     (a captive scoped dependency inside the Singleton CommunicationService would be an anti-pattern).
+        //   • ICallerSystemUserResolver — REUSED (§11) for oid→systemuserid; TryAdd so this module is self-contained
+        //     even if the AI module (its usual registrant) is not composed, without clobbering that registration.
+        services.AddSingleton<IImpersonatedCommunicationQuery, DataverseImpersonatedCommunicationQuery>();
+        services.TryAddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver,
+                              Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
+        services.AddScoped<CommunicationThreadReadService>();
+
         // Job handler: processes incoming email notifications from Graph webhooks (Task 072)
         // Extracts message details from Graph, creates sprk_communication record, handles attachments.
         // JobType: "IncomingCommunication" — processed by dedicated CommunicationJobProcessor (not shared queue).
