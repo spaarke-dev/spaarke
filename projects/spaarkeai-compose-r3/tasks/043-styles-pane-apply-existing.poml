@@ -1,0 +1,152 @@
+<task id="043" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-22 styles pane — apply existing document styles only (no create/rename/manage)</title>
+    <phase>4 Toolset</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W4-Toolset</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend,fluent-ui,tiptap</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-22: a styles pane that lists the loaded document's EXISTING paragraph/character styles and
+    applies a chosen style to the current selection, changing that paragraph's `pStyle`. SCOPE GUARD
+    (binding): apply existing styles ONLY — this task MUST NOT create, rename, delete, or otherwise manage
+    styles (full style management is Word-parity, explicitly out of scope and deferred to Open-in-Word per
+    design §7.5 and spec §Out of Scope). NO style-authoring UI may appear. Client-only, on the MIT TipTap
+    base + Fluent v9; NO TipTap product feature (paid or unpaid), no `@tiptap-pro/*`.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript engineer fluent in TipTap 3 / ProseMirror node attributes and Fluent UI v9.
+    Understands how the document's style catalog (from the loaded OOXML, surfaced on the editor doc) maps to
+    a paragraph-style (`pStyle`) node attribute and how applying a style is a selection-scoped attribute
+    change, not a formatting-mark change.
+  </role>
+
+  <goal>
+    A styles pane component that reads the set of existing paragraph/character style names available on the
+    loaded document and, when the user picks one, applies it to the current selection so the paragraph's
+    `pStyle` changes. No affordance to create/rename/delete/manage styles exists anywhere in the pane.
+    Matching component tests assert the pane lists existing styles, applying one changes the selection's
+    `pStyle`, and no style-authoring control is rendered, plus an ADR-021 dark-mode render check.
+  </goal>
+
+  <context>
+    <background>
+      Design §7.5 explicitly defers "full styles-pane management" to Open-in-Word ("where 'credible editor'
+      would tip into 'trying to be Word'"). The owner clarification (spec Assumptions) pins FR-22 as
+      "Expanded = apply existing document styles to a selection; NOT create/rename/manage styles." The loaded
+      document already carries its style catalog (headings + paragraph styles surfaced from OOXML on Load,
+      per design §7.5 "Headings + paragraph styles | StarterKit + style mapping"). This task exposes that
+      existing catalog as an apply-only pane. Client-only; no BFF change.
+    </background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeStylesPane.tsx — NEW Fluent v9 pane: lists existing paragraph/character styles; apply-to-selection only (no create/rename/manage)</file>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useComposeDocumentStyles.ts — NEW hook: read the document's existing style catalog + apply a style to the selection (set `pStyle`)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — mount/toggle the styles pane; provide the editor selection + style-catalog source</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts — where OOXML style names / `pStyle` are surfaced on the editor doc; source of the existing-style catalog</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx — Fluent v9 conventions to mirror for the pane</file>
+      <file role="export">src/client/shared/Spaarke.Compose.Components/src/index.ts — export the pane if part of the public surface</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §7.5 (full styles-pane management deferred; apply existing = in); spec.md FR-22 + Assumptions (apply existing only)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">Independent — no task dependency. Runs in the W4 toolset parallel wave alongside 040/042/044.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project / owner rule 2026-07-14">NO TipTap product feature (paid or unpaid) — no `@tiptap-pro/*`. Fluent v9 pane on the MIT base only.</constraint>
+    <constraint source="NFR-03 / project">If any npm extension is touched, verify it resolves to `@tiptap/extension-*` (MIT), NEVER `@tiptap-pro/*`. No new dependency expected.</constraint>
+    <constraint source="FR-22 SCOPE GUARD / spec Out-of-Scope">Apply EXISTING styles ONLY. MUST NOT create, rename, delete, or manage styles. NO style-authoring UI may be present anywhere in the pane. Full style management is Word-parity, deferred to Open-in-Word.</constraint>
+    <constraint source="ADR-021 / NFR-10">The pane is Fluent UI v9 and MUST render correctly in dark mode (theme tokens; no hard-coded colors).</constraint>
+    <constraint source="ADR-028 / NFR-10">No new network calls; any client fetch uses `@spaarke/auth`.</constraint>
+    <constraint source="ADR-038 / NFR-06">Client component/unit tests only; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests. Tests exercise real editor state (style list + `pStyle` change) and assert absence of authoring controls.</constraint>
+    <constraint source="CLAUDE.md §11">New pane component — provide the `&lt;justification&gt;` (Existing / Extension / Cost-of-doing-nothing).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ProseMirror paragraph-style (`pStyle`) node attribute; reading the loaded document's style catalog; Fluent v9 pane + dark mode</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Style catalog / pStyle source" location="src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts">
+        The editor-doc bridge surfaces OOXML paragraph styles / `pStyle`; read the existing-style catalog from here rather than inventing a style list.
+      </pattern>
+      <pattern name="Fluent v9 pane conventions" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx">
+        Mirror the Fluent v9 token usage + dark-mode-safe styling for the styles pane.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor. Load the knowledge files + design §7.5 + the FR-22 scope guard. Read `docxBridge.ts` to locate the existing style catalog / `pStyle` source.</step>
+    <step order="1" name="Read existing style catalog">Implement `useComposeDocumentStyles.ts` to read the loaded document's existing paragraph/character style names from the editor doc / bridge — no invented list, no creation path.</step>
+    <step order="2" name="Apply-to-selection">Implement applying a chosen existing style to the current selection so the paragraph's `pStyle` node attribute changes. This is an attribute change, not a formatting-mark change.</step>
+    <step order="3" name="Fluent v9 pane">Build `ComposeStylesPane.tsx`: a list of existing styles with an apply action. Deliberately include NO create/rename/delete/manage affordance. Use Fluent v9 tokens; verify dark mode.</step>
+    <step order="4" name="Wire into editor">Mount/toggle the pane in `ComposeEditor.tsx`; supply the selection + style-catalog source; export from `index.ts` if public.</step>
+    <step order="5" name="Tests">Author component tests: the pane lists the document's existing styles; applying one changes the selection's `pStyle`; assert NO style-authoring control is rendered (scope-guard test); include an ADR-021 dark-mode render check.</step>
+    <step order="6" name="Verify">`npm run build` the shared lib; run the new tests. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeStylesPane.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useComposeDocumentStyles.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (styles pane mounted)</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeStylesPane.test.tsx</output>
+  </outputs>
+
+  <justification>
+    <existing>No existing styles pane. `ComposeFormatToolbar.tsx` applies inline character formatting (bold/italic) — not named paragraph/character styles. `docxBridge.ts` surfaces the style catalog but has no UI. No overlap.</existing>
+    <extension>Cannot fold into `ComposeFormatToolbar` (inline formatting is a distinct concern from applying named document styles) — the pane is a cohesive apply-only surface with its own list state that warrants a dedicated component + hook. It reuses the existing style catalog from `docxBridge` rather than adding a new source.</extension>
+    <cost-of-doing-nothing>Without it, a user cannot reapply a document's own firm styles (e.g. a "Recital" or "Heading 2" paragraph style) to newly typed or reformatted text — degrading fidelity of edited paragraphs against the firm template. Concrete failing contract: FR-22 acceptance "applying a style changes the paragraph's `pStyle`" cannot be met.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The pane lists the loaded document's existing paragraph/character styles (sourced from the editor doc / `docxBridge`, not an invented list).</criterion>
+    <criterion testable="true">Selecting a paragraph and applying an existing style changes that paragraph's `pStyle` node attribute — a unit test asserts the `pStyle` value changes to the chosen style.</criterion>
+    <criterion testable="true">SCOPE GUARD: no create/rename/delete/manage-style affordance is rendered anywhere in the pane — a test asserts the absence of any style-authoring control.</criterion>
+    <criterion testable="true">No `@tiptap-pro/*` dependency and no TipTap product feature is added.</criterion>
+    <criterion testable="true">The styles pane renders correctly in Fluent v9 dark mode (ADR-021).</criterion>
+    <criterion testable="true">Matching component tests exist and pass; shared-lib `npm run build` is green.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <ui-test name="Pane lists existing styles">
+      <steps>Open a document that defines named styles (e.g. Heading 1, Recital, Body Text); open the styles pane.</steps>
+      <expected>The pane lists exactly those existing document styles.</expected>
+    </ui-test>
+    <ui-test name="Apply an existing style changes pStyle">
+      <steps>Place the cursor in a paragraph, pick "Heading 2" from the pane.</steps>
+      <expected>The paragraph's `pStyle` becomes "Heading 2"; the paragraph reflects the style.</expected>
+    </ui-test>
+    <ui-test name="No style-authoring UI (scope guard)">
+      <steps>Inspect the styles pane for any create/rename/delete/manage-style control.</steps>
+      <expected>No such control exists; the pane is apply-existing-only.</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Render the styles pane under the Fluent v9 dark theme provider.</steps>
+      <expected>Pane and style list use theme tokens and are legible in dark mode; no hard-coded light colors.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

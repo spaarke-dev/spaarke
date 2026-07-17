@@ -1,0 +1,164 @@
+<task id="044" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-23 richer comment-thread UI (author/timestamp/replies; view/create/reply/resolve) — feeds FR-25 import</title>
+    <phase>4 Toolset</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W4-Toolset</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend,fluent-ui,tiptap</tags>
+    <estimated-effort>2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-23: a richer comment-thread UI. Comments render as threads showing author, timestamp, and
+    replies; the user can view, create, reply to, and resolve a thread. Threads persist as native `w:comment`
+    on save (via the existing R2 comment-anchor mark + writer path) and the thread model is the render target
+    that FR-25 (import existing Word comment threads, task 051) will feed into on round-trip. SCOPE GUARD
+    (binding): view/create/reply/resolve ONLY — NOT full Word comment-feature parity (spec FR-23 + Assumptions:
+    "nested reply chains beyond one level render flat if the source lacks the modern-comments 4-part
+    structure"). Client-only, on the MIT TipTap base + Fluent v9; NO TipTap product feature (paid or unpaid),
+    no `@tiptap-pro/*` Comments module.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript engineer fluent in TipTap 3 / ProseMirror inline marks, Fluent UI v9, and thread/
+    reply UI modeling. Understands how the existing `CommentAnchorMark` anchors a comment to a range and how a
+    thread (author/timestamp/replies/resolved) is the UI layer over those anchors, persisted as `w:comment`.
+  </role>
+
+  <goal>
+    A comment-thread UI (component + hook + thread type) over the existing `CommentAnchorMark`: threads show
+    author + timestamp + replies; the user can create a thread on a selection, reply to a thread, and resolve
+    it; threads persist as native `w:comment` on save. The thread data model is shaped so FR-25 (task 051) can
+    project imported `RecoveredComment` threads into the same render surface. Matching component tests assert
+    thread rendering (author/timestamp), reply, resolve, persistence-shape, and the scope-guard flat-render of
+    deeper reply chains, plus an ADR-021 dark-mode render check.
+  </goal>
+
+  <context>
+    <background>
+      R2 shipped the home-grown comment marks → `w:comment` path (design §7.5 "Comments | Home-grown marks →
+      w:comment (shipped, R2)"); the anchor mark is `CommentAnchorMark.ts`. R3 makes the comment SURFACE
+      richer — real threads with author/timestamp/replies and resolve — as a table-stakes credibility tool
+      and, critically, as the render target for FR-25 import (task 051 projects `RecoveredComment` threads
+      into this UI on Load, and FR-26 keeps them across save). This is a client-only task; the persistence path
+      to `w:comment` already exists (R2 `DocxAnnotationWriter`). SCOPE GUARD keeps it short of full Word
+      comment parity.
+    </background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentThread.tsx — NEW Fluent v9 thread UI: author, timestamp, replies, create/reply/resolve affordances</file>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useComposeCommentThreads.ts — NEW hook: thread/reply state over `CommentAnchorMark`; create/reply/resolve; expose a thread model for persistence + FR-25 import</file>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentThread.types.ts — NEW thread data model (author, timestamp, replies, resolved) shaped for FR-25 `RecoveredComment` projection</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — mount the comment-thread surface; wire selection → create-thread</file>
+      <file role="canonical-reuse">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/CommentAnchorMark.ts — the existing comment-anchor mark threads render over; reuse, do NOT reimplement anchoring</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeReanchorBanner.tsx — Fluent v9 conventions to mirror</file>
+      <file role="export">src/client/shared/Spaarke.Compose.Components/src/index.ts — export the thread UI + type (FR-25/task 051 consumes the type)</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §7.5 (Comments = shipped R2 marks → w:comment); spec.md FR-23 + FR-25/FR-26 + Assumptions (thread depth scope guard)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">Independent — no task dependency. Runs in the W4 toolset parallel wave alongside 040/042/043. NOTE: task 051 (FR-25 import comments) deps on THIS task (044) — the thread model authored here is 051's render target.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project / owner rule 2026-07-14">NO TipTap product feature (paid or unpaid) — no `@tiptap-pro/*` Comments module. Home-grown thread UI over the existing `CommentAnchorMark` + Fluent v9 only.</constraint>
+    <constraint source="NFR-03 / project">If any npm extension is touched, verify it resolves to `@tiptap/extension-*` (MIT), NEVER `@tiptap-pro/*`. No new dependency expected.</constraint>
+    <constraint source="FR-23 SCOPE GUARD / spec Assumptions">view/create/reply/resolve ONLY — NOT full Word comment-feature parity. Nested reply chains beyond one level render FLAT if the source lacks the modern-comments 4-part structure.</constraint>
+    <constraint source="FR-23 / FR-25">Threads MUST persist as native `w:comment` on save (via the existing R2 writer path). The thread data model MUST be shaped so FR-25 (task 051) can project imported `RecoveredComment` threads into the same render surface — do not fork a parallel thread shape.</constraint>
+    <constraint source="ADR-021 / NFR-10">The thread UI is Fluent UI v9 and MUST render correctly in dark mode (theme tokens; no hard-coded colors).</constraint>
+    <constraint source="ADR-028 / NFR-10">No new network calls; any client fetch uses `@spaarke/auth`.</constraint>
+    <constraint source="ADR-038 / NFR-06">Client component/unit tests only; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests. Tests exercise real thread state (render/reply/resolve) and the flat-render scope guard.</constraint>
+    <constraint source="CLAUDE.md §11">New thread UI component — provide the `&lt;justification&gt;` (Existing / Extension / Cost-of-doing-nothing).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ProseMirror comment-anchor marks; thread/reply UI modeling; native w:comment persistence; Fluent v9 + dark mode</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Comment anchor mark" location="src/client/shared/Spaarke.Compose.Components/src/widgets/marks/CommentAnchorMark.ts">
+        The existing comment-anchor mark ties a comment to a range; threads render over these anchors. Reuse — do not reimplement anchoring or the `w:comment` persistence path.
+      </pattern>
+      <pattern name="Fluent v9 surface conventions" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeReanchorBanner.tsx">
+        Mirror the Fluent v9 token usage + dark-mode-safe styling for the thread cards + reply affordances.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor. Load the knowledge files + design §7.5 + the FR-23 scope guard + FR-25/FR-26 (so the thread model fits import). Read `CommentAnchorMark.ts`.</step>
+    <step order="1" name="Thread data model">Define `ComposeCommentThread.types.ts`: a thread with author, timestamp, ordered replies, and resolved state — shaped so FR-25's `RecoveredComment` (task 051) projects into it without a parallel shape.</step>
+    <step order="2" name="Thread state hook">Implement `useComposeCommentThreads.ts` over `CommentAnchorMark`: create a thread on a selection, reply, resolve; expose the thread model for persistence (native `w:comment`) and for FR-25 import.</step>
+    <step order="3" name="Thread UI">Build `ComposeCommentThread.tsx`: render author + timestamp + replies; create/reply/resolve affordances. Deeper-than-one-level reply chains render FLAT per the scope guard. Fluent v9; verify dark mode.</step>
+    <step order="4" name="Wire into editor">Mount the thread surface in `ComposeEditor.tsx`; wire selection → create-thread; export the component + type from `index.ts` (task 051 consumes the type).</step>
+    <step order="5" name="Tests">Author component tests: thread renders author+timestamp; reply appends; resolve marks resolved; the model persists in the `w:comment`-compatible shape; deeper reply chains render flat (scope guard); include an ADR-021 dark-mode render check.</step>
+    <step order="6" name="Verify">`npm run build` the shared lib; run the new tests. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentThread.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useComposeCommentThreads.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentThread.types.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (thread surface mounted)</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentThread.test.tsx</output>
+  </outputs>
+
+  <justification>
+    <existing>R2 shipped `CommentAnchorMark.ts` (the anchor mark) and the `w:comment` writer path, but there is NO thread UI — no author/timestamp/reply/resolve surface. `ComposeReanchorBanner.tsx` is a re-anchor banner, unrelated. No overlap.</existing>
+    <extension>Cannot fold into `CommentAnchorMark` (a ProseMirror mark, not a React UI) nor into any existing banner. A thread UI with reply/resolve state is a cohesive new surface warranting its own component + hook + type; it reuses the existing anchor mark + `w:comment` persistence rather than adding new marks or a new writer.</extension>
+    <cost-of-doing-nothing>Without it, comments cannot be viewed as threads with author/timestamp or replied to/resolved — and FR-25 (import existing Word comment threads, task 051) has no render target, so imported threads cannot be shown. Concrete failing contracts: FR-23 acceptance "a comment thread shows author+timestamp and supports a reply; persists as w:comment" and FR-25's dependency on this render surface both fail.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A comment thread renders with author and timestamp — a unit test asserts both appear for a thread.</criterion>
+    <criterion testable="true">A user can create a thread on a selection, reply to a thread (reply appends in order), and resolve a thread (resolved state set) — unit tests assert each.</criterion>
+    <criterion testable="true">Threads persist in a shape that maps to native `w:comment` on save (the existing R2 writer path); a test asserts the persistence-shape of the thread model.</criterion>
+    <criterion testable="true">The thread data model is shaped so FR-25's imported `RecoveredComment` threads (task 051) project into the same render surface — no parallel thread shape is introduced.</criterion>
+    <criterion testable="true">SCOPE GUARD: reply chains deeper than one level render flat when the source lacks the modern-comments 4-part structure — a test asserts flat rendering; no full-Word-parity comment features are added.</criterion>
+    <criterion testable="true">No `@tiptap-pro/*` dependency and no TipTap product Comments feature is added.</criterion>
+    <criterion testable="true">The thread UI renders correctly in Fluent v9 dark mode (ADR-021).</criterion>
+    <criterion testable="true">Matching component tests exist and pass; shared-lib `npm run build` is green.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <ui-test name="Thread shows author and timestamp">
+      <steps>Create a comment on a selection with a known author; open the thread.</steps>
+      <expected>The thread card shows the author name and a timestamp.</expected>
+    </ui-test>
+    <ui-test name="Reply appends to thread">
+      <steps>Open an existing thread, type a reply, submit.</steps>
+      <expected>The reply appears appended below the original comment in order.</expected>
+    </ui-test>
+    <ui-test name="Resolve a thread">
+      <steps>Click Resolve on an open thread.</steps>
+      <expected>The thread is marked resolved (visually distinct / collapsed) and its resolved state is set.</expected>
+    </ui-test>
+    <ui-test name="Deep reply chain renders flat (scope guard)">
+      <steps>Load a thread whose source lacks the modern-comments 4-part structure but has multiple replies.</steps>
+      <expected>Replies render as a flat list (one level), not a nested tree.</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Render the comment-thread UI under the Fluent v9 dark theme provider.</steps>
+      <expected>Thread cards, replies, and affordances use theme tokens and are legible in dark mode; no hard-coded light colors.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

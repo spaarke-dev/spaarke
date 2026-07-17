@@ -1,0 +1,150 @@
+<task id="011" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-09/FR-10 explicit load-time paraId carry (hidden node attr) + split-minting via `@tiptap/extension-unique-id`</title>
+    <phase>1 E2</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W1-E2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010</deps>
+    <tags>frontend,tiptap,pcf</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-09 + FR-10 on the client: carry the server-minted `w14:paraId`s (from task 010's
+    Load response) into the editor and keep them stable across edits. Two halves.
+    (1) FR-09 — on Load, set each paragraph's paraId as a **hidden ProseMirror node attribute** via
+    an **explicit transaction** immediately after `setContent`. S2 proved `@tiptap/extension-unique-id`
+    does NOT auto-assign ids to `setContent`-loaded nodes, so the server pre-parse owns load-time ids
+    and the client must stamp them explicitly. The ids are node attributes only — NOT rendered to the
+    DOM (no `data-*` attribute, no visual output).
+    (2) FR-10 — configure `@tiptap/extension-unique-id` (3.28.0, MIT) for the `paragraph` type with
+    `attributeName: 'paraId'` and an OOXML-shaped `generateID` (an 8-hex `ST_LongHexNumber` `&lt;
+    0x80000000` generator). On a paragraph split, UniqueID's built-in dedup keeps the original id on
+    one half and re-mints a fresh id on the other; untouched paragraphs keep their ids. **NO custom
+    minting plugin** — the extension's built-in dedup is the mechanism (S2 simplification). The paraId
+    carry lives in `docxBridge.ts`; the editor/extension config lives in `ComposeEditor.tsx`.
+  </prompt>
+
+  <role>
+    Senior front-end engineer fluent in TipTap v3 / ProseMirror (nodes, attributes, explicit
+    transactions, `setContent` semantics) and the MIT TipTap extension ecosystem, working in the
+    `Spaarke.Compose.Components` shared library. Careful about license provenance
+    (`@tiptap/extension-*` MIT vs `@tiptap-pro/*` forbidden) and about keeping node identity off the
+    rendered DOM.
+  </role>
+
+  <goal>
+    The editor carries the server-minted paraIds as hidden `paragraph` node attributes immediately
+    after mount (set by an explicit transaction, not left to auto-assign), and keeps them stable
+    across editing: untouched paragraphs retain their ids; a split yields two distinct paraIds, one
+    equal to the original, the other freshly minted OOXML-shaped — all via `@tiptap/extension-unique-id`
+    3.28.0 (MIT) with `attributeName: 'paraId'` + an 8-hex `&lt; 0x80000000` `generateID`, and NO
+    custom plugin. Client tests assert: ids present on nodes after mount, ids absent from the rendered
+    DOM, split-minting behaviour (one kept + one re-minted), and that the resolved package is
+    `@tiptap/extension-unique-id` (MIT), never `@tiptap-pro/*`.
+  </goal>
+
+  <context>
+    <background>
+      E2 client half of the paraId identity substrate (design §5, §8 LOAD/EDIT pipeline). Task 010
+      (server pre-parse) mints/collects the ids and projects a `paraId → paragraph` map onto the
+      Load response; this task carries those ids into ProseMirror node attributes and configures the
+      minting extension for in-editor split/merge. S2 (spike) is the validated recipe: headless
+      TipTap v3 + `@tiptap/extension-unique-id` 3.28.0, untouched paraIds preserved, split keeps one
+      id + re-mints the other via the extension's built-in dedup — **no custom plugin**, and load-time
+      ids set explicitly because UniqueID does not auto-assign to `setContent`-loaded nodes. mammoth
+      flattens `.docx` to HTML and discards paraId (`docxBridge.ts`), so the ids arrive from the server
+      map, not from the imported HTML. TipTap open-sourced `UniqueID` (formerly Pro) under MIT in
+      June 2025 — allowed, but the resolved dependency MUST be `@tiptap/extension-unique-id`, NEVER
+      `@tiptap-pro/*` (owner rule 2026-07-14; NFR-03). ids are node attributes only and MUST NOT
+      render to the DOM (FR-09). This task is client-only (no BFF/publish-size surface) and
+      parallel-safe.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts — carry the server paraId map into the editor: after setContent, run an explicit transaction stamping each paragraph node's `paraId` attribute (FR-09); do NOT rely on auto-assign</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — configure `@tiptap/extension-unique-id` for `paragraph` with `attributeName: 'paraId'` + OOXML-shaped `generateID` (FR-10); ensure the paraId attribute is NOT rendered to the DOM</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/package.json — add `@tiptap/extension-unique-id` 3.28.0 (MIT); verify it resolves to `@tiptap/extension-*`, never `@tiptap-pro/*`</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts — the Load-response contract shape; consume task 010's additive paraId-map field (mirror-first, do not fork the schema)</file>
+      <file role="reference">projects/spaarkeai-compose-r3/notes/spikes/ — S2 (paraId carry-through in TipTap; split re-mints one half; server owns load-time ids; generateID OOXML-shaped); the validated recipe this task productionizes</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §5 (E2 paraId identity — hidden node attr, UniqueID config, Word-regeneration caveat), §2 (Current State — mammoth discards paraId; anchoring model compose-contracts.ts:108-115), §8 (LOAD/EDIT pipeline), §10 (reuse map — MIT `@tiptap/extension-unique-id`, NO TipTap Pro)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Server pre-parse mints/collects the `w14:paraId`s and projects the ordered `paraId → paragraph` map onto the Load response. This task consumes that map to stamp node attributes; the map's contract shape is the input.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-09">paraIds are set as hidden `paragraph` node attributes via an EXPLICIT transaction immediately after `setContent` (not left to UniqueID auto-assign — S2). The ids MUST NOT be rendered to the DOM (no `data-*`/visible output).</constraint>
+    <constraint source="FR-10">Split/merge minting is handled by `@tiptap/extension-unique-id` (3.28.0, MIT) configured for `paragraph` with `attributeName: 'paraId'` and an OOXML-shaped `generateID` (8-hex `&lt; 0x80000000`). On split, one half keeps the id, the other is re-minted. NO custom minting plugin.</constraint>
+    <constraint source="NFR-03 / owner rule 2026-07-14 / project MUST-NOT">The extension MUST resolve to `@tiptap/extension-unique-id` (MIT), NEVER `@tiptap-pro/*`. No TipTap product feature (paid or unpaid) and no AGPL code. Verify the resolved package + license before/after install.</constraint>
+    <constraint source="NFR-10 / ADR-021 / ADR-028">Any new/changed UI uses Fluent v9 + dark mode; client fetches use `@spaarke/auth`. (This task is mostly editor-config; applies to any surfaced affordance.)</constraint>
+    <constraint source="mirror-first / project">Consume task 010's additive paraId-map field from the mirrored Load-response contract in `compose-contracts.ts`; do NOT invent a parallel client schema.</constraint>
+    <constraint source="NFR-06 / ADR-038">Client behaviour (ids on nodes after mount, ids absent from DOM, split-minting, license resolution) is covered by client tests; the full through-the-wire proof rides with tasks 010/012's seam slices. No `Mock&lt;HttpMessageHandler&gt;`-style false-greens.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>TipTap v3 / ProseMirror node attributes + explicit transactions; `@tiptap/extension-unique-id` (MIT) config + built-in split dedup; `w14:paraId` OOXML-shaped id generation; license provenance</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r3/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Load convert + editor mount" location="src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts">
+        Where mammoth HTML is turned into editor content — add the explicit paraId-stamping transaction here after `setContent`, reading the server paraId map from the Load response.
+      </pattern>
+      <pattern name="Editor extension config" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx">
+        Where TipTap extensions are configured — add `UniqueID.configure({ types: ['paragraph'], attributeName: 'paraId', generateID })` with a `renderHTML` that keeps the attribute off the DOM.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Confirm task 010's paraId-map Load-response field is available in `compose-contracts.ts`. Read S2 spike notes + design §5/§8. Output the FULL rigor-level declaration. Load `src/client/pcf/CLAUDE.md` + the project CLAUDE.md.</step>
+    <step order="1" name="Add + verify the UniqueID extension">Add `@tiptap/extension-unique-id` 3.28.0 to `package.json`. Verify the resolved package is `@tiptap/extension-unique-id` (MIT) and NOT `@tiptap-pro/*` (inspect the lockfile + declared license). Record the verification.</step>
+    <step order="2" name="Implement the OOXML-shaped generateID">Write an 8-hex `ST_LongHexNumber` generator (`0 &lt; x &lt; 0x80000000`) and wire it as UniqueID's `generateID` so split-minted ids are valid `w14:paraId`s directly.</step>
+    <step order="3" name="Configure UniqueID for paragraph (FR-10)">In `ComposeEditor.tsx`, `UniqueID.configure({ types: ['paragraph'], attributeName: 'paraId', generateID })`. Ensure the `paraId` attribute's `renderHTML` keeps it off the DOM (hidden node attribute only, FR-09).</step>
+    <step order="4" name="Explicit load-time carry (FR-09)">In `docxBridge.ts`, after `setContent`, dispatch an explicit transaction that stamps each paragraph node's `paraId` from the server map (in document order). Do not rely on auto-assign for load-time ids.</step>
+    <step order="5" name="Client tests">Assert: (a) after mount, paragraph nodes carry `paraId` matching the server map; (b) the rendered DOM contains no paraId attribute; (c) splitting a paragraph yields two distinct paraIds, one equal to the original, the other OOXML-shaped (`&lt; 0x80000000`); (d) the resolved dependency is `@tiptap/extension-unique-id` (MIT), not `@tiptap-pro/*`.</step>
+    <step order="6" name="Build-verify">`npm run build` the shared lib (per CLAUDE.md §12 — use the project build scripts, avoid raw `npm ci`). Confirm no Pro package pulled. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts (explicit load-time paraId carry)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (UniqueID config + OOXML-shaped generateID; hidden attr)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/package.json (`@tiptap/extension-unique-id` 3.28.0, MIT)</output>
+    <output type="test">Client tests: ids-on-nodes-after-mount, ids-absent-from-DOM, split-minting, license-resolution</output>
+    <output type="report">License-provenance verification (`@tiptap/extension-unique-id` MIT, not `@tiptap-pro/*`)</output>
+  </outputs>
+
+  <justification>
+    <existing>The editor already configures TipTap MIT-base extensions in `ComposeEditor.tsx` and converts mammoth HTML in `docxBridge.ts`, but neither carries a stable paragraph identity — anchors are fuzzy `textPattern`/`paragraphHint`/session-`spanId` (`compose-contracts.ts:108-115`). No existing paraId carry or minting on the client. Verified by grep across `Spaarke.Compose.Components/src`.</existing>
+    <extension>This EXTENDS existing files (`docxBridge.ts`, `ComposeEditor.tsx`, `package.json`) rather than adding a component; the only new dependency is the MIT `@tiptap/extension-unique-id`, whose split/merge dedup is exactly the minting mechanism we need (S2) — building a custom plugin instead would be reinventing a maintained MIT extension (rejected per S2 simplification).</extension>
+    <cost-of-doing-nothing>Without the client carry, the server-minted ids (task 010) never reach the editor, so edited editor paragraphs cannot be mapped back to original OOXML paragraphs on save (FR-12) and E2/E3 anchors stay fuzzy. Concrete failing contract: FR-09 acceptance "editor doc nodes carry `paraId` immediately after mount" and FR-10 "splitting a paragraph yields two distinct paraIds, one equal to the original" are unmet, blocking the E1 splice (task 020) and paraId anchoring (task 012).</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Editor `paragraph` nodes carry a `paraId` attribute immediately after mount, matching the server pre-parse map in document order (FR-09 acceptance).</criterion>
+    <criterion testable="true">The paraId is a hidden node attribute — it is NOT rendered to the DOM (no `data-*`/visible attribute); a test inspects the rendered HTML and finds no paraId (FR-09 acceptance).</criterion>
+    <criterion testable="true">`@tiptap/extension-unique-id` 3.28.0 is configured for `paragraph` with `attributeName: 'paraId'` and an OOXML-shaped `generateID` (8-hex `&lt; 0x80000000`).</criterion>
+    <criterion testable="true">Splitting a paragraph yields two distinct paraIds, one equal to the original id and the other freshly minted and OOXML-valid — via the extension's built-in dedup, with NO custom minting plugin (FR-10 acceptance, per S2).</criterion>
+    <criterion testable="true">Untouched paragraphs keep their paraIds across unrelated edits.</criterion>
+    <criterion testable="true">The resolved dependency is `@tiptap/extension-unique-id` (MIT); a check confirms it is NOT `@tiptap-pro/*` and no AGPL code is added (NFR-03 / owner rule).</criterion>
+    <criterion testable="true">Client tests exist and pass; the shared-lib build is green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

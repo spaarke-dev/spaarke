@@ -5,7 +5,7 @@
 > **Source**: [`design.md`](design.md) (code-grounded first pass + July-2026 best-practices research + 6 passed pre-spec spikes)
 > **Theme**: **Fidelity.** Make the Word round-trip faithful; give Compose a credible editing surface — without recreating Word, on the MIT TipTap base (no TipTap product features, paid or unpaid).
 > **Owner**: Ralph Schroeder
-> **Supersedes seed**: [`README.md`](README.md) Scope Areas A–J (superseded where this spec differs)
+> **Supersedes seed**: [`notes/seed-README.md`](notes/seed-README.md) Scope Areas A–J (superseded where this spec differs)
 > **Evidence base**: [`ooxml-fidelity-findings.md`](ooxml-fidelity-findings.md) · [`notes/tiptap-docx-fidelity-research-2026-07-16.md`](notes/tiptap-docx-fidelity-research-2026-07-16.md) · [`notes/spikes/`](notes/spikes/) (S1/S1b/S2/S3/S4/S5)
 
 ---

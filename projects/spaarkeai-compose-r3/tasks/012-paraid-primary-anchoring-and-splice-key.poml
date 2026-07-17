@@ -1,0 +1,162 @@
+<task id="012" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-11/FR-12 paraId-primary anchoring + fuzzy fallback (`AnnotationReanchorService`) + paraId as splice key</title>
+    <phase>1 E2</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>W1-E2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>010,011</deps>
+    <tags>bff-api,frontend,docx</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-11 + FR-12: promote `w14:paraId` to the PRIMARY anchor for annotations/redlines and
+    establish it as the splice key for the E1 delta save. Two coupled outcomes.
+    (1) FR-11 — annotations/redlines resolve by `paraId` first; the existing `AnnotationReanchorService`
+    (textPattern + Levenshtein + paragraphHint) is RETAINED as the **cross-Word-session fallback**.
+    This retention is mandatory, not optional: Word regenerates ALL paraIds on save when tracked
+    changes or comments are present (Open-XML-SDK #925), so paraId is stable only within OUR own
+    load→edit→save round-trip and is gone after an external Word edit — the fuzzy matcher
+    re-anchors in that case (design §5.2 caveat). Resolution order: try paraId, fall back to content
+    match when the paraId is absent.
+    (2) FR-12 — on save, paraId is the key that maps each edited editor paragraph to the original
+    OOXML paragraph for the FR-02 splice (an edit to paragraph P updates exactly the original
+    paragraph with the matching paraId).
+    The change is ADDITIVE: add a `paraId` field to `AnchoredAnnotationAnchor`
+    (`compose-contracts.ts:108-115`; `textPattern`/`paragraphHint`/`spanId` remain) and extend the
+    server `AnnotationReanchorService.cs` to try paraId before the fuzzy score. This is the ADR
+    Tension Path A item — `AnchoredAnnotation` gains `paraId`/offsets but stays Compose-domain
+    (positional document-adjacent UI state, never written via `memory.*`).
+  </prompt>
+
+  <role>
+    Full-stack engineer comfortable on both sides of the Compose seam: the TypeScript client
+    contracts (`AnchoredAnnotationAnchor` in `compose-contracts.ts`) and the .NET
+    `AnnotationReanchorService` re-anchor scorer. Fluent in mirror-first additive contract evolution
+    and in reasoning about anchor-resolution ordering (paraId-primary, fuzzy fallback).
+  </role>
+
+  <goal>
+    Annotations/redlines carry an explicit `paraId` (additive on `AnchoredAnnotationAnchor`) and
+    resolve by it first, with `AnnotationReanchorService`'s textPattern+Levenshtein+paragraphHint
+    matcher retained as the cross-Word-session fallback (tried only when the paraId is absent). On
+    save, paraId is the key mapping edited editor paragraphs to original OOXML paragraphs for the
+    FR-02 splice. Tests prove: an anchor resolves by paraId within our round-trip; the SAME anchor
+    re-resolves by fuzzy match after an external Word edit that regenerated paraIds; and an edit to
+    paragraph P maps to exactly the original paragraph with matching paraId. The client mirror
+    (`compose-contracts.ts`) and server contract stay in sync; a through-the-wire slice test (NFR-06)
+    proves the anchor round-trips to the correct paragraph.
+  </goal>
+
+  <context>
+    <background>
+      E2 anchoring half — it consumes task 010's server paraId map and task 011's client-carried node
+      attributes and turns paraId into the primary anchor + splice key (design §5, §5.2, §6.2, §8, §10).
+      Today the anchor is fuzzy: `AnchoredAnnotationAnchor` = `textPattern` (content match) +
+      `paragraphHint` (best-effort index) + `spanId` (session-only), re-scored with Levenshtein by
+      `AnnotationReanchorService.cs` (design §2). The design does NOT retire the fuzzy matcher — it
+      PROMOTES paraId to primary and KEEPS the matcher as the fallback because Word regenerates all
+      paraIds on external save (Open-XML-SDK #925), so the two compose cleanly: try paraId first,
+      fall back to content match when the paraId is gone. paraId is ALSO the splice key the E1
+      Docxodus patch uses (FR-02/FR-12) — the same substrate serves anchoring and the save splice. The
+      contract change is additive and mirror-first: `paraId` on the client `AnchoredAnnotationAnchor` +
+      the server anchor. This is ADR Tension Path A (inherited from R2): `AnchoredAnnotation` gains
+      `paraId`/offsets but stays Compose-domain positional UI state — never written via `memory.*`
+      (design §11; project CLAUDE.md ADR Tensions). This task touches `AnnotationReanchorService.cs`
+      (a shared Compose seam) so it is parallel-safe=false; run `/conflict-check` before the BFF PR.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts — add additive `paraId` field to `AnchoredAnnotationAnchor` (interface at lines 108-115); `textPattern`/`paragraphHint`/`spanId` remain</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs — try `paraId` resolution FIRST; fall back to the existing textPattern+Levenshtein+paragraphHint scorer as the cross-Word-session fallback (FR-11)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — use paraId as the splice key mapping edited editor paragraphs to original OOXML paragraphs (FR-12; the mapping the FR-02 splice in task 020 consumes)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs / DocxAnnotationWriter.cs — the annotation contract shapes that carry the anchor; keep the anchor additive so writer/reader stay compatible</file>
+      <file role="reference">projects/spaarkeai-compose-r3/notes/spikes/ — S1/S1b (paraId preserved on unchanged paragraphs — the within-round-trip case) + S2 (client carry); the Word-regeneration caveat is the external-edit case the fuzzy fallback covers</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §5 + §5.2 (Word-regeneration caveat — paraId-primary + fuzzy fallback), §6.2 (paraId + offsets on the anchor), §2 (Current State — AnchoredAnnotationAnchor compose-contracts.ts:108-115 + AnnotationReanchorService.cs), §8 (SAVE splice-by-paraId), §10 (reuse map — re-anchor service row), §11 (ADR Tension Path A)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Server pre-parse produces the `w14:paraId` map (the ids this task anchors + splices by).</dependency>
+      <dependency task="011" status="pending">Client carries paraIds as hidden node attributes so the anchor can capture the editing paragraph's paraId and the splice key is available on save.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-11 / design §5.2">Resolution order is paraId-FIRST, fuzzy-FALLBACK. `AnnotationReanchorService`'s textPattern+Levenshtein+paragraphHint matcher MUST be retained (not deleted) as the cross-Word-session fallback — Word regenerates all paraIds on external save (Open-XML-SDK #925).</constraint>
+    <constraint source="FR-12">On save, paraId is the key that maps each edited editor paragraph to exactly one original OOXML paragraph for the FR-02 splice. An edit to paragraph P updates exactly the original paragraph with matching paraId.</constraint>
+    <constraint source="ADR Tension Path A (design §11 / project CLAUDE.md)">`AnchoredAnnotation` gains `paraId`/offsets but stays Compose-domain positional document-adjacent UI state — never written via `memory.*` (inherited R2 deviation). Contract change is ADDITIVE; existing fields remain.</constraint>
+    <constraint source="mirror-first / project">The `paraId` field is added mirror-first: client `compose-contracts.ts` ↔ server anchor contract stay in sync. Do not fork the schema.</constraint>
+    <constraint source="ADR-007">No `Microsoft.Graph` types above the `SpeFileStore`/Infrastructure facade in the reanchor/splice code (`Services/Compose/`).</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` injects no AI internals (`IOpenAiClient`/executor/routing) — Tier-1 NetArchTest stays green.</constraint>
+    <constraint source="NFR-06 / ADR-038">Ships a through-the-wire `WebApplicationFactory` seam slice test (`tests/integration/seam/**`) proving an anchor round-trips to the correct paragraph by paraId. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests.</constraint>
+    <constraint source="ADR-029 / NFR-01 / CLAUDE.md §10">Measure BFF publish size on this BFF-touching task; report absolute compressed + delta vs ~49.63 MB baseline (state PDB convention); ≤60 MB; verify no new HIGH CVE. Run `/conflict-check` before the BFF PR (AnnotationReanchorService is a shared seam; parallel-safe=false).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>paraId-primary anchor resolution with fuzzy fallback; the Word paraId-regeneration caveat; additive mirror-first contract evolution; splice-key mapping</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-service-facade.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r3/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Re-anchor scorer" location="src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs">
+        The existing textPattern+Levenshtein+paragraphHint resolution — wrap it: attempt paraId match first, delegate to this scorer only when the paraId is absent (external-Word-edit fallback).
+      </pattern>
+      <pattern name="Additive anchor contract" location="src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts">
+        `AnchoredAnnotationAnchor` (lines 108-115) — add `paraId` alongside the existing fields; mirror the addition to the server anchor contract so writer/reader stay compatible.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Confirm tasks 010 (paraId map) + 011 (client carry) are available. Read design §5.2 (Word-regeneration caveat) + §8 (splice-by-paraId) + §11 (ADR Tension Path A). Output the FULL rigor-level declaration. Load the knowledge files + `.claude/constraints/bff-extensions.md`.</step>
+    <step order="1" name="Add the additive paraId field (mirror-first)">Add `paraId` to `AnchoredAnnotationAnchor` (`compose-contracts.ts:108-115`) and to the server anchor contract in the same shape; keep `textPattern`/`paragraphHint`/`spanId`. Document the Path A rationale (stays Compose-domain, never `memory.*`) in the PR description.</step>
+    <step order="2" name="Promote paraId to primary anchor (FR-11)">In `AnnotationReanchorService.cs`, resolve by `paraId` first; when the paraId is absent (external Word edit regenerated ids), delegate to the retained textPattern+Levenshtein+paragraphHint scorer. Do NOT remove the fuzzy path.</step>
+    <step order="3" name="Wire paraId as splice key (FR-12)">In `ComposeService`, establish the paraId→original-OOXML-paragraph mapping that the FR-02 splice (task 020) consumes, so an edited editor paragraph maps to exactly the original paragraph with matching paraId.</step>
+    <step order="4" name="Unit tests">Assert: (a) an anchor resolves by paraId within our round-trip; (b) the SAME anchor re-resolves via the fuzzy matcher after an external edit that changed/removed the paraId; (c) an edit to paragraph P maps to exactly the original paragraph with matching paraId; (d) the anchor contract is additive (existing consumers unaffected). Real docx/round-trip; no transport mocks (ADR-038).</step>
+    <step order="5" name="Through-the-wire slice test (NFR-06)">Add a `WebApplicationFactory` slice test in `tests/integration/seam/**` proving an anchor round-trips to the correct paragraph by paraId (load → anchor → save → reload).</step>
+    <step order="6" name="Verify + size/CVE report">Build BFF; build the shared lib for the client contract change. Run the new tests. Report publish-size absolute + delta vs ~49.63 MB baseline (PDB convention); no new HIGH CVE. NetArchTest facade + Graph-isolation green. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts (additive `paraId` on `AnchoredAnnotationAnchor`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs (paraId-primary + fuzzy fallback)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (paraId as splice key for FR-02)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ — paraId-primary + fuzzy-fallback + splice-key mapping tests</output>
+    <output type="test">tests/integration/seam/** — anchor round-trips to correct paragraph by paraId (NFR-06)</output>
+    <output type="report">Publish-size absolute + delta; CVE scan result; ADR Tension Path A note in the PR description</output>
+  </outputs>
+
+  <justification>
+    <existing>`AnnotationReanchorService` already resolves anchors (textPattern+Levenshtein+paragraphHint) and `AnchoredAnnotationAnchor` already carries the anchor fields — this task EXTENDS both, it does not add a component. Verified against design §2 (Current State) + `compose-contracts.ts:108-115`.</existing>
+    <extension>The `paraId` field is added to the EXISTING anchor contract and the paraId-first ordering wraps the EXISTING scorer — the fuzzy matcher is retained (required, per the Word-regeneration caveat), not replaced. No new service; the splice-key mapping lives on the existing `ComposeService` save path.</extension>
+    <cost-of-doing-nothing>Without paraId-primary anchoring + the splice-key mapping, redlines/annotations keep drifting on fuzzy text+index (the R2 stale-selection bug class, DEF-09) and the E1 delta save has no key to map edited editor paragraphs to original OOXML paragraphs. Concrete failing contract: FR-11 "an anchor resolves by paraId within our round-trip and by fuzzy match after an external Word edit" and FR-12 "an edit to paragraph P updates exactly the original paragraph with matching paraId" are unmet, blocking the FR-02 splice (task 020).</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">An annotation/redline anchor resolves by `paraId` within our own load→edit→save round-trip (FR-11 acceptance).</criterion>
+    <criterion testable="true">The SAME anchor re-resolves via the retained `AnnotationReanchorService` fuzzy matcher after an external Word edit that regenerated/removed paraIds — the fuzzy path is NOT deleted (FR-11 acceptance / design §5.2).</criterion>
+    <criterion testable="true">On save, an edit to paragraph P maps to exactly the original OOXML paragraph with the matching paraId (FR-12 acceptance) — the splice key the FR-02 rebuild consumes.</criterion>
+    <criterion testable="true">`paraId` is added to `AnchoredAnnotationAnchor` as an additive field (client mirror + server contract in sync); existing `textPattern`/`paragraphHint`/`spanId` consumers are unaffected (ADR Tension Path A — stays Compose-domain, never `memory.*`).</criterion>
+    <criterion testable="true">A through-the-wire `WebApplicationFactory` slice test proves an anchor round-trips to the correct paragraph by paraId (NFR-06).</criterion>
+    <criterion testable="true">`Services/Compose/` injects no AI-internal type (NetArchTest green); no `Microsoft.Graph` type leaks above the facade (ADR-007).</criterion>
+    <criterion testable="true">Publish size reported absolute + delta vs ~49.63 MB baseline, ≤60 MB; no new HIGH CVE; PDB convention stated.</criterion>
+    <criterion testable="true">Unit + slice tests exist and pass; BFF build + shared-lib build green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

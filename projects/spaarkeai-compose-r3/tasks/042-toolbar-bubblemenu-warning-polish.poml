@@ -1,0 +1,142 @@
+<task id="042" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-19/FR-20/FR-21 sticky toolbar + one-line bubble menu + dismissible simplification warning (R2 UAT carry-in)</title>
+    <phase>4 Toolset</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W4-Toolset</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend,fluent-ui,tiptap</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement three carried-in R2 UAT round-3 polish items on the Compose editor: FR-19 (DEF-16) — the
+    formatting toolbar stays pinned/sticky during scroll so it is visible at any scroll position; FR-20
+    (DEF-17) — the selection bubble menu renders on a single line at default widths (no wrap to two rows);
+    FR-21 (DEF-15) — the "opened with N simplification(s)" banner is dismissible via an × that closes it and
+    persists dismissal for the session. All three are client-only Fluent v9 polish on the MIT TipTap base —
+    NO TipTap product feature (paid or unpaid), no `@tiptap-pro/*`.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript engineer fluent in TipTap 3 editor UI (bubble menu, toolbar), CSS sticky
+    positioning, sessionStorage-backed UI state, and Fluent UI v9 theming (including dark mode).
+  </role>
+
+  <goal>
+    Three fixes: (1) the format toolbar is `position: sticky` (or equivalent) so it remains visible while
+    the document scrolls; (2) the selection bubble menu lays out on one row at default editor widths; (3)
+    the simplification banner in `ComposeBannerStack.tsx` gains a dismiss × that closes it and records the
+    dismissal in sessionStorage so it stays closed for the rest of the session. Matching component tests
+    assert toolbar stickiness, single-line bubble layout, and dismiss-persists-for-session, plus an ADR-021
+    dark-mode render check.
+  </goal>
+
+  <context>
+    <background>
+      These three items are R2 UAT round-3 findings (DEF-16 sticky toolbar, DEF-17 one-line bubble menu,
+      DEF-15 dismissible simplification warning) explicitly carried into R3 scope per design §7.5 ("Pinned/
+      sticky toolbar, one-line bubble menu | R2 UAT round-3 items (DEF-16/DEF-17) — carry in") and spec
+      FR-19..21. They are client-only editor polish, independent of the E1/E2 fidelity core, and run in the
+      W4 toolset parallel wave. The "opened with N simplification(s)" banner warns that the loaded doc was
+      simplified on import; dismissal should persist per session so the user is not re-nagged.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx — make the toolbar sticky/pinned during scroll (FR-19); ensure the bubble-menu variant lays out on one line (FR-20)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — bubble-menu wiring + toolbar host; confirm sticky container works within the editor scroll region</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeBannerStack.tsx — add a dismissible × to the "opened with N simplification(s)" banner (FR-21); persist dismissal in sessionStorage</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.scroll.test.tsx — existing scroll test; align the sticky-toolbar assertion with it</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeReanchorBanner.tsx — existing dismissible banner pattern to mirror for the simplification banner</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §7.5 (toolbar polish carry-in); spec.md FR-19/FR-20/FR-21 (DEF-16/DEF-17/DEF-15)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">Independent — no task dependency. Runs in the W4 toolset parallel wave alongside 040/043/044.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project / owner rule 2026-07-14">NO TipTap product feature (paid or unpaid) — no `@tiptap-pro/*`. All three fixes are CSS/state polish on the MIT base + Fluent v9.</constraint>
+    <constraint source="NFR-03 / project">If any npm extension is touched, verify it resolves to `@tiptap/extension-*` (MIT), NEVER `@tiptap-pro/*`. No new dependency expected.</constraint>
+    <constraint source="FR-21 / project">The simplification-banner dismissal MUST persist for the session (sessionStorage-backed) — an × closes it and it does not reappear on re-render within the session.</constraint>
+    <constraint source="ADR-021 / NFR-10">All three surfaces are Fluent UI v9 and MUST render correctly in dark mode (theme tokens; no hard-coded colors).</constraint>
+    <constraint source="ADR-028 / NFR-10">No new network calls; any client fetch uses `@spaarke/auth`.</constraint>
+    <constraint source="ADR-038 / NFR-06">Client component/unit tests only; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests. Tests exercise real render/scroll/dismiss behavior.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>CSS sticky positioning within a scroll region; TipTap bubble-menu layout; sessionStorage-backed dismissal; Fluent v9 + dark mode</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dismissible banner" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeReanchorBanner.tsx">
+        Existing dismissible Fluent v9 banner; mirror its × affordance + state handling for the simplification banner, adding sessionStorage persistence.
+      </pattern>
+      <pattern name="Editor scroll region" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.scroll.test.tsx">
+        Existing scroll test scaffolding; the sticky-toolbar assertion aligns with this scroll region.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor. Load the knowledge files + design §7.5. Read `ComposeReanchorBanner.tsx` (dismiss pattern) and `ComposeEditor.scroll.test.tsx` (scroll region).</step>
+    <step order="1" name="Sticky toolbar (FR-19/DEF-16)">Make `ComposeFormatToolbar` pin/stick during scroll within the editor scroll region; verify it stays visible at any scroll position without overlapping content incorrectly.</step>
+    <step order="2" name="One-line bubble menu (FR-20/DEF-17)">Adjust the bubble-menu variant so its controls lay out on a single row at default editor widths (no two-row wrap).</step>
+    <step order="3" name="Dismissible simplification banner (FR-21/DEF-15)">Add an × to the "opened with N simplification(s)" banner in `ComposeBannerStack.tsx`; on dismiss, write a sessionStorage sentinel so it stays closed for the session; suppress render when the sentinel is set.</step>
+    <step order="4" name="Tests">Author component tests: toolbar remains visible after scroll; bubble menu renders on one row; dismiss × hides the banner and it does not reappear when re-rendered within the session; include an ADR-021 dark-mode render check.</step>
+    <step order="5" name="Verify">`npm run build` the shared lib; run the new + existing scroll tests. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx (sticky + one-line bubble)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeBannerStack.tsx (dismissible simplification banner)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (sticky host / bubble wiring as needed)</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeToolbarPolish.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The formatting toolbar stays visible (pinned/sticky) at any scroll position within the editor — a test asserts the toolbar remains in view after the document scrolls (FR-19/DEF-16).</criterion>
+    <criterion testable="true">The selection bubble menu renders on a single row at default editor widths (no wrap to two lines) — FR-20/DEF-17.</criterion>
+    <criterion testable="true">The "opened with N simplification(s)" banner has an × that closes it; dismissal persists for the session (sessionStorage) and the banner does not reappear on re-render within the session — FR-21/DEF-15.</criterion>
+    <criterion testable="true">No `@tiptap-pro/*` dependency and no TipTap product feature is added.</criterion>
+    <criterion testable="true">All three surfaces render correctly in Fluent v9 dark mode (ADR-021).</criterion>
+    <criterion testable="true">Matching component tests exist and pass; shared-lib `npm run build` is green.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <ui-test name="Sticky toolbar during scroll (FR-19)">
+      <steps>Open a long document, scroll the editor content down several screens.</steps>
+      <expected>The formatting toolbar stays pinned and visible at the top of the editor region throughout the scroll.</expected>
+    </ui-test>
+    <ui-test name="One-line bubble menu (FR-20)">
+      <steps>Select a run of text at default editor width to trigger the bubble menu.</steps>
+      <expected>The bubble menu controls are laid out on a single row; nothing wraps to a second line.</expected>
+    </ui-test>
+    <ui-test name="Dismiss simplification banner persists (FR-21)">
+      <steps>Open a doc that shows "opened with N simplification(s)"; click the × ; then re-render the editor within the same session.</steps>
+      <expected>The banner closes on × and does not reappear on re-render for the remainder of the session.</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Render the toolbar, bubble menu, and simplification banner under the Fluent v9 dark theme provider.</steps>
+      <expected>All three use theme tokens and are legible in dark mode; no hard-coded light colors.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

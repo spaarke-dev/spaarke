@@ -1,0 +1,124 @@
+<task id="003" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>NFR-09 real-template hardening gate — re-run S1/S1b harness on 2–3 real firm templates</title>
+    <phase>0 Foundations</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+    <parallel-group>W0.5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>bff-api,docx,testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Re-run the S1/S1b Docxodus `WmlComparer` fidelity harness on **2–3 REAL firm templates** (not the
+    synthetic spike fixtures) — documents with nested tables, deep multi-level numbering, and
+    cross-references — BEFORE the E1 delta-save cutover (task 022). This is the NFR-09 hardening gate:
+    it proves the WmlComparer engine preserves `w14:paraId` on unchanged paragraphs, preserves all
+    structural parts (headers/footers/numbering/styles/nested tables), and emits minimal
+    `w:ins`/`w:del` + format-change markup on production-representative documents, not just the
+    controlled spike inputs. A FAILURE on any real template **GATES task 022** (the keystone save
+    cutover) — the delta save does not ship until this passes. The owner may need to supply the real
+    firm templates (an escalation trigger if none are available). This is a verification/harness task:
+    no production `Services/Compose/` code, only the test harness + a hardening report.
+  </prompt>
+
+  <role>
+    Senior .NET 8 developer fluent in the Microsoft Open XML SDK 3.x and OOXML WordprocessingML
+    (revision markup, `w14:paraId`, multi-level numbering, nested tables, cross-reference fields),
+    Docxodus `WmlComparer`, and fidelity-harness authoring. Comfortable diffing OOXML parts to assert
+    structural/semantic preservation and reading `w:ins`/`w:del`/format-change output on complex real
+    documents. Comfortable escalating cleanly when a required input (real firm templates) is missing.
+  </role>
+
+  <goal>
+    A repeatable harness (extending the S1/S1b spike harness) that runs `Docxodus` `WmlComparer`
+    against 2–3 real firm templates and asserts, per template: (1) every unchanged paragraph — including
+    table-cell, nested-table-cell, and deep-numbered paragraphs — retains its `w14:paraId`; (2) all
+    structural parts (headers/footers, numbering, styles, footnotes, tables) are preserved
+    structurally/semantically (cosmetic re-serialization accepted — Approach A); (3) representative
+    edits (a text change, a run-format change, a paragraph delete, a paragraph split) yield minimal
+    `w:ins`/`w:del` + format-change markup with no exception. Output: a hardening report at
+    `projects/spaarkeai-compose-r3/notes/spikes/` recording PASS/FAIL per template. A FAIL is a documented
+    gate on task 022. If real templates are unavailable, a clean owner escalation is raised.
+  </goal>
+
+  <context>
+    <background>
+      All six pre-spec spikes passed on synthetic fixtures; S1/S1b confirmed WmlComparer preserves
+      `w14:paraId` on unchanged paragraphs (incl. table cells, nested tables, 3-level numbering),
+      preserves all structural parts (re-serialized, cosmetic-only), and handles delete/split with
+      minimal ins/del + format-change (design §14, S1/S1b). NFR-09 requires re-running that harness on
+      2–3 **real** firm templates before build-freeze because real documents carry edge cases the
+      synthetic fixtures may not (design §14 "Re-run on real firm templates before build-freeze"; spec
+      Unresolved Question — "blocks the E1 cutover only"). This is the ONLY pre-build residual gate; it
+      gates the task 022 keystone cutover. Depends on task 001 (Docxodus must be packaged/available).
+    </background>
+    <relevant-files>
+      <file role="reference">projects/spaarkeai-compose-r3/notes/spikes/S1-docxodus-wmlcomparer-2026-07-16.md — the S1 harness + PASS criteria to re-run</file>
+      <file role="reference">projects/spaarkeai-compose-r3/notes/spikes/S1b-S2-S4-S5-2026-07-16.md — the S1b harder-fixture harness (nested table, 3-level numbering, delete, split)</file>
+      <file role="new">projects/spaarkeai-compose-r3/notes/spikes/ — NEW hardening report: S1/S1b re-run on real firm templates (PASS/FAIL per template; gate verdict for task 022)</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §14 (S1/S1b spikes + "re-run on real firm templates before build-freeze"), §4.2 (WmlComparer Approach A cosmetic re-serialization)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Docxodus 7.1.0 must be packaged (SkiaSharp excluded) and buildable before the harness can run WmlComparer against real templates.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-09">Before the delta-save cutover (task 022), re-run the S1/S1b harness on 2–3 REAL firm templates (nested tables, deep numbering, cross-references). A failure GATES the cutover — task 022 MUST NOT proceed until this passes. Record the verdict explicitly.</constraint>
+    <constraint source="NFR-01 / design §13 (packaging invariant)">The harness MUST exercise `WmlComparer` ONLY — it MUST NOT invoke Docxodus `HtmlToWml`/`FormattingAssembler` (those re-pull SkiaSharp and are not the R3 splice path).</constraint>
+    <constraint source="NFR-07 / FR-07">Fidelity is structural/semantic, not literal byte-identity — WmlComparer's cosmetic re-serialization (BOM/whitespace) is acceptable (Approach A). Assert paraId + structural-part preservation, not byte-equality.</constraint>
+    <constraint source="ADR-038">Harness assertions run at the OOXML level on real document round-trips (KEEP-class fidelity tests; no transport mocks). This is a TEST-MODIFYING task — code-review + adr-check run at Step 9.5 unconditionally.</constraint>
+    <constraint source="escalation / root §6">If the owner cannot supply real firm templates, raise a clean 🔔 Human Input Required escalation (the gate cannot be certified on synthetic fixtures alone) rather than silently substituting synthetic docs and marking PASS.</constraint>
+    <constraint source="project / no-secrets">Real firm templates may contain sensitive content — do NOT commit real client documents to the repo; reference them by path and commit only the sanitized harness + the PASS/FAIL report.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Docxodus WmlComparer fidelity assertions; OOXML paraId/structural-part preservation on real templates</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="S1/S1b fidelity harness" location="projects/spaarkeai-compose-r3/notes/spikes/S1-docxodus-wmlcomparer-2026-07-16.md">
+        The validated spike harness: load two DOCX, run WmlComparer, assert unchanged-paragraph paraId preservation + structural-part preservation + minimal ins/del/format-change. Re-target it at real firm templates; parameterize the fixture path.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency + input check">Declare the rigor level (FULL). Confirm task 001 landed Docxodus (buildable). Read the S1/S1b spike harnesses + PASS criteria. Confirm 2–3 real firm templates are available; if not, raise the owner escalation (🔔 Human Input Required) before proceeding.</step>
+    <step order="1" name="Parameterize the harness">Extend/parameterize the S1/S1b harness to accept real-template fixture paths (nested tables, deep numbering, cross-references). WmlComparer only — no HtmlToWml/FormattingAssembler.</step>
+    <step order="2" name="Run per template">For each real template: apply the representative edit set (text change, run-format change, whole-paragraph delete, paragraph split); run WmlComparer; assert unchanged-paragraph paraId preservation (incl. table-cell + nested-table-cell + deep-numbered), structural-part preservation (Approach A cosmetic), and minimal ins/del + format-change with no exception.</step>
+    <step order="3" name="Record verdict">Write the hardening report to `projects/spaarkeai-compose-r3/notes/spikes/` — PASS/FAIL per template, with the failing edge cases enumerated on any FAIL. State the explicit gate verdict for task 022 (PASS → cutover unblocked; FAIL → cutover blocked, root-cause the WmlComparer behavior).</step>
+    <step order="4" name="Gate + index">If any template FAILS, document that task 022 is GATED and surface the root cause (per root §6.5 if it implies an approach change). Update TASK-INDEX status. Do NOT commit real client documents — only the sanitized harness + report.</step>
+  </steps>
+
+  <outputs>
+    <output type="test">Parameterized S1/S1b fidelity harness targeting real firm templates (WmlComparer only)</output>
+    <output type="report">projects/spaarkeai-compose-r3/notes/spikes/ — NFR-09 hardening report: PASS/FAIL per real template + explicit gate verdict for task 022</output>
+    <output type="report">If applicable: 🔔 owner escalation for missing real firm templates</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The S1/S1b WmlComparer harness is re-run on 2–3 REAL firm templates (nested tables, deep numbering, cross-references) — per NFR-09 + Success Criteria #8.</criterion>
+    <criterion testable="true">Per template, every unchanged paragraph (incl. table-cell, nested-table-cell, deep-numbered) retains its `w14:paraId`; all structural parts (headers/footers, numbering, styles, footnotes, tables) are preserved structurally/semantically (cosmetic re-serialization accepted — Approach A) — per FR-07/NFR-07.</criterion>
+    <criterion testable="true">Representative edits (text change, run-format change, paragraph delete, paragraph split) yield minimal `w:ins`/`w:del` + format-change markup with no exception — per FR-03/FR-05.</criterion>
+    <criterion testable="true">The harness exercises `WmlComparer` ONLY — no `HtmlToWml`/`FormattingAssembler` invocation (SkiaSharp not re-pulled) — per design §13.</criterion>
+    <criterion testable="true">A PASS/FAIL verdict per template is recorded in `notes/spikes/`, and the explicit gate decision for task 022 is stated (PASS → cutover unblocked; FAIL → cutover blocked with root cause) — per NFR-09.</criterion>
+    <criterion testable="true">If real firm templates are unavailable, a clean owner escalation is raised rather than certifying the gate on synthetic fixtures; no real client documents are committed to the repo.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,143 @@
+<task id="050" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-24 import existing revisions — project `DocxAnnotationReader` `RecoveredRevision` on Load + in-editor render</title>
+    <phase>5 Import</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>010,012,022</deps>
+    <tags>bff-api,docx,frontend</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-24 (import round-trip — existing revisions). On Load, run the EXISTING
+    `DocxAnnotationReader.Read` (`Services/Compose/DocxAnnotationReader.cs:68` — it already reads
+    ALL native `w:ins`/`w:del` regardless of authorship; see class doc `DocxAnnotationReader.cs:14-16`
+    + `RecoveredRevision` record `DocxAnnotationReader.cs:327-348`) server-side alongside the mammoth
+    convert, project the resulting `RecoveredRevision` list onto the Load response, and render each as
+    a **first-class tracked change** (insertion/deletion mark) in the editor mount — NOT flattened by
+    mammoth to prose. This is **WIRING, not building** (design §7 — "the reader is not the gap, the
+    editor mount is"): the reader is done; the gap is the Load-response projection + the in-editor
+    render. Extends `ComposeService.LoadAsync` (`ComposeService.cs:168`). The imported revisions must be
+    accept/reject-able like any R2 redline mark, and must anchor by `w14:paraId` (E2) so task 052 can
+    prove they survive save. Do NOT re-derive or reimplement the reader — reuse it verbatim.
+  </prompt>
+
+  <role>
+    Senior full-stack developer fluent in the Microsoft Open XML SDK 3.x read path, the Spaarke
+    Compose BFF (`ComposeService.LoadAsync` load orchestration), the TipTap MIT-base editor with the
+    R2 home-grown `insertion`/`deletion` marks, and the mirror-first contract discipline
+    (`Spaarke.Compose.Components/src/types` ↔ `Services/Compose/*.cs`). Comfortable wiring an existing
+    server-side reader's output into a client render without touching the reader itself.
+  </role>
+
+  <goal>
+    `ComposeService.LoadAsync` runs the existing `DocxAnnotationReader.Read` on the load-time `.docx`
+    bytes and projects `RecoveredRevision` (kind/author/date/text/anchorText/paragraphHint, plus the
+    E2 `paraId`) onto the Load response contract (additive, mirror-first). The client editor mount
+    renders each recovered `w:ins`/`w:del` as a first-class TipTap insertion/deletion mark — visible,
+    author/date-attributed, and accept/reject-able — instead of letting mammoth flatten it to prose.
+    Imported revisions anchor by `paraId` (primary) with the `AnnotationReanchorService` fuzzy fallback
+    retained. A through-the-wire slice assertion (full authorship in task 052) confirms a Word-redlined
+    doc opens with its revisions visible and actionable. Matching unit tests in
+    `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/` cover the Load-projection.
+  </goal>
+
+  <context>
+    <background>
+      Import round-trip is in R3 core (D2) as a parallel track behind the E1/E2 fidelity core, on which
+      it depends for the paraId substrate (E2) and the retained-original save (E1). Design §7 is the
+      controlling section: the existing-mark READER already ships (`DocxAnnotationReader.cs:14-16,327-348`
+      — built to recover human Word-for-Web edits, returns `RecoveredRevision` with
+      author/date/anchorText/paragraphHint), but the editor mount path uses mammoth
+      (`docxBridge.ts:77-86`), which flattens `w:ins`/`w:del` to prose before the editor sees them. So
+      FR-24 is the Load-response projection + in-editor render of `RecoveredRevision`, attached by
+      `paraId` (E2) so it survives the retained-original save (E1). Design §2 records the reader as an
+      existing asset ("The reader is not the gap — the editor mount is").
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — extend `LoadAsync` (`:168`) to run `DocxAnnotationReader.Read` on the load-time bytes and project `RecoveredRevision` onto the Load response (design §2 existing-mark reader row, §7, §9 Load row)</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs — REUSE VERBATIM: `Read(byte[])` (`:68`) already reads all `w:ins`/`w:del` regardless of authorship (`:14-16`); `RecoveredRevision` record (`:327-348`). Do NOT modify or reimplement.</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts — additive Load-response field carrying imported revisions; `AnchoredAnnotationAnchor` (`:108-115`) already gains `paraId` in E2 (task 012/030) — reuse it</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — render recovered revisions as first-class `insertion`/`deletion` marks on mount (accept/reject-able), instead of mammoth-flattened prose</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts — the mammoth mount path (`:77-86`) that currently flattens marks; the imported revisions bypass the flatten by riding the Load-response projection</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §7 (import round-trip — reader exists, mount is the gap), §2 (existing-mark reader row), §10 (component reuse map — import parser row), §8 (LOAD pipeline)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">FR-08 server pre-parse + `w14:paraId` minting on Load — imported revisions attach by paraId; the paraId map must exist on the Load response first.</dependency>
+      <dependency task="012" status="pending">FR-11/FR-12 paraId-primary anchoring + fuzzy fallback — imported revisions anchor by paraId first, fuzzy fallback second.</dependency>
+      <dependency task="022" status="pending">FR-01 E1 cutover (retained-original baseline) — the substrate imported marks must survive across a dirty save (proven in task 052).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project / design §7">This is WIRING, not building. REUSE `DocxAnnotationReader` verbatim — do NOT modify, fork, or reimplement the reader. The only new code is the Load-response projection + the in-editor render.</constraint>
+    <constraint source="ADR-007">NO `Microsoft.Graph` types above the `SpeFileStore`/Infrastructure facade. The reader operates on `byte[]`; `LoadAsync` already obtains bytes via the facade — do not introduce a Graph type in `Services/Compose/`.</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` MUST NOT inject `IOpenAiClient`/executor/routing types. Import projection is a deterministic OOXML-read + render concern with zero AI reach. Tier-1 NetArchTest stays green.</constraint>
+    <constraint source="project / MUST anchor by paraId">Imported revisions MUST anchor primarily by `w14:paraId` (E2); the `AnnotationReanchorService` fuzzy match is retained as the cross-Word-session fallback (Word regenerates paraIds on external edits).</constraint>
+    <constraint source="NFR-03 / owner rule">No TipTap product feature (paid or unpaid). The imported revisions render via the R2 home-grown `insertion`/`deletion` marks on the MIT base — no `@tiptap-pro/*`, no TipTap TrackChanges module.</constraint>
+    <constraint source="NFR-10 / ADR-021 / ADR-028">New UI is Fluent v9 + dark mode; client fetches use `@spaarke/auth`.</constraint>
+    <constraint source="NFR-01 / §10 BFF hygiene / ADR-029">Report BFF publish-size absolute + delta vs the ~49.63 MB baseline (the reader is already referenced → expect ~0 MB delta; state it). No new NuGet. Verify no new HIGH CVE.</constraint>
+    <constraint source="project / §10 Placement Justification">State the Placement Justification in the PR description (Load-projection lives in `Services/Compose/`, reusing the existing reader + LoadAsync seam — no new server surface), citing bff-extensions.md.</constraint>
+    <constraint source="NFR-06 / ADR-038">The through-the-wire seam slice test for imported-marks survival is authored in task 052; this task adds Load-projection unit tests at the KEEP path. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Open XML revision read; ComposeService Load orchestration; TipTap insertion/deletion marks; paraId anchoring</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing-mark reader (reuse verbatim)" location="src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs">
+        `Read(byte[])` (`:68`) returns `DocxAnnotationReadResult { Comments, Revisions }`; `RecoveredRevision` (`:327-348`) carries kind/id/author/date/text/anchorText/paragraphHint. Call it on the load-time bytes; do not touch the reader.
+      </pattern>
+      <pattern name="Load orchestration seam" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs">
+        `LoadAsync` (`:168`) — extend to run the reader alongside the mammoth convert and add the recovered-revisions list to the Load response (additive, mirror-first).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Declare rigor (FULL). Confirm deps 010 (paraId map on Load), 012 (paraId anchoring), 022 (E1 cutover) are ✅. Load bff-extensions.md + the ADRs. Read design §7 + §2 and the reader source — confirm `Read` reads all-authorship revisions and do NOT plan any reader change.</step>
+    <step order="1" name="Design the additive Load-response projection">Add an additive `importedRevisions` (or equivalent) field to the Load-response contract, mirror-first (`compose-contracts.ts` ↔ server DTO). Each item carries the `RecoveredRevision` fields + the E2 `paraId` for the anchoring paragraph. snake_case on the wire; do not invent a parallel schema — reuse the `RecoveredRevision` shape.</step>
+    <step order="2" name="Wire the reader into LoadAsync">In `LoadAsync` (`ComposeService.cs:168`), run `DocxAnnotationReader.Read` on the load-time `.docx` bytes alongside the mammoth convert; map each `RecoveredRevision` onto the response, attaching the `paraId` from the E2 pre-parse map (task 010). Empty list (not null) when the doc has no revisions.</step>
+    <step order="3" name="Render imported revisions in the editor mount">In `ComposeEditor.tsx`, on mount, render each imported revision as a first-class R2 `insertion`/`deletion` mark (author/date attributed, accept/reject-able) anchored by `paraId` — instead of the mammoth-flattened prose. Do NOT add any TipTap Pro/TrackChanges module; use the existing home-grown marks.</step>
+    <step order="4" name="Anchor + fuzzy fallback">Anchor imported revisions by `paraId` first; retain the `AnnotationReanchorService` fuzzy fallback (textPattern + Levenshtein + paragraphHint) for the cross-Word-session case where paraIds were regenerated externally.</step>
+    <step order="5" name="Unit tests">Add Load-projection unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`: a Word-redlined fixture yields the recovered revisions on the Load response with correct kind/author/date + paraId; a no-revision fixture yields an empty list, not null. Mock at the SPE facade boundary (ADR-038; no transport mocks).</step>
+    <step order="6" name="Verify + report">Build BFF + shared lib; run the new tests; run the NetArchTest facade check; report publish-size delta (~0 expected) + CVE; state the Placement Justification; update TASK-INDEX.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (LoadAsync projects RecoveredRevision)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts (additive imported-revisions field)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (imported revisions rendered as first-class marks)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ (Load-projection tests)</output>
+    <output type="report">Publish-size delta vs ~49.63 MB baseline; CVE scan; NetArchTest facade result; Placement Justification</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A `.docx` redlined in Word (existing `w:ins`/`w:del`, any authorship) opens in Compose with those revisions rendered as first-class tracked changes — visible and accept/reject-able — NOT flattened to prose (FR-24 acceptance).</criterion>
+    <criterion testable="true">`LoadAsync` runs the EXISTING `DocxAnnotationReader.Read` verbatim (reader unmodified) and projects `RecoveredRevision` (kind/author/date/text + paraId) onto the Load response; a no-revision doc yields an empty list, not null.</criterion>
+    <criterion testable="true">Imported revisions anchor primarily by `w14:paraId` (E2); the `AnnotationReanchorService` fuzzy match is retained as the cross-Word-session fallback.</criterion>
+    <criterion testable="true">Rendering uses the R2 home-grown `insertion`/`deletion` marks on the MIT TipTap base — no `@tiptap-pro/*` and no TipTap TrackChanges module added (NFR-03).</criterion>
+    <criterion testable="true">`Services/Compose/` injects no AI-internal type (NetArchTest green); no `Microsoft.Graph` type appears in `Services/Compose/` (ADR-007).</criterion>
+    <criterion testable="true">Publish-size reported absolute + delta vs the ~49.63 MB baseline (≈0 expected; no new NuGet); no new HIGH CVE; Placement Justification stated citing bff-extensions.md.</criterion>
+    <criterion testable="true">Load-projection unit tests exist at the KEEP path and pass; BFF + shared-lib builds green (no `Mock&lt;HttpMessageHandler&gt;`, no DI/ctor-null tests — ADR-038).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

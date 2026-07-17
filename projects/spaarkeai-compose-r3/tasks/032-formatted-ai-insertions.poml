@@ -1,0 +1,131 @@
+<task id="032" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-15 formatted AI insertions — enrich `new_text` to carry marks + `buildInsertionHtml`</title>
+    <phase>3 E3</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W3-E3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>030</deps>
+    <tags>frontend,tiptap,api</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-15 (S5/D4): enrich `ComposeDraftPayload.new_text` from a plain string into a
+    **formatting-bearing fragment** (or an additive structured-runs field) so that AI-inserted
+    replacement text can carry run formatting (bold/italic), and update `buildInsertionHtml` (in
+    `usePendingRedline.ts`) to emit the corresponding marks. Today `new_text` is a plain string, so an
+    AI-inserted redline renders unformatted even when the suggestion is bold/italic (design §6.2 S5
+    finding). This is a **bounded change at the payload + insertion-HTML boundary** — the mark/range
+    apply layer is UNCHANGED (already slice-safe, `usePendingRedline.ts:461-465`, per S5). The contract
+    change is additive + mirror-first (client `types/compose-contracts.ts` &lt;-&gt; server
+    `ComposeDraftPayload`); no new AI dispatch endpoint and no AI catalog row change (engine frozen,
+    NFR-04).
+  </prompt>
+
+  <role>
+    Senior React + TipTap engineer fluent in ProseMirror marks (bold/italic), the insertion-HTML
+    boundary that feeds mark-over-range application, and additive snake_case mirror-first contract
+    discipline (client `types` &lt;-&gt; server record). Careful to touch only the payload + HTML-build
+    boundary and leave the proven slice-safe apply layer alone.
+  </role>
+
+  <goal>
+    `ComposeDraftPayload.new_text` enriched to carry run formatting (a formatting-bearing fragment or
+    an additive structured-runs field), mirrored server + client, and `buildInsertionHtml` updated to
+    emit bold/italic marks so an AI insertion that includes bold renders bold in the inserted redline.
+    The mark/range apply layer (`usePendingRedline.ts:461-465`) is untouched. Tests assert a bold-bearing
+    suggestion produces a bold insertion mark, that plain-string `new_text` still round-trips
+    (backward-compatible), and the additive fields mirror server &lt;-&gt; client.
+  </goal>
+
+  <context>
+    <background>
+      S5 proved the shipped redline apply path is slice-safe (mark-over-range preserves existing
+      formatting, `usePendingRedline.ts:461-465`) — the one remaining R3 item is that
+      `ComposeDraftPayload.new_text` is a plain **string**, so an AI-*inserted* replacement carries no
+      bold/italic (design §6.2, S5 finding; §14 S5 row). D4 (run-level fidelity) wants AI insertions
+      to carry runs. The fix is bounded: enrich `new_text` into a formatting-bearing fragment (or add
+      a structured runs field) at the payload boundary, and update `buildInsertionHtml` to emit the
+      marks. This does NOT touch the apply layer (already correct) and does NOT change the AI dispatch
+      seam or catalog (engine frozen). Coordinate the additive payload shape with task 030 (also
+      additive on `ComposeDraftPayload`) — distinct fields, mirror-first, no divergence.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts — `buildInsertionHtml`: emit bold/italic marks from the enriched `new_text`. The mark-over-range apply at 461-465 stays UNCHANGED.</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts — enrich `new_text` to a formatting-bearing fragment (or add an additive structured-runs field) on the `ComposeDraftPayload` mirror.</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDraftDisposition.cs — the server `ComposeDraftPayload` record (line ~168); mirror the enriched `new_text` shape additively, snake_case, no property-level boolean `required`.</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §6.2 (formatted AI insertions — enrich `new_text` to formatting-bearing; update `buildInsertionHtml`; mark/range layer already correct), §14 S5 row, §10 (reuse map — slice-safe apply reference).</file>
+      <file role="spec">projects/spaarkeai-compose-r3/spec.md FR-15, NFR-04, NFR-03 (MIT TipTap base only — no `@tiptap-pro/*`).</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">FR-13/FR-16 additive `ComposeDraftPayload` fields. Establishes the additive mirror-first change on the same record; coordinate the enriched `new_text` shape with 030's additions (distinct fields, identical server/client shapes, no divergence).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project / S5">Touch ONLY the payload (`new_text` enrichment) + `buildInsertionHtml` boundary. Do NOT modify the mark/range apply layer (`usePendingRedline.ts:461-465`) — it is already slice-safe and correct.</constraint>
+    <constraint source="ADR-039 / NFR-04">Engine frozen: NO new AI dispatch endpoint and NO new/changed AI catalog rows. This is a payload-shape + client-render enrichment on the existing dispatch path.</constraint>
+    <constraint source="project / owner hygiene">Additive, mirror-first: the enriched `new_text` shape is identical on the server `ComposeDraftPayload` record and the client mirror. Property-level boolean `required` is BANNED. snake_case wire vocabulary. Preserve backward compatibility — a plain-string `new_text` must still round-trip.</constraint>
+    <constraint source="NFR-03">MIT TipTap base + `@tiptap/extension-*` only — bold/italic marks come from StarterKit (MIT). Never `@tiptap-pro/*`, no AGPL code.</constraint>
+    <constraint source="ADR-013 / NFR-05">If any server-side shaping of `new_text` occurs, `Services/Compose/` injects no AI-internal type; Tier-1 NetArchTest stays green.</constraint>
+    <constraint source="NFR-06 / ADR-038">If the change crosses the save/load/dispatch wire, it carries a through-the-wire seam slice test asserting a formatted insertion survives the boundary. No `Mock&lt;HttpMessageHandler&gt;` / DI-registration / ctor-null tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ProseMirror bold/italic marks; insertion-HTML boundary; additive snake_case mirror-first contract; slice-safe apply (do not touch)</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-013-ai-facade.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/INTEGRATION-CONTRACTS.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="insertion HTML build" location="src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts">
+        `buildInsertionHtml` produces the HTML the insertion mark carries; enrich it to emit bold/italic from the formatting-bearing `new_text`. Leave the mark-over-range apply (461-465) untouched.
+      </pattern>
+      <pattern name="mirror-first payload" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDraftDisposition.cs">
+        `ComposeDraftPayload` record; mirror the enriched `new_text` shape 1:1 in `types/compose-contracts.ts`; additive + backward-compatible; no boolean `required`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Confirm task 030's additive changes to `ComposeDraftPayload` (coordinate the shared record). Run the FULL rigor-level declaration. Load `bff-extensions.md` + the ADR knowledge files.</step>
+    <step order="1" name="Enrich the `new_text` shape (mirror-first)">Enrich `new_text` on the client mirror (`compose-contracts.ts`) and the server record (`ComposeDraftDisposition.cs`) to a formatting-bearing fragment (or add an additive structured-runs field). Keep it additive + backward-compatible (plain string still valid), snake_case, no boolean `required`.</step>
+    <step order="2" name="Emit marks in `buildInsertionHtml`">Update `buildInsertionHtml` in `usePendingRedline.ts` to translate the enriched `new_text` into HTML carrying bold/italic marks (StarterKit MIT marks). Do NOT modify the mark/range apply at 461-465.</step>
+    <step order="3" name="Tests">Author tests asserting: a bold-bearing suggestion yields a bold insertion mark in the rendered redline; a plain-string `new_text` still round-trips unchanged (backward compatibility); the enriched shape mirrors server &lt;-&gt; client. If the change crosses the wire, add/extend a through-the-wire seam slice test.</step>
+    <step order="4" name="Verify">Build the client shared lib (+ BFF if the record changed); run the tests. If BFF touched: report publish size delta + CVE + NetArchTest facade. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts (`buildInsertionHtml` emits bold/italic marks)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts (enriched formatting-bearing `new_text`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDraftDisposition.cs (mirrored enriched `new_text` shape)</output>
+    <output type="test">Tests: bold suggestion =&gt; bold insertion mark; plain-string `new_text` backward-compat; server &lt;-&gt; client mirror</output>
+    <output type="report">If BFF touched: publish-size delta + CVE + NetArchTest facade result</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">An AI suggestion whose `new_text` includes bold renders bold in the inserted redline (FR-15) — asserted by a `buildInsertionHtml`/render test.</criterion>
+    <criterion testable="true">The enriched `new_text` (formatting-bearing fragment or additive structured-runs field) is additive + backward-compatible: a plain-string `new_text` still round-trips unchanged.</criterion>
+    <criterion testable="true">The enriched shape is mirrored identically on the server `ComposeDraftPayload` record and the client `types/compose-contracts.ts`; snake_case; no property-level boolean `required` introduced.</criterion>
+    <criterion testable="true">The mark/range apply layer (`usePendingRedline.ts:461-465`) is unchanged; only the payload + `buildInsertionHtml` boundary is touched (S5).</criterion>
+    <criterion testable="true">No new AI dispatch endpoint and no AI catalog row change (NFR-04); marks come from the MIT TipTap base (StarterKit), never `@tiptap-pro/*` or AGPL code (NFR-03).</criterion>
+    <criterion testable="true">Client shared-lib build green with matching tests passing; if the server record changed, a through-the-wire seam slice test asserts a formatted insertion survives the boundary (NFR-06) and no new HIGH CVE / publish-size regression.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

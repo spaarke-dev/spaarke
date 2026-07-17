@@ -1,0 +1,118 @@
+<task id="024" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-07/NFR-06 through-the-wire fidelity seam slice test (untouched OOXML preserved on dirty save)</title>
+    <phase>2 E1</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+    <parallel-group>W2-E1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>022,023</deps>
+    <tags>testing,bff-api,docx</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-07 + NFR-06: a through-the-wire `WebApplicationFactory` seam slice test in
+    `tests/integration/seam/**` that proves the E1 fidelity guarantee end-to-end. The test drives the
+    real save route with an edited formatted `.docx` and asserts that untouched paragraphs preserve
+    their text, `w14:paraId`, styles, numbering, headers/footers, footnotes, and (nested) tables — while
+    the edited paragraphs show the edits (as tracked changes). This is the E2E Definition-of-Done proof
+    for the E1 cutover: unit-green ≠ done. TEST-MODIFYING task — code-review + adr-check run at Step 9.5
+    UNCONDITIONALLY. Mock ONLY at the `SpeFileStore` facade boundary; NO `Mock&lt;HttpMessageHandler&gt;`,
+    NO DI-registration/ctor-null tests (ADR-038).
+  </prompt>
+
+  <role>
+    Senior .NET 8 test engineer fluent in `WebApplicationFactory` through-the-wire seam tests and Open
+    XML assertion (reading `w:p`/`w14:paraId`/`w:pStyle`/`w:numPr`/headers/footers/footnotes/tables from
+    the persisted `.docx`). Follows the repo's `tests/integration/seam/**` vertical-slice conventions and
+    the ADR-038 mock-boundary rules (mock only the SPE facade; the HTTP boundary is real).
+  </role>
+
+  <goal>
+    A seam slice test under `tests/integration/seam/` that: POSTs an edit to a formatted-doc fixture
+    through the real save route (post-022 delta path); captures the persisted bytes at the SpeFileStore
+    facade boundary; and asserts (a) untouched paragraphs preserve text + `w14:paraId` + `pStyle` +
+    numbering + headers/footers + footnotes + (nested) tables; (b) the edited paragraphs carry the edits
+    as tracked changes. The test fails if a dirty save degrades any untouched structure (regression
+    guard for the fidelity invariant).</goal>
+
+  <context>
+    <background>
+      Design §12 bullet 6 (test obligation: a `WebApplicationFactory` save-a-formatted-doc → assert
+      non-edited OOXML survives + edits applied) + spec NFR-06 (E2E DoD — every save/load/dispatch change
+      carries a through-the-wire slice test; mock-`HttpMessageHandler`/DI-registration/ctor-null do NOT
+      satisfy) + NFR-07 (fidelity invariant: untouched paragraphs preserve text + paraId + styles +
+      numbering + headers/footers + footnotes + nested tables; re-serialization cosmetic-only). Existing
+      seam tests (e.g. `tests/integration/seam/Ai/ComposeDocSessionDispatchSeamTests.cs`) are the shape
+      to follow. ADR-038 adds `tests/integration/seam/**` as a KEEP path (vertical-slice-seam category).
+    </background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/ — NEW fidelity seam slice test (edit-formatted-doc → assert untouched OOXML preserved + edits applied)</file>
+      <file role="reference">tests/integration/seam/Ai/ComposeDocSessionDispatchSeamTests.cs — existing Compose seam test shape (WebApplicationFactory + real route + facade-boundary capture)</file>
+      <file role="reference">tests/integration/seam/README.md — vertical-slice-seam conventions</file>
+      <file role="under-test">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:315 — SaveAsync (inverted delta path, task 022) is the code under test</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §12 bullet 6</file>
+      <file role="spec">projects/spaarkeai-compose-r3/spec.md FR-07, NFR-06, NFR-07</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="022" status="pending">FR-01 baseline inversion — the delta save path this test exercises.</dependency>
+      <dependency task="023" status="pending">FR-04 AI redlines reuse — so the test can also assert AI redlines land on the faithful baseline.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-07 / NFR-07">Assert untouched content — paragraph text, `w14:paraId`, styles, numbering, headers/footers, footnotes, tables (incl. nested) — is preserved across a dirty save. WmlComparer cosmetic re-serialization (BOM/whitespace) is acceptable (Approach A); assert structural/semantic equivalence, not literal byte-identity.</constraint>
+    <constraint source="NFR-06 / ADR-038">Through-the-wire `WebApplicationFactory` slice test that POSTs the body the client actually sends through the real save route and asserts the persisted side-effect. Mock ONLY at the `SpeFileStore` facade boundary. NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests — these do NOT satisfy the DoD.</constraint>
+    <constraint source="ADR-038 KEEP path">Place the test under `tests/integration/seam/**` (the vertical-slice-seam KEEP category); follow the existing seam-test fixture conventions.</constraint>
+    <constraint source="project / TEST-MODIFYING override">This task modifies `tests/**` → code-review + adr-check run at Step 9.5 UNCONDITIONALLY (overrides any default skip).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>WebApplicationFactory seam slice tests; Open XML structural assertions; ADR-038 KEEP paths + mock-boundary rules</topic>
+    <files>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>tests/integration/seam/README.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Compose seam slice test" location="tests/integration/seam/Ai/ComposeDocSessionDispatchSeamTests.cs">
+        WebApplicationFactory + real Compose route + capture the persisted bytes at the SpeFileStore facade — mirror this shape for the fidelity assertion.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context check">Confirm tasks 022 + 023 are complete (the delta save + AI-annotation composition under test). Output the FULL rigor-level declaration (TEST-MODIFYING → gates unconditional). Read the seam README + existing Compose seam test.</step>
+    <step order="1" name="Build the formatted-doc fixture">Create/obtain a formatted `.docx` fixture with a letterhead header/footer, multi-level clause numbering, custom styles, footnotes, and a (nested) table — with stable `w14:paraId`s. Reuse an S1/S1b fixture where possible.</step>
+    <step order="2" name="Author the seam test">Under `tests/integration/seam/`, stand up `WebApplicationFactory` with the SpeFileStore facade faked (capture persisted bytes). POST an edit (edit ~3 paragraphs incl. one run-format change) through the real save route with the body the client sends. Capture the persisted `.docx`.</step>
+    <step order="3" name="Assert fidelity">Open the persisted bytes with the Open XML SDK; assert untouched paragraphs preserve text + `w14:paraId` + `pStyle` + numbering; assert headers/footers, footnotes, and (nested) tables are intact; assert the edited paragraphs carry the edits (tracked changes). Allow cosmetic re-serialization (Approach A).</step>
+    <step order="4" name="Verify">Run the seam test (green); run the full seam suite for no regression. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="test">tests/integration/seam/ (NEW fidelity seam slice test + formatted-doc fixture)</output>
+    <output type="report">Test result summary (untouched OOXML preserved + edits applied on a dirty save)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A `WebApplicationFactory` seam test POSTs an edit to a formatted-doc fixture through the real save route and captures the persisted bytes at the SpeFileStore facade boundary (not a service-level unit test).</criterion>
+    <criterion testable="true">The test asserts untouched paragraphs preserve text + `w14:paraId` + styles (`pStyle`) + numbering + headers/footers + footnotes + (nested) tables after edit+save.</criterion>
+    <criterion testable="true">The test asserts the edited paragraphs carry the edits as tracked changes.</criterion>
+    <criterion testable="true">The test uses no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration test, no ctor-null test; it mocks only at the SpeFileStore facade and lives under `tests/integration/seam/**`.</criterion>
+    <criterion testable="true">Cosmetic re-serialization (BOM/whitespace, Approach A) does not fail the test; structural/semantic equivalence is asserted.</criterion>
+    <criterion testable="true">The seam test passes and the full seam suite has no regression.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -7,7 +7,7 @@
 > **R3 Theme**: **Fidelity.** R1 shipped the editor round-trip (with documented loss); R2 shipped AI actions + native-OOXML track-changes/comments *authoring*. R3 closes the gap between "the document came back mangled" and "the document came back exactly as it went in, with my edits marked."
 > **Owner**: Ralph Schroeder
 > **Last updated**: 2026-07-16 (first draft — code-grounded against the as-built compose-r2 save/annotation path)
-> **Seed**: [`README.md`](README.md) (Scope Areas A–J) + [`ooxml-fidelity-findings.md`](ooxml-fidelity-findings.md) (E1/E2/E3 verdicts, grounded 2026-07-14)
+> **Seed**: [`notes/seed-README.md`](notes/seed-README.md) (Scope Areas A–J) + [`ooxml-fidelity-findings.md`](ooxml-fidelity-findings.md) (E1/E2/E3 verdicts, grounded 2026-07-14)
 > **Research (current best practices, July 2026)**: [`notes/tiptap-docx-fidelity-research-2026-07-16.md`](notes/tiptap-docx-fidelity-research-2026-07-16.md) — three primary-source-cited threads (TipTap ecosystem/licensing · DOCX fidelity round-trip · AI authoring/track-changes UX). Its conclusions are folded into §4–§7, §10, §14 below.
 > **R2 reference (direct foundation, merged to master)**: [`../spaarkeai-compose-r2/design.md`](../spaarkeai-compose-r2/design.md) · [`../spaarkeai-compose-r2/notes/defer-issues.md`](../spaarkeai-compose-r2/notes/defer-issues.md)
 > **Binding foundations**: [ADR-039 Grounded Execution & Closed Catalogs] · [ADR-040 Session Ledger] · [ADR-043 Action spine] · ADR-013 (AI facade) · ADR-007 (Graph isolation) · ADR-009 (Redis-first)
