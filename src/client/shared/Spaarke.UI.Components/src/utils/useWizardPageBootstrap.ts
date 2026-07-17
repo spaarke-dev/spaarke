@@ -25,6 +25,13 @@ import { createXrmNavigationService } from './adapters/xrmNavigationServiceAdapt
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from '@spaarke/auth';
 import { cleanGuid } from '../services/PolymorphicResolverService';
 import type { AssociationResult } from '../components/AssociateToStep/types';
+import {
+  readHandoffFromUrl,
+  handoffSeed as computeHandoffSeed,
+  completeHandoff as writeCompleteHandoff,
+  type HandoffContext,
+  type HandoffSeed,
+} from '../services/surfaceHandoff';
 
 export interface IWizardPageBootstrap {
   /** Resolved Fluent theme (light/dark) for the page's FluentProvider. */
@@ -57,6 +64,30 @@ export interface IWizardPageBootstrap {
    * and pins the host record as the parent (per CreateRecordWizard config).
    */
   lockAssociation: boolean;
+  /**
+   * Assistant → surface hand-off context (task 012), read from THIS page's own
+   * launch URL (`data=handoffId=…`). `null` when the page was opened directly
+   * (not via a `surface_launch` hand-off). Present when the Assistant launched
+   * this wizard pre-seeded.
+   */
+  handoff: HandoffContext | null;
+  /**
+   * The typed pre-seed payload (draftValues + resolvedLookups + fileIds), or
+   * `null` when there is nothing to seed. TASK 013 maps this onto the specific
+   * wizard's initial form values + resolved-dropdown pre-selects — this bootstrap
+   * only surfaces the seed; the per-wizard field mapping is 013 scope.
+   */
+  handoffSeed: HandoffSeed | null;
+  /**
+   * Write the COMMITTED outcome for the active hand-off (a real record was
+   * created), then close the dialog. No-op (just closes) when there is no
+   * hand-off. TASK 013 wires this into each wizard's success/onFinish callback
+   * with the created record id; the Assistant gates its honest "✅ Created …"
+   * claim on the written outcome (P5 / task 020). Cancellation is INFERRED by
+   * the orchestrator from the absence of a written result — so a plain
+   * `closeDialog` (cancel) needs no result write here.
+   */
+  completeHandoff: (recordId?: string) => void;
 }
 
 /**
@@ -107,9 +138,28 @@ export function useWizardPageBootstrap(logPrefix: string): IWizardPageBootstrap 
   const uploadService = React.useMemo(() => createXrmUploadService(bffBaseUrl), [bffBaseUrl]);
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
 
+  // Assistant → surface hand-off (task 012). Read once from this page's own
+  // launch URL; hydrate the envelope from sessionStorage. `null` when opened
+  // directly (no `handoffId` on the URL).
+  const handoff = React.useMemo(() => readHandoffFromUrl(), []);
+  const handoffSeed = React.useMemo(() => computeHandoffSeed(handoff), [handoff]);
+
   const closeDialog = React.useCallback(() => {
     navigationService.closeDialog({ confirmed: true });
   }, [navigationService]);
+
+  // Write the committed outcome (P5 honest ack) then close. Cancellation is
+  // inferred by the orchestrator from the absence of a written result, so a bare
+  // `closeDialog` is the correct "user cancelled" path.
+  const completeHandoff = React.useCallback(
+    (recordId?: string) => {
+      if (handoff?.handoffId) {
+        writeCompleteHandoff(handoff.handoffId, recordId);
+      }
+      navigationService.closeDialog({ confirmed: true });
+    },
+    [handoff, navigationService]
+  );
 
   // Build the pre-filled association from the launch envelope. The entityId is
   // an Xrm-sourced GUID, so normalize it with cleanGuid at ingestion (ADR-044 —
@@ -149,5 +199,8 @@ export function useWizardPageBootstrap(logPrefix: string): IWizardPageBootstrap 
     closeDialog,
     initialAssociation,
     lockAssociation,
+    handoff,
+    handoffSeed,
+    completeHandoff,
   };
 }

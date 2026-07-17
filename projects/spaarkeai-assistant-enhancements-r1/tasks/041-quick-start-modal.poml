@@ -3,7 +3,7 @@
   <metadata>
     <title>Quick Start modal (reuse the Create* wizard library)</title>
     <phase>5: Assistant Surface</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>040</dependencies>
     <blocks>none</blocks>

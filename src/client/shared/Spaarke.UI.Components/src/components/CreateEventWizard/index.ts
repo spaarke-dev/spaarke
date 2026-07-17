@@ -14,6 +14,9 @@ export type { ICreateEventWizardProps } from './CreateEventWizard';
 export { CreateEventStep } from './CreateEventStep';
 export type { ICreateEventStepProps } from './CreateEventStep';
 
+// Assistant hand-off pre-seed mapper (spaarkeai-assistant-enhancements-r1 task 013).
+export { mapEventHandoffSeed } from './handoffSeedMapping';
+
 // Service layer
 export { EventService } from './eventService';
 export type { ICreateEventResult } from './eventService';

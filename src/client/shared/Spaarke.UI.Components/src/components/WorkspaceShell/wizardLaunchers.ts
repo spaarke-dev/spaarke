@@ -58,7 +58,7 @@
  * (CreateProjectWizardWidget, FindSimilarWizardWidget) — hoisted here so the
  * direct-click path uses the same resolver.
  */
-function resolveXrmNavigation(): any | null {
+export function resolveXrmNavigation(): any | null {
   if (typeof window === 'undefined') return null;
 
   const frames: Window[] = [window];
@@ -191,6 +191,28 @@ export function launchCreateMatterWizard(options: BaseLauncherOptions): void {
 }
 
 /**
+ * Launch the Create Event wizard (`sprk_createeventwizard`).
+ *
+ * Added by spaarkeai-assistant-enhancements-r1 task 012 — this was the one
+ * Get-Started surface `wizardLaunchers.ts` did NOT hoist (matter / project /
+ * summarize / find-similar / work-assignment / playbook existed; event did not,
+ * per surface-launch-mechanism §3 build-verify #2). The shared `CreateEventWizard`
+ * component + `src/solutions/CreateEventWizard` Code Page (web resource
+ * `sprk_createeventwizard`, confirmed against its `main.tsx`) already exist; this
+ * is the missing direct-click launcher, matching the sibling call shape exactly.
+ *
+ * The `create-task` assistant hand-off routes here with a Task-subtype preset
+ * carried in the envelope (see `surfaceLaunchRegistry.ts`), NOT on the URL.
+ */
+export function launchCreateEventWizard(options: BaseLauncherOptions): void {
+  fireNavigateTo({
+    webresourceName: 'sprk_createeventwizard',
+    data: `bffBaseUrl=${encodeURIComponent(options.bffBaseUrl)}`,
+    title: 'Create New Event',
+  });
+}
+
+/**
  * Launch the Create Project wizard (`sprk_createprojectwizard`).
  *
  * Source: WorkspaceGrid.tsx `handleOpenProjectWizard` (lines 244–269).
@@ -277,3 +299,126 @@ export function launchPlaybookIntent(options: PlaybookIntentLauncherOptions): vo
     title: options.title ?? 'Playbook Library',
   });
 }
+
+// ---------------------------------------------------------------------------
+// Promise-returning navigate primitives (task 012 — the hand-off return path)
+// ---------------------------------------------------------------------------
+//
+// The fire-and-forget `fireNavigateTo` above swallows the `navigateTo` promise
+// (the shipped Get-Started launchers don't need an outcome). The Assistant →
+// surface hand-off (task 012) DOES need it: the `navigateTo` promise resolving
+// is the "surface is done" signal (design §1 step 8 / build-verify #2), at which
+// point the Assistant reads the outcome the surface wrote to sessionStorage.
+// These primitives expose that promise. They REUSE the same frame-walking
+// `resolveXrmNavigation` + dialog options as the fire-and-forget path — no
+// parallel launch mechanism (CLAUDE.md §11).
+
+/** Common shape of a `navigateTo` result the hand-off cares about. */
+export interface NavigateToOutcome {
+  /**
+   * `false` when no Xrm host was reachable (Vite dev / jsdom) — the caller
+   * degrades to "draft shown, nothing opened" rather than treating it as a
+   * committed launch. `true` once `navigateTo` was actually invoked.
+   */
+  readonly launched: boolean;
+  /**
+   * `true` when the modal was cancelled/dismissed (the `navigateTo` promise
+   * rejected). Never carries the raw rejection detail (ADR-019).
+   */
+  readonly cancelled?: boolean;
+  /**
+   * The saved-entity reference returned by an `entityrecord` navigation when a
+   * record was created/saved (OOB-form return path). Absent for web resources
+   * (those return their outcome via the sessionStorage result envelope instead).
+   */
+  readonly savedEntityReference?: { readonly id: string; readonly entityType?: string; readonly name?: string };
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+/**
+ * Launch a web-resource surface (a Create*Wizard Code Page) and RESOLVE when the
+ * modal closes. Used by the hand-off orchestrator so it can read the surface's
+ * outcome from sessionStorage after close. `data` carries the hand-off id +
+ * bffBaseUrl (the payload rides sessionStorage, not the URL — design §2).
+ */
+export async function navigateToWebResourceSurfaceAsync(params: NavigateToParams): Promise<NavigateToOutcome> {
+  const nav = resolveXrmNavigation();
+  if (nav === null) {
+    return { launched: false };
+  }
+  try {
+    await nav.navigateTo(
+      { pageType: 'webresource', webresourceName: params.webresourceName, data: params.data },
+      { target: DEFAULT_TARGET, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT, title: params.title }
+    );
+    return { launched: true };
+  } catch {
+    // User cancel / dialog error — the outcome (if any) is in sessionStorage.
+    return { launched: true, cancelled: true };
+  }
+}
+
+/**
+ * Options for launching an OOB entity create form in a modal (design §3 /
+ * MODAL-DECISION-CRITERIA — the To Do route).
+ */
+export interface EntityRecordSurfaceParams {
+  /** Entity logical name (e.g. `sprk_todo`). */
+  entityName: string;
+  /** Dialog title. */
+  title: string;
+  /**
+   * Default field values to pre-populate the create form (thinner OOB pre-seed —
+   * OOB forms accept default-value params only, design §3). Attribute-logical-name
+   * keyed. Optional.
+   */
+  defaultValues?: Record<string, unknown>;
+}
+
+/**
+ * Launch an OOB entity create form (`pageType:'entityrecord'`) in a modal and
+ * RESOLVE with the saved-entity reference when a record is created (the OOB-form
+ * return path — an OOB form has no custom code to write the sessionStorage
+ * result, so its outcome rides the `navigateTo` resolve value). REUSES the same
+ * frame-walking resolver + modal options as the wizard path.
+ */
+export async function navigateToEntityRecordSurfaceAsync(
+  params: EntityRecordSurfaceParams
+): Promise<NavigateToOutcome> {
+  const nav = resolveXrmNavigation();
+  if (nav === null) {
+    return { launched: false };
+  }
+  const pageInput: Record<string, unknown> = {
+    pageType: 'entityrecord',
+    entityName: params.entityName,
+  };
+  // OOB pre-seed: `data` on an entityrecord create pageInput pre-populates form
+  // fields with default values (the documented createFromEntity/default-value seam).
+  if (params.defaultValues && Object.keys(params.defaultValues).length > 0) {
+    pageInput.data = params.defaultValues;
+  }
+  try {
+    const result: any = await nav.navigateTo(pageInput, {
+      target: DEFAULT_TARGET,
+      width: DEFAULT_WIDTH,
+      height: DEFAULT_HEIGHT,
+      title: params.title,
+    });
+    // entityrecord resolves with `{ savedEntityReference: [{ id, entityType, name }] }`
+    // when the user saved; undefined/empty when they cancelled.
+    const ref = Array.isArray(result?.savedEntityReference) ? result.savedEntityReference[0] : undefined;
+    if (ref?.id) {
+      return {
+        launched: true,
+        savedEntityReference: { id: String(ref.id).replace(/[{}]/g, ''), entityType: ref.entityType, name: ref.name },
+      };
+    }
+    return { launched: true, cancelled: true };
+  } catch {
+    return { launched: true, cancelled: true };
+  }
+}
+
+/* eslint-enable @typescript-eslint/no-explicit-any */

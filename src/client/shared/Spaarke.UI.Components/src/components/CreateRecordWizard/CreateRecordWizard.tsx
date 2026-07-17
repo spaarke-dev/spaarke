@@ -393,6 +393,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
               attorneyValue={attVal}
               onAttorneyChange={handleAttorneyChange}
               onSearchAttorneys={searchContacts}
+              onAssignAttorneyToMe={config.resolveCurrentUserAssignee}
               paralegalValue={paraVal}
               onParalegalChange={handleParalegalChange}
               onSearchParalegals={searchContacts}
@@ -427,6 +428,8 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
             description: createEventDescriptionRef.current,
             regardingRecordId: '',
             regardingRecordName: '',
+            assignedToId: '',
+            assignedToName: '',
           };
           return (
             <CreateEventFollowOnStep
@@ -556,7 +559,15 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
     const addFilesStep: IWizardStepConfig = {
       id: 'add-files',
       label: 'Add file(s)',
-      canAdvance: () => (fileStateRef.current?.uploadedFiles?.length ?? 0) > 0,
+      // Grounding-optional (spaarkeai-assistant-enhancements-r1 task 014 / P6 /
+      // FR-A5, ADR-039): a create flow MUST NOT require an attached document or
+      // session content. `canAdvance` was previously gated on
+      // `uploadedFiles.length > 0`, contradicting this file's own header
+      // comment ("always skip-able (canAdvance: true)") and this step's
+      // `isSkippable: true` -- Next was disabled with no file even though Skip
+      // always bypassed the same requirement. Always-true removes that
+      // confusing dead-end and makes "no file needed" true for both buttons.
+      canAdvance: () => true,
       isSkippable: true,
       renderContent: () => (
         <>
