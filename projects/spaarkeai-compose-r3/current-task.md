@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-17 (task-execute — task 020 COMPLETE, all gates PASS, awaiting commit)
+> **Last Updated**: 2026-07-17 (context-handoff — 012+020 COMPLETE & committed; task 021 handoff for fresh session)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,33 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 020 — ✅ COMPLETE (FR-02 edited-paragraph rebuild + paraId-keyed splice). Uncommitted. |
-| **Step** | 4 of 4 DONE + Step 9.5 gates PASS (0 Critical, 0 blocking ADR). |
-| **Status** | completed — awaiting commit + operator go for next task |
-| **Next Action** | Commit task 020 (3 code/DI/test files + 3 tracking). Next startable: **021** (FR-02 Docxodus WmlComparer adapter — consumes 020's spliced-edited doc; adds Docxodus NuGet → publish-size watch), **030** (E3 band, deps 012✅). Task **022** (SaveAsync inversion) needs 021. Run `/conflict-check` before any BFF PR. Resume: `work on task 021` / `continue`. |
+| **Task** | 021 — FR-03/FR-05 Docxodus `WmlComparer` redline synthesis adapter (NOT STARTED — fresh-session recommended) |
+| **Step** | 0 of 4 (context-budget stop before starting; 012+020 done & committed) |
+| **Status** | not-started |
+| **Next Action** | `work on task 021` in a FRESH session. FULL · opus @ xhigh · directional. Deps 001✅ 020✅. See Handoff Notes — Task 021 below (WmlComparer API recipe + the 6.4.0-vs-7.1.0 verification risk are pre-captured). |
+
+### Committed this session
+- `5aed0f2d5` — task 012 (FR-11/FR-12 paraId-primary anchoring + splice key) — **pushed** to PR #656.
+- `e492e1844` — task 020 (FR-02 rebuild+splice) — **committed, NOT pushed**.
+
+### Handoff Notes — Task 021 (Docxodus WmlComparer adapter) — NOT STARTED 2026-07-17
+
+**Rigor**: FULL · opus @ xhigh · directional · BFF (Services/Compose, parallel-safe=false). Deps 001✅ 020✅. Hot-path /conflict-check: same surface as 012/020, CLEAR (only open PR touching Services/Compose is our #656).
+
+**API recipe (from S1 spike — de-risks step 2)**: namespace **`Docxodus`**; one-liner —
+`WmlComparer.Compare(new WmlDocument(origBytes), new WmlDocument(editedBytes), new WmlComparerSettings { AuthorForRevisions = "Spaarke AI" })` → returns a `WmlDocument`; get bytes via its byte accessor (S1 used `.SaveAs(path)` — for byte-in/byte-out mirror `DocxAnnotationWriter`; `WmlDocument` exposes `.DocumentByteArray`). Format-Change Detection + author attribution work out of the box (S1 (c)). Emits minimal `w:ins`/`w:del`; bold-only change → `rPr/pPrChange` (NOT del+ins) — assert this (FR-05/D4).
+
+**⚠️ VERIFICATION RISK (do FIRST in step 1)**: S1 validated on Docxodus **7.1.0 (net10)** but task 001 §6.5 Path-C shipped **6.4.0 (net8)**. CONFIRM the 6.4.0 API surface matches: `Docxodus.WmlComparer.Compare`, `Docxodus.WmlDocument(byte[])` ctor, `Docxodus.WmlComparerSettings.AuthorForRevisions`, and the byte accessor. Quick check: `grep`/reflect the restored `Docxodus.dll` (in ~/.nuget/packages/docxodus/6.4.0/) or write a 3-line probe. If 6.4.0 differs, adapt (same fork lineage — likely identical) or surface as §6.5.
+
+**MUST NOT** touch `HtmlToWml` / `FormattingAssembler` (re-pulls SkiaSharp — packaging exclusion from task 001). Diff path = `WmlComparer` only.
+
+**Plan**: NEW `Services/Compose/ComposeRedlineComparerService.cs` (name TBD) — `byte[] SynthesizeRedline(ReadOnlyMemory<byte> retainedOriginal, ReadOnlyMemory<byte> splicedEdited, string author)` → redline-marked bytes. Mirror `DocxAnnotationWriter` byte-in/byte-out shape. Register unconditional singleton in ComposeModule (like 020's ComposeParagraphSpliceService). Consumed by task 022 (SaveAsync inversion) — NOT wired here.
+
+**Tests** (`tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`): build retained-original + spliced-edited pairs via `ComposeParagraphSpliceService` (task 020 — reuse its fixture idiom) then compare. Assert: 3 edited paras → minimal ins/del + author set; bold-a-word → `rPr/pPrChange` not del+ins; NO exception on nested-table / 3-level-numbering / whole-para-delete / paragraph-split fixtures (S1/S1b). Real docx, no transport mocks. (Building the S1b edge-case fixtures is the bulk of the effort.)
+
+**Step 4 verify**: publish — verify NO `libSkiaSharp` in `deploy/api-publish/` output; report absolute compressed + delta vs worktree baseline (012/020 both measured **45.94 MB** compressed incl PDBs — 021 activates Docxodus code paths but the package is already referenced since task 001, so expect ~0 additional delta at publish since 001 already counted it). `dotnet list package --vulnerable` no new HIGH. ADR013_ComposeFacade NetArchTest green (ADR007 pre-existing RED = Services.Communication, not us). PR: §10 Placement Justification.
+
+**Resume**: `work on task 021` (or `continue`).
 
 ### Files Modified This Session (task 020)
 - `src/server/api/Sprk.Bff.Api/Services/Compose/ComposeParagraphSpliceService.cs` — NEW pure splice service + `ComposeEditedParagraph` DTO + `ComposeSpliceException`.
