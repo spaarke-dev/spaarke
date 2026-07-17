@@ -1,7 +1,8 @@
 # Current Task State — messaging-communication-app-r1
 
-> **Last Updated**: 2026-07-16 (task-execute — task 050 in progress)
-> **Recovery**: Read "Quick Recovery" first, then "Remaining Plan". Branch `work/messaging-communication-app-r1`, PR #655 (draft).
+> **Last Updated**: 2026-07-17 (context-handoff — 25 done, 4 remain; ready for /compact)
+> **Recovery**: Read "Quick Recovery" first, then "Remaining Plan". Branch `work/messaging-communication-app-r1` (HEAD `872ff6d56`), PR #655 (draft). All work committed + pushed; tree clean.
+> **Note**: total task count is now **29** (task **052** open-thread-grant was added mid-project). 25 ✅, 4 🔲 (061, 080, 081, 090).
 
 ---
 
@@ -45,25 +46,21 @@
 
 ---
 
-## Remaining Plan (9 tasks) — resume order
+## Remaining Plan (4 tasks) — resume order: 061 → 080 → 081 → 090
 
 | # | Task | Notes for the implementer |
 |---|---|---|
-| **050** | BFF thread-read + unread-count endpoints | Use `DataverseWebApiService.RetrieveMultipleImpersonatedAsync(entitySet, odata, callerSystemUserId)` (built in the 042 rework) → get user-visible rows → apply `ICommunicationAccessFilter.FilterMessages` (internal-only + privilege app-flags) → return. Unread = same filter on since-last-seen. Resolve oid→systemuserid server-side (see `UserPrivilegeChecker`/`CommunicationAccessContext.CallerSystemUserId`). ADR-019 ProblemDetails on whole-thread denial. Deps 040✅/042✅/004✅. **Blocks 060.** |
-| **043** | 1:1 direct threads | Narrow thread OWNERSHIP so exactly the two participants have access (impersonation enforces). Explicit two-participant list feeds 041's `IThreadExplicitParticipantReader` seam (currently Null-Object). `sprk_threadtype = Direct 1:1 (100000001)`. Deps 040✅. |
-| **060** | Polling timeline component (`@spaarke/ui-components`, Fluent v9) | Interleaved email+chat, reply nesting (`sprk_inreplyto`), compose box, unread indicator, ~5s poll of 050's endpoint. **NO client-side ACS SDK** (NFR-04 — acceptance criterion). Reuse `<EmailComposer/>` sub-components. `npm run build`. Deps 050. |
-| **061** | Package timeline as PCF + deploy | React 16/17 platform libs (ADR-022); `npm run build:prod`; `pcf-deploy`; `<ui-tests>` (dark mode, inbound-within-one-poll, no-ACS-SDK bundle check). Deps 060. |
-| **062** | PCF send/respond accessories | On OOB form, mirror email-r4 `CommunicationActions`; calls 051 send path. Deps 051✅/060. |
-| **063** | Bidirectional content quoting | `quoteBody()` helper reading `sprk_body`/`sprk_bodyformat`; email↔message; no `.eml` parse. Deps 060. |
-| **080** | Vertical-slice seam tests | ADR-038 `tests/integration/seam/**`: send/archive/ingest, IThreadResolver, privacy; preserve email characterization. TEST-MODIFYING (9.5 unconditional). Deps 031✅/040✅/042✅/051✅. |
-| **081** | Architecture doc | Extend `docs/architecture/` comm doc with thread model + ACS transport + ingestor seam + **impersonation access model**; wire ADR-046. Deps 040✅/007✅. |
-| **090** | Wrap-up | README→Complete, lessons-learned, `/test-diet`, archive, final TASK-INDEX reconcile. Main-session (`.claude/`). |
+| **061** | Package `CommunicationTimeline` as a form-bound PCF + deploy | Wrap the shipped `@spaarke/ui-components` `CommunicationTimeline` (task 060 ✅) in a PCF host (mirror the **062** `CommunicationMessageActions` PCF just built — same host/auth/manifest pattern, `src/client/pcf/CommunicationMessageActions/` is the template). React 16/17 platform libs (ADR-022); Fluent v9; `@spaarke/auth` at boundary only; **grep the bundle for no `@azure/communication`** (NFR-04 hard gate); `npm run build:prod` (NOT `build`); pack the Solution ZIP. **DEFER `pac solution import` to owner** (owner has env) — document form/section placement (bind to `sprk_communication`/thread form) in the commit like 062. Deps 060✅. |
+| **080** | Vertical-slice seam tests (C#) | ADR-038 `tests/integration/seam/**`: send/archive/ingest, `IThreadResolver`, privacy/access; preserve email characterization. **TEST-MODIFYING → 9.5 gates UNCONDITIONAL** (root §8). Deps 031✅/040✅/042✅/051✅/052✅. Note: also exercise the 052 open-thread grant + 043 direct-thread membership if feasible. |
+| **081** | Architecture doc | Extend/refresh a `docs/architecture/` communication doc with the thread model + ACS-as-transport + ingestor seam + **the impersonation access model** (043/050/052) + the send-contract/thread-stamp (062). Wire ADR-046. Deps 040✅/007✅. |
+| **090** | Wrap-up | README→Complete, lessons-learned, **`/test-diet`** (mandatory at project close per root §7), archive, final TASK-INDEX reconcile, portfolio sync. Main-session (touches `.claude/`). Surface the 2 open findings (send-into-existing-thread MED; DI-cycle-refactor LOW) + config gate (Share privilege) in the wrap-up PR. |
 
-### Orchestration notes for next session
-- **Serial vs parallel**: BFF tasks that touch `CommunicationModule.cs` / `CommunicationChannelDispatcher` / `CommunicationService` must be **serial on the main tree** (parallel agents clobber shared files). Genuinely disjoint tasks parallelize via **isolated worktrees** (`isolation: "worktree"`) then cherry-pick — proven for 070/041. ⚠️ `.claude/worktrees/` is gitignored; do NOT `git add -A` while an isolated worktree is live if it's not ignored — use explicit paths.
-- **Per task**: dispatch a `task-execute` agent with its model-tier/effort from TASK-INDEX; instruct it NOT to touch `TASK-INDEX.md`/`current-task.md` (main session reconciles); leave changes in working tree; main session build-verifies (`dotnet build src/server/api/Sprk.Bff.Api/` + Communication test filter), commits, pushes, marks the index row ✅.
-- **BFF gates every task**: build, publish-size (~45.6 MB, ceiling 60), CVE (pre-existing Kiota HIGH only — report NEW), 9.5 code-review+adr-check, `/conflict-check`. Cite bff-extensions Placement Justification.
-- **UI wave (060–063)** is client TS — `npm run build`/`build:prod`, no publish-size/CVE; different surface from BFF (parallelizable with server work).
+### Orchestration notes (what worked this session — reuse next session)
+- **Subagent-per-task pattern (proven for 043/052/060/062/063)**: dispatch a `general-purpose` subagent (model `sonnet`) with a precise brief (inject exact contracts + pre-decide scope forks so it doesn't rabbit-hole); instruct it to leave changes uncommitted + NOT touch `TASK-INDEX.md`/`current-task.md`/`.claude/` + return a factual report. Main session then independently verifies (build + tests + hard-gate greps + review the highest-risk diff), runs 9.5 gates, updates the index, commits + pushes. Subagents edit non-`.claude/` files fine.
+- **⚠️ Pre-commit hook gotcha (this worktree)**: repo ROOT has no `node_modules`, so the husky pre-commit `npx lint-staged` → `prettier --write` FAILS on staged `.ts/.tsx` files (`'prettier' is not recognized`). Fixed this session by `npm install --no-save --legacy-peer-deps prettier@^3.8.1` at repo root (node_modules is gitignored). If a fresh session/worktree, re-run that before committing TS. Do NOT `--no-verify` (repo policy).
+- **⚠️ `git add` cwd**: stage from the REPO ROOT with explicit paths (a stray `cd` into a sub-package leaves cwd there and repo-relative pathspecs fail). Never `git add -A`.
+- **BFF gates**: build, publish-size (baseline ~46.99 MB compressed incl PDBs, ceiling 60 — measure via `Compress-Archive` of the publish output), CVE (pre-existing `Microsoft.Kiota.Abstractions` HIGH ONLY — report NEW), 9.5 code-review+adr-check. **ArchTest note**: 3 ADR-007/010 tests fail PRE-EXISTING (stale ceiling 76 vs ~140, Graph email debt) — proven via stash-and-rerun; task changes must not add a NEW failure type, but the 3 stale ones are not this project's to fix.
+- **Client tasks**: `npm run build` (tsc) / `build:prod` (PCF), no publish-size/CVE. Hard gates = grep no `@azure/communication` (NFR-04) + no `@spaarke/auth` in shared components (ADR-028).
 
 ---
 
@@ -82,25 +79,26 @@
 
 ## Files / Artifacts map
 - Spec/design/plan: `spec.md`, `design.md`, `plan.md`
-- Task registry: `tasks/TASK-INDEX.md` (19 ✅, 9 🔲)
-- Access model: `notes/access-model-decision.md` (authoritative)
+- Task registry: `tasks/TASK-INDEX.md` (**25 ✅, 4 🔲** — 061/080/081/090)
+- Access model: `notes/access-model-decision.md` (authoritative — incl. Share-privilege prereq #4 + the OPEN-thread-grant finding now RESOLVED by 052)
 - Schema (as-built): `notes/messaging-schema-spec.md`
-- Spikes: `notes/spikes/00{1,2,3}-*.md` + `acs-harness/`
-- Provisioning runbook: `notes/012-acs-provisioning-runbook.md`
+- Spikes: `notes/spikes/00{1,2,3}-*.md` + `acs-harness/`; Provisioning runbook: `notes/012-acs-provisioning-runbook.md`
 - ADR-046: `.claude/adr/ADR-046-*.md` (concise, Accepted) + `docs/adr/ADR-046-*.md` (full)
 - Portfolio: GitHub Project #654 (Epic #431), draft PR #655
-- New server code lives in `src/server/api/Sprk.Bff.Api/Services/Communication/{Acs,Channels,Threads,Membership,Access,Engine}/` + `Services/Jobs/Handlers/` + `Api/AcsEventGridEndpoints.cs`; impersonation in `src/server/shared/Spaarke.Dataverse/DataverseImpersonation.cs`.
+- **Server code**: `src/server/api/Sprk.Bff.Api/Services/Communication/{Acs,Channels,Threads,Membership,Access,Engine}/` + `Services/Jobs/Handlers/` + `Api/{AcsEventGridEndpoints,CommunicationEndpoints}.cs`; impersonation + POA in `src/server/shared/Spaarke.Dataverse/{DataverseImpersonation,DataverseWebApiService}.cs`.
+  - Read model (050): `Services/Communication/{CommunicationThreadReadService,IImpersonatedCommunicationQuery,CommunicationThreadReadModels}.cs`.
+  - Direct threads (043) + open-thread grant (052): `Services/Communication/Access/{DirectThreadAccessService,IDirectThreadAccessService,IDataverseAccessGrantService}.cs` + `Membership/DirectThreadExplicitParticipantReader.cs`. Send-contract/thread-stamp (062): `CommunicationService.AssignExplicitThreadAsync` + `SendCommunicationRequest.ThreadId`.
+- **Client code**: timeline `src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/` + `services/communicationTimelineApi.ts` + `utils/quoteBody.ts` (063). Send/respond PCF: `src/client/pcf/CommunicationMessageActions/` (062, ZIP built).
 
 ---
 
 ## Blockers
-**Status**: None blocking code. **Live integration gated on owner config** (Delegate role + User-level table Read) + a reachable BFF webhook for inbound Event Grid.
+**Status**: None blocking code — all functional code done. **Live use gated on owner config**: (1) Delegate role, (2) messaging-tables Read=User-level, (3) **Share privilege on both messaging tables** (043/052) — all in `access-model-decision.md`. Inbound live Event Grid still needs a publicly reachable BFF webhook (deferred). Owner to import the 062 PCF ZIP.
 
 ---
 
 ## Recovery Instructions
-1. Read Quick Recovery + Remaining Plan above.
-2. `git status` (expect clean, synced) + `git log --oneline -5`.
-3. To resume: "continue" (→ first 🔲 = task 050) or "work on task 050". Each task via `task-execute`.
-4. Load `notes/access-model-decision.md` + `notes/messaging-schema-spec.md` before any read/endpoint/schema work.
-5. Remind owner of the two config to-dos before live verification.
+1. Read Quick Recovery + Remaining Plan above. `git status` (expect clean, synced) + `git log --oneline -5` (HEAD `872ff6d56`).
+2. **⚠️ Before any TS commit**: `npm install --no-save --legacy-peer-deps prettier@^3.8.1` at repo root (pre-commit hook needs it — see Orchestration notes).
+3. To resume: "continue" (→ first 🔲 = **task 061**) or "work on task 061". Use the subagent-per-task pattern (Orchestration notes). Load `notes/access-model-decision.md` + `notes/messaging-schema-spec.md` for any server/schema work.
+4. Sequence: 061 (package PCF, defer deploy) → 080 (seam tests) → 081 (arch doc) → 090 (wrap + `/test-diet`). No remaining design-decision forks.
