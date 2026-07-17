@@ -1,8 +1,7 @@
-# Current Task State
+# Current Task State — messaging-communication-app-r1
 
-> **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-16
-> **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+> **Last Updated**: 2026-07-16 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first, then "Remaining Plan". Branch `work/messaging-communication-app-r1`, PR #655 (draft).
 
 ---
 
@@ -10,111 +9,77 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave 0 in progress — 001,002,003,006,007 ✅ done; **004,005 pending** (live Dataverse schema) |
-| **Step** | W0-B remainder |
-| **Status** | in-progress |
-| **Next Action** | 2 open decisions (private-grant sign-off; live-schema go-ahead), then run 004+005; then W1 (010/011/012) |
-
-### Files Modified This Session (W0)
-- `src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs` — +`Message=100000004` (task 006)
-- `.claude/adr/ADR-046-*.md` (concise→Accepted) + `docs/adr/ADR-046-*.md` (full) + `.claude/adr/INDEX.md` (task 007)
-- `notes/spikes/001-schema-audit.md`, `002-private-grant-decision.md`, `003-acs-spike.md` + `acs-harness/` (spikes)
+| **Project** | messaging-communication-app-r1 — 2nd communication channel (ACS Chat) over ADR-045 seams |
+| **Progress** | **19 of 28 tasks ✅**; branch green; all committed + pushed (HEAD `4ab250d7f`) |
+| **Server-side** | COMPLETE: send (051) · receive (030/031) · channel provider (020/021) · thread resolver (040) · membership reconcile (041) · privacy (042, impersonation) · ACS integration (010/011/012, live-validated) · attachments (070) |
+| **Next Action** | Resume with **task 050** (thread-read + unread endpoints, impersonated) then **043** (1:1 direct threads). Run each via `task-execute`. Then UI wave 060–063, then 080/081, then 090. |
+| **Status** | in-progress (paused at clean milestone for context compaction) |
 
 ### Critical Context
-Wave 0 spikes done on LIVE infra: 001 confirmed `Message=100000004` + all 6 columns absent (clean adds) via Dataverse MCP; 003 measured ACS publish delta +0.22 MB (GO), harness compile-verified; 002 recommends **option B** (sprk_externalrecordaccess overlay) for private threads — 🔔 owner sign-off advised. This project edits shared `Services/Communication/` code (task 040) — run `/conflict-check` before every BFF wave.
+- **Access model DECIDED (impersonation)** — read enforcement = Dataverse impersonation (`MSCRMCallerID` = caller **systemuserid**, resolved from oid). 042 reworked to app-flags only (internal-only + privilege-metadata). Full detail: [`notes/access-model-decision.md`](notes/access-model-decision.md). Granting = OOB "Manage access" (POA), no custom grant table.
+- **🔧 OWNER CONFIG GATE (for live)** — impersonation + private threads need: (1) BFF app user gets Delegate role `prvActOnBehalfOfAnotherUser`; (2) messaging tables (`sprk_communicationthread`, `sprk_communication`) role Read = **User-level**. All code is unit-tested; live integration deferred behind these.
+- **Live ACS resource** `spaarke-acs-dev` (endpoint `https://spaarke-acs-dev.unitedstates.communication.azure.com`, sub `484bc857-…`, tenant `a221a95e-…`) — the ACS round-trip is live-validated (spike harness). Event Grid → BFF webhook (inbound live test) still needs a publicly reachable BFF URL (deferred).
+- **AS-BUILT schema names** (verified live) — message→thread lookup = `sprk_communicationthread` (NOT sprk_thread); ACS thread id = `sprk_acsthreadid`; ACS msg id = `sprk_acsmessageid`; child-ref→thread = `sprk_thread`. Full table in [`notes/messaging-schema-spec.md`](notes/messaging-schema-spec.md).
+- **Echo-dedup key** = `acs-msg:{ProviderMessageId}` (`IncomingMessagingJobHandler.IdempotencyKeyFor`); 051 marks it on send so the Event Grid echo is a no-op.
 
 ---
 
-## Active Task (Full Details)
+## Remaining Plan (9 tasks) — resume order
 
-| Field | Value |
-|-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | W0 — Phase 0 Verification + Foundation |
-| **Status** | none |
-| **Started** | — |
+| # | Task | Notes for the implementer |
+|---|---|---|
+| **050** | BFF thread-read + unread-count endpoints | Use `DataverseWebApiService.RetrieveMultipleImpersonatedAsync(entitySet, odata, callerSystemUserId)` (built in the 042 rework) → get user-visible rows → apply `ICommunicationAccessFilter.FilterMessages` (internal-only + privilege app-flags) → return. Unread = same filter on since-last-seen. Resolve oid→systemuserid server-side (see `UserPrivilegeChecker`/`CommunicationAccessContext.CallerSystemUserId`). ADR-019 ProblemDetails on whole-thread denial. Deps 040✅/042✅/004✅. **Blocks 060.** |
+| **043** | 1:1 direct threads | Narrow thread OWNERSHIP so exactly the two participants have access (impersonation enforces). Explicit two-participant list feeds 041's `IThreadExplicitParticipantReader` seam (currently Null-Object). `sprk_threadtype = Direct 1:1 (100000001)`. Deps 040✅. |
+| **060** | Polling timeline component (`@spaarke/ui-components`, Fluent v9) | Interleaved email+chat, reply nesting (`sprk_inreplyto`), compose box, unread indicator, ~5s poll of 050's endpoint. **NO client-side ACS SDK** (NFR-04 — acceptance criterion). Reuse `<EmailComposer/>` sub-components. `npm run build`. Deps 050. |
+| **061** | Package timeline as PCF + deploy | React 16/17 platform libs (ADR-022); `npm run build:prod`; `pcf-deploy`; `<ui-tests>` (dark mode, inbound-within-one-poll, no-ACS-SDK bundle check). Deps 060. |
+| **062** | PCF send/respond accessories | On OOB form, mirror email-r4 `CommunicationActions`; calls 051 send path. Deps 051✅/060. |
+| **063** | Bidirectional content quoting | `quoteBody()` helper reading `sprk_body`/`sprk_bodyformat`; email↔message; no `.eml` parse. Deps 060. |
+| **080** | Vertical-slice seam tests | ADR-038 `tests/integration/seam/**`: send/archive/ingest, IThreadResolver, privacy; preserve email characterization. TEST-MODIFYING (9.5 unconditional). Deps 031✅/040✅/042✅/051✅. |
+| **081** | Architecture doc | Extend `docs/architecture/` comm doc with thread model + ACS transport + ingestor seam + **impersonation access model**; wire ADR-046. Deps 040✅/007✅. |
+| **090** | Wrap-up | README→Complete, lessons-learned, `/test-diet`, archive, final TASK-INDEX reconcile. Main-session (`.claude/`). |
 
----
-
-## Progress
-
-### Completed Steps
-
-*No steps completed yet — pipeline initialization only.*
-
-### Current Step
-
-*No active task.*
-
-### Files Modified (All Task)
-
-*No task files modified yet.*
-
-### Decisions Made
-
-- 2026-07-16: Grouping key LOCKED = (A) `sprk_communicationthread` entity + `sprk_thread` lookup — Reason: queryable grouping; home for thread privacy/participants/ACS thread id (design Q4).
-- 2026-07-16: UI = OOB main form + PCFs (ADR-026 Path-A exception) — Reason: mirrors email-r4 W4 pivot, lowest-risk proven pattern.
-- 2026-07-16: `CommunicationType.Message = 100000004` (Dataverse choice exists) — Reason: enum extension, not `TeamsMessage`.
+### Orchestration notes for next session
+- **Serial vs parallel**: BFF tasks that touch `CommunicationModule.cs` / `CommunicationChannelDispatcher` / `CommunicationService` must be **serial on the main tree** (parallel agents clobber shared files). Genuinely disjoint tasks parallelize via **isolated worktrees** (`isolation: "worktree"`) then cherry-pick — proven for 070/041. ⚠️ `.claude/worktrees/` is gitignored; do NOT `git add -A` while an isolated worktree is live if it's not ignored — use explicit paths.
+- **Per task**: dispatch a `task-execute` agent with its model-tier/effort from TASK-INDEX; instruct it NOT to touch `TASK-INDEX.md`/`current-task.md` (main session reconciles); leave changes in working tree; main session build-verifies (`dotnet build src/server/api/Sprk.Bff.Api/` + Communication test filter), commits, pushes, marks the index row ✅.
+- **BFF gates every task**: build, publish-size (~45.6 MB, ceiling 60), CVE (pre-existing Kiota HIGH only — report NEW), 9.5 code-review+adr-check, `/conflict-check`. Cite bff-extensions Placement Justification.
+- **UI wave (060–063)** is client TS — `npm run build`/`build:prod`, no publish-size/CVE; different surface from BFF (parallelizable with server work).
 
 ---
 
-## Next Action
+## Decisions Made (this project)
 
-**Next Step**: Begin task 001 via `task-execute`.
+- 2026-07-16: Grouping key = (A) `sprk_communicationthread` entity + lookup (design Q4).
+- 2026-07-16: UI = OOB main form + PCFs (ADR-026 Path-A exception).
+- 2026-07-16: `CommunicationType.Message = 100000004` (Dataverse choice exists).
+- 2026-07-16: `IThreadResolver` invoked from ORCHESTRATORS not the pure `ThreadContinuityRung` (more ADR-045-compliant; 040).
+- 2026-07-16: **Privilege = metadata-only, composes with privacy** (owner) — never independently gates; no AI (ADR-015).
+- 2026-07-16: **Private-grant = OOB "Manage access" (POA)**, not a custom table (owner). Provider reads `principalobjectaccessset` (mirror `PlaybookSharingService`).
+- 2026-07-16: **Read enforcement = Dataverse impersonation** (owner) — supersedes 042's hand-computed union; honors design §5. `RetrievePrincipalAccess` for discrete gates.
+- 2026-07-16: Dataverse additive-union rule confirmed (research memoized: `.claude/agent-memory/researcher/dataverse-record-access-security-2026-07-16.md`).
 
-**Pre-conditions**:
-- Dataverse MCP connected (for schema read).
-- `/conflict-check` run at project start (shared `Services/Communication/`).
+---
 
-**Key Context**:
-- Wave 0 spikes (001/002/003) de-risk the net-new ACS + private-grant areas before build.
-- ADR-045 (channel seams), ADR-034 (membership), ADR-028 (auth) apply from the first BFF task.
-
-**Expected Output**:
-- Task 001: confirmed live `sprk_communication` schema delta + `Message` choice integer, recorded in `notes/spikes/`.
+## Files / Artifacts map
+- Spec/design/plan: `spec.md`, `design.md`, `plan.md`
+- Task registry: `tasks/TASK-INDEX.md` (19 ✅, 9 🔲)
+- Access model: `notes/access-model-decision.md` (authoritative)
+- Schema (as-built): `notes/messaging-schema-spec.md`
+- Spikes: `notes/spikes/00{1,2,3}-*.md` + `acs-harness/`
+- Provisioning runbook: `notes/012-acs-provisioning-runbook.md`
+- ADR-046: `.claude/adr/ADR-046-*.md` (concise, Accepted) + `docs/adr/ADR-046-*.md` (full)
+- Portfolio: GitHub Project #654 (Epic #431), draft PR #655
+- New server code lives in `src/server/api/Sprk.Bff.Api/Services/Communication/{Acs,Channels,Threads,Membership,Access,Engine}/` + `Services/Jobs/Handlers/` + `Api/AcsEventGridEndpoints.cs`; impersonation in `src/server/shared/Spaarke.Dataverse/DataverseImpersonation.cs`.
 
 ---
 
 ## Blockers
-
-**Status**: None
-
----
-
-## Session Notes
-
-### Current Session
-- Started: 2026-07-16
-- Focus: Project pipeline initialization (complete)
-
-### Key Learnings
-
-*None yet.*
-
-### Handoff Notes
-
-*No handoff notes.*
+**Status**: None blocking code. **Live integration gated on owner config** (Delegate role + User-level table Read) + a reachable BFF webhook for inbound Event Grid.
 
 ---
 
-## Quick Reference
-
-### Project Context
-- **Project**: messaging-communication-app-r1
-- **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
-
-### Applicable ADRs
-- ADR-045: Communication channel seams — the spine this extends
-- ADR-046: ACS messaging channel — authored in this project (task 007)
-- ADR-034: Membership resolver — open-thread membership
-- ADR-028: Auth v2 — server-side token minting; central credential
-
-### Knowledge Files Loaded
-- `.claude/constraints/bff-extensions.md` — BFF-addition checklist
-
----
-
-*This file is the primary source of truth for active work state. Keep it updated.*
+## Recovery Instructions
+1. Read Quick Recovery + Remaining Plan above.
+2. `git status` (expect clean, synced) + `git log --oneline -5`.
+3. To resume: "continue" (→ first 🔲 = task 050) or "work on task 050". Each task via `task-execute`.
+4. Load `notes/access-model-decision.md` + `notes/messaging-schema-spec.md` before any read/endpoint/schema work.
+5. Remind owner of the two config to-dos before live verification.
