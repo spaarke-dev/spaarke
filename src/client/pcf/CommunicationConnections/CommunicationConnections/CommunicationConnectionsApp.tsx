@@ -37,7 +37,7 @@ import {
   Badge,
   Tooltip,
 } from '@fluentui/react-components';
-import { Open16Regular } from '@fluentui/react-icons';
+import { Open16Regular, Dismiss24Regular } from '@fluentui/react-icons';
 import {
   TODO_REGARDING_CATALOG,
   cleanGuid,
@@ -51,6 +51,7 @@ import {
   deriveConnections,
   mergeFiledConnections,
   connectionTarget,
+  COMMUNICATION_REGARDING_FIELDS,
   type Connection,
 } from './provenance';
 import { ConnectionsEditor } from './ConnectionsEditor';
@@ -111,6 +112,8 @@ const useStyles = makeStyles({
   // Wizard-standard modal footprint (~80vw × 80vh) so the review grid has room.
   modalSurface: { width: '80vw', maxWidth: '1200px', height: '80vh', maxHeight: '80vh' },
   modalBody: { height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  // Close sits lower-left (Spaarke modal convention); the X in the title bar is the top-right close.
+  modalActions: { justifyContent: 'flex-start' },
 });
 
 // Fallback primary-name field per entity, used ONLY when the `sprk_recordtype_ref`
@@ -304,24 +307,24 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     let cancelled = false;
     void (async () => {
       try {
-        const select = [
-          'sprk_regardingrecordname',
-          'sprk_regardingrecordnumber',
-          ...TODO_REGARDING_CATALOG.map(c => c.lookupAttribute),
-        ].join(',');
-        const rec = await context.webAPI.retrieveRecord('sprk_communication', hostRecordId, `?$select=${select}`);
+        // Retrieve WITHOUT $select — the sprk_communication regarding lookups vary by
+        // deployment and an unknown field name makes the whole $select throw (which is what
+        // made the collapsed card fall back to "not filed" even when a primary was set).
+        const rec = await context.webAPI.retrieveRecord('sprk_communication', hostRecordId);
         if (cancelled) return;
         setPrimaryDenorm({
           number: (rec['sprk_regardingrecordnumber'] as string) ?? null,
           name: (rec['sprk_regardingrecordname'] as string) ?? null,
         });
+        // Use the COMMUNICATION regarding field names (sprk_regardingperson for Contact, …),
+        // not the sprk_todo TODO_REGARDING_CATALOG names.
         const filed: IFiledAssociation[] = [];
-        for (const c of TODO_REGARDING_CATALOG) {
-          const val = rec[`_${c.lookupAttribute}_value`];
+        for (const { field, entityType } of COMMUNICATION_REGARDING_FIELDS) {
+          const val = rec[`_${field}_value`];
           if (typeof val === 'string' && val) {
-            const nm = rec[`_${c.lookupAttribute}_value@OData.Community.Display.V1.FormattedValue`];
+            const nm = rec[`_${field}_value@OData.Community.Display.V1.FormattedValue`];
             filed.push({
-              entityType: c.entityType,
+              entityType,
               recordId: cleanGuid(val),
               recordName: typeof nm === 'string' && nm ? nm : cleanGuid(val),
             });
@@ -335,7 +338,9 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     return () => {
       cancelled = true;
     };
-  }, [hostRecordId, context.webAPI, reloadKey]);
+    // Re-read when the bound association data changes too (e.g. the server auto-files
+    // after the form is already open), not only on our own writes (reloadKey).
+  }, [hostRecordId, context.webAPI, reloadKey, provenanceRaw, status]);
 
   // Full review slot set (used to decide when to advance status to Resolved).
   const reviewSlots = React.useMemo<Connection[]>(() => {
@@ -596,7 +601,18 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
       <Dialog open={modalOpen} onOpenChange={(_, d) => setModalOpen(d.open)}>
         <DialogSurface className={s.modalSurface}>
           <DialogBody>
-            <DialogTitle>Connections</DialogTitle>
+            <DialogTitle
+              action={
+                <Button
+                  appearance="subtle"
+                  aria-label="Close"
+                  icon={<Dismiss24Regular />}
+                  onClick={() => setModalOpen(false)}
+                />
+              }
+            >
+              Connections
+            </DialogTitle>
             <DialogContent className={s.modalBody}>
               <ConnectionsEditor
                 record={record}
@@ -616,7 +632,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
                 onCreateType={handleCreateType}
               />
             </DialogContent>
-            <DialogActions>
+            <DialogActions className={s.modalActions}>
               <Button appearance="secondary" onClick={() => setModalOpen(false)}>
                 Close
               </Button>

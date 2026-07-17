@@ -98,7 +98,7 @@ const useStyles = makeStyles({
     paddingInline: tokens.spacingHorizontalXS,
     minHeight: '32px',
   },
-  bar: { flexWrap: 'wrap' },
+  bar: { flexWrap: 'wrap', flexGrow: 1 },
   // Match the OOB command-bar typography — 14px, regular weight (the default
   // ToolbarButton renders heavier/larger than the native bar).
   toolbarBtn: {
@@ -413,6 +413,8 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
             New
           </ToolbarButton>
 
+          {/* Spacer pushes the record/email action icons to the far right (Outlook-web style). */}
+          <div className={s.grow} />
           <ToolbarDivider />
 
           {/* Right group — record/email actions (icon-only, tooltip). ✨ = engine-suggested. */}

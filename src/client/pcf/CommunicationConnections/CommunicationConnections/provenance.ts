@@ -236,6 +236,16 @@ const ENTITY_TO_SLOT: Record<string, { field: string; label: string; order: numb
   sprk_workassignment: { field: 'sprk_regardingworkassignment', label: 'Work Assignment', order: 9 },
 };
 
+/**
+ * The actual `sprk_communication` regarding lookup fields (field → entity type). NOTE these
+ * are the COMMUNICATION regarding columns (`sprk_regardingperson` for Contact, etc.) — NOT the
+ * `sprk_todo` TODO_REGARDING_CATALOG names (`sprk_regardingcontact`), which do not exist on
+ * `sprk_communication`. Reading with the wrong names makes the whole $select throw.
+ */
+export const COMMUNICATION_REGARDING_FIELDS: { field: string; entityType: string }[] = Object.entries(ENTITY_TO_SLOT).map(
+  ([entityType, meta]) => ({ entityType, field: meta.field })
+);
+
 /** A regarding lookup that is actually populated on the host record (a filed association). */
 export interface FiledAssociation {
   entityType: string;
