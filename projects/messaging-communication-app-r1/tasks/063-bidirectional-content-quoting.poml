@@ -2,7 +2,7 @@
   <metadata>
     <title>Bidirectional inline content quoting (email↔message) via the channel-agnostic `sprk_body`</title>
     <phase>W6 — UI (polling timeline + PCF accessories)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>060</dependencies>
     <blocks></blocks>

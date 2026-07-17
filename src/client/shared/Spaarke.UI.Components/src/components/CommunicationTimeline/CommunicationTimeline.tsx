@@ -16,6 +16,17 @@
  *
  * ADR-026 Path-A exception: this render engine is packaged as a form-bound
  * PCF by task 061 (NOT a Code Page) — mirrors email-r4's shipped W4 pivot.
+ *
+ * Task 063 (FR-13) — bidirectional inline content quoting. "Quote into
+ * message" reads a row's `sprk_body`/`sprk_bodyformat`, formats it via the
+ * pure `quoteBody()` helper (`utils/quoteBody.ts`), and merges it into the
+ * SAME `prefill` state fed to `<TimelineComposeBox/>` that the host-supplied
+ * `prefill` prop already drives — one prefill mechanism, not two (§11).
+ * "Quote into email" does the equivalent read/format step but hands the
+ * result to the host via `onQuoteIntoEmail` (shaped exactly like
+ * `<EmailComposer/>`'s own `initial*` props) — this component never mounts
+ * `<EmailComposer/>` itself, since email compose is a separate host-owned
+ * surface (dialog/page), not an in-timeline concern.
  */
 import * as React from 'react';
 import { Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
@@ -30,7 +41,13 @@ import { MessageRow } from './subcomponents/MessageRow';
 import { UnreadIndicator } from './subcomponents/UnreadIndicator';
 import { TimelineComposeBox, type ITimelineSendPayload } from './subcomponents/TimelineComposeBox';
 import { sendTimelineMessage } from '../../services/communicationTimelineApi';
-import type { CommunicationTimelineProps, TimelineMessage } from './CommunicationTimeline.types';
+import { quoteBody } from '../../utils/quoteBody';
+import { BODY_FORMAT_HTML, BODY_FORMAT_PLAIN_TEXT } from './CommunicationTimeline.types';
+import type {
+  CommunicationTimelinePrefill,
+  CommunicationTimelineProps,
+  TimelineMessage,
+} from './CommunicationTimeline.types';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -88,6 +105,7 @@ export const CommunicationTimeline: React.FC<CommunicationTimelineProps> = props
     bffBaseUrl,
     pollIntervalMs,
     prefill,
+    onQuoteIntoEmail,
     onSearchRecipients,
     associations,
     sendMode,
@@ -99,6 +117,21 @@ export const CommunicationTimeline: React.FC<CommunicationTimelineProps> = props
 
   const styles = useStyles();
   const [state, dispatch] = React.useReducer(communicationTimelineReducer, initialTimelineState);
+
+  // Effective compose-box prefill (task 063) — seeded from the host-supplied
+  // `prefill` prop, and re-synced whenever ITS primitive fields change
+  // (mirrors `TimelineComposeBox`'s own prefill-merge effect). "Quote into
+  // message" (`handleQuoteIntoMessage` below) updates this SAME state
+  // directly — one prefill mechanism feeding `<TimelineComposeBox/>`, not two.
+  const [effectivePrefill, setEffectivePrefill] = React.useState<CommunicationTimelinePrefill | undefined>(prefill);
+  const prefillBody = prefill?.body;
+  const prefillFormat = prefill?.bodyFormat;
+  const prefillSubject = prefill?.subject;
+  const prefillToKey = prefill?.to?.join(',');
+  React.useEffect(() => {
+    setEffectivePrefill(prefill);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillBody, prefillFormat, prefillSubject, prefillToKey]);
 
   // Refs so the poll hook always reads the freshest cursor without re-subscribing its effect.
   const sinceCursorRef = React.useRef<string | undefined>(undefined);
@@ -185,6 +218,46 @@ export const CommunicationTimeline: React.FC<CommunicationTimelineProps> = props
     return undefined;
   }, [timeline]);
 
+  // "Quote into message" (task 063) — reads the row's `sprk_body`/
+  // `sprk_bodyformat`, formats it as an inline quote via `quoteBody()`
+  // targeting HTML (the compose box's default authoring format — matches
+  // `TimelineComposeBox`'s own `bodyFormat` default), and prefills the
+  // SAME `<TimelineComposeBox/>` this timeline already renders — no
+  // navigation, no re-mount.
+  const handleQuoteIntoMessage = React.useCallback((message: TimelineMessage) => {
+    const sourceFormat = message.bodyFormat === 'html' ? BODY_FORMAT_HTML : BODY_FORMAT_PLAIN_TEXT;
+    const quoted = quoteBody(message.body, sourceFormat, BODY_FORMAT_HTML, {
+      sender: message.sender ?? undefined,
+      sentOn: message.sentOn ?? undefined,
+    });
+    setEffectivePrefill({
+      to: message.sender ? [message.sender] : undefined,
+      body: quoted,
+      bodyFormat: 'HTML',
+    });
+  }, []);
+
+  // "Quote into email" (task 063) — reads the row's `sprk_body`/
+  // `sprk_bodyformat`, formats it via `quoteBody()`, and hands the host a
+  // payload shaped exactly like `<EmailComposer/>`'s own `initial*` props
+  // (`QuoteIntoEmailPayload`) — the host owns mounting `<EmailComposer/>`.
+  const handleQuoteIntoEmail = React.useCallback(
+    (message: TimelineMessage) => {
+      if (!onQuoteIntoEmail) return;
+      const sourceFormat = message.bodyFormat === 'html' ? BODY_FORMAT_HTML : BODY_FORMAT_PLAIN_TEXT;
+      const quoted = quoteBody(message.body, sourceFormat, BODY_FORMAT_HTML, {
+        sender: message.sender ?? undefined,
+        sentOn: message.sentOn ?? undefined,
+      });
+      onQuoteIntoEmail({
+        initialTo: message.sender ? [message.sender] : undefined,
+        initialBody: quoted,
+        initialBodyFormat: 'HTML',
+      });
+    },
+    [onQuoteIntoEmail]
+  );
+
   const handleSend = React.useCallback(
     async (payload: ITimelineSendPayload) => {
       dispatch({ type: 'BEGIN_SEND' });
@@ -194,7 +267,7 @@ export const CommunicationTimeline: React.FC<CommunicationTimelineProps> = props
             to: payload.to,
             body: payload.body,
             bodyFormat: payload.bodyFormat === 'PlainText' ? 'text' : 'html',
-            subject: prefill?.subject ?? `Re: conversation ${threadId}`,
+            subject: effectivePrefill?.subject ?? `Re: conversation ${threadId}`,
             attachmentDocumentIds: payload.attachmentDocumentIds,
             associations,
             sendMode,
@@ -217,7 +290,7 @@ export const CommunicationTimeline: React.FC<CommunicationTimelineProps> = props
       authenticatedFetch,
       bffBaseUrl,
       threadId,
-      prefill?.subject,
+      effectivePrefill?.subject,
       associations,
       sendMode,
       archiveToSpe,
@@ -240,7 +313,13 @@ export const CommunicationTimeline: React.FC<CommunicationTimelineProps> = props
 
       <div className={styles.list} role="log" aria-label="Messages">
         {timeline.map(entry => (
-          <MessageRow key={entry.message.id} message={entry.message} depth={entry.depth} />
+          <MessageRow
+            key={entry.message.id}
+            message={entry.message}
+            depth={entry.depth}
+            onQuoteIntoMessage={handleQuoteIntoMessage}
+            onQuoteIntoEmail={onQuoteIntoEmail ? handleQuoteIntoEmail : undefined}
+          />
         ))}
         {timeline.length === 0 && state.status === 'ready' && (
           <Text className={styles.emptyState}>No messages yet.</Text>
@@ -249,7 +328,7 @@ export const CommunicationTimeline: React.FC<CommunicationTimelineProps> = props
 
       <TimelineComposeBox
         defaultTo={lastInboundSender ? [lastInboundSender] : undefined}
-        prefill={prefill}
+        prefill={effectivePrefill}
         isSending={state.isSending}
         onSend={handleSend}
         onSearchRecipients={onSearchRecipients}

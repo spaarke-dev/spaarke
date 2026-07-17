@@ -100,6 +100,25 @@ export interface CommunicationTimelinePrefill {
 }
 
 // ---------------------------------------------------------------------------
+// Quote into email (task 063 — cross-channel, message row -> email composer)
+// ---------------------------------------------------------------------------
+
+/**
+ * Payload for `CommunicationTimelineProps.onQuoteIntoEmail`. Field names
+ * deliberately mirror `<EmailComposer/>`'s own compose-mode pre-fill props
+ * (`initialTo`/`initialSubject`/`initialBody`/`initialBodyFormat` —
+ * `EmailComposer.types.ts` `IEmailComposerProps`) so the host can spread this
+ * payload directly onto a compose-mode `<EmailComposer/>` instance it owns
+ * (e.g. inside a dialog) — no second prefill mechanism (§11).
+ */
+export interface QuoteIntoEmailPayload {
+  initialTo?: string[];
+  initialSubject?: string;
+  initialBody: string;
+  initialBodyFormat: EmailComposerBodyFormat;
+}
+
+// ---------------------------------------------------------------------------
 // Public props
 // ---------------------------------------------------------------------------
 
@@ -117,6 +136,16 @@ export interface CommunicationTimelineProps {
 
   /** Prop-driven compose-box prefill (task 063 injects quoted content here without re-opening the component). */
   prefill?: CommunicationTimelinePrefill;
+
+  /**
+   * Fired when the user clicks "Quote into email" on a message row (task 063,
+   * FR-13). The component reads the row's `sprk_body`/`sprk_bodyformat`,
+   * formats it as an inline quote via `quoteBody()`, and hands the host a
+   * payload shaped exactly like `<EmailComposer/>`'s own `initial*` pre-fill
+   * props — the host owns mounting `<EmailComposer/>` (dialog/page), this
+   * component never imports it for that purpose.
+   */
+  onQuoteIntoEmail?: (payload: QuoteIntoEmailPayload) => void;
 
   /** Recipient directory lookup, forwarded to the compose box's `RecipientField`. */
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;

@@ -10,10 +10,10 @@
 | Field | Value |
 |-------|-------|
 | **Project** | messaging-communication-app-r1 — 2nd communication channel (ACS Chat) over ADR-045 seams |
-| **Progress** | **24 of 28 tasks ✅** — server-side + timeline + send/respond accessories + send-contract closure done. Owner config gates: Delegate role + User-level Read SATISFIED; **app-user Share privilege on `sprk_communicationthread` + `sprk_communication`** needed for GrantAccess/POA (043/052). |
-| **Active task** | **062 COMPLETE** ✅ (`CommunicationMessageActions` PCF + send-contract closure). Remaining: **063** (quoting — client), **061** (timeline-PCF package + DEPLOY — needs owner env), **080/081** (tests/docs), **090** (wrap). |
-| **Next Action** | **task 063** (bidirectional inline content quoting email↔message via `sprk_body`; client TS; extends the 060 compose box prefill). Then 061 (package + owner deploy), 080/081, 090. |
-| **Status** | in-progress (send/respond done; quoting next) |
+| **Progress** | **25 of 28 tasks ✅** — server-side + all client UI (timeline, accessories, quoting) + send-contract closure done. Owner config gates: Delegate role + User-level Read SATISFIED; **app-user Share privilege on `sprk_communicationthread` + `sprk_communication`** needed for GrantAccess/POA (043/052). |
+| **Active task** | **063 COMPLETE** ✅ (quoteBody + quote actions). Remaining: **061** (package `CommunicationTimeline` as PCF + DEPLOY — needs owner env), **080** (vertical-slice seam tests, TEST-MODIFYING), **081** (architecture doc), **090** (wrap-up + `/test-diet`). |
+| **Next Action** | **task 061** — package `CommunicationTimeline` as a form-bound PCF (build + pack ZIP; DEFER `pac solution import` to owner like 062). Then 080 (seam tests), 081 (arch doc), 090 (wrap). All remaining are code/docs — no more design-decision forks. |
+| **Status** | in-progress (all UI logic done; PCF packaging + tests + docs + wrap remain) |
 
 ### 🚚 OWNER DEPLOY HANDOFFS (packaged, awaiting owner's Dataverse env)
 - **062 PCF**: `src/client/pcf/CommunicationMessageActions/Solution/bin/CommunicationMessageActionsSolution_v1.0.0.zip` — `pac solution import --path ... --publish-changes`; place on `sprk_communicationthread` + `sprk_communication` forms; uses existing `sprk_MsalClientId`/`sprk_BffApiAppId`/`sprk_BffApiBaseUrl` env vars (no new ones). Full steps in the 062 commit body.

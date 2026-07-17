@@ -21,6 +21,7 @@ export type {
   TimelineThread,
   UnreadState,
   CommunicationTimelinePrefill,
+  QuoteIntoEmailPayload,
   CommunicationTimelineProps,
 } from './CommunicationTimeline.types';
 export {
