@@ -3,7 +3,7 @@
     <title>FR-08 server pre-parse + `w14:paraId` minting on Load (OOXML-valid, collision-checked)</title>
     <phase>1 E2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>opus</model-tier>
     <effort>xhigh</effort>
@@ -153,4 +153,46 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    **Completed 2026-07-17** (Opus 4.8 @ xhigh, FULL rigor). Build green; 8 new tests pass.
+
+    **Files**:
+    - NEW `Services/Compose/ParaIdPreParser.cs` — single-pass Open XML walk. Key simplification:
+      `body.Descendants<Paragraph>()` is recursive + document-ordered, so it covers table-cell +
+      nested-table paragraphs with no special-case descent. Collects existing `w14:paraId` verbatim;
+      mints random 32-bit `0 < x < 0x80000000` (8-hex uppercase) for gaps, collision-checked against a
+      seen-set of ALL ids (collected first). Read-only open (no mutation); pure byte[]-in / record-out
+      (ADR-007/ADR-013 clean). Internal test-seam ctor accepts a deterministic id generator.
+    - `IComposeService.cs` — additive `IReadOnlyList<ParaIdMapEntry> ParaIdMap` on LoadComposeDocumentResult.
+    - `ComposeService.cs` — LoadAsync invokes the pre-parse on the buffered content (single pass, NFR-08)
+      and projects the map; BEST-EFFORT (try/catch → empty map + warning) so a malformed source never
+      fails Load. Optional ctor param `ParaIdPreParser? = null` (defaults `new`) — existing test ctors
+      unchanged; DI resolves the singleton.
+    - `ComposeModule.cs` — `AddSingleton<ParaIdPreParser>()` unconditional (symmetric per §10 F.1).
+    - Tests: `ParaIdPreParserTests` (uniqueness incl. table-cell/nested, verbatim-preserve, OOXML-range,
+      forced-collision retry, empty/malformed guards) + `ComposeServiceLoadParaIdTests` (LoadAsync
+      projects the complete map for a real docx; malformed → empty-map + Load still succeeds).
+
+    **§6.5 Path-C — NFR-06 seam scope**: the map-projection assertion is covered at the ComposeService
+    seam (LoadAsync wiring test, mocking the ISpeFileOperations module boundary per ADR-038 §4). The
+    HTTP through-the-wire `tests/integration/seam/**` slice rides **task 024** (which owns the Compose
+    endpoints fidelity seam suite) — consistent with the confirmed defer-to-seam doctrine + the POML's
+    own note that the through-the-wire test rides 022/024. TRACKING: task 024 must assert the Load
+    route carries a complete paraId map for a formatted fixture.
+
+    **Verification**: publish 47.28 MB compressed incl PDBs (+0.02 MB vs task-001 47.26 — negligible
+    IL-only; no new package); CVE scan clean (0 vulnerable, post Kiota 1.22.0 merge). ADR-013
+    ComposeFacade arch test PASSED; ParaIdPreParser absent from ADR-007 violation list (OpenXml-only).
+
+    **Pre-existing finding (NOT this task)**: `ADR007_GraphIsolationTests` is RED on the branch — but
+    the violators are `Services.Communication.GraphAttachmentAdapter` / `GraphMessageToEmlConverter` +
+    `Api/Office/Errors/*` + `Infrastructure/Errors/ProblemDetailsHelper`, ALL pre-existing on
+    origin/master, none in Compose. Out of scope for compose-r3; belongs to a Communication/Office arch
+    cleanup. Surfaced to owner.
+
+    **Placement Justification (§10)**: new cohesive OOXML identity component (SRP — not foldable into
+    DocxAnnotationReader's annotation-recovery shape nor ComposeService's SPE-lifecycle facade);
+    invoked from the existing LoadAsync seam; no new endpoint/SPE plumbing. In-BFF per bff-extensions.md.
+  </notes>
 </task>

@@ -31,6 +31,7 @@ public static class ComposeModule
         services.AddSingleton<SemanticAppendixGenerator>();                     // FR-22 (task 023)
         services.AddSingleton<CriticMarkupRenderer>();                          // FR-22 (task 023)
         services.AddSingleton<DocxAnnotationWriter>();                          // FR-24 (task 050) — pure OOXML annotation writer; thread-safe stateless singleton (ADR-010). Consumed by ComposeService.PushAnnotationsAsync (registered unconditionally, same as its consumer — no asymmetric-registration risk per bff-extensions.md §F.1)
+        services.AddSingleton<ParaIdPreParser>();                               // FR-08 (task 010, E2) — pure OOXML w14:paraId collect/mint pre-parse; thread-safe stateless singleton (ADR-010). Consumed by ComposeService.LoadAsync; registered UNCONDITIONALLY (same lifetime as its consumer — symmetric per bff-extensions.md §F.1, no feature gate)
 
         // R2 W1 SPE change-detection (FR-26, task 052) — subscription state machine +
         // BackgroundService renewal (ADR-001 hosted service; ADR-007 Graph stays behind
