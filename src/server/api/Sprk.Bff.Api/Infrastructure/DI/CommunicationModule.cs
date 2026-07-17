@@ -198,24 +198,24 @@ public static class CommunicationModule
         // consumer). Consumed by the messaging inbound/file-share wiring (task 031 / 060), not registered here.
         services.AddScoped<MessageAttachmentMaterializer>(); // task 070
 
-        // BFF read-path privacy / internal-only / privilege enforcement (messaging-communication-app-r1 task 042 /
-        // FR-08 / NFR-06). The DEFAULT-DENY composition filter task 050's thread-read + unread-count endpoints apply
-        // to every returned sprk_communication row: a row is visible only if it passes internal-only (D-05) AND
-        // privacy (ADR-034 open membership ∪ owner-approved option-B overlay grant, point-forward) — privilege
-        // (ADR-015) rides along as composed metadata and NEVER gates the read / NEVER calls AI. Registered
-        // UNCONDITIONALLY (ADR-010 / ADR-032 — the endpoint that consumes it maps unconditionally; no feature gate).
-        // Composes from EXISTING Dataverse record security (IMembershipResolverService, ADR-034) — NOT a new
-        // authorization engine (design §5, root §11). The visible set is always a subset of Dataverse-derived
-        // access and agrees with task 041's ACS-membership projection (same union; neither may exceed it).
+        // BFF read-path internal-only / privilege enforcement (messaging-communication-app-r1 task 042, REWORKED to
+        // the impersonation model 2026-07-16 / FR-08 / NFR-06). RECORD-LEVEL read access is now Dataverse's job:
+        // task 050's thread-read + unread endpoints issue the sprk_communication query IMPERSONATED (MSCRMCallerID =
+        // caller systemuserid, via DataverseWebApiService.RetrieveMultipleImpersonatedAsync), so Dataverse returns
+        // exactly the rows the caller may see — honoring ownership, role depth, BU, teams, sharing, hierarchy — in
+        // one query. This filter then applies, ON TOP of those already-scoped rows, only the two Spaarke business
+        // rules impersonation does not cover: internal-only (D-05 — hide sprk_isinternalonly from non-internal
+        // callers, default-deny on an unreadable flag) and privilege (ADR-015 — sprk_privilegeclassification rides
+        // along as composed metadata, NEVER gates a read, NEVER calls AI). The filter is pure (no I/O / no Dataverse
+        // / membership / grant / AI dependency), so it needs only its logger.
         //
-        // IThreadPrivateGrantProvider is the ONE private-thread seam, following the sprk_externalrecordaccess /
-        // ExternalParticipationService overlay-grant pattern (owner decision 2026-07-16, option B). The FAIL-CLOSED
-        // DenyAllThreadPrivateGrantProvider is the R1 default (ADR-032 Null-Object) because the thread-scoped overlay
-        // schema does not exist yet (task 004 created thread + channelref only; sprk_externalrecordaccess is
-        // project-scoped) — private threads are invisible to everyone until a Dataverse-backed provider replaces this
-        // registration when the overlay schema lands. Default-deny is the correct, safe posture (NFR-06); the
-        // point-forward + grant logic is fully implemented and unit-tested against a mock provider.
-        services.AddSingleton<IThreadPrivateGrantProvider, DenyAllThreadPrivateGrantProvider>();
+        // This SUPERSEDES the task-042 hand-computed "MembershipResolver(anchor) ∪ overlay grants" union + the
+        // point-forward privacy switch, which mis-modeled effective access for an app-only BFF and rebuilt platform
+        // security (design §5 — leverage, don't rebuild). Accordingly the IThreadPrivateGrantProvider deny-all
+        // registration is REMOVED (the read filter no longer depends on it; the type is retained for future task-043
+        // private-direct-thread work). Discrete authz gates ("can user X open/post to thread Y") use Dataverse
+        // RetrievePrincipalAccess (Web API, app-only) — the documented one-principal-one-record mechanism for 050/043.
+        // Registered UNCONDITIONALLY (ADR-010 / ADR-032 — the endpoint that consumes it maps unconditionally).
         services.AddSingleton<ICommunicationAccessFilter, CommunicationAccessFilter>();
 
         // Job handler: processes incoming email notifications from Graph webhooks (Task 072)

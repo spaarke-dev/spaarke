@@ -8,7 +8,7 @@ Dataverse effective record access = **additive UNION** of ownership + security-r
 ## DECISION: read enforcement = IMPERSONATION (not a hand-computed filter)
 An app-only BFF hand-computing "who can see this" is **incorrect** (misses role depth / BU scope / hierarchy) and rebuilds what the platform already does. So:
 
-- **Read path (050 thread-read + unread) → impersonation.** The BFF issues the Dataverse query with **`MSCRMCallerID: <user Entra oid>`** (Web API impersonation). Dataverse returns exactly the rows that user may see, honoring ALL access sources, in one query. Correct + native + performant for ~5s polling.
+- **Read path (050 thread-read + unread) → impersonation.** The BFF issues the Dataverse query with **`MSCRMCallerID: <caller's systemuserid GUID>`** (Web API impersonation). ⚠️ **Header/value correction (impersonation rework 2026-07-16):** `MSCRMCallerID` takes the Dataverse **`systemuserid`**, NOT the AAD oid (`CallerObjectId` is the oid-based variant). The read path resolves the caller's AAD `oid` → `systemuserid` first (as `CommunicationAccessContext.CallerSystemUserId` / the existing `UserPrivilegeChecker` lookup already do). Dataverse returns exactly the rows that user may see, honoring ALL access sources, in one query. Correct + native + performant for ~5s polling.
 - **042 is reworked**: record-level access is now Dataverse's job (via impersonation). `CommunicationAccessFilter` shrinks to the two Spaarke business rules impersonation does NOT cover, applied **on top** of impersonated rows:
   - **internal-only** (`sprk_isinternalonly`) — hide from external users (D-05 user attribute).
   - **privilege** (`sprk_privilegeclassification`) — metadata only, never gates (owner decision 2026-07-16); drives review/labeling.

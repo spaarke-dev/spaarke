@@ -1,5 +1,12 @@
 namespace Sprk.Bff.Api.Services.Communication.Access;
 
+// ⚠️ RETIRED FOR READS (messaging read-access rework, 2026-07-16 — notes/access-model-decision.md).
+// Record-level read access is now enforced by Dataverse IMPERSONATION (MSCRMCallerID), not by a hand-computed
+// membership ∪ overlay-grant union. CommunicationAccessFilter no longer depends on this seam, and it is no longer
+// registered in CommunicationModule. The type is RETAINED (not deleted) because private / named-individual thread
+// access (task 043 Direct 1:1) is expressed as narrow Dataverse OWNERSHIP + "Manage access" (POA) shares — a future
+// grant-management path may reuse this shape. It is NOT part of the R1 read path.
+
 /// <summary>
 /// Supplies the ACTIVE per-record overlay grants that let a named participant read a PRIVATE thread's messages
 /// (option B, owner-approved 2026-07-16 — <c>notes/spikes/002-private-grant-decision.md</c> §OWNER DECISION).
