@@ -3,7 +3,7 @@
     <title>NFR-09 real-template hardening gate — re-run S1/S1b harness on 2–3 real firm templates</title>
     <phase>0 Foundations</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>opus</model-tier>
     <effort>xhigh</effort>
@@ -121,4 +121,39 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    COMPLETE 2026-07-17 (opus @ xhigh, FULL rigor). **GATE VERDICT: ❌ FAIL — task 022 BLOCKED.**
+
+    Real templates sourced (owner directive: source from internet / create; corrected to "download real
+    public Word-authored templates" since NFR-09 forbids synthetic substitution and SDK-created = still
+    synthetic). Kept 2 genuinely Word-authored **Common Paper** standards (CC BY 4.0 public standards, not
+    client docs → committable): Cloud Service Agreement (345 paras, 395 w14:paraId, 3 top + 3 nested tables,
+    9-level numbering, hdr/ftr/footnotes/styles) + Mutual NDA. Rejected 2 sample-files.com docs (0 w14:paraId
+    = not Word-authored). Fixtures at tests/.../Fixtures/Compose/RealTemplates/ (+ README w/ attribution).
+
+    Harness = NEW committable xUnit test Nfr09RealTemplateHardeningTests (10 tests, GREEN) running the REAL
+    production pipeline (task 020 splice → task 021 comparer) on the real templates — far stronger than a
+    throwaway console.
+
+    **Two gate-blocking defects in Docxodus 6.4.0 WmlComparer** (task 020 splice verified clean — preserves
+    all 6 tables + all paraIds; defects appear only post-Compare):
+    1. STRIPS w14:paraId on ALL paragraphs (→ leftover internal pt14:Unid, fresh GUIDs). Defeats paraId-
+       primary re-anchoring across a save under Approach A. S1 saw the OPPOSITE on 7.1.0 (net10) — false-green.
+    2. DROPS an unchanged top-level table on the real CSA (6→5; NFR-07 fidelity violation).
+    Both pinned as characterization tests (flip red if a future Docxodus fixes them).
+
+    What 6.4.0 DOES do right (proven green): no exception incl. delete/split; minimal authored ins/del;
+    format-change (rPr/pPrChange) not del+ins; non-table structural parts preserved.
+
+    §6.5 escalation (owner decision): Path A/B = adopt design §4.2 **Approach B** (graft comparer's w:ins/w:del
+    onto the retained-original bytes, preserving paraId+tables) — promotes Approach B from optional→required,
+    re-scopes task 022. Path B-alt = spike the **Codeuctivity fork** (net8) — if it preserves paraId+tables, a
+    cheaper dependency swap (redo task 001). Path C (accept degraded) REJECTED — table drop is a hard NFR-07
+    violation. Recommendation: spike Codeuctivity (~1 day) first; re-run THIS harness to certify before 022.
+
+    Report: notes/spikes/S1-nfr09-real-template-hardening-2026-07-17.md. Compose suite 439 ✅ (+10). §9.5 PASS.
+    Task 003 acceptance MET (harness authored + real templates + PASS/FAIL verdict recorded + §6.5 escalation
+    raised). Task 022 stays BLOCKED until the owner picks a path and the chosen engine/approach re-certifies.
+  </notes>
 </task>

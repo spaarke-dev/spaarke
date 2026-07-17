@@ -28,13 +28,13 @@
 |----|-------|-------|------|------|--------|-------|-------|--------|---------------|
 | 001 | Add `Docxodus` **6.4.0** (net8.0 line; SkiaSharp excluded) + bump OpenXml 3.4.1→3.5.1; publish-size + CVE baseline | 0 Foundations | 🟢 | none | ✅ | FULL | opus | high | false (csproj foundation) |
 | 002 | `SpeFileStore` version-content fetch (FR-06) — fetch a driveItem version's content by `versionId` | 0 Foundations | 🟢 | none | ✅ | FULL | sonnet | high | true |
-| 003 | NFR-09 real-template hardening gate — re-run S1/S1b harness on 2–3 real firm templates | 0 Foundations | 🟢 | 001 | 🔲 | FULL | opus | xhigh | true |
+| 003 | NFR-09 real-template hardening gate — re-run S1/S1b harness on 2–3 real firm templates — **RAN → ❌ FAIL verdict** (Docxodus 6.4.0 strips w14:paraId + drops an unchanged table on real docs; see notes/spikes/S1-nfr09-real-template-hardening-2026-07-17.md) — **BLOCKS 022 pending §6.5 owner decision** | 0 Foundations | 🟢 | 001 | ✅ | FULL | opus | xhigh | true |
 | 010 | FR-08 server pre-parse + `w14:paraId` minting on Load (OOXML-valid, collision-checked) | 1 E2 | 🟢 | 001 | ✅ | FULL | opus | xhigh | false (LoadAsync) |
 | 011 | FR-09/FR-10 explicit load-time paraId carry (hidden node attr) + split-minting via `@tiptap/extension-unique-id` | 1 E2 | 🔴 | 010 | ✅ | FULL | sonnet | high | true (client) |
 | 012 | FR-11/FR-12 paraId-primary anchoring + fuzzy fallback (`AnnotationReanchorService`) + paraId as splice key | 1 E2 | 🟢 | 010,011 | ✅ | FULL | opus | high | false (reanchor svc) |
 | 020 | FR-02 edited-paragraph rebuild + paraId-keyed splice orchestration (server) | 2 E1 | 🟢 | 010,012 | ✅ | FULL | opus | xhigh | false (Services/Compose) |
 | 021 | FR-03/FR-05 Docxodus `WmlComparer` redline synthesis adapter (minimal ins/del + format-change) | 2 E1 | 🟢 | 001,020 | ✅ | FULL | opus | xhigh | false (Services/Compose) |
-| 022 | FR-01 baseline inversion in `SaveAsync` + drop `docx.js` export (**E1 cutover — keystone**) | 2 E1 | 🔴 | 002,003,020,021 | 🔲 | FULL | opus | xhigh | false (SaveAsync + docxBridge) |
+| 022 | FR-01 baseline inversion in `SaveAsync` + drop `docx.js` export (**E1 cutover — keystone**) — **⛔ BLOCKED: task 003 gate FAILED** (6.4.0 WmlComparer strips paraId + drops table under Approach A; needs §6.5 owner decision — spike Codeuctivity fork or adopt Approach B) | 2 E1 | 🔴 | 002,003,020,021 | 🔲 | FULL | opus | xhigh | false (SaveAsync + docxBridge) |
 | 023 | FR-04 AI redlines/comments reuse — apply via existing `DocxAnnotationWriter` onto retained-original baseline | 2 E1 | 🔴 | 022 | 🔲 | FULL | sonnet | high | false (Services/Compose) |
 | 024 | FR-07/NFR-06 through-the-wire fidelity seam slice test (untouched OOXML preserved on dirty save) | 2 E1 | 🔴 | 022,023 | 🔲 | FULL | sonnet | xhigh | true (tests) |
 | 025 | Deploy + smoke-verify E1 fidelity core (BFF + client) on spaarkedev1 | 2 E1 | 🔴 | 024 | 🔲 | STANDARD | sonnet | high | false (deploy) |

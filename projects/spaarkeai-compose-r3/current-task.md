@@ -10,10 +10,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 021 — FR-03/FR-05 Docxodus `WmlComparer` redline synthesis adapter — ✅ COMPLETE (uncommitted) |
-| **Step** | 4 of 4 done — verify PASS |
-| **Status** | complete, uncommitted (batch-commit with 020 per operator "push after a few more tasks") |
-| **Next Action** | Commit task 021, then batch-push 020+021 to PR #656 (operator deferred push). OR `continue` → task 022 (FR-01 SaveAsync baseline inversion — E1 keystone; deps 002,003,020,021 all ✅; carries NFR-06 seam obligation for the save path). Alt startable: task 030 (E3 confidence, deps 012✅). |
+| **Task** | 003 — NFR-09 real-template hardening gate — ✅ RAN → **❌ FAIL verdict** (task 022 BLOCKED) |
+| **Step** | Complete — harness + real templates + report + §6.5 escalation delivered |
+| **Status** | 🔔 **AWAITING OWNER DECISION (§6.5)** on the E1 comparer engine/approach |
+| **Next Action** | Owner picks a path: **(rec) spike Codeuctivity fork** (net8; if it preserves paraId+tables → cheap swap, redo task 001) OR **adopt Approach B** (graft comparer w:ins/w:del onto retained original — re-scope task 022). Then re-run `Nfr09RealTemplateHardeningTests` to certify → unblock 022. Meanwhile startable-without-gate: **task 030 (E3, deps 012✅)** or Toolset **040/042/043/044** (client, no deps). |
+
+### 🔔 NFR-09 gate FAILED — task 022 (E1 keystone cutover) BLOCKED (2026-07-17)
+Docxodus **6.4.0** WmlComparer, on REAL firm templates (Common Paper CSA + NDA), (1) **strips w14:paraId** on all paragraphs (→ pt14:Unid) and (2) **drops an unchanged top-level table** (NFR-07 violation). S1 validated the opposite on **7.1.0 (net10)** — false-green from spiking a newer major than the net8 codebase runs. Task-020 splice verified clean (defects are Docxodus-only). Verdict + §6.5 resolution paths: [`notes/spikes/S1-nfr09-real-template-hardening-2026-07-17.md`](notes/spikes/S1-nfr09-real-template-hardening-2026-07-17.md). Harness: `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/Nfr09RealTemplateHardeningTests.cs` (10 tests green, defects pinned as characterization tests).
 
 ### Committed this session
 - `5aed0f2d5` — task 012 (FR-11/FR-12 paraId-primary anchoring + splice key) — **pushed** to PR #656.
