@@ -10,10 +10,10 @@
 | Field | Value |
 |-------|-------|
 | **Project** | messaging-communication-app-r1 — 2nd communication channel (ACS Chat) over ADR-045 seams |
-| **Progress** | **22 of 28 tasks ✅** — SERVER-SIDE COMPLETE (incl. 052 read-model gap closure). Owner config gates: Delegate role + User-level Read SATISFIED; **app-user Share privilege on `sprk_communicationthread` + `sprk_communication`** needed for GrantAccess/POA (043/052). |
-| **Active task** | **052 COMPLETE** ✅. Remaining: UI wave (060→061/062/063), then 080/081, then 090. |
-| **Next Action** | **UI wave — task 060** (polling conversation/timeline component, `@spaarke/ui-components`, Fluent v9; consumes 050's endpoints; NO client ACS SDK). Client TS surface (parallelizable with BFF). Then 061 (PCF package+deploy), 062 (send/respond accessories), 063 (quoting). |
-| **Status** | in-progress (server done; UI wave next) |
+| **Progress** | **23 of 28 tasks ✅** — server-side + timeline component done. Owner config gates: Delegate role + User-level Read SATISFIED; **app-user Share privilege on `sprk_communicationthread` + `sprk_communication`** needed for GrantAccess/POA (043/052). |
+| **Active task** | **060 COMPLETE** ✅ (`CommunicationTimeline` in @spaarke/ui-components). Remaining: **061** (PCF package + DEPLOY — needs Dataverse env/auth), **062** (send/respond accessories), **063** (quoting), then **080/081** (tests/docs), **090** (wrap). |
+| **Next Action** | **task 061** — package `CommunicationTimeline` as a form-bound PCF + deploy to the OOB `sprk_communication`/thread form + UI tests. ⚠️ Deploy step needs the owner's Dataverse env (pac auth). Then 062/063 (client, parallelizable), 080/081, 090. |
+| **Status** | in-progress (timeline done; PCF packaging + deploy next) |
 
 ### 🔔 OPEN FINDINGS (status)
 1. ✅ **RESOLVED — Open-thread message access gap** (was HIGH): closed by **task 052** (grant Open-thread msgs to the 041-derived set at persist — option b). Task-050 impersonated reads now return matter-thread msgs.

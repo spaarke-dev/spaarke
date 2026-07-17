@@ -2,7 +2,7 @@
   <metadata>
     <title>Polling conversation/timeline component in `@spaarke/ui-components` (Fluent v9): interleaved email+chat, reply nesting, compose box, unread indicator, ~5s poll</title>
     <phase>W6 — UI (polling timeline + PCF accessories)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>14</estimated-hours>
     <dependencies>050</dependencies>
     <blocks>061, 063</blocks>
