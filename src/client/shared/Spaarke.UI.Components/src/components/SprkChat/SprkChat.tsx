@@ -388,6 +388,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onContextEvent: onContextEventProp,
   // FR-P2-03 task 032 — capture_mode: modal wizard escape forwarding to host.
   onElicitationModal: onElicitationModalProp,
+  // spaarkeai-assistant-enhancements-r1 P0(b) — TEXT-path surface_launch forwarding to host.
+  onSurfaceLaunch: onSurfaceLaunchProp,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -479,6 +481,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     setOnPlaybookOptions,
     setOnContextEvent,
     setOnElicitationModal,
+    setOnSurfaceLaunch,
   } = sseStream;
 
   // Track current streaming state
@@ -1190,6 +1193,32 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       setOnElicitationModal(null);
     };
   }, [onElicitationModalProp, setOnElicitationModal]);
+
+  // ── spaarkeai-assistant-enhancements-r1 P0(b): register surface_launch callback ──
+  //
+  // Forwards the SSE `surface_launch` payload (TEXT/agent-path create-flow launch)
+  // to the host. The host opens the pre-seeded create surface via the shared
+  // `launchSurface({ consumerType, draftValues, resolvedLookups, bffBaseUrl })` —
+  // the SAME registry the chip/Click path uses. Synchronous callback-ref pattern —
+  // mirrors setOnElicitationModal.
+  React.useEffect(() => {
+    if (!onSurfaceLaunchProp) {
+      setOnSurfaceLaunch(null);
+      return;
+    }
+
+    setOnSurfaceLaunch(payload => {
+      try {
+        onSurfaceLaunchProp(payload);
+      } catch (err) {
+        console.error('[SprkChat] Failed to forward surface_launch SSE event:', err);
+      }
+    });
+
+    return () => {
+      setOnSurfaceLaunch(null);
+    };
+  }, [onSurfaceLaunchProp, setOnSurfaceLaunch]);
 
   // R6 Pillar 6c / task 095 — wire `onContextEvent` prop into the SSE pipeline.
   // Synchronous callback-ref pattern — mirrors the setOnPlaybookOptions useEffect

@@ -262,7 +262,15 @@ export type ChatSseEventType =
   // Engine's OutcomeCard view-projection (ChatSseActionOutcomeData) — the
   // counterpart to `action_confirmation` for the no-dialog path. The client routes
   // this to the SAME `outcome_card` render the gate-RESUME leg uses.
-  | 'action_outcome';
+  | 'action_outcome'
+  // spaarkeai-assistant-enhancements-r1 P0(b) (2026-07-17) — TEXT/agent-path
+  // surface launch. Emitted by BindingCapabilityTool.cs when a capability the
+  // agent turn selected routes to a `surface_launch`-disposition Binding: the
+  // client opens the pre-seeded create surface (matter/event/task wizard, …)
+  // via `launchSurface`. The Click path already branches on the terminal
+  // chunk's `disposition`; this is its text-path analogue (SessionOutput ledger
+  // entry precedes this event — ADR-040).
+  | 'surface_launch';
 
 /** A parsed SSE event from the stream, matching ChatSseEvent from the server. */
 export interface IChatSseEvent {
@@ -639,6 +647,31 @@ export interface IElicitationModalPayload {
 }
 
 /**
+ * Payload for the `surface_launch` SSE event (spaarkeai-assistant-enhancements-r1
+ * P0(b), 2026-07-17): a capability the agent turn selected resolved to a Binding
+ * whose disposition is `surface_launch` — a client-owned pass-through. The server
+ * drafted + grounded a payload and ledger-wrote it (ADR-040); the CLIENT opens the
+ * pre-seeded surface.
+ *
+ * Host contract: call the ONE shared `launchSurface({ consumerType, draftValues,
+ * resolvedLookups, bffBaseUrl })` (surface-handoff task 012) — the SAME registry
+ * lookup the chip/Click path uses (`useConsumerChips`), ZERO intent detection
+ * (ADR-039: `consumerType` IS the server's routing decision). Lift `resolvedLookups`
+ * out of `payload` so the enriched closed-set ids pre-select dropdowns and never
+ * land in a free-text field.
+ *
+ * @see `Sprk.Bff.Api.Api.Ai.ChatSseSurfaceLaunchData`
+ */
+export interface ISurfaceLaunchPayload {
+  /** The dispatched Binding row GUID (audit/trace; routing is on `consumerType`). */
+  bindingId: string;
+  /** Stable consumer-type code — the registry key the host maps to a launch surface. */
+  consumerType: string;
+  /** Enriched draft payload (draft slot values + `resolvedLookups` + `fileIds`) to pre-seed the surface; null/absent when none. */
+  payload?: Record<string, unknown> | null;
+}
+
+/**
  * A single step as received in the 'plan_preview' SSE event data.
  * Maps to ChatSsePlanStep on the backend.
  */
@@ -1007,6 +1040,20 @@ export interface ISprkChatProps {
    * Synchronous callback-ref pattern (same as onPlaybookOptions).
    */
   onElicitationModal?: ((payload: IElicitationModalPayload) => void) | null;
+
+  /**
+   * Callback fired for `surface_launch` SSE events
+   * (spaarkeai-assistant-enhancements-r1 P0(b) — the TEXT/agent-path create-flow
+   * fix). Emitted when a capability the agent turn selected routes to a
+   * `surface_launch`-disposition Binding. The host opens the pre-seeded create
+   * surface via the shared `launchSurface({ consumerType, draftValues,
+   * resolvedLookups, bffBaseUrl })` — the SAME registry the chip/Click path uses.
+   * When omitted, the event is logged and dropped (the assistant's chat notice
+   * still tells the user the surface was intended).
+   *
+   * Synchronous callback-ref pattern (same as onElicitationModal).
+   */
+  onSurfaceLaunch?: ((payload: ISurfaceLaunchPayload) => void) | null;
 
   /**
    * Callback fired when the user clicks a candidate playbook link button rendered
@@ -1929,6 +1976,15 @@ export interface IUseSseStreamResult {
    * `dispatchConsumer(bindingId, { slots })`. Pass `null` to unregister.
    */
   setOnElicitationModal: (handler: ((payload: IElicitationModalPayload) => void) | null) => void;
+
+  /**
+   * spaarkeai-assistant-enhancements-r1 P0(b) — register/unregister a synchronous
+   * callback for `surface_launch` SSE forwarding (the TEXT/agent-path create-flow
+   * launch). Same callback-ref pattern as setOnElicitationModal. SprkChat wires
+   * this to its `onSurfaceLaunch` prop; the host opens the pre-seeded surface via
+   * the shared `launchSurface`. Pass `null` to unregister.
+   */
+  setOnSurfaceLaunch: (handler: ((payload: ISurfaceLaunchPayload) => void) | null) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
