@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 012 — FR-11/FR-12 paraId-primary anchoring + fuzzy fallback (`AnnotationReanchorService`) + paraId as splice key (deps 010✅,011✅ — UNBLOCKED) |
-| **Step** | not started |
-| **Status** | ready |
-| **Next Action** | Execute task 012 via task-execute (FULL, opus @ high). Consumes the paraId substrate from 010 (server map) + 011 (client hidden-attr carry). Note the **residual best-effort** from 011: mammoth drops/merges some `<w:p>` (empty paras, headers/footers) → positional paraId drift; 012's fuzzy fallback (textPattern + paragraphHint) is exactly the compensator. |
+| **Task** | 012 — FR-11/FR-12 paraId-primary anchoring + fuzzy fallback (`AnnotationReanchorService`) + paraId as splice key |
+| **Step** | 1 of 6 DONE (additive mirror-first `paraId` contract; BFF builds clean 0 err). Steps 2-6 remaining. |
+| **Status** | in-progress |
+| **Next Action** | Steps 2-6 per Handoff Notes below. Recommend `/compact` first — Steps 2-3 need deep reads of `AnnotationReanchorService.cs` (483 LoC) + `ComposeService.cs` (1747 LoC). Resume: `work on task 012` / `continue`. |
 
 ### Critical Context
 All six pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed — no design pivots. The fidelity core sequences E2 (paraId substrate) → E1 (delta save); toolset + E3 parallelize; import depends on E1/E2. The NFR-09 real-template hardening gate (Phase 6) gates the E1 delta-save cutover.
@@ -84,6 +84,29 @@ All six pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed — no design pivots. The fi
 ### Key Learnings
 - Engine frozen (ADR-039): E3 is server-derived, NOT a new Action output — no catalog rows change.
 
+### Handoff Notes — Task 012 (paraId-primary anchoring + splice key) — IN PROGRESS 2026-07-17
+
+**Rigor**: FULL · opus @ high · directional · BFF+client (hot-path, parallel-safe=false). Deps 010✅,011✅.
+**Model gate**: needs opus — session must be Opus/Fable (was Opus 4.8). **Hot-path /conflict-check: ✅ CLEAR** — only open PR touching `Services/Compose` is our own #656; compose-r2 done/on-master; ai-redesign-r2 owns `Services/Ai` (no overlap).
+
+**✅ Step 1 DONE (additive mirror-first `paraId`, BFF builds 0 err)**:
+- Client `AnchoredAnnotationAnchor` (`compose-contracts.ts:108-124`) — added `paraId?: string`.
+- Server `AnchoredAnnotationAnchor` (`Models/Ai/Chat/ChatSession.cs:342`) — added `public string? ParaId { get; init; }`.
+- `PriorAnchor` (`AnnotationReanchorService.cs:451`) — added trailing `[JsonPropertyName("paraId")] string? ParaId = null`.
+- All OPTIONAL/nullable (ADR Tension Path A additive; existing consumers unaffected).
+
+**Seams located for Steps 2-6**:
+- **Step 2 (FR-11 paraId-primary)** — `AnnotationReanchorService.cs`: scorer at line ~111 (`FindBestParagraphMatch(anchor.TextPattern, currentParagraphs)` + `StructuralProximity(bestIdx, anchor.ParagraphHint)`); bands `ReanchorBand` (Auto/Review/Orphan, Orphan threshold <0.6 @ line ~441). **Plan**: in the resolve loop, try `anchor.ParaId` exact-match against the current doc's paraId map FIRST → if found, band=Auto (confidence 1.0, matched paragraph = that paraId's index); ONLY when ParaId is null/not-found, delegate to the existing textPattern+Levenshtein+ParagraphHint scorer (RETAIN it — Word regen caveat, Open-XML-SDK #925). Need the current-doc paraId list as input — reuse task-010 `ParaIdPreParser` (inject or call) to get `{index → paraId}` for `currentParagraphs`. Read full ResolveAsync signature + how `currentParagraphs` is built (lines ~80-140).
+- **Step 3 (FR-12 splice key)** — `ComposeService.cs` (1747 LoC): find the SAVE path (`SaveComposeAnnotationsAsync` referenced at ChatSession.cs:304; also the dirty-save/`SaveAsync`). Establish the `paraId → original-OOXML-paragraph` map that task 020's FR-02 splice consumes. Grep `SaveAsync`, `paraId`, `splice`. Likely additive: expose the map (already produced by ParaIdPreParser on Load — task 010 `LoadComposeDocumentResult.ParaIdMap`) so save maps edited editor paragraphs (carrying paraId from client) → original OOXML paragraph by paraId. Task 020 does the actual Docxodus patch; 012 just makes the KEY available/wired.
+- **Step 4 unit tests** — `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`: (a) anchor resolves by paraId within round-trip; (b) SAME anchor re-resolves via fuzzy matcher after external edit that removed/changed paraId (null paraId → fuzzy path); (c) edit to para P maps to original OOXML para with matching paraId; (d) additive-contract (existing consumers unaffected). Mirror `ParaIdPreParserTests`/`CrossVersionSessionPersistenceTests` harness. Real docx via `WordprocessingDocument.Create`; NO transport mocks (ADR-038).
+- **Step 5 seam slice** — `tests/integration/seam/**` `WebApplicationFactory`: load → anchor → save → reload, anchor round-trips to correct paragraph by paraId (NFR-06). This ALSO discharges the task-010 §6.5 deferral (010's HTTP through-the-wire map assertion) + task-002 versionId seam if co-located. Check existing `tests/integration/seam/` structure first.
+- **Step 6** — `dotnet build` BFF + shared-lib build; run tests; **publish-size** `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` report absolute compressed + delta vs baseline (worktree fresh baseline **46.66 MB** incl PDBs per task 001; NOT the CLAUDE.md ~49.63 — rebased past ai-redesign-r1 deletions); ≤60 MB ceiling; `dotnet list package --vulnerable --include-transitive` no new HIGH; NetArchTest `ADR013_ComposeFacade` + `ADR007_GraphIsolation` (NOTE: ADR007 is PRE-EXISTING RED on branch from Services.Communication — not us; confirm ComposeFacade green).
+
+**Constraints reminder**: ADR-007 (no Graph types above SpeFileStore in Services/Compose), ADR-013 (no AI internals in Services/Compose — Tier-1 NetArchTest), NFR-06 seam test mandatory, mirror-first (client↔server in sync — DONE Step 1). PR desc MUST cite ADR Tension Path A (AnchoredAnnotation gains paraId, stays Compose-domain, never `memory.*`).
+
+**Resume**: `work on task 012` (or `continue`). Step 1 committed? NO — uncommitted WIP (client + 2 server files). Batch-commit 012 when green, or commit Step-1 contracts separately if desired.
+
+---
 ### Handoff Notes — Task 011 (client paraId carry) analysis + plan (2026-07-17)
 
 **Rigor**: FULL · sonnet @ high · directional · client-only (no BFF/publish). Deps 010 ✅.

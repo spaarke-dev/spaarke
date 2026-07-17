@@ -453,7 +453,12 @@ public sealed record PriorAnchor(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("textPattern")] string TextPattern,
     [property: JsonPropertyName("paragraphHint")] int ParagraphHint,
-    [property: JsonPropertyName("preview")] string? Preview = null);
+    [property: JsonPropertyName("preview")] string? Preview = null,
+    // R3 FR-11 (task 012): PRIMARY anchor — the paragraph's w14:paraId. Resolution tries this
+    // FIRST; the TextPattern+Levenshtein+ParagraphHint scorer below is the retained fallback for
+    // when it is absent (Word regenerated paraIds on an external save — Open-XML-SDK #925). Optional
+    // + trailing so existing PriorAnchor construction/deserialization is unaffected (additive).
+    [property: JsonPropertyName("paraId")] string? ParaId = null);
 
 /// <summary>One prior anchor's re-anchor outcome — the band, the score components, whether a
 /// near-tie made it ambiguous, and (for AUTO/REVIEW) the matched paragraph so the UI can show

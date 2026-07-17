@@ -112,6 +112,17 @@ export interface AnchoredAnnotationAnchor {
   paragraphHint: number;
   /** Editor-native span id (TipTap/ProseMirror) — stable for the in-editor session lifetime. */
   spanId: string;
+  /**
+   * R3 FR-11 (spaarkeai-compose-r3 task 012) — PRIMARY anchor: the `w14:paraId` of the
+   * paragraph the anchor lives in, captured from the editor's paraId-carrying node (task 011).
+   * Resolution order is paraId-FIRST, then the {@link textPattern}/{@link paragraphHint} fuzzy
+   * fallback. Additive + optional: paraId is stable only WITHIN our own load→edit→save round-trip
+   * — Word regenerates all paraIds on an external save when tracked changes/comments are present
+   * (Open-XML-SDK #925), so an anchor from a Word-touched document carries no paraId and the fuzzy
+   * matcher re-anchors it (design §5.2). Absent on legacy anchors created before this field existed.
+   * Compose-domain positional UI state (ADR Tension Path A — never written via `memory.*`).
+   */
+  paraId?: string;
 }
 
 /**
