@@ -278,7 +278,163 @@ public class AnnotationReanchorServiceTests
         loaded!.AutoCount.Should().Be(1);
     }
 
+    // -- FR-11 paraId-primary anchoring (task 012) -----------------------------------------------
+
+    // paraIds aligned 1:1 with BaseParagraphs (index i → BaseParaIds[i]).
+    private static readonly string?[] BaseParaIds = { "0000000A", "0000000B", "0000000C", "0000000D", "0000000E" };
+
+    [Fact]
+    public void Reanchor_AnchorParaIdMatchesCurrentParagraph_ResolvesByParaIdOverContent()
+    {
+        // FR-11 acceptance (a): within our own round-trip the paraId is the PRIMARY anchor. The anchor's
+        // paraId points at paragraph index 2, but its textPattern is byte-identical to paragraph 0 — so
+        // ONLY paraId-primary lands it at 2. If the fuzzy scorer ran, it would (wrongly) pick 0.
+        var anchors = new[]
+        {
+            new PriorAnchor("a1", "comment", BaseParagraphs[0], ParagraphHint: 0, Preview: null, ParaId: "0000000C"),
+        };
+
+        var result = AnnotationReanchorService
+            .Reanchor(anchors, BaseParagraphs, "spe-1", When, BaseParaIds)
+            .Annotations.Single();
+
+        result.MatchedParagraphIndex.Should().Be(2, "the anchor's paraId identifies paragraph 2 — paraId beats the content match at 0");
+        result.Band.Should().Be(ReanchorBand.Auto);
+        result.Confidence.Should().Be(1.0, "an exact paraId hit is a definitive re-anchor");
+        result.Ambiguous.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Reanchor_AnchorParaIdMatchesEvenWhenParagraphContentDrifted_StaysDefinitiveAuto()
+    {
+        // The paragraph the paraId points at was EDITED (content drift) but is still the same paragraph.
+        // paraId-primary must re-anchor it definitively regardless of the content change (design §5.2).
+        var current = (string[])BaseParagraphs.Clone();
+        current[3] = "Termination now requires SIXTY (60) days written notice — substantially reworded during editing.";
+        var anchors = new[]
+        {
+            new PriorAnchor("a1", "insertion-suggestion", TerminationAnchor, ParagraphHint: 3, Preview: null, ParaId: "0000000D"),
+        };
+
+        var result = AnnotationReanchorService
+            .Reanchor(anchors, current, "spe-1", When, BaseParaIds)
+            .Annotations.Single();
+
+        result.MatchedParagraphIndex.Should().Be(3);
+        result.Band.Should().Be(ReanchorBand.Auto);
+        result.Confidence.Should().Be(1.0);
+    }
+
+    [Fact]
+    public void Reanchor_AnchorParaIdAbsentFromDocument_FallsBackToFuzzyMatcher()
+    {
+        // FR-11 acceptance (b) / design §5.2: an EXTERNAL Word edit regenerated all paraIds (Open-XML-SDK
+        // #925), so the anchor's paraId is nowhere in the current doc. The SAME anchor must re-anchor via
+        // the RETAINED fuzzy matcher — landing on the paragraph its textPattern matches (index 1), NOT
+        // orphaned. Regenerated current ids share nothing with the anchor's "0000000C".
+        var regeneratedIds = new string?[] { "FFFF0001", "FFFF0002", "FFFF0003", "FFFF0004", "FFFF0005" };
+        var anchors = new[]
+        {
+            new PriorAnchor("a1", "comment", IndemnificationAnchor, ParagraphHint: 1, Preview: null, ParaId: "0000000C"),
+        };
+
+        var result = AnnotationReanchorService
+            .Reanchor(anchors, BaseParagraphs, "spe-1", When, regeneratedIds)
+            .Annotations.Single();
+
+        result.MatchedParagraphIndex.Should().Be(1, "the paraId is gone, so the retained textPattern+Levenshtein scorer re-anchors by content");
+        result.Band.Should().Be(ReanchorBand.Auto);
+    }
+
+    [Fact]
+    public void Reanchor_AnchorCarriesParaIdButNoIdMapProvided_UsesFuzzyPath()
+    {
+        // Additive/back-compat: a caller that never extracted the id map (currentParaIds omitted → null)
+        // gets the pre-FR-11 behavior — the paraId is simply ignored and the fuzzy scorer runs. Proves
+        // the paraId field does not change existing consumers' results.
+        var anchors = new[]
+        {
+            new PriorAnchor("a1", "comment", IndemnificationAnchor, ParagraphHint: 1, Preview: null, ParaId: "0000000C"),
+        };
+
+        var result = AnnotationReanchorService.Reanchor(anchors, BaseParagraphs, "spe-1", When).Annotations.Single();
+
+        result.MatchedParagraphIndex.Should().Be(1, "no id map → fuzzy content match, as before FR-11");
+        result.Band.Should().Be(ReanchorBand.Auto);
+    }
+
+    [Fact]
+    public void ExtractParaIds_RealDocxWithParaIds_ReturnsUppercasedIdsAlignedWithText()
+    {
+        // The id list must be index-aligned with ExtractParagraphTexts (same document-order walk) and
+        // upper-cased; a paragraph without an id yields null at its slot.
+        var docx = CreateDocxWithParaIds(
+            (BaseParagraphs[0], "aaaa0001"),   // lowercase source id — must come back upper-cased
+            (BaseParagraphs[1], null),          // no id → null slot
+            (BaseParagraphs[2], "CCCC0003"));
+
+        var ids = AnnotationReanchorService.ExtractParaIds(docx);
+        var texts = AnnotationReanchorService.ExtractParagraphTexts(docx);
+
+        ids.Should().HaveCount(3).And.HaveSameCount(texts);
+        ids[0].Should().Be("AAAA0001");
+        ids[1].Should().BeNull();
+        ids[2].Should().Be("CCCC0003");
+        texts[2].Should().Be(BaseParagraphs[2], "text and ids come from the same aligned walk");
+    }
+
+    [Fact]
+    public async Task ComputeAndPersistAsync_WhenParaIdMatchesButContentDiffers_ReanchorsByParaIdDefinitively()
+    {
+        // End-to-end through the docx path: ComputeAndPersistAsync must extract the id map and resolve by
+        // paraId. The anchor's textPattern matches NOTHING in the doc (would orphan on content alone), but
+        // its paraId identifies paragraph 3 — so paraId-primary re-anchors it AUTO at 3.
+        var cache = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
+        var service = new AnnotationReanchorService(cache);
+        var docx = CreateDocxWithParaIds(
+            (BaseParagraphs[0], "0000000A"),
+            (BaseParagraphs[1], "0000000B"),
+            (BaseParagraphs[2], "0000000C"),
+            (BaseParagraphs[3], "0000000D"));
+        var anchors = new[]
+        {
+            new PriorAnchor("a1", "comment", "A clause that appears nowhere in this document.", ParagraphHint: 9, Preview: null, ParaId: "0000000D"),
+        };
+
+        var summary = await service.ComputeAndPersistAsync("spe-paraid", anchors, docx);
+
+        var result = summary.Annotations.Single();
+        result.MatchedParagraphIndex.Should().Be(3, "the paraId identifies paragraph 3 even though the textPattern matches nothing");
+        result.Band.Should().Be(ReanchorBand.Auto);
+        result.Confidence.Should().Be(1.0);
+        summary.AutoCount.Should().Be(1);
+    }
+
     // -- Helpers ---------------------------------------------------------------------------------
+
+    private static byte[] CreateDocxWithParaIds(params (string Text, string? ParaId)[] paragraphs)
+    {
+        using var stream = new MemoryStream();
+        using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document();
+            var body = mainPart.Document.AppendChild(new Body());
+            foreach (var (text, paraId) in paragraphs)
+            {
+                var p = new Paragraph(new Run(new Text(text) { Space = SpaceProcessingModeValues.Preserve }));
+                if (paraId is not null)
+                {
+                    p.ParagraphId = new HexBinaryValue(paraId);
+                }
+                body.AppendChild(p);
+            }
+            body.AppendChild(new SectionProperties());
+            mainPart.Document.Save();
+        }
+
+        return stream.ToArray();
+    }
 
     private static byte[] CreateDocx(IReadOnlyList<string> paragraphs)
     {

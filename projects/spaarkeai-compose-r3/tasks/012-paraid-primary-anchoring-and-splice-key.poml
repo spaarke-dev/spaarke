@@ -2,8 +2,8 @@
   <metadata>
     <title>FR-11/FR-12 paraId-primary anchoring + fuzzy fallback (`AnnotationReanchorService`) + paraId as splice key</title>
     <phase>1 E2</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>startable</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>opus</model-tier>
     <effort>high</effort>
@@ -159,4 +159,31 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    COMPLETED 2026-07-17 (FULL · opus @ high · directional). All 8 acceptance criteria met.
+    - FR-11: `AnnotationReanchorService.Reanchor` gained an OPTIONAL index-aligned `currentParaIds`
+      param; an exact paraId hit re-anchors AUTO/confidence 1.0 (definitive, robust to content drift),
+      falling to the RETAINED textPattern+Levenshtein+paragraphHint scorer only when the id is absent
+      (external Word edit — design §5.2). New `ExtractParaIds` + single-pass `ReadParagraphs` (reduced
+      duplication — one Open XML walk feeds text+ids+ComputeAndPersistAsync) + `ResolveByParaId`.
+    - FR-12: NEW pure static `ComposeParaIdSpliceMap` (`BuildParagraphIndex` paraId→w:p incl.
+      table/nested cells; `Resolve` → matched/unmatched, IsFullyMatched) is the splice KEY task 020
+      consumes. DIRECTIONAL DEVIATION from POML `<outputs>` (which named ComposeService.cs): placed in
+      a dedicated helper, NOT ComposeService.cs — SRP (ComposeService is the 1747-LoC SPE-lifecycle
+      facade) + the 012/020 boundary (task 020 justification keeps OOXML surgery out of ComposeService).
+      Avoids a speculative dead method on ComposeService. Task 020 calls BuildParagraphIndex on its own
+      editable doc.
+    - Mirror-first: client `PriorAnchorInput.paraId?` + `anchoredAnnotationsToPriorAnchors` passes it
+      (end-to-end: anchor.paraId → PriorAnchorInput → server PriorAnchor.ParaId → resolution).
+    - Tests: +6 paraId-primary in AnnotationReanchorServiceTests; NEW ComposeParaIdSpliceMapTests (7);
+      NEW seam ComposeParaIdReanchorSeamTests (NFR-06 — paraId beats content through the wire @ /reanchor,
+      fuzzy fallback for absent id). Unit 27 green; full Compose suite 407 green; client 10 green.
+    - Verify: BFF build 0 err; shared-lib 3/3; publish 45.94 MB compressed incl PDBs (−0.72 vs 46.66
+      baseline, 0 pkg delta); 0 vulnerable pkgs; ADR013_ComposeFacade PASS; ADR007 pre-existing RED
+      confined to Services.Communication/Office.Errors (no Services.Compose — not this task).
+    - PR MUST cite ADR Tension Path A (AnchoredAnnotation gains paraId, stays Compose-domain, never memory.*).
+    - DOC-RECONCILE (unchanged from Step 1): design §5 / task prose say unique-id "3.28.0" → 2.27.2;
+      §12.3 say Docxodus "7.1.0" → 6.4.0.
+  </notes>
 </task>
