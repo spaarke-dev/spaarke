@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="CommunicationMessageActions" version="1.0.0" display-name-key="Communication Message Actions" description-key="Virtual PCF: message send/respond accessory (Compose / Send / Respond) on the OOB sprk_communication and sprk_communicationthread forms. Hosts the shared TimelineComposeBox for the compose surface and calls the existing /api/communications/send (task 051/062) via @spaarke/auth. No Code Page host, no FCC swap (ADR-026 Path-A exception; task 062)." control-type="virtual" api-version="1.3.18">
+  <control namespace="Spaarke.Controls" constructor="CommunicationMessageActions" version="1.0.1" display-name-key="Communication Message Actions" description-key="Virtual PCF: message send/respond accessory (Compose / Send / Respond) on the OOB sprk_communication and sprk_communicationthread forms. Hosts the shared TimelineComposeBox for the compose surface and calls the existing /api/communications/send (task 051/062) via @spaarke/auth. No Code Page host, no FCC swap (ADR-026 Path-A exception; task 062)." control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
