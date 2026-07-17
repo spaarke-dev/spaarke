@@ -616,12 +616,19 @@ public class SessionDispatchOrchestrator
         // (ADR-040 storage-precedes-rendering), never from the pre-store `output` local above.
         var storedEntry = ProgressiveRenderGuard.EnsureStored(routed.Entry);
         // Task 013: surface the dispatch metadata (disposition + consumertype) on the terminal chunk so a
-        // surface_launch dispatch is actionable client-side. Both come from the SAME source the ledger uses
-        // (binding.Disposition.ToLedgerValue() + UcId = Ucid ?? ConsumerType, OutputRouter) — one source of truth.
+        // surface_launch dispatch is actionable client-side. The disposition is the ledger value; the
+        // consumertype MUST be the Binding's sprk_consumertype (e.g. "create-matter") — the key the CLIENT
+        // launch registry (surfaceLaunchRegistry.ts, keyed by sprk_consumertype) resolves to a surface.
+        // BUGFIX (assistant-enhancements-r1 UAT 2026-07-17): this previously emitted storedEntry.UcId
+        // (= sprk_ucid ?? sprk_consumertype). The original comment assumed UcId == ConsumerType, but a
+        // Binding with a distinct sprk_ucid (e.g. create-matter's "UC-B-6") made the client receive
+        // "UC-B-6", which has no registry entry → resolveSurfaceLaunch() returned undefined → the wizard
+        // never opened (silent launched:false). Emit binding.ConsumerType so BOTH the text/agent path
+        // (BindingCapabilityTool → surface_launch SSE) and the chip/Click path (dispatchConsumer) route.
         yield return DeserializeResultChunk(
             storedEntry.Payload.GetRawText(),
             disposition: storedEntry.Disposition,
-            consumerType: storedEntry.UcId);
+            consumerType: binding.ConsumerType);
 
         // ── Next-step chips: the dispatched Binding's curated sprk_chiptransitions follow the terminal
         // complete chunk so the conversation surface always shows the CURRENT next steps.

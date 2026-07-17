@@ -133,7 +133,11 @@ public sealed class DispositionRoutabilitySeamTests
     {
         var h = new Harness();
         await h.SeedSessionAsync(BuildSession());
-        h.GivenBinding(BindingDisposition.SurfaceLaunch, SelectionInputSchema);
+        // Regression (assistant-enhancements-r1 UAT 2026-07-17): a Binding whose sprk_ucid DIVERGES from
+        // sprk_consumertype (the live create-matter row: consumertype="create-matter", ucid="UC-B-6"). The
+        // terminal chunk's consumerType MUST be the sprk_consumertype (the client launch-registry key), NOT
+        // the ledger UcId — emitting "UC-B-6" made resolveSurfaceLaunch() miss and the wizard never opened.
+        h.GivenBinding(BindingDisposition.SurfaceLaunch, SelectionInputSchema, consumerType: "create-matter", ucid: "UC-B-6");
         h.GivenFlatTextAction("ROLE: Draft the matter-intake fields for the launched wizard.", PassThroughOutputSchema);
         h.OpenAi.RawJsonToReturn = """{"new_text":"Acme NDA intake"}""";
 
@@ -142,11 +146,14 @@ public sealed class DispositionRoutabilitySeamTests
         var complete = chunks.Should().ContainSingle(c => c.Type == "complete").Subject;
         var stored = await h.GetStoredOutputAsync();
 
-        // The terminal chunk's disposition IS the server's routing decision (== the stored ledger value),
-        // and the consumertype is the SAME id the ledger carries (UcId = Ucid ?? ConsumerType) — one source
-        // of truth, so the client maps it via its static registry with no re-derivation.
+        // The terminal chunk's disposition IS the server's routing decision (== the stored ledger value).
         complete.Disposition.Should().Be("surface_launch");
-        complete.ConsumerType.Should().NotBeNullOrEmpty().And.Be(stored!.UcId);
+        // The consumertype MUST be the Binding's sprk_consumertype (the CLIENT registry key), even when the
+        // ledger UcId differs — the client maps THIS to a surface via surfaceLaunchRegistry.ts.
+        complete.ConsumerType.Should().Be("create-matter");
+        // The ledger still records the divergent UcId (ucid ?? consumertype) — documents the divergence the
+        // regression guards: consumerType on the wire is NOT the UcId.
+        stored!.UcId.Should().Be("UC-B-6");
     }
 
     // (1d) Smart pre-seed enrichment (assistant-enhancements-r1 task 013 part 3 / D-013-01): a
@@ -559,13 +566,15 @@ public sealed class DispositionRoutabilitySeamTests
             BindingDisposition disposition,
             string inputSchema,
             string consumerType = "disposition-seam-test",
-            BindingRisk risk = BindingRisk.None) =>
+            BindingRisk risk = BindingRisk.None,
+            string? ucid = null) =>
             Routing
                 .Setup(c => c.GetBindingByIdAsync(BindingId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new Binding
                 {
                     BindingId = BindingId,
                     ConsumerType = consumerType,
+                    Ucid = ucid,
                     ActionId = ActionId,
                     ActionKind = ActionKind.Prompted,
                     Disposition = disposition,

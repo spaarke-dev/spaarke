@@ -278,7 +278,6 @@ public sealed class BindingCapabilityTool : AIFunction
             string? summary = null;
             string? error = null;
             string? disposition = null;
-            string? consumerType = null;
             JsonElement? launchPayload = null;
             await foreach (var chunk in orchestrator.DispatchAsync(request, cancellationToken).ConfigureAwait(false))
             {
@@ -290,7 +289,6 @@ public sealed class BindingCapabilityTool : AIFunction
                 error = chunk.Error;
                 summary = chunk.Summary ?? chunk.Content;
                 disposition = chunk.Disposition;
-                consumerType = chunk.ConsumerType;
                 if (chunk.Result is JsonElement resultElement)
                 {
                     launchPayload = resultElement.Clone();
@@ -322,7 +320,12 @@ public sealed class BindingCapabilityTool : AIFunction
                     DispositionRoutability.ToLedgerValue(BindingDisposition.SurfaceLaunch),
                     StringComparison.Ordinal))
             {
-                var launchConsumerType = !string.IsNullOrWhiteSpace(consumerType) ? consumerType! : _binding.ConsumerType;
+                // Route on the Binding's sprk_consumertype (e.g. "create-matter") — the key the client
+                // launch registry (surfaceLaunchRegistry.ts) resolves. NOT the chunk's consumerType, which
+                // is sourced upstream from the ledger UcId (sprk_ucid, e.g. "UC-B-6") and would miss the
+                // registry (assistant-enhancements-r1 UAT 2026-07-17 root cause). _binding.ConsumerType is
+                // unambiguous here — this tool IS the dispatched Binding.
+                var launchConsumerType = _binding.ConsumerType;
 
                 if (_sseWriter is not null)
                 {
