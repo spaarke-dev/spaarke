@@ -12,7 +12,12 @@
 // Mock the shared library BEFORE importing the handler.
 jest.mock('@spaarke/ui-components', () => {
   const CATALOG = [
-    { entityType: 'sprk_matter', entitySet: 'sprk_matters', lookupAttribute: 'sprk_regardingmatter', navPropHint: 'matter' },
+    {
+      entityType: 'sprk_matter',
+      entitySet: 'sprk_matters',
+      lookupAttribute: 'sprk_regardingmatter',
+      navPropHint: 'matter',
+    },
     { entityType: 'contact', entitySet: 'contacts', lookupAttribute: 'sprk_regardingcontact', navPropHint: 'contact' },
   ];
   return {
@@ -163,7 +168,13 @@ describe('persistOverrideReason', () => {
     const ctx = mkCtx();
     const provenance = JSON.stringify({ decision: { status: 'Suggested' }, candidates: [] });
 
-    const res = await persistOverrideReason(ctx, provenance, 'sprk_regardingmatter', 'wrong matter', '2026-07-15T00:00:00.000Z');
+    const res = await persistOverrideReason(
+      ctx,
+      provenance,
+      'sprk_regardingmatter',
+      'wrong matter',
+      '2026-07-15T00:00:00.000Z'
+    );
 
     expect(res.success).toBe(true);
     const call = (ctx.webApi.updateRecord as jest.Mock).mock.calls[0];

@@ -328,7 +328,11 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     <div className={s.root}>
       <div className={s.barRow}>
         <Toolbar size="small" className={s.bar} aria-label="Communication actions">
-          <ToolbarButton icon={<ArrowReply16Regular />} disabled={composeDisabled} onClick={() => openComposer('reply')}>
+          <ToolbarButton
+            icon={<ArrowReply16Regular />}
+            disabled={composeDisabled}
+            onClick={() => openComposer('reply')}
+          >
             Reply
           </ToolbarButton>
           <ToolbarButton
