@@ -57,11 +57,9 @@ import {
   type ProvenanceDoc,
   type ProvenanceCandidate,
   type Connection,
-  type CreateAction,
   type FiledAssociation,
   confidenceBand,
   deriveConnections,
-  deriveCreateActions,
   mergeFiledConnections,
   topCandidate,
 } from './provenance';
@@ -89,8 +87,6 @@ export interface ConnectionsCallbacks {
    * (type-first UX). Called with no argument = all-types fallback.
    */
   onLinkAnother?: (entityType?: string) => void;
-  /** Launch a create-from-email flow (Event / To Do / Invoice). */
-  onCreate?: (action: CreateAction) => void;
 }
 
 export interface ConnectionsEditorProps extends ConnectionsCallbacks {
@@ -138,12 +134,6 @@ const ENTITY_ICON: Record<string, JSX.Element> = {
 function entityIcon(entity: string): JSX.Element {
   return ENTITY_ICON[entity] ?? <DocumentText20Regular />;
 }
-const CREATE_ICON = {
-  event: <CalendarLtr20Regular />,
-  todo: <CheckmarkCircle20Filled />,
-  invoice: <Receipt20Regular />,
-} as const;
-
 const BAND_WORD = { high: 'High', medium: 'Medium', low: 'Low' } as const;
 
 // Empty decision doc — used when every association was filed manually (no engine
@@ -442,40 +432,7 @@ function ConnectionRow({
   );
 }
 
-function CreateActions({
-  actions,
-  readOnly,
-  busy,
-  onCreate,
-}: {
-  actions: CreateAction[];
-  readOnly: boolean;
-  busy: boolean;
-  onCreate: (action: CreateAction) => void;
-}): JSX.Element {
-  const s = useStyles();
-  return (
-    <div className={s.createRow}>
-      {actions.map(a => (
-        <Tooltip key={a.kind} content={a.reason ?? a.label} relationship="label">
-          <Button
-            size="small"
-            appearance={a.suggested ? 'outline' : 'subtle'}
-            className={a.suggested ? s.suggestedChip : undefined}
-            icon={CREATE_ICON[a.kind]}
-            disabled={readOnly || busy}
-            onClick={() => onCreate(a)}
-          >
-            {a.label}
-            {a.suggested ? ' ✨' : ''}
-          </Button>
-        </Tooltip>
-      ))}
-    </div>
-  );
-}
-
-/** The shared body: rollup + slots + add + create. */
+/** The shared body: rollup + slots + link-another. */
 function EditorBody({
   record,
   provenance,
@@ -490,7 +447,6 @@ function EditorBody({
   onChange,
   onSetPrimary,
   onLinkAnother,
-  onCreate,
 }: {
   record: ICommunicationRecord;
   provenance: ProvenanceDoc;
@@ -505,7 +461,6 @@ function EditorBody({
   onChange: (conn: Connection) => void;
   onSetPrimary: (conn: Connection) => void;
   onLinkAnother: (entityType?: string) => void;
-  onCreate: (action: CreateAction) => void;
 }): JSX.Element {
   const s = useStyles();
   const isResolved = record.sprk_associationstatus === AssociationStatus.Resolved;
@@ -515,7 +470,6 @@ function EditorBody({
     () => mergeFiledConnections(deriveConnections(provenance, isResolved), filedAssociations ?? []),
     [provenance, isResolved, filedAssociations]
   );
-  const createActions = React.useMemo(() => deriveCreateActions(provenance), [provenance]);
 
   // Controlled by the App (write-success only) — no local optimistic state (W1).
   const handleAcceptAll = () => {
@@ -595,14 +549,6 @@ function EditorBody({
           </Menu>
         </div>
       )}
-
-      <Divider />
-      <div className={s.headRow}>
-        <Text size={200} weight="semibold" className={s.kicker}>
-          Create from this email
-        </Text>
-      </div>
-      <CreateActions actions={createActions} readOnly={readOnly} busy={busy} onCreate={onCreate} />
     </div>
   );
 }
@@ -627,7 +573,6 @@ export function ConnectionsEditor(props: ConnectionsEditorProps): JSX.Element | 
     onChange: props.onChange ?? (() => undefined),
     onSetPrimary: props.onSetPrimary ?? (() => undefined),
     onLinkAnother: props.onLinkAnother ?? (() => undefined),
-    onCreate: props.onCreate ?? (() => undefined),
   };
 
   // Nothing to show: no engine provenance AND nothing filed → only a bare

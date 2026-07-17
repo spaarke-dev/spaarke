@@ -52,7 +52,6 @@ import {
   mergeFiledConnections,
   connectionTarget,
   type Connection,
-  type CreateAction,
 } from './provenance';
 import { ConnectionsEditor } from './ConnectionsEditor';
 import {
@@ -112,13 +111,6 @@ const useStyles = makeStyles({
   modalSurface: { maxWidth: '640px', width: '90vw' },
   modalBody: { maxHeight: '70vh', overflowY: 'auto' },
 });
-
-// The create-from-email action → target entity logical name.
-const CREATE_TARGET_ENTITY: Record<CreateAction['kind'], string> = {
-  event: 'sprk_event',
-  todo: 'sprk_todo',
-  invoice: 'sprk_invoice',
-};
 
 // Fallback primary-name field per entity, used ONLY when the `sprk_recordtype_ref`
 // catalog has no `sprk_recorddisplaynamefield` row (resolveRecordDisplayNameFieldName
@@ -488,30 +480,6 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     [fileSelection]
   );
 
-  const handleCreate = React.useCallback((action: CreateAction): void => {
-    const xrm = getXrm();
-    const entityName = CREATE_TARGET_ENTITY[action.kind];
-    const onLaunchError = (err: unknown) =>
-      console.warn('[CommunicationConnections] create-from-email launch failed:', err);
-    try {
-      // R4: launch the target create form. Full create-and-link defers to W5.
-      if (typeof xrm?.Navigation?.openForm === 'function') {
-        Promise.resolve(xrm.Navigation.openForm({ entityName, useQuickCreateForm: true })).catch(onLaunchError);
-      } else if (typeof xrm?.Navigation?.navigateTo === 'function') {
-        Promise.resolve(
-          xrm.Navigation.navigateTo(
-            { pageType: 'entityrecord', entityName },
-            { target: 2, width: { value: 60, unit: '%' }, height: { value: 80, unit: '%' } }
-          )
-        ).catch(onLaunchError);
-      } else {
-        setError('Create is unavailable in this host.');
-      }
-    } catch (err) {
-      onLaunchError(err);
-    }
-  }, []);
-
   const handleSetPrimary = React.useCallback(
     (conn: Connection): void => {
       // The primary owns the denormalized Regarding Record fields. Re-filing the
@@ -618,7 +586,6 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
                 onChange={handleChange}
                 onSetPrimary={handleSetPrimary}
                 onLinkAnother={handleLinkAnother}
-                onCreate={handleCreate}
               />
             </DialogContent>
             <DialogActions>
