@@ -282,7 +282,7 @@ public sealed class IncomingCommunicationProcessor
             try
             {
                 await ProcessIncomingAttachmentsAsync(
-                    message.Attachments, communicationId, ct);
+                    message.Attachments, mailboxEmail, graphMessageId, communicationId, ct);
             }
             catch (Exception ex)
             {
@@ -515,12 +515,43 @@ public sealed class IncomingCommunicationProcessor
     /// Reuses EmailAttachmentProcessor for filtering and SPE upload logic.
     /// </summary>
     private async Task ProcessIncomingAttachmentsAsync(
-        IList<Attachment> graphAttachments, Guid communicationId, CancellationToken ct)
+        IList<Attachment> graphAttachments, string mailboxEmail, string graphMessageId,
+        Guid communicationId, CancellationToken ct)
     {
         var fileAttachments = graphAttachments
             .OfType<FileAttachment>()
             .Where(a => a.ContentBytes is { Length: > 0 })
             .ToList();
+
+        // The inline `$expand=attachments` on the message GET frequently returns attachment
+        // METADATA without `contentBytes` (size-dependent Graph behavior). When we have
+        // attachments but none carry usable bytes, re-fetch the attachments collection from
+        // the dedicated endpoint, which returns contentBytes for file attachments. Without
+        // this, incoming attachments silently never materialize into sprk_document records.
+        if (fileAttachments.Count == 0 && graphAttachments.Count > 0)
+        {
+            try
+            {
+                var graphClient = _graphClientFactory.ForApp();
+                var fetched = await graphClient.Users[mailboxEmail].Messages[graphMessageId]
+                    .Attachments.GetAsync(cancellationToken: ct);
+                fileAttachments = (fetched?.Value ?? new List<Attachment>())
+                    .OfType<FileAttachment>()
+                    .Where(a => a.ContentBytes is { Length: > 0 })
+                    .ToList();
+                _logger.LogInformation(
+                    "Re-fetched {Count} file attachment(s) with content for communication {CommunicationId} " +
+                    "(inline expand returned no contentBytes)",
+                    fileAttachments.Count, communicationId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Attachment re-fetch failed for communication {CommunicationId}; " +
+                    "attachments may be larger than the inline limit and require per-item $value fetch",
+                    communicationId);
+            }
+        }
 
         if (fileAttachments.Count == 0)
         {
