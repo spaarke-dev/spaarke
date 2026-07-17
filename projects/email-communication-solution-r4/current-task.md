@@ -10,7 +10,7 @@
 | Field | Value |
 |-------|-------|
 | **Phase** | Post-ship UAT iteration (owner testing on spaarkedev1) |
-| **Branch** | `work/email-communication-solution-r4` · HEAD = **`2ce3ed416`** = origin/master (everything merged) |
+| **Branch** | `work/email-communication-solution-r4` · HEAD = **`3af4571e9`** = origin/master (everything merged) |
 | **Tree** | clean (only `.claude/worktrees/` untracked scaffold) |
 | **BFF** | LIVE on `spaarke-bff-dev` (healthz 200) — all UAT fixes deployed + hash-verified |
 | **Next action** | OWNER imports the 2 PCF ZIPs + re-sends the "Smith v Smith" test email; verify status=Suggested, contact Filed, "Create Matter (AI)" row surfaces |
@@ -40,6 +40,8 @@ The project shipped (W0–W8, merged to master, BFF + SpaarkeAi deployed) earlie
 - Per-slot filed state from each candidate's **`written`** flag (not global Resolved) → filed contact + unfiled matter-suggestion coexist.
 - **"Create Matter (AI)"** row (`deriveAiSuggestedTypes` parses `types=[...]` from the classification signal) + AI suggestions count toward "to review".
 - `Link another` type-first menu; Create-from-email removed (moved to Actions).
+
+5. **Semantic rung found no existing records — tenant-filter mismatch** (`RecordSearchService`, merged `3af4571e9`, BFF deployed): the inbound engine (rung 4) runs from a background/job caller with **no user `tid` claim**, so record search filtered on `tenantId eq 'system'`, but `RecordSyncJob` stamps every indexed record with `AzureAd:TenantId` → **0 matches** for all inbound emails. Only rung 5's metadata-only "looks like a new matter" survived. Empirically reproduced vs live `spaarke-records-index`: `system` filter → 0 hits; real-tenant filter → "Smith v Smith" matter @ score 15.5. **Fix**: no-user tenant fallback is now `AzureAd:TenantId` (symmetric with sync side). Regression test `SearchAsync_WhenNoUserContext_FiltersOnConfiguredTenant_NotSystemLiteral`. Tests: RecordSearch 28/28, Communication 355. Package 46.68 MB (§10 ✓). NOTE: RecordSyncJob syncs `sprk_matter`/`sprk_project`/`contact`/`account` only — **invoices are NOT yet indexed**, so invoice semantic-matching remains a known gap.
 
 **PCF Actions (v1.0.1 → v1.1.1):**
 - Toolbar: **Reply · Reply All · Forward · New** (left) + spacer + **right-justified** icon-only group (Save-to-SharePoint · Create Event/To-Do/Invoice, ✨ when engine-suggested). Dropped Send/Save-Draft. OOB-matched typography. Composer gained `initialCc` for Reply All.
