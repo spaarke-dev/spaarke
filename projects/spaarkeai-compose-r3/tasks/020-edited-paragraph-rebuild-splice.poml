@@ -2,8 +2,8 @@
   <metadata>
     <title>FR-02 edited-paragraph rebuild + paraId-keyed splice orchestration (server)</title>
     <phase>2 E1</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>startable</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>opus</model-tier>
     <effort>xhigh</effort>
@@ -144,4 +144,37 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    COMPLETED 2026-07-17 (FULL · opus @ xhigh · directional). All 8 acceptance criteria met.
+    - NEW `Services/Compose/ComposeParagraphSpliceService.cs` — pure `byte[]`→`byte[]`
+      `SpliceEditedParagraphs(retainedOriginal, IReadOnlyList<ComposeEditedParagraph>)`. Opens an
+      EDITABLE copy of the retained original; builds the paraId→w:p index + resolves ALL edited ids via
+      task-012 `ComposeParaIdSpliceMap` (BuildParagraphIndex + Resolve) BEFORE any mutation; rebuilds
+      each matched paragraph in place (replace runs with one new run carrying NewText) PRESERVING the
+      `w14:paraId` attribute + `w:pPr` (style/numbering) + first-run `w:rPr` (font). Untouched paragraphs
+      pass through unchanged (literal original XML). Produces the spliced-edited doc task 021's WmlComparer
+      diffs. New `ComposeEditedParagraph(ParaId, NewText)` DTO (reuses E2 paraId identity, not a parallel
+      schema) + new `ComposeSpliceException` (distinct from DocxAnnotationException so task 022 can catch
+      splice-specific failures).
+    - FAIL-FAST (FR-12): an unmatched OR duplicate edited paraId throws ComposeSpliceException BEFORE any
+      write — a batch with one valid + one unmatched id applies NEITHER (test asserts). Never a silent
+      no-op or a wrong-paragraph write.
+    - DI: registered `ComposeParagraphSpliceService` UNCONDITIONALLY in ComposeModule.cs (symmetric, no
+      feature gate — bff-extensions.md §F.1; mirrors ParaIdPreParser/DocxAnnotationWriter). Consumed by
+      task 022 (SaveAsync inversion); this task does NOT run the comparer (021) or invert SaveAsync (022).
+    - §11 reuse check: verified existing ComposeEditBatch/EditTransaction/EditValidator operate on
+      PLAINTEXT projections (string documentText + ProposedEdit) — text-level AI-edit machinery, NOT
+      OOXML byte-level paragraph splice by paraId. No overlap; new service justified.
+    - Tests: NEW ComposeParagraphSpliceServiceTests (10) — exactly-K-differ, paraId-exact mapping,
+      table-cell splice, NFR-07 paraId+style preservation, untouched-paraId preservation, empty no-op,
+      unmatched fail-fast, duplicate, malformed, empty-bytes. Unit 10 green; full Compose suite 417 green.
+    - Verify: BFF build 0 err; publish 45.94 MB compressed incl PDBs (0 pkg delta — OpenXML already
+      referenced; Docxodus is task 021's, not here); 0 vulnerable pkgs; ADR013_ComposeFacade NetArchTest
+      green.
+    - NFR-06: no seam test here — 020 adds a pure, not-yet-wired transform; the through-the-wire
+      obligation lands on task 022 (SaveAsync inversion). POML scopes this out ("does NOT invert SaveAsync").
+    - PR MUST include the §10 Placement Justification (server-side OOXML surgery on the save path; reuses
+      ComposeParaIdSpliceMap + OpenXML SDK — no client can do OOXML surgery).
+  </notes>
 </task>
