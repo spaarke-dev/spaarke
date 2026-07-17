@@ -282,12 +282,7 @@ function ConnectionRow({
             </Button>
           ) : (
             <>
-              <Button
-                size="small"
-                appearance="primary"
-                disabled={busy}
-                onClick={() => onConfirm(conn)}
-              >
+              <Button size="small" appearance="primary" disabled={busy} onClick={() => onConfirm(conn)}>
                 Confirm
               </Button>
               <Tooltip content="Pick a different record" relationship="label">
@@ -444,13 +439,7 @@ function EditorBody({
 
       {!readOnly && (
         <div className={s.addRow}>
-          <Button
-            size="small"
-            appearance="subtle"
-            icon={<Link20Regular />}
-            disabled={busy}
-            onClick={onLinkAnother}
-          >
+          <Button size="small" appearance="subtle" icon={<Link20Regular />} disabled={busy} onClick={onLinkAnother}>
             Link another record…
           </Button>
         </div>
