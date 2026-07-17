@@ -5,6 +5,28 @@
 > **Grounded against (live, spaarkedev1, read-only MCP, 2026-07-16)**: `sprk_playbookconsumer` rows for the R1 capabilities (create-matter/task/todo, chat-summarize, chat-classify, draft-correspondence, daily-briefing-narrate, compose-*), including their current `sprk_tooldescription` + `sprk_chiptransitions`.
 > **Constraint anchor**: ADR-039 — ambiguity is authored **into tool descriptions**, never a classifier or a second decider. The create flows draft fields → launch a pre-seeded surface; the LLM never calls `create_record` / resolves GUIDs (`sprk_allowstools=false`).
 
+---
+
+## ✅ OWNER DECISIONS (Ralph, 2026-07-16) — supersede the §6 open questions
+
+The tool-descriptions + chips (§2/§3) are **Dataverse data** (`sprk_playbookconsumer.sprk_tooldescription` / `sprk_chiptransitions`) — live-editable in spaarkedev1 without a code deploy, so they are **UAT-tweakable**. Owner resolutions:
+
+| # | Question | **Decision** |
+|---|---|---|
+| **1** | list-tasks disposition | **Surface Launch → a grid surface. PULL THE GRID SURFACE INTO R1** (not Informational). This is NEW CLIENT CODE (a new launch `SurfaceKind` + a filtered DataGrid launcher) — the one 050 item that needs a build+deploy, unlike the data changes. |
+| **2** | list-tasks scope | **ONLY Event-Task.** ⚠️ **Correction to the draft**: the output is an **`sprk_event` entity dataset filtered to subtype = Task** (+ owner/assignee + open + query params). It does **NOT** span `sprk_todo` (a different entity). The §4/§4.5 "both To Do + Event-Task" recommendation is **rejected** — Event-Task only. |
+| **3** | Ambiguous-create default | **Confirmed: `create-task` (Event-Task)** is the tie-break default over To Do for a bare "task", with the one-tap "Make it a To Do instead" correction chip. |
+| **4** | Chip / utterance label | **"Show my open tasks"** (the canonical label). |
+| **5** | create-matter chips | **Unchanged** (keep the two existing chips). |
+
+**Consequences to fold into the authoring + a new build task:**
+- **list-tasks tool-description (rewrite from §4.5)**: lists the caller's open **Event-Tasks** (`sprk_event`, subtype Task) only — drop the `sprk_todo` span. Still READ-only; the LLM selects the capability, never authors the query.
+- **list-tasks Binding**: `sprk_disposition = Surface Launch (100000007)`, `sprk_consumertype = list-tasks`.
+- **NEW client work (the grid surface)**: add a `grid` (or `workspace-tab`) `SurfaceKind` to `surfaceHandoff/types.ts` + a registry entry (`list-tasks → filtered Event-Task grid`) in `surfaceLaunchRegistry.ts` + a launcher that opens the Spaarke **DataGrid** (`configId` + runtime filter: entity `sprk_event`, subtype Task, owner/assignee = caller, statecode open). Needs a `sprk_gridconfiguration` for the Event-Task grid (or a runtime filter override on an existing one). This is a focused new vertical — scoped as a follow-on task; it is the FR-G2 "filtered Task grid" promise, now in R1.
+- **§4.3 disposition recommendation (Informational) is overridden** → Surface Launch per decision 1.
+
+---
+
 ## Summary
 
 The R1 create trio (`create-matter`, `create-task`, `create-todo`) was already repointed to Surface Launch and given the **To Do vs Event-Task** disambiguation by task 002 — that half of the narrow ambiguity set is live. This proposal adds the **still-missing half of the §5 narrow set — the "file / open / close / matter" cluster** — as reciprocal cues between `create-matter` and `chat-summarize` (the "open a file" = create-a-matter-RECORD vs read-an-existing-document collision), authors the one genuinely-new item — a **`list-tasks`** capability that "what are my tasks?" / "show my open tasks" (FR-G2) **dispatches** (design §464 option (a): no new bare-Q&A machinery — a real capability whose chips fire), and adds successor chips. Every change owes eval cases (listed for task 051). Nothing here is applied yet — it is a before→after for the owner to approve.
