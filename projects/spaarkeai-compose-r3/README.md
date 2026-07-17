@@ -1,6 +1,7 @@
 # Spaarke Compose R3 — Word-Feature Fidelity Project (Seed)
 
-> **Status**: Draft / seed — created 2026-07-01 during R1 UAT close-out
+> **Status**: **Design authored + scope locked + ALL PRE-SPEC SPIKES PASSED (2026-07-16)** — see [`design.md`](design.md) (code-grounded + refreshed with July-2026 best-practices research: [`notes/tiptap-docx-fidelity-research-2026-07-16.md`](notes/tiptap-docx-fidelity-research-2026-07-16.md); spikes: [`notes/spikes/`](notes/spikes/)). Owner review locked D1–D4 (design.md §0): hybrid retained-original delta save (Docxodus `WmlComparer`); full scope (fidelity core + E3 grounding-tied confidence + editing toolset + import round-trip); text+run-level fidelity. **Spikes S1/S1b/S2/S3/S4/S5 all passed — no design pivots.** **Next: `/design-to-spec projects/spaarkeai-compose-r3`.** (Sections below are the original 2026-07-01 seed, superseded where design.md differs.)
+> **Status (original)**: Draft / seed — created 2026-07-01 during R1 UAT close-out
 > **Author**: R1 close-out session (see `../spaarkeai-compose-r1/`)
 > **Parent lineage**: R1 (Path A modal + TipTap editor + AI-dispatch scaffolding) shipped
 > as the baseline; R2 (three-pane pivot + streaming Assistant panel + facade extension)

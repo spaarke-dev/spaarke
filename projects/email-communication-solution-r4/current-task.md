@@ -1,7 +1,7 @@
 # Current Task — email-communication-solution-r4
 
 > **Purpose**: Active task state tracker for context recovery. Reset by `task-execute` on each task transition.
-> **Last Updated**: 2026-07-16 (W8 documentation wave complete — 080/081/082)
+> **Last Updated**: 2026-07-16 (by context-handoff — project COMPLETE + MERGED + DEPLOYED; pre-compact)
 
 ---
 
@@ -9,11 +9,27 @@
 
 | Field | Value |
 |-------|-------|
-| **W8 docs — DONE (2026-07-16)** | **080 ✅** authored `docs/architecture/communication-intelligence-architecture.md` (canonical R4 substrate; absorbed idempotency/.eml/attachment→Document/RAG from the retired `email-processing-architecture.md`). **081 ✅** data-model already R4-current → added 080 pointer; rewrote `communication-service-architecture.md` to R4; **DELETED** `email-processing-architecture.md` + `email-to-document-{architecture,automation}.md` (+ fixed 6 inbound links). **082 ⛔ N/A** — `EMAIL-TRIAGE-MODULE-DESIGN.md` never existed; RI design re-homed to `spaarke-notification-spine-r1`. Also **deleted the superseded R3 project body** (kept `SUPERSEDED.md` tombstone) + bannered the retired ribbon sections in `COMMUNICATION-DEPLOYMENT-GUIDE.md`. ⚠ Source-of-truth note: shipped send DTO field is `AttachmentDocumentIds`; `AttachmentDriveItemIds` rename deferred/unshipped. |
-| **Progress** | **41 / 45 done** (080/081/082 W8 docs complete; 082 N/A). Remaining: 090 wrap-up + owner-side 043 deploy remainder. **W3 COMPLETE + 074-endpoint ✅.** All 6 rungs + telemetry + read-only `POST /{id}/suggest-associations` (behavior-preserving `EvaluateAsync` extract; 352 Comm tests green). Plus 061 + 075 merged. |
-| **Last commits** | `400885a6e` (074 suggest endpoint) · `b4483f00e` (032) · `1803b2f80` (031) · `85ab74a79` (075) · `29834f041` (030). Tree clean. |
-| **Status** | **CLOSING r4 at milestone (owner 2026-07-16).** **W5 (050–054) RE-HOMED** → a new Responsive-Intelligence project. Scoping found W5 can't be built here: `EventRulesService.FireAsync` is SSE/user/session-shaped (E5 — wrong for fire-and-forget comms); OutputRouter record/notification legs = unbuilt net-new mechanisms = the shared `kind`-typed notification spine `assistant-r1.5` is already building + `messaging` will consume (both designs say build it ONCE, coordinated). Full architecture + convergence documented in **`notes/W5-responsive-intelligence-and-shared-notification-spine.md`**. **Remaining in r4: W8 docs (080–082)** — extend 080 to document the 4-layer spine decision — **+ owner 043 deploy**. |
-| **⬆️ Actions v1.0.1 to re-import** | `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.0.1.zip` — env-var fallback (reads `sprk_MsalClientId`/`sprk_BffApiAppId`/`sprk_BffApiBaseUrl`) + OOB-compact toolbar (16px icons). Footer will read v1.0.1. Connections stays v1.0.0 (no change). |
+| **STATUS** | ✅ **email-r4 COMPLETE, MERGED TO MASTER, and DEPLOYED to dev.** Only owner-side maker-UI (043 form config) remains. Nothing else pending from Claude. |
+| **Merge state** | Worktree HEAD = `origin/master` = **`04b13daa1`** (in sync). All r4 work is on master. CI on master was GREEN (build/test/security/quality). |
+| **BFF deploy** | ✅ Live on **`spaarke-bff-dev`** (RG `rg-spaarke-dev`). Verified: `/healthz` 200; `POST /communications/{id}/suggest-associations` + `/{id}/archive` → 401 (routes live); SHA-256 hash-verify passed. Config set: `Communication__SemanticMatch__Enabled=true`, `Communication__AiClassification__Enabled=true`. Deploy via `pwsh scripts/Deploy-BffApi.ps1`. |
+| **SpaarkeAi code page** | ✅ Auto-deployed by CI (`Deploy SpaarkeAi` workflow on master push). email-r4 did NOT touch SpaarkeAi — no manual deploy needed. |
+| **PCF — Actions** | ✅ **v1.0.1 already imported by owner** (unchanged since `76ef649cb`; env-var auth fallback + compact toolbar). No action. |
+| **PCF — Connections** | 📦 **v1.0.1 ZIP READY for owner upload** (proper 5-location version bump per /pcf-deploy + lint fix): `src/client/pcf/CommunicationConnections/Solution/bin/CommunicationConnectionsSolution_v1.0.1.zip` (546 KB, 6 entries). Footer will read v1.0.1 • Built 2026-07-16. |
+| **⏳ REMAINING (owner, 043 form config)** | Import Connections v1.0.1; place both PCFs on the OOB `sprk_communication` form (Connections→`sprk_associationprovenance`+`sprk_associationstatus`; Actions→`sprk_communicationtype`; auth auto-resolves from env vars); remove the deployed **Send** ribbon button/web resource (KEEP Create-To-Do); pack the **Awaiting-Association** view. Then 090 wrap-up. |
+| **Full deploy checklist** | `notes/DEPLOYMENT-CHECKLIST.md` |
+
+### What shipped (this session: 31→complete)
+- **W3 engine COMPLETE**: rung 4 semantic (`SemanticMatchRung`/`IRecordMatchingAi`), rung 5 AI-classify (`AiClassificationRung`/`ICommunicationClassificationAi` structured-output facade), per-rung telemetry (EventId 4501/4502), read-only suggestion endpoint (behavior-preserving `EvaluateAsync` extract — `ResolveAsync`=evaluate+apply). 352 Comm tests green.
+- **W6/W7**: 061 wizard migration ✅, 075 index-config ✅, 074 split (BFF suggestion capability built; add-in UI deferred to future add-in-strategy).
+- **W8 docs**: 080 authored (`docs/architecture/communication-intelligence-architecture.md`); 081 updated `communication-service-architecture.md` + `sprk_communication.md`; **DELETED** `email-processing-architecture.md` + 2 `email-to-document-*` dups + the whole `x-email-communication-solution-r3/` body (kept `SUPERSEDED.md`); 082 = N/A (target doc never existed). All inbound links fixed.
+
+### 🚀 W5 RE-HOMED → new project `spaarke-notification-spine-r1`
+W5 (Responsive Intelligence — auto-create Event/Task/Notification from `communication_assessed`) could NOT be built in r4: `EventRulesService.FireAsync` is SSE/user/session-shaped (task-010 **E5**, wrong for fire-and-forget); OutputRouter record/notification legs are unbuilt = the shared `kind`-typed notification spine that `spaarkeai-assistant-enhancements-r1.5` is already building + `messaging` will consume (both designs say build ONCE, coordinated). **Full architecture (4-layer: domain-actions + kind-typed outbox + Azure SignalR delivery + per-source policy; SSE = chat-presentation only) in `notes/W5-responsive-intelligence-and-shared-notification-spine.md` + `projects/spaarke-notification-spine-r1/design.md`** (for review alongside messaging-r1 + assistant-r1; key open decision = who owns spine Layers A–C). Memory: [[responsive-intelligence-shared-spine]].
+
+### Notes / possible follow-ups
+- ⚠️ **`pack.ps1` quirk**: writes its output zip to a `$PWD`-relative `bin/` (not `$PSScriptRoot`), so it only lands in `Solution/bin/` when CWD = the Solution folder; mis-fired here → packed with absolute paths instead. One-line `$PSScriptRoot` fix would harden it.
+- **Source-of-truth**: shipped send DTO field is `AttachmentDocumentIds` (Document GUIDs); the R3 `AttachmentDriveItemIds` rename is designed-but-unshipped (owner W0 decision — [[email-r4-attachment-id-semantics]]).
+- **Master is a busy/moving branch** — other projects (assistant-r1, messaging) merge frequently; fetch+merge before any master push.
 
 ### 🔑 AUTH / DEPLOY FACTS (spaarkedev1) — critical for future
 - **clientAppId = `170c98e1-d486-4355-bcbe-170454e0207c`** (SDAP-PCF-CLIENT). The value in the OLD `config/environments.json` (`5175798e-…`) was **RETIRED/deleted** → `AADSTS700016`. Fixed in `config/environments.json` (2026-07-15).
