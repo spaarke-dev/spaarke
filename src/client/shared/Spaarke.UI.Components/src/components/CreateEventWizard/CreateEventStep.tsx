@@ -7,21 +7,42 @@
  *   - Event Type (LookupField -> sprk_eventtype_ref)
  *   - Due Date (Input type="date")
  *   - Priority (Dropdown: Low/Normal/High/Urgent)
+ *   - Assigned To (LookupField -> contact, optional, + "Assign to me")
  *   - Description (Textarea)
  *
  * Dependencies are injected via props (no solution-specific imports):
  *   - dataService: IDataService for Dataverse operations
  *
+ * "Assign to me" (spaarkeai-assistant-enhancements-r1 task 014 / FR-A4):
+ * resolves the current Dataverse user onto their own `contact` record via
+ * `resolveCurrentUserAsContactAssignee` (the shared current-user identity
+ * mechanism — no new identity plumbing is introduced here). Failure to
+ * resolve (no Xrm host, or no matching contact) degrades gracefully: the
+ * field is simply left for manual search, never blocking event/task creation.
+ *
  * @see IDataService — high-level data access abstraction
  */
 import * as React from 'react';
-import { Text, Input, Textarea, Dropdown, Option, Field, makeStyles, tokens } from '@fluentui/react-components';
+import {
+  Text,
+  Input,
+  Textarea,
+  Dropdown,
+  Option,
+  Field,
+  Button,
+  Spinner,
+  makeStyles,
+  tokens,
+} from '@fluentui/react-components';
+import { PersonRegular } from '@fluentui/react-icons';
 import { LookupField } from '../LookupField/LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { EventService } from './eventService';
 import type { ICreateEventFormState } from './formTypes';
 import { EMPTY_EVENT_FORM } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
+import { searchContactsAsLookup, resolveCurrentUserAsContactAssignee } from '../../services/userLookup';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -68,6 +89,14 @@ const useStyles = makeStyles({
     gridTemplateColumns: '1fr 1fr',
     gap: tokens.spacingHorizontalM,
   },
+  assigneeRow: {
+    display: 'flex',
+    alignItems: 'flex-end',
+    gap: tokens.spacingHorizontalS,
+  },
+  assigneeLookup: {
+    flexGrow: 1,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -83,6 +112,7 @@ export const CreateEventStep: React.FC<ICreateEventStepProps> = ({
   const styles = useStyles();
 
   const [formValues, setFormValues] = React.useState<ICreateEventFormState>(initialFormValues ?? EMPTY_EVENT_FORM);
+  const [isAssigningToMe, setIsAssigningToMe] = React.useState(false);
 
   const serviceRef = React.useRef<EventService | null>(null);
   if (!serviceRef.current) {
@@ -125,10 +155,45 @@ export const CreateEventStep: React.FC<ICreateEventStepProps> = ({
     setFormValues(prev => ({ ...prev, description: e.target.value }));
   }, []);
 
+  const handleAssignedToChange = React.useCallback((item: ILookupItem | null) => {
+    setFormValues(prev => ({
+      ...prev,
+      assignedToId: item?.id ?? '',
+      assignedToName: item?.name ?? '',
+    }));
+  }, []);
+
+  const handleSearchAssignees = React.useCallback(
+    (query: string) => searchContactsAsLookup(dataService, query),
+    [dataService]
+  );
+
+  /**
+   * "Assign to me" (FR-A4): resolves the current Dataverse user onto their
+   * own contact record and sets it as the assignee. Non-blocking — a `null`
+   * resolution (no Xrm host, or no matching contact) is a silent no-op so
+   * the user can still search manually.
+   */
+  const handleAssignToMe = React.useCallback(async () => {
+    setIsAssigningToMe(true);
+    try {
+      const assignee = await resolveCurrentUserAsContactAssignee(dataService);
+      if (assignee) {
+        handleAssignedToChange(assignee);
+      }
+    } finally {
+      setIsAssigningToMe(false);
+    }
+  }, [dataService, handleAssignedToChange]);
+
   // -- Render ----------------------------------------------------------------
 
   const eventTypeValue: ILookupItem | null = formValues.eventTypeId
     ? { id: formValues.eventTypeId, name: formValues.eventTypeName }
+    : null;
+
+  const assignedToValue: ILookupItem | null = formValues.assignedToId
+    ? { id: formValues.assignedToId, name: formValues.assignedToName }
     : null;
 
   const selectedPriorityText = PRIORITY_OPTIONS.find(o => o.key === formValues.priority)?.text ?? 'Normal';
@@ -178,6 +243,28 @@ export const CreateEventStep: React.FC<ICreateEventStepProps> = ({
             ))}
           </Dropdown>
         </Field>
+      </div>
+
+      <div className={styles.assigneeRow}>
+        <div className={styles.assigneeLookup}>
+          <LookupField
+            label="Assigned To"
+            value={assignedToValue}
+            onChange={handleAssignedToChange}
+            onSearch={handleSearchAssignees}
+            placeholder="Search contacts..."
+            minSearchLength={2}
+          />
+        </div>
+        <Button
+          appearance="secondary"
+          icon={isAssigningToMe ? <Spinner size="tiny" /> : <PersonRegular />}
+          onClick={handleAssignToMe}
+          disabled={isAssigningToMe}
+          aria-label="Assign to me"
+        >
+          Assign to me
+        </Button>
       </div>
 
       <Field label="Description">

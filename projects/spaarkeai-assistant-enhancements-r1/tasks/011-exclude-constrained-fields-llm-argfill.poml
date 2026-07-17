@@ -3,7 +3,7 @@
   <metadata>
     <title>Exclude constrained fields from LLM arg-filling; incoherent-combo prevention</title>
     <phase>2: Structured Creation Core</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>none</blocks>
@@ -82,6 +82,27 @@
 
   <notes>
     Spec FR-B3 / FR-B4; NFR-06 negative eval is authored in task 051.
+
+    CLOSED 2026-07-16 as SATISFIED-BY-DESIGN (owner decision via AskUserQuestion). The task's scope is
+    superseded by the task-002 SurfaceLaunch redesign + task-010 resolver; building it would be redundant
+    (CLAUDE.md §11). Rationale, point by point:
+    - "Exclude closed-set fields from LLM arg-filling" — ALREADY enforced: the create Actions emit LABELS
+      (practice_area_suggestion / matter_type_suggestion), NOT GUIDs (task 002); allowstools=false blocks the
+      LLM from resolving GUIDs or writing records; the WIZARD/FORM owns the closed-set write via real dropdowns.
+      The capability input schema (BindingCapabilityTool → Binding.InputSchemaJson) already asks only for label
+      hints — there is nothing to exclude.
+    - "Closed-set fields resolved by FR-B1, not LLM args" — the resolver (010) does this; the actual WIRING of
+      ResolveAsync into the draft→pre-seed path is task 013's job (where the resolver is called). A code
+      assertion here would be premature/duplicative — it belongs with 013.
+    - "Incoherent practice-area × matter-type pair cannot commit" — NO DATA-MODEL BASIS: verified 2026-07-16
+      that sprk_mattertype_ref has NO practice-area relationship (independent reference table), so every PA×MT
+      pair is independently valid at the schema level. There is no coherence table to enforce. "Only valid
+      values commit" is guaranteed by the resolver (invalid label → none/low → picker) + the wizard's real
+      dropdowns (cannot pick a nonexistent value).
+    - Negative eval (incoherent combo) — belongs in the EVAL SUITE (task 051), not a unit test (catalog content
+      is not unit-testable without hitting live Dataverse).
+    Residual carried forward (not lost): (a) the resolver-wiring assertion → task 013; (b) the negative eval →
+    task 051. No code produced. Publish-size/gates N/A (no code change).
   </notes>
 
   <execution>

@@ -283,6 +283,68 @@ public class AgentTurnLoopContractTests
             "a Binding scoped to the wizard surface must not project into the assistant loop (catalog-column-driven filter, no tool-name lists)");
     }
 
+    // ── FR-H1 grounding predicate (task 044): requires-no-attached-record ────────────────────
+    // A capability whose Binding declares requires-no-attached-record is a pure predicate over the
+    // threaded HasAttachedRecord session fact — removed when a record is attached, kept otherwise.
+    // No model call, no tool-name list (ADR-039 §3.2 removes-the-impossible).
+
+    [Fact]
+    public void PreFilter_RequiresNoAttachedRecord_WithAttachedRecord_ExcludesCapability()
+    {
+        var createMatter = CreateBindingTool("create-matter", surfaces: null, requiresNoAttachedRecord: true);
+        var createTodo = CreateBindingTool("create-todo", surfaces: null, requiresNoAttachedRecord: false);
+        var handlerTool = AIFunctionFactory.Create(() => "x", "web_search");
+        // Session hosted ON a record (e.g. the user is inside a matter).
+        var context = new AgentToolFilterContext(
+            AgentToolFilterContext.AssistantSurface,
+            HasSessionFiles: false, HasActiveDocument: false, HasAnalysisBinding: false,
+            HasAttachedRecord: true);
+
+        var survivors = AgentToolProjection
+            .PreFilter(new AIFunction[] { createMatter, createTodo, handlerTool }, context)
+            .Select(t => t.Name)
+            .ToList();
+
+        survivors.Should().NotContain(createMatter.Name,
+            "requires-no-attached-record + an attached record removes the capability (hide 'Create matter' inside a matter)");
+        survivors.Should().Contain(createTodo.Name,
+            "a capability WITHOUT the predicate is unaffected by the attached record (create-todo is regarding-based)");
+        survivors.Should().Contain("web_search", "handler tools are never grounding-filtered by this predicate");
+    }
+
+    [Fact]
+    public void PreFilter_RequiresNoAttachedRecord_NoAttachedRecord_KeepsCapability()
+    {
+        var createMatter = CreateBindingTool("create-matter", surfaces: null, requiresNoAttachedRecord: true);
+        // Session NOT hosted on a record (top-level assistant — no matter/account in context).
+        var context = new AgentToolFilterContext(
+            AgentToolFilterContext.AssistantSurface,
+            HasSessionFiles: false, HasActiveDocument: false, HasAnalysisBinding: false,
+            HasAttachedRecord: false);
+
+        var survivors = AgentToolProjection
+            .PreFilter(new AIFunction[] { createMatter }, context)
+            .Select(t => t.Name)
+            .ToList();
+
+        survivors.Should().Contain(createMatter.Name,
+            "the precondition IS met (no attached record) — the capability is offered");
+    }
+
+    [Fact]
+    public void PreFilter_RequiresNoAttachedRecord_DefaultContext_KeepsCapability()
+    {
+        // The 4-arg AgentToolFilterContext (no HasAttachedRecord) defaults it to false — existing
+        // construction sites (no host record threaded) never grounding-filter the capability.
+        var createMatter = CreateBindingTool("create-matter", surfaces: null, requiresNoAttachedRecord: true);
+        var context = new AgentToolFilterContext(
+            AgentToolFilterContext.AssistantSurface, false, false, false);
+
+        AgentToolProjection.PreFilter(new AIFunction[] { createMatter }, context)
+            .Select(t => t.Name)
+            .Should().Contain(createMatter.Name, "default HasAttachedRecord=false ⇒ no grounding removal");
+    }
+
     [Fact]
     public void Finalize_AnyInputOrder_ProducesOrdinalNameOrderAndBudgetWrap()
     {
@@ -538,7 +600,8 @@ public class AgentTurnLoopContractTests
         string consumerType,
         string[]? surfaces,
         string? toolDescription = "Maker-authored intent description.",
-        string? inputSchemaJson = null) => new()
+        string? inputSchemaJson = null,
+        bool requiresNoAttachedRecord = false) => new()
         {
             BindingId = Guid.NewGuid(),
             ConsumerType = consumerType,
@@ -546,14 +609,16 @@ public class AgentTurnLoopContractTests
             ToolDescription = toolDescription,
             Surfaces = surfaces ?? Array.Empty<string>(),
             InputSchemaJson = inputSchemaJson,
+            RequiresNoAttachedRecord = requiresNoAttachedRecord,
         };
 
     private static BindingCapabilityTool CreateBindingTool(
         string consumerType,
         string[]? surfaces,
         string? toolDescription = "Maker-authored intent description.",
-        string? inputSchemaJson = null) => new(
-            CreateBinding(consumerType, surfaces, toolDescription, inputSchemaJson),
+        string? inputSchemaJson = null,
+        bool requiresNoAttachedRecord = false) => new(
+            CreateBinding(consumerType, surfaces, toolDescription, inputSchemaJson, requiresNoAttachedRecord),
             new ServiceCollection().BuildServiceProvider(),
             "tenant-1",
             "session-1",

@@ -3,7 +3,7 @@
   <metadata>
     <title>Constrained-field resolver primitive (Services/Ai)</title>
     <phase>2: Structured Creation Core</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>002</dependencies>
     <blocks>011, 013</blocks>
@@ -94,6 +94,15 @@
 
   <notes>
     Spec FR-B1. Critical path. This is the "genuinely-new piece" — keep it to the matcher; reuse metadata rendering. 013 consumes it for smart pre-seed.
+
+    COMPLETED 2026-07-16 (main-session, Opus/xhigh/FULL). Files:
+    - Services/Ai/IConstrainedFieldResolver.cs — contract: ResolveAsync(entity,attr,proposedValue,ct) → ConstrainedFieldResolution{Resolved?, Confidence(None/Low/High), Candidates[]} + FieldCandidate + ConstrainedFieldMatchOptions{FuzzyThreshold=0.82, Synonyms?}.
+    - Services/Ai/ConstrainedFieldMatcher.cs — PURE ladder (the genuinely-new algorithm): exact(ci) → normalized(lowercase/punct-fold/whitespace-collapse/synonyms) → fuzzy(normalized Levenshtein ≥ threshold) → none. Confidence: exact/normalized→High, fuzzy→Low, else None. No I/O.
+    - Services/Ai/ConstrainedFieldResolver.cs — orchestration : DataverseHttpServiceBase. Option-set valid-set via MetadataService.GetMetadataAsync → OptionSetDto.Options {Value,Label} (6h cached). Lookup valid-set: target via LookupAttributeMetadata.Targets → primary id/name via MetadataService → (id,name) OData query on target _ref entity. Candidates cached per field (sdap:cfr:{entity}.{attr}, 10min). Quiet no-op (ADR-032) on no-closed-set/unknown-attr/sourcing-failure. `protected virtual GetCandidatesAsync` = test seam.
+    - Infrastructure/DI/AnalysisServicesModule.cs — AddHttpClient<IConstrainedFieldResolver, ConstrainedFieldResolver>() UNCONDITIONAL (in AddUnconditionalChatAndNotificationServices; §10 F.1 — consumed on chat/dispatch path by 011/013, all deps unconditional).
+    - tests/…/Services/Ai/ConstrainedFieldMatcherTests.cs (11) + ConstrainedFieldResolverTests.cs (8) = 19 tests, all pass. Every ladder tier + none path + quiet no-op + practice-area high-resolve + fuzzy top-first + no-LLM-dependency reflection guard.
+    Reuse (§11): MetadataService (option-set values + target primary id/name), DataverseHttpServiceBase (authed client + errors), LookupChoicesResolver pluralization convention. New surface = matcher + orchestration only.
+    Build ✅ 0 errors. Publish-size 45.32 MB compressed (≤60). No new NuGet/CVE. Step 9.5: ADR-039/032/010/038 + §10/§11 self-reviewed clean (limitations noted in code: +"s" pluralization; statecode-assumed query → quiet None). Escalation trigger CLEARED (practice-area/matter-type are lookups→_ref as spec assumed). 013 consumes ResolveAsync for smart pre-seed; 011 consumes for constrained-field exclusion.
   </notes>
 
   <execution>

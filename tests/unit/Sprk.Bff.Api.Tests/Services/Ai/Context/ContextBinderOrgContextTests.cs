@@ -184,10 +184,12 @@ public sealed class ContextBinderOrgContextTests
         // Architectural invariant (ADR-039 "preference-only, never feeds AgentToolFilterContext"): the
         // grounding pre-filter's context carries ONLY structural session facts — no BU/team-derived member
         // exists through which the org context could enter the grounding/dispatch decision.
+        // HasAttachedRecord added by task 044 (FR-H1) — a STRUCTURAL host-record fact, not a BU/team/org
+        // signal; the grounding context stays free of any organization-derived member.
         typeof(AgentToolFilterContext).GetProperties()
             .Select(p => p.Name)
             .Should().BeEquivalentTo(
-                new[] { "Surface", "HasSessionFiles", "HasActiveDocument", "HasAnalysisBinding" },
+                new[] { "Surface", "HasSessionFiles", "HasActiveDocument", "HasAnalysisBinding", "HasAttachedRecord" },
                 "the grounding filter context is structural-facts-only — no business-unit/team-derived member exists");
     }
 

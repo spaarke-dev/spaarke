@@ -144,7 +144,10 @@ public sealed class PreferenceNotPermissionInvariantTests
             "Boolean HasSessionFiles",
             "Boolean HasActiveDocument",
             "Boolean HasAnalysisBinding",
-        }, "these 4 structural session facts are the ONLY inputs the grounding pre-filter ever sees — " +
+            // Added by task 044 (FR-H1): a STRUCTURAL host-record fact (ChatHostContext.IsValid()), not a
+            // profile/learned signal — grounding stays preference-independent.
+            "Boolean HasAttachedRecord",
+        }, "these structural session facts are the ONLY inputs the grounding pre-filter ever sees — " +
            "there is no parameter, profile or otherwise, through which a stated or learned user signal " +
            "could reach AgentToolProjection.PreFilter");
     }

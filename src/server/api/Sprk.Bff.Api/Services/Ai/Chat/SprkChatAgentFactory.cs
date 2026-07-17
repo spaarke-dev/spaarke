@@ -840,7 +840,12 @@ public class SprkChatAgentFactory
             Surface: AgentToolFilterContext.AssistantSurface,
             HasSessionFiles: context.UploadedFiles is { Count: > 0 },
             HasActiveDocument: !string.IsNullOrWhiteSpace(documentId),
-            HasAnalysisBinding: !string.IsNullOrWhiteSpace(analysisId));
+            HasAnalysisBinding: !string.IsNullOrWhiteSpace(analysisId),
+            // FR-H1 grounding fact (task 044): the session is hosted on a valid attached/regarding record
+            // when ChatHostContext.IsValid() (a genuine host entity — EntityType + EntityId present +
+            // known type). Feeds the requires-no-attached-record PreFilter predicate (e.g. hides
+            // "Create matter" when already inside a matter). Threaded here, never fetched inside PreFilter.
+            HasAttachedRecord: hostContext?.IsValid() == true);
         var finalTools = AgentToolProjection.Finalize(
             tools, filterContext, turnContract, citationContext, _logger);
 

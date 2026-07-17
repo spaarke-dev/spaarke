@@ -3,7 +3,7 @@
   <metadata>
     <title>Wizard entry-payload envelope + hand-off (unify 5→7 wrappers)</title>
     <phase>2: Structured Creation Core</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>002</dependencies>
     <blocks>013, 014</blocks>
@@ -105,6 +105,13 @@
 
   <notes>
     Spec FR-A1 / FR-A3. The envelope is the hand-off contract for 013 + 014.
+
+    COMPLETED 2026-07-16 (bg Opus subagent; reviewed + committed by main session). Client mechanism built + tested under `src/client/shared/Spaarke.UI.Components/`:
+    - NEW `src/services/surfaceHandoff/`: types.ts (SurfaceHandoffEnvelope + SurfaceHandoffResult + ResolvedLookup slot for 013), surfaceLaunchRegistry.ts (consumertype→{kind,surface,preset} per surface-launch-mechanism §3: create-matter→sprk_creatematterwizard, create-task→sprk_createeventwizard+preset{sprk_eventtype_ref=Task}, create-todo→oob-form sprk_todo), handoffStorage.ts (mintHandoffId h-<guid> + sessionStorage rendezvous + TTL), launchSurface.ts (mint→store-before-launch→launch→await close→read outcome→cleanup; never throws; P5 tie-in), readHandoff.ts (launched-surface read side), index.ts.
+    - MODIFIED (additive, byte-stable existing): wizardLaunchers.ts (+launchCreateEventWizard — the missing surface, name VERIFIED against Deploy-WizardCodePages.ps1 'sprk_createeventwizard'; +promise-returning navigateTo primitives for the return path; exported resolveXrmNavigation), useWizardPageBootstrap.ts (+handoff/handoffSeed/completeHandoff seam for wizard read side), barrels.
+    - 30 Jest tests pass; tsc type-clean (2 pre-existing external-pkg errors only, proven by stash-rebuild). Reuses wizardLaunchers (no fork, §11); files-by-reference; no new BFF endpoint (compose invariant); ADR-028 bffBaseUrl base-only.
+    Build-verify: sessionStorage same-origin sharing UNVERIFIABLE in code (needs live host) → primary path + graceful null fallback coded+flagged; navigateTo-resolves-on-close used as done-signal; key naming sprk.handoff.<id> per contract; event web-resource name verified.
+    SCOPED TO 013 (correctly, by design): (a) per-wizard field mapping (envelope.draftValues→initialFormValues; resolvedLookups→dropdown pre-select) — CreateMatterWizard has initialFormValues seam at formTypes.ts:201; (b) the SpaarkeAi call-site that detects a surface_launch dispatch + calls launchSurface() — needs `disposition`+`consumerType` surfaced on DispatchConsumerResult (the terminal `complete` chunk); server already stores UcId=Ucid??ConsumerType at OutputRouter.cs:184. This server→client dispatch-spine wire-up is task 013 (main-session, seam-test DoD). The client mechanism is fully built + tested + ready to receive that one wire-up.
   </notes>
 
   <execution>

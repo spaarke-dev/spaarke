@@ -42,6 +42,18 @@ namespace Sprk.Bff.Api.Models.Ai;
 /// </param>
 /// <param name="Error">Error message if analysis failed.</param>
 /// <param name="Chips">Next-step consumer chips (only set when type="chips"). Additive ai-architecture-redesign-r1 G-P1 UAT-fix variant (2026-07-05); null/omitted for all other event types. Existing consumers ignore the unknown discriminant.</param>
+/// <param name="Disposition">
+/// The dispatched Binding's disposition ledger value (<c>surface_launch</c> / <c>compose</c> / <c>informational</c> / …)
+/// on the terminal <c>complete</c> chunk. Additive (spaarkeai-assistant-enhancements-r1 task 013); JsonIgnore-when-null
+/// so existing consumers (email-r4 / daily-update-r5) are unaffected. Lets the client branch a
+/// <c>surface_launch</c> dispatch to the pre-seeded surface launch (task 012 <c>launchSurface</c>) WITHOUT a second
+/// intent mechanism — the disposition IS the server's routing decision (ADR-039 / ADR-040).
+/// </param>
+/// <param name="ConsumerType">
+/// The dispatched Binding's <c>sprk_consumertype</c> (== the ledger <c>UcId = Ucid ?? ConsumerType</c>) on the terminal
+/// <c>complete</c> chunk. Additive (task 013); JsonIgnore-when-null. The client maps it to a concrete launch surface via
+/// its static registry (surface-launch-mechanism §3) — deployment-specific web-resource names stay client-side (§10).
+/// </param>
 public record AnalysisChunk(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("content")] string Content,
@@ -51,7 +63,13 @@ public record AnalysisChunk(
     [property: JsonPropertyName("error")] string? Error = null,
     [property: JsonPropertyName("chips")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<AnalysisChunkChip>? Chips = null)
+    IReadOnlyList<AnalysisChunkChip>? Chips = null,
+    [property: JsonPropertyName("disposition")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Disposition = null,
+    [property: JsonPropertyName("consumerType")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ConsumerType = null)
 {
     /// <summary>
     /// Create a content chunk (streaming partial result).
