@@ -1,8 +1,8 @@
 # Current Task State — messaging-communication-app-r1
 
-> **Last Updated**: 2026-07-17 (task 080 COMPLETE — seam tests; reuse-first, additive-only)
+> **Last Updated**: 2026-07-17 (task 081 COMPLETE — messaging architecture doc; §9 added)
 > **Recovery**: Read "Quick Recovery" first, then "Remaining Plan". Branch `work/messaging-communication-app-r1`, PR #655 (draft). All work committed + pushed; tree clean.
-> **Note**: total task count is now **29** (task **052** open-thread-grant was added mid-project). **27 ✅, 2 🔲 (081, 090)**.
+> **Note**: total task count is now **29** (task **052** open-thread-grant was added mid-project). **28 ✅, 1 🔲 (090 wrap-up)**.
 
 ---
 
@@ -11,10 +11,10 @@
 | Field | Value |
 |-------|-------|
 | **Project** | messaging-communication-app-r1 — 2nd communication channel (ACS Chat) over ADR-045 seams |
-| **Progress** | **27 of 29 tasks ✅** — server-side + all client UI + send-contract closure + timeline PCF (061) + **seam tests (080)** done. Owner config gates: Delegate role + User-level Read SATISFIED; **app-user Share privilege on `sprk_communicationthread` + `sprk_communication`** needed for GrantAccess/POA (043/052). |
-| **Active task** | **080 COMPLETE** ✅ (seam tests, reuse-first/additive-only, 487 pass). Remaining: **081** (architecture doc), **090** (wrap-up + `/test-diet`). |
-| **Next Action** | **task 081** — architecture doc: extend/refresh a `docs/architecture/` communication doc with the thread model + ACS-as-transport + ingestor seam + impersonation access model (043/050/052) + send-contract/thread-stamp (062); wire ADR-046. Then 090 (wrap). |
-| **Status** | in-progress (all code + tests done; arch doc + wrap remain) |
+| **Progress** | **28 of 29 tasks ✅** — server + all client UI + send-contract + timeline PCF (061) + seam tests (080) + **architecture doc (081)** done. Owner config gates: Delegate role + User-level Read SATISFIED; **app-user Share privilege on `sprk_communicationthread` + `sprk_communication`** needed for GrantAccess/POA (043/052). |
+| **Active task** | **081 COMPLETE** ✅ (arch doc §9 added, source-of-truth verified). Remaining: **090** (wrap-up + `/test-diet`) — the LAST task. |
+| **Next Action** | **task 090 (wrap-up)** — README→Complete, lessons-learned, **`/test-diet`** (mandatory at close, root §7 — `notes/080-seam-coverage-map.md` is the input), archive, final TASK-INDEX reconcile, portfolio sync. Main-session (touches `.claude/`). Surface ALL 5 open findings + config gate + owner PCF imports (061+062) in the wrap-up PR. |
+| **Status** | in-progress (all code/tests/docs done; only project-close wrap-up remains) |
 
 ### 🚚 OWNER DEPLOY HANDOFFS (packaged, awaiting owner's Dataverse env)
 - **062 PCF**: `src/client/pcf/CommunicationMessageActions/Solution/bin/CommunicationMessageActionsSolution_v1.0.0.zip` — `pac solution import --path ... --publish-changes`; place on `sprk_communicationthread` + `sprk_communication` forms; uses existing `sprk_MsalClientId`/`sprk_BffApiAppId`/`sprk_BffApiBaseUrl` env vars (no new ones). Full steps in the 062 commit body.
@@ -47,12 +47,11 @@
 
 ---
 
-## Remaining Plan (2 tasks) — resume order: 081 → 090
+## Remaining Plan (1 task) — 090 wrap-up (LAST)
 
 | # | Task | Notes for the implementer |
 |---|---|---|
-| **081** | Architecture doc | Extend/refresh a `docs/architecture/` communication doc with the thread model + ACS-as-transport + ingestor seam + **the impersonation access model** (043/050/052) + the send-contract/thread-stamp (062). Wire ADR-046. Deps 040✅/007✅. Note: touches `docs/` not `.claude/` → subagent-safe. |
-| **090** | Wrap-up | README→Complete, lessons-learned, **`/test-diet`** (mandatory at project close per root §7 — the `notes/080-seam-coverage-map.md` map is the reconciliation input), archive, final TASK-INDEX reconcile, portfolio sync. Main-session (touches `.claude/`). Surface ALL open findings in the wrap-up PR: send-into-existing-thread (MED), DI-cycle-refactor (LOW), **messaging-archival gap (MED, finding #5)**, + config gate (Share privilege). Owner PCF imports (061+062 ZIPs). |
+| **090** | Wrap-up (project close) | README→Complete, lessons-learned, **`/test-diet`** (MANDATORY at project close per root §7 — `notes/080-seam-coverage-map.md` is the reconciliation input; the messaging tests are all MAINTAIN-class KEEP), archive, final TASK-INDEX reconcile, portfolio sync (GitHub Project #654). Main-session (touches `.claude/`). Surface ALL open findings in the wrap-up PR: (2) send-into-existing-thread (MED), (4) DI-cycle-refactor (LOW), (5) **messaging-archival gap (MED)**, + config gate #3 (app-user Share privilege on both messaging tables). Note owner PCF imports pending: 061 `CommunicationTimelineSolution_v1.0.0.zip` + 062 `CommunicationMessageActionsSolution_v1.0.0.zip`. Mark PR #655 ready-for-review. |
 
 ### Orchestration notes (what worked this session — reuse next session)
 - **Subagent-per-task pattern (proven for 043/052/060/062/063)**: dispatch a `general-purpose` subagent (model `sonnet`) with a precise brief (inject exact contracts + pre-decide scope forks so it doesn't rabbit-hole); instruct it to leave changes uncommitted + NOT touch `TASK-INDEX.md`/`current-task.md`/`.claude/` + return a factual report. Main session then independently verifies (build + tests + hard-gate greps + review the highest-risk diff), runs 9.5 gates, updates the index, commits + pushes. Subagents edit non-`.claude/` files fine.
