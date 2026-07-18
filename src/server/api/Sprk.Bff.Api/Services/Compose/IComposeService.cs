@@ -368,6 +368,17 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     /// freshly-minted session or a resumed session whose ledger has no outputs yet.
     /// </summary>
     public IReadOnlyList<ComposeActionHistoryEntry> ActionHistory { get; init; } = Array.Empty<ComposeActionHistoryEntry>();
+
+    /// <summary>
+    /// FR-08 (task 010, E2): the ordered <c>w14:paraId</c> map for the loaded document — one
+    /// <see cref="ParaIdMapEntry"/> per body paragraph (incl. table-cell + nested-table paragraphs) in
+    /// document order, produced by <see cref="ParaIdPreParser"/> alongside the mammoth convert (which
+    /// discards paraId). Existing ids are collected verbatim; missing ids are minted OOXML-valid. The
+    /// client (task 011) carries these as hidden node attributes so paraId — the E1 splice key + E2
+    /// anchor — survives the editor round-trip. Empty (never null) when the document has no body or the
+    /// pre-parse could not read the source (best-effort; Load still returns the content bytes).
+    /// </summary>
+    public IReadOnlyList<ParaIdMapEntry> ParaIdMap { get; init; } = Array.Empty<ParaIdMapEntry>();
 }
 
 /// <summary>Save request payload.</summary>

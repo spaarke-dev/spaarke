@@ -1,0 +1,101 @@
+<task id="025" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>Deploy + smoke-verify E1 fidelity core (BFF + client) on spaarkedev1</title>
+    <phase>2 E1</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W2-E1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>024</deps>
+    <tags>deploy,bff-api,frontend</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Deploy the E1 fidelity core — the BFF (`Sprk.Bff.Api` with the inverted `SaveAsync`, splice
+    orchestration, and Docxodus comparer adapter) and the client shared lib
+    (`Spaarke.Compose.Components` with docx.js dropped from the export path) — to the spaarkedev1
+    environment, then smoke-verify that a dirty save preserves untouched OOXML on reopen. Use the
+    established deploy skills; do not hand-roll deployment. Report the BFF publish size (≤60 MB
+    compressed). This is a STANDARD-rigor deploy task with prescriptive, ordered steps (a deploy is a
+    sequence-sensitive operation).
+  </prompt>
+
+  <role>
+    Release engineer familiar with the Spaarke BFF App Service deployment (`bff-deploy` skill) and the
+    React Code Page / shared-lib deploy (`code-page-deploy` skill), plus the spaarkedev1 environment
+    conventions. Comfortable running a post-deploy smoke test against a live SPE-backed Compose flow.
+  </role>
+
+  <goal>
+    The E1 fidelity core deployed to spaarkedev1 (BFF + `Spaarke.Compose.Components`), with a smoke
+    verification that editing a formatted document, saving, and reopening preserves the untouched OOXML
+    (header/footer/numbering/styles/table intact) with the edits present as tracked changes. Publish size
+    reported ≤60 MB.</goal>
+
+  <context>
+    <background>
+      Phase 2 (E1) deploy gate — deploys the fidelity core after the seam slice test (024) proves the
+      invariant. The BFF carries the retained-original delta save (022), the splice orchestration (020),
+      the Docxodus adapter (021 — SkiaSharp excluded), and the AI-annotation composition (023); the shared
+      lib carries the dropped docx.js export (022 client half). The full R3 deploy (all tracks) is task
+      081 — this task deploys the E1 core only for early fidelity validation on spaarkedev1.
+    </background>
+    <relevant-files>
+      <file role="deploy-skill">.claude/skills/bff-deploy/SKILL.md — BFF API deploy to Azure App Service</file>
+      <file role="deploy-skill">.claude/skills/code-page-deploy/SKILL.md — React Code Page / shared-lib deploy to Dataverse</file>
+      <file role="under-deploy">src/server/api/Sprk.Bff.Api/ — BFF (inverted SaveAsync + splice + comparer adapter)</file>
+      <file role="under-deploy">src/client/shared/Spaarke.Compose.Components/ — client shared lib (docx.js dropped from export)</file>
+      <file role="spec">projects/spaarkeai-compose-r3/spec.md FR-01, FR-07 (fidelity round-trip)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="024" status="pending">FR-07/NFR-06 fidelity seam slice test — proves the invariant before deploy.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029 / CLAUDE.md §10">Report the BFF publish size (compressed) absolute + delta vs ~49.63 MB baseline; ceiling ≤60 MB. Verify the SkiaSharp exclusion held in the published artifact (no `libSkiaSharp`).</constraint>
+    <constraint source="project / skill-first">Use the `bff-deploy` and `code-page-deploy` skills — do NOT hand-roll deployment commands.</constraint>
+    <constraint source="ADR-028">Deployed client uses `@spaarke/auth` for fetches; verify auth bootstrap on the deployed surface.</constraint>
+    <constraint source="project">Target environment = spaarkedev1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF App Service deploy + shared-lib/Code Page deploy to spaarkedev1; publish-size verification</topic>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Pre-deploy check">Confirm task 024 (fidelity seam test) is green and the BFF + shared-lib build clean. Output the STANDARD rigor-level declaration. Confirm spaarkedev1 is the target.</step>
+    <step order="1" name="Deploy the BFF">Run the `bff-deploy` skill to publish `Sprk.Bff.Api` to spaarkedev1. Capture + report the compressed publish size (≤60 MB) and confirm no `libSkiaSharp` in the artifact.</step>
+    <step order="2" name="Deploy the client shared lib">Run the `code-page-deploy` skill to deploy the `Spaarke.Compose.Components` consumer surface to spaarkedev1.</step>
+    <step order="3" name="Smoke-verify the fidelity round-trip">On spaarkedev1, open a formatted document in Compose, edit a clause, save, then reopen. Verify header/footer/numbering/styles/table are intact and the edit is present as a tracked change.</step>
+    <step order="4" name="Report + index">Record the deploy result + publish size in task notes; update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="report">Deploy result (BFF + shared lib on spaarkedev1); BFF publish size ≤60 MB; SkiaSharp-excluded confirmation</output>
+    <output type="report">Smoke-verification result (dirty save preserves untouched OOXML on reopen)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The BFF (`Sprk.Bff.Api`) is deployed to spaarkedev1 via the `bff-deploy` skill; publish size reported ≤60 MB compressed with the SkiaSharp exclusion confirmed in the artifact.</criterion>
+    <criterion testable="true">The client shared lib (`Spaarke.Compose.Components`) is deployed to spaarkedev1 via the `code-page-deploy` skill.</criterion>
+    <criterion testable="true">A dirty save on spaarkedev1 (edit a formatted doc → save → reopen) preserves the untouched OOXML (header/footer/numbering/styles/table intact) with the edit present as a tracked change.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,243 +1,116 @@
-# Spaarke Compose R3 — Word-Feature Fidelity Project (Seed)
+# Spaarke Compose R3 — Word-Feature Fidelity
 
-> **Status**: **Design authored + scope locked + ALL PRE-SPEC SPIKES PASSED (2026-07-16)** — see [`design.md`](design.md) (code-grounded + refreshed with July-2026 best-practices research: [`notes/tiptap-docx-fidelity-research-2026-07-16.md`](notes/tiptap-docx-fidelity-research-2026-07-16.md); spikes: [`notes/spikes/`](notes/spikes/)). Owner review locked D1–D4 (design.md §0): hybrid retained-original delta save (Docxodus `WmlComparer`); full scope (fidelity core + E3 grounding-tied confidence + editing toolset + import round-trip); text+run-level fidelity. **Spikes S1/S1b/S2/S3/S4/S5 all passed — no design pivots.** **Next: `/design-to-spec projects/spaarkeai-compose-r3`.** (Sections below are the original 2026-07-01 seed, superseded where design.md differs.)
-> **Status (original)**: Draft / seed — created 2026-07-01 during R1 UAT close-out
-> **Author**: R1 close-out session (see `../spaarkeai-compose-r1/`)
-> **Parent lineage**: R1 (Path A modal + TipTap editor + AI-dispatch scaffolding) shipped
-> as the baseline; R2 (three-pane pivot + streaming Assistant panel + facade extension)
-> ships in parallel with R1 close-out; **R3 is the fidelity project**.
-> **Not yet**: spec / plan / task decomposition. This document scopes the problem
-> space so a proper `/project-pipeline projects/spaarkeai-compose-r3` can be run later.
+> **Last Updated**: 2026-07-16
+>
+> **Status**: In Progress (pipeline-initialized — tasks generated, ready to execute)
 
-> **🔎 2026-07-14 UPDATE — read [`ooxml-fidelity-findings.md`](ooxml-fidelity-findings.md) first.**
-> A grounded gap-check during R2 close-out mapped the shipped Compose save/redline path
-> against the fidelity target and formalized **three enhancements (E1/E2/E3)** with verdicts:
-> **E1** retained-original OOXML delta save (= Scope **A**, the keystone — GENUINELY MISSING for
-> edited saves), **E2** `paraId` anchoring (= A/E — MISSING, coupled to E1), **E3** enriched redline
-> contract (= G/H — PARTIALLY present; rationale already ships, confidence+offsets missing).
-> The findings doc also **corrects this seed**: R2 already shipped **home-grown track changes +
-> comments** (native `w:ins`/`w:del`/`w:comment`, no TipTap Pro), so Scope **B/C** authoring is DONE
-> — R3's B/C work is now the **import round-trip**. Constraint reaffirmed: **no TipTap product
-> features, paid or unpaid.** E1/E2/E3 are the prioritized R3 core; `design.md` is authored next.
+## Overview
 
----
+R3 makes the Compose Word round-trip **faithful**. Today any dirty save rebuilds the whole `.docx` from the editor's simplified view, silently dropping headers/footers, firm styles, multi-level clause numbering, hyperlinks, and embedded objects — even for content the user never touched. R3 inverts the save so the baseline is the **retained original** and edits apply as a **delta** onto it (via the MIT `Docxodus` `WmlComparer`), anchored by stable `w14:paraId` identity. It adds a grounding-tied confidence signal to AI suggestions, a credible editing toolset, and import of pre-existing Word revisions/comments.
 
-## Motivation
+**Theme: Fidelity.** All work on the MIT TipTap base — no TipTap product features (paid or unpaid); permissive licenses only (no AGPL).
 
-R1's mammoth → TipTap → docx round-trip was locked in Spike #1 with a
-documented scope: preserve prose text; accept that "advanced Word features"
-would be lost on save. Live UAT 2026-07-01 confirmed the round-trip
-does lose:
+## Quick Links
 
-- **Paragraph & character styles** (Normal, Heading 1, custom styles, direct formatting)
-- **Theme** (colors, fonts)
-- **Section formatting** (headers, footers, page numbers, margins, columns)
-- **Tables of contents / lists / bibliographies** (are converted to plain text on import)
-- **Fields** (dates, page numbers, cross-references, mail-merge tokens)
-- **Track changes / revision marks**
-- **Comments** (Word `<w:comment>` elements)
-- **Embedded objects** (equations, SmartArt, charts, embedded Excel, pictures with cropping)
-- **Ink annotations**
-- **Bookmarks**
-- **Content controls / structured document tags**
-- **Custom XML parts**
+| Document | Description |
+|----------|-------------|
+| [Spec](./spec.md) | AI-optimized implementation spec (FR-01→26, NFR-01→10) — **source of truth** |
+| [Design](./design.md) | Code-grounded design + July-2026 research + 6 passed pre-spec spikes |
+| [Plan](./plan.md) | Phase/track WBS + critical path + parallel groups |
+| [Task Index](./tasks/TASK-INDEX.md) | Task roster, dependencies, parallel groups, status |
+| [OOXML fidelity findings](./ooxml-fidelity-findings.md) | E1/E2/E3 verdicts (grounded 2026-07-14) |
+| [Seed README](./notes/seed-README.md) | Original 2026-07-01 seed (Scope Areas A–J) — superseded by spec |
 
-R1 shipped the correct architecture per Spike #1; R3 is the project that
-closes the gap between "R1 as specced" and "R1 as legal users actually need it."
+## Current Status
 
----
+| Metric | Value |
+|--------|-------|
+| **Phase** | Development (pipeline-initialized) |
+| **Progress** | 0% (0 tasks complete) |
+| **Target Date** | — |
+| **Completed Date** | — |
+| **Owner** | Ralph Schroeder |
 
-## Scope Areas
+## Problem Statement
 
-The following are candidate R3 features. Not all will make R3 — the
-`/project-pipeline` step will produce a scoped spec.
+The moment the user edits anything, Save rebuilds the entire `.docx` from the editor's simplified view — so headers, footers, firm styles, multi-level clause numbering, hyperlinks, and embedded objects are silently dropped, even for the 99% of the document the user never touched. For a 40-page contract with a numbered clause hierarchy, a firm letterhead, and a signature block, this is make-or-break — the root of both the R1 UAT complaint ("Word loses its formatting on save") and R2 redline-fidelity pain.
 
-### A. Preserving Formatting on Save (highest priority)
+## Solution Summary
 
-**Problem**: Every Save currently emits a brand-new DOCX that has only what
-mammoth's simplified HTML could represent. Styles, theme, and structural
-elements are dropped even when the user made no changes touching them.
+Invert the save baseline: the persisted document is derived from the **load-time original OOXML** (fetched by SPE `versionId`), not a TipTap reconstruction. Only edited paragraphs (keyed by `w14:paraId`) are rebuilt and spliced into a copy of the original; `Docxodus` `WmlComparer` synthesizes the minimal `w:ins`/`w:del`. `docx.js` is dropped from the export path. `w14:paraId` becomes the stable anchor (carried through TipTap via MIT `@tiptap/extension-unique-id`), with the existing fuzzy re-anchor retained as the cross-Word-session fallback. AI redlines/comments continue via the existing `DocxAnnotationWriter`. E3 adds a server-derived grounding-tied confidence band; the toolset and import round-trip ride the same substrate.
 
-**Approach candidates**:
-1. **Original-DOCX preservation + patch**. On Load, retain the original DOCX
-   bytes server-side (keyed by `sprk_documentid` + `versionId`). On Save,
-   diff the current TipTap JSON against the DOCX derived at Load time; open
-   the original DOCX with `DocumentFormat.OpenXml` (server-side); patch only
-   the paragraphs whose text changed. All non-edited paragraphs, styles,
-   and structural elements pass through unchanged.
-   - Pros: preserves everything except what the user explicitly edited.
-   - Cons: paragraph-diff algorithm is non-trivial when users add/remove
-     paragraphs; requires TipTap → OOXML paragraph mapping that preserves
-     order.
-2. **Word Online / Graph API delegation**. Use Microsoft's Word for the Web
-   editing API to apply edits to the source DOCX. Requires Graph API for
-   files' `permanentDelete` / SPE-specific file edit endpoints. Substantial
-   new integration.
-3. **Read-only Compose**. Ship Compose as a "read + AI-assist + Open in
-   Word for edits" tool. No Save from Compose. Users use Open-in-Word for
-   any Save work. Lowest complexity, but reduces value.
-4. **Import annotations only**. Compose adds AI-generated annotations
-   (comments, suggestions) to the source DOCX without touching prose.
-   Preserves everything by design. Doesn't support text editing at all.
+## Graduation Criteria (G-R3 — browser-verified on spaarkedev1)
 
-### B. Track Changes / Revision Marks
+The project is **complete** when:
 
-> **⚠️ SUPERSEDED (2026-07-14): AUTHORING is DONE.** R2 shipped a **home-grown** revision-marking
-> system — our own TipTap marks → `DocxAnnotationWriter` emitting **native OOXML `w:ins`/`w:del`**,
-> with an accept/reject workflow. **No TipTap Pro** (the "License TipTap Pro" option below is
-> RETIRED — constraint reaffirmed: no TipTap product features, paid or unpaid). See
-> [`ooxml-fidelity-findings.md`](ooxml-fidelity-findings.md) §Current State.
+- [ ] Open a **formatted contract** (letterhead header/footer, multi-level clause numbering, custom styles, a table) in Compose — renders with structure intact.
+- [ ] Edit **3 clauses** (incl. one bold/italic run change) and **accept one AI redline** — edits show as tracked changes; the AI redline shows rationale + a grounding-tied confidence band.
+- [ ] Exercise the **toolset**: a find/replace and a table edit in the same session — both work; tracked-changes marks intact.
+- [ ] **Save**, then **reopen** — header/footer/numbering/styles/table intact; the 3 edits + accepted redline present as tracked changes; each redline anchored to the correct paragraph by `paraId`.
+- [ ] A doc that **already has Word revisions/comments** opens with them rendered in-editor and preserved across save (import round-trip).
+- [ ] BFF publish ≤ 60 MB with Docxodus + SkiaSharp-excluded; no new HIGH CVE.
+- [ ] ADR-013 NetArchTest green; through-the-wire slice test proves untouched OOXML preserved on a dirty save.
+- [ ] Real-template hardening (NFR-09) passed before the delta-save cutover.
 
-The remaining R3 gap is **IMPORT round-trip**:
-- **Read existing DOCX revision marks** on Load and render them in the editor (currently only
-  *authored* marks are handled; a doc that already has Word revisions doesn't round-trip its
-  history in). Depends on the E1/E2 OOXML-identity work (retained-original + `paraId`).
+## Scope
 
-### C. Comments (Word `<w:comment>` elements)
+### In Scope
+- **E1** — Retained-original delta save (drop `docx.js`; adopt `Docxodus` `WmlComparer`).
+- **E2** — `w14:paraId` identity (server pre-parse/mint; TipTap carry; paraId-primary anchoring).
+- **E3** — Grounding-tied confidence band + formatted AI insertions (additive `ComposeDraftPayload`).
+- **Editing toolset** — find/replace, basic tables, sticky toolbar, one-line bubble menu, dismissible simplification warning, styles pane (apply existing), richer comment-thread UI.
+- **Import round-trip** — read existing `w:ins`/`w:del` + `w:comment` on Load; preserved across save.
 
-> **⚠️ SUPERSEDED (2026-07-14): AUTHORING is DONE.** R2 writes new comments as **native
-> `<w:comment>`** via `DocxAnnotationWriter` (anchored-annotation pipeline). R1's "MUST NOT store
-> comments as `w:comment`" was lifted in R2.
+### Out of Scope
+- Any **TipTap product feature** (paid or unpaid); AGPL code.
+- New AI dispatch endpoint (ADR-039) or new AI catalog rows — **engine frozen**; E3 is server-derived.
+- Recreating Word: pagination, footnote/endnote numbering, complex numbering *authoring*, cross-reference/TOC computation, print fidelity, full style *management* → deferred to Open-in-Word.
+- Multi-user co-editing / CRDT (R5+).
+- True byte-identity of untouched content (Approach B splice-back) — MVP accepts WmlComparer cosmetic re-serialization (Approach A).
 
-The remaining R3 gap is **IMPORT round-trip**:
-- Read source DOCX comments on Load and render them as first-class comment threads in the editor
-  (author, timestamp, response threads), preserving them across the retained-original save (E1).
+## Key Decisions
 
-### D. Fields (Dates, Cross-References, Mail-Merge Tokens)
+| Decision | Rationale | Ref |
+|----------|-----------|-----|
+| E1 = hybrid retained-original + Docxodus redline + existing writer (D1) | Untouched paragraphs preserved; maximum reuse of R2 annotation pipeline | design §0/§4.2 |
+| Full R3 scope: fidelity core + E3 + toolset + import (D2) | Owner directive; fidelity core sequences first, import + toolset parallel | design §0 |
+| E3 = grounding-tied qualitative band, rationale-first (D3) | 2026 HCI research: numeric scores drive over-reliance | design §6.2 |
+| Text + run-level formatting fidelity (D4) | WmlComparer Format-Change Detection | design §0 |
+| Baseline = load-time SPE version by `versionId` (S4) | Authoritative, refresh-safe, zero new storage | design §4.3 |
 
-Fields render dynamically in Word based on document state. In TipTap
-they'd need either:
-- **Rich placeholders**: render as visible text with distinct styling;
-  editable but non-computed. Round-trips as field text without the field
-  code (loses computation).
-- **Read-only pass-through**: freeze field values at Load, prevent editing
-  the field text, restore field codes on Save. Preserves computation on
-  the Word side.
+## Risks & Mitigations
 
-### E. Advanced Structural Elements
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| Docxodus publish-size / SkiaSharp pull-in | Med | Low | Exclude SkiaSharp assets (S3 validated 2.44 MB net); never call `HtmlToWml`/`FormattingAssembler`; measure per BFF task |
+| WmlComparer fails on real firm templates | High | Med | NFR-09 hardening gate — re-run S1/S1b on 2–3 real templates before delta-save cutover |
+| `SpeFileStore` cannot fetch a version's content (FR-06) | Med | Low | Validate the Graph route early (Phase 0); fallback = Redis cache of load-time original |
+| Hot-path overlap with `spaarkeai-compose-r2` / `spaarke-ai-architecture-redesign-r2` | Med | Med | Consume `PublicContracts` seams, no fork of `Services/Ai/`; `/conflict-check` before each BFF PR; confirm R2 merged/frozen before cutover |
 
-**Tables**: TipTap has table support (loaded in R1 LOCKED_EXTENSIONS) but
-Word tables can nest and have styles/borders/shading that TipTap won't
-render identically. Options: enrich table extension; downgrade
-formatting on Save with warning.
+## Dependencies
 
-**Headers/Footers/Section Breaks**: no TipTap concept. Preserve via
-original-DOCX-patch approach (A.1).
+| Dependency | Type | Status | Notes |
+|------------|------|--------|-------|
+| R1 + R2 merged to master | Internal | Ready | Compose service/layout/endpoints, native-OOXML writer/reader, slice-safe marks present |
+| `Docxodus` 7.1.0 (NuGet, MIT) | External | Ready | Redline engine; SkiaSharp excluded |
+| `@tiptap/extension-unique-id` 3.28.0 (npm, MIT) | External | Ready | paraId carry/minting |
+| SPE driveItem version-content fetch (Graph) | External | Validate | Small `SpeFileStore` addition (FR-06) |
+| `.NET 10` SDK (Docxodus target) | External | Ready | Verified S1 |
 
-**Table of Contents**: currently a `<w:sdt>` structured document tag with
-field codes. TipTap doesn't render this natively. Options: convert to
-static text on Load; preserve field code on Save via A.1; or add a TOC
-extension.
+## Team
 
-**Footnotes / Endnotes**: no TipTap concept. Similar to comments — needs
-custom implementation or original-DOCX passthrough.
+| Role | Name | Responsibilities |
+|------|------|------------------|
+| Owner | Ralph Schroeder | Overall accountability, UAT |
+| Developer | AI Agent (Sonnet 5 / Opus 4.8 per task tier) | Implementation |
+| Reviewer | code-review + adr-check gates | Code + ADR review |
 
-### F. Fonts, Colors, Theme
+## Changelog
 
-Word themes let styles reference theme colors/fonts. If the user edits
-theme-based styled text in TipTap without a theme, the color is lost.
-Options: import theme, apply as computed styles in TipTap (loses theme
-binding); preserve theme via A.1; ignore.
-
-### G. Selection-Scoped AI (Rewrite / Explain / Find Similar / Lookup References)
-
-Currently R1 has: whole-document Summarize (via `compose-summarize`
-consumer type). R3 candidate: selection-scoped consumer types:
-- `compose-rewrite` — user selects text, asks AI to rewrite in a specific
-  tone / register / clarity
-- `compose-explain` — user selects a legal clause, asks AI to explain it
-- `compose-find-similar` — user selects a passage, asks AI to find similar
-  clauses in the matter's document set
-- `compose-lookup-references` — user selects a citation, asks AI to look up
-  the cited authority
-- (extensible) other AI functions surfacing in the Assistant pane
-
-Each is a new sprk_playbookconsumer row + a JPS scope + a UI trigger. R2
-lays the streaming Assistant Pane groundwork that R3 leverages for
-selection-scoped functions.
-
-### H. Insert AI Response into Document
-
-Currently AI responses render in the Assistant pane (R2) or a banner (R1).
-R3 candidate: insert AI response into the editor at cursor, or replace
-selection.
-
-Approach: Assistant Pane exposes an "Insert" action per response;
-ComposeEditor exposes `.replaceSelection(html)` / `.insertAtCursor(html)`
-imperatives; dispatch bridges the two via PaneEventBus.
-
-### I. Version History Integration
-
-Word has version history in SharePoint. Compose Save creates new SPE
-versions (via SaveDocxAsync). R3 candidate: expose the version history in
-Compose UI so users can browse / revert.
-
-### J. Collaborative Editing (multi-user)
-
-**Explicitly out of R1** per design.md ("NO multi-user co-editing in R1;
-CRDT deferred to R5+"). Named here for completeness — not R3 scope, but
-worth noting as it interacts with Track Changes, Comments, and Save.
+| Date | Version | Change | Author |
+|------|---------|--------|--------|
+| 2026-07-16 | 1.0 | Pipeline-initialized: canonical README, plan, tasks generated | project-pipeline |
 
 ---
 
-## Related Work / Dependencies
-
-- **R1** (`projects/spaarkeai-compose-r1/`): baseline; landed the mammoth
-  + TipTap + docx architecture, Path A modal, `/api/compose/action/`
-  endpoint scaffold.
-- **R2** (working title — separate project to be created): three-pane
-  pivot, ConversationPane integration, streaming Assistant panel, facade
-  extension for document-context invocations. Currently WIP in-session
-  as R1 close-out extension.
-- **Spike #1** in R1: locked the mammoth-based scope. R3 revisits that
-  scope decision with the fidelity requirement in mind.
-- **`docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md`**: contains
-  the shared-library boundary rules Compose consumers must follow. R3
-  work MUST keep Compose Components in `@spaarke/compose-components` and
-  keep any Word-integration primitives factored so future Word-adjacent
-  work (e.g., Excel via ExcelJS) can reuse patterns.
-- **ADR-013 (refined)**: R2's facade extension for document-context
-  invocations paves the way for R3's selection-scoped consumer types.
-
----
-
-## What NOT to build in R3
-
-- Track-changes UI in Compose editor (defer to a dedicated R4+ project if
-  we decide to take it on)
-- Multi-user co-editing (R5+ per design.md)
-- New TipTap Pro dependencies (per R1 licensing constraint — carry
-  forward through R3 unless explicitly reversed via ADR)
-- SharePoint version-history rewrites (out of scope; consume existing
-  version endpoints)
-
----
-
-## Next Steps
-
-1. When R1 + R2 close, run:
-   `/design-to-spec projects/spaarkeai-compose-r3` (or a manually authored
-   spec.md if scope is small enough)
-2. `/project-pipeline projects/spaarkeai-compose-r3` to generate plan, task
-   decomposition, portfolio registration.
-3. Kick off with prioritized subset of A–I above based on live-user
-   feedback from R1 + R2.
-
----
-
-## Feedback Log (append here as it comes in)
-
-| Date | Source | Feedback |
-|---|---|---|
-| 2026-07-01 | R1 UAT | "when it saves the WORD document loses its original formatting" — motivating factor for R3 A (preserving formatting on Save) |
-| 2026-07-14 | R2 gap-check | Grounded verdicts: **E1** retained-original delta save GENUINELY MISSING for edited saves (any dirty Save rebuilds lossily from TipTap via `tipTapJsonToDocxBytes`); only unedited saves round-trip. Root of R1+R2 fidelity pain. → Scope A. See [`ooxml-fidelity-findings.md`](ooxml-fidelity-findings.md). |
-| 2026-07-14 | R2 gap-check | **E2** `paraId` anchoring MISSING (fuzzy text+index today; mammoth import discards paraIds) — coupled to E1 as one OOXML-identity workstream. → Scope A/E. |
-| 2026-07-14 | R2 gap-check | **E3** enriched redline contract PARTIALLY present — rationale + sources carried and rationale already surfaced in accept/reject UI; **confidence** signal + explicit offsets missing (offsets ride with E2). → Scope G/H. |
-| 2026-07-14 | R2 status | Track changes + comments AUTHORING shipped home-grown in R2 (native `w:ins`/`w:del`/`w:comment`, no TipTap Pro) → Scope B/C authoring DONE; **import round-trip** is the remaining R3 gap. |
-| 2026-07-14 | Owner (compose-r2 UAT) | Assistant/Workspace **pane UI redesign** is a SEPARATE project, sequenced AFTER compose-r2 merges (freeze the Compose output seam first) — NOT R3 scope; noted here for lineage. |
-
----
-
-*This is a project seed, not a spec. Update this file as R1 close-out
-UAT + R2 shipping produce feature requests + defect reports that belong
-in R3 scope.*
+*All work on the MIT TipTap base — no TipTap product features; permissive licenses only (no AGPL). Source of truth: [`spec.md`](./spec.md).*

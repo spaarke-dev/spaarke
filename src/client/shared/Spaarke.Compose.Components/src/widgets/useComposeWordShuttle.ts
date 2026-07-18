@@ -110,7 +110,10 @@ export interface CheckChangesResult {
 /**
  * Maps the Compose session's anchored annotations to the {@link PriorAnchorInput} the reanchor
  * endpoint scores (task 054). `textPattern`/`paragraphHint` come from the annotation's anchor;
- * `preview` is a short, Tier-1-safe label the conflict UI shows.
+ * `preview` is a short, Tier-1-safe label the conflict UI shows. R3 FR-11 (task 012): `paraId`
+ * carries the paragraph's `w14:paraId` so the server can re-anchor by it FIRST, falling back to the
+ * fuzzy textPattern scorer only when it is absent (design §5.2). Omitted (undefined → not serialized)
+ * for a legacy anchor that predates the field.
  */
 export function anchoredAnnotationsToPriorAnchors(annotations: readonly AnchoredAnnotation[]): PriorAnchorInput[] {
   return annotations
@@ -121,6 +124,7 @@ export function anchoredAnnotationsToPriorAnchors(annotations: readonly Anchored
       textPattern: a.anchor.textPattern,
       paragraphHint: a.anchor.paragraphHint ?? -1,
       preview: a.body ? a.body.slice(0, 160) : null,
+      paraId: a.anchor.paraId,
     }));
 }
 

@@ -383,14 +383,25 @@ export function ConversationPane(): React.JSX.Element {
       const { resolvedLookups: rawResolved, ...draftValues } = draft as Record<string, unknown> & {
         resolvedLookups?: Record<string, ResolvedLookup>;
       };
+      // W-2/W-5 file leg (UAT 2026-07-17): carry the session's active source file (the file the
+      // draft was grounded on) BY REFERENCE — sessionId + the session documentId are all the wizard
+      // needs to fetch the binary (GET .../documents/{id}/content) and attach it to the new record
+      // via its existing upload+link pipeline. Never inline binary (envelope invariant). Absent →
+      // no file carried (the wizard opens with an empty Add-file step, as today).
+      const sessionId = getSessionId();
+      const activeFile = activeSourceDocRef.current;
+      const fileIds = activeFile?.sessionFileId ? [activeFile.sessionFileId] : undefined;
       void launchSurface({
         consumerType: payload.consumerType,
         draftValues,
         resolvedLookups: rawResolved ?? {},
+        fileIds,
+        source: sessionId ? { sessionId } : undefined,
+        provenance: activeFile?.fileName ? { sourceFiles: [activeFile.fileName] } : undefined,
         bffBaseUrl,
       });
     },
-    [bffBaseUrl]
+    [bffBaseUrl, getSessionId]
   );
 
   // ── Serial action queue (FR-18) ────────────────────────────────────────

@@ -144,8 +144,14 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
   const [prefilledFields, setPrefilledFields] = React.useState<string[]>([]);
   const [error, setError] = React.useState<string | undefined>();
 
-  // Guard against double-execution (React strict mode or remount)
-  const attemptedRef = React.useRef(skipIfInitialized);
+  // Guard against double-execution (React strict mode or remount). Starts FALSE and
+  // is set true only when a run actually STARTS — the skip decision is re-evaluated
+  // on each effect run (see the guard below) rather than frozen at mount. This lets a
+  // consumer pass a DYNAMIC skipIfInitialized (e.g. "skip only while no file is
+  // present") so an async-arriving file (assistant-enhancements-r1 file leg) can still
+  // trigger the pre-fill even though the form was seeded at mount. Static-`true`
+  // consumers are unaffected — the guard returns before setting this ref.
+  const attemptedRef = React.useRef(false);
 
   // Stable refs for callbacks to avoid re-triggering useEffect
   const onApplyRef = React.useRef(onApply);
@@ -165,7 +171,11 @@ export function useAiPrefill(config: IAiPrefillConfig): IAiPrefillResult {
   const prefillKey = uploadedFiles.map(f => f.name).join('|');
 
   React.useEffect(() => {
-    if (uploadedFiles.length === 0 || attemptedRef.current) {
+    // Re-evaluate the skip decision on each run: no files to analyze, an already-started
+    // attempt, or the consumer says skip → do nothing. `skipIfInitialized` is read fresh
+    // here (the effect re-creates on prefillKey change), so a dynamic value that flips to
+    // false when a file arrives lets the pre-fill run.
+    if (uploadedFiles.length === 0 || attemptedRef.current || skipIfInitialized) {
       return;
     }
 

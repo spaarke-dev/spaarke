@@ -95,7 +95,65 @@ const RUNG_PHRASES: Record<string, string> = {
   StructuralDetector: 'the message structure matched a known pattern',
   SemanticMatch: 'AI found a strong content match',
   AiClassification: 'AI classified the content',
+  RecordNameMatch: 'its name or number appears in the email',
 };
+
+/**
+ * Structured detail parsed from a RecordNameMatch contributor's provenance string, e.g.
+ * `record-name-match:sprk_matter:where=subject:matched=name:name="Smith v Smith":number="REAL-2026-123456.02":reason="name in subject"`.
+ */
+export interface NameMatchInfo {
+  where?: 'subject' | 'body' | 'attachment' | string;
+  matched?: 'name' | 'number' | string;
+  number?: string;
+  reason?: string;
+}
+
+/** Parse a RecordNameMatch contributor provenance string; null for any other rung. */
+export function parseNameMatch(provenance: string | undefined): NameMatchInfo | null {
+  if (!provenance || !provenance.startsWith('record-name-match:')) return null;
+  const where = /where=([^:]+)/.exec(provenance)?.[1];
+  const matched = /matched=([^:]+)/.exec(provenance)?.[1];
+  const number = /number="([^"]*)"/.exec(provenance)?.[1];
+  const reason = /reason="([^"]*)"/.exec(provenance)?.[1];
+  return { where, matched, number: number || undefined, reason };
+}
+
+/** The RecordNameMatch contributor for a candidate, if any (carries the human match reason + record number). */
+function nameMatchOf(candidate: ProvenanceCandidate): NameMatchInfo | null {
+  for (const c of candidate.contributors ?? []) {
+    if (c.rung === 'RecordNameMatch') {
+      const info = parseNameMatch(c.provenance);
+      if (info) return info;
+    }
+  }
+  return null;
+}
+
+const WHERE_LABEL: Record<string, string> = {
+  subject: 'the subject line',
+  body: 'the email body',
+  attachment: 'an attachment',
+};
+
+/** Human, specific match reason for a candidate (e.g. "Matched by name in the subject line"). */
+export function candidateMatchReason(candidate: ProvenanceCandidate): string {
+  const nm = nameMatchOf(candidate);
+  if (nm) {
+    const kind = nm.matched === 'number' ? 'reference number' : 'name';
+    const where = WHERE_LABEL[nm.where ?? ''] ?? 'the email';
+    return `Matched by ${kind} in ${where}`;
+  }
+  // Fall back to the rung-phrase rationale for non-name-match candidates (thread/participant/AI).
+  const phrases = (candidate.contributors ?? []).map(contributorPhrase);
+  if (phrases.length === 0) return 'No match reason recorded';
+  return `Matched because ${phrases[0]}`;
+}
+
+/** The record's reference number when a RecordNameMatch contributor captured it. */
+export function candidateRecordNumber(candidate: ProvenanceCandidate): string | undefined {
+  return nameMatchOf(candidate)?.number;
+}
 
 export function contributorPhrase(c: ProvenanceContributor): string {
   return RUNG_PHRASES[c.rung] ?? c.provenance;
@@ -167,7 +225,47 @@ export interface Connection {
    * undefined when the slot had a single candidate.
    */
   otherCandidates?: ProvenanceCandidate[];
+  /** Human match reason for the primary candidate, e.g. "Matched by name in the subject line". */
+  matchReason?: string;
+  /** Reference number of the primary record (matter/invoice number, etc.) when known. */
+  recordNumber?: string;
   order: number;
+}
+
+/**
+ * A group of alternative candidates that share the same display name (duplicate-named records — legitimate
+ * in production, never auto-dedup'd). Collapses the review UI from N identical rows to one "Name · N records"
+ * group the reviewer can expand to pick a specific record.
+ */
+export interface CandidateGroup {
+  targetName: string;
+  recordNumber?: string;
+  matchReason?: string;
+  confidence: number;
+  candidates: ProvenanceCandidate[];
+}
+
+/** Group a slot's alternative candidates by display name so duplicates collapse into one expandable row. */
+export function groupCandidatesByName(candidates: ProvenanceCandidate[]): CandidateGroup[] {
+  const byName = new Map<string, ProvenanceCandidate[]>();
+  for (const c of candidates) {
+    const name = c.targetName ?? c.targetId;
+    const list = byName.get(name) ?? [];
+    list.push(c);
+    byName.set(name, list);
+  }
+  const groups: CandidateGroup[] = [];
+  byName.forEach((list, targetName) => {
+    const top = list.reduce((a, b) => (b.reinforcedConfidence > a.reinforcedConfidence ? b : a));
+    groups.push({
+      targetName,
+      recordNumber: candidateRecordNumber(top),
+      matchReason: candidateMatchReason(top),
+      confidence: top.reinforcedConfidence,
+      candidates: list,
+    });
+  });
+  return groups.sort((a, b) => b.confidence - a.confidence);
 }
 
 /** A "create a related record from this email" affordance (some engine-suggested). */
@@ -222,6 +320,8 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
       status: conflict ? 'ambiguous' : isWritten ? 'confirmed' : 'suggested',
       alternatives: conflict ? cands : undefined,
       otherCandidates: others && others.length > 0 ? others : undefined,
+      matchReason: candidateMatchReason(primary),
+      recordNumber: candidateRecordNumber(primary),
       order: meta.order,
     });
   });

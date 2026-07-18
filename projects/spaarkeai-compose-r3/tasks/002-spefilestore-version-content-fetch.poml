@@ -1,0 +1,174 @@
+<task id="002" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>`SpeFileStore` version-content fetch (FR-06) — fetch a driveItem version's content by `versionId`</title>
+    <phase>0 Foundations</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api,spe,azure,graph</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Extend the SPE facade (`ISpeFileOperations` / `SpeFileStore`) with a method that fetches a specific
+    driveItem **version's** content by `versionId` — Graph route `/drives/{driveId}/items/{itemId}/versions/{versionId}/content`.
+    This is the FR-06 baseline-retrieval capability: E1's delta save applies edits onto the **load-time**
+    SPE version (captured by `versionId` at Load), which stays addressable even after prior dirty saves
+    have advanced the file's current version (design §4.3, S4). The method MUST live behind the facade —
+    NO `Microsoft.Graph` types (`GraphServiceClient`, `DriveItem`, `DriveItemVersion`) may leak above
+    `SpeFileStore`/Infrastructure (ADR-007). This is an additive facade method that mirrors the existing
+    `DownloadFileAsUserAsync` OBO shape; it adds no consumer wiring (task 022 consumes it).
+  </prompt>
+
+  <role>
+    Senior .NET 8 developer fluent in the Microsoft Graph SDK v5 (driveItem versions endpoint), the
+    OBO (on-behalf-of) auth flow used by the Spaarke SPE facade, and the `SpeFileStore` /
+    `ISpeFileOperations` boundary discipline (ADR-007 — all Graph access stays behind the facade, only
+    byte streams / DTOs cross the boundary). Comfortable adding a version-scoped content download that
+    mirrors the existing item-content download.
+  </role>
+
+  <goal>
+    `ISpeFileOperations` gains a version-content fetch (e.g. `DownloadFileVersionAsUserAsync(HttpContext,
+    driveId, itemId, versionId, ct)` returning `Task&lt;Stream?&gt;`), implemented in `SpeFileStore` via the
+    Graph `/versions/{versionId}/content` route under the caller's OBO token. No `Microsoft.Graph` type
+    appears in the public signature or above the facade. Matching unit tests in
+    `tests/unit/Sprk.Bff.Api.Tests/…` mock at the facade/Graph boundary (ADR-038 — no
+    `Mock&lt;HttpMessageHandler&gt;`) and cover the happy path (correct version bytes returned) plus the
+    not-found / missing-version negative. BFF build green; the method is additive (existing callers/mocks
+    untouched).
+  </goal>
+
+  <context>
+    <background>
+      E1's baseline (design §4.3, Spike S4 decision) is the **load-time SPE version fetched by
+      `versionId`**, captured at Load. SPE versions files, so the load-time original stays addressable
+      after later dirty saves degrade the *current* version — this is authoritative, refresh-safe, and
+      needs zero new storage. The one missing capability is a `SpeFileStore` method to fetch a *specific*
+      version's content (the current facade only downloads the item's current content via
+      `DownloadFileAsUserAsync`, `ISpeFileOperations.cs:42`). The Graph route `/versions/{id}/content` is
+      a known capability (spec Unresolved Question — "validate the Graph route early"). This task lands
+      that additive method so the E1 cutover (task 022) can retrieve the correct baseline; the client
+      `state.docxBytes` remains a same-session fast-path and a size-capped Redis cache is the fallback.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/ISpeFileOperations.cs — add the version-content fetch to the facade contract (mirror `DownloadFileAsUserAsync`, line 42); all SPE access stays behind it (ADR-007)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs — implement the version-content fetch via Graph `/drives/{driveId}/items/{itemId}/versions/{versionId}/content` under OBO; reuse the existing download OBO pattern, do NOT reimplement auth</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs — existing `DownloadFileAsUserAsync` implementation (OBO token acquisition + Graph call shape to mirror)</file>
+      <file role="reference">projects/spaarkeai-compose-r3/notes/spikes/S1b-S2-S4-S5-2026-07-16.md — S4 baseline-source decision (load-time version by `versionId`)</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §4.3 (where the baseline lives — S4), §9 (BFF surface), §10 (SPE facade reuse row)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependency (parallel-safe with task 001 — different files). Consumed by task 022 (E1 cutover baseline retrieval).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">NO `Microsoft.Graph` types above the `SpeFileStore`/Infrastructure facade. The new method's public signature exposes only primitives + `HttpContext` + `Stream?`; `GraphServiceClient`, `DriveItem`, `DriveItemVersion`, and other `Microsoft.Graph` types stay inside `SpeFileStore.cs`. No Graph type leaks into `Services/Compose/` or endpoints.</constraint>
+    <constraint source="ADR-008">Version-content fetch is invoked under the caller's OBO identity (same as `DownloadFileAsUserAsync`); authorization is enforced at the consuming endpoint, not via new global middleware.</constraint>
+    <constraint source="ADR-005 / ADR-009 / ADR-015">The version bytes are Tier-3-isolated document content; any future baseline cache is Redis-first (ADR-009) — but this task adds only the fetch, not a cache.</constraint>
+    <constraint source="NFR-06 / ADR-038">Matching tests mock at the facade/Graph boundary — NO `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests. The consuming through-the-wire seam test rides task 022/024; this task's unit tests assert the version route + return-shape + not-found negative.</constraint>
+    <constraint source="NFR-01 / §10">No new NuGet package (Graph SDK already referenced) → ~0 MB publish delta; still report absolute + delta vs the ~49.63 MB baseline per the per-task rule. State the PDB convention.</constraint>
+    <constraint source="project / §10 Placement Justification">State the Placement Justification for the additive facade method in the PR description, citing bff-extensions.md decision criteria (additive facade method on the existing SPE boundary — no new surface).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph driveItem versions content endpoint; SPE facade OBO download; ADR-007 boundary discipline</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/spe-integration/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Facade download via OBO" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs">
+        Existing `DownloadFileAsUserAsync` — copy the OBO token acquisition + Graph request builder shape; swap the `/content` request for the version-scoped `/versions/{versionId}/content` request builder. Return `Stream?`; translate Graph 404/not-found to `null` (facade error translation, no Graph type leak).
+      </pattern>
+      <pattern name="Facade contract addition" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/ISpeFileOperations.cs">
+        Add the new method signature adjacent to `DownloadFileAsUserAsync` (line 42) with matching XML doc; additive — existing overloads and their mocks stay untouched.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + facade review">Declare the rigor level (FULL). Read `DownloadFileAsUserAsync` (ISpeFileOperations.cs:42 + its SpeFileStore impl) and the S4 spike note. Load ADR-007 + bff-extensions.md before editing.</step>
+    <step order="1" name="Contract addition">Add the version-content method signature to `ISpeFileOperations` (mirror the download signature; add `versionId`). Public signature uses only primitives + `HttpContext` + `Stream?` — no `Microsoft.Graph` types.</step>
+    <step order="2" name="Implementation">Implement in `SpeFileStore`: acquire the OBO token (reuse the existing helper), build the Graph `/drives/{driveId}/items/{itemId}/versions/{versionId}/content` request, stream the bytes. Translate not-found/missing-version to `null` at the facade (no Graph exception type leaks).</step>
+    <step order="3" name="Unit tests">Author tests in `tests/unit/Sprk.Bff.Api.Tests/…` (mirror the existing SpeFileStore download test location): happy path returns the correct version's bytes; missing `versionId` returns `null`. Mock at the facade/Graph boundary (ADR-038; no `Mock&lt;HttpMessageHandler&gt;`).</step>
+    <step order="4" name="Verify + report">Build BFF + run the new tests. Report publish-size absolute + delta (expect ~0; no new package). Confirm no `Microsoft.Graph` type appears above the facade (ADR-007). Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/ISpeFileOperations.cs (version-content fetch contract added)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs (version-content fetch implementation)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/… SpeFileStore version-content tests (happy path + not-found)</output>
+    <output type="report">Publish-size absolute + delta (~0 expected); ADR-007 no-Graph-leak confirmation; Placement Justification</output>
+  </outputs>
+
+  <justification>
+    <existing>The facade downloads only the item's CURRENT content (`DownloadFileAsUserAsync`, ISpeFileOperations.cs:42) — there is no method to fetch a *specific historical version's* content. No overlap; verified against `ISpeFileOperations.cs`.</existing>
+    <extension>This IS an extension of the existing facade — an additive method on `ISpeFileOperations`/`SpeFileStore`, reusing the OBO download pattern. It does not introduce a new service or SPE plumbing; it adds one version-scoped request builder.</extension>
+    <cost-of-doing-nothing>Without version-content fetch, E1's delta save cannot retrieve the correct load-time baseline after a page refresh (client `state.docxBytes` is gone and the SPE *current* version is degraded by prior dirty saves). Concrete failing contract: FR-06 acceptance "a save after a page refresh still applies the delta onto the correct load-time version" cannot be met.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Given a `driveId` + `itemId` + `versionId`, the facade method returns that specific version's content bytes (validated against the Graph `/versions/{versionId}/content` route) — per FR-06.</criterion>
+    <criterion testable="true">A save after a page refresh (client bytes gone) can still retrieve the correct load-time version by `versionId` (the capability that makes FR-06 acceptance achievable; the end-to-end assertion rides the task 022/024 seam test).</criterion>
+    <criterion testable="true">Negative: a missing/unknown `versionId` returns `null` (facade-translated), not an unhandled `Microsoft.Graph` exception.</criterion>
+    <criterion testable="true">No `Microsoft.Graph` type appears in the method's public signature or anywhere above `SpeFileStore`/Infrastructure (ADR-007) — verified by inspection / arch test.</criterion>
+    <criterion testable="true">The method is additive — existing `DownloadFileAsUserAsync` callers and mocks are untouched; BFF build is green.</criterion>
+    <criterion testable="true">Matching unit tests exist and pass, mocking at the facade/Graph boundary (no `Mock&lt;HttpMessageHandler&gt;`) — per NFR-06/ADR-038.</criterion>
+    <criterion testable="true">Publish size reported absolute + delta vs ~49.63 MB baseline (~0 expected; no new package); PDB convention stated.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    **Completed 2026-07-16** (Opus 4.8, FULL rigor). Code deliverable done + build green (0 errors).
+
+    **Files modified**:
+    - Infrastructure/Graph/ISpeFileOperations.cs — added `DownloadFileVersionAsUserAsync(HttpContext,
+      driveId, itemId, versionId, ct) -> Task&lt;Stream?&gt;` (mirrors DownloadFileAsUserAsync; additive).
+    - Infrastructure/Graph/SpeFileStore.cs — added the facade delegation to `_driveItemOps`.
+    - Infrastructure/Graph/DriveItemOperations.cs — implemented via Graph v5
+      `Drives[driveId].Items[itemId].Versions[versionId].Content.GetAsync(...)` under OBO; 404/missing
+      version → null (facade error-translation); 403 → UnauthorizedAccessException. Mirrors the
+      existing download impl exactly.
+
+    **ADR-007**: verified by inspection — new public signatures expose only HttpContext + string +
+    Stream?; no Microsoft.Graph type crosses the facade. Additive: existing DownloadFileAsUserAsync
+    callers/mocks untouched.
+
+    **§6.5 Path-C — unit test deferred to the 022/024 seam (AC#6)**: the mirrored method's own unit
+    tests (SpeFileStoreTests.cs) are ALL `[Fact(Skip="Graph SDK sealed classes cannot be mocked...")]`
+    — Graph v5 GraphServiceClient/request-builders are unmockable at the DriveItemOperations level. The
+    only working exercise is FakeGraphClientFactory+FakeGraphHttpHandler THROUGH an endpoint (seam test),
+    which needs the consuming endpoint from task 022. ADR-038 bans facade-level scaffolding mocks
+    (B1/B5/B7) and mandates seam tests; the POML itself states the through-the-wire test rides 022/024.
+    → No scaffolding unit test added. **TRACKING: task 024's E1 seam test MUST assert baseline
+    retrieval by versionId (load-time version fetched after a simulated refresh).** SYSTEMIC: this
+    defer-to-seam doctrine applies to all R3 BFF facade/IO tasks (010/020/021/022/023) — pending owner
+    confirmation.
+
+    **Publish size**: no NuGet/dependency change (Graph SDK already referenced) → compile-only IL delta,
+    negligible; absolute unchanged from task 001 (~47.26 MB compressed incl PDBs). Not re-measured (the
+    per-task rule targets dependency/size drift; a C#-only method adds none). PDB convention: incl PDBs.
+
+    **Placement Justification (§10)**: additive method on the existing SPE facade boundary — no new
+    service/surface; the version-scoped download extends the existing OBO download pattern. In-BFF per
+    bff-extensions.md (SPE access is BFF-owned behind SpeFileStore).
+
+    **Quality gate (Step 9.5, inline)**: exact mirror of a shipped method + ADR-007 verified by
+    inspection + build green + no new deps. Full /code-review + /adr-check available on request.
+  </notes>
+</task>

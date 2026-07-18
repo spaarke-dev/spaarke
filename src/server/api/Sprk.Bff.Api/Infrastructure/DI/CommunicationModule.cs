@@ -38,6 +38,16 @@ public static class CommunicationModule
         // Enabled flag is an operational kill-switch for the AI-classify rung (no redeploy).
         services.Configure<AiClassificationOptions>(configuration.GetSection(AiClassificationOptions.SectionName));
 
+        // Record-name/number match (rung 3.5) options. Bound from "Communication:RecordNameMatch"; the Enabled
+        // flag is an operational kill-switch (no redeploy). Deterministic exact-name matcher (email-r4 UAT).
+        services.Configure<RecordNameMatchOptions>(configuration.GetSection(RecordNameMatchOptions.SectionName));
+
+        // Attachment-text match signal (Phase 2) options. Bound from "Communication:AttachmentMatch"; the
+        // Enabled flag is an operational kill-switch (no redeploy). The inbound processor extracts bounded
+        // attachment text (ITextExtractor) into the envelope before association so records named only in an
+        // attachment still match.
+        services.Configure<AttachmentMatchOptions>(configuration.GetSection(AttachmentMatchOptions.SectionName));
+
         // Core services (singleton: all dependencies are singleton or options)
         services.AddSingleton<CommunicationAccountService>();
         services.AddSingleton<ApprovedSenderValidator>();
@@ -146,6 +156,12 @@ public static class CommunicationModule
         services.AddSingleton<IStructuralDetector, InvoiceNumberDetector>();
         services.AddSingleton<IStructuralDetector, CourtEFilingDetector>();
         services.AddSingleton<IAssociationRung, StructuralDetectorRung>();     // rung 3 — structural detectors
+        // rung 3.5 — deterministic record-NAME/number match (email-r4 UAT 2026-07-17). Runs in the
+        // deterministic pass; retrieves candidates from the records index (keyword ranking) then VERIFIES an
+        // exact name/number appearance in the email. Surfaces every verified type (matter/project/invoice) for
+        // review; NEVER auto-files (mapper excludes it from auto-file eligibility). Consumes IRecordMatchingAi
+        // (ADR-013) from a per-evaluation scope. Registered unconditionally; self-gated by Communication:RecordNameMatch:Enabled.
+        services.AddSingleton<IAssociationRung, RecordNameMatchRung>();        // rung 3.5 — record-name/number match
         // rung 4 — semantic record match (FR-14). AI-tier: the engine evaluates it only when the
         // deterministic pass did not auto-file, and the mapper caps it to Suggested (never auto-files).
         // Consumes the IRecordMatchingAi facade (ADR-013) from a per-evaluation scope (facade is scoped,

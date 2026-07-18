@@ -120,6 +120,10 @@ public class ComposeService : IComposeService
     // App-shutdown token for the detached profile task — NEVER the request CancellationToken (which
     // cancels when the response completes). Optional; null → CancellationToken.None.
     private readonly IHostApplicationLifetime? _appLifetime;
+    // FR-08 (task 010, E2): load-time w14:paraId pre-parse. Optional + defaults to a fresh instance so
+    // existing test constructors compile unchanged; DI resolves the registered singleton in every host.
+    // Stateless + thread-safe — a default construction is functionally identical to the DI singleton.
+    private readonly ParaIdPreParser _paraIdPreParser;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -132,7 +136,8 @@ public class ComposeService : IComposeService
         IDocumentProfileAi? documentProfileAi = null,
         IServiceScopeFactory? scopeFactory = null,
         IHostApplicationLifetime? appLifetime = null,
-        IComposeMemoryCapture? memoryCapture = null)
+        IComposeMemoryCapture? memoryCapture = null,
+        ParaIdPreParser? paraIdPreParser = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -142,6 +147,7 @@ public class ComposeService : IComposeService
         _logger = logger;
         _documentProfileAi = documentProfileAi;
         _scopeFactory = scopeFactory;
+        _paraIdPreParser = paraIdPreParser ?? new ParaIdPreParser();
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
         // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
@@ -208,6 +214,24 @@ public class ComposeService : IComposeService
             content = buffer.ToArray();
         }
 
+        // FR-08 (E2, task 010): pre-parse the load-time bytes for the ordered w14:paraId map alongside
+        // the (client-side) mammoth convert, which discards paraId. Single Open XML pass (NFR-08).
+        // Best-effort — a malformed/unreadable source must NOT fail Load (which historically did no
+        // server-side parse of the content); the client degrades to fuzzy-only anchoring (task 012)
+        // when the map is empty.
+        IReadOnlyList<ParaIdMapEntry> paraIdMap;
+        try
+        {
+            paraIdMap = _paraIdPreParser.Parse(content).Entries;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose load: paraId pre-parse failed for drive={DriveId} item={DocumentSpeId}; returning empty map",
+                request.DriveId, request.DocumentSpeId);
+            paraIdMap = Array.Empty<ParaIdMapEntry>();
+        }
+
         // 3) Ensure a ChatSession bound to the document. For Path A (Document row present),
         //    bind to sprk_documentid; for Path B continuation, bind to the SPE drive-item id.
         var bindingId = request.DocumentRecordId.HasValue
@@ -267,6 +291,7 @@ public class ComposeService : IComposeService
             AnchoredAnnotations = session.AnchoredAnnotations ?? Array.Empty<AnchoredAnnotation>(),
             DefinedTermsTracking = session.DefinedTermsTracking ?? Array.Empty<DefinedTerm>(),
             ActionHistory = actionHistory,
+            ParaIdMap = paraIdMap,
         };
     }
 

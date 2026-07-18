@@ -56,6 +56,17 @@ public sealed record NormalizedMessage
 
     /// <summary>Attachment descriptors (metadata; see <see cref="NormalizedAttachment"/>).</summary>
     public IReadOnlyList<NormalizedAttachment> Attachments { get; init; } = Array.Empty<NormalizedAttachment>();
+
+    /// <summary>
+    /// Extracted plain text from the message's attachments (bounded), used as an additional MATCH signal by the
+    /// Association Engine's record-name/number + semantic rungs (email-r4 Phase 2 — owner spec: "if an email
+    /// subject OR body OR attachment text matches a record, flag the association"). Populated at the inbound
+    /// pipeline boundary (<c>IncomingCommunicationProcessor</c>) via <c>ITextExtractor</c> over supported
+    /// attachment types; null when there are no attachments, extraction is disabled, or extraction yielded no
+    /// text. The metadata-only <see cref="Attachments"/> descriptors are unchanged (ADR-045: rungs still do not
+    /// read attachment bytes themselves).
+    /// </summary>
+    public string? AttachmentText { get; init; }
 }
 
 /// <summary>

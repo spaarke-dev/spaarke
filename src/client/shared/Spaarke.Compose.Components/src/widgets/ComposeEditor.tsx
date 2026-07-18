@@ -107,8 +107,11 @@ import {
   tipTapToDocxBytes,
   tipTapJsonToDocxBytes,
   buildRejectBaselineJson,
+  stampParaIds,
   type TipTapNode,
 } from '../utils/docxBridge';
+import { COMPOSE_R3_PARAID } from './paraIdExtension';
+import type { ParaIdMapEntry } from '../types/compose-contracts';
 // Redline → Word save fidelity (UAT-R7 #2/#3/#4): the redline→annotation bridge + its wire type.
 import { redlineMarksToDocxAnnotations, type DocxAnnotationInput } from './useComposeWordShuttle';
 
@@ -215,6 +218,10 @@ const COMPOSE_R2_MARKS = [InsertionMark, DeletionMark, CommentAnchorMark];
  * structurally different kind of extension (plugin-only, no schema mark).
  */
 const COMPOSE_R2_QA_HIGHLIGHT = [QaHighlightExtension];
+
+// R3 FR-09/FR-10 paraId identity extension (task 011) — factored into
+// `./paraIdExtension` as a pure headless schema piece (see that module's header).
+// Registered additively below alongside the LOCKED Spike #1 list (never mutated).
 
 // ---------------------------------------------------------------------------
 // Constants — selection debounce
@@ -343,6 +350,18 @@ export interface ComposeEditorProps {
    * docx mount.
    */
   initialHtml?: string | null;
+
+  /**
+   * FR-08/FR-09 (spaarkeai-compose-r3 task 011) — the server pre-parse `w14:paraId`
+   * map from the Load response (task 010), in document order. When a `docxBytes`
+   * document is mounted, these ids are stamped onto the editor's paragraph nodes
+   * as hidden attributes immediately after import (see {@link stampParaIds}), so
+   * edited paragraphs map back to their original OOXML paragraphs on the retained-
+   * original delta save (FR-12). Absent/empty for an AI-drafted seed (`initialHtml`)
+   * — there the paraId extension mints fresh OOXML-shaped ids itself. Identifiers
+   * only (Tier 1 safe).
+   */
+  paraIdMap?: readonly ParaIdMapEntry[];
 
   /**
    * Document pointer used by PaneEventBus events + heartbeat endpoint URL.
@@ -904,6 +923,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const {
       docxBytes,
       initialHtml,
+      paraIdMap,
       documentRef,
       bffBaseUrl,
       sessionId = '',
@@ -1025,9 +1045,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     // ----- TipTap editor instance -----------------------------------------
     const editor = useEditor({
-      // LOCKED Spike #1 set + the ADDITIVE R2 custom marks (task 031) — the locked list itself
-      // is unchanged (spread, not mutated), honoring the "do not touch the locked list" constraint.
-      extensions: [...LOCKED_EXTENSIONS, ...COMPOSE_R2_MARKS, ...COMPOSE_R2_QA_HIGHLIGHT],
+      // LOCKED Spike #1 set + the ADDITIVE R2 custom marks (task 031) + the R3 paraId identity
+      // extension (task 011) — the locked list itself is unchanged (spread, not mutated), honoring
+      // the "do not touch the locked list" constraint.
+      extensions: [...LOCKED_EXTENSIONS, ...COMPOSE_R2_MARKS, ...COMPOSE_R2_QA_HIGHLIGHT, ...COMPOSE_R3_PARAID],
       content: '<p></p>',
       // editorProps to apply Fluent v9 inherited foreground; semantic-token
       // styling on `.ProseMirror` lives in useStyles above.
@@ -1141,6 +1162,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         .then(({ html, messages }) => {
           if (cancelled) return;
           editor.commands.setContent(html);
+          // FR-09 (task 011): stamp the server pre-parse `w14:paraId`s onto the paragraph
+          // nodes EXPLICITLY, immediately after setContent, so load-time identity is
+          // server-owned (the paraId extension's own minting only fills ids the server did
+          // not supply + re-mints on split). No-op when the map is absent (empty stamp).
+          stampParaIds(editor, paraIdMap);
           dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
           onDirtyChange?.(isTransientMount);
           // Privacy: messages are Tier 1 safe (configuration metadata).
@@ -1176,6 +1202,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // save-success (when speDriveItemId gets populated on the same bytes) and clobber the
       // user's edits by re-importing the original mount bytes. The captured value is correct
       // because `mountTransient` sets docxBytes + documentRef atomically in one render.
+      // `paraIdMap` is likewise read-but-not-a-dep for the same reason: the host sets it
+      // atomically with `docxBytes` per mount, so the captured value is the map for THESE
+      // bytes; adding it as a dep would risk a re-import (edit clobber) on an identity change.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [editor, docxBytes, initialHtml, onDirtyChange, onImportWarnings]);
 

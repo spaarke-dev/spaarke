@@ -141,7 +141,15 @@
     <PackageReference Include="OpenTelemetry.Api" Version="1.15.3" />
 
     <!-- Document Generation -->
-    <PackageReference Include="DocumentFormat.OpenXml" Version="3.4.1" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+
+    <!-- Compose R3 E1 redline engine: NO external diff dependency. The E1 delta save synthesizes the
+         tracked-change redline itself (ComposeParagraphRedlineSynthesizer, Option C — design §4.2):
+         a word-level diff of each paraId-keyed edited paragraph, emitted as native w:ins/w:del via
+         DocumentFormat.OpenXml (already referenced above). The originally-planned Docxodus WmlComparer
+         (task 001) was REMOVED after the NFR-09 hardening gate (task 003) proved WmlComparer strips
+         w14:paraId + drops tables on real firm templates in BOTH 6.4.0 (net8) and 7.1.0 (net10) —
+         so removing it also drops the transitive SkiaSharp packages + their native-asset exclusions. -->
 
     <!-- Power BI Embedded Reporting (PBI-001) -->
     <PackageReference Include="Microsoft.PowerBI.Api" Version="4.21.1" />
