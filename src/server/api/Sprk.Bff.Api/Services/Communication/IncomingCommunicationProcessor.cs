@@ -41,6 +41,7 @@ public sealed class IncomingCommunicationProcessor
     private readonly IPostUploadIndexingEnqueuer _postUploadIndexingEnqueuer;
     private readonly NotificationService _notificationService;
     private readonly ICommunicationEnrichmentService _enrichmentService;
+    private readonly IThreadResolver? _threadResolver;
     private readonly CommunicationOptions _options;
     private readonly IConfiguration _configuration;
     private readonly ILogger<IncomingCommunicationProcessor> _logger;
@@ -69,7 +70,8 @@ public sealed class IncomingCommunicationProcessor
         ICommunicationEnrichmentService enrichmentService,
         IOptions<CommunicationOptions> options,
         IConfiguration configuration,
-        ILogger<IncomingCommunicationProcessor> logger)
+        ILogger<IncomingCommunicationProcessor> logger,
+        IThreadResolver? threadResolver = null)
     {
         _graphClientFactory = graphClientFactory;
         _communicationService = communicationService;
@@ -84,6 +86,7 @@ public sealed class IncomingCommunicationProcessor
         _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
         _notificationService = notificationService;
         _enrichmentService = enrichmentService;
+        _threadResolver = threadResolver;
         _options = options.Value;
         _configuration = configuration;
         _logger = logger;
@@ -270,6 +273,35 @@ public sealed class IncomingCommunicationProcessor
                 "Association resolution failed (non-fatal) | CommunicationId: {CommunicationId}, " +
                 "GraphMessageId: {GraphMessageId}",
                 communicationId, graphMessageId);
+        }
+
+        // ── Step 4.6: Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02) ──
+        // Runs AFTER association (4.5) so the resolver can anchor a new thread to the message's resolved
+        // regarding (ADR-024 reuse). Reuses the SAME In-Reply-To/References ancestry the ThreadContinuityRung
+        // walks (email strategy) to join the parent's thread or create a new one. Same shared seam the chat
+        // inbound path (MessagingIngestor) and the outbound send path (CommunicationService) call. A resolver
+        // failure MUST NOT fail capture — the record already exists (without sprk_communicationthread).
+        if (_threadResolver is not null)
+        {
+            try
+            {
+                await _threadResolver.ResolveAndAssignThreadAsync(
+                    new ThreadResolutionRequest
+                    {
+                        CommunicationId = communicationId,
+                        ChannelType = CommunicationType.Email,
+                        Direction = CommunicationDirection.Incoming,
+                        Message = envelope,
+                    },
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Thread resolution failed (non-fatal) | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
+                    communicationId, graphMessageId);
+            }
         }
 
         // ── Step 5: Process attachments ──────────────────────────────────────────

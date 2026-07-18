@@ -1,0 +1,153 @@
+<task id="030" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-13/FR-16 server-derived `confidence_band` (additive `ComposeDraftPayload`) + paraId/offsets on anchor</title>
+    <phase>3 E3</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W3-E3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>012</deps>
+    <tags>bff-api,frontend,api</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-13 + FR-16: enrich the Compose redline contract with (1) a coarse
+    `confidence_band` (`high` | `medium` | `low`) that is DERIVED SERVER-SIDE from
+    grounding/verifiability evidence — is the change supported by a cited source / the retained
+    original / the re-anchor score? — and (2) an explicit `paraId` + `start_offset` / `end_offset`
+    on the redline anchor (these ride the E2 paraId substrate landed by task 012). Both are
+    **additive, mirror-first** fields on `ComposeDraftPayload` (client mirror
+    `types/compose-contracts.ts` &lt;-&gt; server record `ComposeDraftPayload` in
+    `Services/Compose/ComposeDraftDisposition.cs`), snake_case, Tier-3-safe (enum/number, NOT user
+    content). This is a DERIVATION change on the existing dispatch path — there is **NO new AI
+    dispatch endpoint and NO AI catalog Action / row change** (engine frozen, NFR-04). The band is
+    computed from grounding signals already present on the session output; if no grounding signal
+    exists for an action, the band is `low` (or omitted) rather than guessed — never a false-precision
+    numeric self-report. Do NOT auto-accept or pre-select on the band here (that is task 031's UI rule).
+  </prompt>
+
+  <role>
+    Senior full-stack engineer fluent in .NET 8 Minimal API record contracts + `System.Text.Json`
+    `[JsonPropertyName]` snake_case serialization, and the TypeScript mirror discipline
+    (`Spaarke.Compose.Components/src/types`). Comfortable reasoning about grounding/verifiability
+    evidence as a server-side derivation and keeping `Services/Compose/` free of AI internals
+    (ADR-013 facade).
+  </role>
+
+  <goal>
+    An additive `confidence_band` field (`high` | `medium` | `low` enum) on `ComposeDraftPayload`
+    — server record + client mirror — populated by a server-side derivation from existing grounding
+    evidence (cited source presence / retained-original support / re-anchor score), plus additive
+    `paraId` + `start_offset` / `end_offset` on `AnchoredAnnotationAnchor` (client) and its server
+    counterpart, so a redline carries the exact paragraph identity + character offsets from the E2
+    substrate. No new AI dispatch endpoint, no catalog row change, no AI-internal type injected into
+    `Services/Compose/`. Matching tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/` cover the
+    grounded=&gt;high / ungrounded=&gt;low derivation plus the additive-mirror round-trip; a through-the-wire
+    seam slice test asserts the band + offsets survive the dispatch/serialize path.
+  </goal>
+
+  <context>
+    <background>
+      E3-rationale already ships: `ComposeDraftPayload` carries `target_text` / `new_text` /
+      `match_mode` / `rationale` / `sources` / `edits[]` / `comments[]`, and the accept/reject
+      popover already renders the rationale (design §2 redline-suggestion-payload row;
+      `ComposeEditor.tsx:271-294`). The gap is a **confidence** signal and **explicit
+      offsets/paraId** (design §6.1). Per the 2026 HCI research folded into design §6.2, a numeric
+      confidence score is the weakest/riskiest signal (drives over-reliance + false precision), so
+      E3 uses a **coarse qualitative band tied to verifiability**, derived server-side from grounding
+      — NOT a raw model self-report. The offsets are only meaningful against a stable paragraph
+      identity, so they RIDE E2 (task 012 landed paraId-primary anchoring + fuzzy fallback). This
+      task adds the contract fields + the server derivation; task 031 designs the trust-semantics UI
+      and task 032 handles formatted insertions.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDraftDisposition.cs — the `ComposeDraftPayload` record (line ~168; snake_case `[JsonPropertyName]`). Add `confidence_band` (enum) + anchor paraId/start_offset/end_offset additively; keep property-level boolean `required` BANNED (owner hygiene).</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts — client mirror of `ComposeDraftPayload`; `AnchoredAnnotationAnchor` at lines 108-115 (`textPattern` + `paragraphHint`). Mirror the additive `confidence_band` + `paraId`/offsets; do NOT diverge the two shapes.</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — Load/Save orchestration where the draft payload is materialized/dispatched; site of the server-side band derivation from grounding evidence (design §6.2). `LoadAsync` ~168 / draft materialization path.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs — the re-anchor scorer (Levenshtein) is one grounding/verifiability signal feeding the band derivation; the paraId substrate from task 012 is the other.</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §6 (E3 enriched redline contract — rationale-first, grounding-tied band, offsets-ride-E2, additive mirror-first, `required` BANNED), §2 (redline-payload + anchoring rows), §10 (reuse map — payload + re-anchor rows).</file>
+      <file role="spec">projects/spaarkeai-compose-r3/spec.md FR-13, FR-16, NFR-04, NFR-05, NFR-06.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="012" status="pending">FR-11/FR-12 paraId-primary anchoring + fuzzy fallback + paraId as splice key. Provides the stable paragraph identity the offsets ride on; the re-anchor score it exposes is a grounding signal for the band derivation. Do not add offsets before the paraId substrate exists.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039 / NFR-04">Engine frozen: NO new AI dispatch endpoint and NO new/changed AI catalog rows (`sprk_analysisaction` / `sprk_analysisplaybook`). The band is SERVER-DERIVED from existing grounding evidence, not a new Action output field. If a band were ever model-supplied it would have to be declared in the JPS output schema + eval cases — this task deliberately keeps it derived to avoid that.</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` MUST NOT inject `IOpenAiClient`, executor, or routing types. The derivation consumes grounding signals already present on the session output / re-anchor service — no AI-internal reach. Tier-1 NetArchTest stays green. Use the `Services/Ai/PublicContracts/` facade if any AI-produced grounding evidence is read.</constraint>
+    <constraint source="project / owner hygiene">Additive, mirror-first: the server record and the client mirror change together and stay identical in shape. Property-level boolean `required` is BANNED. snake_case wire vocabulary (`confidence_band`, `start_offset`, `end_offset`). NO version suffix anywhere.</constraint>
+    <constraint source="ADR-015 / Tier-3">`confidence_band` + offsets are enum/number metadata — Tier-3-safe, NOT user document content. Do not smuggle user text into these fields.</constraint>
+    <constraint source="project / design §6.2">Derive the band from verifiability: grounded (cited source / retained-original support / strong re-anchor score) =&gt; `high`; weakly supported =&gt; `medium`; unsupported / no grounding signal =&gt; `low` (or omit). Never emit a false-precision numeric self-report. Do NOT auto-accept / pre-select on the band in this task (UI rule is FR-14 / task 031).</constraint>
+    <constraint source="NFR-06 / ADR-038">A save/load/dispatch contract change carries a through-the-wire `WebApplicationFactory` seam slice test (`tests/integration/seam/**`) asserting the band + offsets survive serialize/dispatch. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests. Unit-green != done.</constraint>
+    <constraint source="ADR-029 / CLAUDE.md §10">Report BFF publish size absolute + delta vs ~49.63 MB baseline (incl. PDBs — state the convention); this is a contract/derivation change (no NuGet add) so expect ~0 MB delta. Verify no new HIGH CVE. State the Placement Justification (extension of `Services/Compose`, no new surface).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Additive snake_case record contracts + client mirror; server-side grounding-tied confidence derivation; AI-facade isolation</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-013-ai-facade.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-015-memory-tiers.md</file>
+      <file>docs/standards/INTEGRATION-CONTRACTS.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="snake_case mirror-first contract" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDraftDisposition.cs">
+        `ComposeDraftPayload` record with `[JsonPropertyName("snake_case")]`; mirror each additive field 1:1 in `types/compose-contracts.ts`. Do not add property-level boolean `required`.
+      </pattern>
+      <pattern name="grounding signal source" location="src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs">
+        The re-anchor Levenshtein score + presence of `sources` / retained-original support are the verifiability inputs the band derivation reads — server-side, no AI-internal injection.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Confirm task 012 (paraId substrate) is landed. Run the FULL rigor-level declaration. Load `bff-extensions.md` + the ADR knowledge files. State the Placement Justification (extension of `Services/Compose`; additive contract field; no new surface).</step>
+    <step order="1" name="Add the additive contract fields (server)">In `ComposeDraftDisposition.cs`, add `confidence_band` (a `high`/`medium`/`low` enum serialized as its snake/lower string) to the `ComposeDraftPayload` record, and add `paraId` + `start_offset` + `end_offset` to the server anchor counterpart. Keep them optional/additive; NO boolean `required`. snake_case `[JsonPropertyName]`.</step>
+    <step order="2" name="Mirror the fields (client)">Mirror the identical additive shape in `types/compose-contracts.ts` — `confidence_band?: 'high' | 'medium' | 'low'` on the draft payload and `paraId?` + `start_offset?` / `end_offset?` on `AnchoredAnnotationAnchor` (lines 108-115). Keep server + client shapes identical.</step>
+    <step order="3" name="Implement the server-side band derivation">In the draft-materialization path (`ComposeService` / `ComposeDraftDisposition`), derive `confidence_band` from verifiability evidence: cited-source presence + retained-original support + re-anchor score =&gt; `high`; weak support =&gt; `medium`; no grounding signal =&gt; `low` (or omit). Read only grounding signals already present (no new AI call, no AI-internal injection). Populate `paraId`/offsets from the E2 anchor.</step>
+    <step order="4" name="Unit + derivation tests">Author tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/` asserting: grounded suggestion =&gt; `high`; ungrounded =&gt; `low`; the additive fields round-trip through serialize/deserialize; no catalog row is read/modified.</step>
+    <step order="5" name="Through-the-wire seam slice test">Add a `WebApplicationFactory` slice test (`tests/integration/seam/**`) that drives the dispatch/serialize path and asserts `confidence_band` + `paraId`/offsets are present on the payload the client actually receives (NFR-06). No transport mocks.</step>
+    <step order="6" name="Verify + size/CVE/facade report">Build BFF + client shared lib; run the new tests. Run the ADR-013 NetArchTest facade check (`Services/Compose` injects no AI internals). Report publish size absolute + delta vs ~49.63 MB (expect ~0). Verify no new HIGH CVE. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDraftDisposition.cs (additive `confidence_band` + anchor paraId/offsets)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (server-side band derivation from grounding)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts (mirrored additive fields)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ (band-derivation + additive-mirror tests)</output>
+    <output type="test">tests/integration/seam/ (through-the-wire slice: band + offsets survive dispatch)</output>
+    <output type="report">Publish-size absolute + delta; CVE scan; NetArchTest facade result; Placement Justification</output>
+  </outputs>
+
+  <justification>
+    <existing>`ComposeDraftPayload` (server record + client mirror) already carries the redline contract (`rationale`/`sources`/`edits[]`); `AnchoredAnnotationAnchor` already carries `textPattern`/`paragraphHint`. This task adds FIELDS to those existing types — it does not introduce a new type, service, endpoint, or catalog row.</existing>
+    <extension>Extend the existing record + mirror rather than create a parallel confidence contract: the band + offsets are properties of the redline the payload already models, and the derivation folds into the existing draft-materialization path in `ComposeService`. A new type would fork the mirror discipline and orphan the existing accept/reject render path.</extension>
+    <cost-of-doing-nothing>Without the additive fields, FR-13 (grounding-tied confidence band renders `high`/`low`) and FR-16 (redline round-trips to the exact paragraph + offset) cannot be met — the accept/reject surface has no verifiability signal and redlines cannot anchor to an exact offset. Concrete failing contract: FR-13/FR-16 acceptance.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A grounded suggestion (cited source / retained-original support / strong re-anchor score) renders `confidence_band: high`; an ungrounded one renders `low` — asserted by a server-side derivation unit test.</criterion>
+    <criterion testable="true">No AI catalog row (`sprk_analysisaction` / `sprk_analysisplaybook`) and no AI dispatch endpoint is added or modified; the band is server-derived from existing grounding evidence (NFR-04).</criterion>
+    <criterion testable="true">`confidence_band` + `paraId` + `start_offset` / `end_offset` are additive, snake_case, present identically on the server `ComposeDraftPayload` record and the client `types/compose-contracts.ts` mirror; no property-level boolean `required` is introduced.</criterion>
+    <criterion testable="true">A redline round-trips to the exact paragraph (`paraId`) + character offset (`start_offset`/`end_offset`) — asserted through the dispatch/serialize path (FR-16).</criterion>
+    <criterion testable="true">`Services/Compose/` injects no AI-internal type (ADR-013 NetArchTest green); `confidence_band`/offsets carry enum/number metadata only (Tier-3-safe), never user document content.</criterion>
+    <criterion testable="true">A through-the-wire `WebApplicationFactory` seam slice test (`tests/integration/seam/**`) asserts the band + offsets survive the dispatch/serialize path (NFR-06); no `Mock&lt;HttpMessageHandler&gt;` / DI-registration / ctor-null tests.</criterion>
+    <criterion testable="true">BFF publish size reported absolute + delta vs ~49.63 MB baseline, ≤60 MB; no new HIGH CVE; BFF + client shared-lib builds green with matching tests passing.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

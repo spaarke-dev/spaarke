@@ -90,7 +90,7 @@ export interface ReanchorAnnotationsResponse {
 /**
  * A prior Compose anchor sent to the BFF to re-locate (mirror of BFF `PriorAnchor`). Sourced from
  * the Compose session's `anchoredAnnotations` (design §8): `textPattern` = `anchor.textPattern`,
- * `paragraphHint` = `anchor.paragraphHint`.
+ * `paragraphHint` = `anchor.paragraphHint`, `paraId` = `anchor.paraId`.
  */
 export interface PriorAnchorInput {
   id: string;
@@ -98,6 +98,14 @@ export interface PriorAnchorInput {
   textPattern: string;
   paragraphHint: number;
   preview?: string | null;
+  /**
+   * R3 FR-11 (spaarkeai-compose-r3 task 012) — the PRIMARY anchor: the paragraph's `w14:paraId`
+   * ({@link AnchoredAnnotationAnchor.paraId}). The BFF resolves by this FIRST and only falls back to
+   * the {@link textPattern}/{@link paragraphHint} fuzzy scorer when it is absent (Word regenerated
+   * ids on an external save). Additive + optional: legacy anchors created before this field carry no
+   * paraId and re-anchor by the fuzzy path (design §5.2).
+   */
+  paraId?: string;
 }
 
 // ---------------------------------------------------------------------------

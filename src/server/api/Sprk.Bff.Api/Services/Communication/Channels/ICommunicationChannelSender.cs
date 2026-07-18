@@ -55,6 +55,24 @@ public sealed record ChannelSendRequest
 
     /// <summary>Correlation id for tracing.</summary>
     public required string CorrelationId { get; init; }
+
+    /// <summary>
+    /// Messaging channel only: the sending participant (a <c>systemuser</c> or <c>contact</c>) whose ACS
+    /// identity is resolved (task 010) and whose server-minted <c>chat</c> token is used to transmit. Email
+    /// addresses by mailbox, so this is null on the email path. Populated by the outbound persist-on-send
+    /// wiring (task 051); required by <see cref="MessagingChannelSender"/> (a null value fails the send).
+    /// Optional + additive — no email caller sets it, so the field defaults to null and the email path is
+    /// byte-unchanged (NFR-04).
+    /// </summary>
+    public ParticipantReference? SenderParticipant { get; init; }
+
+    /// <summary>
+    /// Messaging channel only: the ACS <c>ChatThreadId</c> this message is sent into, resolved upstream by
+    /// the thread resolver (task 040). When null, <see cref="MessagingChannelSender"/> creates a thread via
+    /// the ACS thread plane (task 011) seeded with the sender. Ignored on the email path (null there).
+    /// Optional + additive (see <see cref="SenderParticipant"/>).
+    /// </summary>
+    public string? AcsThreadId { get; init; }
 }
 
 /// <summary>Channel-neutral attachment payload for a send.</summary>
@@ -73,8 +91,16 @@ public sealed record ChannelSendResult
 
     /// <summary>
     /// Provider-assigned message id captured post-send when available (email: the RFC-2822
-    /// Internet-Message-Id read back from Sent Items for reply-thread continuity, FR-06). Null when the
-    /// provider returns none or capture was best-effort-skipped.
+    /// Internet-Message-Id read back from Sent Items for reply-thread continuity, FR-06; messaging: the ACS
+    /// <c>SendChatMessageResult.Id</c> — the echo-dedup key, FR-04). Null when the provider returns none or
+    /// capture was best-effort-skipped.
     /// </summary>
     public string? ProviderMessageId { get; init; }
+
+    /// <summary>
+    /// Provider-assigned thread/conversation id when the channel is thread-based (messaging: the ACS
+    /// <c>ChatThreadId</c> the message landed in — persisted by task 051 as <c>sprk_acsthreadid</c> and the
+    /// <c>sprk_communicationchannelref.sprk_externalref</c>). Null for channels with no thread concept (email).
+    /// </summary>
+    public string? ProviderThreadId { get; init; }
 }

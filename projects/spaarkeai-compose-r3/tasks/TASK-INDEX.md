@@ -1,0 +1,88 @@
+# Spaarke Compose R3 — Task Index
+
+> **Created**: 2026-07-16 · **Source**: [plan.md](../plan.md) · **Spec**: [spec.md](../spec.md)
+> **Legend**: Status 🔲 not-started · 🔄 in-progress · ✅ complete · ⛔ blocked
+> **Gate**: 🟢 startable now · 🟡 splittable · 🔴 blocked on dependency
+> **All 6 pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed** — no Phase-0 spike phase; the only pre-build residual is the NFR-09 real-template hardening gate (task 003), which **gates the E1 delta-save cutover (task 022)**.
+
+## Critical Path (read first)
+
+**E2 (paraId substrate) → E1 (delta save) → Import.** paraId is the splice key, so Phase 1 blocks Phase 2; imported marks anchor by paraId and must survive the retained-original save, so Phase 2 blocks Phase 5. E3 + toolset parallelize alongside the fidelity core.
+
+```
+001 ─┬─ 003 (hardening gate) ───────────────────────┐
+     │                                              ▼
+002 ─┼──────────────────────────────► 022 (E1 cutover, keystone)
+010 ─┴─ 011 ─ 012 ─ 020 ─ 021 ────────► 022 ─ 023 ─ 024 ─ 025
+                     │                    │
+                     ├─ 030 ─ 031/032 (E3)│
+                     └─ 050 ─ 051 ─ 052 (import, also deps 022)
+040/042/043/044 (toolset, independent) · 041 deps 011
+```
+
+**Coordination**: ✅ `spaarkeai-compose-r2` confirmed completed/closed + on master (2026-07-16) — E1-cutover (022) gate CLEARED. Consume `spaarke-ai-architecture-redesign-r2` `PublicContracts` seams — no fork of `Services/Ai/`. `/conflict-check` before each BFF PR. (See [`../../INDEX.md`](../../INDEX.md).)
+
+## Task Roster
+
+| ID | Title | Phase | Gate | Deps | Status | Rigor | Model | Effort | Parallel-safe |
+|----|-------|-------|------|------|--------|-------|-------|--------|---------------|
+| 001 | ~~Add `Docxodus` 6.4.0 + SkiaSharp exclusion~~ **REVERSED 2026-07-17** (Docxodus removed — Option C self-synthesizes the redline, no external diff engine; OpenXml 3.5.1 bump retained) | 0 Foundations | 🟢 | none | ✅→↩️ | FULL | opus | high | false (csproj foundation) |
+| 002 | `SpeFileStore` version-content fetch (FR-06) — fetch a driveItem version's content by `versionId` | 0 Foundations | 🟢 | none | ✅ | FULL | sonnet | high | true |
+| 003 | NFR-09 real-template hardening gate — **VERDICT FLIPPED ❌FAIL→✅PASS** (WmlComparer failed on real docs in 6.4.0 AND 7.1.0 → §6.5 pivot to Option C; harness repointed to `ComposeParagraphRedlineSynthesizer`, now preserves 345/345 paraIds + 6/6 tables on the real CSA). Report: notes/spikes/S1-nfr09-real-template-hardening-2026-07-17.md | 0 Foundations | 🟢 | 001 | ✅ | FULL | opus | xhigh | true |
+| 010 | FR-08 server pre-parse + `w14:paraId` minting on Load (OOXML-valid, collision-checked) | 1 E2 | 🟢 | 001 | ✅ | FULL | opus | xhigh | false (LoadAsync) |
+| 011 | FR-09/FR-10 explicit load-time paraId carry (hidden node attr) + split-minting via `@tiptap/extension-unique-id` | 1 E2 | 🔴 | 010 | ✅ | FULL | sonnet | high | true (client) |
+| 012 | FR-11/FR-12 paraId-primary anchoring + fuzzy fallback (`AnnotationReanchorService`) + paraId as splice key | 1 E2 | 🟢 | 010,011 | ✅ | FULL | opus | high | false (reanchor svc) |
+| 020 | ~~FR-02 edited-paragraph rebuild + splice~~ **SUPERSEDED 2026-07-17** (Option C: `ComposeParagraphRedlineSynthesizer` redlines in place — no splice-then-compare; `ComposeParagraphSpliceService` removed, `ComposeParaIdSpliceMap` kept + reused) | 2 E1 | 🟢 | 010,012 | ✅→⤴️ | FULL | opus | xhigh | false (Services/Compose) |
+| 021 | ~~FR-03/FR-05 Docxodus `WmlComparer` redline adapter~~ **SUPERSEDED 2026-07-17** (Option C: `ComposeParagraphRedlineSynthesizer` word-diff → native w:ins/w:del in place; `ComposeRedlineComparerService` removed. Building it PROVED WmlComparer fails NFR-09 → the pivot) | 2 E1 | 🟢 | 001,020 | ✅→⤴️ | FULL | opus | xhigh | false (Services/Compose) |
+| 022 | FR-01 baseline inversion in `SaveAsync` + drop `docx.js` export (**E1 cutover — keystone**) — **UNBLOCKED (gate PASS) + RE-SCOPED to Option C**. Redline engine (`ComposeParagraphRedlineSynthesizer`) built + NFR-09-certified. Remaining: wire into inverted `SaveAsync` + baseline resolution (versionId/client-bytes/Redis) + drop docx.js client + FR-05 format handling + NFR-06 seam | 2 E1 | 🟢 | 002,003 | 🔲 | FULL | opus | xhigh | false (SaveAsync + docxBridge) |
+| 023 | FR-04 AI redlines/comments reuse — apply via existing `DocxAnnotationWriter` onto retained-original baseline | 2 E1 | 🔴 | 022 | 🔲 | FULL | sonnet | high | false (Services/Compose) |
+| 024 | FR-07/NFR-06 through-the-wire fidelity seam slice test (untouched OOXML preserved on dirty save) | 2 E1 | 🔴 | 022,023 | 🔲 | FULL | sonnet | xhigh | true (tests) |
+| 025 | Deploy + smoke-verify E1 fidelity core (BFF + client) on spaarkedev1 | 2 E1 | 🔴 | 024 | 🔲 | STANDARD | sonnet | high | false (deploy) |
+| 030 | FR-13/FR-16 server-derived `confidence_band` (additive `ComposeDraftPayload`) + paraId/offsets on anchor | 3 E3 | 🔴 | 012 | 🔲 | FULL | sonnet | high | false (contract mirror) |
+| 031 | FR-14 rationale-first, anti-rubber-stamp accept/reject surface (no auto-accept low-band) | 3 E3 | 🔴 | 030 | 🔲 | FULL | sonnet | high | true (ComposeEditor UI) |
+| 032 | FR-15 formatted AI insertions — enrich `new_text` to carry marks + `buildInsertionHtml` | 3 E3 | 🔴 | 030 | 🔲 | FULL | sonnet | high | true (insertion html) |
+| 040 | FR-17 find/replace (case-sensitivity + replace-all; tracked-changes-mark-safe) | 4 Toolset | 🟢 | none | 🔲 | FULL | sonnet | high | true (client) |
+| 041 | FR-18 basic tables (`@tiptap/extension-table`); table-cell paragraphs carry paraIds | 4 Toolset | 🔴 | 011 | 🔲 | FULL | sonnet | high | true (client) |
+| 042 | FR-19/FR-20/FR-21 sticky toolbar + one-line bubble menu + dismissible simplification warning | 4 Toolset | 🟢 | none | 🔲 | FULL | sonnet | high | true (client) |
+| 043 | FR-22 styles pane — apply existing document styles only (no create/rename/manage) | 4 Toolset | 🟢 | none | 🔲 | FULL | sonnet | high | true (client) |
+| 044 | FR-23 richer comment-thread UI (author/timestamp/replies; view/create/reply/resolve) | 4 Toolset | 🟢 | none | 🔲 | FULL | sonnet | high | true (client) |
+| 050 | FR-24 import existing revisions — project `DocxAnnotationReader` `RecoveredRevision` on Load + in-editor render | 5 Import | 🔴 | 010,012,022 | 🔲 | FULL | opus | high | false (LoadAsync) |
+| 051 | FR-25 import existing comments — `RecoveredComment` threads via FR-23 | 5 Import | 🔴 | 044,050 | 🔲 | FULL | sonnet | high | false (LoadAsync) |
+| 052 | FR-26 imported anchors survive save (paraId + retained-original) + seam slice test | 5 Import | 🔴 | 022,050,051 | 🔲 | FULL | sonnet | xhigh | true (tests) |
+| 080 | NFR-01/02/05 publish-size ≤60 MB + CVE scan + ADR-013 NetArchTest facade verification | 6 Wrap | 🔴 | 021,022 | 🔲 | STANDARD | sonnet | high | true |
+| 081 | Deploy full R3 (BFF + SpaarkeAi/shared-lib) to spaarkedev1 | 6 Wrap | 🔴 | 025,032,040,041,042,043,044,052 | 🔲 | STANDARD | sonnet | high | false (deploy) |
+| 082 | Flagship gate G-R3 — browser-verified fidelity round-trip + toolset demo on spaarkedev1 | 6 Wrap | 🔴 | 081 | 🔲 | FULL | opus | high | false (UAT) |
+| 090 | Project wrap-up (code-review, adr-check, repo-cleanup, /test-diet, lessons-learned) | 6 Wrap | 🔴 | all | 🔲 | FULL | opus | high | false |
+
+**Total**: 27 tasks.
+
+## Parallel Execution Groups
+
+| Wave | Tasks | Prerequisite | Goal-eligible | Notes |
+|------|-------|--------------|---------------|-------|
+| W0 | 001, 002 | none | no (001 = packaging foundation) | Different files (csproj vs SpeFileStore) — parallel |
+| W0.5 | 003 | 001 | no (hardening gate) | Gates the E1 cutover (022); may block on owner supplying real firm templates |
+| W1 (E2) | 010 → 011 → 012 | 001 | no | Serial: server pre-parse → client carry → anchoring (shared LoadAsync/reanchor seams) |
+| W2 (E1) | 020 → 021 → 022 → 023 → 024 → 025 | W1, 002, 003 | no (irreversible save cutover) | Serial — all touch `ComposeService`/`docxBridge`; 022 is the keystone cutover |
+| W3 (E3) | 030 → {031, 032} | 012 | partial | 031/032 parallel after 030 (distinct UI files) |
+| W4 (Toolset) | {040, 042, 043, 044}; 041 after 011 | none / 011 | **yes** | Independent client components — strong parallel candidate; goal-eligible wave |
+| W5 (Import) | 050 → 051 → 052 | 022 (+ 044 for 051) | no | Serial (LoadAsync); depends on E1/E2 |
+| W6 (Wrap) | 080 → 081 → 082 → 090 | all impl | no (deploy/UAT/irreversible) | Verification → deploy → flagship → wrap-up |
+
+**Concurrency note**: W4 (toolset) can run alongside W1–W3. Max 6 agents/wave. BFF tasks touching `ComposeService.cs` / `ComposeEndpoints.cs` serialize (parallel-safe=false). Client tasks touching distinct components parallelize. Build-verify between waves (dotnet build BFF if `.cs` changed; `npm run build` shared lib if `.ts`/`.tsx` changed).
+
+## Rigor / Model Assignment Rationale
+
+- **opus @ xhigh**: the OOXML fidelity engine + irreversible cutover (010 paraId minting, 020 splice, 021 Docxodus adapter, 022 cutover) + 003 hardening gate — high blast radius, brownfield root-cause reasoning.
+- **opus @ high**: keystone-adjacent + flagship/wrap (012 anchoring, 050 import projection, 082 flagship, 090 wrap, 001 packaging).
+- **sonnet @ high**: well-specified client/UI + additive-contract + deploy tasks (toolset, E3 UI, deploys).
+- **sonnet @ xhigh**: seam slice tests (024, 052) — fully-specified but demand careful through-the-wire assertion authoring.
+- **TEST-MODIFYING override**: 024, 052 run code-review + adr-check at Step 9.5 unconditionally (modify `tests/**`).
+
+---
+
+*Maintained by task-execute (status flips 🔲→🔄→✅). Every BFF task runs `.claude/constraints/bff-extensions.md` + reports publish-size delta vs ~49.63 MB baseline.*
+
+> **TIPTAP VERSION CORRECTION (task 011, 2026-07-17, §6.5 Path C)**: POML/S2 name `@tiptap/extension-unique-id` **3.28.0**, but 3.x is a **TipTap v3** extension (peer `@tiptap/core: 3.28.0`) and the ComposeEditor is **TipTap v2**. Adopted **2.27.2** (v2-latest, MIT — NOT `@tiptap-pro/*`, NFR-03 ✅). `npm install` bumped the whole `@tiptap/*` v2 stack `2.10.3 → 2.27.2` uniformly (all MIT); **accepted** (uniform-version is TipTap's supported consumption model) and validated by full suite **201/201 green** + build green. **Directional refinement**: extension `types` + `stampParaIds` cover `paragraph` **AND** `heading` (an OOXML heading is a `<w:p>` counted by the server map, so paragraph-only stamping misaligned every id after the first heading). New module `src/widgets/paraIdExtension.ts` (extracted for headless testability). **Doc-reconcile follow-up**: design §5 / task-012 prose say "3.28.0" → 2.27.2.
+>
+> **DOCXODUS VERSION CORRECTION (task 001, 2026-07-16, §6.5 Path C)**: The adopted engine is **Docxodus `6.4.0`** (net8.0 line of the same MIT fork), NOT `7.1.0` — 7.x targets net10.0 only and the BFF is net8.0. Same `WmlComparer` engine; pulls OpenXml 3.5.1 transitively. **Doc-reconcile follow-up**: design §12.3 + tasks 010/020/021/022 prose still say "7.1.0" — update to 6.4.0 when those tasks execute. Fresh publish baseline this worktree: **46.66 MB** compressed incl PDBs (not 49.63 — rebased past ai-redesign-r1 deletions); task-001 delta +0.60 MB.

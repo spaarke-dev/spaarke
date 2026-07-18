@@ -1,0 +1,146 @@
+<task id="022" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-01 baseline inversion in `SaveAsync` + drop `docx.js` export (E1 cutover — keystone)</title>
+    <phase>2 E1</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+    <parallel-group>W2-E1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>002,003,020,021</deps>
+    <tags>bff-api,frontend,docx,spe</tags>
+    <estimated-effort>4-5 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    THE KEYSTONE CUTOVER (FR-01). Invert the dirty-save baseline: on a dirty save the persisted
+    document MUST be derived from the LOAD-TIME ORIGINAL OOXML, NOT a TipTap reconstruction. Remove
+    `docx.js` from the export path — drop `tipTapJsonToDocxBytes` (and its caller `tipTapToDocxBytes`)
+    from `utils/docxBridge.ts` so no dirty save routes through a full-document rebuild. Invert
+    `ComposeService.SaveAsync` (`ComposeService.cs:315`) from "persist the client reconstruction" to
+    "delta onto the retained original": resolve the baseline = the load-time SPE version by `versionId`
+    (task 002 fetch), with the client-retained `state.docxBytes` as a same-session fast-path and a
+    size-capped Redis cache (ADR-009, Tier-3) as fallback (FR-06); rebuild the edited paragraphs and
+    splice them (task 020); synthesize the redline via the Docxodus adapter (task 021); write to SPE via
+    the atomic `If-Match` path. This is an IRREVERSIBLE save-path cutover — execute the steps in order.
+    GATED on task 003 (NFR-09 real-template hardening) passing before cutover.
+  </prompt>
+
+  <role>
+    Senior full-stack developer: .NET 8 (`ComposeService.SaveAsync`, Open XML, the SPE facade write) +
+    React/TypeScript (`Spaarke.Compose.Components` save-path client, `docxBridge.ts`). Understands this
+    is the single load-bearing inversion of R3 (design §8: "the save baseline becomes the retained
+    original, and edits are deltas onto it") and that the R2 "Save regenerates .docx from editor"
+    decision is being superseded (Path B).
+  </role>
+
+  <goal>
+    A dirty save that persists a delta onto the retained load-time original: `docx.js` /
+    `tipTapJsonToDocxBytes` removed from the export path; `ComposeService.SaveAsync` resolves the
+    load-time baseline (version-by-`versionId` primary, client-bytes fast-path, Redis fallback), drives
+    task 020's splice + task 021's comparer, and writes via the atomic `If-Match` SPE path. A save after
+    editing a formatted doc no longer routes through `tipTapJsonToDocxBytes`; a through-the-wire test
+    (authored in task 024) asserts untouched paragraphs match the original structurally/semantically;
+    a save after a page refresh (client bytes gone) still applies the delta onto the correct load-time
+    version. The clean-save passthrough path is unchanged.
+  </goal>
+
+  <context>
+    <background>
+      Design §4 (E1 keystone), §4.3 (baseline = load-time SPE version by `versionId`; client fast-path;
+      Redis fallback — S4), §8 (SAVE pipeline diagram; "drop docx.js export"), §11 (Path B — supersede
+      the R2 "regenerate from editor" decision). Current dirty save (§2) rebuilds the whole `.docx` from
+      TipTap JSON via `docx ^9.0.3` (`docxBridge.ts:208` `tipTapJsonToDocxBytes`), and `SaveAsync`
+      (`ComposeService.cs:315`) treats those already-lossy bytes as an opaque baseline (re-applies
+      annotations at `ComposeService.cs:358`). The clean-save passthrough (`state.docxBytes`) is already
+      faithful — this task extends the faithful-baseline model from clean to dirty. All 6 spikes passed;
+      the only pre-cutover residual is task 003 (real-template hardening), which GATES this cutover.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:315 — SaveAsync: invert to delta-onto-retained-original; resolve baseline (versionId primary / client-bytes fast-path / Redis fallback); drive the splice (020) + comparer (021); write via If-Match</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts:208 — REMOVE `tipTapJsonToDocxBytes` (docx.js export) and its caller `tipTapToDocxBytes` (:145); dirty save must not reconstruct the whole doc</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — `triggerSave` baseline: send load-time original reference (versionId) + the paragraph-edit list instead of a client reconstruction</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:1107 — PushAnnotationsAsync download→annotate→replace + If-Match write; the reference save shape to generalize</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ — task 020 splice orchestration + task 021 WmlComparer adapter (invoked here)</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs — task 002 version-content fetch (baseline by `versionId`, FR-06)</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §4, §4.3, §8, §11 (Path B)</file>
+      <file role="spec">projects/spaarkeai-compose-r3/spec.md FR-01, FR-06, NFR-07</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">`SpeFileStore` version-content fetch — the load-time baseline retrieval by `versionId` (FR-06 primary source).</dependency>
+      <dependency task="003" status="pending">NFR-09 real-template hardening gate — MUST pass before this cutover (a failure gates the delta-save cutover).</dependency>
+      <dependency task="020" status="pending">FR-02 edited-paragraph rebuild + splice — produces the spliced-edited document.</dependency>
+      <dependency task="021" status="pending">FR-03/FR-05 Docxodus WmlComparer adapter — synthesizes the redline from original vs spliced-edited.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-01">On a dirty save the persisted document MUST derive from the load-time original OOXML, NOT a TipTap reconstruction. `docx.js` is removed from the export path — a dirty save no longer routes through `tipTapJsonToDocxBytes`. MUST NOT reconstruct the whole doc from TipTap.</constraint>
+    <constraint source="spec / FR-06 / ADR-009 / ADR-015">Baseline = the load-time SPE version fetched by `versionId` (task 002). Client-retained `state.docxBytes` is a same-session fast-path; a size-capped Redis cache (Tier-3, document bytes) is the fallback. A save after a page refresh still applies the delta onto the correct load-time version.</constraint>
+    <constraint source="project / ADR Tension Path B">This supersedes the R2 project decision "Save regenerates `.docx` from editor" → "delta onto retained original." Cite the Path B supersession in the PR description (design §11): "R2 regenerate-from-editor superseded → delta onto retained original." Project-level decision amendment, not an ADR-doc change.</constraint>
+    <constraint source="ADR-007">The version-content fetch + SPE write stay behind the `SpeFileStore` facade — no `Microsoft.Graph` types in `Services/Compose/`.</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` injects no AI internals; Tier-1 NetArchTest stays green.</constraint>
+    <constraint source="ADR-028 / NFR-10">Client save-path fetches use `@spaarke/auth` (no ad-hoc token handling).</constraint>
+    <constraint source="ADR-029 / CLAUDE.md §10">Measure BFF publish size; report absolute + delta vs ~49.63 MB. Verify no new HIGH CVE.</constraint>
+    <constraint source="ADR-038 / NFR-06">Through-the-wire proof is required for this save-path change (authored as the task 024 seam slice test); unit-green ≠ done. NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+    <constraint source="project / §10 Placement Justification">State the Placement Justification (save orchestration stays in `Services/Compose/`; reuses SaveAsync/SpeFileStore seams) in the PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Retained-original delta save inversion; SPE version-by-versionId baseline; Redis-first Tier-3 cache; client save-path (docxBridge / ComposeWorkspace); BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Download→delta→If-Match write" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:1107">
+        PushAnnotationsAsync fetches retained-original bytes, produces new bytes, and writes with an atomic If-Match etag — generalize this shape into the main dirty-save path.
+      </pattern>
+      <pattern name="Clean-save passthrough" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:315">
+        SaveAsync already passes through faithful original bytes on a clean save — extend that faithful-baseline model to the dirty path.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Gate + context check">Confirm task 003 (NFR-09 real-template hardening) has PASSED — this cutover is gated on it. Confirm tasks 002/020/021 seams are available. Confirm `spaarkeai-compose-r2` is merged/frozen (CLAUDE.md coordination). Output the FULL rigor-level declaration. Load knowledge files + bff-extensions.md; state the Placement Justification + the Path B supersession note for the PR.</step>
+    <step order="1" name="Server: implement baseline resolution">In `SaveAsync`, add baseline resolution: primary = load-time SPE version by `versionId` (task 002 fetch); fast-path = client-supplied `state.docxBytes` when present (same session); fallback = size-capped Redis cache of the load-time original (ADR-009 Tier-3). Return a clear error if no baseline can be resolved rather than falling back to a reconstruction.</step>
+    <step order="2" name="Server: drive splice + comparer">Wire `SaveAsync` (dirty path) to: rebuild edited paragraphs + splice onto a copy of the resolved baseline (task 020), then synthesize the redline via the Docxodus adapter (task 021). Continue to apply AI redlines/comments via `DocxAnnotationWriter` (unchanged; task 023 verifies). Persist via the atomic `If-Match` SPE write.</step>
+    <step order="3" name="Client: drop docx.js export">Remove `tipTapJsonToDocxBytes` (`docxBridge.ts:208`) and its caller `tipTapToDocxBytes` (:145). Update `ComposeWorkspace.triggerSave` to send the load-time original reference (versionId) + the paragraph-edit list (paraId-keyed) instead of a reconstructed `.docx`. Ensure the clean-save passthrough remains. Fetches via `@spaarke/auth`.</step>
+    <step order="4" name="Verify no reconstruction path remains">Grep the client for remaining references to `tipTapJsonToDocxBytes` / `tipTapToDocxBytes` / the `docx` export lib in the save path; confirm the dirty save no longer reconstructs. Build the shared lib (`npm run build`).</step>
+    <step order="5" name="Build + verify server">Build BFF; run existing `Services/Compose` unit tests (no regression). Run the Tier-1 NetArchTest facade check. (The through-the-wire fidelity proof is task 024.)</step>
+    <step order="6" name="Size/CVE report + index">Publish; report absolute size + delta vs ~49.63 MB; `dotnet list package --vulnerable`. Update TASK-INDEX status; record the Path B supersession in the PR description.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (SaveAsync inverted to delta-onto-retained-original + baseline resolution)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts (docx.js export removed)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx (triggerSave sends baseline reference + edit list)</output>
+    <output type="report">Publish-size absolute + delta vs ~49.63 MB; CVE scan; Placement Justification; Path B supersession note for the PR</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A save after editing a formatted document no longer routes through `tipTapJsonToDocxBytes`; that function (and `tipTapToDocxBytes`) is removed from `docxBridge.ts` and no save path references docx.js reconstruction.</criterion>
+    <criterion testable="true">On a dirty save, `SaveAsync` derives the persisted document from the load-time original OOXML (baseline resolved by `versionId`, with client-bytes fast-path / Redis fallback), then applies the splice + comparer delta — not a client reconstruction.</criterion>
+    <criterion testable="true">A save after a page refresh (client `state.docxBytes` gone) still applies the delta onto the correct load-time version (FR-06 baseline retrieval).</criterion>
+    <criterion testable="true">The clean-save passthrough path is unchanged (still faithful).</criterion>
+    <criterion testable="true">`Services/Compose/` injects no AI-internal type (Tier-1 NetArchTest green); no `Microsoft.Graph` type in `Services/Compose/`; the version fetch + write stay behind `SpeFileStore` (ADR-007).</criterion>
+    <criterion testable="true">The PR description cites the Path B supersession of the R2 "regenerate from editor" decision (design §11).</criterion>
+    <criterion testable="true">Publish size reported absolute + delta vs ~49.63 MB baseline, ≤60 MB; no new HIGH CVE; BFF + shared-lib builds green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

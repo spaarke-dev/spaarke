@@ -1,0 +1,127 @@
+<task id="090" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Project wrap-up — README → Complete, lessons-learned, `/test-diet` gate, archive, final code-review, TASK-INDEX reconciliation</title>
+    <phase>Wrap</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001, 002, 003, 004, 005, 006, 007, 010, 011, 012, 020, 021, 030, 031, 040, 041, 042, 043, 050, 051, 060, 061, 062, 063, 070, 080, 081</dependencies>
+    <blocks></blocks>
+    <tags>wrapup</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Project-close orchestration: status flip, lessons-learned, mandatory `/test-diet` reconciliation gate (root §7), artifact archive, final holistic `code-review`, and final TASK-INDEX reconciliation. Writes project-close state + invokes gates — MUST run from the main session (root §3). STANDARD rigor with an explicit test-diet gate.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Main-session-only: runs the `/test-diet` gate, updates project-close state, and produces the final review after ALL work tasks complete. Cannot be delegated to a subagent (touches project-close state + gates; §3 write boundary).</parallel-reason>
+    <fr-refs></fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Close out messaging-communication-app-r1 from the MAIN SESSION only:
+
+    1. **README → Complete** — flip the project README status to Complete; summarize what shipped (W0–W8: ACS integration, channel provider + inbound ingestor, thread data model + `IThreadResolver`, privacy, endpoints, polling timeline + PCFs, quoting, attachments, ADR-046, docs) and the graduation criteria met (the 11 spec Success Criteria).
+
+    2. **Lessons-learned** — author `notes/lessons-learned.md` capturing: the ACS net-new integration experience, the shared `Services/Communication/` edit (040) + characterization-guard outcome, the notification-spine coordination (threadId/kind contract for R2), the ADR-026 Path-A OOB-form+PCF surface, the NFR-04 no-client-ACS-SDK boundary, publish-size trajectory vs the ~45.30 MB baseline, and deferred items (live channel, spine push, SMS, Teams/portal, historical backfill).
+
+    3. **`/test-diet` gate (MANDATORY, root §7)** — invoke `/test-diet` to reconcile every test added/modified during R1 (esp. task 080's vertical-slice seam + characterization tests) against the ADR-038 build-vs-maintain classifier: MAINTAIN-class tests stay at KEEP paths; SCAFFOLDING-class tests are emitted for deletion (`git rm`); AMBIGUOUS require reviewer judgment. The skill is read-only — it emits commands for the reviewer. Output: `notes/test-diet-report.md`. The wrap-up PR MUST cite this report.
+
+    4. **Archive artifacts** — move ephemeral working files to the archive per `/repo-cleanup` conventions; retain permanent artifacts (spec, design, plan, tasks, arch docs, ADR-046).
+
+    5. **Final `code-review`** — run a final holistic `code-review` across the R1 diff surface as a project-close quality gate (special attention to the security-sensitive privacy layer 042 + the NFR-04 no-ACS-SDK boundary).
+
+    6. **Final TASK-INDEX reconciliation** — confirm every W0–W8 task is ✅ (or explicitly documented as deferred/owner-handoff, e.g. any PCF import handed to the owner); set `current-task.md` to "none — project complete".
+
+    Then confirm the project is complete and ready for `merge-to-master`.
+  </prompt>
+
+  <role>
+    Spaarke project lead running the main-session project-close protocol. Authoritative on the wrap-up sequence, the `/test-diet` gate (root §7), `/repo-cleanup`, and the final `code-review` gate. Does NOT delegate to subagents (root §3 write boundary).
+  </role>
+
+  <goal>
+    README status is Complete; `notes/lessons-learned.md` and `notes/test-diet-report.md` exist; the `/test-diet` gate has run and its report is cited; ephemeral artifacts are archived; a final `code-review` has run with Critical findings addressed; TASK-INDEX is fully reconciled; `current-task.md` is "none — project complete". The project is ready to merge to master.
+  </goal>
+
+  <context>
+    <background>
+      This is the project-close task. Per root §7, a `090-wrapup-*` task invokes `/test-diet` BEFORE marking the project complete — reconciling R1's test additions against the ADR-038 KEEP-path categories (task 080's seam + characterization tests are the bulk). R1 was substantial (net-new ACS transport + inbound seam + thread model + security-sensitive privacy layer + client polling surface), so lessons-learned and the final review are substantive. The notification-spine coordination (threadId/kind contract) is R2-facing — record it for the sibling project.
+    </background>
+    <relevant-files>
+      <file>projects/messaging-communication-app-r1/README.md</file>
+      <file>projects/messaging-communication-app-r1/notes/lessons-learned.md (NEW)</file>
+      <file>projects/messaging-communication-app-r1/notes/test-diet-report.md (NEW — from /test-diet)</file>
+      <file>projects/messaging-communication-app-r1/tasks/TASK-INDEX.md</file>
+      <file>projects/messaging-communication-app-r1/current-task.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="root §7">A `090-wrapup-*` task MUST invoke `/test-diet` BEFORE marking the project complete; the wrap-up PR MUST cite `notes/test-diet-report.md` (or document the skip rationale). Skipping is a HARD WARNING.</constraint>
+    <constraint source="root §3">Main-session only — this task writes project-close state + runs gates; do NOT delegate to a subagent.</constraint>
+    <constraint source="ADR-038">`/test-diet` classifies per the build-vs-maintain criteria; the skill is read-only (emits `git rm`/`git mv` for the reviewer; no auto-execute).</constraint>
+    <constraint source="project">Final `code-review` is a project-close gate; address Critical findings before declaring complete (special attention: 042 privacy + NFR-04 no-ACS-SDK boundary).</constraint>
+    <constraint source="project">Record the notification-spine `threadId` + `kind` taxonomy coordination outcome for R2 in lessons-learned.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-close</topic>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r1/tasks/TASK-INDEX.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify all tasks complete">Read `TASK-INDEX.md`; confirm every W0–W8 task is ✅ (or explicitly documented as deferred/owner-handoff). If any remain 🔲/🔄 unexpectedly, STOP and report.</step>
+    <step order="2" name="README → Complete">Update the README status to Complete; summarize shipped W0–W8 scope + the 11 spec Success Criteria met.</step>
+    <step order="3" name="Lessons-learned">Author `notes/lessons-learned.md` (ACS net-new experience, shared-path 040 + characterization guard, notification-spine R2 contract, ADR-026 Path-A surface, NFR-04 boundary, publish-size trajectory, deferred items).</step>
+    <step order="4" name="/test-diet gate">Invoke `/test-diet`; produce `notes/test-diet-report.md` (MAINTAIN keep / SCAFFOLDING `git rm` / AMBIGUOUS reviewer-judgment). Do NOT auto-execute the emitted commands.</step>
+    <step order="5" name="Archive">Run `/repo-cleanup` conventions: move ephemeral working/notes files to archive; retain permanent artifacts (spec, design, plan, tasks, arch docs, ADR-046).</step>
+    <step order="6" name="Final code-review">Run a final holistic `code-review` across the R1 diff surface (special attention: 042 privacy, NFR-04 no-ACS-SDK); address Critical findings.</step>
+    <step order="7" name="Reconcile + reset">Mark task 090 ✅ in `TASK-INDEX.md`; confirm full reconciliation; set `current-task.md` to "none — project complete".</step>
+    <step order="8" name="Ready to merge">Confirm the project is complete and ready for `merge-to-master`; the wrap-up PR cites `notes/test-diet-report.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Verify task completion + gather close artifacts</tool>
+    <tool name="edit">README status; lessons-learned; TASK-INDEX; current-task</tool>
+    <tool name="test-diet">MANDATORY project-close test reconciliation gate</tool>
+    <tool name="repo-cleanup">Archive ephemeral artifacts</tool>
+    <tool name="code-review">Final project-close quality gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/messaging-communication-app-r1/README.md (UPDATED — status Complete)</output>
+    <output type="docs">projects/messaging-communication-app-r1/notes/lessons-learned.md (NEW)</output>
+    <output type="docs">projects/messaging-communication-app-r1/notes/test-diet-report.md (NEW — from /test-diet)</output>
+    <output type="docs">projects/messaging-communication-app-r1/tasks/TASK-INDEX.md + current-task.md (UPDATED — fully reconciled)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every W0–W8 task is ✅ (or explicitly documented as deferred/owner-handoff) in `TASK-INDEX.md` before wrap-up completes.</criterion>
+    <criterion testable="true">README status is Complete with a shipped-scope summary + the 11 Success Criteria.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists (incl. the notification-spine R2 contract note).</criterion>
+    <criterion testable="true">`/test-diet` has run; `notes/test-diet-report.md` exists and is cited in the wrap-up PR; no emitted `git rm` auto-executed.</criterion>
+    <criterion testable="true">Ephemeral artifacts archived per `/repo-cleanup`; permanent artifacts retained.</criterion>
+    <criterion testable="true">A final `code-review` has run with Critical findings addressed; `current-task.md` set to "none — project complete".</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Main-session only (root §3). The `/test-diet` gate is mandatory per root §7 — skipping is a HARD WARNING that must be justified in the PR. After this task, run `merge-to-master`. If any W6 PCF import was handed to the owner (environment-gated), document it as a tracked owner-handoff, not an incomplete task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Main-session only. Apply STANDARD rigor + the mandatory `/test-diet` gate (root §7) at Step 4. Do NOT delegate to a subagent. Cite `notes/test-diet-report.md` in the wrap-up PR. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

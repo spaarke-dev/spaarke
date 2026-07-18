@@ -834,6 +834,76 @@ public class DriveItemOperations
     }
 
     /// <summary>
+    /// Download a SPECIFIC version's content (OBO). Mirrors <see cref="DownloadFileAsUserAsync"/>
+    /// but targets the Graph <c>/versions/{versionId}/content</c> route. Returns <c>null</c> when the
+    /// item or the requested version is not found (ADR-007 — no Graph type leaks; 404 → null).
+    /// FR-06 / Spike S4: retrieves the load-time SPE baseline for the Compose E1 delta save.
+    /// </summary>
+    public async Task<Stream?> DownloadFileVersionAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        string versionId,
+        CancellationToken ct = default)
+    {
+        using var activity = Activity.Current;
+        activity?.SetTag("operation", "DownloadFileVersionAsUser");
+        activity?.SetTag("driveId", driveId);
+        activity?.SetTag("itemId", itemId);
+        activity?.SetTag("versionId", versionId);
+
+        _logger.LogInformation(
+            "Downloading version {VersionId} of file {ItemId} from drive {DriveId} (OBO)",
+            versionId, itemId, driveId);
+
+        try
+        {
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
+
+            var stream = await graphClient.Drives[driveId].Items[itemId]
+                .Versions[versionId].Content
+                .GetAsync(cancellationToken: ct);
+
+            if (stream == null)
+            {
+                _logger.LogWarning(
+                    "Failed to download version {VersionId} of file {ItemId} - stream is null",
+                    versionId, itemId);
+                return null;
+            }
+
+            _logger.LogInformation(
+                "Successfully downloaded version {VersionId} of file {ItemId} (OBO)",
+                versionId, itemId);
+            return stream;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning(
+                "Version {VersionId} of file {ItemId} not found in drive {DriveId}",
+                versionId, itemId, driveId);
+            return null;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
+        {
+            _logger.LogWarning(
+                "Access denied downloading version {VersionId} of file {ItemId}: {Error}",
+                versionId, itemId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
+        }
+        catch (ServiceException ex)
+        {
+            _logger.LogError(ex, "Graph API error downloading file version: {Error}", ex.Message);
+            throw new InvalidOperationException($"Failed to download file version: {ex.Message}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error downloading file version: {Error}", ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Get preview URL for a file using app-only authentication.
     /// Returns ephemeral URL that expires in ~10 minutes.
     /// Used for server-side file viewing with correlation ID tracking.

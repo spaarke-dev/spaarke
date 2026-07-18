@@ -1,0 +1,170 @@
+<task id="001" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>Add `Docxodus` 7.1.0 (SkiaSharp excluded) + bump OpenXml 3.4.1→3.5.1; publish-size + CVE baseline</title>
+    <phase>0 Foundations</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>W0</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api,docx,azure</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Add the `Docxodus` 7.1.0 NuGet package (MIT, .NET 10 — the `WmlComparer` redline engine adopted
+    for E1) to `src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj`, with its transitive **SkiaSharp
+    assets EXCLUDED** via `&lt;ExcludeAssets&gt;runtime;native&lt;/ExcludeAssets&gt;` on the SkiaSharp reference
+    (Spike S3 proved `WmlComparer` runs with SkiaSharp fully removed — the 11.6 MB native is not
+    needed for the diff). Bump `DocumentFormat.OpenXml` 3.4.1 → 3.5.1 in the same csproj. Then measure
+    BFF publish size (`dotnet publish -c Release … -o deploy/api-publish/`) — report absolute
+    compressed size + delta vs the ~49.63 MB baseline — and confirm `dotnet list package --vulnerable
+    --include-transitive` is clean for the two additions. This is the packaging foundation for the
+    entire E1/E2 fidelity core (tasks 010, 020, 021, 022); it lands the dependency and proves the
+    budget/CVE gates BEFORE any consuming code is written. No consuming code in this task.
+  </prompt>
+
+  <role>
+    Senior .NET 8 build/packaging engineer fluent in MSBuild `PackageReference` metadata
+    (`ExcludeAssets`, transitive-dependency pruning), the Microsoft Open XML SDK 3.x
+    (`DocumentFormat.OpenXml`), NuGet vulnerability scanning, and the Spaarke BFF publish-size
+    discipline (ADR-029 / CLAUDE.md §10). Comfortable reasoning about SkiaSharp native-asset exclusion
+    on a transitive reference.
+  </role>
+
+  <goal>
+    `Sprk.Bff.Api.csproj` references `Docxodus` 7.1.0 with SkiaSharp runtime/native assets excluded,
+    and `DocumentFormat.OpenXml` bumped 3.4.1 → 3.5.1. The BFF builds green; the published output
+    stays ≤ 60 MB compressed with the net Docxodus add ≈ 2.44 MB uncompressed (~1 MB compressed) per
+    S3; `dotnet list package --vulnerable --include-transitive` reports no new HIGH CVE from either
+    addition. Publish-size absolute + delta vs the ~49.63 MB baseline is recorded in the task notes /
+    PR description, stating the PDB convention. No Docxodus code path is invoked yet.
+  </goal>
+
+  <context>
+    <background>
+      E1 (retained-original delta save, design §4) adopts `Docxodus` `WmlComparer` (MIT, .NET 10,
+      a maintained fork of Microsoft's archived Open-Xml-PowerTools) to synthesize minimal
+      `w:ins`/`w:del` redline markup between the retained original and the spliced-edited document —
+      "prior art we adopt, not code we write" (design §4.2). Spike S1/S1b confirmed adoption; Spike S3
+      resolved publish-size: Docxodus managed = 2.44 MB, and its `SkiaSharp` transitive dependency
+      ships an 11.6 MB win-x64 native (`libSkiaSharp.dll`) that `WmlComparer` does NOT need for the
+      diff, so SkiaSharp assets are excluded (design §12.3). This is the FIRST task to add the NuGet;
+      it establishes the packaging + budget + CVE baseline before tasks 020/021/022 consume it. Open
+      XML SDK is already a BFF dependency (design §9) — this is only a minor 3.4.1 → 3.5.1 bump.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj — add `Docxodus` 7.1.0 (SkiaSharp assets excluded via `&lt;ExcludeAssets&gt;runtime;native&lt;/ExcludeAssets&gt;`); bump `DocumentFormat.OpenXml` 3.4.1 → 3.5.1 (design §38 Affected Areas, §12.3)</file>
+      <file role="reference">projects/spaarkeai-compose-r3/notes/spikes/S1-docxodus-wmlcomparer-2026-07-16.md — S1 WmlComparer PASS (engine + paraId preservation)</file>
+      <file role="reference">projects/spaarkeai-compose-r3/notes/spikes/S1b-S2-S4-S5-2026-07-16.md — S1b/S3 evidence (SkiaSharp-excluded run; 2.44 MB net add)</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §12.3 (Docxodus publish-size + SkiaSharp exclusion), §4.2 (WmlComparer adoption), §14 (S1/S3 spikes)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependency. Consumes the S1/S1b/S3 spike results (already passed, in notes/spikes/). Blocks tasks 003, 010, 020, 021, 022 (the fidelity core that consumes Docxodus).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-01 / §10 BFF hygiene / ADR-029">Measure BFF publish size after adding Docxodus + bumping OpenXml: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report absolute compressed size + delta vs the ~49.63 MB baseline. Docxodus net add ≈ 2.44 MB (managed, SkiaSharp excluded); ≥ +5 MB single-task delta → justify; ≥ 55 MB cumulative → architecture review; ≥ 60 MB → HARD STOP. State the PDB convention when reporting.</constraint>
+    <constraint source="NFR-01 / design §12.3 (S3)">MUST exclude SkiaSharp assets when adding Docxodus — `&lt;ExcludeAssets&gt;runtime;native&lt;/ExcludeAssets&gt;` on the transitive SkiaSharp ref (or a targeted `runtimes/` exclusion). Without exclusion the 11.6 MB native re-inflates the publish.</constraint>
+    <constraint source="NFR-01 / design §13 (BINDING packaging note)">MUST NOT invoke any Docxodus code path that touches `HtmlToWml` or `FormattingAssembler` — those re-pull SkiaSharp. The R3 splice uses `WmlComparer` only. (This task adds no consuming code; the constraint binds all downstream consumers and is stated here as the packaging invariant.)</constraint>
+    <constraint source="NFR-02 / ADR-029">`dotnet list package --vulnerable --include-transitive` MUST be clean for the Docxodus + OpenXml 3.5.1 additions — no NEW HIGH CVE. A pre-existing transitive HIGH not introduced by this change is not a regression but MUST be called out.</constraint>
+    <constraint source="NFR-03 / project">Only permissive licenses — Docxodus is MIT, Open XML SDK is MIT. No AGPL/copyleft. Zero commercial license fees.</constraint>
+    <constraint source="project / §10 Placement Justification">State the Placement Justification (all R3 server work in `Sprk.Bff.Api`; this is a csproj-only packaging change reusing the existing BFF project) in the PR description, citing bff-extensions.md decision criteria.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>NuGet transitive-asset exclusion (SkiaSharp); Open XML SDK version bump; BFF publish-size + CVE discipline</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="PackageReference asset exclusion" location="src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj">
+        Add `&lt;PackageReference Include="Docxodus" Version="7.1.0" /&gt;`; exclude SkiaSharp via a sibling `&lt;PackageReference Include="SkiaSharp" ... &gt;&lt;ExcludeAssets&gt;runtime;native&lt;/ExcludeAssets&gt;&lt;/PackageReference&gt;` (or `runtimes/` prune). Bump the existing `DocumentFormat.OpenXml` entry 3.4.1 → 3.5.1 in place.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + spike review">Declare the rigor level (FULL). Read the S1/S1b/S3 spike notes to confirm the SkiaSharp-excluded WmlComparer run and the 2.44 MB net-add figure. Load bff-extensions.md + ADR-029 before editing the csproj. Capture the CURRENT publish-size baseline first (pre-change) so the delta is exact.</step>
+    <step order="1" name="Add Docxodus + exclude SkiaSharp">Add `Docxodus` 7.1.0 to `Sprk.Bff.Api.csproj`. Add the SkiaSharp asset exclusion (`&lt;ExcludeAssets&gt;runtime;native&lt;/ExcludeAssets&gt;` on the transitive ref, or targeted `runtimes/` exclusion). Restore and confirm the SkiaSharp native is NOT in the output.</step>
+    <step order="2" name="Bump Open XML SDK">Bump `DocumentFormat.OpenXml` 3.4.1 → 3.5.1 in the same csproj. Restore.</step>
+    <step order="3" name="Build">`dotnet build src/server/api/Sprk.Bff.Api/` — confirm green (0 errors) with the new dependency graph.</step>
+    <step order="4" name="Publish-size measurement">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure the compressed output; verify no `libSkiaSharp` native landed; record absolute size + delta vs ~49.63 MB baseline. State the PDB convention (incl/excl PDBs).</step>
+    <step order="5" name="CVE scan">Run `dotnet list package --vulnerable --include-transitive`; confirm no NEW HIGH CVE from Docxodus or OpenXml 3.5.1; call out any pre-existing transitive HIGH as not-introduced-here.</step>
+    <step order="6" name="Report + index">Record the Placement Justification, publish-size absolute + delta, and CVE result in task notes / PR description. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (Docxodus 7.1.0 with SkiaSharp excluded; OpenXml 3.4.1→3.5.1)</output>
+    <output type="report">Publish-size absolute + delta vs ~49.63 MB baseline (PDB convention stated); CVE scan result; SkiaSharp-native-absent confirmation; Placement Justification</output>
+  </outputs>
+
+  <justification>
+    <existing>No in-repo component performs paragraph-level OOXML redline synthesis (minimal `w:ins`/`w:del` diff between two DOCX). `DocxAnnotationWriter` (R2) writes only the AI-redline subset from a known annotation list; it does not diff two documents. No overlap — verified against `Services/Compose/` (design §10 reuse map lists WmlComparer as the sole net-new engine).</existing>
+    <extension>The closest existing service (`DocxAnnotationWriter`) cannot be extended into a general two-document comparer without reimplementing the WmlComparer algorithm (Move Detection + Format-Change Detection). Adopting the maintained MIT engine is strictly cheaper and lower-risk than hand-writing paragraph add/remove/reorder diff (design §4.2, §11 Path C).</extension>
+    <cost-of-doing-nothing>Without Docxodus the E1 delta save (task 020/021/022) cannot synthesize minimal tracked-change markup from direct typing — dirty saves stay lossy (the exact FR-01 defect R3 exists to fix). Concrete failing contract: FR-03 acceptance "3 edited paragraphs → minimal ins/del" is unachievable.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">`Sprk.Bff.Api.csproj` references `Docxodus` 7.1.0 with SkiaSharp `runtime;native` assets excluded; the published output contains NO `libSkiaSharp` native (verified in `deploy/api-publish/`) — per NFR-01 / S3.</criterion>
+    <criterion testable="true">`DocumentFormat.OpenXml` is bumped 3.4.1 → 3.5.1; the BFF builds green (0 errors).</criterion>
+    <criterion testable="true">Publish size is reported absolute + delta vs the ~49.63 MB baseline, ≤ 60 MB compressed, net Docxodus add ≈ 2.44 MB uncompressed (~1 MB compressed); the PDB convention is stated — per NFR-01.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` shows no NEW HIGH CVE from the Docxodus or OpenXml 3.5.1 additions — per NFR-02.</criterion>
+    <criterion testable="true">Only MIT-licensed dependencies are added (Docxodus MIT, OpenXml MIT); no AGPL/copyleft — per NFR-03.</criterion>
+    <criterion testable="true">No Docxodus `HtmlToWml`/`FormattingAssembler` code path is referenced (no consuming code in this task); the packaging invariant is documented for downstream consumers — per NFR-01 / design §13.</criterion>
+    <criterion testable="true">The Placement Justification is stated in the PR description citing bff-extensions.md.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    **Completed 2026-07-16** (Opus 4.8 @ high, FULL rigor).
+
+    **§6.5 Path-C deviation — Docxodus 7.1.0 → 6.4.0**: 7.x targets net10.0 ONLY (NU1202 on the
+    net8.0 BFF). 6.4.0 is the highest release on the net8.0 line of the same MIT fork ("upgraded to
+    .NET 8.0"), same WmlComparer engine, and pulls DocumentFormat.OpenXml 3.5.1 transitively (matches
+    the task's bump target). The S1/S1b/S3 spikes validated engine behavior on a net10 scratchpad
+    harness and did NOT catch net8 consumability — spike-coverage gap noted for the hardening gate
+    (task 003). DOC-RECONCILE FOLLOW-UP: design §12.3 + tasks 010/020/021/022 prose still say "7.1.0";
+    update to "6.4.0 (net8.0 line)".
+
+    **SkiaSharp exclusion (linux-x64 RID)**: 6.4.0 delivers the native via
+    SkiaSharp.NativeAssets.Linux.NoDependencies 3.119.4 (not the win-x64 native). Excluded
+    runtime;native on BOTH `SkiaSharp` 3.119.4 and `SkiaSharp.NativeAssets.Linux.NoDependencies`
+    3.119.4. Verified: 0 SkiaSharp managed dll, 0 native, no runtimes/ dir in publish.
+
+    **Measurements** (deploy/api-publish, compressed incl. PDBs via Compress-Archive Optimal):
+    - Fresh pre-change baseline: 46.66 MB compressed / 140.89 MB uncompressed / 240 files
+      (below the documented 49.63 MB baseline because this worktree is rebased past ai-redesign-r1's
+      ~11.8k-line deletion sweep).
+    - Post-change: 47.26 MB compressed / 142.72 MB uncompressed / 241 files.
+    - Delta: +0.60 MB compressed (+1.83 MB uncompressed = Docxodus.dll 1.82 MB). Under +5 MB
+      escalation threshold; far under 55/60 MB ceilings.
+    - CVE: no NEW HIGH from Docxodus/OpenXml. Pre-existing HIGH = Microsoft.Kiota.Abstractions
+      1.21.2 (GHSA-7j59-v9qr-6fq9), Graph SDK chain, accepted risk per ADR-029 — NOT introduced here.
+
+    **Placement Justification (§10)**: csproj-only packaging change reusing the existing Sprk.Bff.Api
+    project; no new project/service. All R3 server work lives in the BFF (Services/Compose). Per
+    bff-extensions.md decision criteria the addition belongs in-BFF (consumed only by the BFF Compose
+    save path). No new endpoint, DI registration, or AI-internal injection.
+
+    **Quality gate (Step 9.5, inline)**: ADR-029 four MUST rules intact (linux-x64 framework-dependent,
+    sourcemap exclusion, transitive-CVE overrides, ≤60 MB); no new HIGH CVE. Full /code-review +
+    /adr-check skills not spawned (single declarative csproj); available on request.
+
+    **Files modified**: src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (Docxodus 6.4.0 +
+    SkiaSharp×2 exclusion + OpenXml 3.4.1→3.5.1).
+  </notes>
+</task>

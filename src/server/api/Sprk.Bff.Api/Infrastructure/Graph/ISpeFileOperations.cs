@@ -46,6 +46,27 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
+    /// Download the content of a SPECIFIC prior version of a drive-item by <paramref name="versionId"/>,
+    /// using the caller's OBO identity. Graph route
+    /// <c>drives/{driveId}/items/{itemId}/versions/{versionId}/content</c>. Returns the version's byte
+    /// stream, or <c>null</c> when the item or that version is not found (facade-translated — no
+    /// <c>Microsoft.Graph</c> exception type crosses this boundary, ADR-007).
+    /// </summary>
+    /// <remarks>
+    /// Compose R3 E1 baseline retrieval (FR-06, Spike S4): the delta save applies edits onto the
+    /// LOAD-TIME SPE version captured by <paramref name="versionId"/> at Load, which stays addressable
+    /// even after later dirty saves advance the item's CURRENT version. Mirrors
+    /// <see cref="DownloadFileAsUserAsync(HttpContext, string, string, CancellationToken)"/>; additive —
+    /// existing download callers and their mocks are untouched. Consumed by the E1 cutover (task 022).
+    /// </remarks>
+    Task<Stream?> DownloadFileVersionAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        string versionId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Create a NEW small (&lt;4 MB) drive-item in a container/drive under the user's OBO
     /// identity. PUTs the stream to <c>drives/{driveId}/root:/{path}:/content</c>, minting a
     /// fresh drive-item, and returns its <see cref="FileHandleDto"/> (id + name + size + etag +
@@ -65,6 +86,27 @@ public interface ISpeFileOperations
     Task<FileHandleDto?> UploadSmallAsUserAsync(
         HttpContext ctx,
         string containerId,
+        string path,
+        Stream content,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Create a NEW small (&lt;4 MB) drive-item in a container/drive under APP-ONLY (managed identity,
+    /// ADR-028) auth — the background/server-side counterpart to
+    /// <see cref="UploadSmallAsUserAsync(HttpContext, string, string, Stream, CancellationToken)"/>.
+    /// PUTs the stream to <c>drives/{driveId}/root:/{path}:/content</c> and returns the created
+    /// item's <see cref="FileHandleDto"/> (id + name + size + etag + resolved drive id).
+    /// </summary>
+    /// <remarks>
+    /// ADR-007: no <c>Microsoft.Graph</c> type crosses this boundary — the facade returns the
+    /// <see cref="FileHandleDto"/> shape only. Surfaced on the interface (2026-07-16,
+    /// messaging-communication-app-r1 task 070) so background materializers with no acting user
+    /// (e.g. inbound message-attachment materialization) inject the same mockable SPE facade the
+    /// email/AI/Compose services already do, rather than the concrete type. The concrete
+    /// <c>SpeFileStore</c> already implements this exact signature — the addition is declaration-only.
+    /// </remarks>
+    Task<FileHandleDto?> UploadSmallAsync(
+        string driveId,
         string path,
         Stream content,
         CancellationToken ct = default);

@@ -1,0 +1,147 @@
+<task id="070" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Message attachment materialization (ACS/file → SPE → `sprk_document` → intersection); enforce `CHAT-ATTACHMENT-POLICY.md`</title>
+    <phase>W7 — Attachments</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>020,005</dependencies>
+    <blocks></blocks>
+    <tags>bff-api, communication, spe</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Adds a net-new messaging attachment-materialization step in `Sprk.Bff.Api` that writes to SharePoint Embedded (ADR-007) and creates governed `sprk_document` records + intersection links, and MUST enforce the binding `CHAT-ATTACHMENT-POLICY.md` (oversize/disallowed rejected). BFF + SPE-touching (publish-size + CVE + Placement Justification); code-review + adr-check at Step 9.5.</rigor-reason>
+    <parallel-group>W7</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-14</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Materialize a message attachment into Spaarke's channel-agnostic storage model (design §6.4):
+
+    `ACS/file → SPE (SpeFileStore) → sprk_document → sprk_document.sprk_communication lookup + sprk_communicationattachment intersection`.
+
+    A chat file share uploads the binary to SPE, creates the governed `sprk_document`, links it to the message (`sprk_document.sprk_communication` lookup) and to the intersection (`sprk_communicationattachment`), and **the ACS message carries a REFERENCE, not the binary — SPE is the store**. Rendered later as a file card in the timeline (task 060).
+
+    **Reuse the existing `SpeFileStore` facade + the `GraphAttachmentAdapter` shape** — do NOT build a second storage path; the storage SCHEMA is unchanged. The net-new is ONLY the messaging materialization step (email's materialization is email-specific and not behind the archive seam; messaging writes its own step feeding the SAME shape).
+
+    **Enforce `docs/standards/CHAT-ATTACHMENT-POLICY.md`**: oversize (>25 MB binary) and disallowed MIME types are REJECTED with RFC 7807 ProblemDetails (ADR-019). The policy is the single source of truth — reuse its caps/allow-list; do NOT invent new limits.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication subsystem + SPE integration. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/` (attachment materialization) + `Infrastructure/Graph/SpeFileStore.cs`. Fluent in ADR-007 (SpeFileStore facade — the sole SPE access path), ADR-019 (ProblemDetails), the channel-agnostic `sprk_document` + `sprk_communicationattachment` storage model, `docs/standards/CHAT-ATTACHMENT-POLICY.md`, §10 BFF Hygiene, §11 Component Justification.
+  </role>
+
+  <goal>
+    A message attachment materializes into SPE as a governed `sprk_document` linked to the message via `sprk_document.sprk_communication` + the `sprk_communicationattachment` intersection, with the ACS message carrying a reference (not the binary). The materialization reuses `SpeFileStore` + the `GraphAttachmentAdapter` shape (no second storage path, unchanged schema). `CHAT-ATTACHMENT-POLICY.md` is enforced — oversize/disallowed types are rejected with ProblemDetails. Build clean; materialization + policy-rejection tests pass; publish-size delta + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      Design §6.4 + §2 (current-state): attachment storage is already channel-agnostic — attachment → SPE → `sprk_document` (`sprk_document.sprk_communication` lookup + `sprk_communicationattachment` intersection). But materialization is email-specific and NOT behind the archive seam, so a new channel writes its OWN materialization step feeding the same shape. This task builds that step for messaging. The binary lives in SPE (the store); the ACS message carries only a reference — consistent with "Dataverse is the record, ACS is transport."
+
+      Component Justification (§11): (1) Existing — `SpeFileStore` (ADR-007 SPE facade), the `sprk_document`/`sprk_communicationattachment` model, and the `GraphAttachmentAdapter` shape already exist; this task adds NO new storage entity or SPE path. (2) Extension — a new messaging materialization step reusing the existing SPE facade + adapter shape; storage schema is unchanged. (3) Cost-of-doing-nothing (concrete): without the messaging materialization step a chat file share has nowhere governed to land — the attachment is either lost or would (wrongly) be stored as an ACS binary outside Spaarke's document governance (FR-14 acceptance "governed `sprk_document` linked to the message" fails); without policy enforcement an oversize/disallowed file bypasses the binding attachment caps (security/governance failure). Named contract failures, not "future flexibility."
+
+      Policy enforcement: `CHAT-ATTACHMENT-POLICY.md` is the single source of truth (25 MB binary cap, restrictive MIME allow-list: text/plain, text/markdown, application/pdf, DOCX). Reject oversize/disallowed with RFC 7807 ProblemDetails — do NOT invent new limits or a parallel policy surface. The policy's server gates operate on extracted-text envelopes for chat-with-LLM; this task's binary/MIME gate is the attachment-into-SPE analog — enforce the binary cap + MIME allow-list at materialization.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (net-new messaging attachment materialization step)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/GraphAttachmentAdapter.cs (materialization shape to reuse — email precedent)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs (ADR-007 SPE facade — the sole SPE access path)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md (binding — caps + MIME allow-list to enforce)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-14">Materialize: ACS/file → SPE → `sprk_document` → `sprk_document.sprk_communication` lookup + `sprk_communicationattachment` intersection. The ACS message carries a REFERENCE (not the binary — SPE is the store).</constraint>
+    <constraint source="CHAT-ATTACHMENT-POLICY.md">Enforce the binding policy: reject oversize (>25 MB binary) + disallowed MIME types (allow-list: text/plain, text/markdown, application/pdf, DOCX). Reuse the policy's caps/allow-list — do NOT invent new limits or a parallel policy.</constraint>
+    <constraint source="ADR-007">All SPE access goes through the `SpeFileStore` facade — the sole SPE access path; MUST NOT bypass it.</constraint>
+    <constraint source="ADR-019">Oversize/disallowed/failed materialization returns RFC 7807 ProblemDetails.</constraint>
+    <constraint source="project">Reuse `SpeFileStore` + the `GraphAttachmentAdapter` shape; do NOT build a second storage path. Storage SCHEMA unchanged — net-new is ONLY the messaging materialization step.</constraint>
+    <constraint source="ADR-028">Inject central `TokenCredential` + canonical Dataverse/Graph interfaces; MUST NOT `new` a credential.</constraint>
+    <constraint source="ADR-032 / ADR-018">Registration unconditional / Null-Object for any feature-gated dependency; no asymmetric registration.</constraint>
+    <constraint source="NFR-04">Server-side materialization only — MUST NOT introduce a client-side ACS SDK.</constraint>
+    <constraint source="project">§11 Component Justification: state the concrete FR-14 failure modes prevented (ungoverned/lost attachment; policy bypass). §10 bff-extensions Placement Justification in the PR; publish-size delta vs ~45.30 MB baseline; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+      <file>.claude/adr/ADR-007-spe-storage-seam.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-http-standardization.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Attachment materialization via SpeFileStore" location="src/server/api/Sprk.Bff.Api/Services/Communication/GraphAttachmentAdapter.cs">
+        Mirror the email attachment shape: upload binary via `SpeFileStore` → create `sprk_document` → link `sprk_document.sprk_communication` + `sprk_communicationattachment`. Messaging writes its own step feeding the SAME shape; schema unchanged.
+      </pattern>
+      <pattern name="Policy gate with ProblemDetails" location="docs/standards/CHAT-ATTACHMENT-POLICY.md">
+        Enforce the binding 25 MB binary cap + MIME allow-list; reject with RFC 7807 ProblemDetails (ADR-019). Reuse the policy's constants/intent — no new limits.
+      </pattern>
+      <pattern name="Reference-not-binary" location="src/server/api/Sprk.Bff.Api/Services/Communication/">
+        The ACS message carries a reference to the SPE `sprk_document`; SPE is the store. Rendered as a file card in the timeline (task 060).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `GraphAttachmentAdapter.cs` (email materialization shape) + `SpeFileStore.cs` (ADR-007 facade) + the task-005 ACS-key columns + `docs/standards/CHAT-ATTACHMENT-POLICY.md` + `.claude/constraints/bff-extensions.md` §F + §11 to identify the exact shape to reuse and the policy caps to enforce.</step>
+    <step order="2">Grep to confirm no messaging materialization step exists and that the `sprk_document`/`sprk_communicationattachment` schema needs NO change (§11 existing-question evidence; schema unchanged).</step>
+    <step order="3">Implement the messaging materialization step: accept the chat file (binary + MIME + filename) + the message context; enforce the policy gate FIRST (binary cap + MIME allow-list) before any upload.</step>
+    <step order="4">On pass: upload the binary via `SpeFileStore` (ADR-007 facade only), create the governed `sprk_document`, link `sprk_document.sprk_communication` + create the `sprk_communicationattachment` intersection row; return/record the reference the ACS message carries (not the binary).</step>
+    <step order="5">On fail (oversize/disallowed): reject with RFC 7807 ProblemDetails (ADR-019); no SPE upload, no `sprk_document` created.</step>
+    <step order="6">Register the materialization step via `CommunicationModule` (ADR-010), unconditional (ADR-032). Confirm no client-side ACS SDK involvement (NFR-04).</step>
+    <step order="7">Write tests: (a) a valid file materializes → `sprk_document` created in SPE + `sprk_document.sprk_communication` + `sprk_communicationattachment` linked + reference recorded; (b) POLICY NEGATIVE: an oversize (>25 MB) file is REJECTED with ProblemDetails and NO `sprk_document`/SPE upload occurs; (c) POLICY NEGATIVE: a disallowed MIME type is REJECTED with ProblemDetails; (d) the binary is NOT stored on the ACS message (reference only); (e) all SPE access goes through `SpeFileStore` (ADR-007 — no bypass, diff-verifiable).</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm existing attachment/communication tests still pass.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~45.30 MB baseline. Expected ≈ 0 (reuses existing SPE facade; no new packages).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus policy enforcement + SPE-facade-only + reference-not-binary); `adr-check` against `spec.md` (focus FR-14, ADR-007 SPE facade, CHAT-ATTACHMENT-POLICY enforcement, §11). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; shared `Services/Communication/`).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (070 ✅) + `current-task.md`; record decisions (materialization entry point, policy-gate placement, reference-recording mechanism).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect GraphAttachmentAdapter shape, SpeFileStore facade, task-005 ACS keys, the attachment policy</tool>
+    <tool name="grep">Confirm no messaging materialization step + schema unchanged (§11 evidence)</tool>
+    <tool name="edit">Add the messaging materialization step + policy gate; register in CommunicationModule</tool>
+    <tool name="bash">Build, materialization + policy-rejection tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ — messaging attachment materialization step (NEW) reusing SpeFileStore + the GraphAttachmentAdapter shape</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — unconditional registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ — materialization happy-path + CHAT-ATTACHMENT-POLICY oversize/disallowed rejection + reference-not-binary + SPE-facade-only tests</output>
+    <output type="docs">PR description with §11 Component Justification (FR-14 failure modes) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A valid message attachment materializes: binary uploaded via `SpeFileStore`, a governed `sprk_document` created, linked via `sprk_document.sprk_communication` + the `sprk_communicationattachment` intersection, and a reference recorded on the ACS message.</criterion>
+    <criterion testable="true">The materialization reuses `SpeFileStore` + the `GraphAttachmentAdapter` shape — no second storage path; storage schema unchanged (diff-verifiable).</criterion>
+    <criterion testable="true">The ACS message carries a REFERENCE, not the binary (SPE is the store).</criterion>
+    <criterion testable="true">POLICY NEGATIVE: an oversize (>25 MB) file is rejected with RFC 7807 ProblemDetails and NO `sprk_document`/SPE upload occurs.</criterion>
+    <criterion testable="true">POLICY NEGATIVE: a disallowed MIME type (outside the CHAT-ATTACHMENT-POLICY allow-list) is rejected with ProblemDetails.</criterion>
+    <criterion testable="true">All SPE access goes through the `SpeFileStore` facade (ADR-007 — no bypass).</criterion>
+    <criterion testable="true">Registration is unconditional (ADR-032); no client-side ACS SDK introduced (NFR-04).</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta ≈ 0 vs ~45.30 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 020 (messaging channel provider — the archiver/transcript context) + 005 (ACS-key columns on `sprk_communication`). No `blocks` — an independent W7 track that can run in parallel after W2. The load-bearing correctness properties are (1) policy enforcement BEFORE upload (reject oversize/disallowed early — the negative cases are non-negotiable) and (2) reference-not-binary (SPE is the store; the ACS message never holds the binary). If the storage schema seems to need a change, STOP — the schema is unchanged by design; a needed change signals a mis-shaped materialization step, not a schema gap.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting — especially `docs/standards/CHAT-ATTACHMENT-POLICY.md` (binding). Apply FULL rigor — Step 9.5 quality gates REQUIRED. Per CLAUDE.md §10 + §11: publish-size delta (baseline ~45.30 MB) + CVE + bff-extensions Placement Justification + Component Justification (FR-14 failure modes) in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

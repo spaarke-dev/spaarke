@@ -116,14 +116,27 @@ public class CommunicationJobProcessor : BackgroundService
                 "Processing communication job {JobId} of type {JobType}, delivery count {DeliveryCount}",
                 job.JobId, job.JobType, args.Message.DeliveryCount);
 
-            // Resolve only the communication handler — no GetServices<IJobHandler> enumeration
-            var handler = scope.ServiceProvider.GetRequiredService<IncomingCommunicationJobHandler>();
+            // Route by JobType, resolving ONLY the matching handler — NO broad GetServices<IJobHandler>
+            // enumeration (keeps a broken cross-domain handler from failing this queue) and no wasteful
+            // construction of the unused handler's object graph (the email handler pulls a heavy dependency
+            // graph). The communication queue carries two job types: "IncomingCommunication" (email inbound,
+            // Graph webhook) and "IncomingMessaging" (ACS chat inbound, Event Grid — task 030/031).
+            IJobHandler? handler = job.JobType switch
+            {
+                IncomingCommunicationJobHandler.JobTypeName =>
+                    scope.ServiceProvider.GetRequiredService<IncomingCommunicationJobHandler>(),
+                IncomingMessagingJobHandler.JobTypeName =>
+                    scope.ServiceProvider.GetRequiredService<IncomingMessagingJobHandler>(),
+                _ => null
+            };
 
-            if (job.JobType != handler.JobType)
+            if (handler is null)
             {
                 _logger.LogError(
-                    "Unexpected job type {JobType} on communication queue (expected {Expected})",
-                    job.JobType, handler.JobType);
+                    "Unexpected job type {JobType} on communication queue (expected {Expected1} or {Expected2})",
+                    job.JobType,
+                    IncomingCommunicationJobHandler.JobTypeName,
+                    IncomingMessagingJobHandler.JobTypeName);
                 await args.DeadLetterMessageAsync(args.Message, "WrongQueue",
                     $"Job type '{job.JobType}' does not belong on the communication queue",
                     args.CancellationToken);

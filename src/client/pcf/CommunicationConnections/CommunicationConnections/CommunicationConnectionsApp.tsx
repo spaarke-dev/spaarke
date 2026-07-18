@@ -491,8 +491,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   // the quick-create form; full create-and-link is the Notification-Spine project.
   const handleCreateType = React.useCallback((entityType: string): void => {
     const xrm = getXrm();
-    const onLaunchError = (err: unknown) =>
-      console.warn('[CommunicationConnections] create-type launch failed:', err);
+    const onLaunchError = (err: unknown) => console.warn('[CommunicationConnections] create-type launch failed:', err);
     try {
       if (typeof xrm?.Navigation?.openForm === 'function') {
         Promise.resolve(xrm.Navigation.openForm({ entityName: entityType, useQuickCreateForm: true })).catch(

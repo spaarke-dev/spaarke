@@ -349,6 +349,19 @@ public sealed record AnchoredAnnotationAnchor
 
     /// <summary>Editor-native span id (TipTap/ProseMirror) — stable for in-editor session lifetime; not guaranteed stable across a Word round-trip (content-match + paragraph hint carry re-anchoring there).</summary>
     public required string SpanId { get; init; }
+
+    /// <summary>
+    /// R3 FR-11 (spaarkeai-compose-r3 task 012) — PRIMARY anchor: the <c>w14:paraId</c> of the
+    /// paragraph the anchor lives in (client-carried from the editor's paraId node attribute, task 011).
+    /// Resolution order is paraId-FIRST, then the <see cref="TextPattern"/>/<see cref="ParagraphHint"/>
+    /// fuzzy fallback (<c>AnnotationReanchorService</c>). Additive + OPTIONAL (nullable): paraId is
+    /// stable only within OUR own load→edit→save round-trip — Word regenerates all paraIds on an
+    /// external save when tracked changes/comments are present (Open-XML-SDK #925), so an externally
+    /// edited document carries no paraId here and the fuzzy matcher re-anchors it (design §5.2). Null
+    /// on legacy anchors created before this field existed. Compose-domain positional UI state
+    /// (ADR Tension Path A — never written via <c>memory.*</c>).
+    /// </summary>
+    public string? ParaId { get; init; }
 }
 
 /// <summary>

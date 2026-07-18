@@ -1,0 +1,114 @@
+<task id="023" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-04 AI redlines/comments reuse — apply via existing `DocxAnnotationWriter` onto retained-original baseline</title>
+    <phase>2 E1</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W2-E1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>022</deps>
+    <tags>bff-api,docx</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-04: AI redlines + comments continue to apply via the EXISTING `DocxAnnotationWriter`
+    (native `w:ins`/`w:del`/`w:comment`) — unchanged from R2 — but now onto the retained-original
+    baseline established by the E1 cutover (task 022), NOT onto a TipTap reconstruction. This is a
+    VERIFY-AND-WIRE task, not a new component: reuse `DocxAnnotationWriter.cs` verbatim and confirm the
+    annotation pass runs on the resolved retained-original baseline inside the inverted `SaveAsync`
+    flow, composing correctly with the direct-typing splice+comparer delta (020/021). Prove an accepted
+    AI redline persists as native OOXML on the faithful baseline.
+  </prompt>
+
+  <role>
+    Senior .NET 8 developer familiar with the R2 Compose annotation pipeline (`DocxAnnotationWriter`
+    `Annotate`, `w:ins`/`w:del`/`w:comment`) and the inverted `SaveAsync` flow from task 022.
+    Comfortable verifying composition order between the direct-typing delta and the AI-annotation pass.
+  </role>
+
+  <goal>
+    Confirmed + tested wiring so that AI redlines/comments apply via the unchanged `DocxAnnotationWriter`
+    onto the retained-original baseline (post-022), producing native `w:ins`/`w:del`/`w:comment` on the
+    faithful document. Matching unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/` assert an
+    accepted AI redline persists as native OOXML on the retained-original baseline and composes with the
+    direct-typing delta without corrupting either.</goal>
+
+  <context>
+    <background>
+      Design §4.2 bullet 2 ("AI redlines + comments → the existing `DocxAnnotationWriter` delta — no
+      change needed, it already writes onto a baseline") + §8 (SAVE pipeline: "apply AI redlines +
+      comments via DocxAnnotationWriter — R2, reused verbatim") + §10 reuse map (writer reused verbatim).
+      The R2 writer already annotates a baseline (`ComposeService.cs:358` in SaveAsync; `:1166` in
+      PushAnnotationsAsync). The only change vs R2 is WHICH baseline it decorates — after task 022 it is
+      the retained original, not a reconstruction. This task ensures that composition is correct + tested.
+    </background>
+    <relevant-files>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs — REUSE VERBATIM; native w:ins/w:del/w:comment writer (no modification)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:358 — the `_annotationWriter.Annotate` call site inside SaveAsync; confirm it runs on the retained-original baseline (post-022) + composes with the splice+comparer delta</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:1166 — PushAnnotationsAsync annotate call (the reference composition on retained-original bytes)</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §4.2, §8, §10</file>
+      <file role="spec">projects/spaarkeai-compose-r3/spec.md FR-04</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="022" status="pending">FR-01 baseline inversion (E1 cutover) — establishes the retained-original baseline that the annotation pass now decorates.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-04">AI redlines + comments apply via the EXISTING `DocxAnnotationWriter` (native `w:ins`/`w:del`/`w:comment`) onto the retained-original baseline — unchanged from R2. An accepted AI redline persists as native OOXML on the faithful baseline. Do NOT reimplement or fork the writer.</constraint>
+    <constraint source="ADR-007">SPE read/write stays behind the facade; no `Microsoft.Graph` types in `Services/Compose/`.</constraint>
+    <constraint source="ADR-013 / NFR-05">No AI internals injected into `Services/Compose/`; Tier-1 NetArchTest stays green.</constraint>
+    <constraint source="ADR-040">AI edit payloads remain ledger-first (unchanged from R2).</constraint>
+    <constraint source="ADR-029 / CLAUDE.md §10">Report publish size absolute + delta vs ~49.63 MB (expect ~0 MB — no new dep). No new HIGH CVE.</constraint>
+    <constraint source="ADR-038 / NFR-06">Unit tests use real `.docx` fixtures; mock only at the SpeFileStore facade. NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>R2 native-OOXML annotation writer composition on a retained-original baseline; ledger-first AI edits; BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Annotate onto retained-original bytes" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:1166">
+        PushAnnotationsAsync annotates freshly-fetched retained-original bytes — the reference for composing the AI-annotation pass with the retained-original baseline in the inverted SaveAsync.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context check">Confirm task 022 (baseline inversion) is complete. Output the FULL rigor-level declaration. Load knowledge files + bff-extensions.md.</step>
+    <step order="1" name="Verify the annotation pass baseline">Trace the inverted `SaveAsync` (post-022): confirm `_annotationWriter.Annotate` runs on the resolved retained-original baseline (after the direct-typing splice+comparer delta), not on a reconstruction. Confirm composition order does not corrupt either the direct-typing redline or the AI redline/comments.</step>
+    <step order="2" name="Wire/adjust if needed (writer unchanged)">If the composition needs an ordering adjustment inside `SaveAsync`, make it in the orchestration — but DO NOT modify `DocxAnnotationWriter`. Keep the writer verbatim.</step>
+    <step order="3" name="Unit tests">Author/extend tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`: an accepted AI redline persists as native `w:ins`/`w:del`/`w:comment` on the retained-original baseline; an AI redline + a direct-typing edit compose without corrupting either.</step>
+    <step order="4" name="Verify + report">Build BFF; run tests; Tier-1 NetArchTest facade check; publish-size + CVE report. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (annotation-pass composition on retained-original baseline verified/adjusted; DocxAnnotationWriter unchanged)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ (AI-redline-on-baseline + composition tests)</output>
+    <output type="report">Publish-size absolute + delta vs ~49.63 MB; CVE scan</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">An accepted AI redline persists as native `w:ins`/`w:del` (and comments as `w:comment`) on the retained-original baseline via the unchanged `DocxAnnotationWriter`.</criterion>
+    <criterion testable="true">The AI-annotation pass composes with the direct-typing splice+comparer delta without corrupting either set of tracked changes.</criterion>
+    <criterion testable="true">`DocxAnnotationWriter.cs` is reused verbatim (no modification/fork).</criterion>
+    <criterion testable="true">`Services/Compose/` injects no AI-internal type (Tier-1 NetArchTest green); no `Microsoft.Graph` type in `Services/Compose/`.</criterion>
+    <criterion testable="true">Publish size reported absolute + delta vs ~49.63 MB baseline, ≤60 MB (expect ~0 MB delta); no new HIGH CVE; BFF build green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

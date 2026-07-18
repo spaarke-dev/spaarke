@@ -110,6 +110,14 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _driveItemOps.DownloadFileAsUserAsync(ctx, driveId, itemId, ct);
 
+    public Task<Stream?> DownloadFileVersionAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        string versionId,
+        CancellationToken ct = default)
+        => _driveItemOps.DownloadFileVersionAsUserAsync(ctx, driveId, itemId, versionId, ct);
+
     public Task<FilePreviewDto> GetPreviewUrlAsync(
         string driveId,
         string itemId,

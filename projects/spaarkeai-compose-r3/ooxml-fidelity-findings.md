@@ -2,7 +2,7 @@
 
 > **Created**: 2026-07-14
 > **Origin**: Grounded gap-check run during `spaarkeai-compose-r2` UAT close-out, comparing the shipped Compose save/redline path against the `sdap-WORD-studio-r2/design.md` sibling design. Feeds the R3 `design.md`.
-> **Status**: Findings + recommendations (pre-design). Aligns with and refines the R3 seed [`README.md`](README.md) Scope Areas A–J and the prior R1/R2 feedback.
+> **Status**: Findings + recommendations (pre-design). Aligns with and refines the R3 seed [`notes/seed-README.md`](notes/seed-README.md) Scope Areas A–J and the prior R1/R2 feedback.
 > **Constraint carried forward (BINDING)**: **NO TipTap product features — paid OR unpaid** (IP / lock-in). All three enhancements are our-code on the MIT TipTap base. Track-changes/comments already ship home-grown (no Pro) — see §Current State.
 
 ---

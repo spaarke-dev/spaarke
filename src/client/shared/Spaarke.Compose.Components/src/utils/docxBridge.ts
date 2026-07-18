@@ -40,6 +40,7 @@
  */
 
 import type { Editor } from '@tiptap/core';
+import type { ParaIdMapEntry } from '../types/compose-contracts';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -114,6 +115,75 @@ export async function docxToTipTapHtml(docxBytes: ArrayBuffer): Promise<MammothC
     // mammoth Result.messages is `Array<{ type: 'warning' | 'error'; message: string }>`
     messages: result.messages.map(m => ({ type: m.type, message: m.message })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// R3 FR-08/FR-09/FR-10 — `w14:paraId` identity carry (design §5)
+// ---------------------------------------------------------------------------
+//
+// mammoth flattens `.docx` to HTML and DISCARDS `w14:paraId` (docxToTipTapHtml
+// above), so the paragraph ids arrive from the SERVER pre-parse map (task 010),
+// not from the imported HTML. `stampParaIds` owns the client-side carry: an
+// EXPLICIT transaction stamping the server ids onto the paragraph nodes
+// immediately after `setContent` (FR-09: load-time ids are server-owned, never
+// left to the minting extension's auto-assign). The OOXML-shaped id generator for
+// in-editor split minting lives with the extension in `../widgets/paraIdExtension`.
+
+/**
+ * Stamp the server pre-parse paraId map onto the editor's paraId-bearing nodes via
+ * a single EXPLICIT transaction, in document order (FR-09). Call immediately after
+ * `editor.commands.setContent(html)` on a docx Load: the Nth paraId-bearing node
+ * (`paragraph` or `heading` — see `PARAID_NODE_TYPES`; in ProseMirror document
+ * order, which — like the server's `body.Descendants<Paragraph>()` — descends into
+ * table cells and counts headings, since an OOXML heading is a `<w:p>`) receives
+ * `map[N].paraId`.
+ *
+ * Why explicit (not auto-assign): `@tiptap/extension-unique-id` DOES mint ids for
+ * id-less nodes on content change, but those would be random client ids, not the
+ * server's. Stamping explicitly AFTER setContent makes the server ids win, so the
+ * editor's load-time identity is the same substrate the retained-original save
+ * splices against (FR-12). Untouched paragraphs then keep these ids; a later split
+ * re-mints via the extension's built-in dedup (FR-10).
+ *
+ * The stamp is marked `addToHistory:false` — a load-time identity stamp is not a
+ * user edit and must not be undoable or flip the dirty flag.
+ *
+ * No-op when the map is empty (e.g. an AI-drafted seed with no server pre-parse —
+ * there the extension's own minting assigns fresh OOXML-shaped ids).
+ *
+ * @param editor  Live TipTap Editor (paraId attribute must be in schema — the
+ *                UniqueID extension is configured for `paragraph` in ComposeEditor)
+ * @param map     Ordered server paraId map from the Load response (task 010)
+ */
+export function stampParaIds(editor: Editor, map: readonly ParaIdMapEntry[] | undefined): void {
+  if (!map || map.length === 0) return;
+  const { state } = editor;
+  const tr = state.tr;
+  let paraIndex = 0;
+  let changed = false;
+  state.doc.descendants((node, pos) => {
+    // Match the SAME node set as the paraId extension's `PARAID_NODE_TYPES`
+    // (paragraph + heading): the server map counts every OOXML `<w:p>`, and a
+    // heading is a `<w:p>`, so headings must be counted here too or every id
+    // after the first heading misaligns. Keep in sync with paraIdExtension.ts.
+    if (node.type.name === 'paragraph' || node.type.name === 'heading') {
+      const entry = map[paraIndex];
+      if (entry && entry.paraId && node.attrs.paraId !== entry.paraId) {
+        // Positions are stable across attribute-only edits, so the pos captured
+        // during this walk stays valid for every setNodeMarkup on `tr`. Use
+        // setNodeMarkup (the same idiom @tiptap/extension-unique-id uses) to set
+        // the attribute — universally available and it preserves the other attrs.
+        tr.setNodeMarkup(pos, undefined, { ...node.attrs, paraId: entry.paraId });
+        changed = true;
+      }
+      paraIndex++;
+    }
+    return true; // descend into children (table cells hold paragraphs — server parity)
+  });
+  if (changed) {
+    tr.setMeta('addToHistory', false);
+    editor.view.dispatch(tr);
+  }
 }
 
 // ---------------------------------------------------------------------------

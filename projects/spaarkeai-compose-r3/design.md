@@ -7,7 +7,7 @@
 > **R3 Theme**: **Fidelity.** R1 shipped the editor round-trip (with documented loss); R2 shipped AI actions + native-OOXML track-changes/comments *authoring*. R3 closes the gap between "the document came back mangled" and "the document came back exactly as it went in, with my edits marked."
 > **Owner**: Ralph Schroeder
 > **Last updated**: 2026-07-16 (first draft — code-grounded against the as-built compose-r2 save/annotation path)
-> **Seed**: [`README.md`](README.md) (Scope Areas A–J) + [`ooxml-fidelity-findings.md`](ooxml-fidelity-findings.md) (E1/E2/E3 verdicts, grounded 2026-07-14)
+> **Seed**: [`notes/seed-README.md`](notes/seed-README.md) (Scope Areas A–J) + [`ooxml-fidelity-findings.md`](ooxml-fidelity-findings.md) (E1/E2/E3 verdicts, grounded 2026-07-14)
 > **Research (current best practices, July 2026)**: [`notes/tiptap-docx-fidelity-research-2026-07-16.md`](notes/tiptap-docx-fidelity-research-2026-07-16.md) — three primary-source-cited threads (TipTap ecosystem/licensing · DOCX fidelity round-trip · AI authoring/track-changes UX). Its conclusions are folded into §4–§7, §10, §14 below.
 > **R2 reference (direct foundation, merged to master)**: [`../spaarkeai-compose-r2/design.md`](../spaarkeai-compose-r2/design.md) · [`../spaarkeai-compose-r2/notes/defer-issues.md`](../spaarkeai-compose-r2/notes/defer-issues.md)
 > **Binding foundations**: [ADR-039 Grounded Execution & Closed Catalogs] · [ADR-040 Session Ledger] · [ADR-043 Action spine] · ADR-013 (AI facade) · ADR-007 (Graph isolation) · ADR-009 (Redis-first)
@@ -23,7 +23,7 @@ This document leads with the **fidelity problem as users experience it**, ground
 
 | # | Decision | Effect |
 |---|---|---|
-| **D1 — E1 approach** | **Hybrid** — retained-original baseline + Docxodus `WmlComparer` synthesizes the redline for direct typing + the existing `DocxAnnotationWriter` handles AI redlines/comments. | §4.2 fork **resolved**. Untouched paragraphs byte-preserved; maximum reuse of the R2 annotation pipeline. |
+| **D1 — E1 approach** | **Hybrid** — retained-original baseline + the redline engine synthesizes the redline for direct typing + the existing `DocxAnnotationWriter` handles AI redlines/comments. **AMENDED 2026-07-17 (§6.5): the redline engine is `ComposeParagraphRedlineSynthesizer` (Option C, self-synthesized `w:ins`/`w:del` in place), NOT Docxodus `WmlComparer`** — the NFR-09 gate proved WmlComparer strips `w14:paraId` + drops tables on real docs (6.4.0 AND 7.1.0). See §4 amendment banner. | §4.2 fork **resolved**; engine amended. Untouched paragraphs preserved (byte-identical under Option C); maximum reuse of the R2 annotation pipeline. |
 | **D2 — R3 scope** | **Everything**: E1+E2 fidelity core + E3 (grounding-tied confidence) + the credible editing toolset (find/replace, basic tables, toolbar polish) + **import round-trip** (read existing Word revisions/comments into the editor). | Broadest scope. Import moves from fast-follow **into R3 core**; toolset is in. Timeline is larger — plan/WBS will sequence fidelity core first, import + toolset as parallel tracks. |
 | **D3 — E3 confidence** | **Grounding-tied qualitative band** (high/med/low tied to verifiability), rationale-first. No numeric self-report; no auto-accept of low-confidence. | §6.2 **locked**. Aligns with 2026 HCI research; guards against over-reliance. |
 | **D4 — Edit fidelity** | **Text + run-level formatting** inside a changed paragraph (bold/italic/font edits), leveraging WmlComparer Format-Change Detection. | Fuller fidelity in the MVP, not paragraph-text-only. |
@@ -100,6 +100,14 @@ A document redlined in Word by opposing counsel opens in Compose with those `w:i
 ---
 
 ## 4. E1 — Retained-Original Delta Save (THE keystone)
+
+> ### 🔁 DESIGN AMENDMENT — 2026-07-17 (CLAUDE.md §6.5, owner-approved): Option C supersedes the WmlComparer path
+>
+> **The redline engine is no longer Docxodus `WmlComparer`.** The NFR-09 hardening gate (task 003) ran the WmlComparer path on real firm templates (Common Paper CSA + Mutual NDA) and proved it **strips `w14:paraId`** (→ internal `pt14:Unid`) and **drops unchanged tables** — a hard FR-07/NFR-07 + E2-anchor violation. An empirical net10 probe confirmed **Docxodus 7.1.0 (net10) reproduces both defects identically to 6.4.0 (net8)** — so it is inherent to the PowerTools `WmlComparer` algorithm on real docs, NOT a version/net-target gap. S1's "paraId preserved" was a synthetic-fixture artifact.
+>
+> **Adopted: Option C — self-synthesized paragraph redline (`ComposeParagraphRedlineSynthesizer`).** Since the client already tells us exactly which paragraphs changed (paraId-keyed, E2), we don't need a general document differ: for each edited paragraph we locate it in the retained original by `w14:paraId`, run a **word-level LCS diff** (old→new text), and emit native `w:ins`/`w:del` **in place**. Every other paragraph + all structure is byte-untouched, so `w14:paraId` + tables are preserved **by construction**. Validated on the real CSA (345/345 paraIds + 6/6 tables preserved). **This removes the Docxodus dependency entirely** (and its SkiaSharp-exclusion complexity) and retires tasks 001/020/021's comparer path.
+>
+> Where §4.2 below says "Docxodus `WmlComparer` synthesizes the redline" / "Approach A save the comparer output", read **"the synthesizer emits `w:ins`/`w:del` in place on the retained original"**. The **FR-05 format-change** representation (bold-a-word → `rPr`/`pPrChange`) is now handled explicitly by the synthesizer (compare run properties) rather than by the comparer. Evidence: `notes/spikes/S1-nfr09-real-template-hardening-2026-07-17.md`. The §4.2 text is retained below as the decision record.
 
 ### 4.1 The gap, precisely
 On a **dirty** save, `ComposeWorkspace.triggerSave` sends bytes produced by the editor's `serialize()` (or `serializeForSave().baselineBytes`) — a full `.docx` reconstructed from TipTap JSON by the `docx` library (`docxBridge.ts`). That reconstruction can only represent what mammoth's simplified-HTML import preserved, so **headers/footers, section properties, multi-level numbering, custom/firm styles, hyperlinks, fields, footnotes, and embedded objects are gone** — regardless of whether the user touched them. `SaveAsync` then treats those bytes as an opaque baseline and re-applies redlines/comments on top (`ComposeService.cs:352-359`) — but the baseline is *already* lossy, so the annotations decorate a stripped document.

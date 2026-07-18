@@ -1,0 +1,131 @@
+<task id="031" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-14 rationale-first, anti-rubber-stamp accept/reject surface (no auto-accept low-band)</title>
+    <phase>3 E3</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W3-E3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>030</deps>
+    <tags>frontend,fluent-ui,tiptap</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-14: redesign the Compose accept/reject surface so it **leads with the cited
+    rationale** as the primary trust cue and treats the `confidence_band` (from task 030) as a
+    **secondary** signal — never the headline. Engineer the surface against rubber-stamping per the
+    2026 HCI research (design §6.2): low-confidence edits are **NEVER pre-selected or auto-accepted**,
+    and every low-band edit exposes an **explicit-review affordance**. "Accept all" MUST NOT include
+    low-band edits without an explicit confirmation step. This is a client-only change to the existing
+    accept/reject render path in `ComposeEditor.tsx` (`redlineLabelText`, lines 271-294); it consumes
+    the additive `confidence_band` field that task 030 added to `ComposeDraftPayload`. Do NOT emit a
+    false-precision numeric score, do NOT re-derive the band client-side (it is server-derived), and do
+    NOT change the mark/range apply layer.
+  </prompt>
+
+  <role>
+    Senior React + Fluent UI v9 engineer building trustworthy AI-assist surfaces. Fluent in the
+    TipTap accept/reject popover pattern, dark-mode-correct Fluent v9 tokens (ADR-021), and HCI
+    anti-over-reliance design (rationale-first, no false-precision, no one-click accept-all for
+    unverified edits).
+  </role>
+
+  <goal>
+    An accept/reject surface where the cited rationale is visually primary and the `confidence_band`
+    is a secondary, coarse qualitative cue (high/medium/low — never a numeric score); low-confidence
+    redlines are never pre-selected or auto-accepted and carry an explicit-review affordance; and
+    "accept all" excludes low-band edits unless the user explicitly confirms their inclusion. Built on
+    Fluent v9 with correct dark-mode tokens. Component/interaction tests assert the rationale-primary
+    ordering, the no-auto-accept-low-band rule, and the accept-all exclusion + confirmation gate.
+  </goal>
+
+  <context>
+    <background>
+      E3-rationale already ships: the accept/reject popover renders `rationale` today
+      (`ComposeEditor.tsx:271-294`, `redlineLabelText`) — design §2 redline-payload row + §6.1. Task
+      030 adds the server-derived `confidence_band` to `ComposeDraftPayload`. The 2026 HCI research
+      folded into design §6.2 warns that a numeric confidence score drives over-reliance + false
+      precision and that users rubber-stamp more as difficulty rises — so the design is deliberately
+      **rationale-first**: lead with why + grounded-in-what; show confidence only as a coarse band;
+      and engineer against rubber-stamping (never pre-select/auto-accept low-confidence; no one-click
+      accept-all for unverified edits). This task implements those trust semantics in the UI. It does
+      NOT compute the band (server does, task 030) and does NOT touch the mark/range apply layer
+      (already correct, `usePendingRedline.ts:461-465`).
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — the accept/reject surface; `redlineLabelText` + popover at lines 271-294. Make the rationale primary; render `confidence_band` as a secondary coarse band; add the explicit-review affordance + accept-all exclusion logic.</file>
+      <file role="canonical-reuse">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts — consume the `confidence_band` field (mirrored by task 030); do NOT re-derive it client-side.</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts — the pending-redline/accept-reject state hook; wire the no-auto-accept + accept-all-excludes-low-band rules here / at the popover, NOT in the mark/range apply layer (461-465, unchanged).</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §6.2 (rationale-first; confidence as coarse band tied to verifiability; never pre-select/auto-accept low-confidence; explicit-review affordances; no false-precision score), §2 (redline-payload row — rationale already surfaced).</file>
+      <file role="spec">projects/spaarkeai-compose-r3/spec.md FR-14, NFR-10 (Fluent v9 + dark mode, `@spaarke/auth`).</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">FR-13/FR-16 server-derived `confidence_band` + paraId/offsets. Provides the `confidence_band` field on `ComposeDraftPayload` (client mirror) that this UI consumes. Without it there is no band to render or gate on.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021 / NFR-10">New/changed UI uses Fluent UI v9 components + tokens with correct dark-mode rendering. No inline hex; use design tokens. No Fluent v8 or ad-hoc CSS colors.</constraint>
+    <constraint source="project / design §6.2">Rationale is the PRIMARY trust cue (visually leads); `confidence_band` is SECONDARY and coarse (high/medium/low) — never a numeric/percentage score (no false precision). Low-confidence edits are NEVER pre-selected or auto-accepted; each exposes an explicit-review affordance. "Accept all" excludes low-band edits unless the user explicitly confirms including them.</constraint>
+    <constraint source="project / NFR-04">Client-only change; the band is SERVER-DERIVED — do NOT re-derive or synthesize a band client-side, and do NOT add a new AI call or dispatch. Consume the field task 030 provides.</constraint>
+    <constraint source="project / S5">Do NOT modify the mark/range apply layer (`usePendingRedline.ts:461-465`) — it is already slice-safe. This task is popover/label + selection-gating logic only.</constraint>
+    <constraint source="ADR-028 / NFR-10">Any client fetch uses `@spaarke/auth` (no bespoke token handling). This task is primarily render/interaction; if it reads data it goes through the existing authed path.</constraint>
+    <constraint source="NFR-06 / ADR-038">Reachability + interaction evidence: the surface must be mounted + reachable in the running host, and the accept-all/no-auto-accept rules asserted by component/interaction tests — not just built in isolation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fluent v9 accept/reject popover; rationale-first anti-over-reliance UX; consuming a mirrored server contract field</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="redline accept/reject popover" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx">
+        `redlineLabelText` + the accept/reject popover (271-294) already surface `rationale`; extend to lead with rationale and render `confidence_band` as a secondary coarse band + explicit-review affordance.
+      </pattern>
+      <pattern name="pending-redline selection state" location="src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts">
+        Gate accept-all / pre-selection on `confidence_band` at the selection layer; leave the mark-over-range apply (461-465) untouched.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Confirm task 030 landed the `confidence_band` mirror on `ComposeDraftPayload`. Run the FULL rigor-level declaration. Load the Fluent v9 + ADR-038 knowledge files.</step>
+    <step order="1" name="Make the rationale primary">In `ComposeEditor.tsx` (`redlineLabelText` / popover, 271-294), restructure the accept/reject surface so the cited rationale (+ sources) is the visual headline; render `confidence_band` as a secondary coarse band (high/medium/low), never a numeric/percentage score. Fluent v9 tokens, dark-mode-correct.</step>
+    <step order="2" name="No auto-accept / no pre-select of low-band">In the pending-redline selection layer (`usePendingRedline.ts` / popover state), ensure low-confidence redlines are never pre-selected or auto-accepted; add an explicit-review affordance on each low-band edit. Do NOT touch the mark/range apply (461-465).</step>
+    <step order="3" name="Accept-all excludes low-band without confirmation">Change "accept all" so it excludes low-band edits by default; including them requires an explicit confirmation step (a deliberate second action), not a silent inclusion.</step>
+    <step order="4" name="Component + interaction tests">Author tests asserting: rationale renders above/primary to the band; a low-band redline is not pre-selected and not auto-accepted; "accept all" leaves low-band edits unapplied until explicit confirmation. Assert dark-mode token usage where feasible.</step>
+    <step order="5" name="Reachability + verify">Confirm the surface is mounted + reachable in the running host (not isolated). Build the client shared lib; run the tests. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (rationale-first accept/reject surface + secondary band + explicit-review affordance)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts (no-auto-accept-low-band + accept-all exclusion gating)</output>
+    <output type="test">Component/interaction tests for rationale-primary ordering + no-auto-accept + accept-all exclusion</output>
+    <output type="report">Fluent v9 + dark-mode compliance note; reachability evidence</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The accept/reject surface leads with the cited rationale as the primary trust cue; the `confidence_band` renders as a secondary coarse band (high/medium/low) — no numeric/percentage confidence score is shown (no false precision).</criterion>
+    <criterion testable="true">Low-confidence edits are never pre-selected and never auto-accepted; each low-band edit exposes an explicit-review affordance — asserted by an interaction test.</criterion>
+    <criterion testable="true">"Accept all" does not include low-band edits without an explicit confirmation step — asserted by an interaction test.</criterion>
+    <criterion testable="true">The band is consumed from the server-derived `confidence_band` field (task 030 mirror); the UI does NOT re-derive a band client-side and adds no new AI call.</criterion>
+    <criterion testable="true">New/changed UI uses Fluent v9 + correct dark-mode tokens (ADR-021); the mark/range apply layer (`usePendingRedline.ts:461-465`) is unchanged.</criterion>
+    <criterion testable="true">The surface is mounted + reachable in the running host; client shared-lib build is green with matching tests passing.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

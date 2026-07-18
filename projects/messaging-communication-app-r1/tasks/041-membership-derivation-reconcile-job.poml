@@ -1,0 +1,153 @@
+<task id="041" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Membership derivation + reconcile job (open via ADR-034; reconcile ACS from Dataverse; event + sweep)</title>
+    <phase>W4 — Thread Resolver + Membership + Privacy</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>040,011</dependencies>
+    <blocks></blocks>
+    <tags>bff-api, communication, jobs</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Adds a background reconcile job + membership-derivation service touching `Services/Communication/` + `Services/Jobs/`, calling ACS membership mutation (Add/RemoveParticipants). Membership-as-projection is a security-relevant invariant (ACS must never exceed Dataverse-derived access); touches `.cs`; FULL protocol + Step 9.5 gates.</rigor-reason>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-07, NFR-02</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Derive a thread's authorized participant set from Dataverse and reconcile ACS thread membership to match it — ACS membership is a **reconciled PROJECTION of Dataverse-derived access, never a second ACL**.
+
+    • **Open (record-anchored) threads**: membership derives from `MembershipResolverService` (ADR-034) — Spaarke's canonical "who is associated with this matter/record" (owner, assigned attorney, assigned firm, …). No record access → no membership.
+    • **1:1 direct threads**: membership is the explicit two-participant list (from task 043's model).
+    • **Private threads**: add an explicit per-record sharing grant (mechanism decided in task 002) on top of the derived set.
+
+    A **reconcile job** recomputes the authorized set and reconciles ACS thread participants via server-side `ChatThreadClient.AddParticipants` / `RemoveParticipant`, driven **event-driven** (Dataverse record-access change | privacy switch | participant edit) **AND** a **periodic sweep** (eventual consistency safety net). Dataverse is authoritative; ACS is the projection. **Write an audit entry per membership change.** Reuse the existing Service Bus job contract (idempotency, retry, DLQ). Best-effort/non-fatal (NFR-02) — a reconcile failure does not fail send/capture; the sweep repairs drift.
+  </prompt>
+
+  <role>
+    Spaarke BFF architect for the Communication subsystem + background-job infrastructure. Authority on `Services/Communication/`, `Services/Jobs/`, ADR-034 (`MembershipResolverService`), ADR-004/ADR-036 (job contract), ADR-028 (central `TokenCredential`; server-side ACS ops), §11 Component Justification, and `.claude/constraints/bff-extensions.md`. You hold the "membership is a projection, never a second source of truth" invariant as load-bearing.
+  </role>
+
+  <goal>
+    A membership-derivation path computes a thread's authorized participant set (open → ADR-034 `MembershipResolverService`; 1:1 → explicit two-party list; private → derived set + explicit grant), and a reconcile job (event-driven + periodic sweep, on the existing Service Bus job contract) reconciles ACS thread participants (Add/Remove) to match it, writing an audit entry per change. ACS membership never exceeds Dataverse-derived access. Best-effort/non-fatal. Build clean; publish-size + CVE + bff-extensions Placement Justification reported; Step 9.5 FULL gates run; `/conflict-check` clean before PR.
+  </goal>
+
+  <context>
+    <background>
+      Design §4 (membership sync) + §5 (privacy) + §8.4 (ACS membership sync): "Dataverse is authoritative; ACS membership is the projection. Eventually consistent — reconcile via event + periodic sweep." ACS won't deliver *live* messages to a non-member, so ACS keeps its own thread membership; we reconcile it FROM Dataverse access. It is never a second source of truth — the access boundary is always the Dataverse record (design §5).
+
+      **Component Justification (§11) for the reconcile job:**
+      1. **Existing** — `MembershipResolverService` (ADR-034) already answers "who is associated with this record"; the Service Bus job contract already exists (`Services/Jobs/`). This task adds a thin derivation-to-ACS reconcile job, not a new membership engine (verify by grep before claiming none).
+      2. **Extension** — Reuse `IMembershipResolverService` for derivation and the existing job contract for scheduling/retry/DLQ; the net-new piece is the derivation→ACS reconcile step + audit, which has no existing home.
+      3. **Cost-of-doing-nothing (concrete failure)** — Without reconcile, ACS thread membership drifts from Dataverse access: a user removed from a matter still receives live chat (over-exposure), or a newly-added attorney can't participate (under-exposure). That is a named security/functional failure (FR-07, NFR-06 adjacency), not "future flexibility."
+
+      **Invariant to protect:** ACS membership ⊆ Dataverse-derived access, ALWAYS. Reconcile only ADDs members that Dataverse authorizes and REMOVEs members Dataverse no longer authorizes. Never grant ACS membership beyond the derived set.
+
+      **Scope discipline:** derivation + reconcile job + audit. Do NOT build a new authorization engine (reuse ADR-034). Do NOT build a notification fabric (R1 polls). ACS membership mutation is server-side only (no client token).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IThreadResolver.cs (task 040 — thread identity)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Acs/ (task 011 — ACS thread + membership ops: Add/RemoveParticipants)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ (job contract: idempotency, retry, DLQ)</file>
+      <file>IMembershipResolverService (ADR-034 — open-thread membership derivation)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/PlaybookSharingService.cs / sprk_externalrecordaccess (private-grant precedent — task 002 decides the detail)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-07">Open (record-anchored) membership derives from `MembershipResolverService` (ADR-034); 1:1 direct uses the explicit two-participant list; private threads add an explicit per-record sharing grant. A job reconciles ACS thread participants from Dataverse-derived access (event-driven + periodic sweep). Audit entry per change.</constraint>
+    <constraint source="project-INVARIANT">ACS membership is a reconciled PROJECTION of Dataverse-derived access, NEVER a second ACL. ACS membership MUST NOT exceed the Dataverse-derived authorized set.</constraint>
+    <constraint source="ADR-034">Derive open-thread membership via `IMembershipResolverService` — do NOT reimplement association logic.</constraint>
+    <constraint source="ADR-004,ADR-036">Reuse the existing Service Bus job contract — idempotency, retry, dead-letter. Reconcile is a background job, not inline in the send/capture path.</constraint>
+    <constraint source="ADR-028">ACS membership mutation is server-side only via the central `TokenCredential`/ACS ops from task 011; MUST NOT `new` a credential; no client token.</constraint>
+    <constraint source="NFR-02">Best-effort/non-fatal — a reconcile failure MUST NOT fail send or inbound-capture; the periodic sweep repairs drift. Log + retry + DLQ.</constraint>
+    <constraint source="ADR-010">Register the derivation service + job via `CommunicationModule` (ADR-032 Null-Object if feature-gated; unconditional endpoint/job registration).</constraint>
+    <constraint source="root-§10">bff-extensions Placement Justification in the PR; publish-size delta vs ~45.30 MB baseline; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-regarding.md</file>
+      <file>.claude/adr/ADR-015-ai-flag-never-decide.md</file>
+    </files>
+    <patterns>
+      <pattern name="Derived membership (ADR-034)" location="IMembershipResolverService">
+        Ask `IMembershipResolverService` "who is associated with this record" for the thread's anchor; that set IS the open-thread membership. Do not recompute association.
+      </pattern>
+      <pattern name="Event + sweep reconcile" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">
+        Enqueue a reconcile job on Dataverse access change / privacy switch / participant edit (event-driven), and run a periodic sweep for eventual-consistency safety. Idempotent — reconciling an already-consistent thread is a no-op.
+      </pattern>
+      <pattern name="Projection, not ACL" location="src/server/api/Sprk.Bff.Api/Services/Acs/">
+        Compute desired = Dataverse-derived set; current = ACS participants; Add (desired \ current), Remove (current \ desired). Never add beyond desired.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 040's `IThreadResolver` (thread identity + anchor), task 011's ACS membership ops (Add/RemoveParticipants), `IMembershipResolverService` (ADR-034), and the `Services/Jobs/` contract (idempotency/retry/DLQ). Confirm task 002's private-grant decision.</step>
+    <step order="2">Read `.claude/constraints/bff-extensions.md` §F + root §11 + ADR-034 + ADR-004/036 before designing the derivation service + job.</step>
+    <step order="3">Implement membership derivation: for a thread, compute the authorized participant set — open (record-anchored) via `IMembershipResolverService` on the thread's ADR-024 anchor; 1:1 direct via the explicit two-participant list; private via the derived set PLUS the explicit per-record sharing grant (task 002 mechanism).</step>
+    <step order="4">Implement the reconcile step: desired = derived set (mapped to `communicationUserId` via the identity map from task 010); current = ACS thread participants; enforce `desired ⊇ ACS` invariant — Add (desired \ current), Remove (current \ desired) via task 011's server-side ACS ops. Never add beyond desired.</step>
+    <step order="5">Wire the reconcile job on the existing Service Bus job contract: idempotent (re-running on a consistent thread is a no-op), retry with backoff, DLQ on repeated failure. Trigger event-driven (Dataverse record-access change | privacy switch | participant edit) AND via a periodic sweep.</step>
+    <step order="6">Write an audit entry per membership change (participant added/removed, thread, reason/trigger, timestamp, actor).</step>
+    <step order="7">Make reconcile best-effort/non-fatal (NFR-02): a failure logs + retries + DLQs; it does NOT fail send/capture; the sweep repairs drift.</step>
+    <step order="8">Register the derivation service + reconcile job via `CommunicationModule` (ADR-010), unconditional (ADR-032 Null-Object if any part is feature-gated).</step>
+    <step order="9">Write tests: open-thread membership matches the ADR-034 derived set; a Dataverse access change reconciles ACS membership within the sweep window; ACS membership NEVER exceeds the derived set (over-exposure guard); an audit entry is recorded per change; a reconcile failure does not fail the persist path (NFR-02).</step>
+    <step order="9.1">Run `dotnet build src/server/api/Sprk.Bff.Api/` then `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-041-publish/`; report compressed size + delta vs ~45.30 MB baseline.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus: projection invariant — ACS ⊆ Dataverse-derived; NFR-02 non-fatal; ADR-034 reuse; §11 justification); `adr-check` against `spec.md`. Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="9.6">Run `/conflict-check` before the PR (shared `Services/Communication/` hot-path).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (041 ✅) + reset `current-task.md`; record decisions (derivation mapping, sweep cadence, audit shape, trigger events).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect thread resolver, ACS ops, membership resolver, job contract</tool>
+    <tool name="edit">Derivation service; reconcile job; audit; DI registration; tests</tool>
+    <tool name="bash">Build, tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 9.6)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ThreadMembershipDerivationService.cs (NEW — derive authorized set)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/MembershipReconcileJob.cs (NEW — event + sweep reconcile, on the Service Bus job contract)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — derivation + job registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (derivation + reconcile + projection-invariant + audit + non-fatal tests)</output>
+    <output type="docs">PR description with §11 Component Justification (FR-07 drift failure mode) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Open-thread membership derives from `IMembershipResolverService` (ADR-034) on the thread's ADR-024 anchor; 1:1 uses the explicit two-participant list; private adds the explicit per-record grant.</criterion>
+    <criterion testable="true">A reconcile job (on the existing Service Bus job contract) reconciles ACS thread participants (Add/Remove) to the derived set, triggered event-driven AND by a periodic sweep.</criterion>
+    <criterion testable="true">A Dataverse access change reconciles ACS membership within the sweep window — verified by test.</criterion>
+    <criterion testable="true">ACS membership NEVER exceeds the Dataverse-derived authorized set (projection invariant) — verified by an over-exposure guard test.</criterion>
+    <criterion testable="true">An audit entry is recorded per membership change (participant, thread, trigger, timestamp, actor).</criterion>
+    <criterion testable="true">Reconcile is best-effort/non-fatal (NFR-02): a simulated failure does NOT fail send/capture; it retries + DLQs; the sweep repairs drift.</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta reported vs ~45.30 MB; no new HIGH CVE; Step 9.5 gates run; `/conflict-check` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 040 (thread identity + anchor) + 011 (ACS membership ops). Parallel-safe with 042/043 after 040 lands. Blocks nothing directly, but the projection invariant it enforces is what makes 042's privacy enforcement trustworthy at the transport layer — keep them consistent.
+
+    Eventual consistency is expected (design §8.4). The sweep is the safety net; do not attempt strong consistency between Dataverse and ACS. Threads &gt;20 participants lose ACS read-receipts/typing (fine for R1; note for R2). If ADR-034 derivation seems insufficient for a private-thread edge case, surface it via the §6.5 ADR-conflict protocol rather than inventing a second ACL.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates run. Per root §10 + §11: publish-size delta + CVE + bff-extensions Placement Justification + Component Justification (FR-07 drift failure mode) in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>
