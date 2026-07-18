@@ -1,0 +1,146 @@
+<task id="027" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-01 client cutover — drop `docx.js`; the client sends a paraId-keyed content model, never authors bytes</title>
+    <phase>2 E1</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+    <parallel-group>W2-E1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>022,023,026</deps>
+    <tags>frontend,compose,docx</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    THE CLIENT HALF OF THE CUTOVER (FR-01). Now that the SERVER owns all `.docx` authoring — delta-onto-
+    original via `ComposeParagraphRedlineSynthesizer` for loaded docs (022) and full render via
+    `ComposeDocumentRenderer` for born-in-editor docs (026) — the client must STOP authoring `.docx` bytes
+    entirely. Remove `docx.js` from the export path: delete `tipTapToDocxBytes`, `tipTapJsonToDocxBytes`,
+    and `buildRejectBaselineJson` from `utils/docxBridge.ts` (+ the `index.ts` export). Rewrite the save
+    path so the client sends a STRUCTURED, paraId-keyed payload and the server authors the bytes:
+
+      - Loaded doc, dirty edit  → send `{ BaselineVersionId, EditedParagraphs[] }` (paraId-keyed changed
+        paragraphs; server synthesizes the delta — 022).
+      - Loaded doc, clean save  → send the retained-original `Content` byte-identical (unchanged; FR-06a).
+      - Born-in-editor save     → send the full paraId-keyed `ContentModel` (server renders — 026).
+      - AI redlines / comments  → the existing `annotations: DocxAnnotationInput[]` list (server applies via
+        DocxAnnotationWriter — unchanged), now composed onto the server-authored baseline, NOT a client
+        reject-baseline reconstruction (this is why `buildRejectBaselineJson` is retired here).
+
+    This is the change that makes the "no client-authored bytes" invariant real and removes the last lossy
+    reconstruction. It is IRREVERSIBLE for the save contract — mirror-first with the server DTOs (022/026).
+  </prompt>
+
+  <role>
+    Senior React/TypeScript engineer on `Spaarke.Compose.Components`. Understands the editor is now a PURE
+    editing surface: it holds a full paraId-keyed ProseMirror model (`editor.getJSON()` — every paragraph/
+    heading carries a hidden `paraId` attr) and must hand that model to the server, never serialize `.docx`.
+    Knows the save-path seams: `ComposeWorkspace.triggerSave`, the `ComposeEditor` imperative handle
+    (`serialize`/`serializeForSave`), `docxBridge.ts`, and the ~11 tests coupled to the current serializers.
+  </role>
+
+  <goal>
+    `docx.js` fully removed from `Spaarke.Compose.Components` (no `tipTapToDocxBytes`/`tipTapJsonToDocxBytes`/
+    `buildRejectBaselineJson`, no `docx` dependency in the save path, `index.ts:183` export gone). The
+    editor exposes a content-model API instead of a byte-serializer: (a) `collectEditedParagraphs()` — the
+    dirty paragraphs' `{ paraId, text }` (diffed against a load-time text-by-paraId snapshot captured at
+    `stampParaIds` time); (b) `buildContentModel()` — the full paraId-keyed block model for a born-in-editor
+    save (mirror of the server `ComposeContentModel`). `triggerSave` posts the right shape per case (dirty-
+    loaded / clean / born-in-editor / annotations), always structured content + never client-authored bytes
+    (except the clean-save byte-identical passthrough of the RETAINED ORIGINAL). All ~11 coupled client
+    tests updated to the new handle. `npm run build` + suite green. Fetches via `@spaarke/auth` (ADR-028).
+  </goal>
+
+  <context>
+    <background>
+      Investigation (2026-07-18) confirmed: `editor.getJSON()` already carries a hidden `paraId` on every
+      paragraph/heading (server-owned on load via `stampParaIds`, OOXML-minted on split) plus block attrs +
+      marks — everything needed for a `{ paraId, text, structure, marks }` model is in-memory. The current
+      wire sends base64 `.docx` bytes + `annotations`. Born-in-editor paths: `mountDraftHtml` (AI-draft
+      seed, `docxBytes=null`) and `mountTransient` (browse-local); both hit `POST /api/compose/documents/
+      create-on-save`. The AI-redline reject-baseline (`ComposeEditor.serializeForSave` →
+      `tipTapJsonToDocxBytes(buildRejectBaselineJson)`) is retired here because the server now applies
+      annotations onto the authored baseline (task 023).
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts — REMOVE tipTapToDocxBytes (:215), tipTapJsonToDocxBytes (:278), buildRejectBaselineJson (:250); KEEP docxToTipTapHtml (mammoth import) + stampParaIds. ADD a content-model builder (getJSON → ComposeContentModel mirror) + an edited-paragraph collector helper.</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/index.ts — remove the `tipTapToDocxBytes` export (:183); export the new content-model helpers.</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — imperative handle: replace serialize()/serializeForSave() with collectEditedParagraphs() + buildContentModel(); capture a load-time text-by-paraId snapshot right after stampParaIds (~:1169); keep isDirty()/hasPendingRedlines().</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — triggerSave (~:910-1040): send BaselineVersionId+EditedParagraphs (dirty-loaded) / byte-identical Content (clean) / ContentModel (born-in-editor) / annotations (AI redlines); base64 only for the clean-save retained-original passthrough.</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts — mirror the server SaveComposeDocumentRequest additions (BaselineVersionId, EditedParagraph[], ComposeContentModel) + the LoadComposeDocumentResult VersionId (task 022 Load-VersionId completion).</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/IComposeService.cs — the server DTOs to mirror (EditedParagraphs, ContentModel, BaselineVersionId).</file>
+      <file role="test">~11 client test files coupled to the serializers (see constraints) — update to the new handle.</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §4.4, §8</file>
+      <file role="spec">projects/spaarkeai-compose-r3/spec.md FR-01, FR-01a, FR-06</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="022" status="done">Server SaveAsync inversion + the EditedParagraphs/BaselineVersionId contract the dirty-loaded save posts to. (Also: Load must surface VersionId — the FR-06 source; complete as part of this cutover or 022.)</dependency>
+      <dependency task="023" status="pending">AI redlines compose on the server-authored baseline — so the client can drop the reject-baseline reconstruction and just send annotations.</dependency>
+      <dependency task="026" status="pending">ComposeDocumentRenderer — the server can author born-in-editor bytes, so the client can stop serializing them.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-01">The client MUST NOT author `.docx` bytes for a dirty or born-in-editor save. `tipTapToDocxBytes`/`tipTapJsonToDocxBytes`/`buildRejectBaselineJson` are REMOVED. The ONLY bytes the client sends are the RETAINED ORIGINAL on a clean same-session save (byte-identical passthrough, FR-06a).</constraint>
+    <constraint source="spec / FR-06">A dirty save sends `{ BaselineVersionId, EditedParagraphs }`; a save after a page refresh (no client bytes) sends BaselineVersionId only and the server re-fetches the load-time version. The client must carry the load-time VersionId from the Load response.</constraint>
+    <constraint source="mirror-first">The client `EditedParagraph` / `ComposeContentModel` / `BaselineVersionId` types MUST mirror the server DTOs (022/026) field-for-field — no parallel schema (root CLAUDE.md §11).</constraint>
+    <constraint source="edited-paragraph collection">`collectEditedParagraphs()` diffs the current doc against a LOAD-TIME text-by-paraId snapshot (captured at stampParaIds time): a paragraph whose text changed OR whose paraId is new (split/insert) is emitted; unchanged paragraphs are omitted (sending them would rewrite their run structure server-side — NFR-07 violation). Server-side change-detection is the authority; the client collector is the hint.</constraint>
+    <constraint source="ADR-028 / NFR-10">Save-path fetches use `@spaarke/auth` `authenticatedFetch` — no ad-hoc token handling.</constraint>
+    <constraint source="ADR-038 / NFR-06">Through-the-wire proof is task 024; here, unit/component tests only. Update (do not delete) the ~11 coupled tests: `ComposeEditor.dirtyOnMount.test.tsx` + `ComposeEditor.referenceOnly.test.tsx` (mock docxBridge), `redlineDocxAnnotations.test.ts` + `docxBridge.paraId.test.ts` + `ComposeEditor.paraId.test.tsx` (import real docxBridge fns), and the ~9 `ComposeWorkspace.*.test.tsx` that stub `serialize`/`serializeForSave` on the handle.</constraint>
+    <constraint source="NFR-03">No TipTap product feature, no AGPL, never `@tiptap-pro/*` — unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>TipTap/ProseMirror content-model extraction; paraId snapshot + dirty-paragraph collection; save-path client contract; @spaarke/auth</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="paraId stamp + snapshot seam" location="src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts:158">
+        stampParaIds walks state.doc.descendants counting paragraph+heading and sets node.attrs.paraId in doc order. Capture the load-time {paraId → text} snapshot in the SAME walk (right after the stamp) so collectEditedParagraphs can diff against it.
+      </pattern>
+      <pattern name="triggerSave byte/annotation branch (to replace)" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx:964">
+        Current: bytes = editorIsDirty || !state.docxBytes ? await serialize() : state.docxBytes ; needsAnnotationSave → serializeForSave(). Replace with the four-case structured-payload branch.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Output the FULL rigor declaration. Confirm 022 (server contract) + 026 (renderer) + 023 (AI-redline baseline) are available. Load the mirror DTOs from IComposeService.cs. Run /conflict-check for the client save-path hot files.</step>
+    <step order="1" name="Mirror contracts">Add to compose-contracts.ts: `EditedParagraph { paraId, text }`, `ComposeContentModel` (paraId-keyed block model mirroring the server), `BaselineVersionId`, and `VersionId` on the Load response type — field-for-field mirrors of the server DTOs.</step>
+    <step order="2" name="Load-time snapshot + content-model helpers">In docxBridge.ts: capture a load-time `{ paraId → text }` snapshot at stampParaIds time; add `collectEditedParagraphs(editor, snapshot)` (dirty/new paras by paraId) and `buildContentModel(editor)` (getJSON → ComposeContentModel). Remove tipTapToDocxBytes/tipTapJsonToDocxBytes/buildRejectBaselineJson.</step>
+    <step order="3" name="Editor handle">Replace serialize()/serializeForSave() on the ComposeEditor imperative handle with collectEditedParagraphs()/buildContentModel(); wire the snapshot capture; keep isDirty()/hasPendingRedlines().</step>
+    <step order="4" name="triggerSave rewrite">Rewrite triggerSave to post the four-case structured payload: dirty-loaded → {BaselineVersionId, EditedParagraphs, annotations}; clean → {Content (byte-identical), annotations?}; born-in-editor → {ContentModel, annotations?} to create-on-save; annotations always the existing DocxAnnotationInput[]. Remove all docx.js calls. Fetch via @spaarke/auth.</step>
+    <step order="5" name="index.ts + grep-verify">Remove the tipTapToDocxBytes export (index.ts:183); export the new helpers. Grep the whole shared lib for tipTapToDocxBytes/tipTapJsonToDocxBytes/buildRejectBaselineJson/`import 'docx'` — confirm ZERO remain in the save path.</step>
+    <step order="6" name="Tests">Update the ~11 coupled tests to the new handle/helpers (mock buildContentModel/collectEditedParagraphs instead of serialize; delete the reject-baseline assertions that no longer apply, replacing with content-model/edited-paragraph assertions of equal coverage). `npm run build` (tsc) + jest suite green.</step>
+    <step order="7" name="Verify">Full shared-lib build + test; confirm no docx.js in the save path; report. The through-the-wire loaded + born-in-editor seam rides task 024.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts (docx.js removed; content-model + edited-paragraph helpers added)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx + ComposeWorkspace.tsx (handle + triggerSave rewired to structured payloads)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts (mirror DTOs) + index.ts (export cleanup)</output>
+    <output type="test">~11 updated client test files (new handle/helper coverage)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">`tipTapToDocxBytes`, `tipTapJsonToDocxBytes`, and `buildRejectBaselineJson` are removed from `docxBridge.ts` and `index.ts`; a grep of the shared lib shows no `docx.js` authoring in any save path.</criterion>
+    <criterion testable="true">A dirty save of a loaded doc posts `{ BaselineVersionId, EditedParagraphs[] }` (paraId-keyed changed paragraphs), not `.docx` bytes; a clean same-session save posts the retained-original `Content` byte-identical (FR-06a).</criterion>
+    <criterion testable="true">A born-in-editor save (AI-draft/blank/browse-local) posts a paraId-keyed `ComposeContentModel` to `create-on-save`; the server renders it (026) — the client never serializes `.docx`.</criterion>
+    <criterion testable="true">AI redlines/comments are sent as the existing `annotations: DocxAnnotationInput[]` (composed server-side onto the authored baseline); the client no longer builds a reject-baseline reconstruction.</criterion>
+    <criterion testable="true">The client `EditedParagraph`/`ComposeContentModel`/`BaselineVersionId`/`VersionId` types mirror the server DTOs field-for-field; the Load response carries the load-time VersionId (FR-06 source).</criterion>
+    <criterion testable="true">All ~11 coupled tests updated to the new handle; `npm run build` (tsc) + jest suite green; save-path fetches use `@spaarke/auth`.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

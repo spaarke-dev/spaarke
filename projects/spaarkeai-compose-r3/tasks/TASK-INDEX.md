@@ -7,16 +7,20 @@
 
 ## Critical Path (read first)
 
-**E2 (paraId substrate) → E1 (delta save) → Import.** paraId is the splice key, so Phase 1 blocks Phase 2; imported marks anchor by paraId and must survive the retained-original save, so Phase 2 blocks Phase 5. E3 + toolset parallelize alongside the fidelity core.
+**E2 (paraId substrate) → E1 (server owns all `.docx` authoring) → Import.** paraId is the splice key, so Phase 1 blocks Phase 2; imported marks anchor by paraId and must survive the retained-original save, so Phase 2 blocks Phase 5. E3 + toolset parallelize alongside the fidelity core.
+
+**E1 RE-ARCHITECTURE (2026-07-18): the SERVER is the single authority for all `.docx` authoring; the client never authors bytes.** Two server engines: `ComposeParagraphRedlineSynthesizer` (delta onto retained original — loaded-doc edit, Option C, BUILT) and NEW `ComposeDocumentRenderer` (from-scratch high-fidelity render — born-in-editor/AI-drafted docs, styles + multi-level numbering). The client (027) sends a paraId-keyed content model, never `docx.js` bytes. Validated against Harvey's architecture (deterministic server-side OOXML, LLM confined to text). 022 split → 022 (server inversion, Increment A ✅ committed `ce50c9877`) + 027 (client cutover); NEW 026 (renderer).
 
 ```
 001 ─┬─ 003 (hardening gate) ───────────────────────┐
      │                                              ▼
-002 ─┼──────────────────────────────► 022 (E1 cutover, keystone)
-010 ─┴─ 011 ─ 012 ─ 020 ─ 021 ────────► 022 ─ 023 ─ 024 ─ 025
-                     │                    │
-                     ├─ 030 ─ 031/032 (E3)│
-                     └─ 050 ─ 051 ─ 052 (import, also deps 022)
+002 ─┼──────────────────────────────► 022 (E1 SERVER SaveAsync inversion) ✅ Increment A committed
+     │                                     │
+010 ─┴─ 011 ─ 012 ──────┬────────────────► 026 (ComposeDocumentRenderer — born-in-editor authoring) ─┐
+                        │                                                                            ├─► 027 (client content-model cutover — drop docx.js) ─► 024 (seam: loaded + born-in-editor + numbering golden) ─► 025
+                        │                  022 ─► 023 (AI redlines compose on authored baseline) ────┘
+                        ├─ 030 ─ 031/032 (E3)
+                        └─ 050 ─ 051 ─ 052 (import, also deps 022)
 040/042/043/044 (toolset, independent) · 041 deps 011
 ```
 
@@ -34,9 +38,11 @@
 | 012 | FR-11/FR-12 paraId-primary anchoring + fuzzy fallback (`AnnotationReanchorService`) + paraId as splice key | 1 E2 | 🟢 | 010,011 | ✅ | FULL | opus | high | false (reanchor svc) |
 | 020 | ~~FR-02 edited-paragraph rebuild + splice~~ **SUPERSEDED 2026-07-17** (Option C: `ComposeParagraphRedlineSynthesizer` redlines in place — no splice-then-compare; `ComposeParagraphSpliceService` removed, `ComposeParaIdSpliceMap` kept + reused) | 2 E1 | 🟢 | 010,012 | ✅→⤴️ | FULL | opus | xhigh | false (Services/Compose) |
 | 021 | ~~FR-03/FR-05 Docxodus `WmlComparer` redline adapter~~ **SUPERSEDED 2026-07-17** (Option C: `ComposeParagraphRedlineSynthesizer` word-diff → native w:ins/w:del in place; `ComposeRedlineComparerService` removed. Building it PROVED WmlComparer fails NFR-09 → the pivot) | 2 E1 | 🟢 | 001,020 | ✅→⤴️ | FULL | opus | xhigh | false (Services/Compose) |
-| 022 | FR-01 baseline inversion in `SaveAsync` + drop `docx.js` export (**E1 cutover — keystone**) — **UNBLOCKED (gate PASS) + RE-SCOPED to Option C**. Redline engine (`ComposeParagraphRedlineSynthesizer`) built + NFR-09-certified. Remaining: wire into inverted `SaveAsync` + baseline resolution (versionId/client-bytes/Redis) + drop docx.js client + FR-05 format handling + NFR-06 seam | 2 E1 | 🟢 | 002,003 | 🔲 | FULL | opus | xhigh | false (SaveAsync + docxBridge) |
-| 023 | FR-04 AI redlines/comments reuse — apply via existing `DocxAnnotationWriter` onto retained-original baseline | 2 E1 | 🔴 | 022 | 🔲 | FULL | sonnet | high | false (Services/Compose) |
-| 024 | FR-07/NFR-06 through-the-wire fidelity seam slice test (untouched OOXML preserved on dirty save) | 2 E1 | 🔴 | 022,023 | 🔲 | FULL | sonnet | xhigh | true (tests) |
+| 022 | FR-01 E1 SERVER `SaveAsync` inversion — delta onto retained original (**keystone**). **Increment A ✅ COMMITTED `ce50c9877`** (`ResolveSaveBaselineAsync` + `ComposeParagraphRedlineSynthesizer` wiring + contract `+BaselineVersionId +EditedParagraphs`; Compose 235 green). SCOPE SPLIT: client half → 027, born-in-editor authoring → 026. Remaining: `LoadAsync` capture+return `VersionId` (FR-06 source) + Redis Tier-3 decision | 2 E1 | 🟢 | 002,003 | 🔄 | FULL | opus | xhigh | false (SaveAsync) |
+| 023 | FR-04 AI redlines/comments compose on the SERVER-AUTHORED baseline — verify+wire `DocxAnnotationWriter` over both the 022 delta and the 026 render (server-only; client reject-baseline rewire → 027) | 2 E1 | 🔴 | 022 | 🔲 | FULL | sonnet | high | false (Services/Compose) |
+| **026** | **FR-01a NEW `ComposeDocumentRenderer` — server-side born-in-editor OOXML authoring** (content model → high-fidelity `.docx`: real styles + STYLE-LINKED multi-level numbering + native tables + inline marks + minted `w14:paraId`). The from-scratch counterpart to the 022 synthesizer; lets the client stop authoring bytes. Pure OpenXML, no NuGet, non-AI (ADR-039 complied) | 2 E1 | 🔴 | 010,022 | 🔲 | FULL | opus | xhigh | false (Services/Compose) |
+| **027** | **FR-01 CLIENT content-model cutover — drop `docx.js`** (`tipTapToDocxBytes`/`tipTapJsonToDocxBytes`/`buildRejectBaselineJson` removed). `triggerSave` sends paraId-keyed structured payloads (dirty→EditedParagraphs+versionId / clean→byte-identical Content / born-in-editor→ContentModel / AI→annotations); load-time paraId snapshot + `collectEditedParagraphs`; fix ~11 client tests | 2 E1 | 🔴 | 022,023,026 | 🔲 | FULL | opus | xhigh | false (docxBridge/ComposeEditor/ComposeWorkspace) |
+| 024 | FR-07/FR-01a/NFR-06 through-the-wire seam — (a) loaded-doc dirty save preserves untouched OOXML BYTE-IDENTICAL, (b) born-in-editor render round-trips + numbering GOLDEN-FILE (1/1.1/1.1.1 style-linked `abstractNum`) + survives a later tracked edit | 2 E1 | 🔴 | 022,023,026,027 | 🔲 | FULL | sonnet | xhigh | true (tests) |
 | 025 | Deploy + smoke-verify E1 fidelity core (BFF + client) on spaarkedev1 | 2 E1 | 🔴 | 024 | 🔲 | STANDARD | sonnet | high | false (deploy) |
 | 030 | FR-13/FR-16 server-derived `confidence_band` (additive `ComposeDraftPayload`) + paraId/offsets on anchor | 3 E3 | 🔴 | 012 | 🔲 | FULL | sonnet | high | false (contract mirror) |
 | 031 | FR-14 rationale-first, anti-rubber-stamp accept/reject surface (no auto-accept low-band) | 3 E3 | 🔴 | 030 | 🔲 | FULL | sonnet | high | true (ComposeEditor UI) |
@@ -49,12 +55,12 @@
 | 050 | FR-24 import existing revisions — project `DocxAnnotationReader` `RecoveredRevision` on Load + in-editor render | 5 Import | 🔴 | 010,012,022 | 🔲 | FULL | opus | high | false (LoadAsync) |
 | 051 | FR-25 import existing comments — `RecoveredComment` threads via FR-23 | 5 Import | 🔴 | 044,050 | 🔲 | FULL | sonnet | high | false (LoadAsync) |
 | 052 | FR-26 imported anchors survive save (paraId + retained-original) + seam slice test | 5 Import | 🔴 | 022,050,051 | 🔲 | FULL | sonnet | xhigh | true (tests) |
-| 080 | NFR-01/02/05 publish-size ≤60 MB + CVE scan + ADR-013 NetArchTest facade verification | 6 Wrap | 🔴 | 021,022 | 🔲 | STANDARD | sonnet | high | true |
+| 080 | NFR-01/02/05 publish-size ≤60 MB + CVE scan + ADR-013 NetArchTest facade verification | 6 Wrap | 🔴 | 022,026 | 🔲 | STANDARD | sonnet | high | true |
 | 081 | Deploy full R3 (BFF + SpaarkeAi/shared-lib) to spaarkedev1 | 6 Wrap | 🔴 | 025,032,040,041,042,043,044,052 | 🔲 | STANDARD | sonnet | high | false (deploy) |
 | 082 | Flagship gate G-R3 — browser-verified fidelity round-trip + toolset demo on spaarkedev1 | 6 Wrap | 🔴 | 081 | 🔲 | FULL | opus | high | false (UAT) |
 | 090 | Project wrap-up (code-review, adr-check, repo-cleanup, /test-diet, lessons-learned) | 6 Wrap | 🔴 | all | 🔲 | FULL | opus | high | false |
 
-**Total**: 27 tasks.
+**Total**: 29 tasks (added 026 `ComposeDocumentRenderer` + 027 client content-model cutover in the 2026-07-18 E1 re-architecture).
 
 ## Parallel Execution Groups
 
@@ -63,7 +69,7 @@
 | W0 | 001, 002 | none | no (001 = packaging foundation) | Different files (csproj vs SpeFileStore) — parallel |
 | W0.5 | 003 | 001 | no (hardening gate) | Gates the E1 cutover (022); may block on owner supplying real firm templates |
 | W1 (E2) | 010 → 011 → 012 | 001 | no | Serial: server pre-parse → client carry → anchoring (shared LoadAsync/reanchor seams) |
-| W2 (E1) | 020 → 021 → 022 → 023 → 024 → 025 | W1, 002, 003 | no (irreversible save cutover) | Serial — all touch `ComposeService`/`docxBridge`; 022 is the keystone cutover |
+| W2 (E1) | 022 (✅ Increment A) → {023, 026} → 027 → 024 → 025 | W1, 002, 003 | no (irreversible save cutover) | Server owns all authoring. 022 server inversion done; 023 (AI-redline compose) ∥ 026 (renderer) after 022; 027 (client cutover) after 022+023+026; 024 seam after all. 020/021 superseded. Serial on `ComposeService`; 026/023 both touch `Services/Compose` (serialize); 027 is client |
 | W3 (E3) | 030 → {031, 032} | 012 | partial | 031/032 parallel after 030 (distinct UI files) |
 | W4 (Toolset) | {040, 042, 043, 044}; 041 after 011 | none / 011 | **yes** | Independent client components — strong parallel candidate; goal-eligible wave |
 | W5 (Import) | 050 → 051 → 052 | 022 (+ 044 for 051) | no | Serial (LoadAsync); depends on E1/E2 |
@@ -73,7 +79,7 @@
 
 ## Rigor / Model Assignment Rationale
 
-- **opus @ xhigh**: the OOXML fidelity engine + irreversible cutover (010 paraId minting, 020 splice, 021 Docxodus adapter, 022 cutover) + 003 hardening gate — high blast radius, brownfield root-cause reasoning.
+- **opus @ xhigh**: the OOXML fidelity engines + irreversible cutover (010 paraId minting, 022 server SaveAsync inversion, **026 `ComposeDocumentRenderer` — from-scratch styles + multi-level numbering**, **027 client content-model cutover — irreversible save-contract change**) + 003 hardening gate — high blast radius, brownfield/greenfield-OOXML root-cause reasoning. (020 splice, 021 Docxodus adapter superseded.)
 - **opus @ high**: keystone-adjacent + flagship/wrap (012 anchoring, 050 import projection, 082 flagship, 090 wrap, 001 packaging).
 - **sonnet @ high**: well-specified client/UI + additive-contract + deploy tasks (toolset, E3 UI, deploys).
 - **sonnet @ xhigh**: seam slice tests (024, 052) — fully-specified but demand careful through-the-wire assertion authoring.

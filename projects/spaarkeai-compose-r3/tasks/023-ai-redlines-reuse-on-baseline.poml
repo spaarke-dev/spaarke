@@ -17,6 +17,18 @@
     <completed></completed>
   </metadata>
 
+  <amendment date="2026-07-18" by="spaarkeai-compose-r3 re-architecture">
+    SERVER-ONLY scope now. This task verifies-and-wires `DocxAnnotationWriter` so AI redlines/comments
+    compose correctly onto the SERVER-AUTHORED baseline — both the retained-original delta (022 synthesizer)
+    AND the from-scratch render (026 `ComposeDocumentRenderer`). The CLIENT reject-baseline rewire (retiring
+    `ComposeEditor.serializeForSave` / `buildRejectBaselineJson` / `tipTapJsonToDocxBytes`) is MOVED to task
+    027 (client content-model cutover) — do NOT do client work here. Baseline note: the annotation-apply
+    seam is now `ComposeService.SaveAsync` (post-Increment-A, `ce50c9877`), where `request.Annotations` are
+    applied via `_annotationWriter.Annotate` AFTER the synthesizer/renderer produces `contentToPersist` — so
+    the annotations decorate a FAITHFUL baseline, not a reconstruction. Add unit tests proving AI redline +
+    direct-typing delta (and AI redline + rendered born-in-editor doc) compose without corrupting either set.
+  </amendment>
+
   <prompt>
     Implement FR-04: AI redlines + comments continue to apply via the EXISTING `DocxAnnotationWriter`
     (native `w:ins`/`w:del`/`w:comment`) — unchanged from R2 — but now onto the retained-original
