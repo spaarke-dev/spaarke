@@ -11,7 +11,8 @@
 |-------|-------|
 | **Active work** | **R2 = "Communication Workspace"** — draft design done; awaiting owner decisions on 5 questions, then `/design-to-spec` → `/project-pipeline`. |
 | **R2 design** | [`projects/messaging-communication-app-r2/design.md`](design.md) (DRAFT). Investigation archive: [`notes/r2-resource-investigation.md`](notes/r2-resource-investigation.md). NO folder scaffolding beyond design + notes yet (no spec/plan/tasks/README/CLAUDE.md). |
-| **Next action** | Get owner answers to the **5 open questions** (design §10), then run `/design-to-spec` on `design.md` → `/project-pipeline`. |
+| **Next action** | **4 of 5 owner decisions LOCKED 2026-07-18** (design §10). Only **Q3 (coordination confirm)** remains — one-line owner answer, then `/design-to-spec` on `design.md` → `/project-pipeline`. |
+| **Locked decisions** | Q1=**build participant junction in R2** · Q2=**no category/tags** · Q4=**ship standalone page** · Q5=**all 11 regarding entities**. R2 is now the *full-breadth* build. |
 | **R1 status** | **28/29 tasks done, DEPLOYED + MERGED TO MASTER.** Only `090` wrap-up + owner config gates remain. Timeline verified working live. |
 | **Status** | R2 = planning/design; R1 = code-complete + deployed, wrap-up pending. |
 
@@ -44,12 +45,14 @@
 - **CC-4 auto-threading** — subject → record-default → master.
 - **CC-5 compose enrichment (just added)** — the R1 compose form has NO Subject/Cc/Bcc → every msg is `sprk_subject="(No Subject)"`, `sprk_name="Message: (No Subject)"`, and `To`→`sprk_to` TEXT. R2 adds Subject/topic (feeds naming), structured recipient picker (feeds the participant index), Cc/Bcc. Reuse existing `RecipientField`.
 
-**5 OPEN QUESTIONS for owner (design §10) — need answers before spec:**
-1. Participant index (junction) in R2, or defer + ship lookup-only person filter?
-2. Category/tags — reuse an existing platform taxonomy entity, or new choice set?
-3. Coordinate with `ai-spaarke-ai-workspace-UI-r2` — active? who owns the shared grid config + widget?
-4. Standalone "All Communications" page needed, or widget + record panel enough?
-5. Scope — Matter-first, or all 11 regarding-family entities?
+**OWNER DECISIONS (locked 2026-07-18, design §10):**
+1. Participant index → **BUILD the `sprk_communicationparticipant` junction in R2** (no lookup-only interim). W5 mandatory.
+2. Category/tags → **NOT in R2.** Threads = regarding + name only. Removes taxonomy check from W0.
+3. Coordination with `ai-spaarke-ai-workspace-UI-r2` → **STILL OPEN** (one-line confirm needed): sanction upgrading their shipped `sprk_gridconfiguration` (`e1826c4c-…`) + `communications-list` widget **in place**. Only gate left before `/design-to-spec`.
+4. Standalone "All Communications" page → **SHIP IT** (~50-line shell, copy `sprk_invoicespage`; register in `Deploy-AllDataGridConsumers.ps1`).
+5. Scope → **ALL 11 regarding-family entities** from day one (Surface 1 on all 11 forms; W1/W4 test matrix expands; `by-regarding` endpoint already entity-set-agnostic).
+
+**Net: R2 is the full-breadth build** — bigger on entities/junction/page, smaller by dropping category/tags.
 
 **Message compose field mapping (as-built, for reference)**: To→`sprk_to` (text, `;`-joined) · Body→`sprk_body` · Rich/Plain→`sprk_bodyformat` (HTML=100000001/Plain=100000000) · Attach→`sprk_communicationattachment` child rows · (auto) type=Message(100000004), direction=Outgoing(100000001), from=`sprk_from`, sentat, name="Message: {subject}", thread lookup, inReplyTo, acsmessageid/acsthreadid. Persist: `CommunicationService.cs:695-727`.
 

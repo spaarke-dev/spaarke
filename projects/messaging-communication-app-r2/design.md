@@ -73,18 +73,18 @@ Upgrade the existing thin `communications-list` widget to the **rich Calendar-st
 
 ### CC-1 — Thread gets the same regarding treatment as `sprk_communication`
 **Gotcha (verified):** the thread's `sprk_regardingrecordtype` is **Text**, but `sprk_communication`'s is a **Lookup** (`sprk_recordtype_ref`), and RegardingResolver requires a Lookup binding. So:
-- **Add** the typed `sprk_regarding{matter,project,…}` lookups to `sprk_communicationthread` (subset or all 11, mirroring `RegardingFieldMap.All`).
+- **Add** the typed `sprk_regarding{matter,project,…}` lookups to `sprk_communicationthread` — **all 11**, mirroring `RegardingFieldMap.All` (Q5 decision: all-entity from day one).
 - **Add a new Lookup discriminator field** for RegardingResolver's `regardingRecordType` binding (keep the existing Text field as the denormalized copy the timeline/membership already read — avoids a breaking retype of `ThreadResolver.cs` + membership derivation + timeline filters).
 - **Place the existing RegardingResolver PCF** on the thread form with `entity="sprk_communicationthread"` — **zero PCF code change** (FR-22 lever).
 - **Naming**: `sprk_name` is already user-editable; today `ThreadResolver.BuildTopic()` sets a one-shot default at create. Add "**re-derive unless user-edited**" logic (new — needs an auto-vs-edited flag).
-- **Category/tags/description**: genuinely new schema (no ADR-024 precedent). **First check for an existing tag/category entity** platform-wide before inventing one (§11).
+- ~~**Category/tags/description**~~: **OUT OF SCOPE for R2** (Q2 decision, 2026-07-18). Threads organized by regarding + name only; revisit post-UAT.
 - ❌ **Do NOT** use `CommunicationConnections` PCF (AI-provenance-specific) or the Field Mapping Framework (client-wizard-only) for thread regarding.
 
 ### CC-2 — Person filter needs a participant index (the one real schema-heavy piece)
 **Finding:** sender/recipients are stored as `;`-separated **text** (`sprk_from/to/cc`); there is **no queryable participant table**. The Membership service answers *record→people* (write-side), not *person→communications*.
 - **Add** `sprk_communicationparticipant` junction: `(communication|thread) ↔ resolved systemuser|contact + role{From,To,Cc})`, populated at **capture/send** time by reusing `ParticipantCorrelationRung`'s email→contact resolution (`QueryContactByEmailAsync`).
 - Align with ADR-034's `(personId, personIdType)` tuple precedent (which explicitly rejected text-index + polymorphic-lookup approaches). **Requires a schema ADR + §10/§11 justification.**
-- **Interim:** ship person filtering via the existing **lookups** (`sprk_sentby`, `sprk_regardingperson`) on the grid now; gate the full sender/recipient/participant filter on the junction.
+- **Q1 decision (2026-07-18): junction is in scope for R2 — no lookup-only interim.** The `sprk_sentby`/`sprk_regardingperson` lookups remain available as grid chips, but the `participant=` facet (exact sender/recipient/Cc filtering across all roles) ships on the junction in W5.
 
 ### CC-3 — Read endpoints (extend the blessed read path, don't fork it)
 - `GET /api/communications/by-regarding/{entityType}/{id}` → all threads+messages for a record. **Reuse** `IImpersonatedCommunicationQuery` (entity-set-agnostic) + `ICommunicationAccessFilter` + DTOs; add a `ReadByRegardingAsync` on `CommunicationThreadReadService` (impersonated-query threads by regarding → messages by thread-id `or`-filter → same access filter). Small add, no new access logic.
@@ -108,7 +108,7 @@ This is the single point where CC-1 (naming), CC-2 (person index), and the captu
 | # | Tension | Options |
 |---|---|---|
 | T-1 | **VisualHost client-fetch vs BFF access filter** | Surface 1b (VisualHost) fetches client-side (native Dataverse RLS, but no `internal-only` rule). **Decision:** use VisualHost only for a count/summary card; render message *content* via the BFF-backed regarding-mode Timeline (1a). |
-| T-2 | **Participant index = net-new schema (ADR)** | Person filter can't be done well on text fields. Add `sprk_communicationparticipant` junction (§11 + schema ADR) vs. accept lookup-only person filtering (`sprk_sentby`/`sprk_regardingperson`) for R2. |
+| T-2 | **Participant index = net-new schema (ADR)** | Person filter can't be done well on text fields. **RESOLVED 2026-07-18 (Q1): build the `sprk_communicationparticipant` junction in R2** (§11 + schema ADR + capture/send population). No lookup-only interim. |
 | T-3 | **Thread regarding discriminator field** | Add a new Lookup field (non-breaking) vs. retype the existing Text `sprk_regardingrecordtype` (breaking — touches ThreadResolver + membership + timeline filters). Recommend: add new Lookup, keep Text as denormalized copy. |
 | T-4 | **Coordinate with `ai-spaarke-ai-workspace-UI-r2`** | The grid config + thin widget are theirs. R2 upgrades the widget in place — confirm ownership/coordination so we don't fork the config record. |
 
@@ -138,22 +138,34 @@ This is the single point where CC-1 (naming), CC-2 (person index), and the captu
 
 ## 9. Proposed waves (draft)
 
-- **W0 — Schema + coordination**: thread typed-regarding lookups + Lookup discriminator + category/tags; participant-index ADR decision; confirm widget/config coordination with `ai-spaarke-ai-workspace-UI-r2`.
-- **W1 — BFF reads**: `by-regarding` + filtered `query` endpoints (reuse read path); seam tests.
-- **W2 — Record threads view (Surface 1)**: regarding-mode Timeline component + PCF; optional VisualHost summary card.
-- **W3 — Workspace widget upgrade (Surface 3)**: `@spaarke/communication-components` + rich widget replacing the thin one.
-- **W4 — Grid polish (Surface 2)**: standalone page shell + curated views/columns/person chips.
-- **W5 — Participant index + person filter (CC-2)**: junction + capture/send population + `participant=` facet.
+> Reflects the 2026-07-18 owner decisions: all-11-entity scope (Q5), participant junction in R2 (Q1), standalone page in R2 (Q4), **no category/tags** (Q2). Only Q3 (coordination confirm) gates W0.
+
+- **W0 — Schema + coordination**: thread typed-regarding **all-11** lookups + Lookup discriminator (**no category/tags — Q2**); participant-index schema ADR (junction confirmed in scope — Q1); **confirm widget/config coordination with `ai-spaarke-ai-workspace-UI-r2` (Q3 — the one open gate)**.
+- **W1 — BFF reads**: `by-regarding` + filtered `query` endpoints (reuse read path); seam tests. Must cover all 11 regarding entity-sets.
+- **W2 — Record threads view (Surface 1)**: regarding-mode Timeline component + PCF; **placed on all 11 entity forms**; optional VisualHost summary card.
+- **W3 — Workspace widget upgrade (Surface 3)**: `@spaarke/communication-components` + rich widget replacing the thin one (upgrade-in-place pending Q3).
+- **W4 — Standalone page + grid polish (Surface 2)**: **ship the standalone All-Communications page** (~50-line shell, copy `sprk_invoicespage`; register in `Deploy-AllDataGridConsumers.ps1`) + curated views/columns/person chips.
+- **W5 — Participant index + person filter (CC-2)**: junction + capture/send population + `participant=` facet. **In scope (Q1), not conditional.**
 - **W6 — Compose-form enrichment (CC-5)**: Subject/topic + Cc/Bcc + structured recipient picker (feeds CC-1 naming + CC-2 index).
 - **W7 — Auto-threading policy (CC-4)** + thread naming re-derive (CC-1).
 - **W8 — Tests + docs + wrap**.
 
-## 10. Open questions for the owner
-1. **Participant index (T-2)** — build the junction in R2, or defer full person-filter and ship lookup-only for now?
-2. **Category/tags** — is there an existing platform tag/taxonomy entity to reuse, or is a new choice set acceptable?
-3. **Coordination (T-4)** — is `ai-spaarke-ai-workspace-UI-r2` active; who owns the shared config record + widget?
-4. **Standalone page (Surface 2)** — needed, or is the workspace widget + record panel sufficient?
-5. **Scope of "records"** — Matter-first, or all 11 regarding-family entities from day one?
+## 10. Owner decisions (locked 2026-07-18)
+
+| # | Question | **Decision** | Impact on scope |
+|---|----------|--------------|-----------------|
+| 1 | Participant index (T-2) — junction now vs lookup-only | **Build `sprk_communicationparticipant` junction in R2** | T-2 resolved toward the schema-heavy path. Junction + schema ADR + capture/send-time population + `participant=` facet are **in scope** (W5). No lookup-only interim — do it properly. |
+| 2 | Category/tags — reuse taxonomy vs new choice set | **No category/tags in R2** | Drop category/tags from CC-1 and from thread schema delta. Threads organized by regarding + name only. Revisit post-UAT. Removes the "check for existing taxonomy" investigation from W0. |
+| 3 | Coordination (T-4) — is `ai-spaarke-ai-workspace-UI-r2` active; who owns the config + widget? | **Pending owner confirmation** (see note below) | Default plan: **upgrade the shipped grid config + `communications-list` widget in place** (no fork). Needs a one-line confirmation before W0 that we own/coordinate that project's artifacts. |
+| 4 | Standalone "All Communications" page (Surface 2) | **Yes — ship the standalone page** | Surface 2 is **in scope**: ~50-line DataGrid shell (copy `sprk_invoicespage`) + registration in `Deploy-AllDataGridConsumers.ps1`. Global cross-record inbox with channel/person/date/regarding chips. |
+| 5 | Scope of "records" — Matter-first vs all 11 | **All 11 regarding-family entities from day one** | Surface 1 (record-threads view) wires onto all 11 typed regarding entities. Larger form-deploy + test matrix; `by-regarding` endpoint is already entity-set-agnostic so the server cost is flat, but W1/W4 must cover 11 form placements + an 11-entity test pass. |
+
+**Still open — Q3 coordination (one-line answer needed before W0):** confirm that upgrading `ai-spaarke-ai-workspace-UI-r2`'s shipped `sprk_gridconfiguration` (`e1826c4c-…`) + `communications-list` widget **in place** is sanctioned (vs that project being mid-flight and owning them). This is the only gate left before `/design-to-spec`.
+
+### Net effect of the decisions on the plan
+- **Bigger:** all-11-entity Surface 1 (Q5) + standalone page (Q4) + participant junction now (Q1) → R2 is the *full-breadth* build, not the trimmed one the investigation floated.
+- **Smaller:** no category/tags (Q2) removes a schema field + a taxonomy investigation.
+- **Waves affected:** W0 drops category/tags + taxonomy check; W1/W4 expand to 11 entities; W5 is now mandatory (not conditional); a new standalone-page wave folds into the Surface-2 work.
 
 ---
 
