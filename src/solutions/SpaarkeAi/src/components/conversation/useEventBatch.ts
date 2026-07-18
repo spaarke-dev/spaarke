@@ -91,6 +91,13 @@ export interface EventBatchMachine {
   /** Most recent outbound message text (ADR-015: never rendered, never logged). */
   getLastSentMessage: () => string;
   /**
+   * True while a fired Event batch's `runDocumentUploadedEvent` SSE stream (the
+   * classify → output → confirmation stream) is in flight. The host locks the
+   * composer on this (#2b, UAT 2026-07-18) so a typed instruction can't be sent
+   * during the classify window and silently dropped.
+   */
+  isEventInFlight: boolean;
+  /**
    * Session-created reset: promoted ids are session-scoped so the pending
    * queue + failed set + fallback timer clear; membership + batch-open
    * timestamp are KEPT (cold-start gesture: attach → type → first send
@@ -101,6 +108,11 @@ export interface EventBatchMachine {
 
 export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
   const { bffBaseUrl, getAccessToken, getSessionId, enqueueAssistantMessage, onChips } = deps;
+
+  // #2b (UAT 2026-07-18): count of in-flight Event SSE streams so the host can
+  // lock the composer during the classify window. A counter (not a bool) because
+  // a late/duplicate promotion can open a second batch while the first streams.
+  const [inFlightEvents, setInFlightEvents] = React.useState(0);
 
   const pendingEventFilesRef = React.useRef<Array<{ chipId: string; documentId: string }>>([]);
   const expectedRef = React.useRef<Set<string>>(new Set());
@@ -186,6 +198,7 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
       typedCommand !== null
     );
 
+    setInFlightEvents((n) => n + 1);
     void runDocumentUploadedEvent({
       bffBaseUrl,
       sessionId,
@@ -215,9 +228,13 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
           enqueueAssistantMessage(makeLocalAssistantMessage(message || EVENT_FAILURE_MESSAGE));
         },
       },
-    }).catch(() => {
-      enqueueAssistantMessage(makeLocalAssistantMessage(EVENT_FAILURE_MESSAGE));
-    });
+    })
+      .catch(() => {
+        enqueueAssistantMessage(makeLocalAssistantMessage(EVENT_FAILURE_MESSAGE));
+      })
+      .finally(() => {
+        setInFlightEvents((n) => Math.max(0, n - 1));
+      });
   }, [bffBaseUrl, getAccessToken, getSessionId, enqueueAssistantMessage, onChips]);
   fireRef.current = fire;
 
@@ -369,6 +386,9 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
     // (cold-start gesture semantics — see interface JSDoc).
     pendingEventFilesRef.current = [];
     failedChipIdsRef.current = new Set();
+    // A prior session's in-flight stream (if any) decrements via its own .finally
+    // (Math.max-clamped), so a hard reset to 0 here is safe and unlocks the fresh session.
+    setInFlightEvents(0);
     if (timerRef.current !== null) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -396,6 +416,7 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
       fireForPromotedFile,
       noteOutboundMessage,
       getLastSentMessage,
+      isEventInFlight: inFlightEvents > 0,
       resetForSession,
     }),
     [
@@ -406,6 +427,7 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
       fireForPromotedFile,
       noteOutboundMessage,
       getLastSentMessage,
+      inFlightEvents,
       resetForSession,
     ]
   );
