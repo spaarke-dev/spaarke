@@ -57,7 +57,11 @@ public class MembershipReconcilerTests
             .Callback<string, IEnumerable<string>, CancellationToken>((_, ids, _) => _added.AddRange(ids))
             .ReturnsAsync((string t, IEnumerable<string> ids, CancellationToken _) => new AcsMembershipChange
             {
-                ChatThreadId = t, Requested = ids.Count(), Applied = ids.Count(), NoOped = 0, BatchCount = 1,
+                ChatThreadId = t,
+                Requested = ids.Count(),
+                Applied = ids.Count(),
+                NoOped = 0,
+                BatchCount = 1,
             });
 
         _acsThread
@@ -65,7 +69,11 @@ public class MembershipReconcilerTests
             .Callback<string, string, CancellationToken>((_, id, _) => _removed.Add(id))
             .ReturnsAsync((string t, string id, CancellationToken _) => new AcsMembershipChange
             {
-                ChatThreadId = t, Requested = 1, Applied = 1, NoOped = 0, BatchCount = 1,
+                ChatThreadId = t,
+                Requested = 1,
+                Applied = 1,
+                NoOped = 0,
+                BatchCount = 1,
             });
 
         _audit

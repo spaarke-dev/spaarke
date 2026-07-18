@@ -25,13 +25,17 @@ public sealed class AcsIdentityService : IAcsIdentityService
     private static readonly TimeSpan MinValidity = TimeSpan.FromHours(1);
     private static readonly TimeSpan MaxValidity = TimeSpan.FromHours(24);
 
-    private readonly CommunicationIdentityClient _identityClient;
+    // Lazy so CONSTRUCTING this service never builds the ACS client (ADR-032 boot-safety): the client
+    // factory throws when Communication:Acs:Endpoint is unconfigured, and this service is pulled into the
+    // startup hosted-service graph (via MembershipReconciler → MembershipReconcileSweepService). Deferring
+    // the build to first use means a BFF with no ACS config still boots; only an actual ACS call fails.
+    private readonly Lazy<CommunicationIdentityClient> _identityClient;
     private readonly IGenericEntityService _dataverse;
     private readonly TimeSpan _defaultValidity;
     private readonly ILogger<AcsIdentityService> _logger;
 
     public AcsIdentityService(
-        CommunicationIdentityClient identityClient,
+        Lazy<CommunicationIdentityClient> identityClient,
         IGenericEntityService dataverse,
         IOptions<AcsOptions> options,
         ILogger<AcsIdentityService> logger)
@@ -73,7 +77,7 @@ public sealed class AcsIdentityService : IAcsIdentityService
 
         // 2. Create the ACS identity (trusted service) and persist the mapping via the canonical
         //    Dataverse interface (no direct SDK).
-        Response<CommunicationUserIdentifier> created = await _identityClient.CreateUserAsync(ct);
+        Response<CommunicationUserIdentifier> created = await _identityClient.Value.CreateUserAsync(ct);
         var communicationUserId = created.Value.Id;
 
         await _dataverse.UpdateAsync(
@@ -104,7 +108,7 @@ public sealed class AcsIdentityService : IAcsIdentityService
         var scopes = new[] { CommunicationTokenScope.Chat }; // chat scope ONLY (NFR — uniform minting)
         var expiresIn = ClampValidity(validity ?? _defaultValidity);
 
-        Response<AccessToken> token = await _identityClient.GetTokenAsync(user, scopes, expiresIn, ct);
+        Response<AccessToken> token = await _identityClient.Value.GetTokenAsync(user, scopes, expiresIn, ct);
 
         return new AcsChatToken
         {

@@ -25,19 +25,19 @@ public class AcsBoundaryProvisioningTests
         string[]? eventTypes = null,
         string deadLetterStorageId = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/sprkacme",
         string deadLetterContainer = "acs-eventgrid-deadletter") => new()
-    {
-        DataLocation = dataLocation,
-        EventGrid = new AcsEventGridOptions
         {
-            WebhookEndpointUrl = webhook,
-            IncludedEventTypes = eventTypes ?? AcsChatEventTypes.Default,
-            DeadLetter = new AcsDeadLetterOptions
+            DataLocation = dataLocation,
+            EventGrid = new AcsEventGridOptions
             {
-                StorageAccountResourceId = deadLetterStorageId,
-                ContainerName = deadLetterContainer,
+                WebhookEndpointUrl = webhook,
+                IncludedEventTypes = eventTypes ?? AcsChatEventTypes.Default,
+                DeadLetter = new AcsDeadLetterOptions
+                {
+                    StorageAccountResourceId = deadLetterStorageId,
+                    ContainerName = deadLetterContainer,
+                },
             },
-        },
-    };
+        };
 
     private static AcsBoundaryProvisioningService Service(
         AcsProvisioningOptions options,

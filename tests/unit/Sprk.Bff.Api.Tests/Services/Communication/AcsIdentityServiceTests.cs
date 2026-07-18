@@ -32,7 +32,7 @@ public class AcsIdentityServiceTests
         Mock<IGenericEntityService> dataverse,
         int defaultValidityHours = 24)
         => new(
-            identityClient.Object,
+            new Lazy<CommunicationIdentityClient>(() => identityClient.Object),
             dataverse.Object,
             Options.Create(new AcsOptions { DefaultTokenValidityHours = defaultValidityHours }),
             Mock.Of<ILogger<AcsIdentityService>>());

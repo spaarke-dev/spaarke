@@ -28,10 +28,14 @@ public sealed class AcsThreadService : IAcsThreadService
 
     private static readonly TimeSpan DefaultRetention = TimeSpan.FromDays(MinRetentionDays);
 
-    private readonly ChatClient _chatClient;
+    // Lazy so CONSTRUCTING this service never builds the ACS ChatClient (ADR-032 boot-safety): the client
+    // factory throws when Communication:Acs:Endpoint is unconfigured, and this service is reachable from the
+    // startup hosted-service graph. Deferring the build to first use lets a BFF with no ACS config boot; only
+    // an actual ACS thread operation fails.
+    private readonly Lazy<ChatClient> _chatClient;
     private readonly ILogger<AcsThreadService> _logger;
 
-    public AcsThreadService(ChatClient chatClient, ILogger<AcsThreadService> logger)
+    public AcsThreadService(Lazy<ChatClient> chatClient, ILogger<AcsThreadService> logger)
     {
         _chatClient = chatClient;
         _logger = logger;
@@ -62,7 +66,7 @@ public sealed class AcsThreadService : IAcsThreadService
 
         try
         {
-            Response<CreateChatThreadResult> response = await _chatClient.CreateChatThreadAsync(options, ct);
+            Response<CreateChatThreadResult> response = await _chatClient.Value.CreateChatThreadAsync(options, ct);
             var threadId = response.Value.ChatThread.Id;
 
             _logger.LogInformation(
@@ -89,7 +93,11 @@ public sealed class AcsThreadService : IAcsThreadService
         {
             return new AcsMembershipChange
             {
-                ChatThreadId = chatThreadId, Requested = 0, Applied = 0, NoOped = 0, BatchCount = 0,
+                ChatThreadId = chatThreadId,
+                Requested = 0,
+                Applied = 0,
+                NoOped = 0,
+                BatchCount = 0,
             };
         }
 
@@ -148,7 +156,11 @@ public sealed class AcsThreadService : IAcsThreadService
             await threadClient.RemoveParticipantAsync(new CommunicationUserIdentifier(mri), ct);
             return new AcsMembershipChange
             {
-                ChatThreadId = chatThreadId, Requested = 1, Applied = 1, NoOped = 0, BatchCount = 1,
+                ChatThreadId = chatThreadId,
+                Requested = 1,
+                Applied = 1,
+                NoOped = 0,
+                BatchCount = 1,
             };
         }
         catch (RequestFailedException ex) when (ex.Status == 429)
@@ -163,7 +175,11 @@ public sealed class AcsThreadService : IAcsThreadService
                 chatThreadId);
             return new AcsMembershipChange
             {
-                ChatThreadId = chatThreadId, Requested = 1, Applied = 0, NoOped = 1, BatchCount = 1,
+                ChatThreadId = chatThreadId,
+                Requested = 1,
+                Applied = 0,
+                NoOped = 1,
+                BatchCount = 1,
             };
         }
     }
@@ -199,7 +215,7 @@ public sealed class AcsThreadService : IAcsThreadService
     {
         if (string.IsNullOrWhiteSpace(chatThreadId))
             throw new ArgumentException("chatThreadId is required.", nameof(chatThreadId));
-        return _chatClient.GetChatThreadClient(chatThreadId);
+        return _chatClient.Value.GetChatThreadClient(chatThreadId);
     }
 
     private static int ClampRetention(TimeSpan retention)

@@ -31,7 +31,7 @@ public class AcsThreadServiceTests
     private static Response<T> Resp<T>(T value) => Response.FromValue(value, Mock.Of<Response>());
 
     private static AcsThreadService BuildSut(Mock<ChatClient> chatClient)
-        => new(chatClient.Object, Mock.Of<ILogger<AcsThreadService>>());
+        => new(new Lazy<ChatClient>(() => chatClient.Object), Mock.Of<ILogger<AcsThreadService>>());
 
     private static CreateChatThreadResult ThreadResult(string threadId) =>
         ChatModelFactory.CreateChatThreadResult(
