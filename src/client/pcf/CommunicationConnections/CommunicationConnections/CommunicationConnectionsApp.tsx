@@ -95,7 +95,7 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   grow: { flex: 1 },
-  primaryRow: { display: 'flex', alignItems: 'baseline', gap: tokens.spacingHorizontalM, minWidth: 0 },
+  primaryRow: { display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: tokens.spacingHorizontalM, minWidth: 0 },
   primaryNumber: {
     color: tokens.colorBrandForegroundLink,
     fontWeight: tokens.fontWeightSemibold,
@@ -110,6 +110,13 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
   },
   emptyText: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase300 },
+  // Why the primary record matched — shown subtly under the name on the collapsed card.
+  cardReason: {
+    flexBasis: '100%',
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase100,
+    fontStyle: 'italic',
+  },
   // Wizard-standard modal footprint (~80vw × 80vh) so the review grid has room.
   modalSurface: { width: '80vw', maxWidth: '1200px', height: '80vh', maxHeight: '80vh' },
   modalBody: { height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
@@ -556,6 +563,11 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   const toReviewCount =
     connectionsForCount.filter(c => c.status !== 'confirmed' && !confirmedFields.has(c.field)).length +
     aiSuggestionCount;
+  // The primary connection (matches the denormalized primary shown on the card) — used to surface the
+  // match reason + record number on the collapsed card so the reviewer sees WHY without opening the modal.
+  const primaryConn =
+    connectionsForCount.find(c => c.targetName === primaryDenorm.name && c.matchReason) ??
+    connectionsForCount.find(c => c.status === 'confirmed' && c.matchReason);
 
   return (
     <div className={s.root}>
@@ -589,8 +601,11 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
         </div>
         {primaryDenorm.name ? (
           <div className={s.primaryRow}>
-            {primaryDenorm.number && <Text className={s.primaryNumber}>{primaryDenorm.number}</Text>}
+            {(primaryDenorm.number || primaryConn?.recordNumber) && (
+              <Text className={s.primaryNumber}>{primaryDenorm.number || primaryConn?.recordNumber}</Text>
+            )}
             <Text className={s.primaryName}>{primaryDenorm.name}</Text>
+            {primaryConn?.matchReason && <Text className={s.cardReason}>{primaryConn.matchReason}</Text>}
           </div>
         ) : (
           <Text className={s.emptyText}>

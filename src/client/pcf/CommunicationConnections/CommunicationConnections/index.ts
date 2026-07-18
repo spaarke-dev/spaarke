@@ -23,7 +23,7 @@ import * as React from 'react';
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import { CommunicationConnectionsHost } from './CommunicationConnectionsHost';
 
-const CONTROL_VERSION = '1.2.0';
+const CONTROL_VERSION = '1.2.1';
 
 export class CommunicationConnections implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   private _associationProvenance: string | undefined;

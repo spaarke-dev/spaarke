@@ -483,7 +483,7 @@ function ConnectionRow({
                 {targetName}
                 {conn.recordNumber ? <span className={s.recordNumber}> · {conn.recordNumber}</span> : null}
               </Text>
-              {conn.matchReason && conn.status === 'suggested' ? (
+              {conn.matchReason ? (
                 <Text size={100} className={s.matchReason}>
                   {conn.matchReason}
                 </Text>
