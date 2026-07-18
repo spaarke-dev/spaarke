@@ -250,6 +250,24 @@ public class ComposeService : IComposeService
             paraIdMap = Array.Empty<ParaIdMapEntry>();
         }
 
+        // FR-06 (E1, task 027): capture the LOAD-TIME SPE version id so a later dirty save that no longer
+        // holds the client bytes (e.g. after a page refresh) can re-fetch THIS baseline by versionId
+        // (DownloadFileVersionAsUserAsync). Best-effort behind the SpeFileStore facade (ADR-007) — a null
+        // (no version history / lookup unavailable) never fails Load; the client then relies on the
+        // retained-bytes Content fast-path.
+        string? versionId = null;
+        try
+        {
+            versionId = await _spe.GetCurrentVersionIdAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose load: current-version-id lookup failed for drive={DriveId} item={DocumentSpeId}; the save path will use the retained-bytes fast-path",
+                request.DriveId, request.DocumentSpeId);
+        }
+
         // 3) Ensure a ChatSession bound to the document. For Path A (Document row present),
         //    bind to sprk_documentid; for Path B continuation, bind to the SPE drive-item id.
         var bindingId = request.DocumentRecordId.HasValue
@@ -304,6 +322,7 @@ public class ComposeService : IComposeService
             DocumentRecordId = request.DocumentRecordId,
             Content = content,
             ETag = metadata.ETag,
+            VersionId = versionId,
             FileName = metadata.Name,
             Size = metadata.Size,
             AnchoredAnnotations = session.AnchoredAnnotations ?? Array.Empty<AnchoredAnnotation>(),

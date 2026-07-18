@@ -340,6 +340,17 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     /// <summary>SPE ETag (used for staleness detection on next Save).</summary>
     public string? ETag { get; init; }
 
+    /// <summary>
+    /// FR-06 (E1, task 022/027): the LOAD-TIME SPE version id — the drive-item's CURRENT version at the
+    /// moment of Load, resolved via <c>ISpeFileOperations.GetCurrentVersionIdAsUserAsync</c>. The client
+    /// carries it back on a later dirty save as <see cref="SaveComposeDocumentRequest.BaselineVersionId"/>
+    /// so the server can re-fetch this exact baseline even after the client no longer holds the retained
+    /// bytes (e.g. a save after a page refresh) — the load-time version stays addressable after the save
+    /// advances the item's current version. Null (best-effort) when the item has no version history or the
+    /// version lookup was unavailable; the client then relies on the retained-bytes <c>Content</c> fast-path.
+    /// </summary>
+    public string? VersionId { get; init; }
+
     /// <summary>File name from SPE metadata.</summary>
     public string? FileName { get; init; }
 

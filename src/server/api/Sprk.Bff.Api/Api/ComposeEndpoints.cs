@@ -1236,6 +1236,7 @@ public static class ComposeEndpoints
                 DocumentRecordId: result.DocumentRecordId,
                 Content: result.Content.ToArray(),
                 ETag: result.ETag,
+                VersionId: result.VersionId,
                 FileName: result.FileName,
                 Size: result.Size,
                 // gaps 4.2/4.4: surface the three collections the (unchanged) service already
@@ -1292,11 +1293,18 @@ public static class ComposeEndpoints
         if (string.IsNullOrWhiteSpace(body.DriveId)) return BadRequest("driveId is required in the request body.");
         if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
         if (string.IsNullOrWhiteSpace(body.SessionId)) return BadRequest("sessionId is required in the request body for first-Save promotion rebind.");
-        if (body.Content is null || body.Content.Length == 0) return BadRequest("content is required and must be non-empty.");
+        // R3 task 027: the client no longer authors .docx bytes for a dirty save. The replace path accepts
+        // EITHER the retained-original Content (clean save / same-session baseline fast-path) OR a
+        // dirty-loaded delta ({ baselineVersionId, editedParagraphs }) where the server re-fetches the
+        // load-time version as the baseline. One of the two MUST be resolvable.
+        var hasContent = body.Content is { Length: > 0 };
+        var hasDeltaBaseline = body.EditedParagraphs is { Count: > 0 } && !string.IsNullOrWhiteSpace(body.BaselineVersionId);
+        if (!hasContent && !hasDeltaBaseline)
+            return BadRequest("Provide the retained-original 'content' bytes, or 'editedParagraphs' + 'baselineVersionId' for a dirty save (the client no longer authors .docx bytes).");
 
         logger.LogInformation(
-            "Compose save: tenant={TenantId} drive={DriveId} item={DocumentSpeId} session={SessionId} record={DocumentRecordId} size={SizeBytes} TraceId={TraceId}",
-            body.TenantId, body.DriveId, documentSpeId, body.SessionId, body.DocumentRecordId, body.Content.Length, httpContext.TraceIdentifier);
+            "Compose save: tenant={TenantId} drive={DriveId} item={DocumentSpeId} session={SessionId} record={DocumentRecordId} contentBytes={SizeBytes} edits={EditCount} TraceId={TraceId}",
+            body.TenantId, body.DriveId, documentSpeId, body.SessionId, body.DocumentRecordId, body.Content?.Length ?? 0, body.EditedParagraphs?.Count ?? 0, httpContext.TraceIdentifier);
 
         var request = new SaveComposeDocumentRequest
         {
@@ -1305,12 +1313,16 @@ public static class ComposeEndpoints
             // ContainerId is ignored on the replace path (DocumentSpeId present) but forwarded
             // for symmetry so both save routes map the same body shape.
             ContainerId = body.ContainerId,
-            Content = body.Content,
+            Content = body.Content is null ? ReadOnlyMemory<byte>.Empty : body.Content,
             // Replace path still requires a session (guarded above at the endpoint); non-null here.
             SessionId = body.SessionId!,
             TenantId = body.TenantId,
             DocumentRecordId = body.DocumentRecordId,
             DisplayName = body.DisplayName,
+            // R3 FR-01/FR-06 (task 027): the paraId-keyed dirty-edit delta + the load-time baseline version.
+            BaselineVersionId = body.BaselineVersionId,
+            EditedParagraphs = body.EditedParagraphs,
+            ContentModel = body.ContentModel,
             // UAT-R7 #2/#3/#4: pending redlines + comments the server re-applies as native OOXML.
             Annotations = body.Annotations,
         };
@@ -1342,11 +1354,16 @@ public static class ComposeEndpoints
         // sessionId is OPTIONAL on the transient-create path (task 110): a Browse/local-file first
         // Save has no chat session. The FR-07 rebind is skipped server-side when it is absent; the
         // SPE create + sprk_document create + indexing all complete without one.
-        if (body.Content is null || body.Content.Length == 0) return BadRequest("content is required and must be non-empty.");
+        // R3 task 027: create-on-save accepts EITHER retained-original Content (browse-local passthrough)
+        // OR a born-in-editor ContentModel (AI-draft/blank — the server RENDERS the .docx). One MUST be present.
+        var hasContent = body.Content is { Length: > 0 };
+        var hasContentModel = body.ContentModel is { Blocks.Count: > 0 };
+        if (!hasContent && !hasContentModel)
+            return BadRequest("Provide the retained-original 'content' bytes, or a 'contentModel' for a born-in-editor draft (the client no longer authors .docx bytes).");
 
         logger.LogInformation(
-            "Compose create-on-save: tenant={TenantId} container={ContainerId} session={SessionId} size={SizeBytes} TraceId={TraceId}",
-            body.TenantId, body.ContainerId, body.SessionId, body.Content.Length, httpContext.TraceIdentifier);
+            "Compose create-on-save: tenant={TenantId} container={ContainerId} session={SessionId} contentBytes={SizeBytes} modelBlocks={BlockCount} TraceId={TraceId}",
+            body.TenantId, body.ContainerId, body.SessionId, body.Content?.Length ?? 0, body.ContentModel?.Blocks.Count ?? 0, httpContext.TraceIdentifier);
 
         var request = new SaveComposeDocumentRequest
         {
@@ -1355,13 +1372,15 @@ public static class ComposeEndpoints
             DocumentSpeId = null,
             DriveId = null,
             ContainerId = body.ContainerId,
-            Content = body.Content,
+            Content = body.Content is null ? ReadOnlyMemory<byte>.Empty : body.Content,
             // Empty when no session is bound (Browse/local-file first Save). The service treats an
             // empty/whitespace SessionId as "no session" and skips the FR-07 rebind (task 110).
             SessionId = body.SessionId ?? string.Empty,
             TenantId = body.TenantId,
             DocumentRecordId = null,
             DisplayName = body.DisplayName,
+            // R3 FR-01a (task 027): the born-in-editor content model the server RENDERS into high-fidelity bytes.
+            ContentModel = body.ContentModel,
             // UAT-R7 #2/#3/#4: pending redlines + comments the server re-applies as native OOXML.
             Annotations = body.Annotations,
         };
@@ -1951,7 +1970,12 @@ public sealed record SaveComposeDocumentBody(
     /// rebind. Still REQUIRED on the replace path (guarded at that endpoint).</summary>
     [property: JsonPropertyName("sessionId")] string? SessionId,
     [property: JsonPropertyName("tenantId")] string TenantId,
-    [property: JsonPropertyName("content")] byte[] Content,
+    /// <summary>The retained-original bytes (same-session fast-path baseline / clean-save passthrough).
+    /// OPTIONAL as of R3 task 027: a dirty-loaded save may instead send <see cref="BaselineVersionId"/> +
+    /// <see cref="EditedParagraphs"/> (the server re-fetches the load-time version), and a born-in-editor
+    /// save sends <see cref="ContentModel"/> (the server RENDERS the bytes). The client authors no
+    /// <c>.docx</c> bytes — the only bytes it ever sends are this retained original.</summary>
+    [property: JsonPropertyName("content")] byte[]? Content = null,
     [property: JsonPropertyName("driveId")] string? DriveId = null,
     /// <summary>Client-resolved SPE container id for the create-on-save path (Fork A —
     /// businessunit.sprk_containerid). Required when there is no drive-item yet; ignored on replace.</summary>
@@ -1963,7 +1987,20 @@ public sealed record SaveComposeDocumentBody(
     /// <c>w:comment</c> via <c>DocxAnnotationWriter</c> on top of the baseline <c>content</c> before
     /// persisting (see <see cref="SaveComposeDocumentRequest.Annotations"/>). Absent/empty on a plain
     /// no-redline Save — the baseline is then persisted unchanged. Same shape the push path uses.</summary>
-    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation>? Annotations = null);
+    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation>? Annotations = null,
+    /// <summary>R3 FR-06 (task 027): the LOAD-TIME SPE version id (from the Load response). Sent on a
+    /// dirty-loaded save when the client no longer holds the retained <see cref="Content"/> bytes so the
+    /// server re-fetches the load-time version as the delta baseline.</summary>
+    [property: JsonPropertyName("baselineVersionId")] string? BaselineVersionId = null,
+    /// <summary>R3 FR-01 (task 027): the editor paragraphs the user CHANGED, each keyed by its
+    /// <c>w14:paraId</c> with its new text. Drives the server-side tracked-change synthesizer onto the
+    /// resolved baseline — the client never authors the delta bytes.</summary>
+    [property: JsonPropertyName("editedParagraphs")] IReadOnlyList<ComposeEditedParagraph>? EditedParagraphs = null,
+    /// <summary>R3 FR-01a (task 027): the paraId-keyed content model for a BORN-IN-EDITOR save (AI-drafted /
+    /// blank / browse-local — no retained original). The server RENDERS the high-fidelity <c>.docx</c> from
+    /// it (styles + style-linked multi-level numbering + tables + minted paraId). Mutually exclusive with
+    /// <see cref="Content"/> / <see cref="BaselineVersionId"/>.</summary>
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null);
 
 /// <summary>Request body for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentBody(
@@ -2024,6 +2061,7 @@ public sealed record LoadComposeDocumentResponse(
     [property: JsonPropertyName("documentRecordId")] Guid? DocumentRecordId,
     [property: JsonPropertyName("content")] byte[] Content,
     [property: JsonPropertyName("eTag")] string? ETag,
+    [property: JsonPropertyName("versionId")] string? VersionId,
     [property: JsonPropertyName("fileName")] string? FileName,
     [property: JsonPropertyName("size")] long? Size,
     [property: JsonPropertyName("anchoredAnnotations")] IReadOnlyList<AnchoredAnnotation> AnchoredAnnotations,

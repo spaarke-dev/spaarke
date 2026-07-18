@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Sprk.Bff.Api.Services.Compose;
 
 /// <summary>
@@ -31,7 +33,9 @@ public sealed record ComposeContentModel
     public IReadOnlyList<ComposeBlock> Blocks { get; init; } = Array.Empty<ComposeBlock>();
 }
 
-/// <summary>The block kinds the renderer materializes into body content.</summary>
+/// <summary>The block kinds the renderer materializes into body content. Serialized as its STRING name
+/// over the wire (the client posts <c>"heading"</c> etc.; the BFF has no global string-enum converter).</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ComposeBlockKind
 {
     /// <summary>A body paragraph (Normal style).</summary>
@@ -49,7 +53,9 @@ public enum ComposeBlockKind
     Table,
 }
 
-/// <summary>Paragraph horizontal alignment (mirrors the TipTap <c>textAlign</c> attribute).</summary>
+/// <summary>Paragraph horizontal alignment (mirrors the TipTap <c>textAlign</c> attribute). Serialized as
+/// its STRING name over the wire.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ComposeParagraphAlignment
 {
     /// <summary>No explicit alignment — inherit from the style.</summary>
