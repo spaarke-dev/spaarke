@@ -236,13 +236,13 @@ public class CommunicationThreadReadServiceTests
 
     private static Dictionary<string, JsonElement> AttachmentRow(
         Guid attachmentId, Guid messageId, Guid docId, string name, int type) => new()
-    {
-        ["sprk_communicationattachmentid"] = El(attachmentId.ToString()),
-        ["_sprk_communication_value"] = El(messageId.ToString()),
-        ["_sprk_document_value"] = El(docId.ToString()),
-        ["sprk_name"] = El(name),
-        ["sprk_attachmenttype"] = El(type),
-    };
+        {
+            ["sprk_communicationattachmentid"] = El(attachmentId.ToString()),
+            ["_sprk_communication_value"] = El(messageId.ToString()),
+            ["_sprk_document_value"] = El(docId.ToString()),
+            ["sprk_name"] = El(name),
+            ["sprk_attachmenttype"] = El(type),
+        };
 
     private static JsonElement El<T>(T value) => JsonSerializer.SerializeToElement(value);
 }

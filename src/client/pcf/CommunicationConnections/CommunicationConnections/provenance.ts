@@ -247,9 +247,9 @@ const ENTITY_TO_SLOT: Record<string, { field: string; label: string; order: numb
  * `sprk_todo` TODO_REGARDING_CATALOG names (`sprk_regardingcontact`), which do not exist on
  * `sprk_communication`. Reading with the wrong names makes the whole $select throw.
  */
-export const COMMUNICATION_REGARDING_FIELDS: { field: string; entityType: string }[] = Object.entries(ENTITY_TO_SLOT).map(
-  ([entityType, meta]) => ({ entityType, field: meta.field })
-);
+export const COMMUNICATION_REGARDING_FIELDS: { field: string; entityType: string }[] = Object.entries(
+  ENTITY_TO_SLOT
+).map(([entityType, meta]) => ({ entityType, field: meta.field }));
 
 /** A regarding lookup that is actually populated on the host record (a filed association). */
 export interface FiledAssociation {
@@ -311,7 +311,10 @@ export interface AiSuggestedType {
  * provenance string (there is no dedicated structured field today). Surfaced in the grid
  * as a "Create <Type>" affordance so the reviewer can act on the AI's intent.
  */
-export function deriveAiSuggestedTypes(doc: ProvenanceDoc, existingEntityTypes: ReadonlySet<string>): AiSuggestedType[] {
+export function deriveAiSuggestedTypes(
+  doc: ProvenanceDoc,
+  existingEntityTypes: ReadonlySet<string>
+): AiSuggestedType[] {
   const out: AiSuggestedType[] = [];
   const seen = new Set<string>();
   for (const sig of doc.signals ?? []) {

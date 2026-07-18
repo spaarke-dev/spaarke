@@ -209,8 +209,8 @@ export const CommunicationTimelineApp: React.FC<ICommunicationTimelineAppProps> 
       <div className={s.notice}>
         <MessageBar intent="info">
           <MessageBarBody>
-            Timeline unavailable — place this control on the sprk_communicationthread form, or on a
-            sprk_communication record with a thread.
+            Timeline unavailable — place this control on the sprk_communicationthread form, or on a sprk_communication
+            record with a thread.
           </MessageBarBody>
         </MessageBar>
       </div>

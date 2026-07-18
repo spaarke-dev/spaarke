@@ -21,8 +21,9 @@ public static class AcsServiceCollectionExtensions
     /// (011/020/051) with no feature gate. The client is built via a lazy factory from the DI-injected
     /// central <see cref="TokenCredential"/> (ADR-028 / NFR-05) + the configured ACS endpoint — the
     /// factory is only invoked on first resolution, so no live ACS resource is required at startup.
-    /// No consumer maps the client eagerly at startup, so no Null-Object peer is required yet (when
-    /// 011/020/051 add endpoints that consume it, apply ADR-032 if the plane becomes feature-gated).
+    /// Consumers inject <c>Lazy&lt;CommunicationIdentityClient&gt;</c> (ADR-032 boot-safety), so even the
+    /// startup hosted-service graph (MembershipReconciler → MembershipReconcileSweepService) can be built
+    /// without ACS config — the endpoint check fires only on first actual ACS call.
     /// </summary>
     public static IServiceCollection AddAcsIdentityPlane(this IServiceCollection services, IConfiguration configuration)
     {
@@ -43,6 +44,13 @@ public static class AcsServiceCollectionExtensions
             var credential = sp.GetRequiredService<TokenCredential>();
             return new CommunicationIdentityClient(new Uri(endpoint), credential);
         });
+
+        // Boot-safety (ADR-032): consumers take Lazy<CommunicationIdentityClient>, so constructing them never
+        // invokes the throwing factory above. The endpoint check fires only on first actual use — a BFF with
+        // no ACS config still boots (AcsIdentityService is reachable from the startup hosted-service graph via
+        // MembershipReconciler → MembershipReconcileSweepService).
+        services.AddSingleton(sp => new Lazy<CommunicationIdentityClient>(
+            () => sp.GetRequiredService<CommunicationIdentityClient>()));
 
         services.AddSingleton<IAcsIdentityService, AcsIdentityService>();
 
@@ -84,6 +92,10 @@ public static class AcsServiceCollectionExtensions
 
             return new ChatClient(new Uri(endpoint), serviceCredential.CreateCredential());
         });
+
+        // Boot-safety (ADR-032): AcsThreadService takes Lazy<ChatClient>, so constructing it never invokes the
+        // throwing factory above; the endpoint check fires only on first actual ACS thread operation.
+        services.AddSingleton(sp => new Lazy<ChatClient>(() => sp.GetRequiredService<ChatClient>()));
 
         services.AddSingleton<IAcsThreadService, AcsThreadService>();
 
