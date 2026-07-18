@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="CommunicationMessageActions" version="1.0.2" display-name-key="Communication Message Actions" description-key="Virtual PCF: message send/respond accessory (Compose / Send / Respond) on the OOB sprk_communication and sprk_communicationthread forms. Hosts the shared TimelineComposeBox for the compose surface and calls the existing /api/communications/send (task 051/062) via @spaarke/auth. No Code Page host, no FCC swap (ADR-026 Path-A exception; task 062)." control-type="virtual" api-version="1.3.18">
+    <external-service-usage enabled="true">
+      <domain>*.azurewebsites.net</domain>
+      <domain>login.microsoftonline.com</domain>
+    </external-service-usage>
+    <property name="anchorField" display-name-key="Bound Field (anchor)" description-key="Bind to the record primary Name (sprk_name). Anchors the control to the form; the control reads the record from context, not from this value." of-type="SingleLine.Text" usage="bound" required="true"/>
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD application (client) ID for PCF MSAL authentication" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF API application ID for OAuth scope construction" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="showVersionFooter" display-name-key="Show Version Footer" description-key="When true (default), displays the PCF version footer." of-type="TwoOptions" usage="input" required="false" default-value="true"/>
+    <resources>
+      <code path="bundle.js" order="1"/>
+      <css path="styles.css" order="1"/>
+      <platform-library name="React" version="16.14.0"/>
+      <platform-library name="Fluent" version="9.46.2"/>
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true"/>
+      <uses-feature name="Utility" required="true"/>
+      <uses-feature name="Navigation" required="true"/>
+    </feature-usage>
+    <built-by name="pac" version="1.51.1"/>
+  </control>
+</manifest>

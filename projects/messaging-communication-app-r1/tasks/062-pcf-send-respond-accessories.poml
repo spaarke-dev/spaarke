@@ -1,0 +1,150 @@
+<task id="062" project="messaging-communication-app-r1">
+  <metadata>
+    <title>PCF send/respond accessory control(s) on the OOB `sprk_communication`/thread form (mirror email-r4 `CommunicationActions`)</title>
+    <phase>W6 — UI (polling timeline + PCF accessories)</phase>
+    <status>completed</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>051, 060</dependencies>
+    <blocks></blocks>
+    <tags>pcf, frontend, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New PCF control(s) on a live OOB form calling the BFF send/respond path; `.ts`/`.tsx` PCF code + manifest + `@spaarke/auth` boundary; ADR-022 (platform libs), ADR-006 (form binding), ADR-026 (Path-A exception), ADR-028 (auth boundary) bind. Mirrors email-r4 `CommunicationActions` which was FULL. FULL required.</rigor-reason>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New PCF folder under `src/client/pcf/` disjoint from 061 (timeline) and 063 (quoting) file surfaces. Depends on 051 (the outbound send endpoint it calls) + 060 (reuses the timeline compose box / EmailComposer sub-components).</parallel-reason>
+    <fr-refs>FR-12</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Build the **send/respond accessory PCF control(s)** on the OOB `sprk_communication` / communication-thread main form, so compose/send/respond work from the OOB form with **no Code Page host and no Form Component Control (FCC) swap** — mirroring email-r4's shipped `CommunicationActions` PCF pattern.
+
+    Requirements (FR-12):
+    - **Accessory PCF** in a NEW `src/client/pcf/CommunicationMessageActions/` control (or extend the placement alongside the existing `CommunicationActions` — see §11 decision below). It offers the message send/respond actions on the form: **compose** a new message, **send**, and **respond** (reply into the current thread). Actions call the BFF outbound send path (task 051) through the Spaarke PCF `@spaarke/auth` boundary.
+    - **Reuse the compose surface** — reuse the `<EmailComposer/>` sub-components / the timeline compose box (task 060) for the authoring UI rather than re-implementing a composer (§11). The channel is Message; the send request dispatches server-side by `sprk_communicationtype` (task 051 wiring).
+    - **React 16/17 platform libraries** (ADR-022); Fluent v9 (ADR-021); `@spaarke/auth` consumed at the PCF boundary only.
+    - **No FCC swap, no Code Page** — the OOB form stays; the PCF is an accessory (ADR-026 Path-A exception; form-bound → within ADR-006). Confirm compose/send/respond function with the OOB form as host.
+    - **No client-side ACS SDK** — send goes to the BFF, which talks to ACS (NFR-04). The bundle MUST contain no `@azure/communication-*`.
+
+    Do NOT build the timeline viewer PCF (task 061) or the quoting action (task 063). This task is the send/respond accessory surface only.
+  </prompt>
+
+  <role>
+    Spaarke PCF engineer fluent in the email-r4 `CommunicationActions` accessory pattern (Reply/Forward/Send over BFF endpoints, `@spaarke/auth` boundary, ADR-022 platform libraries), Fluent v9, and OOB-form PCF placement. Authority on reusing `@spaarke/ui-components` compose surfaces inside a PCF.
+  </role>
+
+  <goal>
+    A message send/respond accessory PCF exists on the OOB `sprk_communication`/thread form, reuses the shared compose surface, calls the BFF outbound send path (task 051) via the `@spaarke/auth` boundary, uses React 16/17 platform libraries + Fluent v9, and works with no Code Page host and no FCC swap. The bundle contains no ACS SDK. Compose/send/respond verified on the OOB form.
+  </goal>
+
+  <context>
+    <background>
+      email-r4's W4 pivot (design §8.6) shipped the OOB main form + PCFs surface: `CommunicationActions` (Reply/Forward/Send/Save over BFF endpoints, retiring the `sprk_communication_send.js` ribbon) + `CommunicationConnections`. R1 mirrors this for the message channel — the message send/respond actions are the second channel's instance of the same accessory pattern, calling the same channel-dispatching BFF (task 051 dispatches by `sprk_communicationtype`).
+
+      §11 Component Justification: BEFORE creating a new control, evaluate extending the existing `CommunicationActions` PCF to add the message send/respond actions vs a new `CommunicationMessageActions` control. Answer the three questions in the PR: (1) Existing — `CommunicationActions` overlaps (it already does Reply/Forward/Send for email over the BFF). (2) Extension — CAN it be extended to dispatch a Message-type send? If yes and it is low-risk, extend it (preferred). If a new control is genuinely warranted (e.g., the message compose surface + thread-respond semantics differ enough), state the concrete reason in ≤2 sentences. (3) Cost-of-doing-nothing — FR-12's "compose/send/respond from the OOB form with no Code Page / no FCC swap" fails with no accessory. Prefer extend-existing per §11; if new, justify concretely and reuse the composer sub-components + auth boundary + manifest structure.
+
+      ADR-026 Path-A exception + ADR-006: the accessory is form-bound → within ADR-006; the OOB-form-not-Code-Page choice is the documented Path-A exception. Cite in the PR.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/CommunicationActions/ (READ + candidate to EXTEND — email-r4 Reply/Forward/Send accessory; @spaarke/auth boundary; manifest; solution)</file>
+      <file>src/client/pcf/CommunicationMessageActions/ (NEW — only if extend-existing is rejected per §11)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/ (REUSE — compose surface)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/TimelineComposeBox.tsx (REUSE — task 060 compose box)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationTimelineApi.ts (READ — sendMessage; task 060)</file>
+      <file>src/client/pcf/CLAUDE.md (READ — PCF module rules)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-12">Send/respond accessory PCF(s) on the OOB form call the BFF; compose/send/respond work with NO Code Page host and NO FCC swap.</constraint>
+    <constraint source="ADR-022">React 16/17 PLATFORM libraries — MUST NOT bundle React 18. Manifest declares platform libraries.</constraint>
+    <constraint source="ADR-006">Form-bound PCF — binds to the `sprk_communication`/thread record.</constraint>
+    <constraint source="ADR-026">Path-A exception — OOB form + PCF, NOT a Code Page; NO FCC swap. Cite in the PR.</constraint>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens; dark mode via host `FluentProvider`.</constraint>
+    <constraint source="ADR-028">`@spaarke/auth` is consumed at the PCF boundary only; the shared compose components never import it (they take `authenticatedFetch`).</constraint>
+    <constraint source="NFR-04">The bundle MUST NOT contain `@azure/communication-*`; send goes to the BFF, which talks to ACS.</constraint>
+    <constraint source="project">§11 — PREFER extending `CommunicationActions` over a new control; if new, justify concretely in the PR. REUSE the composer sub-components; do not re-implement a composer.</constraint>
+    <constraint source="project">Build with `npm run build:prod` (NOT `npm run build` — AP-1). No BFF publish-size / CVE (client only, root §10 N/A).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-006-pcf-component-architecture.md</file>
+      <file>.claude/adr/ADR-026-code-page-standard.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="CommunicationActions accessory PCF" location="src/client/pcf/CommunicationActions/">
+        Reply/Forward/Send over BFF endpoints, `@spaarke/auth` at the boundary, platform React. The message send/respond actions are the second-channel instance of this pattern — extend or mirror.
+      </pattern>
+      <pattern name="Compose-surface reuse" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/TimelineComposeBox.tsx">
+        Reuse the timeline compose box / EmailComposer sub-components for authoring; do not re-implement a composer.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `src/client/pcf/CommunicationActions/` in full (manifest, action wiring, `@spaarke/auth` boundary, solution), the task-060 compose box + `communicationTimelineApi.sendMessage`, task-051's outbound send endpoint contract, and `src/client/pcf/CLAUDE.md`.</step>
+    <step order="2">§11 decision: determine whether to EXTEND `CommunicationActions` (preferred) or create a new `CommunicationMessageActions` control. Record the three-question answer. Proceed with the chosen path.</step>
+    <step order="3">Implement the send/respond actions: compose (new message), send, respond (reply into the current thread). Wire each to the BFF outbound send path (task 051) via the `@spaarke/auth`-built `authenticatedFetch`; the channel is Message (server dispatches by `sprk_communicationtype`). Reuse the compose surface from 060.</step>
+    <step order="4">Ensure ADR-022 platform libraries in the manifest (React 16/17; no React 18 bundled) and Fluent v9 styling. Grep the produced bundle for `@azure/communication` — MUST be absent (NFR-04).</step>
+    <step order="5">Run `npm run build:prod` (NOT `npm run build` — AP-1). Resolve manifest/type errors.</step>
+    <step order="6">Pack + deploy via `pcf-deploy`; place the accessory on the OOB `sprk_communication`/thread main form alongside the timeline (061) and email-r4 accessories. Document form/section placement. (If the environment blocks import, package + validate the ZIP and hand the `pac solution import` + form-config remainder to the owner — mirror email-r4 task 043.)</step>
+    <step order="7">Verify compose/send/respond function from the OOB form with no Code Page host and no FCC swap (UI tests below).</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` (focus: platform libraries, no React 18 bundled, no ACS SDK, auth at boundary only, composer reused not cloned, §11 extend-vs-new justification); `adr-check` against ADR-022/006/026/028/021 + `spec.md` (FR-12, NFR-04). Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (062 ✅) + `current-task.md`; record decisions (extend-vs-new choice + rationale, form placement, send-path wiring to 051).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">CommunicationActions PCF, task-060 compose box, task-051 send endpoint, PCF CLAUDE.md</tool>
+    <tool name="write">PCF action wiring + manifest (extend or new control) + solution</tool>
+    <tool name="bash">npm run build:prod + bundle grep for @azure/communication</tool>
+    <tool name="pcf-deploy">Pack + import; place on the OOB form</tool>
+    <tool name="ui-test">Compose/send/respond verification on the OOB form</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/CommunicationActions/ (UPDATED — message send/respond actions) OR src/client/pcf/CommunicationMessageActions/ (NEW — per §11 decision)</output>
+    <output type="code">ControlManifest.Input.xml (platform libraries; form binding) + solution ZIP</output>
+    <output type="docs">§11 extend-vs-new justification + form/section placement (in PR / current-task.md)</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test>From the OOB `sprk_communication`/thread form, composing + sending a new message succeeds via the BFF (mocked/live), with no Code Page host and no FCC swap — no console errors.</ui-test>
+    <ui-test>Responding (reply into the current thread) from the accessory posts to the BFF and the reply is threaded.</ui-test>
+    <ui-test>Dark mode: the accessory + compose surface render correctly under the MDA dark theme (Fluent v9 tokens).</ui-test>
+    <ui-test>The bundle contains no `@azure/communication-*` (dependency/bundle scan).</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">A send/respond accessory PCF is on the OOB `sprk_communication`/thread form; compose/send/respond work with NO Code Page host and NO FCC swap (FR-12).</criterion>
+    <criterion testable="true">Actions call the BFF outbound send path (task 051) via the `@spaarke/auth` boundary; the channel is Message (server dispatches by `sprk_communicationtype`).</criterion>
+    <criterion testable="true">The compose surface reuses `<EmailComposer/>` sub-components / the timeline compose box (grep confirms reuse, not a cloned composer).</criterion>
+    <criterion testable="true">Manifest declares React 16/17 platform libraries; React 18 is NOT bundled; the bundle contains no `@azure/communication-*` (ADR-022 / NFR-04).</criterion>
+    <criterion testable="true">`npm run build:prod` clean; packed + deployed via `pcf-deploy` (or ZIP validated + owner-handoff documented); the §11 extend-vs-new decision is justified in the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 051 (the outbound send endpoint) + 060 (the compose surface to reuse). Prefer extending the email-r4 `CommunicationActions` PCF (§11) — a second control is only justified if the message respond/compose semantics genuinely diverge; state the reason concretely if so.
+
+    No FCC swap — email-r4's W4 pivot explicitly DROPPED the Form Component Control swap (TASK-INDEX 041 note). Keep the OOB form as host; the PCF is an accessory. Cite the ADR-026 Path-A exception in the PR.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 (code-review + adr-check) MANDATORY. Build via `npm run build:prod` (NOT `npm run build` — AP-1); deploy via `pcf-deploy`. No BFF publish-size/CVE (root §10 N/A). Answer the §11 extend-vs-new three-question template in the PR. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

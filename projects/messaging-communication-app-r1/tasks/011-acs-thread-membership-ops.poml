@@ -1,0 +1,157 @@
+<task id="011" project="messaging-communication-app-r1">
+  <metadata>
+    <title>ACS thread + membership ops (create thread w/ 30-day retention; Add/RemoveParticipants)</title>
+    <phase>W1 — ACS Integration (server-side only)</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>020, 041, 051</blocks>
+    <tags>bff-api, acs</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Net-new BFF service under `Services/Communication/Acs/` that mutates external ACS thread + membership state (create/add/remove participants) under rate limits, sets retention policy, and is a hard prerequisite for the channel provider (020), membership reconcile (041), and outbound send (051). Tag `bff-api`; external-transport mutation surface; publish-size + CVE governance applies.</rigor-reason>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-15</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Build the **ACS thread + membership operations** for the messaging channel, server-side only, extending the NEW `src/server/api/Sprk.Bff.Api/Services/Communication/Acs/` folder created in task 010. Responsibilities:
+
+    • **Thread create** — `ChatClient.CreateChatThread(...)` with a **30-day auto-delete retention** policy set at create time (FR-15; design §8.7 — keep ACS from becoming a shadow record store). Return the ACS `ChatThreadId` for the thread↔channel child-table row (task 004 schema; written by the caller in W2/W4).
+    • **Membership ops** — server-side `ChatThreadClient.AddParticipants` / `RemoveParticipant`, taking the `communicationUserId` identities minted by task 010's `IAcsIdentityService`.
+    • **Rate-limit + eventual-consistency discipline** — respect ACS thread limits (**10 participant-mutations / 10s** and **30 / min per thread**; 3000/min per resource); shape the API so a bulk membership reconcile (task 041) can batch without breaching them. Threads >20 participants lose read-receipts/typing — fine for R1, note for R2.
+
+    This layer talks to ACS **only from the BFF** (NFR-04). It is a thin adapter over the ACS Chat SDK behind a Spaarke-owned interface — no ACS types leak outside `Services/Communication/`. Do NOT build the Event Grid capture path (030/031), the channel sender/archiver (020), or the Dataverse-derived membership *derivation* logic (041 owns "who should be a member"); this task owns only the ACS-side thread + participant *mechanics*. Blueprint: `Azure-Samples/communication-services-... dotnet-quickstarts` (thread/participant/send server code).
+  </prompt>
+
+  <role>
+    Spaarke BFF architect for the Communication subsystem, specializing in ACS server integration. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/Acs/`. Fluent in ADR-045 (Communication channel seams), ADR-028 (central credential; server-side only), ADR-010 (DI via `CommunicationModule`), ADR-032 (Null-Object kill-switch), §10 BFF Hygiene, §11 Component Justification, and `.claude/constraints/bff-extensions.md`.
+  </role>
+
+  <goal>
+    A server-side ACS thread service exists in `Services/Communication/Acs/` that (1) creates an ACS chat thread with 30-day auto-delete retention and returns its `ChatThreadId`, and (2) adds/removes participants by `communicationUserId`, respecting ACS per-thread rate limits and exposing a batch-friendly shape for the reconcile job (041). It uses task 010's `IAcsIdentityService` for identities and the injected central `TokenCredential` (ADR-028). No ACS admin capability reaches a client (NFR-04). Registered via `CommunicationModule` (ADR-010, unconditional). Build clean; unit tests pass; publish-size delta + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      With identities in place (010), the messaging channel needs the ACS-side thread container and its membership. ACS's model: the BFF (trusted service) creates the `ChatThread` and mutates participants; membership is the transport/live-delivery projection of Dataverse-derived access (task 041 computes the authorized set; this task applies it to ACS). Retention is minimized to 30 days at create time so ACS never becomes a second system of record — Dataverse `sprk_communication` is the record (design §3 principle 2, §8.7).
+
+      This adds `Azure.Communication.Chat` (1.4.0) to the BFF — thin over `Azure.Core` (design §8.9). Rate limits are real and must shape the interface: 10 participant-mutations/10s and 30/min per thread; a naive per-participant loop in the 041 reconcile would breach them, so expose an `AddParticipants(IEnumerable&lt;...&gt;)` batch and let the caller throttle. Eventual consistency between Dataverse and ACS is expected and reconciled by 041 (event + sweep); this task just provides idempotent, rate-aware mutations.
+
+      **§11 Component Justification (concrete cost-of-doing-nothing):** without these NEW `Acs/` thread ops there is **no chat transport container** — a message has nowhere to be sent (020/051 blocked) and membership cannot be projected onto ACS (041 blocked). The failure mode is a named contract failure (FR-15 unmet; 020/041/051 blocked), not "future flexibility." No overlap with any existing service — `Azure.Communication.Chat` is net-new (design §2). It cannot fold into the email path: email has no thread-container transport; ACS thread mechanics are channel-specific and belong behind the Communication boundary.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Acs/IAcsIdentityService.cs (from task 010 — source of `communicationUserId` identities)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/CommunicationChannelDispatcher.cs (ADR-045 seam surface — the sender in 020 calls these thread ops)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailChannelSender.cs (thin-adapter-over-transport shape to mirror)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/ (add AcsThreadCreateResult / AcsMembershipChange models here)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (register the ACS thread service, unconditional per ADR-032)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs (central credential precedent — inject, do NOT `new`)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-15">Create ACS threads with 30-day auto-delete retention set at create time; created threads carry the retention setting.</constraint>
+    <constraint source="design §8.4">Membership ops are server-side `ChatThreadClient.AddParticipants`/`RemoveParticipant`. Respect ACS rate limits: 10 mutations/10s + 30/min per thread (3000/min per resource). Expose a batch-friendly shape so the 041 reconcile can throttle.</constraint>
+    <constraint source="NFR-04">Server-side only; no ACS SDK on any client; no ACS admin capability reaches a client.</constraint>
+    <constraint source="NFR-05">Inject the central ACS `TokenCredential` (ADR-028). MUST NOT `new` a credential / connection-string credential inline.</constraint>
+    <constraint source="ADR-045">Thread ops sit behind the Communication service boundary and serve the channel provider (020); do not leak ACS types outside `Services/Communication/`.</constraint>
+    <constraint source="ADR-010">Register the ACS thread service via `CommunicationModule` only.</constraint>
+    <constraint source="ADR-032">Registration is unconditional (Null-Object if feature-gated).</constraint>
+    <constraint source="project">MUST NOT build the Event Grid capture path (030/031), the sender/archiver (020), or the Dataverse-side membership derivation (041 owns the authorized-set computation). This task owns ACS-side thread + participant mechanics only.</constraint>
+    <constraint source="project">Membership ops take `communicationUserId` from task 010's `IAcsIdentityService`; mutations are idempotent (adding an existing participant / removing an absent one is a safe no-op).</constraint>
+    <constraint source="§11">State the concrete FR-15 failure mode prevented by the new thread ops (no transport container → 020/041/051 blocked) in the PR.</constraint>
+    <constraint source="§10">bff-extensions Placement Justification in the PR; publish-size delta (baseline ~45.30 MB post-R4); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+    <patterns>
+      <pattern name="Thin adapter over an external transport" location="src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailChannelSender.cs">
+        Wrap the ACS Chat SDK behind a Spaarke-owned interface + result models; keep ACS types inside `Services/Communication/`.
+      </pattern>
+      <pattern name="Central credential injection (ADR-028)" location="src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs">
+        Resolve the ACS `TokenCredential` from DI and pass it to the ACS `ChatClient` constructor; never `new` a credential.
+      </pattern>
+      <pattern name="Unconditional Communication DI (ADR-010/032)" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs">
+        Register the ACS thread service here, unconditional (Null-Object if gated).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design §8.1/§8.4/§8.7 (trusted-service model, membership rate limits, retention) + spec FR-15/NFR-04/NFR-05, and `.claude/agent-memory/researcher/acs-chat-integration-2026-07-16.md` if present. Read task 010's `IAcsIdentityService` to consume the identity source.</step>
+    <step order="2">Read `CommunicationChannelDispatcher.cs` + `EmailChannelSender.cs` (seam/adapter shape) and `ManagedIdentityCredentialFactory.cs` (central-credential pattern). Confirm task 004's thread↔channel child table expects an ACS `ChatThreadId` string.</step>
+    <step order="3">Add `Azure.Communication.Chat` (1.4.0) to `Sprk.Bff.Api.csproj`; verify it restores over the existing `Azure.Core` + the `Azure.Communication.Identity` added in 010.</step>
+    <step order="4">Define the thread abstraction in `Services/Communication/Acs/`: `IAcsThreadService` — `CreateThreadAsync(topic, initialParticipants, retention=30d)` → `AcsThreadCreateResult { ChatThreadId }`; `AddParticipantsAsync(chatThreadId, IEnumerable&lt;communicationUserId&gt;)`; `RemoveParticipantAsync(chatThreadId, communicationUserId)`. Batch-friendly Add signature for the 041 reconcile. Add result/model types under `Services/Communication/Models/`.</step>
+    <step order="5">Implement `AcsThreadService` wrapping `ChatClient`/`ChatThreadClient` — constructed from the DI-injected central `TokenCredential` + ACS endpoint (ADR-028, NFR-05). `CreateThreadAsync` sets the **30-day auto-delete retention** at create time (FR-15). Membership ops are idempotent (add-existing / remove-absent are safe no-ops); surface ACS rate-limit responses (429) as retryable so the caller can throttle within the 10/10s + 30/min per-thread budget.</step>
+    <step order="6">Ensure identities are resolved via task 010's `IAcsIdentityService` (create-if-missing) before add — never pass a raw Entra id to ACS. Keep the batch shape so 041 can chunk to stay under the rate limit.</step>
+    <step order="7">Register `IAcsThreadService` in `CommunicationModule` (ADR-010), unconditional (ADR-032 Null-Object if gated). Confirm no ACS type escapes `Services/Communication/` (grep the API layer).</step>
+    <step order="8">Write unit tests in `tests/unit/Sprk.Bff.Api.Tests/`: (a) `CreateThreadAsync` sets 30-day retention (assert the create options); (b) Add/Remove are idempotent; (c) a batch Add of &gt;10 participants is chunked/throttle-aware (assert the batching shape, not a live ACS call); (d) the service is constructed from the injected credential (no `new` credential); (e) no ACS admin capability is exposed on any client DTO (NFR-04).</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Acs`; build clean, tests green.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-011-publish/`; report compressed size + delta vs ~45.30 MB baseline (NFR-01). `Azure.Communication.Chat` is thin over `Azure.Core` — expect a small delta; justify if ≥+5 MB.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE from the ACS Chat package add.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus: retention set at create, rate-limit-aware batch shape, idempotent mutations, credential injected not `new`'d, ACS types don't leak); `adr-check` against `spec.md` (ADR-028, ADR-045, ADR-010/032, NFR-04/05, §11). Resolve Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path — shared `Services/Communication/`; coordinate with email-r4 + notification-spine-r1).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (011 ✅) + `current-task.md`; record decisions (retention mechanism used, batch/throttle shape, idempotency handling, publish-size delta).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Design §8, seam files, task-010 identity service, task-004 child table</tool>
+    <tool name="grep">Confirm no ACS type leaks the Communication boundary</tool>
+    <tool name="edit">Add package; define + implement `IAcsThreadService`; models; DI</tool>
+    <tool name="bash">Restore, build, tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Acs/IAcsThreadService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Acs/AcsThreadService.cs (NEW — wraps `ChatClient`/`ChatThreadClient`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/AcsThreadCreateResult.cs + AcsMembershipChange.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — register the ACS thread service, unconditional)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (UPDATED — add `Azure.Communication.Chat` 1.4.0)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (retention + idempotent membership + batch-throttle + injected-credential + no-leak tests)</output>
+    <output type="docs">PR description with §11 Component Justification (FR-15 failure mode) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IAcsThreadService` + `AcsThreadService` exist in `Services/Communication/Acs/`; the only new ACS SDK added is `Azure.Communication.Chat`.</criterion>
+    <criterion testable="true">`CreateThreadAsync` creates a thread with 30-day auto-delete retention set at create time and returns the ACS `ChatThreadId` (FR-15); a test asserts the retention option.</criterion>
+    <criterion testable="true">`AddParticipantsAsync`/`RemoveParticipantAsync` mutate membership by `communicationUserId` (resolved via task 010's identity service), are idempotent, and expose a batch-friendly shape sized for the ACS 10/10s + 30/min per-thread limit.</criterion>
+    <criterion testable="true">The ACS client is constructed from the DI-injected central `TokenCredential`; no `new` credential appears inline (ADR-028 / NFR-05).</criterion>
+    <criterion testable="true">No ACS admin capability / thread-mutation surface is exposed to any client (NFR-04 — grep/diff-verifiable); no client-side ACS SDK is added.</criterion>
+    <criterion testable="true">Service registered via `CommunicationModule`, unconditional (ADR-010/032); ACS types do not leak outside `Services/Communication/`.</criterion>
+    <criterion testable="true">`dotnet build` clean; tests green; publish-size delta reported vs ~45.30 MB (small); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 010 (identities — thread ops take `communicationUserId`). Blocks 020 (messaging sender creates/uses the thread), 041 (reconcile applies the Dataverse-derived authorized set via these Add/Remove ops), and 051 (outbound send targets a thread).
+
+    Strict scope: ACS-side thread + participant *mechanics* only. This task does NOT decide *who* should be a member (041 derives the authorized set from Dataverse via ADR-034), does NOT capture inbound events (030/031), and does NOT persist any `sprk_communication` row (020/051). If a step seems to require `MembershipResolverService` or an Event Grid handler, stop — that is 041 / 030.
+
+    Rate limits are load-bearing: design the batch Add so the 041 reconcile can chunk under 10/10s + 30/min per thread. Threads >20 participants lose read-receipts/typing — acceptable for R1 matter threads; note for R2 in `current-task.md`.
+
+    Reference impl to copy: the ACS dotnet quickstarts (thread/participant/send server code).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED. Per CLAUDE.md §10 + §11: publish-size delta + CVE + bff-extensions Placement Justification + Component Justification (FR-15 failure mode) in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/`). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,156 @@
+<task id="010" project="messaging-communication-app-r1">
+  <metadata>
+    <title>ACS identity + server-side chat-token minting (`communicationUserId ↔ Dataverse`; uniform minting)</title>
+    <phase>W1 — ACS Integration (server-side only)</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <dependencies>003, 005</dependencies>
+    <blocks>011, 020, 051</blocks>
+    <tags>bff-api, acs, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Net-new BFF service under `Services/Communication/Acs/` that talks to an external Azure resource (ACS) and mints security tokens; touches auth (ADR-028 central credential), persists a new cross-entity identity mapping (`communicationUserId`), and is a hard prerequisite for all messaging transport (blocks 011/020/051). Tags include `bff-api` + `auth`; security-sensitive token surface; publish-size + CVE governance applies.</rigor-reason>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-03</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Build the **ACS identity plane** for the messaging channel, server-side only, in a NEW `src/server/api/Sprk.Bff.Api/Services/Communication/Acs/` folder. Two responsibilities:
+
+    • **Identity creation + mapping** — the BFF (ACS "trusted service") creates an ACS identity (`CommunicationIdentityClient.CreateUser`) for any Spaarke participant that lacks one, and persists the resulting `communicationUserId` on the Dataverse user/contact (the `communicationUserId` column added by task 005). This is the durable `communicationUserId ↔ Dataverse` mapping used for sender resolution and token re-issue.
+    • **Server-side chat-token minting** — mint `chat`-scoped ACS access tokens (`GetToken(user, ["chat"])` / `CreateUserAndToken`) for participants, server-side, 1–24h validity (default 24h), with a refresh callback shape ready for a future live client. **Even internal Entra users get chat tokens minted here** — the Entra→ACS token exchange is VoIP-scope only, so Chat is one uniform server-minting path (design §8.2).
+
+    This layer talks to ACS **only from the BFF**. NFR-04: no ACS SDK on any client and **no token reaches a browser in R1** — the BFF holds the minted tokens and acts as the participant on ACS's behalf (the live-client browser-token path is the next project). Blueprint: `Azure-Samples/communication-services-authentication-hero-csharp` (trusted-service token minting + identity mapping). Do NOT build thread/membership ops here — that is task 011.
+  </prompt>
+
+  <role>
+    Spaarke BFF architect for the Communication subsystem, specializing in ACS (Azure Communication Services) server integration. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/` and the ADR-028 auth plane. Fluent in ADR-028 (central `TokenCredential`, no `new` credential), ADR-045 (Communication channel seams), ADR-010 (DI minimalism via `CommunicationModule`), ADR-032 (Null-Object kill-switch), §10 BFF Hygiene, §11 Component Justification, and `.claude/constraints/bff-extensions.md`.
+  </role>
+
+  <goal>
+    A server-side ACS identity service exists in `Services/Communication/Acs/` that (1) creates an ACS identity and persists `communicationUserId` on the Dataverse user/contact for any participant lacking one, and (2) mints `chat`-scoped ACS tokens (1–24h) for participants — uniformly for internal and (future) external identities. The central ACS `TokenCredential` is injected (ADR-028); no credential is `new`'d. No token or ACS admin capability reaches any client (NFR-04/NFR-05). Registered via `CommunicationModule` (ADR-010). Build clean; unit tests pass; publish-size delta + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      The messaging channel needs an identity plane before any thread or message can exist. ACS's documented model is a **trusted service + thin clients**: the BFF creates identities, mints scoped tokens, and (task 011) mutates thread membership; clients never hold ACS admin capability. R1 goes further than the usual sample — because R1 has **no live client at all** (§8.5), the minted chat tokens stay server-side and the BFF acts as the participant; the browser-token path is deferred to the next-project live upgrade.
+
+      Two ACS SDKs enter the BFF here: `Azure.Communication.Identity` (1.3.1) for `CreateUser`/`GetToken`, thin over `Azure.Core` (already present). Design §8.9: negligible publish-size delta — but measure it (NFR-01). Token scope is `chat` only; the Entra→ACS exchange is VoIP-scope, so uniform server-minting is the correct single path regardless of the exchange's preview status (design §8.2, re-check note §8.9).
+
+      **§11 Component Justification (concrete cost-of-doing-nothing):** without a NEW `Acs/` identity service there is **no identity plane** — ACS cannot address a participant, so no thread can be created (011), no message can be sent (020/051), and no inbound event can be attributed to a Dataverse user. The failure mode is a named contract failure (FR-03 cannot be satisfied; 011/020/051 are blocked), not "future flexibility." This does not overlap any existing service: there is no `Azure.Communication.*` anywhere in the tree today (design §2). The identity concern cannot be folded into an existing auth service because it mints a *different* token type (ACS chat scope) against a *different* resource (ACS, not Entra/Graph) — extension of `GraphClientFactory`/`ManagedIdentityCredentialFactory` would leak ACS specifics into the Entra plane.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/CommunicationChannelDispatcher.cs (ADR-045 seam surface — the dispatch this identity plane will eventually feed via 020/051)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailChannelSender.cs (the "thin adapter over an external transport" shape to mirror)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/ (add ACS identity/token result models here — e.g. AcsIdentityMapping, AcsChatToken)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (register the ACS identity service + ACS client here, unconditional per ADR-032)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs (central credential precedent — inject the ACS `TokenCredential`, do NOT `new` one)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs (reference for how a central `TokenCredential` is resolved + passed to an Azure SDK client)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-03">BFF creates ACS identities, persists `communicationUserId` on the Dataverse user/contact, and mints `chat`-scoped tokens server-side for all participants. A participant without an ACS identity gets one created + mapped on first use.</constraint>
+    <constraint source="NFR-04">No ACS SDK on any client; NO token or ACS admin capability reaches any client in R1. The BFF holds minted tokens and acts as the participant.</constraint>
+    <constraint source="NFR-05">Inject the central ACS `TokenCredential` (ADR-028). MUST NOT `new` a `TokenCredential` / `ConfidentialClientApplication` / ACS connection-string credential inline; resolve it from DI.</constraint>
+    <constraint source="ADR-028">Auth v2 — server-side token minting only; central credential; no `new` credential anywhere.</constraint>
+    <constraint source="ADR-045">The identity plane serves the messaging channel provider (020/051) that dispatches by `CommunicationType`; keep it channel-scoped and behind the Communication service boundary — do not leak ACS types outside `Services/Communication/`.</constraint>
+    <constraint source="ADR-010">Register the ACS identity service + ACS client via `CommunicationModule` only.</constraint>
+    <constraint source="ADR-032">Registration is unconditional (Null-Object if feature-gated); if a kill-switch is used, provide a Null-Object impl so endpoints/services that depend on it register unconditionally.</constraint>
+    <constraint source="project">MUST NOT build thread/membership ops here (task 011) — identity + token minting only.</constraint>
+    <constraint source="project">Token scope is `chat` only, validity 1–24h (default 24h), with a refresh-callback shape; uniform minting for internal + (future) external identities.</constraint>
+    <constraint source="§11">State the concrete FR-03 failure mode prevented by the new `Acs/` service (no identity plane → no thread/send/attribution) in the PR; verify by grep that no `Azure.Communication.*` exists pre-task.</constraint>
+    <constraint source="§10">bff-extensions Placement Justification in the PR; publish-size delta (baseline ~45.30 MB post-R4); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+    <patterns>
+      <pattern name="Central credential injection (ADR-028)" location="src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs">
+        Resolve the Azure `TokenCredential` from DI and pass it to the ACS `CommunicationIdentityClient` constructor. Never `new` a credential inline. Mirror how `AiModule` wires a central credential into an Azure SDK client.
+      </pattern>
+      <pattern name="Thin adapter over an external transport" location="src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailChannelSender.cs">
+        Wrap the ACS SDK behind a Spaarke-owned interface + result models; keep ACS types from leaking outside `Services/Communication/`.
+      </pattern>
+      <pattern name="Unconditional Communication DI (ADR-010/032)" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs">
+        Register the ACS identity service + client here; keep registration unconditional (Null-Object if gated).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `.claude/agent-memory/researcher/acs-chat-integration-2026-07-16.md` if present, plus design §8.1–8.2 + §8.9 and spec FR-03/NFR-04/NFR-05, to lock the trusted-service token-minting model + the uniform-minting rationale.</step>
+    <step order="2">Grep the tree to confirm no `Azure.Communication.*` exists today (`grep -r "Azure.Communication" src/`) — records the §11 "no existing overlap" evidence. Read `CommunicationChannelDispatcher.cs` + `EmailChannelSender.cs` for the seam shape, `ManagedIdentityCredentialFactory.cs` + `AiModule.cs` for the central-credential pattern, and confirm task 005's `communicationUserId` column exists on the user/contact schema.</step>
+    <step order="3">Add `Azure.Communication.Identity` (1.3.1) to `Sprk.Bff.Api.csproj`. Verify it resolves over the existing `Azure.Core`; report the restore result.</step>
+    <step order="4">Define the identity abstraction in `Services/Communication/Acs/`: `IAcsIdentityService` (`EnsureIdentityAsync(participantRef)` → creates+maps if missing, returns `communicationUserId`; `MintChatTokenAsync(communicationUserId)` → `chat`-scoped token, 1–24h). Add result models (`AcsIdentityMapping`, `AcsChatToken`) under `Services/Communication/Models/`.</step>
+    <step order="5">Implement `AcsIdentityService` wrapping `CommunicationIdentityClient` — constructed from the DI-injected central `TokenCredential` + ACS endpoint (ADR-028, NFR-05; no inline credential). `EnsureIdentityAsync`: look up existing `communicationUserId` on the Dataverse user/contact; if absent, `CreateUser`, persist the mapping via the canonical Dataverse interface, return it. `MintChatTokenAsync`: `GetToken(user, ["chat"])`; expose validity + a refresh-callback shape.</step>
+    <step order="6">Wire the `communicationUserId` persistence through the canonical Dataverse client interface (no direct SDK); ensure the mapping is idempotent (a participant already mapped is not re-created).</step>
+    <step order="7">Register `IAcsIdentityService` + the ACS identity client in `CommunicationModule` (ADR-010), unconditional (ADR-032 Null-Object if a kill-switch is introduced). Confirm no token/ACS type escapes `Services/Communication/` (grep the API layer).</step>
+    <step order="8">Write unit tests in `tests/unit/Sprk.Bff.Api.Tests/`: (a) `EnsureIdentityAsync` creates+maps when no mapping exists and is a no-op when one exists (idempotent); (b) `MintChatTokenAsync` requests only the `chat` scope; (c) the service is constructed from the injected credential (no `new` credential — assert via DI wiring / a fake credential); (d) no token is exposed on any client-facing DTO (NFR-04 — grep/assert the endpoint surface is untouched).</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Acs`; build clean, tests green.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-010-publish/`; report compressed size + delta vs ~45.30 MB baseline (NFR-01). `Azure.Communication.Identity` is thin over `Azure.Core` — expect a small delta; justify if ≥+5 MB.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE from the ACS package add.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus: token never reaches a client, credential injected not `new`'d, ACS types don't leak the boundary); `adr-check` against `spec.md` (ADR-028 credential, NFR-04/05, ADR-010/032, §11 justification). Resolve Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path — shared `Services/Communication/`; coordinate with email-r4 + notification-spine-r1).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (010 ✅) + `current-task.md`; record decisions (token validity chosen, mapping-persistence path, DI registration shape, publish-size delta).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Design §8, seam files, central-credential pattern, task-005 schema</tool>
+    <tool name="grep">Confirm no `Azure.Communication.*` today; confirm no token leaks the boundary</tool>
+    <tool name="edit">Add package; define + implement `IAcsIdentityService`; models; DI</tool>
+    <tool name="bash">Restore, build, tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Acs/IAcsIdentityService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Acs/AcsIdentityService.cs (NEW — wraps `CommunicationIdentityClient`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/AcsIdentityMapping.cs + AcsChatToken.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — register ACS identity service + client, unconditional)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (UPDATED — add `Azure.Communication.Identity` 1.3.1)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (identity create/map idempotency + chat-scope + injected-credential + no-token-leak tests)</output>
+    <output type="docs">PR description with §11 Component Justification (FR-03 failure mode) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IAcsIdentityService` + `AcsIdentityService` exist in `Services/Communication/Acs/`; the only ACS SDK added is `Azure.Communication.Identity`.</criterion>
+    <criterion testable="true">`EnsureIdentityAsync` creates an ACS identity + persists `communicationUserId` on the Dataverse user/contact when none exists, and is a no-op (returns the existing mapping) when one exists — idempotent.</criterion>
+    <criterion testable="true">`MintChatTokenAsync` mints a token with the `chat` scope only, validity 1–24h; a test asserts the scope.</criterion>
+    <criterion testable="true">The ACS client is constructed from the DI-injected central `TokenCredential`; no `new` credential / connection-string credential appears inline (ADR-028 / NFR-05).</criterion>
+    <criterion testable="true">No token or ACS admin capability is exposed on any client-facing DTO/endpoint (NFR-04 — grep/diff-verifiable); no client-side ACS SDK is added.</criterion>
+    <criterion testable="true">Service + client registered via `CommunicationModule`, unconditional (ADR-010/032); ACS types do not leak outside `Services/Communication/`.</criterion>
+    <criterion testable="true">`dotnet build` clean; tests green; publish-size delta reported vs ~45.30 MB (small); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 003 (ACS spike — proves identity+token+Event Grid round-trip and measures publish-size) and 005 (the `communicationUserId` column on user/contact). Blocks 011 (thread/membership ops need identities), 020 (sender), and 051 (outbound send uses the sender's minted token).
+
+    Strict scope: identity + token minting ONLY. Thread create, participant add/remove, and retention config are task 011. If a step seems to require a `ChatThreadClient`, stop — that is 011's surface.
+
+    Re-check before locking token design: the Entra→ACS *chat*-scope exchange is preview-gated to VoIP (design §8.9). Uniform server-minting works regardless, so this task is not blocked by that status — but note the finding in `current-task.md` for 011.
+
+    Reference impl to copy: `Azure-Samples/communication-services-authentication-hero-csharp` — the BFF trusted-service token-minting + identity-mapping blueprint.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED. Per CLAUDE.md §10 + §11: publish-size delta + CVE + bff-extensions Placement Justification + Component Justification (FR-03 failure mode) in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/`). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

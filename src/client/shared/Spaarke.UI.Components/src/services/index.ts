@@ -178,7 +178,26 @@ export type {
   ICommunicationAssociation,
   CommunicationBodyFormat,
   CommunicationSendMode,
+  CommunicationChannelType,
 } from './communicationApi';
+
+// Typed wrapper around the polling-timeline read endpoints (task 050) +
+// a send delegate over `sendCommunication()` (task 060 / CommunicationTimeline).
+export {
+  readThread,
+  getUnreadCount,
+  sendTimelineMessage,
+  CommunicationTimelineReadError,
+} from './communicationTimelineApi';
+export type {
+  IThreadAttachmentRefDto,
+  IThreadMessageDto,
+  IThreadReadResultDto,
+  IUnreadCountResultDto,
+  ICommunicationTimelineApiClientOptions,
+  IReadThreadOptions,
+  IGetUnreadCountOptions,
+} from './communicationTimelineApi';
 export type {
   SprkChatBridgeEventMap,
   SprkChatBridgeEventName,

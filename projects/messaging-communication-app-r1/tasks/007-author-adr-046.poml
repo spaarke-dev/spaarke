@@ -1,0 +1,158 @@
+<task id="007" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Author **ADR-046** (ACS messaging channel) — concise + full; INDEX placeholder → Accepted</title>
+    <phase>W0 — Phase 0 Verification + Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>020, 021</blocks>
+    <tags>adr, docs</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Authors a binding ADR (concise + full) — high-leverage governance artifact all ACS/ingestor/thread waves cite; not code implementation. STANDARD per CLAUDE.md §8, but `/adr-check` is invoked explicitly. Model tier opus (architectural authoring).</rigor-reason>
+    <parallel-group>W0-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `.claude/adr/` — sub-agent write boundary (main-session-only per CLAUDE.md §3). Sub-agents CANNOT write to `.claude/` paths.</parallel-reason>
+    <fr-refs>FR-17</fr-refs>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Author the ACS messaging-channel ADR — **ADR-046** — superseding the reserved placeholder (FR-17, design §10). It codifies the messaging channel as an ADDITIVE extension of ADR-045, not a new pipeline. The placeholder already exists at `.claude/adr/ADR-046-acs-messaging-channel.md` (RESERVED, 2026-07-16) and `docs/adr/ADR-046-acs-messaging-channel.md` — this task turns them into full Accepted ADRs and flips the `.claude/adr/INDEX.md` row from Placeholder → Accepted.
+
+    Codify, at minimum (design §10 + §14.7 lock the content):
+
+    1. **ACS-as-transport / Dataverse-as-record.** Each chat message is a JSON transport artifact the BFF processes into a `sprk_communication` (type=`Message`=100000004) record + a transcript archive in SPE (via `ICommunicationArchiver`) — analogous to email's `.eml`. Dataverse is the system of record; ACS threads are reconstructible projections.
+    2. **Uniform server-side token minting.** The BFF (trusted service) mints ACS `chat`-scoped tokens server-side for ALL participants (Entra→ACS exchange is VoIP-only, so even internal users get server-minted tokens); `communicationUserId` ↔ Dataverse identity mapping; NO ACS admin capability or token on any client in R1 (no client-side ACS SDK).
+    3. **Inbound ingestor seam (net-new).** Add `ICommunicationChannelIngestor` alongside the shipped `ICommunicationChannelSender`/`ICommunicationArchiver` — completes ADR-045's stated-but-unbuilt intent; inbound = Event Grid → webhook → Service Bus job → normalizer → ingestor → persist → enrichment; idempotent dedupe on the ACS message id (also covers the outbound echo).
+    4. **Membership as a projection.** ACS thread membership is a RECONCILED PROJECTION of Dataverse-derived access — never a second ACL. Open threads via `MembershipResolverService` (ADR-034); private threads via the existing per-record sharing grant (mechanism from task 002).
+    5. **First-class thread model.** `sprk_communicationthread` + `sprk_thread` lookup + thread↔channel child table + a direction-symmetric `IThreadResolver` grouping email reply-chains AND chat; point-forward.
+    6. **Retention-minimized, per-customer ACS resource.** 30-day auto-delete (or delete-post-persist); ACS data location immutable at create → per-boundary resource via the provisioning orchestrator (ADR-027).
+
+    Write BOTH forms: concise at `.claude/adr/ADR-046-acs-messaging-channel.md` (~120–160 lines, MUST/MUST NOT) and full history at `docs/adr/ADR-046-acs-messaging-channel.md` (rationale + alternatives + consequences). Update `.claude/adr/INDEX.md` (Placeholder → Accepted) and `docs/adr/INDEX.md`; ensure reachable from root `CLAUDE.md` §17; add the required `.claude/CHANGELOG.md` entry. Mirror exactly how ADR-045 was authored (email-r4 task 005). This is MAIN-SESSION ONLY (§3 write boundary).
+  </prompt>
+
+  <role>
+    Spaarke platform architect. Authoritative on the Communication architecture (ADR-045) and its channel-seam extensibility. Fluent in the project's concise ADR conventions (`.claude/adr/`, MUST/MUST NOT, ~120–160 lines) and the full-history form (`docs/adr/`). You author a binding ADR that every ACS/ingestor/thread/privacy task will cite.
+  </role>
+
+  <goal>
+    ADR-046 exists in both concise (`.claude/adr/`) and full (`docs/adr/`) forms, codifying the six-part messaging-channel decision with MUST/MUST NOT rules; both ADR INDEXes show it Accepted (concise row flipped from Placeholder); reachable from root `CLAUDE.md` §17; `.claude/CHANGELOG.md` has the entry; passes `/adr-check` against `spec.md` with no contradiction against existing ADRs. Tasks 020 (channel seams) + 021 (ingestor seam) build against a landed governance anchor.
+  </goal>
+
+  <context>
+    <background>
+      Design §10 mandates a fresh ADR because ACS is a first-of-kind Azure resource for Spaarke (external transport, BYOI identity plane, per-customer provisioning, Event Grid ingress, a net-new ingestor seam). Landing it first — alongside the schema pass — enforces the discipline that the rest of the project references an authoritative anchor, exactly as ADR-045 anchored email-r4. Downstream `adr-check` + `code-review` on every ACS wave will cite ADR-046.
+
+      §11 Component Justification (a NEW ADR + a NEW seam it codifies): (1) **Existing overlap** — ADR-045 covers channel seams but does NOT cover ACS transport, server token minting, the inbound ingestor seam, the thread model, or membership-as-projection; the placeholder was reserved precisely because these are net-new decisions. (2) **Extension instead** — the ingestor seam EXTENDS ADR-045's sender/archiver seam family (completing its stated intent), rather than a parallel contract; the ADR documents that. (3) **Concrete cost-of-doing-nothing** — without ADR-046, the ACS/ingestor/thread work has no binding anchor, so `adr-check` has nothing to validate the ACS decisions against and future channels/ISVs could re-litigate ACS-as-transport, client-token exposure, or a second ACL — the named failure modes design §10 guards.
+
+      The ADR must correctly cite its neighbors: ADR-045 (the spine it extends), ADR-034 (open membership), ADR-028 (server token minting; no `new` credential), ADR-004/036 (job contract / background infra for capture + reconcile), ADR-007 (SpeFileStore transcript/attachment archive), ADR-024 (regarding-family thread anchor — no second mechanism), ADR-027 (per-customer resource provisioning), ADR-018/032 (kill-switch / Null-Object for feature-gated services + unconditional endpoints), ADR-015 (AI flags privilege, never decides), ADR-013 (AI facade if enrichment touched), ADR-038 (testing). Sibling ADR-047 is reserved for `notification-spine-r1` — do NOT claim it.
+    </background>
+    <relevant-files>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md (EXISTING placeholder → author full concise form)</file>
+      <file>docs/adr/ADR-046-acs-messaging-channel.md (EXISTING placeholder → author full form)</file>
+      <file>.claude/adr/INDEX.md (flip the ADR-046 row Placeholder → Accepted)</file>
+      <file>docs/adr/INDEX.md (ADR-046 row)</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md (the spine this extends — cite + mirror structure)</file>
+      <file>CLAUDE.md (§17 pointer reachability + CHANGELOG obligation)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">ADR number is **ADR-046** (reserved 2026-07-16). Sibling **ADR-047** is reserved for `notification-spine-r1` — MUST NOT claim it. Re-verify 046 is still the reserved messaging slot before writing.</constraint>
+    <constraint source="project (§3 write boundary)">MAIN-SESSION ONLY. Sub-agents cannot write to `.claude/`. Execute from the main session, not a delegated Agent-tool sub-agent. An "Edit denied on `.claude/...`" from a sub-agent is the boundary working correctly.</constraint>
+    <constraint source="project">Author BOTH forms: concise (`.claude/adr/`, MUST/MUST NOT, ~120–160 lines) AND full (`docs/adr/`, rationale + alternatives + consequences). Mirror ADR-045's structure (Status / Context / Decision (MUST/MUST NOT) / Consequences / Related).</constraint>
+    <constraint source="ADR-045">ADR-046 is ADDITIVE to ADR-045 (extends the channel-seam family with an ingestor seam); MUST NOT introduce a second communication pipeline, second regarding mechanism, or second channel-provider contract.</constraint>
+    <constraint source="ADR-024">Thread anchoring defers to the ADR-024 regarding family (extend, never replace).</constraint>
+    <constraint source="ADR-028">Server-side ACS token minting only; central `TokenCredential`; MUST NOT `new` a credential/`ConfidentialClientApplication`. No client-side ACS SDK / no token to a browser in R1.</constraint>
+    <constraint source="ADR-034">Open-thread membership derives from `MembershipResolverService`; ACS membership is a reconciled projection — never a second ACL. Private grant = the task-002 mechanism.</constraint>
+    <constraint source="project MUST NOT">Codify the owner-locked MUST NOTs: no Dataverse Activities / OOB email / portal comments; no native Teams chat capture; no client-side ACS SDK / composites in R1; AI never decides privilege (ADR-015).</constraint>
+    <constraint source="project">Every CLAUDE.md-touching PR MUST add a `.claude/CHANGELOG.md` entry.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership-resolution.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/adr/INDEX.md</file>
+      <file>projects/email-communication-solution-r4/tasks/005-author-adr-045-communication.poml</file>
+    </files>
+    <patterns>
+      <pattern name="Concise ADR form" location=".claude/adr/ADR-045-communication-architecture.md">
+        The sibling this ADR extends — structural exemplar: Status / Context / Decision (MUST / MUST NOT) / Consequences / Related; ~120–160 lines.
+      </pattern>
+      <pattern name="ADR authoring workflow" location="projects/email-communication-solution-r4/tasks/005-author-adr-045-communication.poml">
+        The exact mirror: verify slot → read spec/design → author concise + full → update both INDEXes + CLAUDE.md §17 + CHANGELOG → /adr-check.
+      </pattern>
+      <pattern name="Full ADR form" location="docs/adr/">
+        Full-history form: Status, Context, Decision, Alternatives Considered, Consequences, Related, revision log — more rationale than concise.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Re-verify ADR-046 is still the reserved messaging slot and ADR-047 is untaken (reserved for notification-spine): `ls .claude/adr/ADR-04*` + read the placeholder + `.claude/adr/INDEX.md`.</step>
+    <step order="2">Read `spec.md` FR-17 + §Technical Constraints (ADR list + MUST/MUST NOT) + §ADR Tensions + design §10/§14.7 for the scope inputs. Read the email-r4 task 005 POML as the authoring mirror.</step>
+    <step order="3">Read `ADR-045` (the spine — cite + mirror structure) + the neighbor ADRs (034, 028, 024, 027, 032, 004/036, 007, 015, 038) so the Related section cites them correctly. Consume task 002's private-grant decision if available (else cite it as the pending mechanism).</step>
+    <step order="4">Author `.claude/adr/ADR-046-acs-messaging-channel.md` (concise): Status (Accepted, dated), Context (ACS net-new; second channel on ADR-045), Decision covering the six parts with MUST/MUST NOT pulled from spec §MUST Rules / §MUST NOT Rules (ACS-transport/Dataverse-record; server-only token minting/no client SDK; ingestor seam; membership-as-projection; thread model + `IThreadResolver`; retention-minimized per-customer resource; no Activities/OOB-email/portal/Teams-chat; AI never decides privilege), Consequences, Related.</step>
+    <step order="5">Author `docs/adr/ADR-046-acs-messaging-channel.md` (full): same decision + Alternatives Considered (e.g., ACS composites vs headless — deferred/rejected per design §8.5; thread grouping-key options A/B/C per design §6.1; capture-on-event vs persist-on-send for outbound; SignalR-in-R1 vs polling) + fuller rationale + consequences + revision log.</step>
+    <step order="6">Flip the `.claude/adr/INDEX.md` ADR-046 row Placeholder → Accepted (concise summary of the six-part decision). Update `docs/adr/INDEX.md` with the ADR-046 row.</step>
+    <step order="7">Ensure ADR-046 is reachable from root `CLAUDE.md` §17 (via the ADR INDEX row or a direct pointer). Add the required `.claude/CHANGELOG.md` entry.</step>
+    <step order="8">Run `/adr-check` against `spec.md` — confirm ADR-046 has no contradiction with existing ADRs (esp. ADR-045 additivity, ADR-028 token minting, ADR-034 membership) + passes constraint validation. Confirm existing cross-references still resolve and ADR-047 was not claimed.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md` (007 ✅) + `current-task.md`; confirm dependents 020 + 021 unblocked. Record decisions (final ADR structure, any alternative explicitly rejected).</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Verify ADR slot + cross-reference resolution</tool>
+    <tool name="read">Spec/design + ADR-045 + neighbor ADRs + the email-r4 005 mirror</tool>
+    <tool name="edit">Author both ADR forms + update both INDEXes + CLAUDE.md §17 + CHANGELOG</tool>
+    <tool name="adr-check">Validate ADR-046 against spec + neighbors</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-046-acs-messaging-channel.md (AUTHORED — concise, placeholder → full Accepted ADR)</output>
+    <output type="docs">docs/adr/ADR-046-acs-messaging-channel.md (AUTHORED — full form)</output>
+    <output type="docs">.claude/adr/INDEX.md (UPDATED — ADR-046 row Placeholder → Accepted)</output>
+    <output type="docs">docs/adr/INDEX.md (UPDATED — ADR-046 row)</output>
+    <output type="docs">CLAUDE.md (§17 reachable to ADR-046) + .claude/CHANGELOG.md entry</output>
+    <output type="docs">projects/messaging-communication-app-r1/tasks/TASK-INDEX.md (status update 007 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.claude/adr/ADR-046-acs-messaging-channel.md` exists as a full Accepted ADR (~120–160 lines) with Status / Context / Decision (MUST + MUST NOT) / Consequences / Related — no longer a placeholder.</criterion>
+    <criterion testable="true">`docs/adr/ADR-046-acs-messaging-channel.md` exists (full form) with Alternatives Considered (composites-vs-headless, thread grouping-key, outbound persist-on-send, SignalR-vs-polling) + revision log.</criterion>
+    <criterion testable="true">The Decision codifies all six parts: ACS-transport/Dataverse-record; uniform server-side token minting (no client SDK); the `ICommunicationChannelIngestor` seam; membership-as-projection (open ADR-034 / private record-sharing grant); thread model + `IThreadResolver`; retention-minimized per-customer resource.</criterion>
+    <criterion testable="true">MUST NOT rules include: no Activities/OOB-email/portal comments; no native Teams chat; no client-side ACS SDK/composites in R1; no second pipeline/regarding/channel contract; AI never decides privilege.</criterion>
+    <criterion testable="true">Related cites ADR-045, ADR-034, ADR-028, ADR-024, ADR-027, ADR-004/036, ADR-007, ADR-018/032, ADR-015, ADR-013, ADR-038; ADR-047 is NOT claimed.</criterion>
+    <criterion testable="true">`.claude/adr/INDEX.md` shows ADR-046 Accepted (row flipped); `docs/adr/INDEX.md` lists it; root `CLAUDE.md` §17 reaches it; `.claude/CHANGELOG.md` has the entry.</criterion>
+    <criterion testable="true">`/adr-check` passes against `spec.md` with ADR-046 included; no existing cross-reference regresses; ADR-046 is additive to ADR-045 (no contradiction).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    MAIN-SESSION ONLY (§3): do not delegate to an Agent-tool sub-agent — the `.claude/adr/` write would be denied. If a parallel agent reports "Edit denied on `.claude/...`" that is the boundary working correctly.
+
+    Mirror email-r4 task 005 (ADR-045) exactly in workflow + structure — this is its sibling ADR for the second channel. ADR-046 EXTENDS ADR-045; frame it as additive, not a new pipeline.
+
+    Blocks 020 (channel sender/archiver cite the ADR) + 021 (the ingestor seam this ADR codifies). Land it early in W0 so every ACS/thread wave has the anchor.
+
+    ADR-047 is reserved for `notification-spine-r1` — the coordination sibling. Do not claim it; cite it as the reserved sibling.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor per `&lt;rigor-hint&gt;` — Step 9.5 gates SKIPPED, but the explicit `/adr-check` in step 8 is REQUIRED. Execute from the MAIN SESSION (§3 write boundary — this task is `parallel-safe: false`). Model tier `opus` @ effort `high` (architectural authoring).
+    </protocol>
+  </execution>
+</task>

@@ -112,21 +112,29 @@ public class DataverseWebApiService : IDataverseService
     /// Creates an HttpRequestMessage with per-request Authorization and standard OData headers.
     /// This avoids mutating shared DefaultRequestHeaders on the HttpClient.
     /// </summary>
+    /// <param name="impersonateSystemUserId">
+    /// OPTIONAL Dataverse <c>systemuserid</c> to impersonate for this request (adds the <c>MSCRMCallerID</c>
+    /// header via <see cref="DataverseImpersonation"/>). <c>null</c>/<see cref="Guid.Empty"/> (the default) leaves
+    /// the request app-only and byte-unchanged — existing consumers pass nothing and are unaffected. Added for the
+    /// messaging read path (messaging-communication-app-r1), where Dataverse does row-level filtering natively.
+    /// </param>
     private async Task<HttpRequestMessage> CreateAuthenticatedRequestAsync(
-        HttpMethod method, string url, CancellationToken cancellationToken = default)
+        HttpMethod method, string url, CancellationToken cancellationToken = default, Guid? impersonateSystemUserId = null)
     {
         var token = await GetAccessTokenAsync(cancellationToken);
         var request = new HttpRequestMessage(method, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        DataverseImpersonation.Apply(request, impersonateSystemUserId);
         return request;
     }
 
     /// <summary>
-    /// Sends a GET request with per-request auth headers.
+    /// Sends a GET request with per-request auth headers. When <paramref name="impersonateSystemUserId"/> is a real
+    /// user id the request runs AS that Dataverse user (MSCRMCallerID impersonation); otherwise it is app-only.
     /// </summary>
-    private async Task<HttpResponseMessage> SendGetAsync(string url, CancellationToken ct = default)
+    private async Task<HttpResponseMessage> SendGetAsync(string url, CancellationToken ct = default, Guid? impersonateSystemUserId = null)
     {
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct, impersonateSystemUserId);
         return await _httpClient.SendAsync(request, ct);
     }
 
@@ -1873,6 +1881,173 @@ public class DataverseWebApiService : IDataverseService
             _logger.LogError(ex, "Error querying child records: {Entity} by {LookupField}", childEntityLogicalName, parentLookupField);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Runs an OData GET against <paramref name="entitySetName"/> IMPERSONATING the given caller
+    /// (<c>MSCRMCallerID</c> = <paramref name="callerSystemUserId"/>), returning the raw rows. Because the query
+    /// runs AS the caller, Dataverse applies row-level security natively — the result is EXACTLY the rows that user
+    /// may read (honoring ownership, role depth, BU, teams, sharing, hierarchy) in a single query. This is the read
+    /// primitive for the messaging thread-read / unread endpoints (messaging-communication-app-r1 task 050); the
+    /// caller then applies the internal-only + privilege business rules (<c>CommunicationAccessFilter</c>) on top.
+    /// <para>
+    /// SECURITY: a <see cref="Guid.Empty"/> caller is REJECTED — the read path MUST NOT fall back to an app-only
+    /// (org-scoped) query, which would return rows the user cannot see (fail closed, NFR-06). Requires the BFF app
+    /// user to hold <c>prvActOnBehalfOfAnotherUser</c> (owner config; a go-live prerequisite).
+    /// </para>
+    /// </summary>
+    /// <param name="entitySetName">The OData entity SET name, e.g. <c>sprk_communications</c> (plural collection name).</param>
+    /// <param name="odataQuery">
+    /// The OData query string WITHOUT a leading <c>?</c> (e.g. <c>$filter=...&amp;$select=...&amp;$orderby=...</c>),
+    /// or null/empty for none. The caller is responsible for OData-escaping values.
+    /// </param>
+    /// <param name="callerSystemUserId">The Dataverse <c>systemuserid</c> to impersonate. MUST NOT be empty.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The impersonated rows as attribute-keyed dictionaries (empty when none match).</returns>
+    public async Task<IReadOnlyList<Dictionary<string, JsonElement>>> RetrieveMultipleImpersonatedAsync(
+        string entitySetName,
+        string? odataQuery,
+        Guid callerSystemUserId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(entitySetName))
+            throw new ArgumentException("Entity set name must be provided.", nameof(entitySetName));
+
+        if (callerSystemUserId == Guid.Empty)
+            throw new ArgumentException(
+                "An impersonated read requires a non-empty caller systemuserid; refusing to issue an app-only query on the access-scoped read path (fail closed).",
+                nameof(callerSystemUserId));
+
+        var url = string.IsNullOrWhiteSpace(odataQuery)
+            ? entitySetName
+            : $"{entitySetName}?{odataQuery}";
+
+        _logger.LogDebug(
+            "[DATAVERSE-IMPERSONATE] GET {EntitySet} as caller {CallerSystemUserId}", entitySetName, callerSystemUserId);
+
+        var response = await SendGetAsync(url, ct, impersonateSystemUserId: callerSystemUserId);
+        response.EnsureSuccessStatusCode();
+
+        var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+        return data?.Value ?? new List<Dictionary<string, JsonElement>>();
+    }
+
+    // ── POA (principalobjectaccess) primitives — messaging-communication-app-r1 task 043 ──────────────
+    // Direct 1:1 thread + per-message access is expressed as narrow Dataverse OWNERSHIP + "Manage access"
+    // (POA) shares (owner decision 2026-07-16, notes/access-model-decision.md — the SAME OOB GrantAccess/POA
+    // mechanism PlaybookSharingService already uses for playbook team-sharing). These three primitives are
+    // the minimal generic surface a POA-based caller needs: resolve an entity's ObjectTypeCode (POA's
+    // objectid is polymorphic and requires it), grant access to a systemuser principal, and read back the
+    // systemuser principals with an active share. Added HERE (not a new HTTP client) because this class is
+    // already the BFF's established generic Web API singleton (IEventDataverseService /
+    // IFieldMappingDataverseService / IImpersonatedCommunicationQuery all extend it) — CLAUDE.md §11: extend
+    // the existing generic Dataverse Web API surface rather than stand up a second one.
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _objectTypeCodeCache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Resolves an entity's Dataverse <c>ObjectTypeCode</c> (required to disambiguate <c>principalobjectaccess</c>'s
+    /// polymorphic <c>objectid</c>). Cached in-memory per logical name — object type codes are immutable for the
+    /// lifetime of the connected environment.
+    /// </summary>
+    public async Task<int> GetEntityObjectTypeCodeAsync(string entityLogicalName, CancellationToken ct = default)
+    {
+        if (_objectTypeCodeCache.TryGetValue(entityLogicalName, out var cached))
+            return cached;
+
+        var url = $"EntityDefinitions(LogicalName='{entityLogicalName}')?$select=ObjectTypeCode";
+        var response = await SendGetAsync(url, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning(
+                "GetEntityObjectTypeCodeAsync failed for '{Entity}': {StatusCode}", entityLogicalName, response.StatusCode);
+            return 0;
+        }
+
+        var data = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(cancellationToken: ct);
+        var code = data != null
+            && data.TryGetValue("ObjectTypeCode", out var codeElement)
+            && codeElement.TryGetInt32(out var parsed)
+            ? parsed
+            : 0;
+
+        if (code != 0)
+            _objectTypeCodeCache[entityLogicalName] = code;
+
+        return code;
+    }
+
+    /// <summary>
+    /// Grants POA access on a record to a <c>systemuser</c> principal — the OOB "Manage access" (GrantAccess)
+    /// mechanism, app-only. <paramref name="accessRightsCsv"/> is the Dataverse <c>AccessMask</c> literal (e.g.
+    /// <c>"ReadAccess"</c> or <c>"ReadAccess,AppendAccess"</c>).
+    /// </summary>
+    public async Task GrantAccessAsync(
+        string entitySetName,
+        Guid recordId,
+        Guid principalSystemUserId,
+        string accessRightsCsv,
+        CancellationToken ct = default)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["Target"] = new Dictionary<string, object>
+            {
+                ["@odata.id"] = $"{entitySetName}({recordId})",
+            },
+            ["PrincipalAccess"] = new Dictionary<string, object>
+            {
+                ["Principal"] = new Dictionary<string, object>
+                {
+                    ["@odata.id"] = $"systemusers({principalSystemUserId})",
+                },
+                ["AccessMask"] = accessRightsCsv,
+            },
+        };
+
+        var response = await SendPostAsJsonAsync("GrantAccess", payload, ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// Reads the principals with an ACTIVE POA share on a record, as <c>systemuser</c> ids. Assumes every
+    /// share on the record was written by a Spaarke systemuser-only grant flow (R1 Direct-thread scope is
+    /// internal-only per <c>notes/access-model-decision.md</c> config prerequisite #3 — no team/contact
+    /// shares are written by this path, so no <c>principaltypecode</c> filter is needed to disambiguate).
+    /// Fails soft: a lookup error returns an empty list rather than throwing (callers treat "no shares" as
+    /// the safe default — see <see cref="Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService"/>).
+    /// </summary>
+    public async Task<IReadOnlyList<Guid>> GetSharedSystemUserIdsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        CancellationToken ct = default)
+    {
+        var objectTypeCode = await GetEntityObjectTypeCodeAsync(entityLogicalName, ct);
+        if (objectTypeCode == 0)
+            return Array.Empty<Guid>();
+
+        var url = $"principalobjectaccessset?$filter=objectid eq {recordId} and objecttypecode eq {objectTypeCode}&$select=principalid";
+        var response = await SendGetAsync(url, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning(
+                "GetSharedSystemUserIdsAsync failed for {Entity}({RecordId}): {StatusCode}",
+                entityLogicalName, recordId, response.StatusCode);
+            return Array.Empty<Guid>();
+        }
+
+        var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+        if (data?.Value is null)
+            return Array.Empty<Guid>();
+
+        return data.Value
+            .Select(row => row.TryGetValue("principalid", out var v) && v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var g)
+                ? g
+                : (Guid?)null)
+            .Where(g => g.HasValue)
+            .Select(g => g!.Value)
+            .Distinct()
+            .ToList();
     }
 
     public async Task UpdateRecordFieldsAsync(

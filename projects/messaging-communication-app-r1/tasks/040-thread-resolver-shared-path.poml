@@ -1,0 +1,162 @@
+<task id="040" project="messaging-communication-app-r1">
+  <metadata>
+    <title>`IThreadResolver` (direction-symmetric) — extend `ThreadContinuityRung` + `CommunicationService`; email characterization first</title>
+    <phase>W4 — Thread Resolver + Membership + Privacy</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>004,031</dependencies>
+    <blocks>041,042,043,050,051</blocks>
+    <tags>bff-api, communication, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Edits shared `Services/Communication/` code that email-communication-solution-r4 shipped (`ThreadContinuityRung`, `CommunicationService`) — the highest-risk, shared-code part of R1. Introduces a net-new `IThreadResolver` seam invoked on BOTH the inbound capture path and the outbound send path for ALL channels; touches `.cs`; FULL protocol + Step 9.5 gates required. `parallel-safe: false` — serializes the shared-path edit within W4.</rigor-reason>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <fr-refs>FR-06, NFR-02, NFR-08</fr-refs>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Introduce a direction-symmetric **`IThreadResolver`** that find-or-creates a `sprk_communicationthread` and returns its `sprk_thread` lookup, invoked by **BOTH** the inbound capture path AND the outbound send path, for **all channels**. This gives dimension-2 (reply-chain / conversation) a first-class, queryable home so email reply-chains and chat conversations both map onto one thread record (design §6, the headline).
+
+    • **Email** resolves the thread from `sprk_inreplyto` RFC-2822 ancestry (reply-chain root → thread) — reusing the ancestry the `ThreadContinuityRung` already walks; no new matching logic.
+    • **Chat (`Message`)** resolves the thread from the ACS `ChatThreadId` carried on the normalized message / channel-ref row.
+    • **Inbound**: extend `ThreadContinuityRung` (which today inherits *regarding* from the parent) to ALSO set `sprk_thread` — join the parent's thread or create one.
+    • **Outbound**: extend `CommunicationService` send path — a reply joins the replied-to message's thread; a fresh message/email creates a thread. One added resolver call.
+
+    **CRITICAL — this EDITS shared code email-r4 shipped.** BEFORE extending, author/run **characterization tests** that pin the CURRENT behavior of the existing email inbound matching (`IncomingCommunicationProcessor` / `ThreadContinuityRung` regarding inheritance) AND the existing outbound send flow, and confirm they are GREEN. Keep them green after the extension. Thread assignment is **point-forward** (no historical backfill) and **best-effort / non-fatal** (NFR-02 — a thread-resolve failure MUST NOT fail the send or inbound-capture path). Run `/conflict-check` before the PR (shared `Services/Communication/`, also touched by `spaarke-notification-spine-r1`).
+  </prompt>
+
+  <role>
+    Spaarke BFF architect for the Communication subsystem, authority on `src/server/api/Sprk.Bff.Api/Services/Communication/`. Fluent in ADR-045 (channel seams, direction-symmetric enrichment rule 3), ADR-024 (polymorphic regarding family — the thread anchor, NOT a second mechanism), ADR-010 (DI minimalism via `CommunicationModule`), ADR-038 (integration-heavy testing; characterization before extending shared code), §11 Component Justification, and `.claude/constraints/bff-extensions.md`. You treat the frozen email path as a contract to preserve, not a surface to rewrite.
+  </role>
+
+  <goal>
+    `IThreadResolver` (find-or-create `sprk_communicationthread`, return `sprk_thread`; direction-symmetric; channel-agnostic dispatch — email by `sprk_inreplyto` ancestry, chat by ACS `ChatThreadId`) exists in `Services/Communication/`, registered via `CommunicationModule`, and is invoked from BOTH `ThreadContinuityRung` (inbound) and `CommunicationService` (outbound). Existing email inbound matching + outbound send behaviors are unchanged — characterization tests written FIRST and GREEN before and after. Thread assignment is point-forward and best-effort (NFR-02). Build clean; publish-size + CVE + bff-extensions Placement Justification reported; Step 9.5 FULL gates run; `/conflict-check` clean before PR.
+  </goal>
+
+  <context>
+    <background>
+      Today "threading" is invisible association-matching: `ThreadContinuityRung` copies a parent message's *regarding* onto a reply by walking `sprk_internetmessageid`/`sprk_inreplyto` ancestry — but there is **no thread record grouping them and no grouped view**. Task 004 created the `sprk_communicationthread` entity + `sprk_thread` lookup + thread↔channel child table; this task wires the runtime so every persisted message (email AND chat) actually carries a `sprk_thread`.
+
+      **Component Justification (§11) for the NEW `IThreadResolver`:**
+      1. **Existing** — What does it overlap with? `ThreadContinuityRung` computes regarding-ancestry but assigns *regarding*, not a thread grouping key; the channel dispatcher resolves senders/archivers, not threads. There is no existing find-or-create-thread service (verify by grep before claiming none).
+      2. **Extension** — Can we extend instead of adding? The *rung* and *send path* are extended (they call the resolver); but the find-or-create-thread logic is direction-symmetric and channel-agnostic and must be called from two call sites (inbound rung + outbound send) — a single shared seam is the correct home, not duplicated inline logic in each path.
+      3. **Cost-of-doing-nothing (concrete failure)** — Without `IThreadResolver` there is **no grouped conversation**: a matter shows a flat list of messages, the polling timeline component (task 060) has nothing to filter on (`sprk_thread = X` returns nothing), and email + chat cannot be interleaved into one conversation. That is a named contract failure (FR-05/FR-06/FR-10 all depend on `sprk_thread` being populated), not "future flexibility."
+
+      **Direction symmetry** mirrors ADR-045 rule 3 (enrichment invoked from both directions). The resolver is the thread analog: one call site inbound, one outbound, one channel-agnostic seam.
+
+      **Scope discipline:** extend the two shared call sites + add the seam. Do NOT rewrite the association engine, the normalized envelope, or the regarding model. Do NOT backfill historical email (point-forward). Do NOT add a second regarding mechanism (ADR-024) — the thread anchor reuses the regarding family.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/ThreadContinuityRung.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/CommunicationChannelDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (existing Communication/Engine tests — the characterization baseline)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-06">A shared, direction-symmetric `IThreadResolver` find-or-creates the thread and returns `sprk_thread`, invoked by both inbound capture and outbound send, for all channels. Email = `sprk_inreplyto` ancestry (reply-chain root → thread); chat = ACS `ChatThreadId`. Extends `ThreadContinuityRung` (inbound) + `CommunicationService` (outbound).</constraint>
+    <constraint source="project-CRITICAL">This EDITS shared `Services/Communication/` code email-r4 shipped. Author/run characterization tests pinning the CURRENT email inbound matching + outbound send behavior and confirm GREEN BEFORE extending; keep GREEN after. No historical backfill (point-forward).</constraint>
+    <constraint source="ADR-024">Thread anchor reuses the polymorphic regarding family — MUST NOT add a second regarding mechanism. The thread record's anchor is the ADR-024 regarding, not a new pointer.</constraint>
+    <constraint source="ADR-045">Direction-symmetric per rule 3 — the resolver is invoked from both directions, mirroring the enrichment pattern. Register via the channel-agnostic seam; email + chat resolve their own thread key.</constraint>
+    <constraint source="NFR-02">Thread assignment is best-effort and non-fatal — a resolve/create failure MUST NOT fail the send or inbound-capture path (log + continue, message still persists without `sprk_thread`).</constraint>
+    <constraint source="ADR-010">Register `IThreadResolver` + its channel strategies via `CommunicationModule` only; DI unconditional (ADR-032 Null-Object if any part is feature-gated).</constraint>
+    <constraint source="ADR-038">Integration-heavy; characterization tests for the frozen path FIRST; vertical-slice seam test for the resolver. No `Mock&lt;HttpMessageHandler&gt;` / DI-registration / ctor-null-check tests.</constraint>
+    <constraint source="project">`parallel-safe: false` — this task serializes the W4 shared-path edit; 041/042/043 start only after it lands. Run `/conflict-check` before the PR (shared `Services/Communication/`; `notification-spine-r1` also touches this area — align the `threadId` contract at joint intake, not an R1 blocker).</constraint>
+    <constraint source="root-§10">bff-extensions Placement Justification in the PR; publish-size delta vs ~45.30 MB baseline; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-regarding.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-015-ai-flag-never-decide.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Direction-symmetric invocation" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs">
+        Enrichment is already invoked from both inbound and outbound (ADR-045 rule 3). Mirror that shape for the thread resolver: one inbound call site (`ThreadContinuityRung`), one outbound (send path), one channel-agnostic seam.
+      </pattern>
+      <pattern name="Ancestry reuse (no new matching)" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/ThreadContinuityRung.cs">
+        The rung already walks `sprk_inreplyto` ancestry to inherit regarding. Reuse that computed ancestry to resolve the thread (root → thread); do not add a second walk.
+      </pattern>
+      <pattern name="Type-keyed strategy" location="src/server/api/Sprk.Bff.Api/Services/Communication/Channels/CommunicationChannelDispatcher.cs">
+        Mirror the dispatcher's `CommunicationType`-keyed resolution for the per-channel thread-key strategy (email = ancestry root; Message = ACS `ChatThreadId`).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `IncomingCommunicationProcessor.cs`, `Engine/ThreadContinuityRung.cs` (regarding-ancestry walk), and `CommunicationService.cs` (send path) to map the exact inbound + outbound call sites and the ancestry data already computed. Read task 004's `sprk_communicationthread`/`sprk_thread`/thread↔channel schema.</step>
+    <step order="2">Read `.claude/constraints/bff-extensions.md` §F + root §11 Component Justification + ADR-045 rule 3 + ADR-024 before defining the seam.</step>
+    <step order="3">**CHARACTERIZATION FIRST (shared-code safety gate).** Author/confirm characterization tests that pin CURRENT behavior of: (a) existing email inbound matching (regarding inheritance via ThreadContinuityRung ancestry) and (b) the existing outbound send flow. Run them; confirm GREEN. Do NOT edit shared code until these are green. Record the baseline in `current-task.md`.</step>
+    <step order="4">Define `IThreadResolver` in `Services/Communication/` — a direction-symmetric `find-or-create` returning `sprk_thread` for a given normalized message + direction, with a per-channel thread-key strategy (email: `sprk_inreplyto` ancestry root; `Message`: ACS `ChatThreadId`). Keep it channel-agnostic at the seam; channel-specific key extraction behind a small keyed strategy.</step>
+    <step order="5">Implement the resolver: look up an existing `sprk_communicationthread` by the channel thread-key (ancestry-root id for email; ACS `ChatThreadId` for chat via the thread↔channel child table); create one (thin: topic from first-message subject/participant label, anchor = ADR-024 regarding of the message, default privacy state) when none exists; write/ensure the thread↔channel ref row for chat.</step>
+    <step order="6">Extend `ThreadContinuityRung` (inbound): after it computes ancestry/regarding, call the resolver to ALSO set `sprk_thread` (join parent's thread or create). Preserve the existing regarding inheritance exactly.</step>
+    <step order="7">Extend `CommunicationService` (outbound send): call the resolver so a reply joins the replied-to message's thread and a fresh message/email creates a thread. One added call; email behavior otherwise unchanged.</step>
+    <step order="8">Make both call sites best-effort/non-fatal (NFR-02): wrap the resolve so a failure logs and continues — the message still persists (without `sprk_thread`) rather than failing send/capture.</step>
+    <step order="9">Register `IThreadResolver` + channel strategies in `CommunicationModule` (ADR-010), unconditional.</step>
+    <step order="9.05">Write the extension tests: an email reply joins its parent's thread; a fresh outbound email creates a thread; a chat message joins its ACS thread; a fresh chat message creates a thread; a resolver failure does NOT fail the persist path (NFR-02). RE-RUN the Step-3 characterization tests — confirm STILL GREEN (existing email flows unchanged).</step>
+    <step order="9.1">Run `dotnet build src/server/api/Sprk.Bff.Api/` then `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-040-publish/`; report compressed size + delta vs ~45.30 MB baseline. Expected ≈ 0 (no new package).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.</step>
+    <step order="9.5">FULL-rigor quality gates (REQUIRED — shared-path edit): `code-review` on the diff (focus: frozen email behavior preserved, NFR-02 non-fatal, ADR-024 no second mechanism, §11 justification); `adr-check` against `spec.md`. Address Critical findings; cite bff-extensions Placement Justification. Per root §6.5, surface any ADR tension rather than silently complying.</step>
+    <step order="9.6">Run `/conflict-check` before the PR (shared `Services/Communication/` hot-path; coordinate with `notification-spine-r1` on the `threadId` contract — not an R1 blocker).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (040 ✅) + reset `current-task.md`; record decisions (seam shape, per-channel key strategy, characterization-test locations, non-fatal wiring).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect inbound rung, send path, dispatcher, thread schema</tool>
+    <tool name="edit">Define `IThreadResolver`; extend rung + send path; DI registration; tests</tool>
+    <tool name="bash">Characterization tests, build, extension tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5) — REQUIRED (shared-path edit)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 9.6)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IThreadResolver.cs (NEW — seam)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs + per-channel thread-key strategies (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/ThreadContinuityRung.cs (UPDATED — also set `sprk_thread`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (UPDATED — outbound resolver call)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — resolver registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (characterization tests for existing email flows + resolver extension tests)</output>
+    <output type="docs">PR description with §11 Component Justification (concrete FR-05/06/10 failure mode) + bff-extensions Placement Justification + publish-size delta + CVE result + "characterization tests green" statement</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IThreadResolver` exists in `Services/Communication/`, direction-symmetric, returns `sprk_thread`, with per-channel thread-key resolution (email = `sprk_inreplyto` ancestry root; `Message` = ACS `ChatThreadId`).</criterion>
+    <criterion testable="true">It is invoked from BOTH `ThreadContinuityRung` (inbound) and `CommunicationService` (outbound); registered via `CommunicationModule`, unconditional.</criterion>
+    <criterion testable="true">An email reply joins its parent's thread; a fresh outbound email creates a thread — verified by test.</criterion>
+    <criterion testable="true">A chat (`Message`) inbound joins its ACS thread; a fresh chat message creates a thread — verified by test.</criterion>
+    <criterion testable="true">**Existing email flows continue to pass (characterization tests green)** — the pre-existing email inbound matching + outbound send behaviors are unchanged before and after the extension.</criterion>
+    <criterion testable="true">Thread assignment is best-effort/non-fatal (NFR-02): a simulated resolver failure does NOT fail send/capture; the message still persists (without `sprk_thread`).</criterion>
+    <criterion testable="true">No second regarding mechanism introduced (ADR-024) — the thread anchor reuses the regarding family (grep/diff-verifiable).</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta ≈ 0 vs ~45.30 MB; no new HIGH CVE; Step 9.5 gates run; `/conflict-check` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 004 (thread schema) + 031 (idempotent inbound persist supplies the normalized chat message + ACS thread id). Blocks 041/042/043/050/051 — the whole downstream thread + privacy + endpoint layer needs `sprk_thread` populated.
+
+    This is the single most sensitive edit in R1: it modifies code another shipped project (email-r4) owns. The characterization-first discipline is non-negotiable — if you cannot get the existing email tests green BEFORE editing, STOP and escalate (root §6) rather than editing blind. If following ADR-024/ADR-045 strictly seems to force a worse outcome, surface it via the §6.5 ADR-conflict protocol, do not silently deviate.
+
+    Point-forward only: historical emails remain ungrouped until an optional backfill (deferred, out of R1). Do not build backfill.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED (shared-path edit). Characterization tests for the existing email flows MUST be green BEFORE editing shared code (Step 3) and after (Step 9.05). Per root §10 + §11: publish-size delta + CVE + bff-extensions Placement Justification + Component Justification (FR-05/06/10 failure mode) in the PR. Run `/conflict-check` before the PR. `parallel-safe: false` — serializes the W4 shared-path edit. Model tier `opus` @ effort `xhigh`.
+    </protocol>
+  </execution>
+</task>

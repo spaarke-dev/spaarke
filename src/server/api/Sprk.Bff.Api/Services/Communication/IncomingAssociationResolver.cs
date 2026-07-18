@@ -142,9 +142,13 @@ public sealed class IncomingAssociationResolver
 
         var decision = _statusMapper.Decide(matches, message.Direction, context.TenantKey);
 
-        // AI escalation (W3): only when the deterministic pass did not auto-file. AI matches join the
-        // aggregation and can raise Pending Review → Suggested, but never auto-file (mapper-enforced).
-        if (!decision.AutoFiled && _aiRungs.Count > 0)
+        // AI pass (W3): ALWAYS run — a multi-association engine must search for the substantive targets
+        // (matter / project / invoice, via semantic search + classification) even when a deterministic
+        // participant/contact match already auto-filed. A contact match ("the sender is known") must not
+        // short-circuit finding the matter the email is actually about. AI matches join the aggregation and
+        // can raise Pending Review → Suggested / surface create-suggestions, but never auto-file
+        // (mapper-enforced). Cost is bounded by the per-rung kill-switches + ADR-016 budget + ADR-014 cache.
+        if (_aiRungs.Count > 0)
         {
             await EvaluateRungsAsync(_aiRungs, message, context, communicationId, matches, ct);
             decision = _statusMapper.Decide(matches, message.Direction, context.TenantKey);

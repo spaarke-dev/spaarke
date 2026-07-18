@@ -62,6 +62,17 @@ param serviceBusQueues array = ['sdap-jobs', 'document-indexing', 'ai-indexing',
 @description('Principal ID of the platform BFF App Service Managed Identity (granted Sender on membership topic + Receiver on recon subscription per R3 D3 / FR-2P2.3). Leave empty to skip RBAC assignment — operator must grant manually.')
 param bffPrincipalId string = ''
 
+// --- ACS messaging options (messaging-communication-app-r1, task 012, FR-18) ---
+
+@description('Deploy the per-boundary ACS resource + Event Grid system topic/subscription (messaging). Default false — existing customer provisioning is unchanged until messaging is enabled for the boundary.')
+param deployAcsMessaging bool = false
+
+@description('ACS data location for this boundary. IMMUTABLE at create time (design §8.7 / D-01) — residency is achieved by a separate ACS resource per boundary. Choose deliberately at onboarding.')
+param acsDataLocation string = 'UnitedStates'
+
+@description('BFF inbound webhook URL the Event Grid chat-event subscription delivers to (task 030 ingress). Required when deployAcsMessaging is true.')
+param acsWebhookEndpointUrl string = ''
+
 // --- Tags ---
 
 @description('Tags applied to ALL resources for cost tracking and management')
@@ -91,6 +102,16 @@ var keyVaultName = take('sprk-${customerId}-${environmentName}-kv', 24)
 
 // Service Bus: spaarke-{customer}-{env}-sbus (Note: '-sb' suffix is reserved by Azure)
 var serviceBusName = 'spaarke-${customerId}-${environmentName}-sbus'
+
+// ACS resource: sprk-{customer}-{env}-acs (per boundary; data location immutable — D-01)
+var acsResourceName = 'sprk-${customerId}-${environmentName}-acs'
+
+// Dead-letter blob container for the ACS Event Grid subscription (task 012 / §8.3).
+var acsDeadLetterContainerName = 'acs-eventgrid-deadletter'
+
+// When messaging is enabled for the boundary, ensure the dead-letter container exists in the
+// customer Storage account (reuse — §11 default-to-reuse; no separate storage account).
+var effectiveStorageContainers = deployAcsMessaging ? union(storageContainers, [acsDeadLetterContainerName]) : storageContainers
 
 // ============================================================================
 // RESOURCE GROUP
@@ -128,7 +149,7 @@ module storage 'modules/storage-account.bicep' = {
     storageAccountName: storageAccountName
     location: location
     sku: storageSku
-    containers: storageContainers
+    containers: effectiveStorageContainers
     enableTestDocumentLifecycle: false
     tags: tags
   }
@@ -168,6 +189,30 @@ module membershipTopic 'modules/membership-topic.bicep' = {
 }
 
 // ============================================================================
+// ACS MESSAGING (messaging-communication-app-r1 — task 012 / FR-18)
+// Per-boundary ACS resource + Event Grid system topic + chat-event subscription
+// -> BFF webhook + dead-letter Storage. EXTENSION of the ADR-027 per-customer
+// orchestrator (mirrors membership-topic module), gated per boundary.
+// Data location is IMMUTABLE at create (D-01) — the residency mechanism.
+// ============================================================================
+
+module acsCommunication 'modules/acs-communication.bicep' = if (deployAcsMessaging) {
+  scope: rg
+  name: 'acs-${baseName}'
+  params: {
+    acsResourceName: acsResourceName
+    acsDataLocation: acsDataLocation
+    webhookEndpointUrl: acsWebhookEndpointUrl
+    deadLetterStorageAccountResourceId: storage.outputs.storageAccountId
+    deadLetterContainerName: acsDeadLetterContainerName
+    tags: tags
+  }
+  dependsOn: [
+    storage
+  ]
+}
+
+// ============================================================================
 // OUTPUTS
 // ============================================================================
 
@@ -196,6 +241,14 @@ output serviceBusConnectionString string = serviceBus.outputs.serviceBusConnecti
 // --- Membership topic (R3 Phase 2) ---
 output membershipTopicName string = membershipTopic.outputs.topicName
 output membershipReconSubscriptionName string = membershipTopic.outputs.subscriptionName
+
+// --- ACS messaging (task 012 / FR-18) — populated only when deployAcsMessaging=true ---
+output acsMessagingDeployed bool = deployAcsMessaging
+output acsResourceId string = deployAcsMessaging ? acsCommunication.outputs.acsResourceId : ''
+output acsHostName string = deployAcsMessaging ? acsCommunication.outputs.acsHostName : ''
+output acsDataLocation string = deployAcsMessaging ? acsCommunication.outputs.acsDataLocation : ''
+output acsSystemTopicName string = deployAcsMessaging ? acsCommunication.outputs.systemTopicName : ''
+output acsEventSubscriptionName string = deployAcsMessaging ? acsCommunication.outputs.eventSubscriptionName : ''
 
 // --- Platform cross-reference ---
 output platformKeyVaultName string = platformKeyVaultName

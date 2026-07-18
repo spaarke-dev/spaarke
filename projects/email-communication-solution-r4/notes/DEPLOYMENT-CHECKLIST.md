@@ -11,7 +11,7 @@
 |---|---|---|
 | **BFF.api** — rungs 4/5, `ICommunicationClassificationAi`, suggestion endpoint, per-rung telemetry, index-config tokenization, archive endpoint | `src/server/api/Sprk.Bff.Api/` | App Service deploy (after merge-to-master) |
 | **appsettings** — `Communication:SemanticMatch`, `Communication:AiClassification`, tokenized `AiSearch` index names | App Service config / Key Vault | Env config (not code) |
-| **Connections PCF** (`CommunicationConnectionsSolution_v1.0.0.zip`) | `src/client/pcf/CommunicationConnections/` | `pac solution import` |
+| **Connections PCF** (`CommunicationConnectionsSolution_v1.0.2.zip`) | `src/client/pcf/CommunicationConnections/` | `pac solution import` |
 | **Actions PCF** (`CommunicationActionsSolution_v1.0.1.zip`) | `src/client/pcf/CommunicationActions/` | `pac solution import` (re-import v1.0.1) |
 | **Dataverse schema** (`sprk_regardingservicerequest`, `Suggested`/`Ambiguous` values, `sprk_domain`, etc.) | spaarkedev1 | ✅ already created by owner |
 | **Ribbon Send retirement** (`sprk_communication_send.js` ×2 + send button) | deployed solution | remove at PCF re-import (043 remainder) |
@@ -76,7 +76,7 @@ PCFs are unmanaged solution imports; they do NOT require the BFF merge (but keep
 
 **B1. Import both solutions to spaarkedev1**
 ```bash
-pac solution import --path src/client/pcf/CommunicationConnections/Solution/bin/CommunicationConnectionsSolution_v1.0.0.zip --publish-changes
+pac solution import --path src/client/pcf/CommunicationConnections/Solution/bin/CommunicationConnectionsSolution_v1.0.2.zip --publish-changes
 pac solution import --path src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.0.1.zip --publish-changes
 ```
 (If CPM blocks import: temporarily rename `Directory.Packages.props` → `.disabled`, import, restore.)

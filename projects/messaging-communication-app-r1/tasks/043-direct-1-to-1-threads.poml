@@ -1,0 +1,145 @@
+<task id="043" project="messaging-communication-app-r1">
+  <metadata>
+    <title>1:1 direct threads — explicit two-participant membership</title>
+    <phase>W4 — Thread Resolver + Membership + Privacy</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks></blocks>
+    <tags>bff-api, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Adds a second thread topology (person-to-person, not record-anchored) with explicit two-participant membership over the shared `IThreadResolver` + thread model; touches `.cs` in `Services/Communication/`; FULL protocol + Step 9.5 gates.</rigor-reason>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-09</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Support **person-to-person direct threads** that are NOT anchored to a record, with **explicit exactly-two-participant membership**. This is R1's second thread topology alongside record-anchored (open) threads — ad-hoc named N-party group threads are explicitly deferred to a later phase.
+
+    • A user can start a 1:1 thread with another user.
+    • Membership is EXACTLY the two participants — no more, no less. Unlike open threads, membership does NOT derive from `MembershipResolverService` (there is no record anchor); it is the explicit two-party list.
+    • The thread appears in EACH participant's authorized threads (both, and only, the two participants can read it).
+
+    Build over the shared `IThreadResolver` (task 040) + thread model (task 004) + membership reconcile (task 041). A 1:1 thread has no ADR-024 regarding anchor — the thread topology field distinguishes it; task 041's reconcile projects its explicit two-party set to ACS membership; task 042's read filter honors the two-party visibility.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication subsystem. Authority on `Services/Communication/`, the thread model (task 004), `IThreadResolver` (task 040), membership derivation/reconcile (task 041), ADR-034, §11 Component Justification, and `.claude/constraints/bff-extensions.md`. You keep 1:1 as a thin topology over the existing thread machinery, not a parallel path.
+  </role>
+
+  <goal>
+    A 1:1 direct thread topology exists: a user starts a 1:1 thread with another user; membership is exactly the two participants (explicit list, NOT ADR-034-derived — there is no record anchor); the thread appears in each participant's authorized threads and no one else's. It reuses the shared `IThreadResolver` + thread model + membership reconcile + access filter. Build clean; publish-size + CVE + bff-extensions Placement Justification reported; Step 9.5 FULL gates run; `/conflict-check` clean before PR.
+  </goal>
+
+  <context>
+    <background>
+      Spec Owner Clarifications: R1 supports two thread topologies — record-anchored (matter/project via ADR-024 regarding) AND 1:1 direct (person-to-person, explicit two-party membership). Ad-hoc named group threads (N participants, not record-anchored) are deferred (design §1 out-of-scope, spec Assumptions).
+
+      **Component Justification (§11) for the 1:1 topology:**
+      1. **Existing** — The thread model (task 004), `IThreadResolver` (040), membership reconcile (041), and access filter (042) already exist. This task adds a topology discriminator + explicit-two-party membership path, not a new thread engine (verify by grep).
+      2. **Extension** — Extend the thread model with a topology marker and give `IThreadResolver` / the membership-derivation path a branch: record-anchored → ADR-034; 1:1 → explicit two-party list. No new entity, no new pipeline.
+      3. **Cost-of-doing-nothing (concrete failure)** — Without a 1:1 topology, a user cannot message another user directly (every thread would need a record anchor); FR-09 fails. And absent an EXPLICIT two-party membership branch, a 1:1 thread has no membership source (ADR-034 needs a record), so it would either be inaccessible or wrongly derive members — a concrete FR-09/NFR-06 failure, not "future flexibility."
+
+      **Scope discipline:** exactly-two-participant only. Do NOT build N-party group threads (deferred). Do NOT anchor 1:1 threads to a record (they are person-to-person). Reuse 041's reconcile (projecting the two-party set to ACS) and 042's filter (two-party visibility) — do not fork them.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IThreadResolver.cs (task 040 — find-or-create, add 1:1 branch)</file>
+      <file>src/server/api/Sprk.Bff.Api/ (task 004 — `sprk_communicationthread` topology/participant fields)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ThreadMembershipDerivationService.cs (task 041 — explicit two-party branch)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationAccessFilter.cs (task 042 — two-party visibility)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ (endpoint to start a 1:1 thread)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-09">Support person-to-person direct threads NOT anchored to a record, with explicit two-participant membership. A user can start a 1:1 thread; membership is exactly the two participants; it appears in each participant's authorized threads.</constraint>
+    <constraint source="project">Exactly-two-participant only. Ad-hoc named N-party group threads are DEFERRED — MUST NOT build them in R1.</constraint>
+    <constraint source="ADR-034">Open (record-anchored) membership derives from `MembershipResolverService`; 1:1 does NOT — it uses the explicit two-party list. Do not force a record anchor onto a 1:1 thread.</constraint>
+    <constraint source="ADR-024">Record-anchored threads use the regarding family; a 1:1 thread has no regarding anchor — distinguish via the thread topology field, MUST NOT add a second regarding mechanism.</constraint>
+    <constraint source="project">Reuse task 041's reconcile (project the two-party set to ACS membership) and task 042's access filter (two-party visibility) — do not fork them. ACS membership for a 1:1 = exactly the two participants.</constraint>
+    <constraint source="ADR-010">Register any new service/endpoint via `CommunicationModule`; DI unconditional (ADR-032 if feature-gated).</constraint>
+    <constraint source="root-§10">bff-extensions Placement Justification in the PR; publish-size delta vs ~45.30 MB baseline; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-regarding.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Topology branch in the resolver" location="src/server/api/Sprk.Bff.Api/Services/Communication/IThreadResolver.cs">
+        `IThreadResolver` find-or-create branches on topology: record-anchored resolves by ancestry/ACS key + ADR-024 anchor; 1:1 resolves/creates a person-to-person thread keyed by the ordered participant pair.
+      </pattern>
+      <pattern name="Explicit membership (not derived)" location="src/server/api/Sprk.Bff.Api/Services/Communication/ThreadMembershipDerivationService.cs">
+        For 1:1, the derivation service returns the explicit two-party list rather than calling `IMembershipResolverService` — task 041's reconcile then projects exactly those two to ACS.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 040's `IThreadResolver`, task 004's thread topology/participant fields, task 041's derivation service, and task 042's access filter to find the extension points for a 1:1 topology.</step>
+    <step order="2">Read `.claude/constraints/bff-extensions.md` §F + root §11 + ADR-034 (open vs explicit membership) before adding the topology.</step>
+    <step order="3">Add a thread topology discriminator (record-anchored vs 1:1-direct) to the thread model usage; a 1:1 thread carries no ADR-024 regarding anchor and stores the explicit two-participant set.</step>
+    <step order="4">Extend `IThreadResolver` with a 1:1 branch: find-or-create a person-to-person thread keyed by the ordered participant pair (so starting a 1:1 with the same person twice reuses the thread, not creates a duplicate).</step>
+    <step order="5">Extend the membership-derivation path (task 041) so a 1:1 thread returns the EXPLICIT two-party list (not ADR-034-derived); confirm task 041's reconcile projects exactly those two to ACS membership.</step>
+    <step order="6">Add a BFF endpoint to start a 1:1 thread with another user (authZ; both participants get ACS identities via task 010's identity map); confirm task 042's access filter makes the thread visible to exactly the two participants.</step>
+    <step order="7">Register any new service/endpoint via `CommunicationModule` (ADR-010), unconditional.</step>
+    <step order="8">Write tests (closed set incl. negative cases): a user starts a 1:1 thread with another user; membership is EXACTLY the two participants; it appears in EACH participant's authorized threads; a THIRD user does NOT see it (negative/authorization case); starting a 1:1 with the same person reuses the thread (no duplicate); a 1:1 thread has no regarding anchor.</step>
+    <step order="9.1">Run `dotnet build src/server/api/Sprk.Bff.Api/` then `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-043-publish/`; report compressed size + delta vs ~45.30 MB baseline.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus: exactly-two membership, third-user exclusion, no N-party leakage, reuse of 041/042, §11 justification); `adr-check` against `spec.md`. Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="9.6">Run `/conflict-check` before the PR (shared `Services/Communication/` hot-path).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (043 ✅) + reset `current-task.md`; record decisions (topology discriminator, ordered-pair keying, explicit-membership branch).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect thread resolver, topology fields, derivation service, access filter</tool>
+    <tool name="edit">1:1 topology branch; explicit-membership path; start-thread endpoint; DI; tests</tool>
+    <tool name="bash">Build, tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 9.6)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IThreadResolver.cs + ThreadResolver.cs (UPDATED — 1:1 branch, ordered-pair keying)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ThreadMembershipDerivationService.cs (UPDATED — explicit two-party branch)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ (NEW — start-1:1-thread endpoint)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (1:1 start, exactly-two membership, third-user-excluded, reuse-no-duplicate, no-regarding-anchor)</output>
+    <output type="docs">PR description with §11 Component Justification (FR-09 failure mode) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A user can start a 1:1 direct thread with another user; the thread is NOT anchored to a record (no ADR-024 regarding).</criterion>
+    <criterion testable="true">Membership is EXACTLY the two participants — the explicit two-party list, not ADR-034-derived.</criterion>
+    <criterion testable="true">The thread appears in EACH participant's authorized threads; a third user does NOT see it (negative/authorization case).</criterion>
+    <criterion testable="true">Starting a 1:1 with the same person reuses the existing thread (ordered-pair keying — no duplicate).</criterion>
+    <criterion testable="true">Task 041's reconcile projects exactly the two participants to ACS membership; task 042's filter honors two-party visibility (reuse, not fork).</criterion>
+    <criterion testable="true">No N-party group-thread code is introduced (deferred) — grep/diff-verifiable.</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta reported vs ~45.30 MB; no new HIGH CVE; Step 9.5 gates run; `/conflict-check` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 040 (shared resolver). Parallel-safe with 041/042 after 040 lands, but it consumes 041's reconcile + 042's filter — coordinate if those land concurrently (they are the same `Services/Communication/` surface; `/conflict-check`).
+
+    Strict scope: exactly two participants. If a use case seems to want three participants, that is the deferred N-party group topology — do NOT build it; note it for R2. The 1:1 thread is a thin topology over the existing thread machinery; if it seems to need a parallel pipeline, the resolver branch is mis-shaped — fix the branch.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates run. Per root §10 + §11: publish-size delta + CVE + bff-extensions Placement Justification + Component Justification (FR-09 failure mode) in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

@@ -44,6 +44,23 @@ public sealed class AssociationStatusMapper
     /// <summary>A field-winner below this confidence is not asserted as a regarding write.</summary>
     private const double WriteFloor = 0.50;
 
+    /// <summary>
+    /// Identity / participant "fallback" regarding fields. A match here means only that the sender/recipient
+    /// is a known contact / organization / account — it is NOT what the email is about, so on its own it must
+    /// NOT auto-file the communication to Resolved (owner: "a contact match isn't really a match — it's a
+    /// fallback"). Auto-file requires a SUBSTANTIVE target (matter / project / invoice / service request /
+    /// event / work assignment). Fallback matches are still WRITTEN (a correct association) and can be the
+    /// review surface's primary — they just don't clear the auto-file bar by themselves.
+    /// </summary>
+    private static readonly HashSet<string> FallbackFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_regardingperson",       // Contact
+        "sprk_regardingorganization", // Organization
+        "sprk_regardingaccount",      // Account
+    };
+
+    private static bool IsSubstantiveField(string field) => !FallbackFields.Contains(field);
+
     public AssociationStatusMapper(AutoFileGate gate, ILogger<AssociationStatusMapper> logger)
     {
         _gate = gate;
@@ -98,6 +115,13 @@ public sealed class AssociationStatusMapper
         var anyConflict = fieldWinners.Any(f => f.Conflict);
         var topFull = fieldWinners.Count > 0 ? fieldWinners.Max(f => f.FullConfidence) : 0.0;
         var topDet = fieldWinners.Count > 0 ? fieldWinners.Max(f => f.DeterministicConfidence) : 0.0;
+        // Auto-file eligibility keys off the top SUBSTANTIVE deterministic winner — a fallback
+        // identity match (contact/org/account) alone never clears the bar.
+        var topDetSubstantive = fieldWinners
+            .Where(f => IsSubstantiveField(f.Field))
+            .Select(f => f.DeterministicConfidence)
+            .DefaultIfEmpty(0.0)
+            .Max();
         var aiInvolvedTop = fieldWinners
             .Where(f => Math.Abs(f.FullConfidence - topFull) < 1e-9)
             .Any(f => f.AiInvolved);
@@ -123,18 +147,22 @@ public sealed class AssociationStatusMapper
             status = AssociationStatusCodes.PendingReview;
             reason = $"Top reinforced confidence {topFull:F2} < suggest floor {SuggestFloor:F2}.";
         }
-        else if (topDet >= settings.Threshold && settings.Enabled)
+        else if (topDetSubstantive >= settings.Threshold && settings.Enabled)
         {
             status = AssociationStatusCodes.Resolved;
             autoFiled = true;
-            reason = $"Deterministic reinforced confidence {topDet:F2} ≥ threshold {settings.Threshold:F2}; auto-file enabled ⇒ Resolved.";
+            reason = $"Substantive deterministic reinforced confidence {topDetSubstantive:F2} ≥ threshold {settings.Threshold:F2}; auto-file enabled ⇒ Resolved.";
             // Auto-file asserts only deterministic winners (AI-derived fields are never auto-filed).
             AddWrites(writes, fieldWinners, useDeterministic: true);
         }
         else
         {
             status = AssociationStatusCodes.Suggested;
-            reason = BuildSuggestedReason(topDet, topFull, aiInvolvedTop, settings);
+            // A high-confidence FALLBACK match (contact/org) that doesn't auto-file lands here: the fallback
+            // is written but the email still needs a substantive association reviewed.
+            reason = topDet >= settings.Threshold && topDetSubstantive < settings.Threshold
+                ? $"Only a fallback identity match (contact/organization) reached the threshold ({topDet:F2}); no substantive target auto-filed ⇒ Suggested (review for the matter/project/invoice)."
+                : BuildSuggestedReason(topDet, topFull, aiInvolvedTop, settings);
             // Suggestions may include AI-derived fields.
             AddWrites(writes, fieldWinners, useDeterministic: false);
         }

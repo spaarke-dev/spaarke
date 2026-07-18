@@ -157,3 +157,4 @@ infra/**/modules/*.json
 # Backfill checkpoint files (runtime artifacts; never commit)
 backfill-parent-records-progress.json
 backfill-documents-progress.json
+.claude/worktrees/

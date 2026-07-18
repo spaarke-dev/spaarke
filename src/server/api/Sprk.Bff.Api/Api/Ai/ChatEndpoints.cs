@@ -3368,6 +3368,29 @@ public record ChatSseElicitationModalData(
     IReadOnlyList<ChatSseElicitationFieldData> MissingFields,
     JsonElement? ProvidedArgs);
 
+/// <summary>
+/// Data payload for the <c>surface_launch</c> SSE event (spaarkeai-assistant-enhancements-r1
+/// P0(b) — the typed-path create-flow fix, 2026-07-17). A capability tool-call the agent turn
+/// selected resolved to a Binding whose disposition is <c>surface_launch</c> — a client-owned
+/// PASS-THROUGH: the server drafts + grounds a payload; the CLIENT opens the pre-seeded surface
+/// (matter/event/task wizard, list-tasks grid, …). The Click path already branches on
+/// <see cref="AnalysisChunk.Disposition"/> == <c>surface_launch</c> (task 013); this event is the
+/// TEXT/agent-path analogue — <see cref="Sprk.Bff.Api.Services.Ai.Chat.BindingCapabilityTool"/>
+/// emits it (mirroring <c>elicitation_modal</c>) so the SpaarkeAi chat client calls
+/// <c>launchSurface(consumerType, payload)</c> with the SAME static registry the chip path uses
+/// (surface-launch-mechanism §3; §10 keeps deployment-specific web-resource names client-side).
+/// The enriched draft payload (draft slot values + task-013 <c>resolvedLookups</c> + <c>fileIds</c>)
+/// is carried VERBATIM so the surface pre-fills without a second server round-trip. The
+/// SessionOutput ledger entry was written BEFORE this event renders (ADR-040).
+/// </summary>
+/// <param name="BindingId">The dispatched <c>sprk_playbookconsumer</c> row GUID (audit/trace).</param>
+/// <param name="ConsumerType">The Binding's <c>sprk_consumertype</c> — the client maps it to a concrete launch surface via its static registry.</param>
+/// <param name="Payload">The enriched draft payload to pre-seed the launched surface; null when the dispatch produced no structured payload.</param>
+public record ChatSseSurfaceLaunchData(
+    string BindingId,
+    string ConsumerType,
+    JsonElement? Payload);
+
 // =============================================================================
 // FR-P2-02 loop-boundary confirmation-gate records (task 037 / FR-P2-08)
 // =============================================================================

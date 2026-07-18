@@ -25,6 +25,7 @@ export interface ISendEmailPageProps {
   /** Required for view/reply/forward/draft modes. */
   communicationId?: string;
   initialTo?: string[];
+  initialCc?: string[];
   initialSubject?: string;
   initialBody?: string;
   associations?: ICommunicationAssociation[];

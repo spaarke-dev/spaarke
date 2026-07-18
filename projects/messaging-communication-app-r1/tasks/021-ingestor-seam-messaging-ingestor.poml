@@ -1,0 +1,153 @@
+<task id="021" project="messaging-communication-app-r1">
+  <metadata>
+    <title>`ICommunicationChannelIngestor` seam (net-new) + `MessagingIngestor`</title>
+    <phase>W2 — Channel Provider (ADR-045 seams)</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>007</dependencies>
+    <blocks>030,031</blocks>
+    <tags>bff-api, communication, architecture</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Introduces a NET-NEW channel-extensibility seam (`ICommunicationChannelIngestor`) into shared `Services/Communication/` — completes ADR-045's stated-but-unbuilt inbound intent — plus the first implementation (`MessagingIngestor`). Architecture-shaping, BFF-touching (`.cs`, Services/Communication hot-path), requires publish-size + CVE + code-review + adr-check per root §10 and §11 Component Justification for the new seam.</rigor-reason>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-02</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Add the **net-new inbound seam** that completes ADR-045's stated-but-unbuilt intent, alongside the shipped sender/archiver seams:
+
+    • **`ICommunicationChannelIngestor`** `[NEW seam]` — the "ingest" leg counterpart to `ICommunicationChannelSender` / `ICommunicationArchiver`. One implementation per `CommunicationType`; keyed by `SupportedType` for the same additive-registration pattern the dispatcher already uses. It accepts a channel-normalized inbound message (a `NormalizedMessage`, the envelope the engine already operates over) and persists it as a `sprk_communication` record, then hands off to the shared enrichment/association path — so inbound capture is channel-agnostic instead of forked per channel. Define the interface + its channel-neutral request/result shape mirroring `ICommunicationChannelSender`'s DTO discipline (no provider types across the seam).
+
+    • **`MessagingIngestor`** `[NEW impl]` — implements `ICommunicationChannelIngestor` with `SupportedType =&gt; CommunicationType.Message`. It is the persist-side of the inbound ACS path: given a normalized ACS message, it creates/updates the `sprk_communication` (type=Message) record and invokes enrichment best-effort. The actual Event Grid ingress + Service Bus job + ACS-event→`NormalizedMessage` normalizer are tasks 030/031 which call INTO this seam — do NOT build them here.
+
+    Register the seam + impl in `CommunicationModule` (ADR-010, unconditional), keyed by `CommunicationType`, resolvable via the same dispatch mechanism as the sender/archiver seams (extend `CommunicationChannelDispatcher` with a `ResolveIngestor(type)` OR add a parallel keyed resolver — mirror the existing shape). Do NOT modify the existing email `IncomingCommunicationProcessor` behavior in this task (040 later assigns threads on that path; email inbound stays green). This task defines the seam and the messaging impl only.
+  </prompt>
+
+  <role>
+    Spaarke BFF Communication architect. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/`. Fluent in ADR-045 (channel seams — sender/archiver shipped; ingestor is the missing leg), ADR-046 (ACS messaging channel — task 007), ADR-010 (DI minimalism), ADR-032 (Null-Object), §11 Component Justification, and `.claude/constraints/bff-extensions.md`.
+  </role>
+
+  <goal>
+    A net-new `ICommunicationChannelIngestor` seam exists in `Services/Communication/Channels/`, shaped as the inbound counterpart to the sender/archiver seams (channel-neutral input `NormalizedMessage`, keyed by `SupportedType`), resolvable via the dispatcher. `MessagingIngestor` (`SupportedType = Message`) implements it: persists an inbound ACS message as a `sprk_communication` (type=Message) record and invokes enrichment best-effort. Both are registered in `CommunicationModule`, unconditional. The existing email `IncomingCommunicationProcessor` is unchanged. Build clean; seam + impl tests pass; publish-size (vs ~45.30 MB) + CVE + bff-extensions Placement Justification + §11 Component Justification reported; `/conflict-check` before PR.
+  </goal>
+
+  <context>
+    <background>
+      **Mirror the email seam — and complete it.** email-r4 (task 016) shipped the OUTBOUND channel seams: `ICommunicationChannelSender` + `ICommunicationArchiver`, keyed by `CommunicationType` and resolved by `CommunicationChannelDispatcher` (`ToDictionary(SupportedType)`; additive registration; engine/enrichment/regarding/review UI never change to add a channel). But inbound was left CONCRETE and email-only: `IncomingCommunicationProcessor` + `Engine/` fetch Graph messages directly — there is **no ingestor seam** (design §2 "Inbound ingestor seam — NONE"). Messaging's inbound is net-new, and design §10 / §3.1 direct R1 to abstract it as a seam now, so inbound is not messaging-forked and the platform gains the missing leg of ADR-045's stated intent.
+
+      **§11 Component Justification (the NEW seam — the one that needs justifying).**
+      • Existing: NO ingestor seam exists — verified by grep (`grep -rn "ICommunicationChannelIngestor" src/` returns nothing; inbound today is the concrete `IncomingCommunicationProcessor`). The sender/archiver seams exist but are the OUTBOUND legs; there is no inbound counterpart.
+      • Extension: cannot be an extension of `IncomingCommunicationProcessor` — that is a concrete, email-and-Graph-specific class, not a seam; making messaging call it would fork it with ACS branches. The seam is the boundary that keeps inbound channel-agnostic.
+      • Cost-of-doing-nothing (concrete contract failure): without `ICommunicationChannelIngestor`, the inbound ACS capture pipeline (030/031) would have to persist messaging directly against a bespoke messaging-only path OR branch `IncomingCommunicationProcessor` on channel — either way inbound forks per channel, violating ADR-045's one-process principle and re-opening the engine/enrichment for the next channel (SMS in R2). The seam is what lets 030/031 call one channel-agnostic ingest boundary.
+
+      Scope discipline: this task defines the seam + the messaging impl + their registration ONLY. The Event Grid webhook ingress + subscription-validation handshake (030), the Service Bus job + ACS-event→`NormalizedMessage` normalizer + idempotent dedupe + DLQ (031) call INTO this seam and are separate tasks. Do NOT modify email inbound behavior (040 handles the shared-path thread-assignment edit under characterization tests).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/ICommunicationChannelSender.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/ICommunicationArchiver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/CommunicationChannelDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/NormalizedMessage.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-02">Add the `ICommunicationChannelIngestor` seam; `MessagingIngestor` persists an inbound normalized ACS message as `sprk_communication` and hands off to enrichment. (Event Grid ingress + job + normalizer + idempotency are 030/031, which call this seam.)</constraint>
+    <constraint source="ADR-045">The ingestor is the missing inbound leg of the channel seams — keyed by `CommunicationType`, additive registration, resolved via the dispatcher. The engine, enrichment, regarding model, and review UI MUST NOT change to add an inbound channel (NFR-04). Operate over the `NormalizedMessage` envelope only — never `Azure.Communication.*` or `Microsoft.Graph.Message` across the seam.</constraint>
+    <constraint source="ADR-046">Follow ADR-046 (task 007): ACS is transport, Dataverse is the record; the ingestor seam is codified there as a reusable addition.</constraint>
+    <constraint source="ADR-010">Register the seam + `MessagingIngestor` via `CommunicationModule` only, keyed to `CommunicationType.Message`, unconditional (ADR-032 Null-Object if any dependency is feature-gated).</constraint>
+    <constraint source="NFR-02">Enrichment/association invoked by the ingestor MUST be best-effort and non-fatal — enrichment failure MUST NOT fail the persist. Persist every message as `sprk_communication` (Dataverse is the record).</constraint>
+    <constraint source="project">Do NOT modify the existing email `IncomingCommunicationProcessor` behavior in this task — email inbound stays green (thread-assignment edit is 040 under characterization tests). Do NOT build the Event Grid ingress/job/normalizer/idempotency (030/031).</constraint>
+    <constraint source="root §10">bff-extensions Placement Justification in the PR (ingestor lives in BFF — sole `sprk_communication` mutation + policy point); publish-size delta vs ~45.30 MB baseline; no new HIGH CVE. Run `/conflict-check` before PR (shared `Services/Communication/` hot-path).</constraint>
+    <constraint source="§11">State the concrete cost-of-doing-nothing for the new seam (inbound forks per channel; engine/enrichment re-opened for SMS in R2) in the PR — a NEW seam requires a §11 justification with grep evidence that no ingestor seam exists.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+    <patterns>
+      <pattern name="Channel seam interface shape" location="src/server/api/Sprk.Bff.Api/Services/Communication/Channels/ICommunicationChannelSender.cs">
+        `SupportedType` dispatch key + a channel-neutral request record (no provider types). `ICommunicationChannelIngestor` mirrors this: `SupportedType` + a channel-neutral input built around `NormalizedMessage`.
+      </pattern>
+      <pattern name="Type-keyed dispatch resolution" location="src/server/api/Sprk.Bff.Api/Services/Communication/Channels/CommunicationChannelDispatcher.cs">
+        `IEnumerable&lt;T&gt;` ctor injection + `ToDictionary(x =&gt; x.SupportedType)` + `Resolve*(type)` throwing `CHANNEL_NOT_SUPPORTED`. Add `ResolveIngestor(type)` (or a parallel resolver) the same way.
+      </pattern>
+      <pattern name="Envelope-only engine boundary" location="src/server/api/Sprk.Bff.Api/Services/Communication/Models/NormalizedMessage.cs">
+        The Association Engine + enrichment operate over `NormalizedMessage` only. The ingestor accepts this type; the ACS→envelope mapping happens at the pipeline boundary in 031's normalizer, not inside the ingestor.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `ICommunicationChannelSender.cs` + `ICommunicationArchiver.cs` + `CommunicationChannelDispatcher.cs` to fix the seam + dispatch shape to mirror. Read `NormalizedMessage.cs` (the envelope the ingestor accepts) and `IncomingCommunicationProcessor.cs` + `CommunicationEnrichmentService.cs` to see how email currently persists + enriches (so the seam abstracts the same downstream handoff).</step>
+    <step order="2">Grep-confirm no `ICommunicationChannelIngestor` exists today (§11 evidence). Read `.claude/constraints/bff-extensions.md` §F + §11 + the ADR-046 ingestor-seam section (task 007).</step>
+    <step order="3">Define `ICommunicationChannelIngestor` in `Services/Communication/Channels/`: `CommunicationType SupportedType { get; }` + `Task&lt;...&gt; IngestAsync(&lt;channel-neutral input around NormalizedMessage&gt;, CancellationToken)`. Define its channel-neutral request/result records mirroring `ChannelSendRequest`/`ChannelSendResult` discipline (no provider types).</step>
+    <step order="4">Implement `MessagingIngestor : ICommunicationChannelIngestor` (`SupportedType =&gt; CommunicationType.Message`): persist the normalized inbound ACS message as a `sprk_communication` (Direction=Incoming, type=Message) record via the canonical Dataverse service, then invoke enrichment best-effort (NFR-02). Reuse the same persist/enrich downstream email uses; do NOT re-fetch from ACS here (031's normalizer supplies the `NormalizedMessage`).</step>
+    <step order="5">Wire dispatch: extend `CommunicationChannelDispatcher` with `ResolveIngestor(CommunicationType)` (or a parallel keyed resolver) using the same `IEnumerable` + `ToDictionary(SupportedType)` pattern. Register the seam + `MessagingIngestor` in `CommunicationModule` (ADR-010, unconditional).</step>
+    <step order="6">Grep-verify the existing email `IncomingCommunicationProcessor`, the engine, enrichment, regarding model, and review UI are UNCHANGED by this task (the ingestor is additive; email inbound is untouched until 040).</step>
+    <step order="7">Write tests: `ResolveIngestor(Message)` returns `MessagingIngestor`; `IngestAsync` persists exactly one `sprk_communication` (type=Message) from a `NormalizedMessage` and invokes enrichment; enrichment failure does NOT fail the persist (NFR-02); `ResolveIngestor(Email)` (no email ingestor registered in R1) throws `CHANNEL_NOT_SUPPORTED` as designed. Prefer vertical-slice seam tests per ADR-038.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm existing email inbound tests still pass (unchanged behavior).</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-021-publish/`; report compressed size + delta vs ~45.30 MB baseline. Expected ≈ 0 (pure code, no new package). ≥+5 MB justify; ≥55 MB architecture review; ≥60 MB HARD STOP.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff; `adr-check` against `spec.md` (focus ADR-045 seam completion + §11 new-seam justification + ADR-010/032 DI + NFR-02 non-fatal enrichment). Resolve Critical findings (path C) or surface an ADR conflict (root §6.5).</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/` BFF hot-path).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (021 ✅) + `current-task.md`; record decisions (ingestor seam signature, dispatch mechanism `ResolveIngestor` vs parallel resolver, the ingest input shape 030/031 must produce).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect sender/archiver seams, dispatcher, NormalizedMessage, IncomingCommunicationProcessor, enrichment</tool>
+    <tool name="grep">§11 evidence (no ingestor seam exists); verify email inbound untouched</tool>
+    <tool name="edit">Define `ICommunicationChannelIngestor`; implement `MessagingIngestor`; extend dispatcher + `CommunicationModule`</tool>
+    <tool name="bash">Build, seam/impl tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/ICommunicationChannelIngestor.cs (NEW — the net-new inbound seam)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/MessagingIngestor.cs (NEW — ICommunicationChannelIngestor for Message)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/CommunicationChannelDispatcher.cs (UPDATED — ResolveIngestor)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — register seam + MessagingIngestor keyed to Message)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (ResolveIngestor(Message) → MessagingIngestor; IngestAsync persists one sprk_communication; enrichment non-fatal)</output>
+    <output type="docs">PR description with §11 Component Justification (no ingestor seam exists — grep evidence; inbound-forks-per-channel failure mode) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ICommunicationChannelIngestor` exists in `Services/Communication/Channels/` with a `SupportedType` dispatch key and a channel-neutral `IngestAsync` operating over `NormalizedMessage` (no `Azure.Communication.*` / `Microsoft.Graph` type in the signature).</criterion>
+    <criterion testable="true">`MessagingIngestor : ICommunicationChannelIngestor` exists with `SupportedType =&gt; CommunicationType.Message`; `IngestAsync` persists exactly one `sprk_communication` (Direction=Incoming, type=Message) from a `NormalizedMessage`.</criterion>
+    <criterion testable="true">Enrichment/association invoked by the ingestor is best-effort — a thrown enrichment error does NOT fail the persist (NFR-02).</criterion>
+    <criterion testable="true">The dispatcher resolves the ingestor by `CommunicationType` (`ResolveIngestor(Message)` → `MessagingIngestor`); the seam + impl are registered via `CommunicationModule`, unconditional.</criterion>
+    <criterion testable="true">The existing email `IncomingCommunicationProcessor`, the engine, enrichment, regarding model, and review UI are byte-unchanged by this task (grep/diff-verifiable).</criterion>
+    <criterion testable="true">No Event Grid ingress / Service Bus job / normalizer / idempotency logic is added here (those are 030/031) — this task is seam + impl + registration only.</criterion>
+    <criterion testable="true">`dotnet build` clean; existing email inbound tests pass; publish-size delta ≈ 0 vs ~45.30 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends only on 007 (ADR-046 codifies the ingestor seam). Blocks 030 (Event Grid ingress → job) and 031 (normalizer → `NormalizedMessage` → this ingestor's `IngestAsync` with idempotent dedupe). `parallel-safe: true` within W2 — distinct new files from 020 (sender/archiver); both touch `CommunicationModule` (coordinate the two small registration edits at merge, or serialize the module edit).
+
+    Strict scope: define the seam + messaging impl + registration. The idempotency/echo-dedup, DLQ, Event Grid handshake, and Service Bus job are 030/031 and call INTO `IngestAsync`. If the seam seems to need Event Grid or ACS-fetch knowledge, it is mis-shaped — the ingestor accepts an already-normalized `NormalizedMessage` and knows nothing about transport (that boundary is 031's normalizer). Do NOT touch email inbound (040 owns the shared-path thread edit under characterization tests).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED. Per root §10 + §11: publish-size delta (vs ~45.30 MB) + CVE + bff-extensions Placement Justification + Component Justification (new-seam, grep evidence) in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/` hot-path). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

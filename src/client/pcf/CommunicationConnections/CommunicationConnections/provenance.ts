@@ -158,8 +158,15 @@ export interface Connection {
   targetId: string;
   confidence: number;
   status: 'confirmed' | 'suggested' | 'ambiguous';
-  /** Competing candidates when the slot is ambiguous. */
+  /** Competing candidates when the slot is ambiguous (conflict). */
   alternatives?: ProvenanceCandidate[];
+  /**
+   * Runner-up candidates for a NON-ambiguous slot (the engine had a clear top
+   * pick but also recorded lower-confidence alternatives). Surfaced behind an
+   * "other candidates" expander so a reviewer can file a different one. Empty/
+   * undefined when the slot had a single candidate.
+   */
+  otherCandidates?: ProvenanceCandidate[];
   order: number;
 }
 
@@ -196,6 +203,15 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
     const meta = SLOT_META[field] ?? { label: entityLabel(cands[0].targetEntity), order: 99 };
     const conflict = cands.length >= 2 && cands.some(c => c.conflict);
     const primary = cands.reduce((a, b) => (b.reinforcedConfidence > a.reinforcedConfidence ? b : a));
+    // Non-conflict runners-up (everything but the primary), highest-confidence first.
+    const others = conflict
+      ? undefined
+      : cands.filter(c => c !== primary).sort((a, b) => b.reinforcedConfidence - a.reinforcedConfidence);
+    // Per-candidate `written` is authoritative for filed state — the engine may mark the
+    // communication Resolved on a deterministic (contact) auto-file while an AI-suggested
+    // matter/project on ANOTHER field is NOT written; that one must still read as "suggested"
+    // (to review), not "confirmed". Fall back to the global isResolved only if `written` is absent.
+    const isWritten = primary.written ?? isResolved;
     out.push({
       field,
       entity: primary.targetEntity,
@@ -203,12 +219,122 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
       targetName: primary.targetName ?? primary.targetId,
       targetId: primary.targetId,
       confidence: primary.reinforcedConfidence,
-      status: conflict ? 'ambiguous' : isResolved ? 'confirmed' : 'suggested',
+      status: conflict ? 'ambiguous' : isWritten ? 'confirmed' : 'suggested',
       alternatives: conflict ? cands : undefined,
+      otherCandidates: others && others.length > 0 ? others : undefined,
       order: meta.order,
     });
   });
   return out.sort((a, b) => a.order - b.order);
+}
+
+/** entityType → display slot (reverse of SLOT_META) so filed lookups map to a labelled slot. */
+const ENTITY_TO_SLOT: Record<string, { field: string; label: string; order: number }> = {
+  sprk_matter: { field: 'sprk_regardingmatter', label: 'Matter', order: 1 },
+  sprk_project: { field: 'sprk_regardingproject', label: 'Project', order: 2 },
+  sprk_organization: { field: 'sprk_regardingorganization', label: 'Organization', order: 3 },
+  account: { field: 'sprk_regardingaccount', label: 'Account', order: 4 },
+  contact: { field: 'sprk_regardingperson', label: 'Contact', order: 5 },
+  sprk_invoice: { field: 'sprk_regardinginvoice', label: 'Invoice', order: 6 },
+  sprk_servicerequest: { field: 'sprk_regardingservicerequest', label: 'Service Request', order: 7 },
+  sprk_event: { field: 'sprk_regardingevent', label: 'Event', order: 8 },
+  sprk_workassignment: { field: 'sprk_regardingworkassignment', label: 'Work Assignment', order: 9 },
+};
+
+/**
+ * The actual `sprk_communication` regarding lookup fields (field → entity type). NOTE these
+ * are the COMMUNICATION regarding columns (`sprk_regardingperson` for Contact, etc.) — NOT the
+ * `sprk_todo` TODO_REGARDING_CATALOG names (`sprk_regardingcontact`), which do not exist on
+ * `sprk_communication`. Reading with the wrong names makes the whole $select throw.
+ */
+export const COMMUNICATION_REGARDING_FIELDS: { field: string; entityType: string }[] = Object.entries(
+  ENTITY_TO_SLOT
+).map(([entityType, meta]) => ({ entityType, field: meta.field }));
+
+/** A regarding lookup that is actually populated on the host record (a filed association). */
+export interface FiledAssociation {
+  entityType: string;
+  recordId: string;
+  recordName: string;
+}
+
+/**
+ * Fold the record's actually-filed regarding lookups into the engine-derived slots
+ * so the surface is authoritative — it shows EVERY association, not just what the
+ * engine suggested. For a filed entity type that already has a slot, the filed
+ * record is the truth (mark confirmed, adopt its identity, drop review affordances);
+ * a filed type with no slot (e.g. a manual "Link another") becomes a new confirmed row.
+ */
+export function mergeFiledConnections(connections: Connection[], filed: FiledAssociation[]): Connection[] {
+  if (!filed || filed.length === 0) return connections;
+  const out = connections.map(c => ({ ...c }));
+  for (const f of filed) {
+    const existing = out.find(c => c.entity === f.entityType);
+    if (existing) {
+      existing.status = 'confirmed';
+      existing.targetName = f.recordName;
+      existing.targetId = f.recordId;
+      existing.alternatives = undefined;
+      existing.otherCandidates = undefined;
+    } else {
+      const slot = ENTITY_TO_SLOT[f.entityType] ?? {
+        field: `sprk_regarding_${f.entityType}`,
+        label: entityLabel(f.entityType),
+        order: 99,
+      };
+      out.push({
+        field: slot.field,
+        entity: f.entityType,
+        slotLabel: slot.label,
+        targetName: f.recordName,
+        targetId: f.recordId,
+        confidence: 1,
+        status: 'confirmed',
+        order: slot.order,
+      });
+    }
+  }
+  return out.sort((a, b) => a.order - b.order);
+}
+
+/** A record type the AI classifier flagged (e.g. "looks like a new Matter") with no matching record yet. */
+export interface AiSuggestedType {
+  entityType: string;
+  label: string;
+  reason: string;
+}
+
+/**
+ * Parse the AI-classification signals for suggested record TYPES that aren't already
+ * represented by a candidate/filed slot — e.g. an email about a brand-new matter that
+ * doesn't exist yet. The engine embeds these as `types=[sprk_matter]` in the signal's
+ * provenance string (there is no dedicated structured field today). Surfaced in the grid
+ * as a "Create <Type>" affordance so the reviewer can act on the AI's intent.
+ */
+export function deriveAiSuggestedTypes(
+  doc: ProvenanceDoc,
+  existingEntityTypes: ReadonlySet<string>
+): AiSuggestedType[] {
+  const out: AiSuggestedType[] = [];
+  const seen = new Set<string>();
+  for (const sig of doc.signals ?? []) {
+    const match = /types=\[([^\]]*)\]/.exec(sig.provenance ?? '');
+    if (!match) continue;
+    const types = match[1]
+      .split(',')
+      .map(t => t.trim())
+      .filter(Boolean);
+    for (const et of types) {
+      if (existingEntityTypes.has(et) || seen.has(et)) continue;
+      seen.add(et);
+      out.push({
+        entityType: et,
+        label: entityLabel(et),
+        reason: `The AI classifier flagged this email as relating to a ${entityLabel(et)}.`,
+      });
+    }
+  }
+  return out;
 }
 
 /** Turn structural signals/obligations into "create from this email" suggestions. */

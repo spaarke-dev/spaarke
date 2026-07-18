@@ -41,6 +41,7 @@ public sealed class IncomingCommunicationProcessor
     private readonly IPostUploadIndexingEnqueuer _postUploadIndexingEnqueuer;
     private readonly NotificationService _notificationService;
     private readonly ICommunicationEnrichmentService _enrichmentService;
+    private readonly IThreadResolver? _threadResolver;
     private readonly CommunicationOptions _options;
     private readonly IConfiguration _configuration;
     private readonly ILogger<IncomingCommunicationProcessor> _logger;
@@ -69,7 +70,8 @@ public sealed class IncomingCommunicationProcessor
         ICommunicationEnrichmentService enrichmentService,
         IOptions<CommunicationOptions> options,
         IConfiguration configuration,
-        ILogger<IncomingCommunicationProcessor> logger)
+        ILogger<IncomingCommunicationProcessor> logger,
+        IThreadResolver? threadResolver = null)
     {
         _graphClientFactory = graphClientFactory;
         _communicationService = communicationService;
@@ -84,6 +86,7 @@ public sealed class IncomingCommunicationProcessor
         _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
         _notificationService = notificationService;
         _enrichmentService = enrichmentService;
+        _threadResolver = threadResolver;
         _options = options.Value;
         _configuration = configuration;
         _logger = logger;
@@ -272,6 +275,35 @@ public sealed class IncomingCommunicationProcessor
                 communicationId, graphMessageId);
         }
 
+        // ── Step 4.6: Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02) ──
+        // Runs AFTER association (4.5) so the resolver can anchor a new thread to the message's resolved
+        // regarding (ADR-024 reuse). Reuses the SAME In-Reply-To/References ancestry the ThreadContinuityRung
+        // walks (email strategy) to join the parent's thread or create a new one. Same shared seam the chat
+        // inbound path (MessagingIngestor) and the outbound send path (CommunicationService) call. A resolver
+        // failure MUST NOT fail capture — the record already exists (without sprk_communicationthread).
+        if (_threadResolver is not null)
+        {
+            try
+            {
+                await _threadResolver.ResolveAndAssignThreadAsync(
+                    new ThreadResolutionRequest
+                    {
+                        CommunicationId = communicationId,
+                        ChannelType = CommunicationType.Email,
+                        Direction = CommunicationDirection.Incoming,
+                        Message = envelope,
+                    },
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Thread resolution failed (non-fatal) | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
+                    communicationId, graphMessageId);
+            }
+        }
+
         // ── Step 5: Process attachments ──────────────────────────────────────────
         // Process attachments when: account has AutoCreateRecords enabled, OR account
         // could not be resolved (default to processing rather than silently dropping).
@@ -282,7 +314,7 @@ public sealed class IncomingCommunicationProcessor
             try
             {
                 await ProcessIncomingAttachmentsAsync(
-                    message.Attachments, communicationId, ct);
+                    message.Attachments, mailboxEmail, graphMessageId, communicationId, ct);
             }
             catch (Exception ex)
             {
@@ -515,12 +547,43 @@ public sealed class IncomingCommunicationProcessor
     /// Reuses EmailAttachmentProcessor for filtering and SPE upload logic.
     /// </summary>
     private async Task ProcessIncomingAttachmentsAsync(
-        IList<Attachment> graphAttachments, Guid communicationId, CancellationToken ct)
+        IList<Attachment> graphAttachments, string mailboxEmail, string graphMessageId,
+        Guid communicationId, CancellationToken ct)
     {
         var fileAttachments = graphAttachments
             .OfType<FileAttachment>()
             .Where(a => a.ContentBytes is { Length: > 0 })
             .ToList();
+
+        // The inline `$expand=attachments` on the message GET frequently returns attachment
+        // METADATA without `contentBytes` (size-dependent Graph behavior). When we have
+        // attachments but none carry usable bytes, re-fetch the attachments collection from
+        // the dedicated endpoint, which returns contentBytes for file attachments. Without
+        // this, incoming attachments silently never materialize into sprk_document records.
+        if (fileAttachments.Count == 0 && graphAttachments.Count > 0)
+        {
+            try
+            {
+                var graphClient = _graphClientFactory.ForApp();
+                var fetched = await graphClient.Users[mailboxEmail].Messages[graphMessageId]
+                    .Attachments.GetAsync(cancellationToken: ct);
+                fileAttachments = (fetched?.Value ?? new List<Attachment>())
+                    .OfType<FileAttachment>()
+                    .Where(a => a.ContentBytes is { Length: > 0 })
+                    .ToList();
+                _logger.LogInformation(
+                    "Re-fetched {Count} file attachment(s) with content for communication {CommunicationId} " +
+                    "(inline expand returned no contentBytes)",
+                    fileAttachments.Count, communicationId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Attachment re-fetch failed for communication {CommunicationId}; " +
+                    "attachments may be larger than the inline limit and require per-item $value fetch",
+                    communicationId);
+            }
+        }
 
         if (fileAttachments.Count == 0)
         {
