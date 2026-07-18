@@ -1,8 +1,27 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-18 (task 022 Increment A — SaveAsync inversion COMMITTED ce50c9877; Increment B escalated)
+> **Last Updated**: 2026-07-18 (E1 re-architecture COMMITTED 4b7887a0b; resume at task 026)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+
+## ▶️ RESUME HERE (fresh session) — `work on task 026`
+
+**Task 026** = build `ComposeDocumentRenderer` (server-side born-in-editor OOXML authoring). The POML [`tasks/026-compose-document-renderer.poml`](tasks/026-compose-document-renderer.poml) is self-contained (reuse anchors, numbering recipe, file:line seams, acceptance criteria + numbering golden-file). Rigor FULL · opus · xhigh · parallel-safe=false (Services/Compose). Run via `task-execute`.
+
+**Five de-risking facts from the 2026-07-18 investigation (not all in the POML):**
+1. **Reuse anchor**: `Services/Ai/Export/DocxExportService.cs` is the ONLY from-scratch authoring precedent — `WordprocessingDocument.Create` (:55), `CreateStyledTable`/`CreateTableCell` (:412-486), `AddStyleDefinitions`/`CreateStyle` (:134-176), `SanitizeText` (:557). Reuse the patterns; its numbering is FAKE (literal "1. " text) — do NOT copy that.
+2. **The one greenfield = multi-level numbering** — ZERO `NumberingDefinitionsPart` authoring exists anywhere in `src/server/`. Recipe + pitfalls (style-linked not direct `numId`; `%N` lvlText; `isLgl`; `lvlRestart`) in FR-27 + the 026 POML + researcher memo `.claude/agent-memory/researcher/server-docx-authoring-numbering-2026-07-18.md`.
+3. **Fidelity target fixture**: `tests/unit/Sprk.Bff.Api.Tests/Fixtures/Compose/RealTemplates/commonpaper-cloud-service-agreement.docx` (9-level numbering, 345 paras, 395 paraIds, 6 tables) — UNZIP it to study its real `numbering.xml`/`styles.xml`.
+4. **paraId mint**: apply `ParaIdPreParser`'s scheme (`RandomNumberGenerator.GetInt32(1,int.MaxValue).ToString("X8")`, `0<x<0x80000000`, dedup) at BUILD time — set `Paragraph.ParagraphId` on every emitted `w:p` incl. table cells.
+5. **Render seam**: `ComposeService.SaveAsync` / `ResolveSaveBaselineAsync` create-path (add `ComposeContentModel? ContentModel` to `SaveComposeDocumentRequest`, additive; branch to the renderer before `UploadSmallAsUserAsync` :444). OpenXML SDK 3.5.1, no new NuGet.
+
+**Also open (task 022 completion, do alongside or before 027)**: `LoadAsync` must capture+return `VersionId` (today returns only ETag — the FR-06 re-fetch branch I wired in Increment A has no source yet). See FR-06.
+
+**Uncommitted/unpushed state**: tree CLEAN. 4 LOCAL commits not pushed to origin (`3a5505c5e`, `ce50c9877`, `a2773e0dc`, `4b7887a0b`) — all safe in this worktree; push when ready (owner batches pushes). Do NOT re-open the committed server inversion (`ce50c9877`).
+
+**Downstream order**: 026 → 023 (AI-redline compose on authored baseline) → 027 (client content-model cutover: drop docx.js) → 024 (seam: loaded byte-identity + born-in-editor numbering golden). 020/021 superseded; 001 reversed.
+
+---
 
 ---
 
