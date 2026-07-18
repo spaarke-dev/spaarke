@@ -2,8 +2,8 @@
   <metadata>
     <title>FR-01 client cutover — drop `docx.js`; the client sends a paraId-keyed content model, never authors bytes</title>
     <phase>2 E1</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>opus</model-tier>
     <effort>xhigh</effort>

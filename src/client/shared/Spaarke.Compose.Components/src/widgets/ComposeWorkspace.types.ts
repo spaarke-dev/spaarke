@@ -86,6 +86,13 @@ export interface ComposeWorkspaceState {
   seedHtml: string | null;
   /** ETag from last load — used as if-match on save (per ComposeEndpoints contract). */
   etag: string | null;
+  /**
+   * R3 FR-06 (task 027): the LOAD-TIME SPE version id from the Load response. Sent as
+   * `baselineVersionId` on a dirty-loaded save so the server can re-fetch the load-time baseline even if
+   * the client no longer holds the retained bytes (e.g. after a page refresh). Null for a transient/
+   * born-in-editor mount (no server version yet) or when the Load did not surface one.
+   */
+  versionId: string | null;
   /** Mammoth import warnings (Tier 1 safe). */
   importWarnings: Array<{ type: string; message: string }>;
   /** User-facing error message (NOT a Tier 3 sink). */
@@ -115,6 +122,7 @@ export type ComposeWorkspaceAction =
       kind: 'loadSucceeded';
       docxBytes: ArrayBuffer;
       etag: string | null;
+      versionId: string | null;
       sessionId: string;
       sprkDocumentId?: string;
       fileName?: string;
@@ -164,6 +172,7 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   docxBytes: null,
   seedHtml: null,
   etag: null,
+  versionId: null,
   importWarnings: [],
   errorMessage: null,
   pendingAssistantInsert: null,
@@ -193,6 +202,7 @@ export function composeWorkspaceReducer(
         docxBytes: action.docxBytes,
         seedHtml: null,
         etag: action.etag,
+        versionId: action.versionId,
         sessionId: action.sessionId,
         documentRef: state.documentRef
           ? {
@@ -238,6 +248,7 @@ export function composeWorkspaceReducer(
         docxBytes: action.docxBytes,
         seedHtml: null,
         etag: null,
+        versionId: null,
         sessionId: action.sessionId ?? state.sessionId,
         documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
         checkoutStatus: 'skipped',
@@ -252,6 +263,7 @@ export function composeWorkspaceReducer(
         docxBytes: null,
         seedHtml: action.html,
         etag: null,
+        versionId: null,
         documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
         checkoutStatus: 'skipped',
         errorMessage: null,

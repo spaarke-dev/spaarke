@@ -4,7 +4,13 @@
 > **Last Updated**: 2026-07-18 (tasks 026 + 023 ✅ COMPLETE; next = 027 client cutover)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
-## ▶️ RESUME HERE — `work on task 027` CLIENT HALF (server half ✅ done + pushed)
+## ▶️ RESUME HERE — `work on task 024` (E1 seam) — tasks 022/023/026/027 all ✅ DONE
+
+**Task 027 ✅ COMPLETE (2026-07-18) — the client no longer authors `.docx` bytes.** Server half `ff9576278`; client half this session. `docx.js` (`tipTapToDocxBytes`/`tipTapJsonToDocxBytes`/`buildRejectBaselineJson`) + the `docx` npm dependency REMOVED. `docxBridge` now exposes `captureParaIdSnapshot`/`collectEditedParagraphs`(reject-state diff)/`buildContentModel`; `ComposeEditor` handle exposes `collectEditedParagraphs`/`buildContentModel`/`getRedlineAnnotations` + captures the load-time snapshot after `stampParaIds`; `triggerSave` sends the 4-case structured payload (loaded+dirty→`{editedParagraphs, baselineVersionId, content?}` / loaded+clean→`{content}` / born-in-editor→`{contentModel}` / unedited-browse-local→`{content}`; annotations ride every case); `versionId` threaded through workspace state (Load response → state → save). Client **205✅** (NEW `docxBridge.contentModel.test.ts`; fixed `dirtyOnMount`/`referenceOnly` mocks + `redlineDocxAnnotations` reject-state block moved); tsc clean. **Known E1 limitation (inherited from 022, documented):** a brand-new/split paraId is NOT emitted as an EditedParagraph (the synthesizer fails-fast on an unmatched paraId) — structural insert/split/delete is a future synthesizer extension.
+
+**Next = task 024 (E1 through-the-wire seam — NFR-06).** WebApplicationFactory slices: (a) loaded-doc dirty save preserves untouched OOXML BYTE-IDENTICAL + edited paras carry `w:ins`/`w:del`; (b) born-in-editor render round-trips + numbering GOLDEN-FILE (1/1.1/1.1.1 style-linked abstractNum) + survives a later tracked edit. deps 022,023,026,027 — ALL MET. Rigor FULL · sonnet · xhigh · tests. Then 025 (deploy+smoke). E3 (030-032), Toolset (040-044), Import (050-052) are independent/parallelizable.
+
+### ⬇️ (prior) 027 server-half handoff — kept for reference
 
 **Task 027 SERVER HALF ✅ DONE (2026-07-18, committed `ff9576278`, pushed).** The BFF wire contract for the client cutover is complete:
 - **SPE facade** `GetCurrentVersionIdAsUserAsync` (OBO `.../versions` → newest id) on `ISpeFileOperations`/`SpeFileStore`/`DriveItemOperations` (ADR-007). `LoadAsync` captures it best-effort → `LoadComposeDocumentResult.VersionId` + Load wire response `versionId` (FR-06 022-completion).
@@ -139,11 +145,11 @@ All six pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed — no design pivots. The fi
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 027 (IN PROGRESS — server half ✅ done) |
+| **Task ID** | 027 → ✅ COMPLETE (next: 024) |
 | **Task File** | [`tasks/027-client-content-model-cutover.poml`](tasks/027-client-content-model-cutover.poml) |
 | **Title** | FR-01 — client content-model cutover (drop docx.js) + FR-06 VersionId |
 | **Phase** | 2 E1 |
-| **Status** | 🔄 SERVER HALF ✅ committed `ff9576278` (pushed): VersionId facade + Load surfacing + save wire contract. CLIENT HALF remaining (docx.js removal + triggerSave + ~11 tests). Rigor FULL · opus · xhigh. 026 ✅ `bd15cae77`, 023 ✅ `1624d7263`. |
+| **Status** | ✅ completed 2026-07-18 (FULL · opus · xhigh). Server `ff9576278` + client this session; client 205✅, server Compose 252✅/contract 85✅, docx dep removed. E1 quartet (022/023/026/027) all done. |
 | **Started** | 2026-07-18 |
 
 **Placement Justification (§10 BFF hygiene)**: (1) Existing — overlaps `DocxExportService` (AI-analysis export, `Services/Ai/Export`, numbering is FAKE literal text) + `ComposeParagraphRedlineSynthesizer` (edit path, deltas onto a retained original). (2) Extension — can't extend either: DocxExportService is an AI-domain concern behind the ADR-013 boundary with fake numbering; the synthesizer requires a retained original a born-in-editor doc lacks. NEW pure engine in `Services/Compose` justified. (3) Cost-of-doing-nothing — without it an AI-drafted legal doc is saved by the lossy client `docx.js`, flattening 1/1.1/1.1.1 clause numbering + real styles into literal "1." text runs that later tracked-change edits corrupt. Pure (`ComposeContentModel` in / `byte[]` out), no AI, no Graph, no new NuGet. ADR-039 non-conflict (deterministic OOXML authoring, not AI dispatch — design §11).

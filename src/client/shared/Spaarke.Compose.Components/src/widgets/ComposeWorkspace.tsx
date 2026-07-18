@@ -645,6 +645,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // NOT as a JSON array of numbers. Decode with atob() below.
           content: string;
           eTag?: string;
+          // R3 FR-06 (task 027): the load-time SPE version id — carried back as `baselineVersionId` on a
+          // dirty-loaded save so the server can re-fetch this baseline without the client bytes.
+          versionId?: string;
           fileName?: string;
           size: number;
           correlationId?: string;
@@ -675,6 +678,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           kind: 'loadSucceeded',
           docxBytes: bytes.buffer,
           etag: payload.eTag ?? null,
+          versionId: payload.versionId ?? null,
           sessionId: payload.sessionId ?? '',
           sprkDocumentId: payload.documentRecordId,
           fileName: payload.fileName,
@@ -947,91 +951,81 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
     dispatch({ kind: 'requestSave' });
     try {
-      // FR-06a (task 015) upload fidelity branch: an UNEDITED mount must persist the
-      // pristine ORIGINAL bytes byte-identical — avoiding the lossy mammoth
-      // `docxToTipTapHtml` -> `tipTapToDocxBytes` round-trip for a file the user never
-      // touched. `editorRef.current.isDirty()` is the editor's OWN authoritative dirty
-      // flag (ComposeEditor's internal `dirtyRef`), read fresh at Save time — this is
-      // deliberately NOT the local `isDirty` React state above (which only gates the
-      // toolbar button's enabled/disabled visual and can lag behind an in-flight
-      // mammoth import; see DEF-01). `state.docxBytes` is the retained ORIGINAL mount
-      // bytes: set once by the `loadSucceeded`/`mountTransient` reducer actions (see
-      // ComposeWorkspace.types.ts) and never mutated by any other action for the life
-      // of the mount, so it is still the pristine upload/load payload at Save time.
-      // Only a genuinely dirty editor (or the defensive fallback when, unexpectedly,
-      // no original bytes were retained) pays the regeneration cost via the EXISTING
-      // `tipTapToDocxBytes` path — that path is otherwise unchanged.
+      // R3 FR-01 (task 027): the client STOPS authoring `.docx` bytes. It sends a STRUCTURED, paraId-
+      // keyed payload and the SERVER authors the bytes — delta-onto-original for a loaded doc, full
+      // render for a born-in-editor doc. `editorRef.current.isDirty()` is the editor's OWN authoritative
+      // dirty flag (ComposeEditor's internal `dirtyRef`), read fresh at Save time (NOT the local `isDirty`
+      // React state, which only gates the toolbar button and can lag an in-flight import). `state.docxBytes`
+      // is the retained ORIGINAL mount bytes — the ONLY bytes the client ever sends (byte-identical
+      // passthrough of the RETAINED original; never a reconstruction).
       const editorIsDirty = editorRef.current.isDirty();
 
-      // UAT-R7 #2/#3/#4 — redline→Word save fidelity. When the editor holds PENDING redlines OR the
-      // session has anchored COMMENT annotations (DEF-13 edit-reason / DEF-11 review flags), Save
-      // must NOT go through the mark-blind `serialize()` (which flattens insertion/deletion marks to
-      // plain body text and drops comments). Instead send a clean BASELINE (pending redlines reduced
-      // to their reject-state text; accepted edits already baked in) + a structured annotation list;
-      // the BFF re-applies them as native w:ins/w:del/w:comment via DocxAnnotationWriter.
-      // This is also the #3 dirty-flag fix: any accept/reject/redline/comment op forces the
-      // annotation path, so accepted edits are never discarded in favor of pristine original bytes.
-      // `?.()` guards an older mounted editor build without the redline-save handle (defensive,
-      // mirroring the materializeComposeDraft guard) — it degrades to the plain serialize path.
+      // Pending AI redlines (task 023) → native-markup annotations the SERVER composes onto the authored
+      // baseline (replaces the old client reject-baseline reconstruction). Combined with the session's
+      // COMMENT annotations. `?.()` guards an older editor build without the handle (defensive).
       const hasRedlines = editorRef.current.hasPendingRedlines?.() ?? false;
       const commentAnnotations = composeDocxAnnotations; // anchoredAnnotationsToDocxAnnotations(anchoredAnnotations)
-      const needsAnnotationSave =
-        (hasRedlines || commentAnnotations.length > 0) && typeof editorRef.current.serializeForSave === 'function';
+      const redlineAnnotations =
+        hasRedlines && typeof editorRef.current.getRedlineAnnotations === 'function'
+          ? editorRef.current.getRedlineAnnotations()
+          : [];
+      // Redlines first, then comments — DocxAnnotationWriter emits comments before track-changes (EDGE-1),
+      // so concat order only affects the ins/del sequence the bridge already ordered correctly.
+      const saveAnnotations: DocxAnnotationInput[] = [...redlineAnnotations, ...commentAnnotations];
 
-      let bytes: ArrayBuffer;
-      let saveAnnotations: DocxAnnotationInput[] = [];
-      if (needsAnnotationSave) {
-        const forSave = await editorRef.current.serializeForSave();
-        bytes = forSave.baselineBytes;
-        // Redlines first, then comments — DocxAnnotationWriter emits comments before track-changes
-        // regardless of list order (EDGE-1), so the concat order only affects the ins/del sequence
-        // the bridge already ordered correctly (Insertion-before-Deletion per pair).
-        saveAnnotations = [...forSave.redlineAnnotations, ...commentAnnotations];
-      } else {
-        // FR-06a fidelity (no redlines, no comments): an unedited mount persists the pristine
-        // ORIGINAL bytes byte-identical; a genuinely dirty editor (or a defensive missing-original)
-        // regenerates via the EXISTING tipTapToDocxBytes path.
-        bytes = editorIsDirty || !state.docxBytes ? await editorRef.current.serialize() : state.docxBytes;
-      }
+      // Base64-encode the RETAINED ORIGINAL bytes. ASP.NET Core deserializes byte[] from a base64 string;
+      // iterate (not spread) to avoid a call-stack overflow on large documents.
+      const encodeRetained = (buf: ArrayBuffer): string => {
+        const view = new Uint8Array(buf);
+        let binary = '';
+        for (let i = 0; i < view.length; i++) binary += String.fromCharCode(view[i]);
+        return btoa(binary);
+      };
 
-      // FR-05 (task 100): the create-on-save route carries no id in the path (the draft has no
-      // drive-item yet) and sends `containerId`; the replace route carries the SPE id + driveId.
-      // Both hit ComposeService.SaveAsync — the server branches on DocumentSpeId presence.
+      // FR-05 (task 100): the create-on-save route carries no id in the path (the draft has no drive-item
+      // yet) and sends `containerId`; the replace route carries the SPE id + driveId. Both hit
+      // ComposeService.SaveAsync — the server branches on DocumentSpeId presence.
       const url = isTransientCreate
         ? `${bffBaseUrl}/api/compose/documents/create-on-save`
         : `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(state.documentRef.speDriveItemId)}/save`;
 
-      // Encode bytes -> base64. ASP.NET Core deserializes byte[] from
-      // base64 strings, NOT from JSON number arrays. Iterate rather than
-      // spread to avoid call-stack overflow on large documents.
-      const view = new Uint8Array(bytes);
-      let binary = '';
-      for (let i = 0; i < view.length; i++) {
-        binary += String.fromCharCode(view[i]);
+      // Four structured cases (the client authors NO bytes):
+      //  1. Loaded + dirty       → { editedParagraphs, baselineVersionId, content?(retained fast-path) }
+      //  2. Loaded + clean       → { content: retained byte-identical } (FR-06a)
+      //  3. Born-in-editor        → { contentModel } (AI-draft/blank/edited-browse-local → server renders)
+      //  4. Unedited browse-local → { content: retained byte-identical } (FR-06a)
+      // AI redlines/comments ride `annotations` in every case.
+      let requestBody: Record<string, unknown>;
+      if (isTransientCreate) {
+        // A born-in-editor create-on-save: an AI-draft/blank/EDITED mount RENDERS from the content model;
+        // an UNEDITED browse-local mount with retained bytes persists them byte-identical (FR-06a).
+        const bornInEditorRender = editorIsDirty || !state.docxBytes;
+        requestBody = {
+          containerId: saveContainerId,
+          tenantId,
+          sessionId: state.sessionId,
+          displayName: state.documentRef.fileName ?? null,
+          annotations: saveAnnotations,
+          ...(bornInEditorRender
+            ? { contentModel: editorRef.current.buildContentModel() }
+            : { content: encodeRetained(state.docxBytes!) }),
+        };
+      } else {
+        requestBody = {
+          driveId: effectiveDriveId,
+          tenantId,
+          sessionId: state.sessionId,
+          documentRecordId: state.documentRef.sprkDocumentId ?? null,
+          displayName: state.documentRef.fileName ?? null,
+          annotations: saveAnnotations,
+          // The load-time version id lets the server re-fetch the baseline even without the client bytes.
+          baselineVersionId: state.versionId ?? undefined,
+          // Same-session fast-path: still holding the retained original → send it (byte-identical).
+          content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
+          // Dirty → the paraId-keyed edited-paragraph delta the server synthesizes onto the baseline.
+          editedParagraphs: editorIsDirty ? editorRef.current.collectEditedParagraphs() : undefined,
+        };
       }
-      const base64Content = btoa(binary);
-
-      // UAT-R7 #2/#3/#4: carry the redline + comment annotations so the BFF re-applies them onto the
-      // baseline as native Word markup. Empty on a plain no-redline Save → the server persists the
-      // baseline unchanged (FR-06a byte fidelity preserved).
-      const requestBody = isTransientCreate
-        ? {
-            containerId: saveContainerId,
-            tenantId,
-            sessionId: state.sessionId,
-            content: base64Content,
-            displayName: state.documentRef.fileName ?? null,
-            annotations: saveAnnotations,
-          }
-        : {
-            driveId: effectiveDriveId,
-            tenantId,
-            sessionId: state.sessionId,
-            content: base64Content,
-            documentRecordId: state.documentRef.sprkDocumentId ?? null,
-            displayName: state.documentRef.fileName ?? null,
-            annotations: saveAnnotations,
-          };
 
       const response = await authenticatedFetch(url, {
         method: 'POST',

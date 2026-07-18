@@ -248,6 +248,92 @@ export interface ParaIdMapEntry {
 }
 
 // ---------------------------------------------------------------------------
+// R3 FR-01 / FR-01a — the client content-model save contract (task 027)
+// ---------------------------------------------------------------------------
+//
+// Mirror of the server save DTOs (`Sprk.Bff.Api.Services.Compose.ComposeEditedParagraph` +
+// `ComposeContentModel`, task 022/026). The client STOPS authoring `.docx` bytes: a dirty save of a
+// loaded doc sends the paraId-keyed changed paragraphs (`ComposeEditedParagraph[]`) and the server
+// synthesizes the tracked-change delta onto the retained original; a born-in-editor save sends the full
+// `ComposeContentModel` and the server RENDERS the high-fidelity `.docx`. Field names are camelCase; the
+// BFF deserializes case-insensitively and `kind`/`alignment` map to the server enums (string values).
+//
+// Privacy: `text`/`runs[].text` carry document content (Tier 3) — carried in-memory to the Save request
+// only, never on an SSE frame / PaneEventBus payload / log surface (ADR-015).
+
+/**
+ * One edited paragraph on a dirty-loaded save (FR-01): its `w14:paraId` (the E2 splice key) + its new
+ * REJECT-STATE settled text (accepted edits baked in, pending AI redlines excluded — those ride the
+ * `annotations` list). The server rewrites exactly this paragraph in the retained original as native
+ * `w:ins`/`w:del`. Only paragraphs that EXISTED at load and whose settled text changed are emitted —
+ * a paraId the retained original lacks (a split/insert) is out of E1 delta scope (the server synthesizer
+ * fails fast on an unmatched paraId; structural insert/split is a future synthesizer extension).
+ */
+export interface ComposeEditedParagraph {
+  /** The paragraph's `w14:paraId` (8-hex; must exist in the retained original). */
+  paraId: string;
+  /** The paragraph's new reject-state settled text. Tier 3 (document content). */
+  text: string;
+}
+
+/** Block kind — mirrors the server `ComposeBlockKind` (string enum). */
+export type ComposeBlockKind = 'Paragraph' | 'Heading' | 'ListItem' | 'Table';
+
+/** Paragraph alignment — mirrors the server `ComposeParagraphAlignment` (string enum). */
+export type ComposeAlignment = 'Default' | 'Left' | 'Center' | 'Right' | 'Justify';
+
+/** One inline run — a span of text with optional formatting (mirrors the server `ComposeInlineRun`). */
+export interface ComposeInlineRun {
+  /** Run text (Tier 3 — document content). */
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+}
+
+/** A table cell — nested block content (mirrors the server `ComposeTableCell`). */
+export interface ComposeTableCell {
+  blocks: ComposeContentBlock[];
+  isHeader?: boolean;
+}
+
+/** A table row (mirrors the server `ComposeTableRow`). */
+export interface ComposeTableRow {
+  cells: ComposeTableCell[];
+}
+
+/** A native table (mirrors the server `ComposeTable`). */
+export interface ComposeTable {
+  rows: ComposeTableRow[];
+}
+
+/**
+ * One content-model block (mirrors the server `ComposeBlock`). Active fields depend on `kind`:
+ * `runs`/`alignment` for Paragraph/Heading/ListItem; `level` for Heading (1-6) and ListItem (nesting
+ * depth); `ordered`/`startsNewList` for ListItem; `table` for Table. Each block carries its `paraId`
+ * (client-minted; the server mints one where absent).
+ */
+export interface ComposeContentBlock {
+  kind: ComposeBlockKind;
+  paraId?: string;
+  level?: number;
+  ordered?: boolean;
+  startsNewList?: boolean;
+  runs?: ComposeInlineRun[];
+  alignment?: ComposeAlignment;
+  table?: ComposeTable;
+}
+
+/**
+ * The paraId-keyed content model for a BORN-IN-EDITOR save (FR-01a) — the authoring source the server
+ * renders into a high-fidelity `.docx` (styles + style-linked multi-level numbering + tables + minted
+ * paraId). Mirrors the server `ComposeContentModel`.
+ */
+export interface ComposeContentModel {
+  blocks: ComposeContentBlock[];
+}
+
+// ---------------------------------------------------------------------------
 // Shared types — pointers, not entities
 // ---------------------------------------------------------------------------
 

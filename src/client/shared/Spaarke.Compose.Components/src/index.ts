@@ -178,7 +178,15 @@ export type {
   DefinedTerm,
 } from './types/compose-contracts';
 
-// DOCX bridge helpers — exported for advanced consumers + R2 tests. Most
-// consumers should use ComposeEditor (which orchestrates these internally).
-export { docxToTipTapHtml, tipTapToDocxBytes } from './utils/docxBridge';
-export type { MammothConversionResult } from './utils/docxBridge';
+// DOCX bridge helpers — exported for advanced consumers + tests. Most consumers should use ComposeEditor
+// (which orchestrates these internally). R3 task 027: the `docx.js` byte-authoring exporters
+// (`tipTapToDocxBytes`/`tipTapJsonToDocxBytes`/`buildRejectBaselineJson`) are REMOVED — the server owns
+// all `.docx` authoring; the client sends the structured content model / edited-paragraph deltas below.
+export {
+  docxToTipTapHtml,
+  stampParaIds,
+  captureParaIdSnapshot,
+  collectEditedParagraphs,
+  buildContentModel,
+} from './utils/docxBridge';
+export type { MammothConversionResult, TipTapNode } from './utils/docxBridge';

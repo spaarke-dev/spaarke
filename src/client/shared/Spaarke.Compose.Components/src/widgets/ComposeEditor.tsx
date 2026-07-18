@@ -104,14 +104,13 @@ import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widget
 
 import {
   docxToTipTapHtml,
-  tipTapToDocxBytes,
-  tipTapJsonToDocxBytes,
-  buildRejectBaselineJson,
   stampParaIds,
-  type TipTapNode,
+  captureParaIdSnapshot,
+  collectEditedParagraphs,
+  buildContentModel,
 } from '../utils/docxBridge';
 import { COMPOSE_R3_PARAID } from './paraIdExtension';
-import type { ParaIdMapEntry } from '../types/compose-contracts';
+import type { ParaIdMapEntry, ComposeEditedParagraph, ComposeContentModel } from '../types/compose-contracts';
 // Redline → Word save fidelity (UAT-R7 #2/#3/#4): the redline→annotation bridge + its wire type.
 import { redlineMarksToDocxAnnotations, type DocxAnnotationInput } from './useComposeWordShuttle';
 
@@ -346,8 +345,8 @@ export interface ComposeEditorProps {
    * body already IS the editor content (no docx round-trip). Rendered once on mount as a
    * TRANSIENT working draft (reported dirty so create-on-save first Save is reachable), then the
    * editor owns subsequent edits. Mutually exclusive with `docxBytes` (a draft seed sets
-   * `docxBytes` null). Save serializes the editor content via `tipTapToDocxBytes` exactly as for a
-   * docx mount.
+   * `docxBytes` null). R3 task 027: Save sends the paraId-keyed `ComposeContentModel`
+   * (`buildContentModel`) and the SERVER renders the `.docx` — the client authors no bytes.
    */
   initialHtml?: string | null;
 
@@ -444,28 +443,28 @@ export interface ComposeEditorProps {
  */
 export interface ComposeEditorHandle {
   /**
-   * Serialize current editor state to DOCX bytes (for SPE upload).
-   *
-   * Lazy-loads `docx` on first call. Round-trip fidelity per Spike #1 §3
-   * inventory ("Preserved" rows survive; "Degraded" rows survive with
-   * documented loss).
-   *
-   * @returns ArrayBuffer of DOCX bytes ready for upload.
-   * @throws  Error if no editor is mounted or if docx packing fails.
+   * R3 FR-01 (task 027): the paragraphs the user CHANGED since load, each keyed by its `w14:paraId`
+   * with its new REJECT-STATE settled text (pending AI redlines excluded — those ride
+   * {@link getRedlineAnnotations}). The host sends these on a dirty save of a LOADED doc; the server
+   * synthesizes the tracked-change delta onto the retained original. Resets the dirty flag. The client
+   * NEVER authors `.docx` bytes — this replaced the removed `serialize()`.
    */
-  serialize(): Promise<ArrayBuffer>;
+  collectEditedParagraphs(): ComposeEditedParagraph[];
 
   /**
-   * Redline → Word save fidelity (UAT-R7 #2/#3/#4). Serialize a clean BASELINE `.docx` (the
-   * document as if every PENDING redline were REJECTED — proposed insertions dropped, struck
-   * originals kept as normal text — with ACCEPTED edits already committed) AND the
-   * redline→annotation bridge ({@link DocxAnnotationInput}[]) mapping the current pending
-   * insertion/deletion marks. The host sends both to the BFF Save endpoint, which re-applies the
-   * annotations as NATIVE `w:ins`/`w:del` via `DocxAnnotationWriter`. This replaces the mark-blind
-   * `serialize()` for a redlined Save (which flattened both original + AI text to plain body text).
-   * Resets the dirty flag on success like {@link serialize}.
+   * R3 FR-01a (task 027): the full paraId-keyed {@link ComposeContentModel} for a BORN-IN-EDITOR save
+   * (AI-drafted / blank / browse-local). The host sends it to create-on-save; the server RENDERS the
+   * high-fidelity `.docx` (styles + style-linked multi-level numbering + tables). Resets the dirty flag.
    */
-  serializeForSave(): Promise<{ baselineBytes: ArrayBuffer; redlineAnnotations: DocxAnnotationInput[] }>;
+  buildContentModel(): ComposeContentModel;
+
+  /**
+   * R3 FR-04 (task 027): the current PENDING AI redlines mapped to {@link DocxAnnotationInput}[] (native
+   * `w:ins`/`w:del`). The host appends these to the save `annotations` list; the server composes them
+   * onto the authored baseline via `DocxAnnotationWriter` (task 023). Does NOT reset the dirty flag
+   * (redlines are separate from settled-text edits). Empty when there are no pending redlines.
+   */
+  getRedlineAnnotations(): DocxAnnotationInput[];
 
   /** True when the editor currently holds one or more PENDING redlines (drives the Save path). */
   hasPendingRedlines(): boolean;
@@ -946,6 +945,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     const [isImporting, setIsImporting] = React.useState<boolean>(false);
     const dirtyRef = React.useRef<boolean>(false);
+    // R3 FR-01 (task 027): the LOAD-TIME `{ paraId → reject-state text }` snapshot, captured right after
+    // stampParaIds (and after a born-in-editor seed). `collectEditedParagraphs()` diffs the live doc
+    // against it to find the dirty paragraphs the server deltas onto the retained original.
+    const paraIdSnapshotRef = React.useRef<Map<string, string>>(new Map());
 
     // ----- Wave 6 (DEF-G) — non-docx reference-only state ------------------
     // Non-null when a NON-DOCX buffer reached the editor (detected by byte
@@ -1122,12 +1125,16 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // Saves the pristine draft). Mirrors the transient-mount dirty semantics below.
         if (initialHtml && initialHtml.length > 0) {
           editor.commands.setContent(initialHtml);
+          // Born-in-editor seed: capture a snapshot so an edit-then-save can still diff (though a born-in-
+          // editor save normally sends the full content model, not edited-paragraph deltas).
+          paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
           dirtyRef.current = false;
           onDirtyChange?.(true);
           return;
         }
         // Reset to empty paragraph if cleared.
         editor.commands.setContent('<p></p>');
+        paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
         dirtyRef.current = false;
         onDirtyChange?.(false);
         return;
@@ -1167,6 +1174,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // server-owned (the paraId extension's own minting only fills ids the server did
           // not supply + re-mints on split). No-op when the map is absent (empty stamp).
           stampParaIds(editor, paraIdMap);
+          // FR-01 (task 027): snapshot the load-time reject-state text per paraId — the diff baseline for
+          // collectEditedParagraphs. Captured AFTER the stamp so every block carries its server paraId.
+          paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
           dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
           onDirtyChange?.(isTransientMount);
           // Privacy: messages are Tier 1 safe (configuration metadata).
@@ -1249,31 +1259,32 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     React.useImperativeHandle(
       ref,
       (): ComposeEditorHandle => ({
-        serialize: async () => {
+        // R3 FR-01 (task 027): the paraId-keyed dirty-paragraph deltas (reject-state text) for a loaded
+        // doc. The server synthesizes the tracked change onto the retained original — the client authors
+        // no bytes. Resets the dirty flag (host collects then saves; the doc is clean after).
+        collectEditedParagraphs: () => {
           if (!editor) {
-            throw new Error('ComposeEditor: cannot serialize — editor not mounted');
+            throw new Error('ComposeEditor: cannot collect edited paragraphs — editor not mounted');
           }
-          const bytes = await tipTapToDocxBytes(editor);
-          // Successful serialize resets the dirty flag (host typically calls
-          // serialize() then uploads; after upload completes, the doc is clean).
+          const edited = collectEditedParagraphs(editor, paraIdSnapshotRef.current);
           dirtyRef.current = false;
           onDirtyChange?.(false);
-          return bytes;
+          return edited;
         },
-        // UAT-R7 #2/#3/#4 — baseline (reject-state) bytes + the redline→annotation bridge. The BFF
-        // re-applies the annotations as native w:ins/w:del so pending redlines save as real Word
-        // tracked-changes instead of the mark-blind flatten `serialize()` produced.
-        serializeForSave: async () => {
+        // R3 FR-01a (task 027): the full content model for a born-in-editor save — the server renders it.
+        buildContentModel: () => {
           if (!editor) {
-            throw new Error('ComposeEditor: cannot serialize for save — editor not mounted');
+            throw new Error('ComposeEditor: cannot build content model — editor not mounted');
           }
-          const json = editor.getJSON();
-          const redlineAnnotations = redlineMarksToDocxAnnotations(json, 'Spaarke Assistant', new Date().toISOString());
-          const baselineBytes = await tipTapJsonToDocxBytes(buildRejectBaselineJson(json as TipTapNode));
+          const model = buildContentModel(editor);
           dirtyRef.current = false;
           onDirtyChange?.(false);
-          return { baselineBytes, redlineAnnotations };
+          return model;
         },
+        // R3 FR-04 (task 027): pending AI redlines → native-markup annotations the server composes onto
+        // the authored baseline (task 023). Does NOT reset dirty (separate from settled-text edits).
+        getRedlineAnnotations: () =>
+          editor ? redlineMarksToDocxAnnotations(editor.getJSON(), 'Spaarke Assistant', new Date().toISOString()) : [],
         hasPendingRedlines: () => redline.pending.length > 0,
         getCounts: () => {
           if (!editor) return { characters: 0, words: 0 };
