@@ -74,7 +74,13 @@ permissions:
   pull-requests: write   # tier2-pr-comment writes ONE deduplicated comment
 
 concurrency:
-  group: ci-tier2-advisory-${{ github.ref }}
+  # Include the commit SHA so runs on DIFFERENT commits never cancel each other. Previously the group was
+  # keyed on github.ref alone, so on master (frequent merges from many projects) a newer run cancelled the
+  # in-flight tier2 run of the prior commit; the Router aggregator (alls-green) treats a *cancelled* tier2 as
+  # a hard fail (allowed-failures covers failure, not cancellation) → spurious red `CI / Router`. Per-SHA
+  # groups keep cancel-in-progress a literal boolean (avoids the ci-router.yml startup_failure class) while
+  # letting each commit's advisory tier run to completion.
+  group: ci-tier2-advisory-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
 env:
