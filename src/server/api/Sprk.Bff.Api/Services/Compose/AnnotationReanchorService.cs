@@ -119,10 +119,13 @@ public sealed class AnnotationReanchorService
         foreach (var anchor in priorAnchors)
         {
             // FR-11 (task 012) — paraId is the PRIMARY anchor. A paragraph's w14:paraId is stable
-            // across our own load→edit→save round-trip (S1/S1b: Docxodus preserves it on unchanged
-            // paragraphs incl. table cells), so an exact id hit is a DEFINITIVE re-anchor — the
-            // paragraph may have been edited (content drift) yet still be the same paragraph. Resolve
-            // by id first; the fuzzy scorer below runs ONLY when the id is absent (design §5.2).
+            // across our own load→edit→save round-trip: the E1 save synthesizes the redline in place
+            // (ComposeParagraphRedlineSynthesizer, Option C), rewriting only run content — the w:p
+            // paraId attribute survives by construction. (This is why the retired Docxodus WmlComparer
+            // path was rejected: task 003 proved it STRIPS paraId on real docs.) So an exact id hit is a
+            // DEFINITIVE re-anchor — the paragraph may have been edited (content drift) yet still be the
+            // same paragraph. Resolve by id first; the fuzzy scorer below runs ONLY when the id is
+            // absent (design §5.2 — e.g. Word regenerated the ids across an EXTERNAL edit session).
             var paraIdIdx = ResolveByParaId(anchor.ParaId, currentParaIds);
             if (paraIdIdx >= 0)
             {

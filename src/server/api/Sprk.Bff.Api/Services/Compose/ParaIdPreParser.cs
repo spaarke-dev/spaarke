@@ -15,14 +15,16 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why this exists</b>: <c>paraId</c> is the splice key the E1 delta save (task 020/022) and the
-/// E2 anchoring (task 012) use to map editor paragraphs back to original OOXML paragraphs. mammoth
-/// (the Load-path HTML convert, <c>docxBridge.ts</c>) DISCARDS <c>w14:paraId</c>, so a server-side
-/// Open XML pre-parse must run alongside the convert to capture the ids before they are lost (S2:
-/// <c>@tiptap/extension-unique-id</c> does NOT auto-assign ids to <c>setContent</c>-loaded nodes, so
-/// the server pre-parse owns load-time ids while the client extension owns split/merge minting in
-/// task 011). S1/S1b proved Docxodus <c>WmlComparer</c> PRESERVES <c>w14:paraId</c> on unchanged
-/// paragraphs (incl. table cells + nested tables), so an id minted here survives the round-trip.
+/// <b>Why this exists</b>: <c>paraId</c> is the splice key the E1 delta save (<see cref="ComposeParagraphRedlineSynthesizer"/>,
+/// task 022) and the E2 anchoring (task 012) use to map editor paragraphs back to original OOXML
+/// paragraphs. mammoth (the Load-path HTML convert, <c>docxBridge.ts</c>) DISCARDS <c>w14:paraId</c>, so
+/// a server-side Open XML pre-parse must run alongside the convert to capture the ids before they are
+/// lost (S2: <c>@tiptap/extension-unique-id</c> does NOT auto-assign ids to <c>setContent</c>-loaded
+/// nodes, so the server pre-parse owns load-time ids while the client extension owns split/merge minting
+/// in task 011). The E1 save synthesizes the redline in place (Option C — design §4.2), so an id minted
+/// here survives the round-trip by construction (a rewrite of a paragraph's run content never touches its
+/// <c>w:p</c> <c>w14:paraId</c> attribute). This replaced the originally-planned Docxodus
+/// <c>WmlComparer</c> path, which the NFR-09 gate (task 003) proved STRIPS <c>w14:paraId</c> on real docs.
 /// </para>
 /// <para>
 /// <b>Pure — <c>byte[]</c>/<c>ReadOnlyMemory&lt;byte&gt;</c> in / ordered record out (no I/O, no AI,

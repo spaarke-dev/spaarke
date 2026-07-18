@@ -4,20 +4,21 @@ namespace Sprk.Bff.Api.Services.Compose;
 
 /// <summary>
 /// FR-12 (task 012) — the paraId SPLICE KEY. Builds a <c>w14:paraId → w:p</c> index over a document
-/// body and resolves a set of edited-paragraph paraIds against it, so the E1 delta save (FR-02 splice,
-/// task 020) can map each edited editor paragraph back to EXACTLY the original OOXML paragraph carrying
-/// the matching id — an edit to paragraph P updates the one original paragraph whose paraId is P's, and
-/// an id that matches nothing is surfaced as a handled miss rather than a silent no-op or a wrong write.
+/// body and resolves a set of edited-paragraph paraIds against it, so the E1 delta save
+/// (<see cref="ComposeParagraphRedlineSynthesizer"/>, Option C — design §4.2) can map each edited editor
+/// paragraph back to EXACTLY the original OOXML paragraph carrying the matching id — an edit to paragraph
+/// P updates the one original paragraph whose paraId is P's, and an id that matches nothing is surfaced as
+/// a handled miss rather than a silent no-op or a wrong write.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why a shared key (the 012/020 boundary)</b>: task 020 owns the OOXML surgery (rebuild the edited
-/// paragraphs' XML + splice them into a copy of the retained original); task 012 owns paraId IDENTITY —
-/// promoting it to the primary anchor (<see cref="AnnotationReanchorService"/>, FR-11) AND to the splice
-/// key here (FR-12). Both consume the SAME id. Factoring the index/resolution out as a pure helper means
-/// task 020's splice and this task's FR-12 tests exercise ONE lookup, not two divergent copies. It is
-/// deliberately NOT a method on <see cref="ComposeService"/> — that class is the SPE-lifecycle facade
-/// (SRP); a byte/OOXML lookup keyed by paraId is a distinct, pure concern.
+/// <b>Why a shared key</b>: the redline synthesizer owns the OOXML surgery (rewrite each edited paragraph
+/// in place as a word-diff redline of its old→new text); task 012 owns paraId IDENTITY — promoting it to
+/// the primary anchor (<see cref="AnnotationReanchorService"/>, FR-11) AND to the splice key here (FR-12).
+/// Both consume the SAME id. Factoring the index/resolution out as a pure helper means the synthesizer and
+/// this task's FR-12 tests exercise ONE lookup, not two divergent copies. It is deliberately NOT a method
+/// on <see cref="ComposeService"/> — that class is the SPE-lifecycle facade (SRP); a byte/OOXML lookup
+/// keyed by paraId is a distinct, pure concern.
 /// </para>
 /// <para>
 /// <b>Same walk as <see cref="ParaIdPreParser"/></b>: <c>Descendants&lt;Paragraph&gt;()</c> is recursive
@@ -30,8 +31,8 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// <see cref="Body"/>. The SPE read/write hop stays behind the <c>SpeFileStore</c> facade in the caller
 /// (ADR-007); this helper never sees a <c>Microsoft.Graph</c> type, an <c>IOpenAiClient</c>, or a routing
 /// type (ADR-013 / NFR-05 — Tier-1 NetArchTest enforces). It does NOT mutate the body; the returned
-/// <see cref="Paragraph"/> references are LIVE children of the caller's document, so task 020 replaces
-/// them in place within its own editable <c>using</c> scope.
+/// <see cref="Paragraph"/> references are LIVE children of the caller's document, so the synthesizer
+/// rewrites them in place within its own editable <c>using</c> scope.
 /// </para>
 /// </remarks>
 public static class ComposeParaIdSpliceMap
@@ -74,9 +75,9 @@ public static class ComposeParaIdSpliceMap
 
     /// <summary>
     /// Resolves <paramref name="editedParaIds"/> against <paramref name="index"/>, partitioning them into
-    /// the matched original paragraphs (the splice targets) and the unmatched ids. FR-12: an unmatched id
+    /// the matched original paragraphs (the redline targets) and the unmatched ids. FR-12: an unmatched id
     /// is a HANDLED miss — returned in <see cref="ParaIdSpliceResolution.Unmatched"/> for the caller
-    /// (task 020) to surface as an error — NEVER a silent no-op or a write to the wrong paragraph. A
+    /// (the synthesizer) to surface as an error — NEVER a silent no-op or a write to the wrong paragraph. A
     /// null/empty edited id is treated as unmatched (it can key nothing). Duplicate edited ids collapse
     /// to a single matched entry (the same original paragraph); the id still appears once as matched.
     /// </summary>
