@@ -88,11 +88,11 @@ public sealed class RecordNameMatchRung : IAssociationRung
             return Array.Empty<RungMatch>();
         }
 
-        // Verification corpora derived from the SAME envelope text: a token list for name subsequence checks,
-        // and an alphanumeric-collapsed string for reference-number checks.
-        var emailTokens = Tokenize(query);
-        var emailCollapsed = CollapseAlphanumeric(query);
-        if (emailTokens.Count == 0)
+        // Location-scoped verification corpora: subject / body / attachment are verified SEPARATELY so a
+        // candidate's confidence reflects WHERE its name appeared (subject > body > attachment) — a name in
+        // the subject is a far stronger association signal than one buried in a long attachment.
+        var corpora = BuildCorpora(message, opts.MaxQueryChars);
+        if (corpora.IsEmpty)
             return Array.Empty<RungMatch>();
 
         var startTs = Stopwatch.GetTimestamp();
@@ -116,7 +116,7 @@ public sealed class RecordNameMatchRung : IAssociationRung
             response = await matcher.SearchAsync(request, ct);
         }
 
-        var matches = VerifyAndMap(response, emailTokens, emailCollapsed, opts);
+        var matches = VerifyAndMap(response, corpora, opts);
         var elapsed = Stopwatch.GetElapsedTime(startTs);
 
         _logger.LogInformation(
@@ -150,16 +150,15 @@ public sealed class RecordNameMatchRung : IAssociationRung
     }
 
     /// <summary>
-    /// Deterministically verifies each index candidate against the email text and maps hits to
-    /// <see cref="RungMatch"/>. A candidate qualifies when its NAME (normalized token subsequence, subject to the
-    /// length/token guards) OR one of its reference NUMBERS (normalized alphanumeric) appears in the email.
-    /// Dedups by (field, target) keeping the highest confidence; returns the top N by confidence.
+    /// Deterministically verifies each index candidate against the location-scoped email corpora and maps hits
+    /// to <see cref="RungMatch"/>. A candidate qualifies when its NAME (normalized token subsequence, subject to
+    /// the length/token guards) OR a reference NUMBER (normalized alphanumeric) appears — with confidence tiered
+    /// by WHERE it matched (number &gt; subject &gt; body &gt; attachment). Provenance carries a parseable
+    /// where/matched/name/number/reason payload for the review UI. Dedups by (field, target) keeping the highest
+    /// confidence; returns the top N by confidence (so subject matches survive the cap over attachment noise).
     /// </summary>
     private IReadOnlyList<RungMatch> VerifyAndMap(
-        RecordSearchResponse response,
-        IReadOnlyList<string> emailTokens,
-        string emailCollapsed,
-        RecordNameMatchOptions opts)
+        RecordSearchResponse response, MatchCorpora corpora, RecordNameMatchOptions opts)
     {
         var best = new Dictionary<(string Field, Guid Id), RungMatch>();
 
@@ -172,30 +171,27 @@ public sealed class RecordNameMatchRung : IAssociationRung
             if (!Guid.TryParse(result.RecordId, out var targetId))
                 continue;
 
-            double confidence;
-            string provenanceDetail;
-
-            if (NameAppears(result.RecordName, emailTokens, opts))
-            {
-                confidence = opts.NameConfidence;
-                provenanceDetail = $"name=\"{result.RecordName}\"";
-            }
-            else if (TryMatchNumber(result.ReferenceNumbers, emailCollapsed, opts, out var matchedNumber))
-            {
-                confidence = opts.NumberConfidence;
-                provenanceDetail = $"number=\"{matchedNumber}\"";
-            }
-            else
-            {
+            var verified = DetermineBestMatch(result, corpora, opts);
+            if (verified is null)
                 continue; // no exact name/number appearance — leave this candidate to the semantic rung
-            }
+
+            var v = verified.Value;
+            var recordNumber = result.ReferenceNumbers is { Count: > 0 } ? result.ReferenceNumbers[0] : string.Empty;
+            var reason = v.Kind == "number"
+                ? $"reference number in {v.Location}"
+                : $"name in {v.Location}";
+
+            // Parseable provenance for the CommunicationConnections review UI (match reason + record number).
+            var provenance =
+                $"record-name-match:{result.RecordType}:where={v.Location}:matched={v.Kind}:" +
+                $"name=\"{result.RecordName}\":number=\"{recordNumber}\":reason=\"{reason}\"";
 
             var match = new RungMatch
             {
                 RegardingFieldName = field,
                 Target = new EntityReference(result.RecordType, targetId) { Name = result.RecordName },
-                Confidence = confidence,
-                Provenance = $"record-name-match:{result.RecordType}:{provenanceDetail}",
+                Confidence = v.Confidence,
+                Provenance = provenance,
                 Rung = RungKind.RecordNameMatch,
             };
 
@@ -211,54 +207,85 @@ public sealed class RecordNameMatchRung : IAssociationRung
     }
 
     /// <summary>
-    /// True when the record name (after the length + token-count guards) appears as a contiguous token
-    /// subsequence in the email tokens. Token-based so "smith" does not match inside "blacksmith".
+    /// Determines a candidate's strongest verified match: a reference number (top priority, most discriminating)
+    /// or a name, each located in subject → body → attachment (highest-confidence location wins). Returns null
+    /// when nothing appears verbatim.
     /// </summary>
-    private static bool NameAppears(string? recordName, IReadOnlyList<string> emailTokens, RecordNameMatchOptions opts)
+    private static VerifiedMatch? DetermineBestMatch(
+        RecordSearchResult result, MatchCorpora c, RecordNameMatchOptions opts)
     {
-        if (string.IsNullOrWhiteSpace(recordName))
-            return false;
-
-        var normalizedLength = CollapseAlphanumeric(recordName).Length;
-        if (normalizedLength < opts.MinNameLength)
-            return false;
-
-        var nameTokens = Tokenize(recordName);
-        if (nameTokens.Count < opts.MinNameTokens)
-            return false;
-
-        return ContainsContiguous(emailTokens, nameTokens);
-    }
-
-    /// <summary>
-    /// True when any reference number (alphanumeric-collapsed, subject to the min-length guard) appears in the
-    /// alphanumeric-collapsed email text. Collapsing ignores separators so "REAL-2026-123456.02" matches
-    /// whether the email wrote it with dashes, dots, or spaces.
-    /// </summary>
-    private static bool TryMatchNumber(
-        IReadOnlyList<string>? referenceNumbers, string emailCollapsed, RecordNameMatchOptions opts, out string matched)
-    {
-        matched = string.Empty;
-        if (referenceNumbers is null)
-            return false;
-
-        foreach (var refNum in referenceNumbers)
+        // Reference number first — a number appearance is the most discriminating signal.
+        if (result.ReferenceNumbers is { Count: > 0 })
         {
-            if (string.IsNullOrWhiteSpace(refNum))
-                continue;
-
-            var collapsed = CollapseAlphanumeric(refNum);
-            if (collapsed.Length < opts.MinNumberLength)
-                continue;
-
-            if (emailCollapsed.Contains(collapsed, StringComparison.Ordinal))
+            foreach (var refNum in result.ReferenceNumbers)
             {
-                matched = refNum;
-                return true;
+                if (string.IsNullOrWhiteSpace(refNum))
+                    continue;
+                var collapsed = CollapseAlphanumeric(refNum);
+                if (collapsed.Length < opts.MinNumberLength)
+                    continue;
+
+                var loc = c.SubjectCollapsed.Contains(collapsed, StringComparison.Ordinal) ? "subject"
+                        : c.BodyCollapsed.Contains(collapsed, StringComparison.Ordinal) ? "body"
+                        : c.AttachmentCollapsed.Contains(collapsed, StringComparison.Ordinal) ? "attachment"
+                        : null;
+                if (loc is not null)
+                    return new VerifiedMatch(opts.NumberConfidence, loc, "number", refNum);
             }
         }
 
-        return false;
+        // Name, tiered by location. Guards: normalized length + token count (a short/common single word is too
+        // weak a deterministic signal — the semantic rung still covers those).
+        if (!string.IsNullOrWhiteSpace(result.RecordName))
+        {
+            var normalizedLength = CollapseAlphanumeric(result.RecordName).Length;
+            var nameTokens = Tokenize(result.RecordName);
+            if (normalizedLength >= opts.MinNameLength && nameTokens.Count >= opts.MinNameTokens)
+            {
+                if (ContainsContiguous(c.SubjectTokens, nameTokens))
+                    return new VerifiedMatch(opts.SubjectNameConfidence, "subject", "name", result.RecordName);
+                if (ContainsContiguous(c.BodyTokens, nameTokens))
+                    return new VerifiedMatch(opts.BodyNameConfidence, "body", "name", result.RecordName);
+                if (ContainsContiguous(c.AttachmentTokens, nameTokens))
+                    return new VerifiedMatch(opts.AttachmentNameConfidence, "attachment", "name", result.RecordName);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Builds the location-scoped verification corpora (subject / body / attachment), each tokenized and alphanumeric-collapsed. Attachment text is bounded by <paramref name="maxChars"/>.</summary>
+    private static MatchCorpora BuildCorpora(NormalizedMessage message, int maxChars)
+    {
+        var subject = CollapseWhitespace(message.Subject);
+        var body = CollapseWhitespace(message.BodyText);
+        var attachment = CollapseWhitespace(message.AttachmentText);
+        if (attachment.Length > maxChars)
+            attachment = attachment[..maxChars];
+
+        return new MatchCorpora(
+            Tokenize(subject), Tokenize(body), Tokenize(attachment),
+            CollapseAlphanumeric(subject), CollapseAlphanumeric(body), CollapseAlphanumeric(attachment));
+    }
+
+    private static string CollapseWhitespace(string? text) =>
+        string.IsNullOrWhiteSpace(text)
+            ? string.Empty
+            : string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    /// <summary>A verified match: its confidence, where it matched (subject/body/attachment), what matched (name/number), and the matched value.</summary>
+    private readonly record struct VerifiedMatch(double Confidence, string Location, string Kind, string Value);
+
+    /// <summary>Location-scoped verification corpora derived from the envelope.</summary>
+    private sealed record MatchCorpora(
+        IReadOnlyList<string> SubjectTokens,
+        IReadOnlyList<string> BodyTokens,
+        IReadOnlyList<string> AttachmentTokens,
+        string SubjectCollapsed,
+        string BodyCollapsed,
+        string AttachmentCollapsed)
+    {
+        public bool IsEmpty => SubjectTokens.Count == 0 && BodyTokens.Count == 0 && AttachmentTokens.Count == 0;
     }
 
     // ── Normalization helpers ────────────────────────────────────────────────────

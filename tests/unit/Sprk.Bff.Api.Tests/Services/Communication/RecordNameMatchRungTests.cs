@@ -33,7 +33,7 @@ public class RecordNameMatchRungTests
             .ReturnsAsync(RungTestSupport.SearchResponse(hits));
 
     [Fact]
-    public async Task Evaluate_WhenRecordNameAppearsInSubject_EmitsMatchAtNameConfidence()
+    public async Task Evaluate_WhenRecordNameAppearsInSubject_EmitsMatchAtSubjectConfidence()
     {
         var matterId = Guid.NewGuid();
         SetupIndex(RungTestSupport.Hit(RecordEntityType.Matter, matterId, 0.7, "Smith v Smith"));
@@ -46,14 +46,15 @@ public class RecordNameMatchRungTests
         match.RegardingFieldName.Should().Be("sprk_regardingmatter");
         match.Target!.Id.Should().Be(matterId);
         match.Target!.Name.Should().Be("Smith v Smith");
-        match.Confidence.Should().Be(0.90);                     // NameConfidence
+        match.Confidence.Should().Be(0.95);                     // SubjectNameConfidence (strongest)
         match.Rung.Should().Be(RungKind.RecordNameMatch);
-        match.Provenance.Should().Contain("record-name-match");
+        match.Provenance.Should().Contain("where=subject");
+        match.Provenance.Should().Contain("reason=\"name in subject\"");
         match.Provenance.Should().Contain("Smith v Smith");
     }
 
     [Fact]
-    public async Task Evaluate_WhenNameAppearsInBody_EmitsMatch()
+    public async Task Evaluate_WhenNameAppearsInBody_EmitsMatchAtBodyConfidence()
     {
         SetupIndex(RungTestSupport.Hit(RecordEntityType.Project, Guid.NewGuid(), 0.6, "Smith v Smith"));
 
@@ -61,11 +62,42 @@ public class RecordNameMatchRungTests
             RungTestSupport.Envelope(subject: "Please action", bodyText: "This is about the matter titled Smith v Smith, thanks."),
             new AssociationContext(), CancellationToken.None);
 
-        matches.Should().ContainSingle().Which.RegardingFieldName.Should().Be("sprk_regardingproject");
+        var match = matches.Should().ContainSingle().Subject;
+        match.RegardingFieldName.Should().Be("sprk_regardingproject");
+        match.Confidence.Should().Be(0.88);                     // BodyNameConfidence
+        match.Provenance.Should().Contain("where=body");
     }
 
     [Fact]
-    public async Task Evaluate_WhenMatterAndProjectBothNamedInEmail_SurfacesBoth()
+    public async Task Evaluate_SubjectMatchOutranksAttachmentMatch()
+    {
+        // The core email-r4 UAT fix: a name in the SUBJECT must outrank a name that appears only in a (noisy)
+        // attachment, so the exact match surfaces first and attachment noise cannot crowd it out.
+        var subjectMatterId = Guid.NewGuid();
+        var attachmentMatterId = Guid.NewGuid();
+        SetupIndex(
+            RungTestSupport.Hit(RecordEntityType.Matter, subjectMatterId, 0.7, "Smith v Smith"),
+            RungTestSupport.Hit(RecordEntityType.Project, attachmentMatterId, 0.7, "Test New Matter via Workspace"));
+
+        var envelope = new NormalizedMessage
+        {
+            Direction = CommunicationDirection.Incoming,
+            Subject = "Fw: Smith v Smith",
+            BodyText = "See attached.",
+            AttachmentText = "This engagement concerns Test New Matter via Workspace and related items.",
+        };
+
+        var matches = await Build().EvaluateAsync(envelope, new AssociationContext(), CancellationToken.None);
+
+        matches.Should().HaveCount(2);
+        var top = matches[0];
+        top.Target!.Id.Should().Be(subjectMatterId);            // subject match ranks first
+        top.Confidence.Should().Be(0.95);
+        matches[1].Confidence.Should().Be(0.75);                // attachment match demoted
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenMatterAndProjectBothNamedInSubject_SurfacesBoth()
     {
         // Owner spec: surface ALL deterministically-matching types; the user picks the primary.
         var matterId = Guid.NewGuid();
@@ -81,7 +113,7 @@ public class RecordNameMatchRungTests
         matches.Should().HaveCount(2);
         matches.Select(m => m.RegardingFieldName).Should()
             .BeEquivalentTo(new[] { "sprk_regardingmatter", "sprk_regardingproject" });
-        matches.Should().OnlyContain(m => m.Confidence == 0.90);
+        matches.Should().OnlyContain(m => m.Confidence == 0.95);   // both in subject
     }
 
     [Fact]
@@ -146,8 +178,9 @@ public class RecordNameMatchRungTests
 
         var match = matches.Should().ContainSingle().Subject;
         match.Target!.Id.Should().Be(matterId);
-        match.Confidence.Should().Be(0.95);                     // NumberConfidence
+        match.Confidence.Should().Be(0.97);                     // NumberConfidence (most discriminating)
         match.Provenance.Should().Contain("REAL-2026-123456.02");
+        match.Provenance.Should().Contain("matched=number");
     }
 
     [Fact]
@@ -168,7 +201,10 @@ public class RecordNameMatchRungTests
 
         var matches = await Build().EvaluateAsync(envelope, new AssociationContext(), CancellationToken.None);
 
-        matches.Should().ContainSingle().Which.Target!.Id.Should().Be(matterId);
+        var match = matches.Should().ContainSingle().Subject;
+        match.Target!.Id.Should().Be(matterId);
+        match.Confidence.Should().Be(0.75);                     // AttachmentNameConfidence (demoted)
+        match.Provenance.Should().Contain("where=attachment");
     }
 
     [Fact]

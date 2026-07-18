@@ -57,13 +57,27 @@ public class RecordNameMatchOptions
     [Range(1, 100)]
     public int MinNumberLength { get; set; } = 4;
 
-    /// <summary>Confidence emitted for a verified NAME appearance (0–1, default 0.90). High — an exact, normalized name match — but below the 0.85 auto-file bar is NOT required here because the rung is excluded from auto-file eligibility in the mapper.</summary>
-    [Range(0.0, 1.0)]
-    public double NameConfidence { get; set; } = 0.90;
+    // ── Confidence tiered by WHERE the name matched (email-r4 UAT 2026-07-18) ────────────────────────────
+    // A name in the SUBJECT is a far stronger association signal than one buried in a long attachment. Tiering
+    // by location (a) surfaces the real subject match above incidental attachment mentions, (b) demotes
+    // attachment noise below the 0.85 conflict floor so it stops spuriously triggering Ambiguous, and (c) gives
+    // each candidate a human, location-based match reason for the review UI.
 
-    /// <summary>Confidence emitted for a verified reference-NUMBER appearance (0–1, default 0.95) — a reference number is more discriminating than a name.</summary>
+    /// <summary>Confidence for a verified reference-NUMBER appearance (0–1, default 0.97) — the most discriminating signal.</summary>
     [Range(0.0, 1.0)]
-    public double NumberConfidence { get; set; } = 0.95;
+    public double NumberConfidence { get; set; } = 0.97;
+
+    /// <summary>Confidence for a name matched in the SUBJECT (0–1, default 0.95) — strongest name signal.</summary>
+    [Range(0.0, 1.0)]
+    public double SubjectNameConfidence { get; set; } = 0.95;
+
+    /// <summary>Confidence for a name matched in the BODY (0–1, default 0.88).</summary>
+    [Range(0.0, 1.0)]
+    public double BodyNameConfidence { get; set; } = 0.88;
+
+    /// <summary>Confidence for a name matched ONLY in an ATTACHMENT (0–1, default 0.75) — often incidental; kept below the 0.85 conflict floor.</summary>
+    [Range(0.0, 1.0)]
+    public double AttachmentNameConfidence { get; set; } = 0.75;
 
     /// <summary>
     /// Max characters of the composed query (subject + body + attachment text) used for retrieval AND
