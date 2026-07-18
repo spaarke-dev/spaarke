@@ -412,8 +412,46 @@ public sealed record SaveComposeDocumentRequest
     /// </summary>
     public string? ContainerId { get; init; }
 
-    /// <summary>DOCX bytes to save. Required.</summary>
-    public required ReadOnlyMemory<byte> Content { get; init; }
+    /// <summary>
+    /// E1 (FR-01/FR-06, task 022): the retained load-time original <c>.docx</c> bytes, supplied as the
+    /// same-session FAST-PATH baseline. This is the pristine mount payload the client still holds
+    /// (<c>state.docxBytes</c>) — NOT a TipTap reconstruction (<c>docx.js</c> is dropped from the export
+    /// path; a dirty save never rebuilds the whole document). <see cref="SaveAsync"/> applies
+    /// <see cref="EditedParagraphs"/> as a delta ONTO these bytes.
+    /// <para>
+    /// OPTIONAL (was <c>required</c> pre-R3): when the client no longer holds the original (e.g. a save
+    /// after a page refresh), it omits <see cref="Content"/> and instead supplies
+    /// <see cref="BaselineVersionId"/> so the BFF re-fetches the load-time SPE version (FR-06 primary).
+    /// A transient create-on-save (Browse/Upload/AI-draft with no <see cref="DocumentSpeId"/>) still
+    /// supplies <see cref="Content"/> as the document bytes. When present with no
+    /// <see cref="EditedParagraphs"/> and no <see cref="Annotations"/>, the baseline is persisted
+    /// byte-identical (a clean Save is unchanged; FR-06a — see <c>ComposeServiceUploadFidelityTests</c>).
+    /// </para>
+    /// </summary>
+    public ReadOnlyMemory<byte> Content { get; init; }
+
+    /// <summary>
+    /// E1 (FR-06, task 022): the LOAD-TIME SPE version id captured when the document was loaded
+    /// (<see cref="LoadComposeDocumentResult.VersionId"/> via <c>ComposeService.LoadAsync</c>). Used to
+    /// re-fetch the retained original baseline via <c>ISpeFileOperations.DownloadFileVersionAsUserAsync</c>
+    /// (task 002) when <see cref="Content"/> is absent (the client-bytes fast-path is unavailable, e.g. a
+    /// save after a page refresh). The load-time version stays addressable even after later dirty saves
+    /// advance the item's CURRENT version, so the delta always applies onto the correct baseline. Null on a
+    /// same-session save (the <see cref="Content"/> fast-path is used) or a transient create-on-save.
+    /// </summary>
+    public string? BaselineVersionId { get; init; }
+
+    /// <summary>
+    /// E1 (FR-01/FR-02, task 022, Option C — design §4.2): the editor paragraphs the user CHANGED, each
+    /// keyed by its <c>w14:paraId</c> (E2 splice key) with its new settled text. When non-empty,
+    /// <see cref="SaveAsync"/> drives <see cref="ComposeParagraphRedlineSynthesizer"/> to rewrite exactly
+    /// these paragraphs in the resolved baseline as native <c>w:ins</c>/<c>w:del</c> tracked changes (a
+    /// word-level diff old→new), preserving every untouched paragraph + all structure by construction —
+    /// the "delta onto the retained original" that replaces the R2 whole-document reconstruction. Null/empty
+    /// on a clean Save or a create-on-save (nothing to splice; the baseline persists as-is). An unmatched
+    /// paraId is a handled synthesis error (<c>ComposeRedlineException</c>), never a silent wrong write.
+    /// </summary>
+    public IReadOnlyList<ComposeEditedParagraph>? EditedParagraphs { get; init; }
 
     /// <summary>Bound session id (required to keep the session's <c>DocumentId</c> in sync
     /// across the ephemeral → promoted transition).</summary>
