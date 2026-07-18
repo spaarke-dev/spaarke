@@ -243,6 +243,17 @@ export interface ICreateRecordWizardConfig {
   /** Subtitle for the Add Files step (optional override). */
   filesStepSubtitle?: string;
   /**
+   * Files to PRE-SEED into the "Add file(s)" step (assistant-enhancements-r1 UAT
+   * W-2/W-5 — the create-flow file leg). The launching surface (the Assistant
+   * create-flow) fetches the drafted-from session document(s) and passes them here
+   * so they ride the wizard's EXISTING upload+link+index pipeline into the new
+   * record's container. Seeded via an effect keyed on this array (it may arrive
+   * ASYNC after open); the reducer dedups by name+size and a user removal is not
+   * undone. Omitted by every wizard except the Assistant-launched Matter flow —
+   * fully backward compatible.
+   */
+  initialFiles?: IUploadedFile[];
+  /**
    * When `true`, the "Add file(s)" step is omitted entirely from the wizard's
    * step sequence — not merely skippable, but never shown.
    *
