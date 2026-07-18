@@ -11,6 +11,10 @@
 // ── Main component ──────────────────────────────────────────────────────────
 export { CreateProjectWizard, type ICreateProjectWizardProps } from './CreateProjectWizard';
 
+// Assistant hand-off pre-seed mapper (spaarkeai-assistant-enhancements-r1 UAT #1):
+// maps a 012 hand-off seed onto the project wizard's initial form values.
+export { mapProjectHandoffSeed } from './handoffSeedMapping';
+
 // ── Form types ──────────────────────────────────────────────────────────────
 export { type ICreateProjectFormState, EMPTY_PROJECT_FORM } from './projectFormTypes';
 
