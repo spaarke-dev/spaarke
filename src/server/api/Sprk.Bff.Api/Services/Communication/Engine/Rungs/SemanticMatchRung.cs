@@ -105,6 +105,11 @@ public sealed class SemanticMatchRung : IAssociationRung
                 {
                     Limit = opts.Limit,
                     HybridMode = RecordHybridSearchMode.Rrf,
+                    // Rank by keyword relevance (BM25), not the Azure semantic reranker: for matching a
+                    // communication to a NAMED record the reranker buries exact-name matches under
+                    // conceptually-similar ones (email-r4 UAT 2026-07-17). This is the fuzzy fallback rung;
+                    // the deterministic RecordNameMatch rung handles exact appearances.
+                    PreferKeywordRanking = true,
                 },
                 // SearchIndexName intentionally null → RecordSearchService resolves the records-index
                 // name via its own config/resolver (no hardcoded index name here).

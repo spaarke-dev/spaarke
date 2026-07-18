@@ -31,4 +31,15 @@ public enum RungKind
 
     /// <summary>Rung 5 — AI extract + classify.</summary>
     AiClassification = 5,
+
+    /// <summary>
+    /// Rung 3.5 — deterministic record-NAME/number match. Retrieves candidates from the records index
+    /// (keyword ranking) then deterministically VERIFIES that a candidate's name or reference number appears
+    /// verbatim (normalized) in the email subject/body, and surfaces EVERY verified record type (matter AND
+    /// project AND invoice) as a high-confidence review candidate. Runs in the deterministic pass (before the
+    /// AI rungs) but — per owner spec (2026-07-17) — is <b>surface-for-review, never auto-file</b>: the user
+    /// picks the primary among the surfaced matches. Deliberately NOT in the mapper's auto-file-eligible set,
+    /// and NOT an AI rung.
+    /// </summary>
+    RecordNameMatch = 6,
 }

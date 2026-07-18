@@ -89,6 +89,52 @@ public class AssociationStatusMapperTests
         decision.RegardingWrites.Should().ContainKey(PersonField);
     }
 
+    // ── RecordNameMatch (rung 3.5): deterministic-but-surface-only (email-r4 UAT 2026-07-17) ─────────────
+
+    [Fact]
+    public void Decide_RecordNameMatchOnly_SurfacesSuggested_NeverAutoFiles_AndWritesCandidate()
+    {
+        // A deterministic name match on a SUBSTANTIVE target (matter) at high confidence must NOT auto-file —
+        // owner spec: surface for review, the user picks the primary. The candidate is still written so the
+        // review UI can one-click confirm it.
+        var matterId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[] { Match(MatterField, matterId, 0.90, RungKind.RecordNameMatch) },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Suggested);
+        decision.AutoFiled.Should().BeFalse();
+        decision.RegardingWrites.Should().ContainKey(MatterField);
+        decision.RegardingWrites[MatterField].Id.Should().Be(matterId);
+        // It is a deterministic exact match, NOT an AI rung — must not be mislabeled as AI-involved.
+        decision.Provenance.Decision.AiInvolved.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Decide_RecordNameMatch_MatterAndProject_BothWritten_ForReview()
+    {
+        // Both a matter and a project are named in the email → surface BOTH (different fields, no conflict),
+        // Suggested, so the reviewer chooses the primary.
+        var matterId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[]
+            {
+                Match(MatterField, matterId, 0.90, RungKind.RecordNameMatch),
+                Match("sprk_regardingproject", projectId, 0.90, RungKind.RecordNameMatch, entity: "sprk_project"),
+            },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Suggested);
+        decision.AutoFiled.Should().BeFalse();
+        decision.RegardingWrites.Should().ContainKey(MatterField);
+        decision.RegardingWrites.Should().ContainKey("sprk_regardingproject");
+    }
+
     [Fact]
     public void Decide_SameDeterministicMatch_KillSwitchOff_DowngradesToSuggested()
     {
@@ -263,6 +309,30 @@ public class AssociationStatusMapperTests
         decision.Status.Should().Be(AssociationStatusCodes.Ambiguous);
         decision.AutoFiled.Should().BeFalse();
         decision.RegardingWrites.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Decide_ConflictOnOneField_StillWritesCleanSiblingField()
+    {
+        // Duplicate same-named projects (legitimate in production) conflict on the project field, but a single
+        // exact-name matter on the matter field is unambiguous — it must still be written for review. A
+        // conflict on one field must not suppress a clean association on another (email-r4 UAT 2026-07-17).
+        var matterId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[]
+            {
+                Match(MatterField, matterId, 0.90, RungKind.RecordNameMatch),
+                Match("sprk_regardingproject", Guid.NewGuid(), 0.90, RungKind.RecordNameMatch, entity: "sprk_project"),
+                Match("sprk_regardingproject", Guid.NewGuid(), 0.90, RungKind.RecordNameMatch, entity: "sprk_project"),
+            },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Ambiguous);
+        decision.RegardingWrites.Should().ContainKey(MatterField);          // clean field written
+        decision.RegardingWrites[MatterField].Id.Should().Be(matterId);
+        decision.RegardingWrites.Should().NotContainKey("sprk_regardingproject"); // conflicting field withheld
     }
 
     [Fact]

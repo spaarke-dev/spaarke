@@ -257,9 +257,14 @@ public sealed class IncomingAssociationResolver
             resolvingRungsText, rungsFiredText);
     }
 
+    // Which rungs run in the DETERMINISTIC pass (always, before the cost-gated AI escalation). Includes
+    // RecordNameMatch (rung 3.5) — its match is an exact, verified name/number appearance, so it belongs in the
+    // deterministic pass even though the mapper keeps it OUT of auto-file eligibility (owner: surface-for-review,
+    // never auto-file). Kept in sync with AssociationStatusMapper's classification (which governs auto-file).
     private static bool IsDeterministic(RungKind kind) =>
         kind is RungKind.ExplicitReference or RungKind.ThreadContinuity
-             or RungKind.ParticipantCorrelation or RungKind.StructuralDetector;
+             or RungKind.ParticipantCorrelation or RungKind.StructuralDetector
+             or RungKind.RecordNameMatch;
 
     // ═════════════════════════════════════════════════════════════════════════════
     // Apply the ladder decision to the communication record
