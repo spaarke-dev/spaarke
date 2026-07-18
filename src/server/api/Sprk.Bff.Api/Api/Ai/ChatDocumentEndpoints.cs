@@ -701,7 +701,6 @@ public static class ChatDocumentEndpoints
         string documentId,
         HttpContext httpContext,
         ITenantCache cache,
-        ChatSessionManager sessionManager,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
@@ -715,14 +714,13 @@ public static class ChatDocumentEndpoints
             return Results.Problem(statusCode: 401, title: "Unauthorized", detail: "Tenant identity not found in token claims");
         }
 
-        // Verify the session exists + is owned by the caller (the AddAiAuthorizationFilter already
-        // enforced AI access; this confirms the session scope for the tenant-keyed cache read).
-        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, httpContext.RequestAborted);
-        if (session == null)
-        {
-            return Results.Problem(statusCode: 404, title: "Not Found", detail: $"Chat session '{sessionId}' not found or has expired");
-        }
-
+        // NOTE: we intentionally do NOT gate on GetSessionAsync here. The binary cache key is
+        // tenant + session + document scoped and the AddAiAuthorizationFilter already enforced AI
+        // access, so the binary read below IS the authorization + existence gate. A prior
+        // session-existence pre-check produced spurious 404s from the SEPARATE wizard code-page
+        // token/context (assistant-enhancements-r1 UAT W-2/W-5: the binary was present under the
+        // exact key, but the cross-context session lookup returned null) — the drafted-from file
+        // then never attached. Reading the binary directly is correct and sufficient.
         var docCacheId = DocCacheId(sessionId, documentId);
 
         var binaryContent = await cache.GetAsync<byte[]>(
