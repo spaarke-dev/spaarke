@@ -1,12 +1,16 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-18 (task 026 ComposeDocumentRenderer ✅ COMPLETE; next = 023 / 027)
+> **Last Updated**: 2026-07-18 (tasks 026 + 023 ✅ COMPLETE; next = 027 client cutover)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
-## ▶️ RESUME HERE — `work on task 023` (or `continue`)
+## ▶️ RESUME HERE — `work on task 027` (or `continue`)
 
-**Task 026 ✅ DONE (2026-07-18, uncommitted — ready to commit).** `ComposeDocumentRenderer` (server-side born-in-editor OOXML authoring) built + wired + tested. Files: NEW `Services/Compose/ComposeDocumentRenderer.cs` + `ComposeContentModel.cs`; MOD `ComposeService.cs` (`_documentRenderer` field/ctor + `ResolveSaveBaselineAsync` branch (a0)), `IComposeService.cs` (`SaveComposeDocumentRequest.ContentModel`), `ComposeModule.cs` (DI singleton); NEW tests `ComposeDocumentRendererTests.cs` (12) + `ComposeServiceBornInEditorSaveTests.cs` (1). **Verify**: Compose suite **249✅** (+13); ADR013_ComposeFacade PASS (ADR007 pre-existing RED = Communication-only, not us); publish **45.69 MB** compressed incl PDBs (−0.31 vs 46.00; 0 pkg delta); CVE clean; OpenXML schema-valid (Office2019 validator green — caught+fixed 4 ordering bugs: tblGrid, tblBorders order, keepNext-before-numPr, nsid-before-multiLevelType); dup-client-paraId re-mint (code-review-found correctness fix). §9.5 gates PASS.
+**Task 023 ✅ DONE (2026-07-18).** FR-04 AI-redline composition VERIFIED + TESTED. No production change — the composition was already correct in `SaveAsync` (`ResolveSaveBaselineAsync` baseline/render → `EditedParagraphs` synthesizer delta → `Annotations` via the unchanged `DocxAnnotationWriter`). NEW `ComposeServiceAnnotationCompositionTests` (3): (a) annotations-only persist native `w:ins`/`w:del`/`w:comment` on the retained original; (b) annotations + direct-typing delta compose without corrupting either (edit on para B, annotation on para C, para A clean); (c) annotations decorate the 026 born-in-editor render — all OpenXML schema-valid. Compose **252✅**; ADR013_ComposeFacade PASS; publish/CVE unchanged (no src delta).
+
+**Next = task 027 (CLIENT content-model cutover — drop docx.js).** deps 022✅,023✅,026✅ all met. Remove `tipTapToDocxBytes`/`tipTapJsonToDocxBytes`/`buildRejectBaselineJson` from `docxBridge.ts` + `index.ts:183`; add load-time text-by-paraId snapshot + `collectEditedParagraphs()` + `buildContentModel()`; rewrite `triggerSave` (4-case: dirty→EditedParagraphs+versionId / clean→byte-identical Content / born-in-editor→ContentModel / AI→annotations); fix ~11 client test files. Rigor FULL · opus · xhigh · client (`Spaarke.Compose.Components`). **Also open (022 completion, do WITH 027)**: `LoadAsync` must capture+return `VersionId` (FR-06 re-fetch source — 027's dirty-save path needs it; today Load returns only ETag).
+
+### (prior) Task 026 ✅ DONE (2026-07-18, committed bd15cae77, pushed). `ComposeDocumentRenderer` (server-side born-in-editor OOXML authoring) built + wired + tested. Files: NEW `Services/Compose/ComposeDocumentRenderer.cs` + `ComposeContentModel.cs`; MOD `ComposeService.cs` (`_documentRenderer` field/ctor + `ResolveSaveBaselineAsync` branch (a0)), `IComposeService.cs` (`SaveComposeDocumentRequest.ContentModel`), `ComposeModule.cs` (DI singleton); NEW tests `ComposeDocumentRendererTests.cs` (12) + `ComposeServiceBornInEditorSaveTests.cs` (1). **Verify**: Compose suite **249✅** (+13); ADR013_ComposeFacade PASS (ADR007 pre-existing RED = Communication-only, not us); publish **45.69 MB** compressed incl PDBs (−0.31 vs 46.00; 0 pkg delta); CVE clean; OpenXML schema-valid (Office2019 validator green — caught+fixed 4 ordering bugs: tblGrid, tblBorders order, keepNext-before-numPr, nsid-before-multiLevelType); dup-client-paraId re-mint (code-review-found correctness fix). §9.5 gates PASS.
 
 **Downstream order**: 023 (AI redlines/comments compose on the SERVER-AUTHORED baseline — verify+wire `DocxAnnotationWriter` over both the 022 delta AND the 026 render; deps 022✅ met) → 027 (client content-model cutover, drop docx.js; deps 022,023,026 — 026 now ✅) → 024 (seam: loaded byte-identity + born-in-editor numbering golden-file). **Also open (022 completion, before/with 027)**: `LoadAsync` must capture+return `VersionId` (FR-06 re-fetch source — today returns only ETag).
 
@@ -127,11 +131,11 @@ All six pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed — no design pivots. The fi
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 026 → ✅ COMPLETE (next: 023) |
-| **Task File** | [`tasks/026-compose-document-renderer.poml`](tasks/026-compose-document-renderer.poml) |
-| **Title** | FR-01a — `ComposeDocumentRenderer`: server-side born-in-editor OOXML authoring |
+| **Task ID** | 023 → ✅ COMPLETE (next: 027) |
+| **Task File** | [`tasks/023-ai-redlines-reuse-on-baseline.poml`](tasks/023-ai-redlines-reuse-on-baseline.poml) |
+| **Title** | FR-04 — AI redlines/comments compose on the server-authored baseline (verify + test) |
 | **Phase** | 2 E1 |
-| **Status** | ✅ completed 2026-07-18 (Rigor FULL · opus · xhigh · directional) — Compose 249✅, schema-valid, 45.69 MB, CVE clean |
+| **Status** | ✅ completed 2026-07-18 (FULL · sonnet · high) — Compose 252✅, composition schema-valid; 026 also ✅ (committed bd15cae77, pushed) |
 | **Started** | 2026-07-18 |
 
 **Placement Justification (§10 BFF hygiene)**: (1) Existing — overlaps `DocxExportService` (AI-analysis export, `Services/Ai/Export`, numbering is FAKE literal text) + `ComposeParagraphRedlineSynthesizer` (edit path, deltas onto a retained original). (2) Extension — can't extend either: DocxExportService is an AI-domain concern behind the ADR-013 boundary with fake numbering; the synthesizer requires a retained original a born-in-editor doc lacks. NEW pure engine in `Services/Compose` justified. (3) Cost-of-doing-nothing — without it an AI-drafted legal doc is saved by the lossy client `docx.js`, flattening 1/1.1/1.1.1 clause numbering + real styles into literal "1." text runs that later tracked-change edits corrupt. Pure (`ComposeContentModel` in / `byte[]` out), no AI, no Graph, no new NuGet. ADR-039 non-conflict (deterministic OOXML authoring, not AI dispatch — design §11).

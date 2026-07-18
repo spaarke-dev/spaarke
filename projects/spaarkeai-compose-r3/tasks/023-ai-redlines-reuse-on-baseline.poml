@@ -2,8 +2,8 @@
   <metadata>
     <title>FR-04 AI redlines/comments reuse — apply via existing `DocxAnnotationWriter` onto retained-original baseline</title>
     <phase>2 E1</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
