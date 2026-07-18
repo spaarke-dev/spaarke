@@ -730,9 +730,7 @@ function EditorBody({
   const connReview = connections.filter(c => c.status !== 'confirmed' && !confirmedFields.has(c.field)).length;
   const confirmedCount = connections.length - connReview;
   // Only 'suggested' slots are safely bulk-confirmable — an 'ambiguous' slot needs the reviewer to pick.
-  const acceptableCount = connections.filter(
-    c => c.status === 'suggested' && !confirmedFields.has(c.field)
-  ).length;
+  const acceptableCount = connections.filter(c => c.status === 'suggested' && !confirmedFields.has(c.field)).length;
   // AI-suggested types (e.g. "Create Matter") are also review items, so they count toward "to review".
   const toReview = connReview + aiSuggestions.length;
 
