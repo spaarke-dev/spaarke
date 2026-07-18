@@ -361,6 +361,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // R5 task 020 / D2-11 chat-pane orchestration UX props (all optional;
   // existing consumers ignore — generic shared-lib hooks per ADR-012).
   onAttachmentsChanged,
+  inputBusy,
   onAttachmentRemoved,
   injectLocalMessage,
   onLocalMessageInjected,
@@ -2734,7 +2735,12 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         <SprkChatInput
           ref={inputHandleRef}
           onSend={handleSend}
-          disabled={isStreaming}
+          // Lock the composer for the WHOLE orchestration, not just the message
+          // stream (UAT: a message typed while a file was uploading/classifying was
+          // dropped). Busy = message streaming OR assistant typing OR a file still
+          // `extracting` OR the host signalling `inputBusy` (its Event-path
+          // classify/summarize). Re-enables when all clear.
+          disabled={isStreaming || isTyping || !!inputBusy || attachmentFiles.some(f => f.status === 'extracting')}
           maxCharCount={maxCharCount}
           dynamicSlashCommands={dynamicSlashCommands}
           hideSlashButton
