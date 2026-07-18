@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-17 (context-handoff — 012+020 COMPLETE & committed; task 021 handoff for fresh session)
+> **Last Updated**: 2026-07-18 (task 022 Increment A — SaveAsync inversion COMMITTED ce50c9877; Increment B escalated)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,21 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Option C ADOPTED (§6.5 owner-approved) — E1 redline engine built + Docxodus fully removed. NFR-09 gate ✅ PASS. |
-| **Step** | Phase 1 COMPLETE (synthesizer + cleanup + design/spec amend). Phase 2 = the rest of task 022 (SaveAsync wiring). |
-| **Status** | Foundation done, committed. Task 022 UNBLOCKED + re-scoped. |
-| **Next Action** | **Task 022 Phase 2** (the E1 cutover wiring, own turn — FULL·opus·xhigh): invert `ComposeService.SaveAsync` to call `ComposeParagraphRedlineSynthesizer` on the resolved baseline (FR-06: versionId primary / client-bytes fast-path / Redis fallback via task-002 `DownloadFileVersionAsUserAsync`); **FR-05** format-change handling in the synthesizer (compare run props → rPrChange); client: drop `tipTapJsonToDocxBytes`/`tipTapToDocxBytes` from docxBridge.ts + `ComposeWorkspace.triggerSave` sends versionId + paraId-keyed edits; **NFR-06** through-the-wire seam slice test. |
+| **Task** | 022 (E1 keystone cutover, Option C). Increment A (server SaveAsync inversion) DONE + committed `ce50c9877`. Increment B (client docx.js removal) ESCALATED — born-in-editor baseline gap + task-023 coupling. |
+| **Step** | Increment A ✅ (baseline resolution + synthesizer wiring + contract + tests, all additive-safe). Increment B ⛔ awaiting owner §6.5 decision. |
+| **Status** | Server keystone landed. Client half BLOCKED on a design decision (see escalation below). |
+| **Next Action** | Owner to choose the born-in-editor baseline resolution (§6.5) → then Increment B: drop `tipTapToDocxBytes` (scoped per decision), add client load-time text-by-paraId snapshot + `collectEditedParagraphs`, rewrite `triggerSave` to send `BaselineVersionId` + `EditedParagraphs`, fix client test mocks. NFR-06 seam rides task 024. |
+
+### ✅ Task 022 Increment A COMPLETE (2026-07-18, commit ce50c9877)
+Server E1 inversion — `ComposeService.SaveAsync` now derives a dirty save as a DELTA onto the retained load-time original: **(1)** `ResolveSaveBaselineAsync` — `request.Content` same-session fast-path (retained ORIGINAL, not a reconstruction) → else re-fetch the load-time SPE version by `BaselineVersionId` via task-002 `DownloadFileVersionAsUserAsync` (behind SpeFileStore, ADR-007); no reconstruction fallback (FR-01). **(2)** synthesize `EditedParagraphs` (paraId-keyed) via `ComposeParagraphRedlineSynthesizer`, author from OBO identity. **(3)** `Annotations` via `DocxAnnotationWriter` (unchanged; task 023). Contract: `+BaselineVersionId +EditedParagraphs`, `Content` demoted required→optional. Synthesizer injected (optional ctor param, DI singleton already registered). **Additive-safe**: 4 existing FR-06a fidelity tests still green. NEW `ComposeServiceDeltaSaveTests` (3). Compose suite 235✅; ADR013_ComposeFacade✅; publish 46.00 MB compressed incl PDBs (+0.65 vs 45.35; 0 pkg; 0 CVE). **Redis Tier-3 baseline fallback DEFERRED** (§6.5 Path-A scoping — versionId fetch discharges FR-06; Redis needs a Load-path write, out of 022 file scope).
+
+### ⛔ Task 022 Increment B (client docx.js removal) — §6.5 ESCALATION OPEN (2026-07-18)
+Removing `tipTapToDocxBytes`/`tipTapJsonToDocxBytes` **wholesale** (POML step 3 + design §133 "drop docx.js entirely") conflicts with two realities the design does not resolve:
+1. **Born-in-editor baseline gap**: an AI-drafted / blank-new doc (DEF-08 `initialHtml` seed, `docxBytes=null`) has NO retained load-time original to delta against. Removing the serializer breaks its save; R3 has no server-side HTML→docx materialization (ADR-039 blocks new AI dispatch). FR-01 "never reconstruct" logically applies only to docs that HAVE an original.
+2. **AI-redline reject-baseline coupling**: `ComposeEditor.serializeForSave` builds its reject-baseline via `tipTapJsonToDocxBytes(buildRejectBaselineJson)` — that rewire onto the Option C baseline is explicitly **task 023's** charter (FR-04 AI redlines onto Option C baseline).
+**Recommended (owner to ratify)**: §6.5 Path A — scope the removal to the *dirty-edit-of-a-loaded-doc* path (the real FR-01 fidelity target); **retain `tipTapToDocxBytes` NARROWLY** as the born-in-editor serializer with a documented rationale (no original ⇒ reconstruction is the only option and is not a fidelity regression). Tensions with the "no residual" Option-C directive → owner call required. Client work after decision: load-time text-by-paraId snapshot at `stampParaIds` time → `collectEditedParagraphs()` handle (dirty paras by paraId) → `triggerSave` sends `BaselineVersionId`+`EditedParagraphs` (dirty-loaded path) / `Content` byte-identical (clean) / retained serializer (born-in-editor). Fix ~5 client test files mocking `tipTapToDocxBytes`.
+
+### Superseded handoff (pre-Increment-A) — kept for reference below.
 
 ### Handoff Notes — Task 022 (E1 SaveAsync cutover, Option C) — SCOPED, NOT STARTED (fresh session recommended — irreversible cutover on 1747-LoC file)
 
