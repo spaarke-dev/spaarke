@@ -1,12 +1,19 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-18 (E1 re-architecture COMMITTED 4b7887a0b; resume at task 026)
+> **Last Updated**: 2026-07-18 (task 026 ComposeDocumentRenderer ✅ COMPLETE; next = 023 / 027)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
-## ▶️ RESUME HERE (fresh session) — `work on task 026`
+## ▶️ RESUME HERE — `work on task 023` (or `continue`)
 
-**Task 026** = build `ComposeDocumentRenderer` (server-side born-in-editor OOXML authoring). The POML [`tasks/026-compose-document-renderer.poml`](tasks/026-compose-document-renderer.poml) is self-contained (reuse anchors, numbering recipe, file:line seams, acceptance criteria + numbering golden-file). Rigor FULL · opus · xhigh · parallel-safe=false (Services/Compose). Run via `task-execute`.
+**Task 026 ✅ DONE (2026-07-18, uncommitted — ready to commit).** `ComposeDocumentRenderer` (server-side born-in-editor OOXML authoring) built + wired + tested. Files: NEW `Services/Compose/ComposeDocumentRenderer.cs` + `ComposeContentModel.cs`; MOD `ComposeService.cs` (`_documentRenderer` field/ctor + `ResolveSaveBaselineAsync` branch (a0)), `IComposeService.cs` (`SaveComposeDocumentRequest.ContentModel`), `ComposeModule.cs` (DI singleton); NEW tests `ComposeDocumentRendererTests.cs` (12) + `ComposeServiceBornInEditorSaveTests.cs` (1). **Verify**: Compose suite **249✅** (+13); ADR013_ComposeFacade PASS (ADR007 pre-existing RED = Communication-only, not us); publish **45.69 MB** compressed incl PDBs (−0.31 vs 46.00; 0 pkg delta); CVE clean; OpenXML schema-valid (Office2019 validator green — caught+fixed 4 ordering bugs: tblGrid, tblBorders order, keepNext-before-numPr, nsid-before-multiLevelType); dup-client-paraId re-mint (code-review-found correctness fix). §9.5 gates PASS.
+
+**Downstream order**: 023 (AI redlines/comments compose on the SERVER-AUTHORED baseline — verify+wire `DocxAnnotationWriter` over both the 022 delta AND the 026 render; deps 022✅ met) → 027 (client content-model cutover, drop docx.js; deps 022,023,026 — 026 now ✅) → 024 (seam: loaded byte-identity + born-in-editor numbering golden-file). **Also open (022 completion, before/with 027)**: `LoadAsync` must capture+return `VersionId` (FR-06 re-fetch source — today returns only ETag).
+
+**Uncommitted**: task 026 (8 files: 2 new src, 3 mod src, 2 new tests, + current-task/POML/TASK-INDEX). 5 prior LOCAL commits unpushed (`3a5505c5e`…`5d9d535c2`). Commit 026 when ready; owner batches pushes.
+
+### ⬇️ (prior) RESUME block — task 026 (now complete) — kept for reference
+The POML [`tasks/026-compose-document-renderer.poml`](tasks/026-compose-document-renderer.poml) is self-contained (reuse anchors, numbering recipe, file:line seams, acceptance criteria + numbering golden-file). Rigor FULL · opus · xhigh · parallel-safe=false (Services/Compose).
 
 **Five de-risking facts from the 2026-07-18 investigation (not all in the POML):**
 1. **Reuse anchor**: `Services/Ai/Export/DocxExportService.cs` is the ONLY from-scratch authoring precedent — `WordprocessingDocument.Create` (:55), `CreateStyledTable`/`CreateTableCell` (:412-486), `AddStyleDefinitions`/`CreateStyle` (:134-176), `SanitizeText` (:557). Reuse the patterns; its numbering is FAKE (literal "1. " text) — do NOT copy that.
@@ -120,12 +127,16 @@ All six pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed — no design pivots. The fi
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 026 → ✅ COMPLETE (next: 023) |
+| **Task File** | [`tasks/026-compose-document-renderer.poml`](tasks/026-compose-document-renderer.poml) |
+| **Title** | FR-01a — `ComposeDocumentRenderer`: server-side born-in-editor OOXML authoring |
+| **Phase** | 2 E1 |
+| **Status** | ✅ completed 2026-07-18 (Rigor FULL · opus · xhigh · directional) — Compose 249✅, schema-valid, 45.69 MB, CVE clean |
+| **Started** | 2026-07-18 |
+
+**Placement Justification (§10 BFF hygiene)**: (1) Existing — overlaps `DocxExportService` (AI-analysis export, `Services/Ai/Export`, numbering is FAKE literal text) + `ComposeParagraphRedlineSynthesizer` (edit path, deltas onto a retained original). (2) Extension — can't extend either: DocxExportService is an AI-domain concern behind the ADR-013 boundary with fake numbering; the synthesizer requires a retained original a born-in-editor doc lacks. NEW pure engine in `Services/Compose` justified. (3) Cost-of-doing-nothing — without it an AI-drafted legal doc is saved by the lossy client `docx.js`, flattening 1/1.1/1.1.1 clause numbering + real styles into literal "1." text runs that later tracked-change edits corrupt. Pure (`ComposeContentModel` in / `byte[]` out), no AI, no Graph, no new NuGet. ADR-039 non-conflict (deterministic OOXML authoring, not AI dispatch — design §11).
+
+**CSA numbering study (Step 0 done)**: the style-link mechanism = ONE `abstractNum` (multilevel, 9 levels ilvl 0-8), each level carries BOTH `<w:pStyle w:val="HeadingN"/>` AND a `%N` `lvlText` cascade; ONE `w:num`→that abstractNum; each `HeadingN` **paragraph style** carries `<w:pPr><w:numPr><w:ilvl/><w:numId/></w:numPr></w:pPr>`; body paragraphs use ONLY `<w:pStyle val="HeadingN"/>` (no direct paragraph numId) → no double-numbering. Ordered/bullet lists = `ListParagraph` + DIRECT `numPr` (ListParagraph carries no style numId, so a direct numPr is not double-numbering); ordered restart = fresh `w:num` with `<w:lvlOverride><w:startOverride val="1"/></w:lvlOverride>`.
 
 ---
 

@@ -131,6 +131,13 @@ public class ComposeService : IComposeService
     // to a fresh instance (stateless, thread-safe) so existing test constructors compile unchanged; DI
     // resolves the registered singleton (ComposeModule) in every host.
     private readonly ComposeParagraphRedlineSynthesizer _redlineSynthesizer;
+    // FR-01a (task 026, E1 born-in-editor): the from-scratch high-fidelity OOXML AUTHORING engine. On a
+    // born-in-editor save (request.ContentModel present — an AI-drafted/blank/browse-local doc with no
+    // retained original), it renders the .docx server-side (real styles + style-linked multi-level numbering
+    // + tables + minted paraId) — the deterministic replacement for the removed client docx.js exporter.
+    // Optional + defaults to a fresh instance (stateless, thread-safe) so existing test constructors compile
+    // unchanged; DI resolves the registered singleton (ComposeModule) in every host.
+    private readonly ComposeDocumentRenderer _documentRenderer;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -145,7 +152,8 @@ public class ComposeService : IComposeService
         IHostApplicationLifetime? appLifetime = null,
         IComposeMemoryCapture? memoryCapture = null,
         ParaIdPreParser? paraIdPreParser = null,
-        ComposeParagraphRedlineSynthesizer? redlineSynthesizer = null)
+        ComposeParagraphRedlineSynthesizer? redlineSynthesizer = null,
+        ComposeDocumentRenderer? documentRenderer = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -157,6 +165,7 @@ public class ComposeService : IComposeService
         _scopeFactory = scopeFactory;
         _paraIdPreParser = paraIdPreParser ?? new ParaIdPreParser();
         _redlineSynthesizer = redlineSynthesizer ?? new ComposeParagraphRedlineSynthesizer();
+        _documentRenderer = documentRenderer ?? new ComposeDocumentRenderer();
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
         // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
@@ -624,6 +633,19 @@ public class ComposeService : IComposeService
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
+        // (a0) BORN-IN-EDITOR (FR-01a, task 026): a document authored IN the editor (AI-drafted / blank /
+        //      browse-local) has NO retained original — its client CONTENT MODEL is the authoring source.
+        //      Render the high-fidelity .docx server-side (real styles + style-linked multi-level numbering +
+        //      native tables + minted w14:paraId) — the deterministic replacement for the removed client
+        //      docx.js exporter (task 027). This is NOT an AI dispatch (ADR-039 complied — design §11). No
+        //      EditedParagraphs/Annotations layer onto it (the whole document is authored here); the rendered
+        //      bytes ARE contentToPersist. Checked FIRST: ContentModel is mutually exclusive with Content /
+        //      BaselineVersionId (a born-in-editor doc has no baseline to delta onto).
+        if (request.ContentModel is not null)
+        {
+            return _documentRenderer.SynthesizeDocument(request.ContentModel, ResolveRevisionAuthor(httpContext));
+        }
+
         // (a) Same-session fast-path: the client still holds the retained ORIGINAL bytes.
         if (!request.Content.IsEmpty)
         {

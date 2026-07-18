@@ -453,6 +453,20 @@ public sealed record SaveComposeDocumentRequest
     /// </summary>
     public IReadOnlyList<ComposeEditedParagraph>? EditedParagraphs { get; init; }
 
+    /// <summary>
+    /// E1 born-in-editor (FR-01a, task 026): the paraId-keyed editor CONTENT MODEL — the authoring source for
+    /// a document BORN IN THE EDITOR (AI-drafted from a <c>initialHtml</c> seed, blank-new, or browse-local)
+    /// that has NO retained load-time original to delta against. When present, <see cref="SaveAsync"/> renders
+    /// a high-fidelity <c>.docx</c> server-side via <see cref="ComposeDocumentRenderer"/> (real styles +
+    /// style-linked multi-level numbering + native tables + minted <c>w14:paraId</c>) — the deterministic
+    /// replacement for the removed client <c>docx.js</c> exporter (task 027). Mutually exclusive with
+    /// <see cref="Content"/> / <see cref="BaselineVersionId"/> / <see cref="EditedParagraphs"/> (a born-in-editor
+    /// first Save authors the whole document; there is no baseline to delta onto). Null on every loaded-document
+    /// save (the E1 edit path). Server-side render-from-a-content-model is deterministic OOXML authoring, NOT an
+    /// AI dispatch (ADR-039 complied — design §11).
+    /// </summary>
+    public ComposeContentModel? ContentModel { get; init; }
+
     /// <summary>Bound session id (required to keep the session's <c>DocumentId</c> in sync
     /// across the ephemeral → promoted transition).</summary>
     public required string SessionId { get; init; }
