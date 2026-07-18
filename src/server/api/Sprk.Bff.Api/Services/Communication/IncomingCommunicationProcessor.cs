@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
@@ -43,6 +44,8 @@ public sealed class IncomingCommunicationProcessor
     private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly IThreadResolver? _threadResolver;
     private readonly CommunicationOptions _options;
+    private readonly ITextExtractor _textExtractor;
+    private readonly AttachmentMatchOptions _attachmentMatchOptions;
     private readonly IConfiguration _configuration;
     private readonly ILogger<IncomingCommunicationProcessor> _logger;
 
@@ -69,6 +72,8 @@ public sealed class IncomingCommunicationProcessor
         NotificationService notificationService,
         ICommunicationEnrichmentService enrichmentService,
         IOptions<CommunicationOptions> options,
+        ITextExtractor textExtractor,
+        IOptions<AttachmentMatchOptions> attachmentMatchOptions,
         IConfiguration configuration,
         ILogger<IncomingCommunicationProcessor> logger,
         IThreadResolver? threadResolver = null)
@@ -88,6 +93,8 @@ public sealed class IncomingCommunicationProcessor
         _enrichmentService = enrichmentService;
         _threadResolver = threadResolver;
         _options = options.Value;
+        _textExtractor = textExtractor;
+        _attachmentMatchOptions = attachmentMatchOptions.Value;
         _configuration = configuration;
         _logger = logger;
     }
@@ -258,6 +265,12 @@ public sealed class IncomingCommunicationProcessor
         // Map the Graph message → channel-neutral envelope ONCE, here at the pipeline boundary.
         // Downstream (Association Engine + enrichment) see only NormalizedMessage, never Graph types.
         var envelope = _messageNormalizer.Normalize(message, CommunicationDirection.Incoming);
+
+        // ── Step 4.4: Attachment text as a MATCH signal (Phase 2, owner spec 2026-07-18) ─────────
+        // Extract bounded plain text from the message's attachments and add it to the envelope BEFORE
+        // association so an email whose matter/project name appears only in the attachment still matches.
+        // Best-effort + non-fatal: on any failure the envelope keeps its subject/body-only match surface.
+        envelope = await AddAttachmentTextAsync(envelope, message, mailboxEmail, graphMessageId, ct);
 
         // ── Step 4.5: Resolve associations via the Association Engine (non-fatal) ──
         try
@@ -546,6 +559,113 @@ public sealed class IncomingCommunicationProcessor
     /// and creates sprk_communicationattachment records.
     /// Reuses EmailAttachmentProcessor for filtering and SPE upload logic.
     /// </summary>
+    /// <summary>
+    /// Extracts bounded plain text from the message's attachments and returns the envelope with
+    /// <see cref="NormalizedMessage.AttachmentText"/> populated (Phase 2 match signal). Best-effort/non-fatal:
+    /// any failure returns the envelope unchanged (subject/body-only match surface). Bounded by
+    /// <see cref="AttachmentMatchOptions"/> (attachment count, per-attachment size, total chars) to contain
+    /// inbound-path cost. Runs independently of the SPE-upload path (Step 5) and of AutoCreateRecords —
+    /// matching should work even when document records are not created.
+    /// </summary>
+    private async Task<NormalizedMessage> AddAttachmentTextAsync(
+        NormalizedMessage envelope, Message message, string mailboxEmail, string graphMessageId, CancellationToken ct)
+    {
+        if (!_attachmentMatchOptions.Enabled)
+            return envelope;
+        if (message.HasAttachments != true || message.Attachments is not { Count: > 0 })
+            return envelope;
+
+        try
+        {
+            var fileAttachments = await ResolveFileAttachmentsWithContentAsync(
+                message.Attachments, mailboxEmail, graphMessageId, ct);
+            if (fileAttachments.Count == 0)
+                return envelope;
+
+            var sb = new StringBuilder();
+            var extractedCount = 0;
+
+            foreach (var attachment in fileAttachments)
+            {
+                if (extractedCount >= _attachmentMatchOptions.MaxAttachments) break;
+                if (sb.Length >= _attachmentMatchOptions.MaxTotalChars) break;
+
+                var bytes = attachment.ContentBytes;
+                if (bytes is null || bytes.Length == 0) continue;
+                if (bytes.Length > _attachmentMatchOptions.MaxAttachmentSizeBytes) continue;
+                if (attachment.IsInline == true) continue;
+
+                var fileName = attachment.Name ?? string.Empty;
+                var ext = Path.GetExtension(fileName);
+                if (string.IsNullOrEmpty(ext) || !_textExtractor.IsSupported(ext)) continue;
+
+                try
+                {
+                    using var stream = new MemoryStream(bytes);
+                    var result = await _textExtractor.ExtractAsync(stream, fileName, ct);
+                    if (result.Success && !string.IsNullOrWhiteSpace(result.Text))
+                    {
+                        if (sb.Length > 0) sb.Append('\n');
+                        sb.Append(result.Text);
+                        extractedCount++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex,
+                        "Attachment text extraction failed for {FileName} (non-fatal)", fileName);
+                }
+            }
+
+            if (sb.Length == 0)
+                return envelope;
+
+            var text = sb.Length > _attachmentMatchOptions.MaxTotalChars
+                ? sb.ToString(0, _attachmentMatchOptions.MaxTotalChars)
+                : sb.ToString();
+
+            _logger.LogInformation(
+                "Extracted attachment text for matching | GraphMessageId: {GraphMessageId}, Attachments: {Count}, Chars: {Chars}",
+                graphMessageId, extractedCount, text.Length);
+
+            return envelope with { AttachmentText = text };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Attachment text extraction step failed (non-fatal) | GraphMessageId: {GraphMessageId}; " +
+                "proceeding with subject/body match only", graphMessageId);
+            return envelope;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the message's file attachments WITH content bytes, re-fetching from the dedicated Graph
+    /// attachments endpoint when the inline <c>$expand</c> returned metadata without <c>contentBytes</c> (same
+    /// size-dependent Graph behavior handled by <see cref="ProcessIncomingAttachmentsAsync"/>).
+    /// </summary>
+    private async Task<List<FileAttachment>> ResolveFileAttachmentsWithContentAsync(
+        IList<Attachment> graphAttachments, string mailboxEmail, string graphMessageId, CancellationToken ct)
+    {
+        var fileAttachments = graphAttachments
+            .OfType<FileAttachment>()
+            .Where(a => a.ContentBytes is { Length: > 0 })
+            .ToList();
+
+        if (fileAttachments.Count == 0 && graphAttachments.Count > 0)
+        {
+            var graphClient = _graphClientFactory.ForApp();
+            var fetched = await graphClient.Users[mailboxEmail].Messages[graphMessageId]
+                .Attachments.GetAsync(cancellationToken: ct);
+            fileAttachments = (fetched?.Value ?? new List<Attachment>())
+                .OfType<FileAttachment>()
+                .Where(a => a.ContentBytes is { Length: > 0 })
+                .ToList();
+        }
+
+        return fileAttachments;
+    }
+
     private async Task ProcessIncomingAttachmentsAsync(
         IList<Attachment> graphAttachments, string mailboxEmail, string graphMessageId,
         Guid communicationId, CancellationToken ct)

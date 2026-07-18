@@ -15,6 +15,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Communication;
@@ -238,6 +239,8 @@ public class InboundPipelineTests
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
+            Mock.Of<ITextExtractor>(),
+            Options.Create(new AttachmentMatchOptions { Enabled = false }),
             CreateConfiguration(),
             Mock.Of<ILogger<IncomingCommunicationProcessor>>());
     }

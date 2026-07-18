@@ -1265,6 +1265,8 @@ public class CommunicationIntegrationTests
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
+            Mock.Of<ITextExtractor>(),
+            Options.Create(new AttachmentMatchOptions { Enabled = false }),
             config,
             Mock.Of<ILogger<IncomingCommunicationProcessor>>());
     }

@@ -130,7 +130,7 @@ public sealed class RecordSearchDocument
 /// spaarke-records-index Azure AI Search index.
 ///
 /// <para>
-/// Supported entity types: sprk_matter, sprk_project, contact, account.
+/// Supported entity types: sprk_matter, sprk_project, sprk_invoice, contact, account.
 /// Only records modified since the last successful sync watermark are queried
 /// (incremental sync).  Watermarks are persisted in the distributed cache
 /// (Redis in production, in-memory in development) under the key
@@ -174,6 +174,18 @@ public class RecordSyncJob : BackgroundService
             DescriptionField:  "sprk_projectdescription",
             ReferenceField:    "sprk_projectnumber",
             SelectFields:      "sprk_projectid,sprk_projectname,sprk_projectdescription,sprk_projectnumber,modifiedon"),
+
+        // Invoice (email-r4 Phase 2, 2026-07-18): indexing invoices makes them matchable by the Association
+        // Engine's record-name/number + semantic rungs (previously matter/project only). Name field is
+        // sprk_name; reference number is sprk_invoicenumber (FinanceSummaryService is the field-name authority).
+        new EntityConfig(
+            EntityLogicalName: "sprk_invoice",
+            EntitySetName:     "sprk_invoices",
+            IdField:           "sprk_invoiceid",
+            NameField:         "sprk_name",
+            DescriptionField:  "sprk_description",
+            ReferenceField:    "sprk_invoicenumber",
+            SelectFields:      "sprk_invoiceid,sprk_name,sprk_description,sprk_invoicenumber,modifiedon"),
 
         new EntityConfig(
             EntityLogicalName: "contact",

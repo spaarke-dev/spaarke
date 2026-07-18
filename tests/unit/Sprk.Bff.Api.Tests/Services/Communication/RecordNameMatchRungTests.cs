@@ -151,6 +151,27 @@ public class RecordNameMatchRungTests
     }
 
     [Fact]
+    public async Task Evaluate_WhenNameAppearsOnlyInAttachmentText_EmitsMatch()
+    {
+        // Phase 2: an email whose matter name appears ONLY in the attachment (not subject/body) must still
+        // match — the inbound processor sets NormalizedMessage.AttachmentText and the rung includes it.
+        var matterId = Guid.NewGuid();
+        SetupIndex(RungTestSupport.Hit(RecordEntityType.Matter, matterId, 0.7, "Smith v Smith"));
+
+        var envelope = new NormalizedMessage
+        {
+            Direction = CommunicationDirection.Incoming,
+            Subject = "Please see attached",
+            BodyText = "Details are in the letter.",
+            AttachmentText = "ENGAGEMENT LETTER\nRe: Smith v Smith\nDear client, this confirms our engagement.",
+        };
+
+        var matches = await Build().EvaluateAsync(envelope, new AssociationContext(), CancellationToken.None);
+
+        matches.Should().ContainSingle().Which.Target!.Id.Should().Be(matterId);
+    }
+
+    [Fact]
     public async Task Evaluate_WhenDisabled_ReturnsEmpty_AndDoesNotCallIndex()
     {
         var matches = await Build(new RecordNameMatchOptions { Enabled = false }).EvaluateAsync(

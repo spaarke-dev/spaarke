@@ -42,6 +42,12 @@ public static class CommunicationModule
         // flag is an operational kill-switch (no redeploy). Deterministic exact-name matcher (email-r4 UAT).
         services.Configure<RecordNameMatchOptions>(configuration.GetSection(RecordNameMatchOptions.SectionName));
 
+        // Attachment-text match signal (Phase 2) options. Bound from "Communication:AttachmentMatch"; the
+        // Enabled flag is an operational kill-switch (no redeploy). The inbound processor extracts bounded
+        // attachment text (ITextExtractor) into the envelope before association so records named only in an
+        // attachment still match.
+        services.Configure<AttachmentMatchOptions>(configuration.GetSection(AttachmentMatchOptions.SectionName));
+
         // Core services (singleton: all dependencies are singleton or options)
         services.AddSingleton<CommunicationAccountService>();
         services.AddSingleton<ApprovedSenderValidator>();

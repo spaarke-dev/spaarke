@@ -65,7 +65,11 @@ public class RecordNameMatchOptions
     [Range(0.0, 1.0)]
     public double NumberConfidence { get; set; } = 0.95;
 
-    /// <summary>Max characters of the composed query (subject + body) sent to the index (1–1000, default 1000).</summary>
-    [Range(1, 1000)]
-    public int MaxQueryChars { get; set; } = 1000;
+    /// <summary>
+    /// Max characters of the composed query (subject + body + attachment text) used for retrieval AND
+    /// deterministic verification (1–20000, default 6000). Generous because this rung is keyword-only (no
+    /// embedding cost) and the exact name/number must be present in the verification corpus to match.
+    /// </summary>
+    [Range(1, 20000)]
+    public int MaxQueryChars { get; set; } = 6000;
 }

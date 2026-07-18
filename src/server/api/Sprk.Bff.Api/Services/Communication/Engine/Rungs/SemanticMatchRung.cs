@@ -134,11 +134,14 @@ public sealed class SemanticMatchRung : IAssociationRung
     /// </summary>
     private static string BuildQuery(NormalizedMessage message, int maxChars)
     {
-        var parts = new List<string>(2);
+        var parts = new List<string>(3);
         if (!string.IsNullOrWhiteSpace(message.Subject))
             parts.Add(message.Subject.Trim());
         if (!string.IsNullOrWhiteSpace(message.BodyText))
             parts.Add(message.BodyText.Trim());
+        // Attachment text (Phase 2) as an additional fuzzy-match signal; bounded by MaxQueryChars below.
+        if (!string.IsNullOrWhiteSpace(message.AttachmentText))
+            parts.Add(message.AttachmentText.Trim());
 
         if (parts.Count == 0)
             return string.Empty;

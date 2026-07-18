@@ -126,14 +126,20 @@ public sealed class RecordNameMatchRung : IAssociationRung
         return matches;
     }
 
-    /// <summary>Composes the retrieval/verification text from subject + plain-text body, whitespace-collapsed, capped.</summary>
+    /// <summary>
+    /// Composes the retrieval/verification text from subject + plain-text body + extracted attachment text
+    /// (Phase 2 match signal), whitespace-collapsed, capped. Keyword-only + no embedding on this rung, so the
+    /// cap can be generous — verification (exact name/number containment) needs the fuller text.
+    /// </summary>
     private static string BuildQuery(NormalizedMessage message, int maxChars)
     {
-        var parts = new List<string>(2);
+        var parts = new List<string>(3);
         if (!string.IsNullOrWhiteSpace(message.Subject))
             parts.Add(message.Subject.Trim());
         if (!string.IsNullOrWhiteSpace(message.BodyText))
             parts.Add(message.BodyText.Trim());
+        if (!string.IsNullOrWhiteSpace(message.AttachmentText))
+            parts.Add(message.AttachmentText.Trim());
 
         if (parts.Count == 0)
             return string.Empty;
