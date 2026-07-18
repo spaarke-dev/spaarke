@@ -136,6 +136,28 @@ public static class ChatDocumentEndpoints
             .ProducesProblem(429)
             .ProducesProblem(500);
 
+        // GET /api/ai/chat/sessions/{sessionId}/documents/{documentId}/content — return the
+        // session document's ORIGINAL binary (spaarkeai-assistant-enhancements-r1 UAT W-2/W-5:
+        // the create-flow "file leg"). A chat upload's binary is cached in session-scoped Redis
+        // (DocBinaryResource, 4h TTL — same source PersistDocumentAsync uploads to SPE). The
+        // launched Create-Matter wizard fetches it here, wraps it as a browser File, and runs it
+        // through its EXISTING upload+link+index pipeline so the drafted-from file lands in the
+        // NEW matter's SPE container + an sprk_document links it — no new create-write path.
+        group.MapGet("/sessions/{sessionId}/documents/{documentId}/content", GetDocumentContentAsync)
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-context")
+            .WithName("GetChatDocumentContent")
+            .WithSummary("Download a session document's original binary (create-flow file hand-off)")
+            .WithDescription(
+                "Returns the original uploaded binary for a chat session document from session-scoped Redis " +
+                "(the same cached bytes PersistDocumentAsync saves to SPE). Used by the Assistant create-flow " +
+                "hand-off so a launched wizard can attach the drafted-from file to the new record. 404 when the " +
+                "binary has expired (4h TTL) or the document/session is unknown.")
+            .Produces(StatusCodes.Status200OK, contentType: "application/octet-stream")
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404);
+
         // POST /api/ai/chat/sessions/{sessionId}/events/document-uploaded — the Event entry
         // path emission point (FR-P1-03, ai-architecture-redesign-r1 task 022). The client
         // signals batch completion here (per-file 202s above can't see batch boundaries or
@@ -665,6 +687,83 @@ public static class ChatDocumentEndpoints
         return Results.Accepted(
             uri: $"/api/ai/chat/sessions/{sessionId}/documents/{documentId}",
             value: response);
+    }
+
+    /// <summary>
+    /// GET the original binary for a chat session document (spaarkeai-assistant-enhancements-r1
+    /// UAT W-2/W-5 — the create-flow "file leg"). Reads the SAME session-scoped Redis binary
+    /// (<see cref="DocBinaryResource"/>) that <see cref="PersistDocumentAsync"/> uploads to SPE, so a
+    /// launched wizard can attach the drafted-from file to the new record via its own upload pipeline.
+    /// ADR-015: never logs binary content. NFR-06: read-only — never deletes the session entry.
+    /// </summary>
+    private static async Task<IResult> GetDocumentContentAsync(
+        string sessionId,
+        string documentId,
+        HttpContext httpContext,
+        ITenantCache cache,
+        ChatSessionManager sessionManager,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
+
+        var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(statusCode: 401, title: "Unauthorized", detail: "Tenant identity not found in token claims");
+        }
+
+        // Verify the session exists + is owned by the caller (the AddAiAuthorizationFilter already
+        // enforced AI access; this confirms the session scope for the tenant-keyed cache read).
+        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, httpContext.RequestAborted);
+        if (session == null)
+        {
+            return Results.Problem(statusCode: 404, title: "Not Found", detail: $"Chat session '{sessionId}' not found or has expired");
+        }
+
+        var docCacheId = DocCacheId(sessionId, documentId);
+
+        var binaryContent = await cache.GetAsync<byte[]>(
+            tenantId, DocBinaryResource, docCacheId, CacheVersion, ct: httpContext.RequestAborted);
+        if (binaryContent == null || binaryContent.Length == 0)
+        {
+            return Results.Problem(
+                statusCode: 404,
+                title: "Not Found",
+                detail: $"Document '{documentId}' binary not found in session storage. It may have expired (4h) or was never uploaded.");
+        }
+
+        // Filename + content-type from the cached metadata (best-effort; the filename drives the
+        // downloaded File's name so the wizard shows the real document name).
+        string filename;
+        try
+        {
+            var metadata = await cache.GetAsync<UploadedDocumentMetadata>(
+                tenantId, DocMetaResource, docCacheId, CacheVersion, ct: httpContext.RequestAborted);
+            filename = metadata?.Filename ?? "document";
+        }
+        catch
+        {
+            filename = "document";
+        }
+
+        var extension = Path.GetExtension(filename)?.ToLowerInvariant() ?? string.Empty;
+        var contentType = extension switch
+        {
+            ".pdf" => "application/pdf",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".txt" => "text/plain",
+            ".md" => "text/markdown",
+            _ => "application/octet-stream"
+        };
+
+        logger.LogInformation(
+            "Returning session document binary: DocumentId={DocumentId}, Filename={Filename}, SizeBytes={SizeBytes}, SessionId={SessionId}",
+            documentId, filename, binaryContent.Length, sessionId);
+
+        return Results.File(binaryContent, contentType, fileDownloadName: filename);
     }
 
     /// <summary>
