@@ -40,6 +40,7 @@
 | R4-7 empty "Actions available" header | ⏳ deferred — owner will re-capture the repro next session |
 | R4-8 no history | ✅ shipped `1888646ab` (BFF) — root cause: `GET /api/ai/chat/sessions` was a STUB returning `new List<>()`. Implemented `ListRecentSessionsAsync` (Cosmos query, tenant partition, ORDER BY lastActivity DESC, projected title) + wired the endpoint to return a top-level array. BFF deployed to dev + hash-verified + health passed; merged to master. |
 | R4-9 Context inconsistent | ⏳ deferred — owner will re-capture the repro next session |
-| R4-10 summarize spinner | ⏳ TODO — add a progress spinner during the in-chat summarize flow |
-| R4-11 post-summarize cards ("Summarize again" only) | ⏳ TODO — replace with useful next actions (catalog `sprk_chiptransitions` edit or client cards) |
-| R4-12 wizard context (uploaded files) | ⏳ larger — wizards launched from Quick Start carry no conversation context; would need to thread session files into the wizard handoff |
+| R4-10 summarize spinner | ✅ shipped `5a75e0b42` — `useConsumerChips.dispatching` drives a "Working…" spinner + composer lock across any chip capability (Summarize included) |
+| R4-11 post-summarize cards ("Summarize again" only) | ⏳ NEXT — the next-step chips come from the summarize binding's `sprk_chiptransitions` (server catalog). Needs a decision on the replacement set (proposed: Create a matter · Draft a response · Ask about these files) then a live PATCH — no code deploy |
+| R4-6 post-Draft next-action cards (Send email / Save / Create matter) | ⏳ NEXT — Create-a-matter exists (surface-launch); Send-as-email + Save-to-document need to exist as actions/bindings first. Medium |
+| R4-12 wizard context (uploaded files) | ⏳ NEXT (larger) — thread the session's uploaded files into the wizard handoff seed so Quick Start wizards start with the current context. Owner: important (we offer the option, so it must be integrated) |
