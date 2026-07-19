@@ -380,6 +380,18 @@ export function ConversationPane(): React.JSX.Element {
     enqueueAssistantMessage: injection.enqueue,
     inject: injection.inject,
     openLibraryModal: React.useCallback(() => openLibraryModalRef.current(), []),
+    // UAT 2026-07-19: the post-classify "Create a matter" chip carries the uploaded file into the
+    // wizard (parity with the text path) — read the session's active source doc.
+    getActiveSourceFile: React.useCallback(
+      () =>
+        activeSourceDocRef.current?.sessionFileId
+          ? {
+              sessionFileId: activeSourceDocRef.current.sessionFileId,
+              fileName: activeSourceDocRef.current.fileName,
+            }
+          : null,
+      []
+    ),
   });
   acceptChipsRef.current = chips.acceptChips;
 
@@ -541,11 +553,10 @@ export function ConversationPane(): React.JSX.Element {
   // per-message "Accept" routes through this to the EXISTING `usePendingRedline.accept` in the editor.
   const acceptRedlineViaBridge = useComposeRedlineAccept();
 
-  // R4 — "Insert into document". The editor's insert-suggestion handler, published by ComposeWorkspace
-  // into the cross-pane bridge. Null when no live editor is registered (no Compose tab open) — the
-  // Assistant then omits the SprkChat `onInsertToCompose` prop so the per-message button does not
-  // render (an insert has nowhere to land). Wired to SprkChat below.
-  const insertSuggestionToCompose = useComposeInsertSuggestion();
+  // R4 — "Insert into document". The editor's insert-suggestion conduit, published by ComposeWorkspace
+  // into the cross-pane bridge. UAT 2026-07-19: the per-message insert button was removed (noise), so
+  // the conduit is no longer wired to SprkChat — kept subscribed here for a future TARGETED affordance.
+  void useComposeInsertSuggestion();
 
   // FIX #1b — the editor's Save conduit (create-on-save / save-to-matter), published by ComposeWorkspace
   // into the cross-pane bridge. Null when no live editor is registered (no Compose tab open) — the
@@ -1527,12 +1538,12 @@ export function ConversationPane(): React.JSX.Element {
               // the agent selects a `surface_launch`-disposition capability.
               onSurfaceLaunch={handleSurfaceLaunch}
               onCitations={docQaCitation.onCitations}
-              // R4 — "Insert into document": one-click insert of a completed Assistant suggestion's
-              // text into the Compose editor as a tracked change at the current selection/cursor.
-              // Passed ONLY when a live editor is registered (a Compose tab is open) so the button
-              // renders exclusively when the insert can land; routes through the bridge to
-              // ComposeWorkspace's `materializeComposeDraft` (existing redline engine).
-              onInsertToCompose={insertSuggestionToCompose ?? undefined}
+              // UAT 2026-07-19: the per-message "Insert into document" button was noise — it appeared
+              // after essentially every Assistant message and was rarely the relevant action (even the
+              // P1-3 length gate wasn't selective enough). Removed by not passing `onInsertToCompose`.
+              // `insertSuggestionToCompose` (the bridge conduit) stays available for a future TARGETED
+              // insert affordance (e.g. a dedicated "Insert" only on a genuine compose-draft message).
+              // onInsertToCompose intentionally omitted.
               // FIX #10a: the generic per-message "Open in Compose" affordance was removed —
               // `onOpenInCompose` is intentionally NOT passed (no auto-appended mount link).
               // DEF-12: per-message Accept / Reject / Try-another controls on the compose-edit
