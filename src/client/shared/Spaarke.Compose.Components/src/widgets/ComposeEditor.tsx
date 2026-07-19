@@ -118,11 +118,13 @@ import {
 } from '../utils/docxBridge';
 import { COMPOSE_R3_PARAID } from './paraIdExtension';
 import { applyImportedRevisions } from './importedRevisions';
+import { applyImportedCommentAnchors, groupImportedComments } from './importedComments';
 import type {
   ParaIdMapEntry,
   ComposeEditedParagraph,
   ComposeContentModel,
   ImportedRevision,
+  ImportedComment,
 } from '../types/compose-contracts';
 // Redline → Word save fidelity (UAT-R7 #2/#3/#4): the redline→annotation bridge + its wire type.
 import { redlineMarksToDocxAnnotations, type DocxAnnotationInput } from './useComposeWordShuttle';
@@ -400,6 +402,20 @@ export interface ComposeEditorProps {
    * Privacy: `text`/`anchorText` are Tier 3 (document content) — carried in-memory only, never logged.
    */
   importedRevisions?: readonly ImportedRevision[];
+
+  /**
+   * FR-25 (spaarkeai-compose-r3 task 051, import round-trip) — the existing Word comments
+   * (`w:comment`, any authorship) recovered server-side on Load and projected onto the Load response
+   * (`ImportedComment[]`), in document order. Grouped by shared `anchorText` into FR-23 comment
+   * threads (first comment on a span = thread root, the rest = flat replies — see
+   * {@link groupImportedComments}) and rendered via the `ComposeCommentThread` panel (task 044),
+   * anchored by `paraId` (see {@link applyImportedCommentAnchors}) — instead of the comments the
+   * mammoth convert would otherwise silently drop. Absent/empty for an AI-drafted seed (`initialHtml`)
+   * or a document with no existing comments. Set atomically with `docxBytes` + `paraIdMap` by the host
+   * (same mount contract as `importedRevisions`).
+   * Privacy: `commentText`/`anchorText` are Tier 3 (document content) — carried in-memory only, never logged.
+   */
+  importedComments?: readonly ImportedComment[];
 
   /**
    * Document pointer used by PaneEventBus events + heartbeat endpoint URL.
@@ -1062,6 +1078,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       initialHtml,
       paraIdMap,
       importedRevisions,
+      importedComments,
       documentRef,
       bffBaseUrl,
       sessionId = '',
@@ -1126,6 +1143,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // yields `null` and the panel shows a "select text" hint instead of guessing an anchor.
     const [commentsOpen, setCommentsOpen] = React.useState<boolean>(false);
     const [pendingCommentRange, setPendingCommentRange] = React.useState<ComposeCommentPendingRange | null>(null);
+
+    // ----- Task 051 — FR-25 imported Word comments, seeded into the FR-23 thread panel --------------
+    // PURE grouping (no editor dependency) so the threads are ready for `ComposeCommentThread`'s
+    // `initialThreads` prop at ITS OWN first render — before the docx-mount effect below (which applies
+    // the visual anchor mark) has had a chance to run. See importedComments.ts file header for the
+    // two-concerns split. Recomputed only when the host supplies a new `importedComments` reference
+    // (set atomically with `docxBytes` on a fresh mount, per the prop's own contract).
+    const initialCommentThreads = React.useMemo(() => groupImportedComments(importedComments), [importedComments]);
 
     // ----- Task 043 — FR-22 styles-pane toggle -----------------------------------------------------
     // Additive sibling toggle to the comments panel above (mirrors its own independent open/close
@@ -1369,6 +1394,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // next save — it rides the retained original, per task 052). Marks apply with addToHistory:false
           // and the dirty flag is reset just below, so this render is not a user edit.
           applyImportedRevisions(editor, importedRevisions);
+          // FR-25 (task 051, import round-trip): anchor each imported comment thread's root span with the
+          // visible commentAnchor mark (the SAME mark a user's own "create thread" gesture applies), keyed
+          // by the same thread id `initialCommentThreads` (above) used to seed the FR-23 panel. Applied
+          // AFTER stampParaIds (exact paraId anchoring) and BEFORE captureParaIdSnapshot, mirroring
+          // applyImportedRevisions immediately above — the anchor mark must fold into the load-time
+          // reject-state baseline, not read as a user edit on the next save.
+          applyImportedCommentAnchors(editor, importedComments);
           // FR-01 (task 027): snapshot the load-time reject-state text per paraId — the diff baseline for
           // collectEditedParagraphs. Captured AFTER the stamp so every block carries its server paraId.
           paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
@@ -1412,6 +1444,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // bytes; adding it as a dep would risk a re-import (edit clobber) on an identity change.
       // `importedRevisions` (FR-24, task 050) follows the identical mount contract — set atomically
       // with `docxBytes` + `paraIdMap`, read here but intentionally not a dep for the same reason.
+      // `importedComments` (FR-25, task 051) follows the identical mount contract for the SAME reason —
+      // only the mark-application side is read here; `initialCommentThreads` (the panel-seeding half) is
+      // a separate useMemo above, correctly reactive to `importedComments` on its own.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [editor, docxBytes, initialHtml, onDirtyChange, onImportWarnings]);
 
@@ -1640,6 +1675,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           author={commentAuthor}
           pendingRange={pendingCommentRange}
           onThreadCreated={() => setPendingCommentRange(null)}
+          initialThreads={initialCommentThreads}
         />
         {/* ===================================================================
             FR-22 styles pane — task 043. Lists the loaded document's EXISTING paragraph styles and

@@ -261,22 +261,27 @@ public class ComposeService : IComposeService
             paraIdMap = Array.Empty<ParaIdMapEntry>();
         }
 
-        // FR-24 (task 050, import round-trip): run the EXISTING DocxAnnotationReader on the SAME load-time
-        // bytes, alongside the paraId pre-parse + the (client-side) mammoth convert — which FLATTENS
-        // w:ins/w:del to prose before the editor sees them (docxBridge.ts). Each RecoveredRevision is
-        // projected onto the Load response WITH the E2 w14:paraId of its containing paragraph (resolved from
-        // the paraIdMap above by the reader's document-order ParagraphHint — both walk body.Descendants
-        // <Paragraph>() so the indices align), so the client renders it as a first-class accept/reject-able
-        // insertion/deletion mark anchored by paraId (design §7). REUSE ONLY — the reader is unmodified.
-        // Best-effort + empty (NOT null): a malformed/unreadable source degrades to no imported revisions and
-        // NEVER fails Load, matching the paraId pre-parse contract above (the client still edits the doc).
+        // FR-24/FR-25 (task 050 + task 051, import round-trip): run the EXISTING DocxAnnotationReader ONCE
+        // on the SAME load-time bytes, alongside the paraId pre-parse + the (client-side) mammoth convert —
+        // which FLATTENS w:ins/w:del to prose AND drops comment anchors before the editor sees them
+        // (docxBridge.ts). A single Read() call (NFR-08 — same single-pass rationale as the paraId pre-parse
+        // above) projects BOTH RecoveredRevision (FR-24) and RecoveredComment (FR-25) onto the Load response,
+        // each WITH the E2 w14:paraId of its containing paragraph (resolved from the paraIdMap above by the
+        // reader's document-order ParagraphHint — both walk body.Descendants<Paragraph>() so the indices
+        // align). Revisions render as first-class accept/reject-able insertion/deletion marks; comments group
+        // by shared anchorText into FR-23 comment threads (design §7). REUSE ONLY — the reader is unmodified.
+        // Best-effort + empty (NOT null): a malformed/unreadable source degrades to no imported
+        // revisions/comments and NEVER fails Load, matching the paraId pre-parse contract above (the client
+        // still edits the doc).
         IReadOnlyList<ImportedRevision> importedRevisions;
+        IReadOnlyList<ImportedComment> importedComments;
         try
         {
-            var recovered = _annotationReader.Read(content.ToArray()).Revisions;
-            importedRevisions = recovered.Count == 0
+            var recovered = _annotationReader.Read(content.ToArray());
+
+            importedRevisions = recovered.Revisions.Count == 0
                 ? Array.Empty<ImportedRevision>()
-                : recovered
+                : recovered.Revisions
                     .Select(r => new ImportedRevision(
                         Kind: r.Kind,
                         Id: r.Id,
@@ -287,13 +292,27 @@ public class ComposeService : IComposeService
                         ParagraphHint: r.ParagraphHint,
                         ParaId: ResolveParaIdForHint(paraIdMap, r.ParagraphHint)))
                     .ToList();
+
+            importedComments = recovered.Comments.Count == 0
+                ? Array.Empty<ImportedComment>()
+                : recovered.Comments
+                    .Select(c => new ImportedComment(
+                        Id: c.Id,
+                        Author: c.Author,
+                        Date: c.Date,
+                        CommentText: c.CommentText,
+                        AnchorText: c.AnchorText,
+                        ParagraphHint: c.ParagraphHint,
+                        ParaId: ResolveParaIdForHint(paraIdMap, c.ParagraphHint)))
+                    .ToList();
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "Compose load: existing-revision read failed for drive={DriveId} item={DocumentSpeId}; returning no imported revisions",
+                "Compose load: existing-annotation read failed for drive={DriveId} item={DocumentSpeId}; returning no imported revisions/comments",
                 request.DriveId, request.DocumentSpeId);
             importedRevisions = Array.Empty<ImportedRevision>();
+            importedComments = Array.Empty<ImportedComment>();
         }
 
         // FR-06 (E1, task 027): capture the LOAD-TIME SPE version id so a later dirty save that no longer
@@ -376,6 +395,7 @@ public class ComposeService : IComposeService
             ActionHistory = actionHistory,
             ParaIdMap = paraIdMap,
             ImportedRevisions = importedRevisions,
+            ImportedComments = importedComments,
         };
     }
 

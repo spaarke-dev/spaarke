@@ -295,6 +295,49 @@ export interface ImportedRevision {
 }
 
 // ---------------------------------------------------------------------------
+// R3 FR-25 — import round-trip: existing Word comments projected on Load (design §7)
+// ---------------------------------------------------------------------------
+//
+// Client mirror of `Sprk.Bff.Api.Services.Compose.ImportedComment` (spaarkeai-compose-r3 task 051) —
+// itself a mirror-first projection of the server `RecoveredComment` shape (id/author/date/commentText/
+// anchorText/paragraphHint) + the E2 `paraId`. On Load the server runs the SAME EXISTING
+// `DocxAnnotationReader` call that projects `ImportedRevision` above and ALSO projects every native
+// `w:comment` here, because the mammoth convert (`docxBridge.ts`) drops comment anchors entirely. The
+// client groups same-`anchorText` comments into one `ComposeCommentThreadModel` (first = root, rest =
+// flat replies — see `importedComments.ts`) and renders it through the FR-23 `ComposeCommentThread` UI
+// (task 044) instead of losing the comment. Field names are camelCase per the Web serializer; do NOT
+// fork this shape (reuse `RecoveredComment`'s vocabulary, not a parallel schema).
+//
+// Privacy: `commentText` / `anchorText` carry document content (Tier 3) — carried in-memory to the
+// editor render only, never on an SSE frame / PaneEventBus payload / log surface (ADR-015). `author` is
+// Word attribution (a display name); `id` / `paraId` are opaque identifiers (Tier 1).
+
+/**
+ * One existing Word comment (`w:comment`) recovered on Load and projected for the editor render (FR-25).
+ * `commentText` is the comment's own body; `anchorText` is the document span the comment is ABOUT (what
+ * it was left on) — the fuzzy re-anchor context; `paragraphHint` is the 0-based document-order paragraph
+ * index; `paraId` is the E2 `w14:paraId` of that paragraph (the PRIMARY anchor), absent when the server
+ * could not resolve one (the client then fuzzy-anchors by `anchorText` + `paragraphHint`, mirroring
+ * `ImportedRevision`).
+ */
+export interface ImportedComment {
+  /** The comment's native OOXML id (`w:comment` `w:id`); may be empty. Tier 1 (opaque id). */
+  id: string;
+  /** Comment author (Word attribution — a display name). */
+  author: string;
+  /** ISO-8601 UTC timestamp the comment was authored (`w:date`, normalized to UTC). */
+  date: string;
+  /** The comment's own body text. Tier 3 (document content). */
+  commentText: string;
+  /** The anchored document range's text (what the comment is about) — the fuzzy re-anchor context. Tier 3. */
+  anchorText: string;
+  /** 0-based document-order paragraph index of the anchor's containing paragraph (`-1` when unlocated). Tier 1. */
+  paragraphHint: number;
+  /** PRIMARY anchor — the anchor paragraph's E2 `w14:paraId`; absent when unresolved server-side. Tier 1. */
+  paraId?: string;
+}
+
+// ---------------------------------------------------------------------------
 // R3 FR-01 / FR-01a — the client content-model save contract (task 027)
 // ---------------------------------------------------------------------------
 //

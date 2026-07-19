@@ -209,6 +209,8 @@ export type {
   // R3 FR-24 — import round-trip: existing Word revisions projected on Load (task 050)
   ImportedRevision,
   ImportedRevisionKind,
+  // R3 FR-25 — import round-trip: existing Word comments projected on Load (task 051)
+  ImportedComment,
 } from './types/compose-contracts';
 
 // R3 FR-24 import round-trip (task 050) — render recovered Word revisions as first-class,
@@ -216,6 +218,16 @@ export type {
 // ComposeEditor mount + direct tests; most consumers pass `importedRevisions` to <ComposeEditor>.
 export { applyImportedRevisions, IMPORTED_LEDGER_PREFIX } from './widgets/importedRevisions';
 export type { ApplyImportedRevisionsResult } from './widgets/importedRevisions';
+
+// R3 FR-25 import round-trip (task 051) — group recovered Word comments into FR-23 comment threads +
+// anchor them with the commentAnchor mark (design §7). Exported for the ComposeEditor mount + direct
+// tests; most consumers pass `importedComments` to <ComposeEditor>.
+export {
+  groupImportedComments,
+  applyImportedCommentAnchors,
+  IMPORTED_COMMENT_THREAD_PREFIX,
+} from './widgets/importedComments';
+export type { ApplyImportedCommentAnchorsResult } from './widgets/importedComments';
 
 // DOCX bridge helpers — exported for advanced consumers + tests. Most consumers should use ComposeEditor
 // (which orchestrates these internally). R3 task 027: the `docx.js` byte-authoring exporters

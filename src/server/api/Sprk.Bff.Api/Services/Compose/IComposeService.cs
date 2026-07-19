@@ -405,7 +405,45 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     /// a malformed source degrades to no imported revisions, never fails Load).
     /// </summary>
     public IReadOnlyList<ImportedRevision> ImportedRevisions { get; init; } = Array.Empty<ImportedRevision>();
+
+    /// <summary>
+    /// FR-25 (task 051, import round-trip): the existing native Word comment threads (<c>w:comment</c>,
+    /// any authorship) recovered from the load-time <c>.docx</c> by the SAME EXISTING
+    /// <see cref="DocxAnnotationReader"/> (reused verbatim) that projects <see cref="ImportedRevisions"/>
+    /// above, run alongside the mammoth convert — which flattens comment anchors to plain prose before
+    /// the editor sees them (<c>docxBridge.ts</c>). Each recovered <see cref="RecoveredComment"/> is
+    /// projected here with the E2 <c>w14:paraId</c> of its containing paragraph (resolved from
+    /// <see cref="ParaIdMap"/> by the reader's document-order <c>ParagraphHint</c>, the identical
+    /// <c>ResolveParaIdForHint</c> resolver the revisions projection uses), so the client
+    /// groups same-anchor comments into a thread (first = root, rest = flat replies — the reader carries no
+    /// modern-comments 4-part structure, so a deeper reply tree is never representable here by construction)
+    /// and renders it via the FR-23 <c>ComposeCommentThread</c> UI (task 044) instead of the mammoth-flattened
+    /// prose. Empty (never null) when the document has no comments, or when the read could not run
+    /// (best-effort; a malformed source degrades to no imported comments, never fails Load).
+    /// </summary>
+    public IReadOnlyList<ImportedComment> ImportedComments { get; init; } = Array.Empty<ImportedComment>();
 }
+
+/// <summary>
+/// FR-25 (task 051) — one native Word comment recovered on Load, projected for the editor render. A
+/// mirror-first projection of <see cref="RecoveredComment"/> (same field vocabulary, NOT a parallel
+/// schema) PLUS the E2 <see cref="ParaId"/> of the containing paragraph — the primary anchor the client
+/// uses to group same-span comments into a <c>ComposeCommentThreadModel</c> (first recovered comment on a
+/// span = thread root, the rest = flat replies) and render it through the FR-23 thread UI. <see cref="AnchorText"/>
+/// is the anchored document range the comment is about (NOT the comment's own body — that is
+/// <see cref="CommentText"/>). <see cref="ParaId"/> is <c>null</c> when the reader's paragraph index falls
+/// outside the paraId map (best-effort; the client then fuzzy-anchors by <see cref="AnchorText"/> +
+/// <see cref="ParagraphHint"/>, mirroring <see cref="ImportedRevision"/>'s fallback). Wire shape is
+/// camelCase, matching the client <c>ImportedComment</c> mirror in <c>compose-contracts.ts</c>.
+/// </summary>
+public sealed record ImportedComment(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("author")] string Author,
+    [property: JsonPropertyName("date")] DateTimeOffset Date,
+    [property: JsonPropertyName("commentText")] string CommentText,
+    [property: JsonPropertyName("anchorText")] string AnchorText,
+    [property: JsonPropertyName("paragraphHint")] int ParagraphHint,
+    [property: JsonPropertyName("paraId")] string? ParaId);
 
 /// <summary>
 /// FR-24 (task 050) — one native Word revision recovered on Load, projected for the editor render.

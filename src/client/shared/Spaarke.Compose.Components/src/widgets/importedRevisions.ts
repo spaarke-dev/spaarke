@@ -71,7 +71,12 @@ export interface ApplyImportedRevisionsResult {
   unresolved: number;
 }
 
-interface BlockInfo {
+/**
+ * One paraId-bearing block (paragraph/heading) located in the live editor document. Exported (task 051)
+ * so {@link ../widgets/importedComments.ts} reuses the SAME paraId-primary / anchorText-fuzzy resolution
+ * this module built for revisions — no parallel anchor-resolution logic.
+ */
+export interface BlockInfo {
   /** ProseMirror position of the block node's opening boundary. */
   from: number;
   /** ProseMirror position just after the block node (its closing boundary + 1). */
@@ -82,8 +87,19 @@ interface BlockInfo {
   text: string;
 }
 
-/** Collect the editor's paraId-bearing blocks in document order (descends into table cells — server parity). */
-function collectBlocks(editor: Editor): BlockInfo[] {
+/**
+ * The paraId + anchorText + paragraphHint triple {@link resolveBlock} matches against. Both
+ * {@link ImportedRevision} and the sibling `ImportedComment` (task 051) satisfy this shape structurally.
+ */
+export interface AnchorHint {
+  paraId?: string;
+  paragraphHint: number;
+  anchorText: string;
+}
+
+/** Collect the editor's paraId-bearing blocks in document order (descends into table cells — server parity).
+ * Exported (task 051) for reuse by {@link ../widgets/importedComments.ts}. */
+export function collectBlocks(editor: Editor): BlockInfo[] {
   const blocks: BlockInfo[] = [];
   editor.state.doc.descendants((node, pos) => {
     if (BLOCK_NODE_TYPES.has(node.type.name)) {
@@ -127,17 +143,17 @@ function fuzzyMatches(blockText: string, anchorText: string): boolean {
  * `anchorText` ({@link fuzzyMatches}), else the first block that fuzzy-matches. Returns `null` when nothing
  * anchors (the caller counts it unresolved and renders nothing — never guesses).
  */
-function resolveBlock(blocks: readonly BlockInfo[], revision: ImportedRevision): BlockInfo | null {
+export function resolveBlock(blocks: readonly BlockInfo[], target: AnchorHint): BlockInfo | null {
   // Primary: exact w14:paraId match (the editor carries the same server-stamped ids).
-  if (revision.paraId) {
-    const byParaId = blocks.find(b => b.paraId === revision.paraId);
+  if (target.paraId) {
+    const byParaId = blocks.find(b => b.paraId === target.paraId);
     if (byParaId) return byParaId;
   }
 
   // Fuzzy fallback (cross-Word-session): the document-order hint, verified loosely against anchorText.
-  const anchor = revision.anchorText ?? '';
-  if (revision.paragraphHint >= 0 && revision.paragraphHint < blocks.length) {
-    const atHint = blocks[revision.paragraphHint];
+  const anchor = target.anchorText ?? '';
+  if (target.paragraphHint >= 0 && target.paragraphHint < blocks.length) {
+    const atHint = blocks[target.paragraphHint];
     if (!normalize(anchor) || fuzzyMatches(atHint.text, anchor)) {
       return atHint;
     }
@@ -158,8 +174,9 @@ function ledgerRefFor(revision: ImportedRevision, index: number): string {
   return `${IMPORTED_LEDGER_PREFIX}${id}`;
 }
 
-/** A flat char index of the text WITHIN one block, mapping each char to its ProseMirror position. */
-function blockCharIndex(editor: Editor, from: number, to: number): { text: string; positions: number[] } {
+/** A flat char index of the text WITHIN one block, mapping each char to its ProseMirror position. Exported
+ * (task 051) for reuse by {@link ../widgets/importedComments.ts}'s comment-anchor mark placement. */
+export function blockCharIndex(editor: Editor, from: number, to: number): { text: string; positions: number[] } {
   const chars: string[] = [];
   const positions: number[] = [];
   editor.state.doc.nodesBetween(from, to, (node, pos) => {
