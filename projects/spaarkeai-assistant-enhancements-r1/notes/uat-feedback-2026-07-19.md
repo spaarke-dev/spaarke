@@ -34,7 +34,11 @@ SprkChat + SprkChatInput gained three additive, default-off, context-agnostic pr
 
 ### Files + Context pane (#9, per decision 1)
 - ✅ **Part A — Files own section** (commit `e5f447fec`, deployed 2026-07-19): the "N files attached" one-liner is now a collapsible section — single file shows inline; 2+ files collapse into a dropdown (default collapsed) that expands to a per-file list. `FilesAttachedIndicator` evolved in ConversationPaneChrome; ConversationPane passes `files={attachments.attachmentChips}`.
-- ⏳ **Part B — Context/Execution-Trace pane default on load + live-update**: cross-cutting (workspace layout + Context pane data). Scoping the default-pane-state config + PaneEventBus live-update path before touching (changing the default visible pane may be a shared-lib change affecting other consumers — verify blast radius first).
+- ✅ **Part B — Context pane opens on Execution Trace; quick-start removed** (commit `9f78b2874`, deployed 2026-07-19). Owner: "we are removing the quick start from the Context - you can remove it." `DEFAULT_TOOL`→`execution-trace`; quick-start removed from `ContextToolId`/menu/`ContextPaneController` (branch + handler + 8 imports + styles); execution-trace still yields to a server-pushed context widget during active analysis. ComposeTraceHost stubbed in the provider-less test suite; 24/24 Context tests pass. The Assistant-pane ⋮ → Quick Start modal is a SEPARATE surface (unchanged). Finding: the Context pane was ALREADY visible on load (right 25% col) — the real change was its default CONTENT.
+- ⏳ **Part B.2 — session files live IN the Context pane** (OPTIONAL): `context.files_staged` is dispatched (ids only) but the Context pane has no consumer. Lower priority now — files already show in the Assistant pane (Part A) and the trace shows Assistant activity. Would need `files_staged` enriched with filenames + a render home in the trace view.
+
+### Draft-a-response → Compose tab (owner: YES, 2026-07-19)
+- Route the drafted `{subject, body}` into a pre-filled Compose tab. Needs the compose widget to accept SEED content via `widget_load` widgetData, then dispatch it from the draft path. IN PROGRESS.
 
 ## Key facts / anchors
 - Chip dispatch path: `useConsumerChips.runBindingDispatch` (surface_launch handling fixed in cluster 1).
