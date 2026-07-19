@@ -28,7 +28,14 @@
       "@spaarke/ui-components/*": ["../Spaarke.UI.Components/dist/*"],
       "@spaarke/legal-workspace": ["../../../solutions/LegalWorkspace/src/index.d.ts"],
       "@spaarke/auth": ["../Spaarke.Auth/dist/index.d.ts"],
-      "@spaarke/ai-context": ["../Spaarke.AI.Context/dist/index.d.ts"]
+      "@spaarke/ai-context": ["../Spaarke.AI.Context/dist/index.d.ts"],
+      // @spaarke/communication-components — declaration-only build (mirrors
+      // @spaarke/ai-outputs' dist-based mapping above); required because
+      // this package's own build is a REAL `tsc` emit with an explicit
+      // `rootDir` — mapping to raw SOURCE pulled files outside that rootDir
+      // into the program (TS6059). messaging-communication-app-r2 task 030.
+      "@spaarke/communication-components": ["../Spaarke.Communication.Components/dist/index.d.ts"],
+      "@spaarke/communication-components/*": ["../Spaarke.Communication.Components/dist/*"]
     }
   },
   "include": ["src/**/*"],

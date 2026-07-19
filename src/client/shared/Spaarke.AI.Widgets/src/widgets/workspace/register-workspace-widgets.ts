@@ -730,6 +730,18 @@ registerWorkspaceWidget(
 // Pattern D dual-use with the `communications` section in LegalWorkspace.
 // Row-click opens Layout 1 (OOB modal via `Xrm.Navigation.navigateTo` at 85% × 85%)
 // per the Phase-1 framework unification (FR-03/FR-20).
+//
+// messaging-communication-app-r2 task 030 (FR-12, 2026-07-19): UPGRADED IN
+// PLACE from the bare `DataverseEntityViewWidget` wrapper to the rich Pattern D
+// `CommunicationsWorkspaceWidget` (filter-chip toolbar + card strip + embedded
+// DataGrid), authored in the NEW shared lib `@spaarke/communication-components`
+// (§11: neither the entity-coupled `@spaarke/events-components` nor the
+// thin-generic `@spaarke/ai-widgets` layer is the right home for rich
+// communication-widget content). The type string `communications-list` is
+// UNCHANGED (dispatch unbroken) — this is the SAME registration, upgraded,
+// not a second widget (NFR-05). The reused `sprk_gridconfiguration` GUID
+// (`ENTITY_VIEW_CONFIG_IDS.communications`) now lives as the widget's own
+// default `configId` inside `CommunicationsWorkspaceWidget.tsx`.
 registerWorkspaceWidget(
   'communications-list',
   {
@@ -739,7 +751,10 @@ registerWorkspaceWidget(
     allowMultiple: true,
     defaultOrder: 240,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.communications),
+  () =>
+    import('@spaarke/communication-components').then(m => ({
+      default: m.CommunicationsWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+    })),
   tableWidgetVisibility
 );
 

@@ -2,7 +2,7 @@
   <metadata>
     <title>VisualHost summary count/unread MetricCard `sprk_chartdefinition` config (optional, config-only; drill-through to Surface 1; count-only per T-1)</title>
     <phase>W2 — Record Threads View (Surface 1)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <deps>010</deps>
     <blocks></blocks>
@@ -126,4 +126,21 @@
       Load all `&lt;knowledge&gt;&lt;files&gt;`. STANDARD rigor — Step 9.5 quality gates skipped, but the T-1 count-only boundary is a closed acceptance gate (never render content via VisualHost). Config-only: no code, no BFF change, no publish-size/CVE (root §10 N/A). Author/deploy the `sprk_chartdefinition` record via `dataverse-deploy` or hand to the owner. Dispatch at model-tier `sonnet` @ effort `high`.
     </protocol>
   </execution>
+
+  <notes>
+    Completed 2026-07-19. Deliverable: `projects/messaging-communication-app-r2/notes/023-visualhost-summary-card.md`
+    — one exemplar `sprk_chartdefinition` record (config-only, no code) scoped to `sprk_matter`: MetricCard,
+    entity `sprk_communication`, Count aggregate, `sprk_contextfieldname=_sprk_regardingmatter_value` (already
+    live in production today — no schema dependency). "Unread" scoped out (no read/unread schema field exists;
+    a schema gap, not a config gap). Drill-through target set to `sprk_communicationthread` (entity-list dialog,
+    thread-grain — safe, no message-content columns), chosen over `sprk_communication` (message-grain, rejected
+    as content-adjacent) and the standalone `sprk_communicationspage` (global/unfiltered per Q-B, rejected).
+    Documented Path-C limitation (CLAUDE.md §6.5): an exact same-form jump to task 022's Timeline section would
+    require `ChartRenderer.tsx` to wire `onViewListClick` for `MetricCard` (today only `DueDateCardList`
+    consumes it) — a code change, out of scope for this config-only task, flagged in the note's §7 for a future
+    task. Per-entity `sprk_contextfieldname` substitution table provided if the owner replicates beyond
+    `sprk_matter`. Card NOT dropped — shipped as low-risk/high-value; Surface 1 (020–022) is unaffected either
+    way. LIVE APPLY DEFERRED (Dataverse MCP unavailable this session) — owner creates the record + places the
+    VisualHost control + verifies per the note's §4/§5 checklist.
+  </notes>
 </task>

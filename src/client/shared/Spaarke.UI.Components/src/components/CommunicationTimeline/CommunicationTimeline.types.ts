@@ -77,6 +77,35 @@ export interface TimelineThread {
 }
 
 // ---------------------------------------------------------------------------
+// Regarding mode (R2 task 020, FR-03) — a record's threads grouped for
+// collapsible-group rendering. Built by `mapRegardingReadResultToGroups`
+// (`CommunicationTimeline.buildTimeline.ts`) from the `by-regarding` DTO
+// (`IRegardingReadResultDto` — mirrors the BFF `RegardingReadResult`).
+// ---------------------------------------------------------------------------
+
+/**
+ * One thread's collapsible-group projection for regarding mode. `messages` is
+ * the SAME `TimelineMessage[]` domain shape the thread-id mode already uses —
+ * a group's expanded body reuses `buildTimeline`/`MessageRow`/`ChannelBadge`
+ * unchanged (no forked rendering, per FR-03 / ADR-012).
+ */
+export interface RegardingThreadGroup {
+  /** `sprk_communicationthread` id (GUID). */
+  threadId: string;
+  /**
+   * `sprk_name`. The BFF's by-regarding read now projects this (task 020
+   * closed a gap in the task-010 DTO, which fetched the name but dropped it
+   * before returning — see `communicationTimelineApi.ts` `IThreadReadResultDto`
+   * header note). Falls back to a placeholder when the server value is
+   * null/blank (e.g. a not-yet-named thread) rather than rendering an empty
+   * group header.
+   */
+  name: string;
+  messageCount: number;
+  messages: TimelineMessage[];
+}
+
+// ---------------------------------------------------------------------------
 // Unread state
 // ---------------------------------------------------------------------------
 
@@ -122,17 +151,34 @@ export interface QuoteIntoEmailPayload {
 // Public props
 // ---------------------------------------------------------------------------
 
-export interface CommunicationTimelineProps {
-  /** The thread to render (`sprk_communication` rows sharing this thread anchor). */
-  threadId: string;
-
+/** Props shared by both render modes (R2 task 020 introduces the discriminated `mode`). */
+export interface CommunicationTimelineBaseProps {
   // — Auth (injected per shared-lib decoupling rule, ADR-028) —
   authenticatedFetch: AuthenticatedFetchFn;
   /** Host only, no `/api` — forwarded to `communicationTimelineApi` + `sendCommunication()`. */
   bffBaseUrl?: string;
 
-  /** Poll interval in ms. Default 5000 (NFR-07). */
+  /** Poll interval in ms. Default 5000 (NFR-07, both modes). */
   pollIntervalMs?: number;
+
+  /** Fired when a poll or send fails (the component also renders an inline error). */
+  onError?: (error: Error) => void;
+
+  /** Optional className applied to the root layout container. */
+  className?: string;
+}
+
+/**
+ * R1 thread-id mode (task 060) — renders ONE thread's interleaved
+ * email+chat timeline + compose/send box. `mode` is optional and defaults to
+ * `'thread'` so every existing call site (which never set `mode`) keeps
+ * compiling and behaving unchanged.
+ */
+export interface CommunicationTimelineThreadModeProps extends CommunicationTimelineBaseProps {
+  mode?: 'thread';
+
+  /** The thread to render (`sprk_communication` rows sharing this thread anchor). */
+  threadId: string;
 
   /** Prop-driven compose-box prefill (task 063 injects quoted content here without re-opening the component). */
   prefill?: CommunicationTimelinePrefill;
@@ -159,9 +205,40 @@ export interface CommunicationTimelineProps {
 
   /** Fired after a successful send. */
   onSendComplete?: (result: { communicationId: string }) => void;
-  /** Fired when a poll or send fails (the component also renders an inline error). */
-  onError?: (error: Error) => void;
-
-  /** Optional className applied to the root layout container. */
-  className?: string;
 }
+
+/**
+ * Regarding mode (R2 task 020, FR-03) — renders ALL of a regarding record's
+ * threads as collapsible groups (name + message count), each expanding to
+ * that thread's R1 interleaved timeline. Read-only: no compose box (composing
+ * happens inside a specific thread — thread-id mode / the task 021 PCF — this
+ * grouped view's job is discovery/organization across threads, not sending;
+ * §11 — one compose surface, not a second one bolted onto the grouped view).
+ * Calls the `by-regarding` endpoint (task 010) via the injected
+ * `authenticatedFetch`; performs NO client-side access/privacy filtering
+ * (NFR-03) — it renders exactly the access-filtered set the endpoint returns.
+ */
+export interface CommunicationTimelineRegardingModeProps extends CommunicationTimelineBaseProps {
+  mode: 'regarding';
+
+  /** The regarding record's logical entity name (e.g. `sprk_matter`, `contact`) — one of the 11 ADR-024 families. */
+  entityType: string;
+  /** The regarding record's id. */
+  id: string;
+
+  /**
+   * Thread ids expanded by default. Default: none (all groups start
+   * collapsed) — a record can carry many threads; showing every thread's
+   * full timeline on first render would be noisy and expensive to lay out.
+   * Design decision recorded in task 020 notes.
+   */
+  defaultExpandedThreadIds?: string[];
+}
+
+/**
+ * Discriminated on `mode`. Thread-id mode (`mode` omitted or `'thread'`) is
+ * the unchanged R1 surface; regarding mode (`mode: 'regarding'`) is the R2
+ * FR-03 addition. Existing call sites that never set `mode` keep matching the
+ * thread-id variant unchanged.
+ */
+export type CommunicationTimelineProps = CommunicationTimelineThreadModeProps | CommunicationTimelineRegardingModeProps;

@@ -91,6 +91,7 @@ public class CommunicationByRegardingReadTests
         result.MessageCount.Should().Be(1);
         var thread = result.Threads.Single();
         thread.ThreadId.Should().Be(threadId);
+        thread.Name.Should().Be("Matter — Acme");
         thread.Count.Should().Be(1);
         var msg = thread.Messages.Single();
         msg.MessageId.Should().Be(messageId);
@@ -119,6 +120,9 @@ public class CommunicationByRegardingReadTests
         result.MessageCount.Should().Be(3);
         result.Threads.Single(t => t.ThreadId == threadA).Count.Should().Be(2);
         result.Threads.Single(t => t.ThreadId == threadB).Count.Should().Be(1);
+        // Name flows through per-thread (task 020 — the regarding-mode Timeline's collapsible group header label).
+        result.Threads.Single(t => t.ThreadId == threadA).Name.Should().Be("A");
+        result.Threads.Single(t => t.ThreadId == threadB).Name.Should().Be("B");
     }
 
     // ─────────────────────────── entity-set-agnostic (≥3 of the 11 families) ───────────────────────────

@@ -33,9 +33,14 @@ public sealed record ThreadMessageDto(
 /// <summary>
 /// Thread-read endpoint result: the access-filtered, ordered message list for a thread (task 050 / FR-11).
 /// <see cref="Count"/> == <c>Messages.Count</c> (the readable subset returned on this page).
+/// <see cref="Name"/> (the thread's <c>sprk_name</c>) is populated by the by-regarding read (R2 task 010/020,
+/// FR-01/FR-03 — the record-level grouped view needs a label per collapsible group) and left <c>null</c> by the
+/// R1 per-thread read (<c>ReadThreadAsync</c>) — that surface is placed directly on the thread form, which already
+/// displays the thread's name via the host record header, so fetching it there would be redundant.
 /// </summary>
 public sealed record ThreadReadResult(
     Guid ThreadId,
+    string? Name,
     IReadOnlyList<ThreadMessageDto> Messages,
     int Count);
 

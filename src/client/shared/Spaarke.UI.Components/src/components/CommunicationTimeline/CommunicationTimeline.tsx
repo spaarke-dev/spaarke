@@ -27,10 +27,20 @@
  * `<EmailComposer/>`'s own `initial*` props) — this component never mounts
  * `<EmailComposer/>` itself, since email compose is a separate host-owned
  * surface (dialog/page), not an in-timeline concern.
+ *
+ * R2 task 020 (FR-03) — regarding mode. `<CommunicationTimeline mode="regarding" .../>`
+ * renders ALL of a `(entityType, id)` regarding record's threads as
+ * collapsible groups (see `subcomponents/ThreadGroup.tsx`) instead of one
+ * thread's messages. The public `CommunicationTimeline` component below is a
+ * thin mode switch — `ThreadModeCommunicationTimeline` is the UNCHANGED R1
+ * implementation (renamed, behavior identical), `RegardingModeCommunicationTimeline`
+ * is the new additive path. Both reuse the same `buildTimeline`/`MessageRow`/
+ * `ChannelBadge` engine — regarding mode never forks it (ADR-012/§11).
  */
 import * as React from 'react';
 import { Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { useThreadPoll } from './hooks/useThreadPoll';
+import { useRegardingPoll } from './hooks/useRegardingPoll';
 import { buildTimeline } from './CommunicationTimeline.buildTimeline';
 import {
   communicationTimelineReducer,
@@ -39,6 +49,7 @@ import {
 } from './CommunicationTimeline.reducer';
 import { MessageRow } from './subcomponents/MessageRow';
 import { UnreadIndicator } from './subcomponents/UnreadIndicator';
+import { ThreadGroup } from './subcomponents/ThreadGroup';
 import { TimelineComposeBox, type ITimelineSendPayload } from './subcomponents/TimelineComposeBox';
 import { sendTimelineMessage } from '../../services/communicationTimelineApi';
 import { quoteBody } from '../../utils/quoteBody';
@@ -46,6 +57,9 @@ import { BODY_FORMAT_HTML, BODY_FORMAT_PLAIN_TEXT } from './CommunicationTimelin
 import type {
   CommunicationTimelinePrefill,
   CommunicationTimelineProps,
+  CommunicationTimelineRegardingModeProps,
+  CommunicationTimelineThreadModeProps,
+  RegardingThreadGroup,
   TimelineMessage,
 } from './CommunicationTimeline.types';
 
@@ -95,10 +109,57 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// Component
+// Regarding-mode styles (R2 task 020, FR-03)
 // ---------------------------------------------------------------------------
 
+const useRegardingStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    minHeight: 0,
+    overflowY: 'auto',
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  emptyState: {
+    padding: tokens.spacingVerticalXL,
+    color: tokens.colorNeutralForeground3,
+    textAlign: 'center',
+  },
+  errorBar: {
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    color: tokens.colorPaletteRedForeground1,
+    backgroundColor: tokens.colorPaletteRedBackground1,
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Component (mode switch)
+// ---------------------------------------------------------------------------
+
+/**
+ * Public entry point. Discriminates on `props.mode` (`CommunicationTimeline.types.ts`):
+ * `'regarding'` renders `RegardingModeCommunicationTimeline` (R2 task 020);
+ * everything else (`undefined`/`'thread'`) renders the UNCHANGED R1
+ * `ThreadModeCommunicationTimeline`.
+ */
 export const CommunicationTimeline: React.FC<CommunicationTimelineProps> = props => {
+  if (props.mode === 'regarding') {
+    return <RegardingModeCommunicationTimeline {...props} />;
+  }
+  return <ThreadModeCommunicationTimeline {...props} />;
+};
+
+CommunicationTimeline.displayName = 'CommunicationTimeline';
+
+// ---------------------------------------------------------------------------
+// Thread-id mode (R1, task 060) — UNCHANGED behavior, renamed for the mode switch above.
+// ---------------------------------------------------------------------------
+
+const ThreadModeCommunicationTimeline: React.FC<CommunicationTimelineThreadModeProps> = props => {
   const {
     threadId,
     authenticatedFetch,
@@ -265,9 +326,16 @@ export const CommunicationTimeline: React.FC<CommunicationTimelineProps> = props
         const result = await sendTimelineMessage(
           {
             to: payload.to,
+            cc: payload.cc,
+            bcc: payload.bcc,
             body: payload.body,
             bodyFormat: payload.bodyFormat === 'PlainText' ? 'text' : 'html',
-            subject: effectivePrefill?.subject ?? `Re: conversation ${threadId}`,
+            // Task 060 (FR-10): the compose box's own Subject field is now
+            // required and always non-empty at this point — no more
+            // hardcoded `Re: conversation {threadId}` filler. Populates
+            // `sprk_subject` + the server-derived `sprk_name` ("Message:
+            // {subject}"/"Email: {subject}").
+            subject: payload.subject,
             attachmentDocumentIds: payload.attachmentDocumentIds,
             associations,
             sendMode,
@@ -286,17 +354,7 @@ export const CommunicationTimeline: React.FC<CommunicationTimelineProps> = props
         dispatch({ type: 'END_SEND' });
       }
     },
-    [
-      authenticatedFetch,
-      bffBaseUrl,
-      threadId,
-      effectivePrefill?.subject,
-      associations,
-      sendMode,
-      archiveToSpe,
-      onSendComplete,
-      onError,
-    ]
+    [authenticatedFetch, bffBaseUrl, associations, sendMode, archiveToSpe, onSendComplete, onError]
   );
 
   return (
@@ -337,4 +395,90 @@ export const CommunicationTimeline: React.FC<CommunicationTimelineProps> = props
   );
 };
 
-CommunicationTimeline.displayName = 'CommunicationTimeline';
+ThreadModeCommunicationTimeline.displayName = 'ThreadModeCommunicationTimeline';
+
+// ---------------------------------------------------------------------------
+// Regarding mode (R2 task 020, FR-03)
+// ---------------------------------------------------------------------------
+
+const RegardingModeCommunicationTimeline: React.FC<CommunicationTimelineRegardingModeProps> = props => {
+  const {
+    entityType,
+    id,
+    authenticatedFetch,
+    bffBaseUrl,
+    pollIntervalMs,
+    defaultExpandedThreadIds,
+    onError,
+    className,
+  } = props;
+
+  const styles = useRegardingStyles();
+  const [state, dispatch] = React.useReducer(communicationTimelineReducer, initialTimelineState);
+
+  const handleLoading = React.useCallback(() => {
+    dispatch({ type: 'REGARDING_LOADING' });
+  }, []);
+
+  const handleGroups = React.useCallback(
+    (groups: RegardingThreadGroup[]) => {
+      dispatch({ type: 'SET_REGARDING_GROUPS', groups, defaultExpandedThreadIds });
+    },
+    [defaultExpandedThreadIds]
+  );
+
+  const handlePollError = React.useCallback(
+    (err: unknown) => {
+      const message = err instanceof Error ? err.message : 'Failed to load communications for this record.';
+      dispatch({ type: 'SET_REGARDING_ERROR', error: message });
+      if (err instanceof Error) onError?.(err);
+    },
+    [onError]
+  );
+
+  useRegardingPoll({
+    entityType,
+    id,
+    authenticatedFetch,
+    bffBaseUrl,
+    pollIntervalMs,
+    onLoading: handleLoading,
+    onGroups: handleGroups,
+    onError: handlePollError,
+  });
+
+  const handleToggleGroup = React.useCallback((threadId: string) => {
+    dispatch({ type: 'TOGGLE_REGARDING_GROUP', threadId });
+  }, []);
+
+  const { groups, expandedThreadIds, status, error } = state.regarding;
+
+  return (
+    <div
+      className={mergeClasses(styles.root, className)}
+      role="region"
+      aria-label={`Communications for ${entityType} ${id}`}
+    >
+      {error && (
+        <Text role="alert" className={styles.errorBar}>
+          {error}
+        </Text>
+      )}
+
+      {groups.map(group => (
+        <ThreadGroup
+          key={group.threadId}
+          group={group}
+          expanded={expandedThreadIds.includes(group.threadId)}
+          onToggle={handleToggleGroup}
+        />
+      ))}
+
+      {groups.length === 0 && status === 'ready' && (
+        <Text className={styles.emptyState}>No communications for this record yet.</Text>
+      )}
+    </div>
+  );
+};
+
+RegardingModeCommunicationTimeline.displayName = 'RegardingModeCommunicationTimeline';

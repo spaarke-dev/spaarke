@@ -125,19 +125,19 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
         // GET /api/communications?thread=&regarding=&channel=&from=&to=&participant= — filtered cross-record
-        // communication query (R2 task 011 / FR-02) backing the global grid + workspace widget. thread/regarding/
-        // channel/date facets reuse the impersonation read path + access filter (NFR-03). `participant=` is STUBBED
-        // (501 not-yet-supported; wired in task 051 once the participant junction lands — never a text-LIKE fallback).
-        // Unknown/empty/malformed filters degrade gracefully to a 400 ProblemDetails (ADR-019) — never a 500, never
-        // an unfiltered dump.
+        // communication query (R2 task 011 / FR-02; `participant=` wired in task 051) backing the global grid +
+        // workspace widget. thread/regarding/channel/date/participant facets all compose onto the SAME
+        // impersonation read path + access filter (NFR-03). `participant=` joins the sprk_communicationparticipant
+        // junction (003/050) on its typed person lookups (role-exact, FK-backed) or, for an unresolved external
+        // party, an exact match on its address column — never a text-LIKE scan. Unknown/empty/malformed filters
+        // degrade gracefully to a 400 ProblemDetails (ADR-019) — never a 500, never an unfiltered dump.
         group.MapGet("/", QueryCommunicationsAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("QueryCommunications")
-            .WithDescription("Filtered cross-record communication query (thread/regarding/channel/date facets; access-filtered; impersonated). 'participant' is not yet supported (task 051).")
+            .WithDescription("Filtered cross-record communication query (thread/regarding/channel/date/participant facets; access-filtered; impersonated).")
             .Produces<CommunicationQueryResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
-            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
-            .Produces<ProblemDetails>(StatusCodes.Status501NotImplemented);
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
         group.MapPost("/{id:guid}/archive", ArchiveCommunicationAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
@@ -521,10 +521,10 @@ public static class CommunicationEndpoints
     }
 
     /// <summary>
-    /// Filtered cross-record communication query (R2 task 011 / FR-02). Resolves the caller server-side and delegates
-    /// to the impersonated, access-filtered query. thread/regarding/channel/date facets are composed onto the shared
-    /// read path; `participant` returns a 501 not-yet-supported ProblemDetails (task 051 seam); malformed/empty
-    /// filters return a 400 ProblemDetails (ADR-019 graceful degradation).
+    /// Filtered cross-record communication query (R2 task 011 / FR-02; `participant` wired in task 051). Resolves
+    /// the caller server-side and delegates to the impersonated, access-filtered query. thread/regarding/channel/
+    /// date/participant facets are all composed onto the shared read path; malformed/empty filters return a 400
+    /// ProblemDetails (ADR-019 graceful degradation).
     /// </summary>
     private static async Task<IResult> QueryCommunicationsAsync(
         CommunicationThreadReadService readService,

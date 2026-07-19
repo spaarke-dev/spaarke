@@ -42,6 +42,7 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
     private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly IThreadResolver? _threadResolver;
     private readonly IDirectThreadAccessService? _directThreadAccess;
+    private readonly CommunicationParticipantIndexer? _participantIndexer;
     private readonly ILogger<MessagingIngestor> _logger;
 
     /// <param name="threadResolver">
@@ -57,17 +58,26 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
     /// the sender). No-op for a non-Direct thread. Optional so existing unit constructions keep compiling;
     /// production DI always supplies it.
     /// </param>
+    /// <param name="participantIndexer">
+    /// Participant-index writer (task 050 / FR-08 / ADR-048) — invoked best-effort after persist to write the
+    /// (message × person/address × role) <c>sprk_communicationparticipant</c> rows the <c>participant=</c> facet
+    /// (task 051) reads. Optional so existing unit constructions keep compiling; production DI always supplies it.
+    /// Best-effort / non-fatal + idempotent (it never throws) — a junction-write failure never drops the captured
+    /// message.
+    /// </param>
     public MessagingIngestor(
         IGenericEntityService genericEntityService,
         ICommunicationEnrichmentService enrichmentService,
         ILogger<MessagingIngestor> logger,
         IThreadResolver? threadResolver = null,
-        IDirectThreadAccessService? directThreadAccess = null)
+        IDirectThreadAccessService? directThreadAccess = null,
+        CommunicationParticipantIndexer? participantIndexer = null)
     {
         _genericEntityService = genericEntityService;
         _enrichmentService = enrichmentService;
         _threadResolver = threadResolver;
         _directThreadAccess = directThreadAccess;
+        _participantIndexer = participantIndexer;
         _logger = logger;
     }
 
@@ -122,6 +132,23 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
                     "Thread resolution failed (non-fatal) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
                     communicationId, request.CorrelationId);
             }
+        }
+
+        // ── Participant index (task 050 / FR-08 / ADR-048) — BEST-EFFORT, NON-FATAL + IDEMPOTENT ──
+        // Write one sprk_communicationparticipant row per (message × person/address × role) so the participant=
+        // facet (task 051) surfaces this message's parties. Inbound ACS addresses are MRIs (no '@'), so they
+        // write first-class unresolved rows (Q-D). The indexer never throws — a failure never drops the message.
+        if (_participantIndexer is not null)
+        {
+            await _participantIndexer.WriteParticipantsAsync(
+                communicationId,
+                new CommunicationParticipantSet
+                {
+                    FromAddress = request.Message.From,
+                    To = request.Message.To,
+                    Cc = request.Message.Cc,
+                },
+                cancellationToken);
         }
 
         // ── Shared enrichment/association — BEST-EFFORT, NON-FATAL (NFR-02) ──

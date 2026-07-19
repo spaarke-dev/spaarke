@@ -40,6 +40,7 @@ public sealed class CommunicationService
     private readonly IThreadResolver? _threadResolver;
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly IDirectThreadAccessService? _directThreadAccess;
+    private readonly CommunicationParticipantIndexer? _participantIndexer;
     private readonly CommunicationOptions _options;
     private readonly ILogger<CommunicationService> _logger;
 
@@ -62,6 +63,12 @@ public sealed class CommunicationService
     /// Direct-thread message via the impersonated read, task 050). No-op for a non-Direct thread. Optional so
     /// existing unit constructions keep compiling; production DI always supplies it.
     /// </param>
+    /// <param name="participantIndexer">
+    /// Participant-index writer (task 050 / FR-08 / ADR-048) — invoked best-effort after a message persists to
+    /// write the (message × person/address × role) <c>sprk_communicationparticipant</c> rows the <c>participant=</c>
+    /// facet (task 051) reads. Optional so existing unit constructions keep compiling; production DI always supplies
+    /// it. Best-effort / non-fatal + idempotent (it never throws) — a junction-write failure never fails the send.
+    /// </param>
     public CommunicationService(
         CommunicationChannelDispatcher channelDispatcher,
         ApprovedSenderValidator senderValidator,
@@ -76,7 +83,8 @@ public sealed class CommunicationService
         ILogger<CommunicationService> logger,
         IThreadResolver? threadResolver = null,
         IServiceScopeFactory? scopeFactory = null,
-        IDirectThreadAccessService? directThreadAccess = null)
+        IDirectThreadAccessService? directThreadAccess = null,
+        CommunicationParticipantIndexer? participantIndexer = null)
     {
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
@@ -90,6 +98,7 @@ public sealed class CommunicationService
         _threadResolver = threadResolver;
         _scopeFactory = scopeFactory;
         _directThreadAccess = directThreadAccess;
+        _participantIndexer = participantIndexer;
         _options = options.Value;
         _logger = logger;
     }
@@ -582,6 +591,16 @@ public sealed class CommunicationService
                         "Enrichment failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
                         correlationId, communicationId.Value);
                 }
+            }
+
+            // Participant index (task 050 / FR-08 / ADR-048) — best-effort / non-fatal + idempotent. The sender
+            // is already resolved to a systemuser (ResolveMessageSenderAsync), so its row carries sprk_systemuser
+            // directly (no redundant lookup); recipients resolve via the shared email→contact resolver.
+            if (communicationId.HasValue)
+            {
+                await WriteParticipantIndexAsync(
+                    communicationId.Value, senderEmail, senderParticipant,
+                    request.To, request.Cc, request.Bcc, ct);
             }
 
             // The response carries only the tracking record id + status — NO ACS token or admin capability
@@ -1198,6 +1217,15 @@ public sealed class CommunicationService
                 }
             }
 
+            // Participant index (task 050 / FR-08 / ADR-048) — best-effort / non-fatal + idempotent. Addresses
+            // resolve via the shared email→contact resolver (no pre-resolved sender identity on this path).
+            if (communicationId.HasValue)
+            {
+                await WriteParticipantIndexAsync(
+                    communicationId.Value, senderResult.Email, null,
+                    request.To, request.Cc, request.Bcc, cancellationToken);
+            }
+
             return new SendCommunicationResponse
             {
                 CommunicationId = communicationId,
@@ -1491,6 +1519,16 @@ public sealed class CommunicationService
                         "Enrichment failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
                         correlationId, communicationId.Value);
                 }
+            }
+
+            // Participant index (task 050 / FR-08 / ADR-048) — best-effort / non-fatal + idempotent. Addresses
+            // resolve via the shared email→contact resolver (the sender's typed identity is already on the
+            // record's sprk_sentby lookup; the junction is additive and back-fillable).
+            if (communicationId.HasValue)
+            {
+                await WriteParticipantIndexAsync(
+                    communicationId.Value, userEmail, null,
+                    request.To, request.Cc, request.Bcc, ct);
             }
 
             return new SendCommunicationResponse
@@ -2272,5 +2310,38 @@ public sealed class CommunicationService
                 "Internet-Message-Id stamp failed (non-fatal) for communication {CommunicationId} | CorrelationId: {CorrelationId}",
                 communicationId, correlationId);
         }
+    }
+
+    /// <summary>
+    /// Writes the participant index (task 050 / FR-08 / ADR-048) for a persisted OUTBOUND message — one
+    /// <c>sprk_communicationparticipant</c> row per (message × person/address × role {From,To,Cc,Bcc}). Reuses
+    /// the shared <see cref="CommunicationParticipantIndexer"/> (which itself reuses the email→contact resolver;
+    /// no second resolver). The indexer is best-effort / non-fatal (it never throws) + idempotent, so a
+    /// junction-write failure never fails an already-sent + persisted message (NFR-02). No-op when the indexer
+    /// is not composed (test constructions that predate it).
+    /// </summary>
+    private Task WriteParticipantIndexAsync(
+        Guid communicationId,
+        string? fromAddress,
+        ParticipantReference? fromResolved,
+        string[]? to,
+        string[]? cc,
+        string[]? bcc,
+        CancellationToken ct)
+    {
+        if (_participantIndexer is null)
+            return Task.CompletedTask;
+
+        return _participantIndexer.WriteParticipantsAsync(
+            communicationId,
+            new CommunicationParticipantSet
+            {
+                FromAddress = fromAddress,
+                FromResolved = fromResolved,
+                To = to,
+                Cc = cc,
+                Bcc = bcc,
+            },
+            ct);
     }
 }

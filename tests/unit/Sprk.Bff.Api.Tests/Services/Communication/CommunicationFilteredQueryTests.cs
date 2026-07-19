@@ -13,12 +13,14 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Services.Communication;
 
 /// <summary>
-/// Behavior of the R2 filtered communication query (task 011 / FR-02 / NFR-03). Every facet composes onto the SAME
-/// impersonation read path + REAL <see cref="CommunicationAccessFilter"/> as the by-regarding read — so, like
+/// Behavior of the R2 filtered communication query (tasks 011/051 / FR-02 / NFR-03). Every facet composes onto the
+/// SAME impersonation read path + REAL <see cref="CommunicationAccessFilter"/> as the by-regarding read — so, like
 /// <see cref="CommunicationThreadReadServiceTests"/>, these tests use the real filter and mock only the Dataverse
 /// read + caller resolver. No second/divergent filter, no membership-union (retired 2026-07-16), no text-LIKE
-/// participant fallback. The tests assert (a) each facet builds the right OData clause, (b) graceful degradation on
-/// malformed/empty filters, and (c) the <c>participant</c> stub is genuinely inert (501, no query).
+/// participant fallback (the junction join uses typed FK / exact-address equality only). The tests assert (a) each
+/// facet builds the right OData clause, (b) graceful degradation on malformed/empty filters, and (c) the
+/// <c>participant</c> junction join (task 051) is role-exact/FK-backed, composes as AND, and can never leak a
+/// message the caller cannot otherwise see (negative access case).
 /// </summary>
 public class CommunicationFilteredQueryTests
 {
@@ -28,12 +30,14 @@ public class CommunicationFilteredQueryTests
 
     private const string CommunicationSet = "sprk_communications";
     private const string AttachmentSet = "sprk_communicationattachments";
+    private const string ParticipantSet = "sprk_communicationparticipants";
     private const int TypeMessage = 100000004;
     private const int PrivilegeNone = 100000000;
 
     private readonly Mock<IImpersonatedCommunicationQuery> _query = new();
     private readonly Mock<ICallerSystemUserResolver> _resolver = new();
     private string? _messageQuery;
+    private string? _participantQuery;
 
     private CommunicationThreadReadService Sut()
     {
@@ -45,6 +49,10 @@ public class CommunicationFilteredQueryTests
               .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => _messageQuery = odata)
               .ReturnsAsync(new[] { MessageRow(Guid.NewGuid(), ThreadId, body: "m", type: TypeMessage) });
         _query.Setup(q => q.QueryAsync(AttachmentSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(Array.Empty<Dictionary<string, JsonElement>>());
+        // Default: no participant-junction rows (tests that exercise `participant=` override this explicitly).
+        _query.Setup(q => q.QueryAsync(ParticipantSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => _participantQuery = odata)
               .ReturnsAsync(Array.Empty<Dictionary<string, JsonElement>>());
 
         return new CommunicationThreadReadService(
@@ -138,18 +146,127 @@ public class CommunicationFilteredQueryTests
         filter.EvaluateMessage(nonInternal, internalOnly).IsVisible.Should().BeFalse();
     }
 
-    // ─────────────────────────── participant stub (inert until task 051) ───────────────────────────
+    // ─────────────────────────── participant facet (task 051 — joins the sprk_communicationparticipant junction) ───
 
     [Fact]
-    public async Task QueryCommunicationsAsync_ParticipantFacet_Returns501AndNeverQueries()
+    public async Task QueryCommunicationsAsync_ParticipantFacet_ResolvedPersonId_JoinsJunctionByTypedLookup()
     {
-        var act = () => Query(participant: "someone@x.com");
+        var personId = Guid.NewGuid();
+        var matchedMessageId = Guid.NewGuid();
+        var sut = Sut();
+        _query.Setup(q => q.QueryAsync(ParticipantSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => _participantQuery = odata)
+              .ReturnsAsync(new[] { ParticipantRow(matchedMessageId) });
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => _messageQuery = odata)
+              .ReturnsAsync(new[] { MessageRow(matchedMessageId, ThreadId, body: "m", type: TypeMessage) });
 
-        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
-        ex.StatusCode.Should().Be(501);
-        ex.Code.Should().Be("PARTICIPANT_FILTER_NOT_SUPPORTED");
-        _query.Verify(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
-            Times.Never, "the participant stub must be inert — never issue a query, never a text-LIKE fallback");
+        var result = await sut.QueryCommunicationsAsync(null, null, null, null, null, personId.ToString(), Caller(), CancellationToken.None);
+
+        result.Count.Should().Be(1);
+        _participantQuery.Should().Contain($"_sprk_systemuser_value eq {personId}")
+            .And.Contain($"_sprk_contact_value eq {personId}", "a resolved GUID matches EITHER typed lookup — role-exact, FK-backed, not a text-LIKE scan");
+        _messageQuery.Should().Contain($"sprk_communicationid eq {matchedMessageId}");
+    }
+
+    [Fact]
+    public async Task QueryCommunicationsAsync_ParticipantFacet_UnresolvedAddress_MatchesExactAddressText()
+    {
+        const string address = "external@example.com";
+        var matchedMessageId = Guid.NewGuid();
+        var sut = Sut();
+        _query.Setup(q => q.QueryAsync(ParticipantSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => _participantQuery = odata)
+              .ReturnsAsync(new[] { ParticipantRow(matchedMessageId) });
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new[] { MessageRow(matchedMessageId, ThreadId, body: "m", type: TypeMessage) });
+
+        var result = await sut.QueryCommunicationsAsync(null, null, null, null, null, address, Caller(), CancellationToken.None);
+
+        result.Count.Should().Be(1);
+        _participantQuery.Should().Contain($"sprk_addresstext eq '{address}'",
+            "an unresolved external party is matched by EXACT equality on the junction's address column — never a text-LIKE scan");
+    }
+
+    [Fact]
+    public async Task QueryCommunicationsAsync_ParticipantFacet_ComposesAsAndWithAnotherFacet()
+    {
+        var sut = Sut();
+        _query.Setup(q => q.QueryAsync(ParticipantSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new[] { ParticipantRow(Guid.NewGuid()) });
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => _messageQuery = odata)
+              .ReturnsAsync(new[] { MessageRow(Guid.NewGuid(), ThreadId, body: "m", type: TypeMessage) });
+
+        await sut.QueryCommunicationsAsync(null, null, TypeMessage.ToString(), null, null, Guid.NewGuid().ToString(), Caller(), CancellationToken.None);
+
+        _messageQuery.Should().Contain($"sprk_communicationtype eq {TypeMessage}");
+        _messageQuery.Should().Contain(" and ", "participant= composes as AND with the channel facet, same as every other facet pair");
+    }
+
+    [Fact]
+    public async Task QueryCommunicationsAsync_ParticipantFacet_NoJunctionMatch_DegradesToEmptyResultNotError()
+    {
+        // Sut()'s default ParticipantSet setup already returns zero rows. The resulting always-false clause is a
+        // real OData predicate a live Dataverse would never match — reflect that here by having the (mocked)
+        // impersonated sprk_communication read return nothing too, rather than relying on the generic canned row.
+        var sut = Sut();
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => _messageQuery = odata)
+              .ReturnsAsync(Array.Empty<Dictionary<string, JsonElement>>());
+
+        var result = await sut.QueryCommunicationsAsync(null, null, null, null, null, Guid.NewGuid().ToString(), Caller(), CancellationToken.None);
+
+        result.Count.Should().Be(0);
+        result.Messages.Should().BeEmpty();
+        _messageQuery.Should().Contain($"sprk_communicationid eq {Guid.Empty}",
+            "no junction match composes to an always-false clause rather than silently ignoring participant=");
+    }
+
+    [Fact]
+    public async Task QueryCommunicationsAsync_ParticipantFacet_NegativeAccess_CandidateCallerCannotSeeIsNotReturned()
+    {
+        // The junction says this person participates in `hiddenMessageId`, but the impersonated sprk_communication
+        // read (Dataverse's native row-level security, standing in for "the caller has no ownership/sharing/BU
+        // grant on this record") returns NOTHING for that id — modeling a message the caller cannot otherwise see.
+        // The participant join must not leak it: it only supplies a candidate id into the SAME impersonated read +
+        // access filter every other facet uses (no second/divergent access mechanism, NFR-03).
+        var personId = Guid.NewGuid();
+        var hiddenMessageId = Guid.NewGuid();
+        var sut = Sut();
+        _query.Setup(q => q.QueryAsync(ParticipantSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new[] { ParticipantRow(hiddenMessageId) });
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => _messageQuery = odata)
+              .ReturnsAsync(Array.Empty<Dictionary<string, JsonElement>>());
+
+        var result = await sut.QueryCommunicationsAsync(null, null, null, null, null, personId.ToString(), Caller(), CancellationToken.None);
+
+        result.Count.Should().Be(0, "a candidate id the impersonated read does not return must never surface via the participant join");
+        _messageQuery.Should().Contain($"sprk_communicationid eq {hiddenMessageId}",
+            "the candidate id WAS passed to the impersonated read — Dataverse's own scoping excluded it, proving no bypass occurred");
+    }
+
+    [Fact]
+    public async Task QueryCommunicationsAsync_ParticipantFacet_MalformedValue_Returns400()
+    {
+        var act = () => Query(participant: new string('x', 401)); // exceeds sprk_addresstext Text(400) and is not a GUID
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(400);
+        _query.Verify(q => q.QueryAsync(ParticipantSet, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never, "a malformed participant value must fail before issuing the junction query");
+    }
+
+    [Fact]
+    public async Task QueryCommunicationsAsync_ParticipantFacet_BlankValue_DegradesGracefullyAsNoFilter()
+    {
+        // A blank/whitespace participant= alongside a real facet behaves as if participant were absent entirely —
+        // never an error, never a junction query.
+        var result = await Query(thread: ThreadId.ToString(), participant: "   ");
+
+        result.Count.Should().Be(1);
+        _query.Verify(q => q.QueryAsync(ParticipantSet, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     // ─────────────────────────── graceful degradation (ADR-019, never 500 / never an unfiltered dump) ───────────
@@ -192,6 +309,11 @@ public class CommunicationFilteredQueryTests
             ["sprk_body"] = El(body ?? ""),
             ["sprk_communicationtype"] = El(type ?? TypeMessage),
         };
+
+    private static Dictionary<string, JsonElement> ParticipantRow(Guid communicationId) => new()
+    {
+        ["_sprk_communication_value"] = El(communicationId.ToString()),
+    };
 
     private static JsonElement El<T>(T value) => JsonSerializer.SerializeToElement(value);
 }
