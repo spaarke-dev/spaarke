@@ -132,6 +132,9 @@ import type {
   AnchoredAnnotation,
   DefinedTerm,
   ComposeActionHistoryEntry,
+  ParaIdMapEntry,
+  ImportedRevision,
+  ImportedComment,
 } from '../types/compose-contracts';
 
 // Re-export for consumers wiring the FR-29/FR-33 rehydrate state (annotations authoring UX is a
@@ -657,6 +660,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           anchoredAnnotations?: AnchoredAnnotation[];
           definedTermsTracking?: DefinedTerm[];
           actionHistory?: ComposeActionHistoryEntry[];
+          // task 052 fast-follow (FR-08/FR-24/FR-25 wire gap): the server pre-parse paraId map +
+          // recovered Word revisions/comments the BFF Load response now projects (ComposeEndpoints.cs
+          // `LoadComposeDocumentResponse`). Parsed defensively (optional) so an older BFF that
+          // predates the wiring still loads — `loadSucceeded` normalizes an omitted field to `[]`.
+          paraIdMap?: ParaIdMapEntry[];
+          importedRevisions?: ImportedRevision[];
+          importedComments?: ImportedComment[];
         };
 
         // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
@@ -674,6 +684,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // gap 4.3: mark the just-hydrated collections as server-synced so the persist effect below
         // does NOT write them straight back — only a subsequent LOCAL mutation persists.
         syncedAnnotationsRef.current = annotationsSnapshot(hydratedAnnotations, hydratedDefinedTerms);
+        // task 052 fast-follow: same Array.isArray defensive-parse convention as the three
+        // collections above — an omitted OR malformed (non-array) field degrades to `[]` rather
+        // than forwarding a non-array value through the atomic `loadSucceeded` mount contract.
+        const hydratedParaIdMap = Array.isArray(payload.paraIdMap) ? payload.paraIdMap : [];
+        const hydratedImportedRevisions = Array.isArray(payload.importedRevisions) ? payload.importedRevisions : [];
+        const hydratedImportedComments = Array.isArray(payload.importedComments) ? payload.importedComments : [];
         dispatch({
           kind: 'loadSucceeded',
           docxBytes: bytes.buffer,
@@ -682,6 +698,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           sessionId: payload.sessionId ?? '',
           sprkDocumentId: payload.documentRecordId,
           fileName: payload.fileName,
+          // Set ATOMICALLY with docxBytes (the ComposeEditor mount contract).
+          paraIdMap: hydratedParaIdMap,
+          importedRevisions: hydratedImportedRevisions,
+          importedComments: hydratedImportedComments,
         });
       } catch (err) {
         if (ac.signal.aborted) return;
@@ -2127,6 +2147,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               ref={editorRef}
               docxBytes={state.docxBytes}
               initialHtml={state.seedHtml}
+              // task 052 fast-follow (FR-08/FR-24/FR-25 wire gap): set atomically alongside docxBytes
+              // per ComposeEditor's mount contract (JSDoc on these props) — sourced from the
+              // stored-document Load response; `[]` for every other mount door.
+              paraIdMap={state.paraIdMap}
+              importedRevisions={state.importedRevisions}
+              importedComments={state.importedComments}
               documentRef={editorDocRef}
               bffBaseUrl={bffBaseUrl}
               sessionId={state.sessionId}

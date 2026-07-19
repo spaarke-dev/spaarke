@@ -14,7 +14,13 @@
  * @see src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx
  */
 
-import type { ComposeAssistantToWorkspaceFlow, ComposeDocumentRef } from '../types/compose-contracts';
+import type {
+  ComposeAssistantToWorkspaceFlow,
+  ComposeDocumentRef,
+  ParaIdMapEntry,
+  ImportedRevision,
+  ImportedComment,
+} from '../types/compose-contracts';
 
 // ---------------------------------------------------------------------------
 // Document-context state machine
@@ -95,6 +101,26 @@ export interface ComposeWorkspaceState {
   versionId: string | null;
   /** Mammoth import warnings (Tier 1 safe). */
   importWarnings: Array<{ type: string; message: string }>;
+  /**
+   * task 052 fast-follow (FR-08/FR-24/FR-25 wire gap): the server pre-parse `w14:paraId` map
+   * from a STORED-DOCUMENT Load response (task 010), in document order. Set ATOMICALLY with
+   * `docxBytes` on `loadSucceeded` (the ComposeEditor mount contract) so the editor stamps
+   * paraIds immediately after import. Empty for every other mount door (Browse upload / assistant
+   * upload / AI-draft seed) — those never carry a server pre-parse.
+   */
+  paraIdMap: readonly ParaIdMapEntry[];
+  /**
+   * task 052 fast-follow — existing Word revisions (`w:ins`/`w:del`) recovered server-side on a
+   * STORED-DOCUMENT Load (task 050) and projected for the editor render (FR-24). Set atomically
+   * with `docxBytes` + `paraIdMap`. Empty for every other mount door.
+   */
+  importedRevisions: readonly ImportedRevision[];
+  /**
+   * task 052 fast-follow — existing Word comments (`w:comment`) recovered server-side on a
+   * STORED-DOCUMENT Load (task 051) and projected for the editor render (FR-25). Set atomically
+   * with `docxBytes` + `paraIdMap`. Empty for every other mount door.
+   */
+  importedComments: readonly ImportedComment[];
   /** User-facing error message (NOT a Tier 3 sink). */
   errorMessage: string | null;
   /** Last assistant-inserted draft staged for confirm (Flow 5 R1 manual-confirm gate). */
@@ -126,6 +152,11 @@ export type ComposeWorkspaceAction =
       sessionId: string;
       sprkDocumentId?: string;
       fileName?: string;
+      // task 052 fast-follow (FR-08/FR-24/FR-25 wire gap): parsed defensively by the caller from an
+      // optional Load response field — undefined (older BFF) is normalized to `[]` in the reducer.
+      paraIdMap?: readonly ParaIdMapEntry[];
+      importedRevisions?: readonly ImportedRevision[];
+      importedComments?: readonly ImportedComment[];
     }
   | { kind: 'loadFailed'; errorMessage: string }
   // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
@@ -174,6 +205,9 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   etag: null,
   versionId: null,
   importWarnings: [],
+  paraIdMap: [],
+  importedRevisions: [],
+  importedComments: [],
   errorMessage: null,
   pendingAssistantInsert: null,
   checkoutStatus: 'idle',
@@ -204,6 +238,11 @@ export function composeWorkspaceReducer(
         etag: action.etag,
         versionId: action.versionId,
         sessionId: action.sessionId,
+        // task 052 fast-follow (FR-08/FR-24/FR-25 wire gap): set ATOMICALLY with docxBytes (the
+        // ComposeEditor mount contract) — normalize an omitted field (older BFF) to `[]`.
+        paraIdMap: action.paraIdMap ?? [],
+        importedRevisions: action.importedRevisions ?? [],
+        importedComments: action.importedComments ?? [],
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
@@ -252,6 +291,13 @@ export function composeWorkspaceReducer(
         sessionId: action.sessionId ?? state.sessionId,
         documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
         checkoutStatus: 'skipped',
+        // A transient (Browse / assistant-upload) mount has no server pre-parse — there is no
+        // stored-document Load response to source imports from. Explicitly clear rather than
+        // inheriting whatever a PRIOR loaded document may have populated (e.g. Browse-mounting a
+        // new local file after an earlier stored-document load in the same tab).
+        paraIdMap: [],
+        importedRevisions: [],
+        importedComments: [],
         errorMessage: null,
       };
     // ── DEF-08: AI-drafted full-document seed. Like mountTransient (create-on-save, no SPE
@@ -266,6 +312,10 @@ export function composeWorkspaceReducer(
         versionId: null,
         documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
         checkoutStatus: 'skipped',
+        // An AI-drafted seed has no server pre-parse either — same rationale as `mountTransient`.
+        paraIdMap: [],
+        importedRevisions: [],
+        importedComments: [],
         errorMessage: null,
       };
     case 'requestSave':
