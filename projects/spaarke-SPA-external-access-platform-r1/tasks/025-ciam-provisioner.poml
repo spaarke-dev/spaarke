@@ -1,0 +1,106 @@
+<task id="025" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Implement admin-initiated CIAM provisioner (replace B2B invitation)</title>
+    <phase>2 Identity + provisioning + document content</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth-sensitive multi-file provisioning replacing the B2B flow (tags: auth)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth-sensitive multi-file provisioning replacing B2B flow</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Complex multi-file change with a complete spec (account creation + oid persist + email + idempotency)</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-safe-reason>modifies InviteExternalUserEndpoint + wires client/email/schema</parallel-safe-reason>
+    <deps>022, 004, 024</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>1.5-2 dev-days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Replace the Graph B2B invitation in `InviteExternalUserEndpoint` with CIAM account creation via the cross-tenant CIAM Graph client (task 022): Graph `POST /users` with an email local-account `identities` block, temp password + `forceChangePasswordNextSignIn`, `passwordPolicies: DisablePasswordExpiration`; persist the returned `oid` to `Contact.sprk_externalobjectid`; send the onboarding email (task 024). The flow MUST be idempotent — skip account creation when an oid is already present. Reuse `GraphUserService` payload shape, `PasswordGenerator`, `TrackingIdGenerator`, and `RegistrationDataverseService` resolve-or-create-by-email. Do NOT create a workforce B2B guest.
+  </prompt>
+
+  <role>
+    You are a BFF identity engineer replacing the external B2B invitation flow with an idempotent admin-initiated CIAM provisioner, reusing the existing registration building blocks.
+  </role>
+
+  <goal>
+    `InviteExternalUserEndpoint` resolves-or-creates a Dataverse `Contact` by email, and — if no `oid` is bound — creates a CIAM account via the cross-tenant Graph client (`POST /users` with email `identities` local account, temp password + `forceChangePasswordNextSignIn`, `passwordPolicies: DisablePasswordExpiration`), persists the returned `oid` to `Contact.sprk_externalobjectid`, and sends the onboarding email; re-invoking for a Contact that already has an oid creates NO second account (idempotent). No workforce B2B guest is created.
+  </goal>
+
+  <context>
+    <background>
+      Per ADR-028 Amendment A1, the external portal moves off Entra B2B guests to CIAM broker-only. `InviteExternalUserEndpoint` currently issues a Graph B2B invitation; this task replaces that step with CIAM account creation via the task-022 cross-tenant client. The reusable building blocks (from the BFF audit): `GraphUserService.CreateUserAsync` payload shape + `PasswordGenerator` (temp password), `TrackingIdGenerator`, and `RegistrationDataverseService` resolve-or-create-by-email + idempotency guard. The CIAM-specific additions are the `identities` (email local account) block on the user payload and persisting the returned `oid` to `Contact.sprk_externalobjectid` (task 004 column). Onboarding email is task 024. Steps are prescriptive because the sequence (create → persist oid → email, guarded by idempotency) is auth-critical.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteExternalUserEndpoint.cs</file>
+      <file status="reference">src/server/api/Sprk.Bff.Api/Services/Registration/GraphUserService.cs</file>
+      <file status="reference">src/server/api/Sprk.Bff.Api/Services/Registration/PasswordGenerator.cs</file>
+      <file status="reference">src/server/api/Sprk.Bff.Api/Services/Registration/TrackingIdGenerator.cs</file>
+      <file status="reference">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: the invite endpoint. MUST create a CIAM account (broker-only) and MUST NOT provision a workforce Entra B2B guest; the external user's token is never exchanged downstream (Amendment A1).</constraint>
+    <constraint source="spec-FR-08">Scope: idempotency. MUST be idempotent — when the resolved Contact already has an `oid` (`sprk_externalobjectid`), SKIP account creation (no second CIAM account); reuse `RegistrationDataverseService` resolve-or-create-by-email + the idempotency guard.</constraint>
+    <constraint source="spec-FR-08">Scope: the user payload. Reuse the `GraphUserService.CreateUserAsync` payload shape + `PasswordGenerator`; add the CIAM `identities` (email local account) block, temp password + `forceChangePasswordNextSignIn`, `passwordPolicies: DisablePasswordExpiration`.</constraint>
+    <constraint source="spec-FR-08">Scope: oid persistence. MUST persist the Graph-returned `oid` to `Contact.sprk_externalobjectid` and send the onboarding email (task 024 method) after successful creation.</constraint>
+    <constraint source="NFR-06">Scope: the CIAM credential. Use the task-022 client (KV cert / MI-as-FIC) — no plaintext secret; the temp password is generated by `PasswordGenerator`, not hardcoded.</constraint>
+    <constraint source="project">Scope: this BFF task. State the §10 BFF Hygiene Placement Justification in the PR description (cite `.claude/constraints/bff-extensions.md`), and report BFF compressed publish size + diff vs baseline (~49.63 MB) confirming the ≤60 MB ceiling (NFR-01). Add/update tests per §10 bullet 6 (covered by task 030).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`InviteExternalUserEndpoint` performs a Graph B2B invitation.</existing>
+    <extension>Yes — replace the B2B step in the existing endpoint with CIAM account creation; reuse GraphUserService payload/PasswordGenerator/TrackingIdGenerator/RegistrationDataverseService.</extension>
+    <cost-of-doing-nothing>Without the CIAM provisioner, no CIAM identity is minted for outside counsel — admin-initiated onboarding is impossible and the primary R1 use case fails.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/GraphUserService.cs</file>
+      <file>.claude/agent-memory/researcher/ciam-user-provisioning-graph-2026-07-19.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Read `InviteExternalUserEndpoint.cs`, `GraphUserService.cs` (payload shape), `PasswordGenerator.cs`, `TrackingIdGenerator.cs`, and `RegistrationDataverseService.cs` to identify the B2B step to replace and the reusable helpers.</step>
+    <step>Resolve-or-create the Dataverse `Contact` by email via `RegistrationDataverseService`; read its `sprk_externalobjectid`.</step>
+    <step>Idempotency gate: if `sprk_externalobjectid` is already populated, SKIP account creation (do not call Graph `POST /users`); proceed to grant/email as appropriate without minting a second account.</step>
+    <step>If no oid is bound, build the Graph `POST /users` payload reusing the `GraphUserService` shape + `PasswordGenerator` temp password, adding the CIAM email `identities` local-account block, `forceChangePasswordNextSignIn=true`, and `passwordPolicies: DisablePasswordExpiration`; create the user via the task-022 cross-tenant CIAM Graph client.</step>
+    <step>Persist the Graph-returned `oid` to `Contact.sprk_externalobjectid`.</step>
+    <step>Send the onboarding email via `RegistrationEmailService.SendCiamOnboardingEmailAsync` (task 024).</step>
+    <step>Ensure no Graph B2B invitation path remains reachable for the external flow.</step>
+    <step>Build and run `dotnet publish -c Release`; record compressed size + diff vs the ~49.63 MB baseline.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Graph `POST /users` contract (the `identities` block or `passwordProfile`/`passwordPolicies` shape) differs from the researcher spike spec (`ciam-user-provisioning-graph-2026-07-19.md`), STOP and escalate per root CLAUDE.md §6 rather than adapting the payload by guesswork.</trigger>
+  </escalation>
+
+  <outputs>
+    <output>`InviteExternalUserEndpoint` creating a CIAM account (idempotent), persisting oid, and sending the onboarding email.</output>
+    <output>B2B invitation path removed from the external flow.</output>
+    <output>BFF publish-size report (compressed size + diff).</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Inviting a new Contact creates a CIAM account, persists the returned `oid` to `sprk_externalobjectid`, and sends the onboarding email.</criterion>
+    <criterion testable="true">Negative (idempotency): re-invoking for a Contact whose `sprk_externalobjectid` is already populated creates NO second CIAM account.</criterion>
+    <criterion testable="true">Negative: no workforce Entra B2B guest is created for the external user.</criterion>
+    <criterion testable="true">The created user carries the email `identities` local account, `forceChangePasswordNextSignIn`, and `passwordPolicies: DisablePasswordExpiration`.</criterion>
+    <criterion testable="true">BFF compressed publish size is reported with diff and stays ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on task 022 (cross-tenant CIAM Graph client), task 004 (`sprk_externalobjectid` column), and task 024 (onboarding email method). Prescriptive steps because the create→persist→email sequence guarded by idempotency is auth-critical.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,99 @@
+<task id="022" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Build cross-tenant CIAM Graph client (app-only)</title>
+    <phase>2 Identity + provisioning + document content</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New cross-tenant auth component reaching a second tenant's Graph (tags: auth)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New cross-tenant auth component (tags: auth)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-safe-reason>new Graph client + DI wiring</parallel-safe-reason>
+    <deps>002</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>1 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build an app-only Microsoft Graph client that targets the Entra External ID (CIAM) tenant, modeled on `SpeAdmin/SpeAdminTokenProvider.GetOrCreateMsalApp` (per-authority `WithAuthority`, credential from Key Vault secret or Managed-Identity-as-Federated-Identity-Credential). The existing `GraphClientFactory` is single-tenant and cannot target the CIAM tenant. Register the new client in DI. No plaintext secrets.
+  </prompt>
+
+  <role>
+    You are a BFF identity engineer building a cross-tenant app-only Graph client for CIAM user management, reusing the established per-authority MSAL app pattern from SpeAdmin.
+  </role>
+
+  <goal>
+    A new app-only Graph client (under `Infrastructure/Graph/` or `Services/`) acquires an application token for the CIAM tenant via a per-authority MSAL app modeled on `SpeAdminTokenProvider.GetOrCreateMsalApp` (`WithAuthority(ciamAuthority)`), with the client credential sourced from Key Vault (cert) or MI-as-FIC; it is registered in DI and usable by the provisioner (task 025). No plaintext secret is used.
+  </goal>
+
+  <context>
+    <background>
+      The BFF must create/manage users in the CIAM tenant (Graph `POST /users`), which requires an app-only Graph token issued by the CIAM tenant's own app registration (task 002). `GraphClientFactory.ForApp()` is single-tenant (workforce) and has no authority parameter, so it cannot reach the CIAM tenant. `SpeAdminTokenProvider.GetOrCreateMsalApp` already implements the cross-tenant/per-authority MSAL confidential-client pattern (per-customer authority + KV secret) — this task models the CIAM client on it. Credential path (cert-in-KV vs MI-as-FIC) is decided in task 002; this task consumes that decision.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeAdminTokenProvider.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: external-surface outbound. The CIAM Graph client is app-only (application permissions in the CIAM tenant) — the external user's token is NEVER exchanged; broker-only invariant (Amendment A1). No OBO.</constraint>
+    <constraint source="NFR-06">Scope: the CIAM app credential. Store the credential in Key Vault (cert) or eliminate via MI-as-FIC — NO plaintext secret in source or config; reference via `@Microsoft.KeyVault(...)` in production.</constraint>
+    <constraint source="ADR-007">Scope: Graph client construction. Follow the established per-authority MSAL confidential-client pattern from `SpeAdminTokenProvider.GetOrCreateMsalApp` (WithAuthority per authority); do not fork a divergent auth mechanism.</constraint>
+    <constraint source="ADR-010">Scope: DI. Register the client as a concrete/interface pair per DI minimalism; do not over-abstract.</constraint>
+    <constraint source="project">Scope: this BFF task. State the §10 BFF Hygiene Placement Justification in the PR description (cite `.claude/constraints/bff-extensions.md`), and report BFF compressed publish size + diff vs baseline (~49.63 MB) confirming the ≤60 MB ceiling (NFR-01).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`GraphClientFactory` is single-tenant (no authority parameter); `SpeAdminTokenProvider.GetOrCreateMsalApp` is the cross-tenant per-authority template.</existing>
+    <extension>No — `GraphClientFactory` cannot target the CIAM tenant; model a new client on `SpeAdminTokenProvider` instead.</extension>
+    <cost-of-doing-nothing>Without a cross-tenant CIAM Graph client, the BFF cannot create or manage CIAM users (the app permission lives in the CIAM tenant) — admin-initiated onboarding cannot mint a credential.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeAdminTokenProvider.cs</file>
+      <file>.claude/agent-memory/researcher/ciam-user-provisioning-graph-2026-07-19.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read `SpeAdminTokenProvider.GetOrCreateMsalApp` to learn the per-authority MSAL confidential-client construction (WithAuthority + KV-backed credential caching).</step>
+    <step>Read task 002's recorded credential decision (cert-in-KV vs MI-as-FIC) and the CIAM app-reg identifiers from `config/environments.json`.</step>
+    <step>Implement a CIAM Graph client that builds a per-authority MSAL app against the CIAM authority and acquires an app-only Graph token (`.default`), exposing a `GraphServiceClient` (or equivalent) for user operations.</step>
+    <step>Register the client in DI (concrete + minimal interface) so the provisioner can consume it.</step>
+    <step>Build and run `dotnet publish -c Release`; record compressed size + diff vs the ~49.63 MB baseline.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Managed-Identity-as-Federated-Identity-Credential (MI-as-FIC) is not GA/available at build time, fall back to a certificate stored in Key Vault per task 002; if neither credential path is available, STOP and escalate per root CLAUDE.md §6 rather than embedding a plaintext secret.</trigger>
+  </escalation>
+
+  <outputs>
+    <output>A cross-tenant app-only CIAM Graph client under Infrastructure/Graph/ or Services/, registered in DI.</output>
+    <output>Credential sourced from Key Vault / MI-as-FIC (no plaintext).</output>
+    <output>BFF publish-size report (compressed size + diff).</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The client acquires an app-only Graph token for the CIAM tenant (per-authority MSAL app against the CIAM authority).</criterion>
+    <criterion testable="true">The credential is sourced from Key Vault or MI-as-FIC; negative: no plaintext secret appears in source or config.</criterion>
+    <criterion testable="true">The client is registered in DI and resolvable for CIAM user operations.</criterion>
+    <criterion testable="true">Negative: the client does not perform any OBO/user-token exchange (app-only only).</criterion>
+    <criterion testable="true">BFF compressed publish size is reported with diff and stays ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on task 002 (CIAM app registration + credential decision). Consumed by task 025 (provisioner). Models the cross-tenant pattern on SpeAdminTokenProvider rather than extending single-tenant GraphClientFactory.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

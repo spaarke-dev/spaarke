@@ -10,13 +10,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — project initialized, tasks not yet generated |
+| **Task** | none — 25 tasks generated, awaiting execution go-ahead |
 | **Step** | — |
 | **Status** | none |
-| **Next Action** | Run `/task-create projects/spaarke-SPA-external-access-platform-r1` to decompose plan.md into POML task files |
+| **Next Action** | Begin Phase 0: execute task **001** (provision CIAM tenant) — but Phase 0 is ops/Azure provisioning; confirm live-resource readiness first. See `tasks/TASK-INDEX.md`. |
 
 ### Files Modified This Session
 - `README.md`, `plan.md`, `CLAUDE.md`, `current-task.md` — Created (project artifacts)
+- `tasks/*.poml` (25) + `tasks/TASK-INDEX.md` — Created (task decomposition)
 
 ### Critical Context
 Hosting + identity migration (Power Pages + B2B → Azure SWA + Entra External ID/CIAM), broker-only. Spec is BFF-audit-reconciled (reuse-in-place). ADR-028 Amendment A1 applied. Phase-0 spike GREEN.

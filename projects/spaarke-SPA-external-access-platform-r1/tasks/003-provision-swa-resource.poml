@@ -1,0 +1,90 @@
+<task id="003" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Provision Azure Static Web Apps resource + CI/CD scaffold</title>
+    <phase>0 Foundations</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Config/infra task with explicit constraints</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Azure resource + workflow scaffold</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>azure, ci-cd, deploy</tags>
+    <estimated-effort>0.5-1 day (ops-gated on Azure subscription access)</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Provision an Azure Static Web Apps resource to host the external SPA (replacing the Power Pages web-resource deploy path) and scaffold a CI/CD GitHub workflow that builds and deploys `src/client/external-spa`. Record the SWA hostname in config/environments.json. Provisioning steps are prescriptive; do not wire routing/security-header config here (that is Phase 1).
+  </prompt>
+
+  <role>
+    You are a cloud/DevOps engineer provisioning an Azure Static Web Apps resource and scaffolding its GitHub Actions deploy workflow per Spaarke's azure-deploy conventions.
+  </role>
+
+  <goal>
+    An Azure Static Web Apps resource exists with a CI/CD GitHub Actions workflow scaffold targeting `src/client/external-spa`; the SWA hostname is recorded in `config/environments.json`.
+  </goal>
+
+  <context>
+    <background>
+      R1 moves the external SPA off Power Pages (the brittle `Deploy-ExternalWorkspaceSpa.ps1` web-resource path — the incident that motivated this project) onto Azure Static Web Apps with real static hosting + CI/CD. This Phase-0 task provisions the SWA resource and scaffolds the deploy workflow so Phase 1 can flip `HashRouter` → `BrowserRouter`, add `staticwebapp.config.json` (navigationFallback + security headers), and wire CORS/redirect URIs against a real origin. Only provisioning + a workflow scaffold are in scope here; the routing/header configuration and the actual `external-spa` code changes are Phase 1.
+    </background>
+    <relevant-files>
+      <file>config/environments.json</file>
+      <file>.github/workflows/</file>
+      <file>src/client/external-spa/</file>
+      <file>scripts/Deploy-ExternalWorkspaceSpa.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope: hosting target. The SWA resource MUST target `src/client/external-spa` as the app source; it replaces the Power Pages web-resource host (decommission of Power Pages is Phase 3, not here).</constraint>
+    <constraint source="ci-cd">Scope: the deploy workflow. The CI/CD scaffold MUST be a GitHub Actions workflow committed under `.github/workflows/`; do NOT introduce a parallel non-GitHub deploy mechanism.</constraint>
+    <constraint source="NFR-06">Scope: any SWA deploy token/credential. Store as a GitHub secret / Key Vault reference — MUST NOT commit a plaintext deployment token to source or `config/environments.json`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Read `.claude/skills/azure-deploy/SKILL.md` and `docs/guides/auth-deployment-setup.md` for the SWA provisioning + deployment conventions.</step>
+    <step>Provision the Azure Static Web Apps resource in the target subscription/resource group; capture the assigned SWA hostname.</step>
+    <step>Scaffold a GitHub Actions CI/CD workflow under `.github/workflows/` that builds `src/client/external-spa` and deploys to the SWA (deploy token referenced as a GitHub secret, not committed).</step>
+    <step>Record the SWA hostname in `config/environments.json` (non-secret).</step>
+    <step>Verify: the SWA resource exists and the workflow scaffold is committed and syntactically valid.</step>
+  </steps>
+
+  <outputs>
+    <output>A provisioned Azure Static Web Apps resource.</output>
+    <output>A GitHub Actions CI/CD workflow scaffold under `.github/workflows/` targeting `src/client/external-spa`.</output>
+    <output>SWA hostname recorded in `config/environments.json`.</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Azure Static Web Apps resource is provisioned and reachable at its assigned hostname.</criterion>
+    <criterion testable="true">A GitHub Actions workflow scaffold exists under `.github/workflows/` and targets `src/client/external-spa` as the app source.</criterion>
+    <criterion testable="true">The SWA hostname is recorded in `config/environments.json`.</criterion>
+    <criterion testable="true">Negative: no plaintext SWA deployment token is committed to source or `config/environments.json` (referenced as a secret only).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe (group A) with task 004 — different surfaces (Azure/CI vs Dataverse). Routing flip, `staticwebapp.config.json`, security headers, and CORS/redirect-URI wiring are Phase 1, not this task. Power Pages decommission is Phase 3.
+  </notes>
+
+  <justification>
+    <existing>The external SPA currently deploys via the Power Pages web-resource path (`scripts/Deploy-ExternalWorkspaceSpa.ps1`).</existing>
+    <extension>No — SWA replaces the Power Pages host; the web-resource deploy script is being retired (Phase 3), not extended.</extension>
+    <cost-of-doing-nothing>Without real static hosting + CI/CD, the brittle web-resource deploy path (the incident that started this project) remains in place and the SPA cannot serve from a controllable origin with navigationFallback/security-header support.</cost-of-doing-nothing>
+  </justification>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

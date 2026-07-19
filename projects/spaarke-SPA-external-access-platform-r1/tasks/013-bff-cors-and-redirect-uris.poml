@@ -1,0 +1,120 @@
+<task id="013" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Add SWA origin to BFF CORS + SPA redirect URIs</title>
+    <phase>1 Hosting migration + routing</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF (bff-api hot path) + app registration</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Config change with explicit reference</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe reason="modifies Program/AuthorizationModule shared with Phase 2 auth tasks">false</parallel-safe>
+    <deps>003</deps>
+    <tags>bff-api, auth, config</tags>
+    <estimated-effort>0.5 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add the new Azure Static Web Apps origin to (a) the BFF CORS allow-list (config-driven, not a wildcard) and (b) the external-spa app-registration redirect URIs, so the SWA-hosted SPA can call the BFF and complete the MSAL login redirect while Phase 1 stays on the existing Entra B2B identity. Do NOT add or alter JwtBearer schemes (the "Ciam" scheme is Phase 2); state the §10 BFF Placement Justification and report publish-size + CVE results in the PR.
+  </prompt>
+
+  <role>
+    You are a .NET BFF engineer configuring CORS and identity redirect URIs for the migrated
+    external-spa. You make a scoped config change against the existing auth surface; you do not
+    introduce new services or endpoints.
+  </role>
+
+  <goal>
+    Add the new Azure Static Web Apps (SWA) origin to (a) the BFF CORS allow-list and
+    (b) the external-spa app-registration redirect URIs, so the SPA — served from the SWA
+    origin — can call the BFF and complete the MSAL login redirect. Phase 1 stays on the
+    existing Entra B2B identity.
+  </goal>
+
+  <context>
+    <background>
+      The external-spa currently loads from Power Pages; after the SWA migration it loads from a
+      new SWA origin. The browser will make cross-origin calls to the BFF and MSAL will redirect
+      back to the SWA origin, so both the BFF CORS allow-list and the SPA app registration's
+      redirect URIs must include the SWA origin. This is a config change on the existing auth
+      surface: CORS in `Program.cs` (and/or `AuthorizationModule.cs`), redirect URIs in the app
+      registration. Phase 2 auth tasks will also touch `AuthorizationModule.cs` (the new "Ciam"
+      scheme), so this task is not parallel-safe with them.
+    </background>
+    <relevant-files>
+      <file status="modify">src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file status="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file status="reference">config/environments.json (SWA hostname + app-reg config)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-§10">
+      SCOPE: this BFF-touching task. State a Placement Justification in the PR citing
+      `.claude/constraints/bff-extensions.md` (even though this is config-only, no new service).
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`,
+      measure compressed output, and report absolute size + diff vs the ~49.63 MB baseline
+      (ceiling ≤60 MB). Verify no new HIGH CVE via `dotnet list package --vulnerable --include-transitive`.
+    </constraint>
+    <constraint source="spec-FR-05">
+      SCOPE: CORS + redirect URIs only. Add the SWA origin to the CORS allow-list and the SPA
+      app-registration redirect URIs. MUST NOT weaken CORS to a wildcard origin; add the specific
+      SWA origin (config-driven).
+    </constraint>
+    <constraint source="ADR-028">
+      SCOPE: the auth config. Do NOT add or alter JwtBearer schemes here (the "Ciam" scheme is
+      Phase 2). Keep the workforce/B2B validation unchanged; this task is origin/redirect config only.
+    </constraint>
+    <constraint source="NFR-07">
+      SCOPE: test obligation. If the CORS policy is expressed in a testable way, add/adjust a
+      test asserting the SWA origin is allowed; otherwise document why no unit test applies
+      (config-only) per §10 bullet 6.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Locate the CORS policy registration (Program.cs and/or AuthorizationModule.cs) and the origins source (likely config-driven from `config/environments.json`).</step>
+    <step>Add the SWA origin to the allow-list via config (not a hardcoded literal, and not a wildcard).</step>
+    <step>Add the SWA origin's redirect URI(s) to the external-spa app registration (record the exact URIs in task notes / EXTERNAL-ACCESS-ADMIN-SETUP.md; app-registration change is out-of-repo config — document it).</step>
+    <step>Build the BFF; run the §10 publish-size + CVE checks and record results in task notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the CORS origins are sourced from a location that also governs internal Spaarke surfaces such that adding the SWA origin would broaden internal CORS, STOP and surface the placement decision before editing.</trigger>
+  </escalation>
+
+  <outputs>
+    <output>BFF CORS allow-list including the SWA origin (config-driven)</output>
+    <output>External-spa app-registration redirect URIs including the SWA origin (documented)</output>
+    <output>§10 evidence: publish size + diff, CVE check result, Placement Justification text for the PR</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A pre-flight OPTIONS request from the SWA origin returns 204 with an `Access-Control-Allow-Origin` header matching the SWA origin.</criterion>
+    <criterion testable="true">The MSAL login redirect to the SWA origin succeeds (redirect URI accepted by the app registration).</criterion>
+    <criterion testable="true">CORS is NOT broadened to a wildcard origin, and internal-surface CORS is unchanged (negative case).</criterion>
+    <criterion testable="true">No new JwtBearer scheme is added by this task (Ciam scheme is Phase 2 — negative case).</criterion>
+    <criterion testable="true">BFF compressed publish size is reported and ≤60 MB; `dotnet list package --vulnerable` shows no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Modify-only task (no new service/endpoint surface) — no justification block; but §10 BFF
+    Hygiene applies (Placement Justification + publish-size + CVE reported in the PR). Not
+    parallel-safe with Phase 2 auth tasks that edit AuthorizationModule.cs.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

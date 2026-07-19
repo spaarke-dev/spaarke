@@ -1,0 +1,93 @@
+<task id="023" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Resolve Contact by CIAM oid (extend filter + participation service)</title>
+    <phase>2 Identity + provisioning + document content</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth identity resolution on the external surface (tags: auth)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth identity resolution (tags: auth)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-safe-reason>modifies filter + participation service</parallel-safe-reason>
+    <deps>004, 020</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>1 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Extend `ExternalCallerAuthorizationFilter` (Api/Filters/ExternalCallerAuthorizationFilter.cs, ~line 63) and `ExternalParticipationService` (Infrastructure/ExternalAccess/, `ResolveContactByEmailAsync`) to resolve the Dataverse Contact by the stable CIAM `oid` claim (`sprk_externalobjectid`), using email only as a first-login fallback that then binds the oid. Do NOT fork a parallel filter — extend the existing one. Preserve the participation cache keying under the CIAM `tid`.
+  </prompt>
+
+  <role>
+    You are a BFF auth engineer hardening external-caller identity resolution from mutable email to a stable oid link, extending the existing filter and participation service in place.
+  </role>
+
+  <goal>
+    The external caller is resolved to a Dataverse Contact by the CIAM token's stable `oid` (`sprk_externalobjectid`); when no oid binding exists yet (first login), the resolver falls back to email match and then persists/binds the oid; the existing `ExternalCallerAuthorizationFilter` and `ExternalParticipationService` are extended (not forked); the participation cache still keys correctly under the CIAM `tid`.
+  </goal>
+
+  <context>
+    <background>
+      Per ADR-028 Amendment A1, external callers MUST resolve to a Contact by stable `oid` rather than mutable/social-IdP email. Task 025 persists the `oid` to `Contact.sprk_externalobjectid` at onboarding; task 004 creates that column. This task teaches the existing filter (`ExternalCallerAuthorizationFilter.cs:63`) and `ExternalParticipationService.ResolveContactByEmailAsync` to prefer oid resolution, with email as a first-login fallback that then hardens to oid. The participation cache (ADR-009, 60s TTL) keys under the caller's `tid`; with CIAM callers the `tid` is the CIAM tenant — keying must remain correct.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/ExternalCallerAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: external caller resolution. MUST resolve the Contact by stable `oid` (`sprk_externalobjectid`); once an oid is bound, an email mismatch MUST NOT grant access (Amendment A1).</constraint>
+    <constraint source="spec-FR-09">Scope: the filter + participation service. EXTEND `ExternalCallerAuthorizationFilter` + `ExternalParticipationService.ResolveContactByEmailAsync` in place — MUST NOT create a parallel filter or fork a second resolution path.</constraint>
+    <constraint source="ADR-009">Scope: the participation cache. Cache keying MUST remain correct under the CIAM `tid`; invalidation semantics unchanged.</constraint>
+    <constraint source="project">Scope: this BFF task. State the §10 BFF Hygiene Placement Justification in the PR description (cite `.claude/constraints/bff-extensions.md`), and report BFF compressed publish size + diff vs baseline (~49.63 MB) confirming the ≤60 MB ceiling (NFR-01).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/ExternalCallerAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read `ExternalCallerAuthorizationFilter.cs` (~line 63) and `ExternalParticipationService.ResolveContactByEmailAsync` to understand the current email-based resolution and cache keying.</step>
+    <step>Extend the filter to read the CIAM token's `oid` claim and pass it to the participation service; keep the existing filter as the single external-caller filter.</step>
+    <step>Extend `ResolveContactByEmailAsync` (or add an oid-aware resolution path within the same service) to look up the Contact by `sprk_externalobjectid` first; on first login (no oid bound) fall back to email match and then bind the oid to the Contact.</step>
+    <step>Ensure that once an oid is bound, email is not used to grant access (email mismatch does not override oid binding).</step>
+    <step>Confirm the participation cache keys under the CIAM `tid` correctly; add/adjust nothing that changes invalidation semantics.</step>
+    <step>Build and run `dotnet publish -c Release`; record compressed size + diff vs the ~49.63 MB baseline.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a CIAM token lacks both an `oid` claim and a usable `email` claim (no way to resolve or first-login-bind the Contact), return 401 and escalate the claim-mapping gap per root CLAUDE.md §6 rather than guessing an identity.</trigger>
+  </escalation>
+
+  <outputs>
+    <output>Extended `ExternalCallerAuthorizationFilter` reading the CIAM `oid` claim.</output>
+    <output>Extended `ExternalParticipationService` resolving Contact by `sprk_externalobjectid` with email first-login fallback + oid binding.</output>
+    <output>BFF publish-size report (compressed size + diff).</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A signed-in CIAM user with a bound oid resolves to the correct Contact by `sprk_externalobjectid`.</criterion>
+    <criterion testable="true">On first login (no oid bound), the resolver falls back to email match and then persists the oid to the Contact.</criterion>
+    <criterion testable="true">Negative: when an oid is already bound, an email mismatch does NOT grant access.</criterion>
+    <criterion testable="true">Negative: an unknown external user (no oid match, no email fallback match) is denied (403).</criterion>
+    <criterion testable="true">The participation cache still keys correctly under the CIAM `tid`.</criterion>
+    <criterion testable="true">BFF compressed publish size is reported with diff and stays ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Extend-only — no §11 component justification required (no new surface). Depends on task 004 (`sprk_externalobjectid` column) and task 020 (CIAM scheme so the token/oid claim is available). Task 025 populates the oid at onboarding.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

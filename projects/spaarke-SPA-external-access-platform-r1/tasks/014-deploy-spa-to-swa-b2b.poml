@@ -1,0 +1,112 @@
+<task id="014" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Deploy external-spa to SWA on existing B2B + verify parity</title>
+    <phase>1 Hosting migration + routing</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deploy + verification</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deploy step</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe reason="deploy step, gates on 010-013">false</parallel-safe>
+    <deps>010,011,012,013</deps>
+    <tags>deploy, azure</tags>
+    <estimated-effort>0.5 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Deploy the external-spa (still authenticating against the EXISTING Entra B2B identity) to the SWA origin using the task-010 workflow and `staticwebapp.config.json`, then verify functional parity end-to-end: clean-URL deep links resolve directly and through login, data loads via the BFF, security headers are present, and there is no regression versus Power Pages. Do NOT change the SPA feature set, switch the IdP to CIAM, or decommission the Power Pages path (Phase 3).
+  </prompt>
+
+  <role>
+    You are a DevOps engineer performing the Phase 1 hosting cutover for the Spaarke external-spa.
+    You deploy the existing SPA to Azure Static Web Apps and verify functional parity; you do not
+    change the SPA feature set or the identity provider.
+  </role>
+
+  <goal>
+    Deploy the external-spa (still authenticating against the EXISTING Entra B2B identity) to the
+    SWA origin using the task-010 workflow + `staticwebapp.config.json`, and verify that
+    clean-URL deep links work end-to-end (direct + through login), data loads via the BFF, and
+    there is NO functional regression versus the Power Pages hosting.
+  </goal>
+
+  <context>
+    <background>
+      This is the Phase 1 integration point: tasks 010 (SWA config + workflow), 011
+      (BrowserRouter + in-app 404), 012 (deep-link-through-login), and 013 (BFF CORS + redirect
+      URIs) come together here. Phase 1 deliberately stays on Entra B2B so any routing/hosting
+      regression is attributable to the host + routing changes, not the IdP swap (CIAM is Phase 2).
+      Success here is the Phase 1 gate: SPA live on SWA (B2B), clean-URL deep links resolve,
+      headers present, CORS/redirect updated, data loads.
+    </background>
+    <relevant-files>
+      <file status="reference">src/client/external-spa/staticwebapp.config.json (task 010)</file>
+      <file status="reference">.github/workflows/ SWA deploy workflow (task 010)</file>
+      <file status="reference">src/client/external-spa/src/App.tsx (BrowserRouter — tasks 011/012)</file>
+      <file status="reference">config/environments.json (SWA hostname + CORS/redirect config — task 013)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-scope">
+      SCOPE: deploy + verify only. Do NOT change the SPA feature set or pages; do NOT switch the
+      IdP to CIAM (Phase 2). This task validates the B2B-on-SWA baseline.
+    </constraint>
+    <constraint source="spec-Phase-3">
+      SCOPE: decommission boundary. Do NOT retire the Power Pages site or delete
+      `Deploy-ExternalWorkspaceSpa.ps1` — that is Phase 3, after full parity. Both hosting paths
+      may coexist at the end of this task.
+    </constraint>
+    <constraint source="NFR-05">
+      SCOPE: verification. Confirm the SPA still uses sessionStorage MSAL cache after the move;
+      a switch to localStorage is a regression.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>config/environments.json</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Confirm tasks 010–013 are merged/available: SWA config + workflow present, BrowserRouter + in-app 404 in App.tsx, deep-link-through-login wired, BFF CORS + redirect URIs include the SWA origin.</step>
+    <step>Run the task-010 SWA deploy workflow to publish the external-spa build to the SWA origin.</step>
+    <step>Verify the SPA loads from the SWA origin and completes B2B login (existing identity).</step>
+    <step>Verify a clean-URL deep link resolves both by direct navigation and by unauthenticated hit → login → return to the intended route.</step>
+    <step>Verify data loads via the BFF (CORS pre-flight succeeds; authenticated BFF calls return data).</step>
+    <step>Verify security headers (Referrer-Policy, CSP frame-ancestors) are present on SWA responses.</step>
+    <step>Compare against Power Pages behavior across the SPA pages (Documents, Events, Tasks, Contacts) and record any delta; assert no regression.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If login or data loading breaks after the origin move, STOP — the likely cause is CORS / redirect-URI configuration (task 013), NOT routing. Do not begin editing routing code; surface the CORS/redirect hypothesis first.</trigger>
+  </escalation>
+
+  <outputs>
+    <output>external-spa deployed and live on the SWA origin (still Entra B2B)</output>
+    <output>Parity verification report: deep-link (direct + through login), data-load, headers, per-page parity vs Power Pages</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The SPA loads from the SWA origin and authenticates against the existing Entra B2B identity.</criterion>
+    <criterion testable="true">A clean-URL deep link resolves both by direct navigation and through the login redirect.</criterion>
+    <criterion testable="true">Data loads via the BFF from the SWA origin (CORS pre-flight succeeds; authenticated calls return data).</criterion>
+    <criterion testable="true">Security headers (Referrer-Policy + CSP frame-ancestors) are present on SWA responses.</criterion>
+    <criterion testable="true">No functional regression versus Power Pages across the SPA pages; the Power Pages site is NOT decommissioned by this task (negative case — Phase 3 boundary).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Deploy/verification task — no new code surface, no justification block. Phase 1 gate. Stays
+    on Entra B2B; CIAM swap is Phase 2. Both hosting paths may coexist until Phase 3 decommission.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

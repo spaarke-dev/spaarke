@@ -1,0 +1,93 @@
+<task id="030" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Unit tests for the CIAM external-access surface</title>
+    <phase>2 Identity + provisioning + document content</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING — tags include testing (unconditional code-review + adr-check gates per CLAUDE.md §8)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test authoring against defined contracts</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-safe-reason>tests span multiple Phase-2 files</parallel-safe-reason>
+    <deps>020, 021, 022, 023, 025, 026, 027</deps>
+    <tags>testing, unit-test, bff-api</tags>
+    <estimated-effort>1-1.5 dev-days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add unit tests in `tests/unit/Sprk.Bff.Api.Tests/` covering the CIAM external-access surface: CIAM scheme token validation, provisioner idempotency, oid Contact resolution, grant-without-synthetic-SPE, and download authz-before-stream (POSITIVE and NEGATIVE — unauthorized → 403, no bytes, no Graph call). Follow ADR-038: integration-heavy; NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration or ctor-null-check tests.
+  </prompt>
+
+  <role>
+    You are a BFF test engineer writing behavior-focused tests against the Phase-2 CIAM surface contracts, adhering to the ADR-038 integration-heavy pyramid and mock-boundary bans.
+  </role>
+
+  <goal>
+    Tests in `tests/unit/Sprk.Bff.Api.Tests/` exist and pass covering: (1) CIAM scheme token validation (valid authenticates / invalid-issuer 401), (2) provisioner idempotency (oid-present → no second account), (3) oid Contact resolution (oid match; email mismatch denied when oid bound), (4) grant-without-synthetic-SPE (access record + invalidation, no synthetic write), and (5) download authz-before-stream POSITIVE (authorized → bytes) and NEGATIVE (unauthorized → 403, no bytes, no Graph call); no banned test shapes are introduced.
+  </goal>
+
+  <context>
+    <background>
+      §10 bullet 6 + NFR-07 require tests for modifications to `Sprk.Bff.Api/Services/` and `Api/ExternalAccess/`. The most consequential is the download authz-before-stream negative case (NFR-03): an unauthorized caller must receive 403 with no bytes and no Graph call. Tests must follow ADR-038: integration-heavy, KEEP-path categories only; the bans on `Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, and ctor-null-check tests apply. This task is TEST-MODIFYING, so code-review + adr-check run unconditionally at Step 9.5.
+    </background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteExternalUserEndpoint.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/ExternalCallerAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Scope: all tests authored here. Integration-heavy pyramid; use the KEEP-path categories. MUST NOT use `Mock&lt;HttpMessageHandler&gt;`, MUST NOT write DI-registration tests, MUST NOT write ctor null-check tests.</constraint>
+    <constraint source="project-NFR-03">Scope: the download tests. MUST include the authz-before-stream NEGATIVE case asserting an unauthorized caller gets 403, receives NO bytes, and triggers NO Graph content read.</constraint>
+    <constraint source="spec-FR-08">Scope: the provisioner test. MUST assert idempotency — an already-provisioned Contact (oid present) does not create a second CIAM account.</constraint>
+    <constraint source="project">Scope: this BFF/test task. Tests live in `tests/unit/Sprk.Bff.Api.Tests/` per §10 bullet 6; the wrap-up PR references them. (No new runtime surface added — publish-size unchanged; note it.)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read `.claude/constraints/testing.md` + `docs/adr/ADR-038-testing-strategy.md` for the KEEP-path categories and mock-boundary bans; inspect existing `tests/unit/Sprk.Bff.Api.Tests/` external-access tests for fixture conventions.</step>
+    <step>Add CIAM scheme validation tests: a valid CIAM token authenticates on `/api/v1/external/*`; an invalid-issuer token returns 401.</step>
+    <step>Add provisioner idempotency tests: first invite creates an account + persists oid; re-invite for an oid-present Contact creates no second account.</step>
+    <step>Add oid-resolution tests: oid match resolves the Contact; when an oid is bound, an email mismatch does not grant access.</step>
+    <step>Add grant tests: `/grant` creates `sprk_externalrecordaccess` + invalidates cache and writes NO synthetic `contact_{guid}` SPE permission.</step>
+    <step>Add download authz-before-stream tests: authorized → bytes; unauthorized → 403 with no bytes and no Graph content read asserted.</step>
+    <step>Run `dotnet test` for the affected project and confirm all added tests pass.</step>
+  </steps>
+
+  <outputs>
+    <output>Unit tests in `tests/unit/Sprk.Bff.Api.Tests/` covering the five listed areas.</output>
+    <output>Passing `dotnet test` run for the affected test project.</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A test asserts a valid CIAM token authenticates and an invalid-issuer token returns 401.</criterion>
+    <criterion testable="true">A test asserts provisioner idempotency (oid-present → no second CIAM account).</criterion>
+    <criterion testable="true">A test asserts oid resolution: oid match resolves; email mismatch denied when oid bound.</criterion>
+    <criterion testable="true">A test asserts `/grant` creates the access record + invalidates cache and writes no synthetic SPE permission.</criterion>
+    <criterion testable="true">A test asserts download POSITIVE (authorized → bytes) AND the NEGATIVE case asserts unauthorized → 403 with NO bytes returned and NO Graph call.</criterion>
+    <criterion testable="true">Negative: no test uses `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null-check shapes (ADR-038 bans).</criterion>
+    <criterion testable="true">All added tests pass under `dotnet test`.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    TEST-MODIFYING task — code-review + adr-check run unconditionally at Step 9.5 (CLAUDE.md §8 override row). Depends on tasks 020/021/022/023/025/026/027 (the surface under test). Test-diet reconciliation runs at project wrap-up.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

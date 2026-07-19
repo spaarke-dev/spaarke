@@ -1,0 +1,84 @@
+<task id="026" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Remove vestigial synthetic SPE container grant from GrantExternalAccessEndpoint</title>
+    <phase>2 Identity + provisioning + document content</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the grant path on the external access surface; broker-only correctness matters</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Targeted cleanup with clear scope</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-safe-reason>modifies GrantExternalAccessEndpoint</parallel-safe-reason>
+    <deps>none</deps>
+    <tags>bff-api</tags>
+    <estimated-effort>0.5 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Remove the synthetic `contact_{guid}` SPE container-permission POST in `GrantExternalAccessEndpoint.cs` (~lines 242-257). Under the broker-only model (ADR-028 A1) it is vestigial — external users never reach SPE directly; all access is app-only. Keep the `sprk_externalrecordaccess` create and the participation cache invalidation intact.
+  </prompt>
+
+  <role>
+    You are a BFF engineer removing a now-vestigial SPE container membership write from the grant path while preserving the three-plane access record + cache invalidation.
+  </role>
+
+  <goal>
+    The synthetic `contact_{guid}` SPE container-permission POST in `GrantExternalAccessEndpoint.cs` (~lines 242-257) is removed; the endpoint still creates the `sprk_externalrecordaccess` record and invalidates the participation cache.
+  </goal>
+
+  <context>
+    <background>
+      Under broker-only (ADR-028 Amendment A1), external users never authenticate to SPE directly — all external SPE access is app-only via the BFF. The historical `contact_{guid}` synthetic container-permission write (a hangover from the B2B-guest model) grants nothing meaningful now and is an anti-pattern to keep. This task removes it while leaving the authoritative `sprk_externalrecordaccess` create + ADR-009 cache invalidation untouched.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: the grant path. Broker-only (Amendment A1) makes the synthetic SPE container grant vestigial — remove it; external SPE access remains app-only.</constraint>
+    <constraint source="spec-FR-10">Scope: the retained behavior. The `/grant` endpoint MUST still create `sprk_externalrecordaccess` and invalidate the participation cache — only the synthetic `contact_{guid}` SPE permission POST is removed.</constraint>
+    <constraint source="ADR-009">Scope: cache invalidation. Participation-cache invalidation on grant MUST remain (unchanged).</constraint>
+    <constraint source="project">Scope: this BFF task. State the §10 BFF Hygiene Placement Justification in the PR description (cite `.claude/constraints/bff-extensions.md`), and report BFF compressed publish size + diff vs baseline (~49.63 MB) confirming the ≤60 MB ceiling (NFR-01).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read `GrantExternalAccessEndpoint.cs` and locate the synthetic `contact_{guid}` SPE container-permission POST (~lines 242-257).</step>
+    <step>Remove that POST and any now-dead local variables/imports solely supporting it; keep the `sprk_externalrecordaccess` create and the cache-invalidation call.</step>
+    <step>Confirm the endpoint still compiles and the grant + invalidation flow is intact.</step>
+    <step>Build and run `dotnet publish -c Release`; record compressed size + diff vs the ~49.63 MB baseline.</step>
+  </steps>
+
+  <outputs>
+    <output>`GrantExternalAccessEndpoint.cs` with the synthetic SPE container grant removed.</output>
+    <output>Retained `sprk_externalrecordaccess` create + participation-cache invalidation.</output>
+    <output>BFF publish-size report (compressed size + diff).</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/grant` still creates the `sprk_externalrecordaccess` access record.</criterion>
+    <criterion testable="true">`/grant` still invalidates the participation cache.</criterion>
+    <criterion testable="true">Negative: no synthetic `contact_{guid}` SPE container permission is written.</criterion>
+    <criterion testable="true">Existing grant tests pass (or are updated) with the synthetic write removed.</criterion>
+    <criterion testable="true">BFF compressed publish size is reported with diff and stays ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Modify-only — no §11 component justification required; the §10 BFF Hygiene note (Placement Justification + publish-size report) still applies. Startable (no deps). Grant-without-synthetic-SPE is also covered by the task-030 tests.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
