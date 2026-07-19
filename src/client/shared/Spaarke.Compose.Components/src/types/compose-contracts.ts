@@ -383,6 +383,26 @@ export interface ComposeUploadRef {
 }
 
 /**
+ * FR-15 formatted AI insertions (task 032, client-only per §6.5 Path B amendment) — documentation
+ * pointer, not a type. `ComposeDraftPayload.new_text` (the single-edit AI-suggestion payload) is
+ * defined in `../widgets/ComposeEditor.tsx` (NOT in this file — `compose-contracts.ts` mirrors the
+ * three-pane coordination + workspace-event contracts; `ComposeDraftPayload` lives with the editor
+ * that materializes it, per task 030's grep-verified residual note). Recorded here because this file
+ * is the project's canonical "wire contract" home and the task-032 POML named this file.
+ *
+ * `new_text` (and the DEF-11 `ComposeDraftEdit.new_text`) MAY carry a lightweight, SANITIZED inline
+ * markup subset — bare `<strong>`/`<b>`, `<em>`/`<i>`, `<u>` open/close tags, no attributes — which
+ * `buildInsertionHtml` (`../widgets/hooks/usePendingRedline.ts`) parses into the corresponding
+ * bold/italic/underline StarterKit (MIT) marks so an AI-*inserted* redline renders formatted instead
+ * of flattening to plain text. This is CLIENT-parsed only: no server `ComposeDraftPayload` record
+ * change (the compose ledger payload ships opaque end-to-end — see
+ * `docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md`). A plain string `new_text` (no markup) still
+ * round-trips unchanged (backward compatible). Any markup outside the whitelist (`<script>`, `<a
+ * href>`, an allowed tag name carrying an attribute, unknown tags) is sanitized to inert literal text
+ * — see `sanitizeInlineMarkup` in `usePendingRedline.ts` for the allow-list + security rationale.
+ */
+
+/**
  * Pointer to an AI-DRAFTED full document to SEED the editor with (spaarkeai-compose-r2 DEF-08).
  * Distinct from {@link ComposeDocumentRef} (a stored SPE document) and {@link ComposeUploadRef}
  * (a retained upload): a draft seed carries the drafted document BODY (as semantic HTML), which

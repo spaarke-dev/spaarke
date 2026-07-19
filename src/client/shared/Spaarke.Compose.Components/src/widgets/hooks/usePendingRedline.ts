@@ -30,6 +30,13 @@
  * pending redline in document state; the true ledger-supersession WRITE for undo/replace is FR-17
  * / task 034, which builds on this hook.
  *
+ * FR-15 formatted AI insertions (task 032, client-only per §6.5 Path B amendment): `buildInsertionHtml`
+ * parses a lightweight, SANITIZED inline-markup subset (bold/italic/underline) out of `new_text` so an
+ * AI-*inserted* suggestion that should be formatted actually renders formatted, instead of flattening
+ * to plain text. See {@link sanitizeInlineMarkup} for the allow-list + security rationale. This is a
+ * CLIENT-render-only enrichment — no server `ComposeDraftPayload` change (the compose ledger payload
+ * ships opaque end-to-end per `docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md`).
+ *
  * @see ./ ../marks/InsertionMark.ts · ../marks/DeletionMark.ts (task 031 rendering primitives)
  * @see ../ComposeEditor.tsx (imperative handle: materializePendingRedline)
  * @see projects/spaarkeai-compose-r2/notes/HANDOFF-core-r2-A0-contract-requirements.md §1
@@ -350,9 +357,98 @@ function collectMatchingRanges(
   return ranges;
 }
 
-/** An insertion `<span>` that parses back to InsertionMark with provenance (task 031 parseHTML). */
-function buildInsertionHtml(newText: string, bindingId: string, ledgerRef: string): string {
-  const body = escapeHtml(newText).replace(/\r?\n/g, '<br>');
+/**
+ * FR-15 (task 032, client-only per §6.5 Path B amendment — see
+ * `docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md`) — the whitelist of inline formatting tags an
+ * AI-authored `new_text` may carry inline. Keys are the bare tag NAMES this sanitizer recognizes as
+ * open/close tags (case-insensitive, NO attributes); values are the canonical tag emitted (`b`→`strong`,
+ * `i`→`em` — StarterKit's Bold/Italic marks accept either spelling on parse, so canonicalizing keeps
+ * the emitted fragment deterministic). `u` rides through as-is (the editor's `Underline` extension,
+ * `@tiptap/extension-underline`, MIT — already LOCKED_EXTENSIONS in `ComposeEditor.tsx`).
+ */
+const ALLOWED_INLINE_TAGS: Readonly<Record<string, string>> = {
+  strong: 'strong',
+  b: 'strong',
+  em: 'em',
+  i: 'em',
+  u: 'u',
+};
+
+/**
+ * FR-15 sanitizing inline-markup parser (task 032). An AI-authored `new_text` may carry a lightweight
+ * inline-markup subset — bare `<strong>`/`<b>`, `<em>`/`<i>`, `<u>` open/close tags, NO attributes — so
+ * a suggestion that should render bold/italic/underline actually does once inserted, instead of being
+ * flattened to plain text (the FR-15 gap this task closes).
+ *
+ * SECURITY: this is an ALLOW-list, not a deny-list. Every `<...>` sequence that is not an EXACT,
+ * attribute-free match against {@link ALLOWED_INLINE_TAGS} — an unknown tag, `<script>`, `<a href="…">`
+ * (the editor's `Link` extension IS loaded in `ComposeEditor.tsx`, so an unsanitized anchor would parse
+ * into a REAL link mark with an attacker-controlled `href`), an allowed tag name carrying an attribute
+ * (e.g. `<strong onclick="…">`), or a stray/mismatched closing tag — is treated as inert literal text
+ * and HTML-escaped via {@link escapeHtml}. It can therefore NEVER reach the editor's HTML parser as
+ * markup, regardless of how the surrounding characters are crafted (no tag-splitting / nesting trick
+ * can smuggle a non-whitelisted element through, because only an exact whitelisted match is ever
+ * emitted as a real tag). A plain string with no recognized tags round-trips byte-for-byte through
+ * {@link escapeHtml} — identical output to the pre-032 behavior (backward compatible). Unclosed
+ * allowed tags at the end of the string are auto-closed (reverse nesting order) so the emitted
+ * fragment is always well-formed HTML.
+ *
+ * Deliberately a tiny hand-rolled whitelist, not a general HTML sanitizer/parser dependency — NFR-03
+ * (MIT TipTap base only) disfavors a new dependency for a 5-tag allow-list this narrow.
+ *
+ * Exported for direct unit testing.
+ */
+export function sanitizeInlineMarkup(text: string): string {
+  const TAG_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)\s*\/?>/g;
+  let out = '';
+  let lastIndex = 0;
+  const openStack: string[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = TAG_RE.exec(text)) !== null) {
+    const [full, closing, rawName] = match;
+    const canonical = ALLOWED_INLINE_TAGS[rawName.toLowerCase()];
+
+    // Emit the text run before this tag, escaped.
+    out += escapeHtml(text.slice(lastIndex, match.index));
+    lastIndex = match.index + full.length;
+
+    if (!canonical) {
+      // Unknown tag, or a disallowed tag (script/a/img/on*-bearing/…) — inert literal text, never markup.
+      out += escapeHtml(full);
+      continue;
+    }
+
+    if (closing) {
+      const stackIdx = openStack.lastIndexOf(canonical);
+      if (stackIdx === -1) {
+        // Stray closing tag with no matching open — literal text; never desyncs well-formedness.
+        out += escapeHtml(full);
+        continue;
+      }
+      // Close every tag opened after the matched one too, keeping the emitted fragment well-nested.
+      while (openStack.length > stackIdx) out += `</${openStack.pop()}>`;
+    } else {
+      openStack.push(canonical);
+      out += `<${canonical}>`;
+    }
+  }
+
+  out += escapeHtml(text.slice(lastIndex));
+  // Auto-close any tags left open at the end of the string.
+  while (openStack.length > 0) out += `</${openStack.pop()}>`;
+  return out;
+}
+
+/**
+ * An insertion `<span>` that parses back to InsertionMark with provenance (task 031 parseHTML).
+ * FR-15 (task 032): `newText` may carry the {@link sanitizeInlineMarkup} inline-formatting subset
+ * (bold/italic/underline) so an AI-inserted redline renders formatted instead of flattened to plain
+ * text — sanitized so no disallowed markup (script, anchors, event handlers, unknown tags) ever
+ * reaches the editor. Exported for direct unit testing.
+ */
+export function buildInsertionHtml(newText: string, bindingId: string, ledgerRef: string): string {
+  const body = sanitizeInlineMarkup(newText).replace(/\r?\n/g, '<br>');
   return (
     `<span data-compose-mark="${INSERTION}" ` +
     `data-binding="${escapeAttr(bindingId)}" ` +
