@@ -1,20 +1,27 @@
 /**
  * MyAssistantDialog.tsx — the "My Assistant" stated-profile questionnaire (task 042, FR-F3 / FR-E1).
  *
- * P2-4 (UAT 2026-07-18): reworked from a single-page form into a 3-STEP WIZARD with richer
- * guidance + (i) info popovers, per the owner UX request:
- *   Step 1 "Your role"      — intro + Primary role + Office location (with an info popover).
- *   Step 2 "Practice areas" — description + Practice areas + Focus areas (with an info popover).
- *   Step 3 "Preferences"    — Assistant preferences (with examples in an info popover).
- * The field state, save path, cold-start banner, and GDPR erase (F5) are UNCHANGED — only the
- * layout is stepped. (The earlier "dropdown doesn't work / can't save" defect was a data-access
- * bug fixed separately in userProfileService — the lookup-alternate-key 400.)
+ * 3-STEP WIZARD:
+ *   Step 1 "Your role"   — Primary role + Primary work location (dropdown from `sprk_workoffice`).
+ *   Step 2 "Focus areas" — Practice areas (multiselect) + curated Focus-area chips.
+ *   Step 3 "Preferences" — curated Assistant-preference chips.
+ *
+ * UAT 2026-07-19 (MA cluster):
+ *   • MA-2 — standard small modal; simplified bottom nav (Cancel · Back · Next/Save); the GDPR
+ *     "Clear my profile" affordance was REMOVED from this flow (owner decision — erase can live
+ *     elsewhere; the `eraseMyAssistantProfile` service + hook path remain for a future surface).
+ *   • MA-3 — "Office location" free-text → "Primary work location" dropdown; the selected office NAME
+ *     is stored in the existing `sprk_officelocation` text column (no schema change).
+ *   • MA-4 — Focus areas + Preferences free-text boxes → curated multi-select chips. Each selected chip
+ *     stores its directive phrase (newline-joined) in the existing `sprk_focusareas` /
+ *     `sprk_assistantpreferences` columns, which `ContextBinder.userFragment` already injects into the
+ *     agent turn — deterministic behaviour, NO BFF change. See userProfileService chip catalogs.
  *
  * Standards: ADR-021 (Fluent v9 semantic tokens only — dark mode adapts; no hex/rgba), ADR-022
  * (functional component), ADR-025 (v9 icons).
  *
- * @see userProfileService.ts — the write/erase path + PRIMARY_ROLE_OPTIONS
- * @see useMyAssistant.ts — open-state + cold-start + save/erase orchestration
+ * @see userProfileService.ts — the write path + PRIMARY_ROLE_OPTIONS + chip catalogs (encode/decode)
+ * @see useMyAssistant.ts — open-state + cold-start (needs-profile) + save orchestration
  * @see AssistantToolMenu.tsx — the launcher (onMyAssistant)
  */
 
@@ -27,12 +34,11 @@ import {
   DialogContent,
   DialogActions,
   Button,
+  ToggleButton,
   Dropdown,
   Option,
   Field,
   InfoLabel,
-  Textarea,
-  Input,
   Text,
   MessageBar,
   MessageBarBody,
@@ -40,10 +46,16 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { PersonRegular, DeleteRegular, ArrowLeftRegular, ArrowRightRegular } from '@fluentui/react-icons';
+import { PersonRegular, ArrowLeftRegular, ArrowRightRegular } from '@fluentui/react-icons';
 import {
   PRIMARY_ROLE_OPTIONS,
+  FOCUS_AREA_CHIPS,
+  PREFERENCE_CHIPS,
+  encodeChipSelection,
+  decodeChipSelection,
+  type ProfileChip,
   type PracticeArea,
+  type WorkOffice,
   type UserProfileFormValues,
 } from './userProfileService';
 
@@ -60,13 +72,13 @@ export interface MyAssistantDialogProps {
   coldStart?: boolean;
   /** The constrained practice-area options (from the resolver entity). */
   practiceAreas: ReadonlyArray<PracticeArea>;
+  /** The primary-work-location options (from `sprk_workoffice`). */
+  workOffices?: ReadonlyArray<WorkOffice>;
   /** Initial field values (prefilled from an existing profile, or empty on first run). */
   initialValues?: Partial<UserProfileFormValues>;
   /** Persist the questionnaire. Rejects on failure (surfaced as an inline error). */
   onSubmit: (values: UserProfileFormValues) => Promise<void>;
-  /** GDPR erasure (F5): delete the profile + N:N + seeded memory. Rejects on failure. */
-  onErase?: () => Promise<void>;
-  /** True while any load of practice areas / initial values is in flight. */
+  /** True while any load of practice areas / offices / initial values is in flight. */
   loading?: boolean;
 }
 
@@ -76,20 +88,26 @@ export interface MyAssistantDialogProps {
 
 const useStyles = makeStyles({
   surface: {
-    minWidth: '460px',
-    maxWidth: '520px',
+    // MA-2: standard small modal — modest width, height driven by content.
+    maxWidth: '480px',
   },
   content: {
     display: 'flex',
     flexDirection: 'column',
     rowGap: tokens.spacingVerticalL,
-    minHeight: '300px',
+    minHeight: '260px',
   },
   stepIndicator: {
     color: tokens.colorNeutralForeground3,
   },
   stepIntro: {
     color: tokens.colorNeutralForeground2,
+  },
+  chipWrap: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    columnGap: tokens.spacingHorizontalS,
+    rowGap: tokens.spacingVerticalS,
   },
   actionsRow: {
     display: 'flex',
@@ -101,16 +119,45 @@ const useStyles = makeStyles({
     display: 'flex',
     columnGap: tokens.spacingHorizontalS,
   },
-  eraseButton: {
-    color: tokens.colorPaletteRedForeground1,
-  },
 });
 
 const ROLE_PLACEHOLDER = 'Select your role';
 const PRACTICE_PLACEHOLDER = 'Select practice areas';
+const OFFICE_PLACEHOLDER = 'Select your work location';
 
-const STEP_TITLES = ['Your role', 'Practice areas', 'Preferences'] as const;
+const STEP_TITLES = ['Your role', 'Focus areas', 'Preferences'] as const;
 const TOTAL_STEPS = STEP_TITLES.length;
+
+// ---------------------------------------------------------------------------
+// Chip multi-select (MA-4) — a wrap of Fluent v9 ToggleButtons
+// ---------------------------------------------------------------------------
+
+const ChipMultiSelect: React.FC<{
+  chips: ReadonlyArray<ProfileChip>;
+  selected: ReadonlyArray<string>;
+  onToggle: (id: string) => void;
+  disabled?: boolean;
+  testIdPrefix: string;
+}> = ({ chips, selected, onToggle, disabled, testIdPrefix }) => {
+  const styles = useStyles();
+  return (
+    <div className={styles.chipWrap} data-testid={`${testIdPrefix}-chips`}>
+      {chips.map((c) => (
+        <ToggleButton
+          key={c.id}
+          size="small"
+          shape="circular"
+          checked={selected.includes(c.id)}
+          disabled={disabled}
+          onClick={() => onToggle(c.id)}
+          data-testid={`${testIdPrefix}-${c.id}`}
+        >
+          {c.label}
+        </ToggleButton>
+      ))}
+    </div>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -125,9 +172,9 @@ export const MyAssistantDialog: React.FC<MyAssistantDialogProps> = ({
   onClose,
   coldStart = false,
   practiceAreas,
+  workOffices = [],
   initialValues,
   onSubmit,
-  onErase,
   loading = false,
 }) => {
   const styles = useStyles();
@@ -137,30 +184,28 @@ export const MyAssistantDialog: React.FC<MyAssistantDialogProps> = ({
   const [selectedPractice, setSelectedPractice] = React.useState<string[]>(
     initialValues?.practiceAreaIds ?? []
   );
-  const [focusAreas, setFocusAreas] = React.useState<string>(initialValues?.focusAreas ?? '');
+  const [focusChipIds, setFocusChipIds] = React.useState<string[]>([]);
   const [office, setOffice] = React.useState<string>(initialValues?.officeLocation ?? '');
-  const [preferences, setPreferences] = React.useState<string>(initialValues?.assistantPreferences ?? '');
+  const [prefChipIds, setPrefChipIds] = React.useState<string[]>([]);
 
   const [saving, setSaving] = React.useState(false);
-  const [erasing, setErasing] = React.useState(false);
-  const [confirmErase, setConfirmErase] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // Re-seed field state each time the dialog opens (prefill from the latest server values).
+  // Re-seed field state each time the dialog opens (prefill from the latest server values). The
+  // free-text focus/preference columns are decoded back into selected chips (MA-4).
   React.useEffect(() => {
     if (open) {
       setStep(0);
       setRole(initialValues?.primaryRole ?? null);
       setSelectedPractice(initialValues?.practiceAreaIds ?? []);
-      setFocusAreas(initialValues?.focusAreas ?? '');
+      setFocusChipIds(decodeChipSelection(initialValues?.focusAreas, FOCUS_AREA_CHIPS));
       setOffice(initialValues?.officeLocation ?? '');
-      setPreferences(initialValues?.assistantPreferences ?? '');
+      setPrefChipIds(decodeChipSelection(initialValues?.assistantPreferences, PREFERENCE_CHIPS));
       setError(null);
-      setConfirmErase(false);
     }
   }, [open, initialValues]);
 
-  const busy = saving || erasing || loading;
+  const busy = saving || loading;
 
   const roleLabel = React.useMemo(
     () => PRIMARY_ROLE_OPTIONS.find((o) => o.value === role)?.label ?? '',
@@ -176,6 +221,15 @@ export const MyAssistantDialog: React.FC<MyAssistantDialogProps> = ({
     [selectedPractice, practiceNamesById]
   );
 
+  const toggleFocus = React.useCallback(
+    (id: string) => setFocusChipIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])),
+    []
+  );
+  const togglePref = React.useCallback(
+    (id: string) => setPrefChipIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])),
+    []
+  );
+
   const handleSubmit = React.useCallback(async () => {
     setError(null);
     setSaving(true);
@@ -183,9 +237,9 @@ export const MyAssistantDialog: React.FC<MyAssistantDialogProps> = ({
       await onSubmit({
         primaryRole: role,
         practiceAreaIds: selectedPractice,
-        focusAreas,
+        focusAreas: encodeChipSelection(focusChipIds, FOCUS_AREA_CHIPS),
         officeLocation: office,
-        assistantPreferences: preferences,
+        assistantPreferences: encodeChipSelection(prefChipIds, PREFERENCE_CHIPS),
       });
       onClose();
     } catch (err) {
@@ -193,22 +247,7 @@ export const MyAssistantDialog: React.FC<MyAssistantDialogProps> = ({
     } finally {
       setSaving(false);
     }
-  }, [onSubmit, onClose, role, selectedPractice, focusAreas, office, preferences]);
-
-  const handleErase = React.useCallback(async () => {
-    if (!onErase) return;
-    setError(null);
-    setErasing(true);
-    try {
-      await onErase();
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not clear your profile. Please try again.');
-    } finally {
-      setErasing(false);
-      setConfirmErase(false);
-    }
-  }, [onErase, onClose]);
+  }, [onSubmit, onClose, role, selectedPractice, focusChipIds, office, prefChipIds]);
 
   const isLastStep = step === TOTAL_STEPS - 1;
 
@@ -253,9 +292,7 @@ export const MyAssistantDialog: React.FC<MyAssistantDialogProps> = ({
 
                 <Field
                   label={
-                    <InfoLabel
-                      info="Your role tailors the assistant's tone and the tasks it surfaces first (for example, a partner sees different defaults than a paralegal)."
-                    >
+                    <InfoLabel info="Your role tailors the assistant's tone and the tasks it surfaces first (for example, a partner sees different defaults than a paralegal).">
                       Primary role
                     </InfoLabel>
                   }
@@ -295,22 +332,33 @@ export const MyAssistantDialog: React.FC<MyAssistantDialogProps> = ({
                         </>
                       }
                     >
-                      Office location
+                      Primary work location
                     </InfoLabel>
                   }
                 >
-                  <Input
-                    aria-label="Office location"
+                  <Dropdown
+                    aria-label="Primary work location"
                     data-testid="my-assistant-office"
+                    placeholder={OFFICE_PLACEHOLDER}
                     disabled={busy}
+                    selectedOptions={office ? [office] : []}
                     value={office}
-                    onChange={(_e, data) => setOffice(data.value)}
-                  />
+                    onOptionSelect={(_e, data) => setOffice(data.optionValue ?? '')}
+                  >
+                    <Option key="__none__" value="" text="Not specified">
+                      Not specified
+                    </Option>
+                    {workOffices.map((o) => (
+                      <Option key={o.id} value={o.name} text={o.name}>
+                        {o.name}
+                      </Option>
+                    ))}
+                  </Dropdown>
                 </Field>
               </>
             ) : null}
 
-            {/* ── Step 2: Practice areas ────────────────────────────────────── */}
+            {/* ── Step 2: Focus areas ───────────────────────────────────────── */}
             {step === 1 ? (
               <>
                 <Text size={200} className={styles.stepIntro}>
@@ -345,27 +393,17 @@ export const MyAssistantDialog: React.FC<MyAssistantDialogProps> = ({
 
                 <Field
                   label={
-                    <InfoLabel
-                      info={
-                        <>
-                          Describe what you concentrate on. Examples:
-                          <br />• &ldquo;M&amp;A and joint ventures&rdquo;
-                          <br />• &ldquo;Commercial real-estate leasing&rdquo;
-                          <br />• &ldquo;Employment disputes and wage-and-hour&rdquo;
-                        </>
-                      }
-                    >
-                      Describe your focus areas
+                    <InfoLabel info="Pick the areas you concentrate on. The assistant weights these when it surfaces matters, documents, and suggestions.">
+                      What do you focus on?
                     </InfoLabel>
                   }
                 >
-                  <Textarea
-                    aria-label="Focus areas"
-                    data-testid="my-assistant-focus"
+                  <ChipMultiSelect
+                    chips={FOCUS_AREA_CHIPS}
+                    selected={focusChipIds}
+                    onToggle={toggleFocus}
                     disabled={busy}
-                    resize="vertical"
-                    value={focusAreas}
-                    onChange={(_e, data) => setFocusAreas(data.value)}
+                    testIdPrefix="my-assistant-focus"
                   />
                 </Field>
               </>
@@ -375,79 +413,40 @@ export const MyAssistantDialog: React.FC<MyAssistantDialogProps> = ({
             {step === 2 ? (
               <>
                 <Text size={200} className={styles.stepIntro}>
-                  Tell the assistant how you like it to work — the style, format, and priorities you
-                  prefer in its responses.
+                  Choose how you like the assistant to work. These preferences are applied to every
+                  response, so its behaviour stays consistent.
                 </Text>
 
                 <Field
                   label={
-                    <InfoLabel
-                      info={
-                        <>
-                          Examples:
-                          <br />• &ldquo;Be concise and cite sources&rdquo;
-                          <br />• &ldquo;Always show a short summary first&rdquo;
-                          <br />• &ldquo;Prefer bullet points over prose&rdquo;
-                          <br />• &ldquo;Flag risks and deadlines explicitly&rdquo;
-                        </>
-                      }
-                    >
-                      Describe your preferences in using the Assistant
+                    <InfoLabel info="Each selected preference is applied as a standing instruction to the assistant — so its tone and format stay consistent across every response.">
+                      How should the assistant respond?
                     </InfoLabel>
                   }
                 >
-                  <Textarea
-                    aria-label="Assistant preferences"
-                    data-testid="my-assistant-preferences"
+                  <ChipMultiSelect
+                    chips={PREFERENCE_CHIPS}
+                    selected={prefChipIds}
+                    onToggle={togglePref}
                     disabled={busy}
-                    resize="vertical"
-                    value={preferences}
-                    onChange={(_e, data) => setPreferences(data.value)}
+                    testIdPrefix="my-assistant-preferences"
                   />
                 </Field>
-
-                {confirmErase ? (
-                  <MessageBar intent="warning" data-testid="my-assistant-erase-confirm">
-                    <MessageBarBody>
-                      This permanently deletes your stated profile, its practice-area links, and your
-                      assistant memory. This cannot be undone.
-                    </MessageBarBody>
-                  </MessageBar>
-                ) : null}
               </>
             ) : null}
           </DialogContent>
 
           <DialogActions>
+            {/* MA-2: simplified nav — Cancel (bottom-left) · Back · Next/Save (bottom-right). */}
             <div className={styles.actionsRow}>
-              <div>
-                {/* Clear my profile (F5 erase) lives on the LAST step, next to Save. */}
-                {onErase && isLastStep ? (
-                  confirmErase ? (
-                    <Button
-                      appearance="primary"
-                      className={styles.eraseButton}
-                      icon={erasing ? <Spinner size="tiny" /> : <DeleteRegular />}
-                      disabled={busy}
-                      onClick={handleErase}
-                      data-testid="my-assistant-erase-confirm-btn"
-                    >
-                      Confirm delete
-                    </Button>
-                  ) : (
-                    <Button
-                      appearance="subtle"
-                      className={styles.eraseButton}
-                      icon={<DeleteRegular />}
-                      disabled={busy}
-                      onClick={() => setConfirmErase(true)}
-                      data-testid="my-assistant-erase"
-                    >
-                      Clear my profile
-                    </Button>
-                  )
-                ) : null}
-              </div>
+              <Button
+                appearance="subtle"
+                onClick={onClose}
+                disabled={busy}
+                data-testid="my-assistant-cancel"
+              >
+                Cancel
+              </Button>
               <div className={styles.rightActions}>
                 {step > 0 ? (
                   <Button
@@ -459,16 +458,7 @@ export const MyAssistantDialog: React.FC<MyAssistantDialogProps> = ({
                   >
                     Back
                   </Button>
-                ) : (
-                  <Button
-                    appearance="secondary"
-                    onClick={onClose}
-                    disabled={busy}
-                    data-testid="my-assistant-cancel"
-                  >
-                    Cancel
-                  </Button>
-                )}
+                ) : null}
                 {isLastStep ? (
                   <Button
                     appearance="primary"

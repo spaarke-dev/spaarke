@@ -1174,6 +1174,34 @@ export interface ISprkChatProps {
   inputBusy?: boolean;
 
   /**
+   * CHAT-6 (UAT 2026-07-19): when true, hide the toolbar-strip slash-command
+   * ("Prompt") button. Some hosts (SpaarkeAi Assistant) treat slash commands as an
+   * advanced affordance not worth surfacing by default. The slash menu is still
+   * reachable by typing `/`. Omitted/false → the button renders (prior behavior).
+   */
+  hidePromptMenu?: boolean;
+
+  /**
+   * CHAT-4 (UAT 2026-07-19): when true, suppress SprkChat's built-in
+   * "No messages yet" empty state. Hosts that render their own get-started
+   * surface (SpaarkeAi WelcomeStartCards) set this so the two don't both show.
+   * Omitted/false → the built-in empty state renders (prior behavior).
+   */
+  hideEmptyState?: boolean;
+
+  /**
+   * CHAT-5 (UAT 2026-07-19): placeholder text for the composer input. Omitted →
+   * the default 'Type a message...'.
+   */
+  inputPlaceholder?: string;
+
+  /**
+   * CHAT-5 (UAT 2026-07-19): minimum visible rows for the composer textarea (a
+   * taller default composer). Omitted → the Fluent Textarea default height.
+   */
+  inputMinRows?: number;
+
+  /**
    * Callback fired when the user clicks the dismiss button on an attachment
    * chip — R5 task 020 / D2-11.
    *
@@ -1401,6 +1429,8 @@ export interface ISprkChatInputProps {
   maxCharCount?: number;
   /** Placeholder text */
   placeholder?: string;
+  /** CHAT-5 (UAT 2026-07-19): minimum visible rows for the textarea (taller composer). */
+  minRows?: number;
   /**
    * Optional dynamic slash commands appended to the static DEFAULT_SLASH_COMMANDS.
    * Use to inject playbook-capability commands resolved from the context mapping

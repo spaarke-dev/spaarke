@@ -37,6 +37,7 @@ import { AssistantToolMenu } from "../AssistantToolMenu";
 function renderMenu(props?: {
   onQuickStart?: () => void;
   onMyAssistant?: () => void;
+  highlightMyAssistant?: boolean;
   theme?: typeof webLightTheme;
 }): void {
   const theme = props?.theme ?? webLightTheme;
@@ -45,6 +46,7 @@ function renderMenu(props?: {
       <AssistantToolMenu
         onQuickStart={props?.onQuickStart}
         onMyAssistant={props?.onMyAssistant}
+        highlightMyAssistant={props?.highlightMyAssistant}
       />
     </FluentProvider>,
   );
@@ -105,6 +107,23 @@ describe("AssistantToolMenu", () => {
 
     expect(onMyAssistant).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("assistant-tool-menu-popover")).not.toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // MA-1 (UAT 2026-07-19) — incomplete-profile badge
+  // -------------------------------------------------------------------------
+
+  it("shows the profile-setup badge on the trigger when highlightMyAssistant is true", () => {
+    renderMenu({ highlightMyAssistant: true });
+    expect(screen.getByTestId("assistant-tool-menu-badge")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /profile setup available/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the badge when the profile is complete (default)", () => {
+    renderMenu();
+    expect(screen.queryByTestId("assistant-tool-menu-badge")).not.toBeInTheDocument();
   });
 
   it("does not throw when handler props are omitted (console-only placeholder for 041/042)", async () => {

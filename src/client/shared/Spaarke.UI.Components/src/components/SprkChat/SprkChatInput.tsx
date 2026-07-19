@@ -94,6 +94,7 @@ export const SprkChatInput = React.forwardRef<ISprkChatInputHandle, ISprkChatInp
       disabled = false,
       maxCharCount = DEFAULT_MAX_CHAR_COUNT,
       placeholder = 'Type a message...',
+      minRows,
       dynamicSlashCommands,
       hideSlashButton = false,
     },
@@ -267,6 +268,9 @@ export const SprkChatInput = React.forwardRef<ISprkChatInputHandle, ISprkChatInp
               aria-expanded={menuVisible}
               aria-haspopup="listbox"
               data-testid="chat-input-textarea"
+              // CHAT-5 (UAT 2026-07-19): a taller default composer when the host asks for
+              // it — `rows` sets the textarea's initial visible height (still user-resizable).
+              textarea={minRows ? { rows: minRows } : undefined}
               // Fluent Textarea forwards the ref to the underlying <textarea> element
               // (primary slot — confirmed by TextareaSlots.textarea JSDoc)
               ref={inputRef}

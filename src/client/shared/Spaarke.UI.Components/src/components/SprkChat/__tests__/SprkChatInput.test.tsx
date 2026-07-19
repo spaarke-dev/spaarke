@@ -45,6 +45,16 @@ describe('SprkChatInput', () => {
       expect(screen.getByPlaceholderText('Ask a question...')).toBeInTheDocument();
     });
 
+    it('CHAT-5: applies minRows to the textarea for a taller composer', () => {
+      renderWithProviders(<SprkChatInput onSend={mockOnSend} minRows={3} />);
+      expect(screen.getByTestId('chat-input-textarea')).toHaveAttribute('rows', '3');
+    });
+
+    it('CHAT-5: omits the rows attribute when minRows is not provided', () => {
+      renderWithProviders(<SprkChatInput onSend={mockOnSend} />);
+      expect(screen.getByTestId('chat-input-textarea')).not.toHaveAttribute('rows');
+    });
+
     it('should display Ctrl+Enter hint', () => {
       const { container } = renderWithProviders(<SprkChatInput onSend={mockOnSend} />);
 

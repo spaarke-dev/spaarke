@@ -30,6 +30,7 @@ import {
   isProfileComplete,
   type IUserProfilePort,
   type PracticeArea,
+  type WorkOffice,
   type UserProfileRow,
   type UserProfileFormValues,
 } from './userProfileService';
@@ -58,11 +59,17 @@ export interface UseMyAssistantResult {
   coldStart: boolean;
   loading: boolean;
   practiceAreas: PracticeArea[];
+  workOffices: WorkOffice[];
   initialValues: Partial<UserProfileFormValues>;
   onSubmit: (values: UserProfileFormValues) => Promise<void>;
   onErase: () => Promise<void>;
   /** True once a Dataverse user id was resolvable and wiring is live (false in non-MDA/jsdom). */
   available: boolean;
+  /**
+   * True when the profile read succeeded but is incomplete — the host surfaces a dismissible
+   * "complete your profile" indicator (MA-1, UAT 2026-07-19). Replaces the old jarring auto-open.
+   */
+  needsProfile: boolean;
 }
 
 function defaultDisplayName(): string | undefined {
@@ -103,10 +110,11 @@ export function useMyAssistant(options: UseMyAssistantOptions = {}): UseMyAssist
 
   const [open, setOpen] = React.useState(false);
   const [coldStart, setColdStart] = React.useState(false);
+  const [needsProfile, setNeedsProfile] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [practiceAreas, setPracticeAreas] = React.useState<PracticeArea[]>([]);
+  const [workOffices, setWorkOffices] = React.useState<WorkOffice[]>([]);
   const [existing, setExisting] = React.useState<UserProfileRow | null>(null);
-  const autoOpenedRef = React.useRef(false);
 
   // Cold-start prefetch (once). Inert when no user id / disabled.
   React.useEffect(() => {
@@ -116,10 +124,11 @@ export function useMyAssistant(options: UseMyAssistantOptions = {}): UseMyAssist
     (async () => {
       // UAT 2026-07-18: settle each read INDEPENDENTLY. Previously a single Promise.all meant a
       // failure in the profile read (the lookup-alternate-key 400) also discarded the successfully
-      // loaded practice areas → an empty dropdown. allSettled lets the practice-areas list populate
-      // even if the profile read fails, and vice-versa.
-      const [areasResult, profileResult] = await Promise.allSettled([
+      // loaded practice areas → an empty dropdown. allSettled lets each list populate even if a
+      // sibling read fails. MA-3 (2026-07-19): work offices load here too.
+      const [areasResult, officesResult, profileResult] = await Promise.allSettled([
         port.listPracticeAreas(),
+        port.listWorkOffices(),
         port.getProfileByUser(systemUserId),
       ]);
       if (cancelled) return;
@@ -128,19 +137,22 @@ export function useMyAssistant(options: UseMyAssistantOptions = {}): UseMyAssist
       } else {
         console.warn('[useMyAssistant] practice-area load failed:', areasResult.reason);
       }
+      if (officesResult.status === 'fulfilled') {
+        setWorkOffices(officesResult.value);
+      } else {
+        console.warn('[useMyAssistant] work-office load failed:', officesResult.reason);
+      }
       const profile = profileResult.status === 'fulfilled' ? profileResult.value : null;
       if (profileResult.status === 'rejected') {
         console.warn('[useMyAssistant] profile load failed:', profileResult.reason);
       }
       setExisting(profile);
-      // Only auto-open the cold-start questionnaire when the profile read SUCCEEDED and is incomplete
-      // (a failed read must not spuriously treat the user as brand-new).
+      // MA-1 (UAT 2026-07-19): NO auto-open. When the profile read SUCCEEDED and is incomplete, flag
+      // cold-start + needs-profile so the host can surface a dismissible indicator (a failed read must
+      // not spuriously treat the user as brand-new). Opening is now user-initiated only.
       if (profileResult.status === 'fulfilled' && !isProfileComplete(profile)) {
         setColdStart(true);
-        if (!autoOpenedRef.current) {
-          autoOpenedRef.current = true;
-          setOpen(true);
-        }
+        setNeedsProfile(true);
       }
       setLoading(false);
     })();
@@ -199,6 +211,7 @@ export function useMyAssistant(options: UseMyAssistantOptions = {}): UseMyAssist
       };
       setExisting(completedRow);
       setColdStart(false);
+      setNeedsProfile(false);
     },
     [port, systemUserId, displayName, existing, options]
   );
@@ -219,6 +232,7 @@ export function useMyAssistant(options: UseMyAssistantOptions = {}): UseMyAssist
     await eraseMyAssistantProfile(port, { systemUserId, eraseUserMemory });
     setExisting(null);
     setColdStart(true);
+    setNeedsProfile(true);
   }, [port, systemUserId, options]);
 
   const initialValues = React.useMemo(() => rowToInitialValues(existing), [existing]);
@@ -230,9 +244,11 @@ export function useMyAssistant(options: UseMyAssistantOptions = {}): UseMyAssist
     coldStart,
     loading,
     practiceAreas,
+    workOffices,
     initialValues,
     onSubmit,
     onErase,
     available,
+    needsProfile,
   };
 }
