@@ -19,7 +19,8 @@
 import * as React from "react";
 import { Button, Tooltip } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular } from "@fluentui/react-icons";
-import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, launchSurface } from "@spaarke/ui-components";
+import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, launchSurface, launchSummarizeFilesWizard } from "@spaarke/ui-components";
+import { WelcomeStartCards } from "./WelcomeStartCards";
 import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type {
@@ -416,6 +417,25 @@ export function ConversationPane(): React.JSX.Element {
     },
     [bffBaseUrl, getSessionId]
   );
+
+  // ── P1-1 (UAT 2026-07-18): cold-open get-started cards ────────────────────
+  // Three quick-start actions on the welcome stage, each reusing an EXISTING
+  // launch mechanism (no new launcher — CLAUDE.md §11).
+  const handleWelcomeSummarize = React.useCallback(() => {
+    launchSummarizeFilesWizard({ bffBaseUrl });
+  }, [bffBaseUrl]);
+  const handleWelcomeCreateMatter = React.useCallback(() => {
+    void launchSurface({ consumerType: "create-matter", bffBaseUrl });
+  }, [bffBaseUrl]);
+  const handleWelcomeCompose = React.useCallback(() => {
+    // Open a blank Compose tab (same widget_load contract the add-to-DMS fallback uses).
+    dispatch("workspace", {
+      type: "widget_load",
+      widgetType: "compose",
+      widgetData: { source: "welcome-compose" },
+      displayName: "Compose",
+    } as WorkspacePaneEvent);
+  }, [dispatch]);
 
   // ── Serial action queue (FR-18) ────────────────────────────────────────
   // Rapid, distinct AI actions (e.g. FR-14 toolbar's Compare then Draft) must
@@ -1406,6 +1426,13 @@ export function ConversationPane(): React.JSX.Element {
 
       <div className={styles.content} role="region" aria-label="AI Chat">
         {showWelcomePanel && <WelcomePanel />}
+        {showWelcomePanel && (
+          <WelcomeStartCards
+            onSummarize={handleWelcomeSummarize}
+            onCreateMatter={handleWelcomeCreateMatter}
+            onCompose={handleWelcomeCompose}
+          />
+        )}
 
         <div className={styles.chatWrapper}>
           <RestoreBanners

@@ -4,7 +4,9 @@
  * Proves the per-message "Insert into document" affordance: it renders on completed ASSISTANT
  * messages when the host provides `onInsertToCompose`, and clicking it hands the message's text to
  * the host (which routes it through the cross-pane bridge to the Compose editor's redline engine).
- * Guards the render gates: not on user messages, not while streaming, not without the callback.
+ * Guards the render gates: not on user messages, not while streaming, not without the callback,
+ * and (P1-3, UAT 2026-07-18) only when the content is a substantial DRAFT worth inserting — short
+ * conversational replies no longer offer it.
  */
 import '@testing-library/jest-dom';
 import * as React from 'react';
@@ -16,9 +18,15 @@ import type { IChatMessage } from '../types';
 const renderWithProvider = (ui: React.ReactElement) =>
   render(<FluentProvider theme={webLightTheme}>{ui}</FluentProvider>);
 
+// P1-3: an insertable DRAFT — long enough (>=240 chars) to clear the "rare" gate.
+const DRAFT_BODY =
+  'Consider adding an indemnification clause here: the Supplier shall indemnify and hold harmless the ' +
+  'Customer against any and all claims, losses, liabilities, and expenses (including reasonable ' +
+  "attorneys' fees) arising out of the Supplier's breach of this Agreement or its negligent acts or omissions.";
+
 const assistantMessage: IChatMessage = {
   role: 'Assistant',
-  content: 'Consider adding an indemnification clause here.',
+  content: DRAFT_BODY,
   timestamp: '2026-07-13T00:00:00.000Z',
 };
 
@@ -31,7 +39,18 @@ describe('SprkChatMessage — R4 "Insert into document"', () => {
     expect(btn).toHaveTextContent('Insert into document');
 
     fireEvent.click(btn);
-    expect(onInsertToCompose).toHaveBeenCalledWith('Consider adding an indemnification clause here.');
+    expect(onInsertToCompose).toHaveBeenCalledWith(DRAFT_BODY);
+  });
+
+  it('does NOT render on a short conversational reply (P1-3: only substantial drafts)', () => {
+    const onInsertToCompose = jest.fn();
+    renderWithProvider(
+      <SprkChatMessage
+        message={{ ...assistantMessage, content: 'Yes, I can help with that.' }}
+        onInsertToCompose={onInsertToCompose}
+      />
+    );
+    expect(screen.queryByTestId('insert-into-document')).not.toBeInTheDocument();
   });
 
   it('does NOT render when onInsertToCompose is absent', () => {
@@ -61,11 +80,11 @@ describe('SprkChatMessage — R4 "Insert into document"', () => {
       role: 'Assistant',
       content: '',
       timestamp: '2026-07-13T00:00:00.000Z',
-      metadata: { responseType: 'markdown', data: { text: 'The structured suggestion body.' } },
+      metadata: { responseType: 'markdown', data: { text: DRAFT_BODY } },
     };
     renderWithProvider(<SprkChatMessage message={structured} onInsertToCompose={onInsertToCompose} />);
 
     fireEvent.click(screen.getByTestId('insert-into-document'));
-    expect(onInsertToCompose).toHaveBeenCalledWith('The structured suggestion body.');
+    expect(onInsertToCompose).toHaveBeenCalledWith(DRAFT_BODY);
   });
 });
