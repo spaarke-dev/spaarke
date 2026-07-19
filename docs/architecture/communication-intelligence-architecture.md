@@ -1,11 +1,11 @@
 # Communication Intelligence Architecture
 
-> **Last Updated**: 2026-07-17
-> **Last Reviewed**: 2026-07-17
-> **Reviewed By**: email-communication-solution-r4 task 080 (W8 documentation); extended by messaging-communication-app-r1 task 081 (§9 — ACS messaging channel as-built)
+> **Last Updated**: 2026-07-19
+> **Last Reviewed**: 2026-07-19
+> **Reviewed By**: email-communication-solution-r4 task 080 (W8 documentation); extended by messaging-communication-app-r1 task 081 (§9 — ACS messaging channel as-built); extended by messaging-communication-app-r2 task 081 (§15 — the Communication Workspace read/organize layer as-built)
 > **Status**: Current — canonical
-> **Canonical ADR**: [ADR-045 — Communication Architecture](../../.claude/adr/ADR-045-communication-architecture.md) (engine + seams) · [ADR-046 — ACS Messaging Channel](../../.claude/adr/ADR-046-acs-messaging-channel.md) (§9 — second channel + thread model)
-> **Purpose**: The canonical architecture reference for the Communication Intelligence subsystem — the normalized-message envelope, the 6-rung Association Engine, the confidence→status ladder + auto-file kill-switch, direction-symmetric enrichment, channel seams, **the ACS messaging channel + first-class thread model (§9)**, the read-only suggestion endpoint, per-rung telemetry, and the shared inbound patterns (idempotency, `.eml`→SPE archival, attachment→Document, RAG indexing). Supersedes and absorbs `email-processing-architecture.md`, `email-to-document-architecture.md`, and `email-to-document-automation.md`.
+> **Canonical ADR**: [ADR-045 — Communication Architecture](../../.claude/adr/ADR-045-communication-architecture.md) (engine + seams) · [ADR-046 — ACS Messaging Channel](../../.claude/adr/ADR-046-acs-messaging-channel.md) (§9 — second channel + thread model) · [ADR-048 — Communication Participant Index](../../.claude/adr/ADR-048-communication-participant-index.md) (§15.2 — message-grain participant junction)
+> **Purpose**: The canonical architecture reference for the Communication Intelligence subsystem — the normalized-message envelope, the 6-rung Association Engine, the confidence→status ladder + auto-file kill-switch, direction-symmetric enrichment, channel seams, **the ACS messaging channel + first-class thread model (§9)**, the read-only suggestion endpoint, per-rung telemetry, the shared inbound patterns (idempotency, `.eml`→SPE archival, attachment→Document, RAG indexing), and **the R2 Communication Workspace read/organize layer (§15)** — by-regarding + filtered read endpoints, the participant index, the auto-threading policy, and the two workspace UI surfaces (regarding-mode Timeline, rich workspace widget). Supersedes and absorbs `email-processing-architecture.md`, `email-to-document-architecture.md`, and `email-to-document-automation.md`.
 
 ---
 
@@ -249,36 +249,128 @@ The target architecture is a **4-layer notification/action spine**: (A) session-
 
 ---
 
-## 15. ADR cross-references
+## 15. R2 — the Communication Workspace (read/organize layer) — as-built
+
+**Codified in [ADR-048](../../.claude/adr/ADR-048-communication-participant-index.md)** (concise; full: [`docs/adr/ADR-048-communication-participant-index.md`](../adr/ADR-048-communication-participant-index.md)) for the participant index; the remaining R2 surfaces extend existing ADRs rather than adding new ones. R2 (`messaging-communication-app-r1`'s successor project, `messaging-communication-app-r2`) is **not a new subsystem** — it is the **read / query / organize layer** on top of the R1 messaging channel (§9): threads-per-record across all 11 ADR-024 regarding families, a queryable participant index, an auto-threading policy so no message ever orphans, and a rich workspace widget. Every R2 surface **extends** an existing R1 seam (`CommunicationThreadReadService`, `IImpersonatedCommunicationQuery`, `ICommunicationAccessFilter`, `IThreadResolver`, the `CommunicationTimeline` component, the `communications-list` widget) — none of them is a second read path, a second regarding mechanism, or a second access filter.
+
+### 15.1 Workspace read endpoints — by-regarding + filtered query
+
+**Code entry points**
+
+| Concern | Entry point |
+|---|---|
+| By-regarding read | `Services/Communication/CommunicationThreadReadService.cs` (`ReadByRegardingAsync`) |
+| Filtered query | `Services/Communication/CommunicationThreadReadService.cs` (`QueryCommunicationsAsync`) |
+| Shared impersonated pipeline | `Services/Communication/CommunicationThreadReadService.cs` (`QueryVisibleMessagesAsync`, private) |
+| Regarding-family map (message AND thread lookups) | `Services/Communication/Engine/RegardingFieldMap.cs` |
+| Endpoint registration | `Api/CommunicationEndpoints.cs` — `GET /api/communications/by-regarding/{entityType}/{id}`, `GET /api/communications` |
+
+`GET /api/communications/by-regarding/{entityType}/{id}` (task 010, FR-01) and the filtered `GET /api/communications?thread=&regarding=&channel=&from=&to=&participant=` (task 011/051, FR-02) are **additive methods on the existing `CommunicationThreadReadService`** — not a new service, not a new access mechanism. Both resolve `entityType` through the **same** `RegardingFieldMap` the association engine (§4.3) already uses to write `sprk_communication`'s regarding lookups; the task-002 thread schema mirrors the identical field-name convention (`sprk_regarding{...}`) on `sprk_communicationthread`, so `RegardingFieldMap.FieldFor(entityType)` resolves the typed lookup on **either** entity with zero per-family branching. This is what makes both endpoints **entity-set-agnostic across all 11 regarding families** from a single code path.
+
+Both endpoints funnel through one private pipeline, `QueryVisibleMessagesAsync`: issue the Dataverse query **impersonated** (`MSCRMCallerID` = the caller's `systemuserid`, per the R1 access-model decision, §9.1) → apply the shared `ICommunicationAccessFilter` (the same two rules §9.1 already documents: internal-only fail-closed, privilege metadata-only) → project to the R1 `ThreadMessageDto` shape. **There is exactly one impersonation seam and one access filter for every read path in the platform — R1's thread-scoped read, R2's by-regarding read, and R2's filtered query all compose onto it.** No membership-union was reintroduced (the hand-computed union was retired 2026-07-16, `projects/messaging-communication-app-r1/notes/access-model-decision.md`) and no second filter was added.
+
+`ReadByRegardingAsync` layers one extra step ahead of the shared pipeline: it queries `sprk_communicationthreads` by the typed regarding lookup to find every thread anchored to the record (also impersonated — a private thread the caller has no grant for is simply absent from this query), then runs the shared pipeline with an OR-filter over those thread ids, and groups the visible messages back under their thread (`RegardingReadResult` → `ThreadReadResult[]` → `ThreadMessageDto[]`). `QueryCommunicationsAsync` instead composes independent OData clauses per facet (`thread`, `regarding={entityType}:{guid}`, `channel`, `from`/`to`) with `AND`, then runs the shared pipeline once; a malformed or absent facet is a 400 `ProblemDetails`, never an unfiltered dump.
+
+### 15.2 Participant index — `sprk_communicationparticipant`
+
+**Code entry points**
+
+| Concern | Entry point |
+|---|---|
+| Junction entity + schema | `sprk_communicationparticipant` (message-grain; see [ADR-048](../../.claude/adr/ADR-048-communication-participant-index.md)) |
+| Write (capture/send) | `Services/Communication/CommunicationParticipantIndexer.cs` (`WriteParticipantsAsync`) |
+| Persist-point wiring | `Services/Communication/CommunicationService.cs` (3 outbound send paths), `Services/Communication/IncomingCommunicationProcessor.cs` (inbound email), `Services/Communication/Channels/MessagingIngestor.cs` (inbound chat) |
+| Query (`participant=` facet) | `Services/Communication/CommunicationThreadReadService.cs` (`BuildParticipantClauseAsync`) |
+| Reused resolution | `Services/Communication/Engine/Rungs/ParticipantCorrelationRung.cs` (`QueryContactByEmailAsync`, via `ICommunicationDataverseService`) |
+
+Sender/recipients on `sprk_communication` are `;`-joined **text** (`sprk_from`/`sprk_to`/`sprk_cc`/`sprk_bcc`) — not queryable, no role precision, no identity resolution. `sprk_communicationparticipant` is the fix: a **message-grain** junction (parent = `sprk_communication`, required + Cascade) with one row per (message × person/address × role {From/To/Cc/Bcc}). Person identity is **two typed nullable lookups** — `sprk_systemuser` XOR `sprk_contact`, exactly one set for a resolved person, both null for an unresolved external address (`sprk_isresolved=false` + `sprk_addresstext` = the raw address, Q-D — never dropped, always back-fillable). [ADR-048](../../.claude/adr/ADR-048-communication-participant-index.md) argues this on the record as an ADR-034 **path-C comply-with-intent**: ADR-034's `(personId, personIdType)` tuple exists to dodge a 6-target polymorphic lookup and forbid text-name matching; the participant space here has only 2 targets, so two typed lookups honor that same intent (typed identity, no fuzzy matching) while adding FK integrity and DataGrid chip auto-derivation the tuple form cannot.
+
+`CommunicationParticipantIndexer.WriteParticipantsAsync` is wired into all **5** message-persist points (3 outbound in `CommunicationService` — shared-mailbox send, OBO send, the shared `SendMessageAsync` — plus inbound email in `IncomingCommunicationProcessor` and inbound chat in `MessagingIngestor`). It reuses `ParticipantCorrelationRung`'s existing `QueryContactByEmailAsync` resolver (no second resolver, no new AI dependency) and is **best-effort/non-fatal and idempotent**: a write failure (including the schema not yet being live) is logged and swallowed rather than failing the send/capture path, and re-processing a message writes no duplicate rows (a `(role, address)` existence check per message).
+
+The `participant=` facet (task 051) joins the junction as a **candidate-id resolver only** — it is deliberately not a second access gate. A GUID value matches either typed lookup in any role (FK-backed, not a text scan); a non-GUID value matches `sprk_addresstext` by exact equality (the unresolved-external-party path). The resulting candidate message ids are then run through the **same** `QueryVisibleMessagesAsync` impersonated read + access filter as every other facet — a candidate the caller cannot see there is silently absent from the result, so the junction can never leak access the impersonated read wouldn't already grant.
+
+### 15.3 Auto-threading policy — the 3-tier `IThreadResolver` ladder
+
+**Code entry points**
+
+| Concern | Entry point |
+|---|---|
+| Ladder + naming re-derive | `Services/Communication/ThreadResolver.cs` (`ResolveAndAssignThreadAsync`, `ReDeriveThreadNameAsync`) |
+| Default/master idempotency key | `Services/Communication/ThreadResolver.cs` (`FindOrCreateDefaultThreadAsync`, `sprk_isdefaultthread`) |
+| Thread regarding schema (task 002) | 11 typed `sprk_regarding{...}` lookups + Lookup discriminator `sprk_regardingrecordtype_ref` + `sprk_nameisautoderived`/`sprk_isdefaultthread` markers on `sprk_communicationthread` |
+| Thread regarding placement | `src/client/pcf/RegardingResolver/` on the `sprk_communicationthread` form (0 code — dynamic nav-prop discovery binds `sprk_regardingrecordtype_ref`) |
+
+R1's `IThreadResolver` (§9.2) already dispatched per-channel to JOIN an existing thread or CREATE a new one from the message's channel key (subject/ancestry for email, ACS `ChatThreadId` for chat). R2 (task 070) extends the **Tier-1 miss** case — previously a channel key that produced no groupable conversation (e.g. an outbound chat with no ACS thread id yet) returned `null` and the message was **unthreaded**. The ladder now falls through instead: **Tier 2** — a per-record default thread, found-or-lazily-created, keyed on the message's resolved ADR-024 regarding (`sprk_isdefaultthread=true` + the thread's own denormalized regarding pointer as the idempotency key, so at most one default thread exists per record); **Tier 3** — no resolvable regarding at all, so a per-user master catch-all keyed `("systemuser", ownerId)` (a key type deliberately **outside** `RegardingFieldMap`, so a master thread never collides with a record-anchored default and never surfaces in a by-regarding read). The whole ladder runs inside the resolver's existing NFR-02 try/catch — a Dataverse failure anywhere in it degrades to an unthreaded message, never a failed send/capture.
+
+Thread regarding-resolution reuses the platform's one mechanism (ADR-024/ADR-046: no second regarding pipeline). The thread's `sprk_regardingrecordtype` is **Text** (a denormalized display copy — see §9.1), so it cannot bind the RegardingResolver PCF's Lookup-typed `regardingRecordType` property; task 002 adds a **parallel Lookup discriminator**, `sprk_regardingrecordtype_ref` → `sprk_recordtype_ref`, chosen specifically so the PCF's dynamic nav-prop discovery (matching on `referencedEntity=='sprk_recordtype_ref'` + a column name containing `regardingrecordtype`) finds and binds it with **zero code change** — the existing Text field is left untouched (MUST-NOT-RETYPE) and is never matched by that discovery logic. 11 typed `sprk_regarding{...}` lookups mirror `RegardingFieldMap.All` verbatim, so the same field-name convention resolves the thread's regarding on read (§15.1) and on write (RegardingResolver).
+
+Naming re-derive (task 071, FR-07) closes the loop: `ReDeriveThreadNameAsync` re-derives `sprk_name` from the thread's *current* regarding, gated on the `sprk_nameisautoderived` marker (`true`/missing = Auto → re-derive; `false` = Edited → preserve the user's rename unconditionally) and short-circuited for the Tier-3 master (`sprk_regardingrecordtype=="systemuser"` is never treated as a resolvable regarding record). **Known gap, documented rather than silently left**: neither the regarding-change trigger nor the edited-marker flip is wired to a caller yet — both would-be triggers are client-side `Xrm.WebApi` writes (the RegardingResolver PCF's write handler; a direct form edit of `sprk_name`) that bypass the BFF entirely. The recommended follow-on is a Dataverse plugin (Post-Operation Update of `sprk_communicationthread`) invoking `ReDeriveThreadNameAsync` on a regarding-lookup change and flipping the marker on a name edit — not built in R2 (out of its bff-api/pcf/communication task scope).
+
+### 15.4 Surface 1 — the regarding-mode Timeline
+
+**Code entry points**
+
+| Concern | Entry point |
+|---|---|
+| Regarding-mode component logic | `src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.tsx`, `CommunicationTimeline.types.ts` (discriminated `mode` prop), `subcomponents/ThreadGroup.tsx`, `hooks/useRegardingPoll.ts` |
+| Regarding-mode PCF | `src/client/pcf/CommunicationTimelineRegarding/` (sibling to R1's `CommunicationTimeline` PCF — a separate variant folder, not a mode-switch on the deployed control) |
+| Optional count card | `sprk_chartdefinition` config record (VisualHost, `src/client/pcf/VisualHost/`) — see T-1 note below |
+
+The R1 `CommunicationTimeline` component (§9.3, §10) rendered exactly one thread. R2 extends its props to a **discriminated union** (`mode?: 'thread'` unchanged vs `mode: 'regarding'` new, task 020): regarding mode takes `(entityType, id)`, calls the by-regarding endpoint (§15.1), and renders the record's threads as collapsible groups (`ThreadGroup` — name + message count) that each expand into the **same** `buildTimeline`/`MessageRow`/`ChannelBadge` rendering R1 already ships, unchanged — no forked rendering path (ADR-012). Regarding mode is deliberately **read-only**: there is no compose box in the grouped view (composing stays inside a specific thread — thread-id mode / the R2 PCF variant), keeping the platform to one compose surface. Polling reuses the same `pollIntervalMs` convention via a new `useRegardingPoll` hook (full-snapshot refetch — the endpoint has no incremental `since` cursor).
+
+`src/client/pcf/CommunicationTimelineRegarding/` is a **new sibling PCF**, not a mode toggle on R1's live, form-bound `CommunicationTimeline` control — the decision avoids regression risk on R1's already-deployed placements (the 11 regarding-family host entities are disjoint from R1's own placements, so there is no collision either way). It is placed on **all 11 regarding-family entity forms** (task 022) with a bound `anchorField` (the R1 lesson: a code component only appears in the form's component library if it declares a bound field) targeting each entity's primary-name field — `sprk_mattername`/`sprk_projectname`/`sprk_eventname` for the three custom entities with a dedicated name field, `sprk_name` for the rest, OOB `name`/`fullname` for `account`/`contact`.
+
+**T-1 (VisualHost) boundary, honored**: an optional per-record count-only `MetricCard` (task 023, one exemplar `sprk_chartdefinition` config for `sprk_matter`, Count over `sprk_communication`) may sit beside the Timeline as a summary. VisualHost containers fetch **client-side** via `context.webAPI` — they do not go through the BFF's `internal-only` filter — so **only a count is ever surfaced there**; actual message content flows exclusively through the BFF-backed regarding-mode Timeline (§15.1's impersonation + access filter). This is a T-1 compliance boundary, not an oversight: VisualHost is chrome/config/drill-through only for this subsystem, never a second content-read path.
+
+### 15.5 Surface 3 — the workspace widget
+
+**Code entry points**
+
+| Concern | Entry point |
+|---|---|
+| Rich widget | `src/client/shared/Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/` (new `@spaarke/communication-components` lib) |
+| Registration (upgraded in place) | `register-workspace-widgets.ts` (Direct registration, SpaarkeAi), `src/solutions/LegalWorkspace/src/sections/communications.registration.ts` (section shim, LegalWorkspace) |
+| Underlying grid | `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/` — config `sprk_gridconfiguration` `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` (built by `ai-spaarke-ai-workspace-UI-r2`, reused unchanged) |
+
+The `communications-list` widget existed thin (a bare `<DataGrid>`, built by `ai-spaarke-ai-workspace-UI-r2`) before R2. Task 030 upgrades it **in place** to a rich Pattern D widget — channel + sent-date filter-chip toolbar, a per-channel count card strip, an embedded `<DataGrid hostFilters onRecordsLoaded>` reusing the framework's default row-open behavior — mirroring the shipped `CalendarWorkspaceWidget` pattern, in a **new** lib (`@spaarke/communication-components`) rather than folding into the entity-coupled Events lib or the thin generic `ai-widgets` layer. The widget type string (`communications-list`) and section id (`communications`) are **unchanged** — this is an upgrade of the existing registration, not a second widget — and the widget is **dual-deployed** to both LegalWorkspace and SpaarkeAi (the platform's two workspace-widget host surfaces) from the same registration files. No BFF change: the widget reads through `Xrm.WebApi` via the DataGrid framework's `XrmDataverseClient` adapter, the same as before the upgrade.
+
+---
+
+## 16. ADR cross-references
 
 | ADR | Relationship |
 |---|---|
 | [ADR-045](../../.claude/adr/ADR-045-communication-architecture.md) | **Canonical** — the four coupled rules (canonical send, engine over envelope, direction-symmetric enrichment, channel seams) |
 | [ADR-046](../../.claude/adr/ADR-046-acs-messaging-channel.md) (ACS Messaging Channel) | **Canonical for §9** — the second channel: ACS-as-transport, server-side token minting, the inbound ingestor seam, the first-class thread model, membership-as-projection, per-boundary provisioning |
-| ADR-024 (Polymorphic Resolver) | Regarding family — the engine extends it, never replaces it; §9.1 threads reuse the same fields/resolver as the thread anchor |
-| ADR-034 (User-record membership) | Open-thread membership derivation (§9.3); ACS membership is a reconciled projection of it, never a parallel ACL |
-| ADR-028 (Spaarke Auth v2) | Central `TokenCredential` + `IGraphClientFactory`; `OfficeNaaStrategy` client-side; no `new` credentials — governs both Graph and ACS server-side token minting (§9.3) |
-| ADR-027 (Provisioning isolation) | Per-boundary ACS resource + Event Grid system topic/subscriptions (ACS data location is immutable at create time) |
+| [ADR-048](../../.claude/adr/ADR-048-communication-participant-index.md) (Communication Participant Index) | **Canonical for §15.2** — the message-grain participant junction; ADR-034 path-C comply-with-intent |
+| ADR-024 (Polymorphic Resolver) | Regarding family — the engine extends it, never replaces it; §9.1 threads reuse the same fields/resolver as the thread anchor; §15.1/§15.3 reuse the identical `RegardingFieldMap` convention for the thread's typed lookups |
+| ADR-034 (User-record membership) | Open-thread membership derivation (§9.3); ACS membership is a reconciled projection of it, never a parallel ACL; the identity intent §15.2's participant index complies with (path C) |
+| ADR-028 (Spaarke Auth v2) | Central `TokenCredential` + `IGraphClientFactory`; `OfficeNaaStrategy` client-side; no `new` credentials — governs both Graph and ACS server-side token minting (§9.3); the impersonation identity (`MSCRMCallerID`) §15.1's reads use |
+| ADR-032 (Null-Object kill-switch) | Symmetric DI registration pattern — the §15.2 participant indexer is registered unconditionally |
+| ADR-038 (Testing strategy) | Vertical-slice seam tests are the DoD for §15.1/§15.2/§15.3 (messaging-communication-app-r2 task 080) |
+| ADR-027 (Provisioning isolation) | Per-boundary ACS resource + Event Grid system topic/subscriptions (ACS data location is immutable at create time); the §15.2 junction ships in the project managed solution |
 | ADR-004 / ADR-036 (Job contract) | Event Grid capture → Service Bus job → DLQ (§9.4) rides the existing job/idempotency/DLQ infrastructure |
 | ADR-007 (SpeFileStore) | Message-transcript + attachment archive to SPE (messaging analog of `.eml` archival, §12) |
 | ADR-018 (Kill switches) | Per-tenant auto-file kill-switch without redeploy |
 | ADR-013 (AI facade) | AI rungs reach AI via `Services/Ai/PublicContracts/` facades, not internal types |
 | ADR-037 (DeliverComposite) | Section-name-keyed streaming (relevant to the downstream Triage summary) |
-| ADR-015 (Privilege) | AI may flag privilege, never decide it — governs both the association engine's rung 5 and the messaging access filter (§9.1) |
+| ADR-015 (Privilege) | AI may flag privilege, never decide it — governs both the association engine's rung 5 and the messaging access filter (§9.1/§15.1) |
 
 ---
 
-## 16. Related
+## 17. Related
 
 - [ADR-045 — Communication Architecture (concise)](../../.claude/adr/ADR-045-communication-architecture.md) · full: [`docs/adr/ADR-045-communication-architecture.md`](../adr/ADR-045-communication-architecture.md)
 - [ADR-046 — ACS Messaging Channel (concise)](../../.claude/adr/ADR-046-acs-messaging-channel.md) · full: [`docs/adr/ADR-046-acs-messaging-channel.md`](../adr/ADR-046-acs-messaging-channel.md) — the second-channel decision (§9)
+- [ADR-048 — Communication Participant Index (concise)](../../.claude/adr/ADR-048-communication-participant-index.md) · full: [`docs/adr/ADR-048-communication-participant-index.md`](../adr/ADR-048-communication-participant-index.md) — the R2 participant-junction decision (§15.2)
 - [communication-service-architecture.md](communication-service-architecture.md) — send/inbound service mechanics (accounts, subscriptions, dedup, verification, error codes)
-- [sprk_communication.md](../data-model/sprk_communication.md) — entity schema (columns + option-set values); does not yet document the messaging-channel columns (`sprk_communicationthread`, `sprk_acsmessageid`, `sprk_acsthreadid`, `sprk_isprivate`, `sprk_privilegeclassification`) or the new `sprk_communicationthread`/`sprk_communicationchannelref` entities — see `projects/messaging-communication-app-r1/notes/messaging-schema-spec.md` for the as-built schema pending a data-model page
+- [sprk_communication.md](../data-model/sprk_communication.md) — entity schema (columns + option-set values); does not yet document the messaging-channel columns (`sprk_communicationthread`, `sprk_acsmessageid`, `sprk_acsthreadid`, `sprk_isprivate`, `sprk_privilegeclassification`), the `sprk_communicationthread`/`sprk_communicationchannelref` entities, or the R2 additions (`sprk_communicationparticipant`, the thread's 11 typed `sprk_regarding{...}` lookups, `sprk_regardingrecordtype_ref`, `sprk_nameisautoderived`, `sprk_isdefaultthread`) — see `projects/messaging-communication-app-r1/notes/messaging-schema-spec.md` and `projects/messaging-communication-app-r2/notes/002-thread-regarding-schema.md` / `003-communicationparticipant-schema.md` for the as-built schema pending a data-model page
 - [SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md](SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md) — the narrative-output pattern the downstream Triage summary would use
 - `projects/email-communication-solution-r4/notes/W5-responsive-intelligence-and-shared-notification-spine.md` — the re-homed Responsive Intelligence design seed
 - `projects/spaarke-notification-spine-r1/design.md` — the shared notification/action spine
 - `projects/messaging-communication-app-r1/design.md` §6/§8, `spec.md` FR-17, `notes/access-model-decision.md`, `notes/messaging-schema-spec.md` — the messaging-channel source project
+- `projects/messaging-communication-app-r2/spec.md` (FR-01/02/03/06/07/08/09/12), `design.md`, `notes/r2-resource-investigation.md` — the R2 Communication Workspace source project (§15)
 
 ---
 
-*Last Updated: 2026-07-17 — email-communication-solution-r4 W8 (task 080); extended by messaging-communication-app-r1 task 081 (§9).*
+*Last Updated: 2026-07-19 — email-communication-solution-r4 W8 (task 080); extended by messaging-communication-app-r1 task 081 (§9); extended by messaging-communication-app-r2 task 081 (§15 — the read/organize Workspace layer).*
