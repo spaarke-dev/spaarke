@@ -1153,6 +1153,18 @@ export interface ISprkChatProps {
   onAttachmentsChanged?: (chips: AttachmentChip[]) => void;
 
   /**
+   * When true, the composer input + send are DISABLED because the host is running
+   * an orchestration the user's next message would race
+   * (spaarkeai-assistant-enhancements-r1 UAT: a file's upload → classify → summarize
+   * runs on the Event path AFTER the chip is `ready`, and a message typed during it
+   * was dropped). OR'd with SprkChat's own busy signals (message streaming, typing,
+   * a file still `extracting`), so the input locks for the WHOLE orchestration and
+   * re-enables when the host clears this. Omitted/false → only SprkChat's internal
+   * busy signals gate the input (prior behavior).
+   */
+  inputBusy?: boolean;
+
+  /**
    * Callback fired when the user clicks the dismiss button on an attachment
    * chip — R5 task 020 / D2-11.
    *

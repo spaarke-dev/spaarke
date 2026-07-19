@@ -140,7 +140,12 @@ public sealed class AssociationStatusMapper
         {
             var conflictFields = string.Join(", ", fieldWinners.Where(f => f.Conflict).Select(f => f.Field));
             status = AssociationStatusCodes.Ambiguous;
-            reason = $"Conflicting high-confidence matches (≥ {settings.Threshold:F2}) on field(s): {conflictFields}. Engine will not guess.";
+            reason = $"Conflicting high-confidence matches (≥ {settings.Threshold:F2}) on field(s): {conflictFields}. Engine will not guess on those; other fields written for review.";
+            // A conflict on ONE field (e.g. duplicate same-named projects — legitimate in production, never
+            // auto-dedup'd) must NOT suppress a clean, unambiguous association on ANOTHER field (e.g. the one
+            // exact-name matter). AddWrites skips the conflicting field(s) and writes the rest so the review UI
+            // surfaces both the filed clean match AND the ambiguous choices (from provenance).
+            AddWrites(writes, fieldWinners, useDeterministic: false);
         }
         else if (topFull < SuggestFloor)
         {
@@ -225,8 +230,11 @@ public sealed class AssociationStatusMapper
                     .ToList();
 
                 var fullConf = NoisyOr(perKindMax.Select(m => m.Confidence));
-                var detConf = NoisyOr(perKindMax.Where(m => IsDeterministic(m.Rung)).Select(m => m.Confidence));
-                var aiInvolved = perKindMax.Any(m => !IsDeterministic(m.Rung));
+                var detConf = NoisyOr(perKindMax.Where(m => IsAutoFileEligible(m.Rung)).Select(m => m.Confidence));
+                // "AI involved" is TRUE only when a genuine AI rung contributed. RecordNameMatch is a
+                // deterministic exact-match rung that is (intentionally) not auto-file-eligible — it must NOT
+                // be mislabeled as AI in the provenance/reason.
+                var aiInvolved = perKindMax.Any(m => IsAi(m.Rung));
 
                 targets.Add(new TargetAgg(
                     Target: contributors[0].Target!,
@@ -332,9 +340,20 @@ public sealed class AssociationStatusMapper
 
     private static double Clamp(double c) => c < 0.0 ? 0.0 : c > 1.0 ? 1.0 : c;
 
-    private static bool IsDeterministic(RungKind kind) =>
+    /// <summary>
+    /// Rungs whose confidence is AUTO-FILE-ELIGIBLE (a match here can push a substantive target to Resolved).
+    /// The 4 hard-deterministic rungs. Deliberately EXCLUDES <see cref="RungKind.RecordNameMatch"/>: per owner
+    /// spec (2026-07-17) a name match is surfaced for review (the user picks the primary among matches), never
+    /// auto-filed — so it contributes to full confidence + is written as a Suggested candidate, but does not
+    /// clear the auto-file bar on its own.
+    /// </summary>
+    private static bool IsAutoFileEligible(RungKind kind) =>
         kind is RungKind.ExplicitReference or RungKind.ThreadContinuity
              or RungKind.ParticipantCorrelation or RungKind.StructuralDetector;
+
+    /// <summary>Genuine AI rungs (semantic + LLM classify) — these set the provenance "AI involved" flag.</summary>
+    private static bool IsAi(RungKind kind) =>
+        kind is RungKind.SemanticMatch or RungKind.AiClassification;
 
     // ── Internal working types ───────────────────────────────────────────────────
 

@@ -695,6 +695,57 @@ public class RecordSearchServiceTests
         capturedOptions.Filter.Should().NotContain("tenantId eq 'system'");
     }
 
+    [Fact]
+    public async Task SearchAsync_WhenPreferKeywordRanking_SkipsSemanticReranker()
+    {
+        // Association Engine record-matching path: the semantic reranker buries exact-name matches, so the
+        // caller opts into keyword (BM25) ranking. Verify the search does NOT request semantic query type.
+        var service = CreateService();
+        var request = new RecordSearchRequest
+        {
+            Query = "Smith v Smith",
+            RecordTypes = new List<string> { RecordEntityType.Matter },
+            Options = new RecordSearchOptions
+            {
+                HybridMode = RecordHybridSearchMode.KeywordOnly,
+                PreferKeywordRanking = true
+            }
+        };
+
+        SearchOptions? capturedOptions = null;
+        _searchClientMock
+            .Setup(x => x.SearchAsync<SearchIndexDocument>(
+                It.IsAny<string>(), It.IsAny<SearchOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<string, SearchOptions, CancellationToken>((text, opts, ct) => capturedOptions = opts)
+            .ReturnsAsync(CreateEmptySearchResponse());
+
+        await service.SearchAsync(request);
+
+        capturedOptions.Should().NotBeNull();
+        capturedOptions!.QueryType.Should().NotBe(SearchQueryType.Semantic);
+        capturedOptions.SemanticSearch.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SearchAsync_DefaultKeywordMode_StillUsesSemanticReranker()
+    {
+        // Interactive record search (no PreferKeywordRanking) keeps semantic reranking — behavior unchanged.
+        var service = CreateService();
+        var request = CreateValidRequest(RecordHybridSearchMode.KeywordOnly);
+
+        SearchOptions? capturedOptions = null;
+        _searchClientMock
+            .Setup(x => x.SearchAsync<SearchIndexDocument>(
+                It.IsAny<string>(), It.IsAny<SearchOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<string, SearchOptions, CancellationToken>((text, opts, ct) => capturedOptions = opts)
+            .ReturnsAsync(CreateEmptySearchResponse());
+
+        await service.SearchAsync(request);
+
+        capturedOptions.Should().NotBeNull();
+        capturedOptions!.QueryType.Should().Be(SearchQueryType.Semantic);
+    }
+
     #endregion
 
     #region SearchAsync - Uses Correct Index Name Tests

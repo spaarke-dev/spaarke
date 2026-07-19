@@ -72,6 +72,14 @@ export interface AttachmentsController {
   sessionAttachmentCount: number;
   /** Count of chips promoted to server-side session files ("N indexed"). */
   promotedCount: number;
+  /**
+   * True while any ready chip's `/documents` promotion POST is in flight. The
+   * composer lock (#2b, UAT 2026-07-18) gates on this so a typed instruction
+   * can't be sent during the upload/classify window and silently dropped —
+   * SprkChat's own `extracting`/`streaming` locks cover the client-extract and
+   * agent-turn windows, but the promotion POST sits between them uncovered.
+   */
+  isPromoting: boolean;
   handleAttachmentsChanged: (chips: AttachmentChip[]) => void;
   handleAttachmentRemoved: (chip: AttachmentChip, index: number) => void;
   handleAttachmentReady: (attachment: ChatAttachment) => void;
@@ -107,6 +115,9 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
   const [promotedChipIds, setPromotedChipIds] = React.useState<ReadonlySet<string>>(
     () => new Set<string>()
   );
+  // #2b (UAT 2026-07-18): rendered mirror of `pendingPromotionIdsRef` so the host
+  // can lock the composer while a promotion POST is in flight (see `isPromoting`).
+  const [isPromoting, setIsPromoting] = React.useState(false);
 
   // Held original Files (keyed by filename) so the auto-promote effect can
   // POST multipart binary. SprkChat forwards the original `File` reference
@@ -395,9 +406,16 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
       }
     };
 
+    setIsPromoting(true);
     void (async () => {
-      for (const item of queue) {
-        await promoteOne(item.chipId, item.chipFilename, item.attemptNumber);
+      try {
+        for (const item of queue) {
+          await promoteOne(item.chipId, item.chipFilename, item.attemptNumber);
+        }
+      } finally {
+        // Clear only when no promotions remain in flight (a later effect run may
+        // have started its own batch that this one must not prematurely unlock).
+        if (pendingPromotionIdsRef.current.size === 0) setIsPromoting(false);
       }
     })();
   }, [
@@ -459,6 +477,7 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
     pendingConfirmFilenamesRef.current = [];
     heldFilesRef.current.clear();
     setPromotedChipIds(new Set());
+    setIsPromoting(false);
     if (readyConfirmationTimerRef.current !== null) {
       clearTimeout(readyConfirmationTimerRef.current);
       readyConfirmationTimerRef.current = null;
@@ -474,6 +493,7 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
       uploadedFileCount,
       sessionAttachmentCount,
       promotedCount,
+      isPromoting,
       handleAttachmentsChanged,
       handleAttachmentRemoved,
       handleAttachmentReady,
@@ -485,6 +505,7 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
       uploadedFileCount,
       sessionAttachmentCount,
       promotedCount,
+      isPromoting,
       handleAttachmentsChanged,
       handleAttachmentRemoved,
       handleAttachmentReady,

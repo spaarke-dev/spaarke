@@ -1,7 +1,7 @@
 # Current Task State — email-communication-solution-r4
 
-> **Last Updated**: 2026-07-17 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first. Project is COMPLETE + MERGED + DEPLOYED; this is a live **UAT bug-fix cycle**.
+> **Last Updated**: 2026-07-18 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. Project is COMPLETE + MERGED + DEPLOYED; this is a live **UAT bug-fix cycle** focused on the **Association Engine matching + review UI**.
 
 ---
 
@@ -9,19 +9,25 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | Post-ship UAT iteration (owner testing on spaarkedev1) |
-| **Branch** | `work/email-communication-solution-r4` · HEAD = **`3af4571e9`** = origin/master (everything merged) |
+| **Phase** | Post-ship UAT iteration (owner testing on spaarkedev1) — association-matching + review-UI polish |
+| **Branch** | `work/email-communication-solution-r4` · HEAD = **`9062ef34b`** = origin/master (everything merged; the 7-ahead were OTHER projects' commits, worktree fast-forwarded) |
 | **Tree** | clean (only `.claude/worktrees/` untracked scaffold) |
-| **BFF** | LIVE on `spaarke-bff-dev` (healthz 200) — all UAT fixes deployed + hash-verified |
-| **Next action** | OWNER imports the 2 PCF ZIPs + re-sends the "Smith v Smith" test email; verify status=Suggested, contact Filed, "Create Matter (AI)" row surfaces |
+| **BFF** | LIVE on `spaarke-bff-dev` (healthz 200) — all matching fixes deployed + hash-verified (last deploy `7ea2fea02`, 47.03 MB) |
+| **Next action** | **OWNER imports PCF `CommunicationConnectionsSolution_v1.2.1.zip` + hard-refresh (Ctrl+Shift+R)**; verify the match reason shows on the collapsed card AND on every modal row, record number next to each name, and duplicate-named projects grouped |
 
-### PCF ZIPs ready for owner import (Dataverse)
-- `src/client/pcf/CommunicationConnections/Solution/bin/CommunicationConnectionsSolution_v1.1.4.zip`
-- `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.1.1.zip`
-- Import via `pac solution import --path <zip> --publish-changes` (temp-rename `Directory.Packages.props` if CPM blocks).
+### PCF ZIP ready for owner import (Dataverse)
+- `src/client/pcf/CommunicationConnections/Solution/bin/CommunicationConnectionsSolution_v1.2.1.zip` (v1.2.1 — display fix)
+- Import via `pac solution import --path <zip> --publish-changes`. Footer must read **v1.2.1** after hard-refresh; the instant tell it loaded = button says **"Confirm N suggestions"** (not "Accept all").
+- NOTE: v1.2.0 is ALREADY imported/deployed (confirmed via Dataverse `customcontrols` = 1.2.0). v1.2.1 is the follow-up that shows the match reason on Primary/Filed rows (v1.2.0 wrongly gated it to `suggested` only) + surfaces reason/number on the collapsed card.
 
-### Critical context
-The project shipped (W0–W8, merged to master, BFF + SpaarkeAi deployed) earlier. This session was an **owner UAT loop** that found + fixed real bugs. All code is committed + on master (`2ce3ed416`). Only remaining = owner-side PCF import + re-test.
+### Critical context — this session's arc (association matching + review UI)
+The project shipped (W0–W8) earlier. This UAT cycle iterated the **Association Engine matching** end-to-end. Everything is committed + on master (`9062ef34b`); only owner-side PCF v1.2.1 import remains. Key fixes, newest first — see the numbered "What was fixed" log below for detail:
+1. **Match-ranking by location + review-UI legibility** (`7ea2fea02` + PCF v1.2.0/v1.2.1): confidence tiered by WHERE a name matched — number 0.97 / subject 0.95 / body 0.88 / attachment 0.75 — so the exact subject match wins over incidental attachment noise (which drops below the 0.85 conflict floor, clearing spurious Ambiguous). Provenance carries `where=/matched=/name=/number=/reason=`. PCF shows the reason + record number per row + on the card, groups duplicate-named candidates, relabels "Accept all"→"Confirm N".
+2. **Phase 2** (`52457f442`): attachment text as a match signal (ITextExtractor, bounded/non-fatal, before association) + `sprk_invoice` added to `RecordSyncJob` index coverage.
+3. **Deterministic record-NAME/number match rung 3.5** (`cb018a12f`): the core gap — no deterministic rung matched on record NAMES. New `RecordNameMatchRung` (retrieve via keyword index then verify exact name/number in subject/body/attachment); surface-for-review, never auto-files; runs in the deterministic pass but excluded from auto-file eligibility.
+4. **No-user tenant fallback** (`3af4571e9`): the inbound engine had no user `tid` → record search filtered `tenantId eq 'system'` while records are indexed under `AzureAd:TenantId` → 0 matches. Fixed the fallback.
+
+**Verified working in prod (owner screenshots):** Smith v Smith matter → 95% Primary (subject match); a second email's matter → 97% (reference-number match). Engine correctness confirmed; the only open item is the v1.2.1 display import.
 
 ---
 
@@ -40,6 +46,12 @@ The project shipped (W0–W8, merged to master, BFF + SpaarkeAi deployed) earlie
 - Per-slot filed state from each candidate's **`written`** flag (not global Resolved) → filed contact + unfiled matter-suggestion coexist.
 - **"Create Matter (AI)"** row (`deriveAiSuggestedTypes` parses `types=[...]` from the classification signal) + AI suggestions count toward "to review".
 - `Link another` type-first menu; Create-from-email removed (moved to Actions).
+
+8. **Match-ranking-by-location + review-UI legibility** (merged `7ea2fea02`, BFF deployed + PCF v1.2.0 packed): fixes the UAT where a reused test attachment's "Test New Matter via Workspace" text crowded out the exact subject match "Smith v Smith". **BFF** (`RecordNameMatchRung`): confidence now tiered by WHERE the name matched — number 0.97, name-in-subject 0.95, body 0.88, attachment 0.75 (subject/body/attachment verified as separate corpora). Subject match outranks attachment noise, which drops below the 0.85 conflict floor (clears the spurious Ambiguous). Provenance carries a parseable `where=/matched=/name=/number=/reason=` payload. **PCF** (CommunicationConnections 1.1.4→**1.2.0**, ZIP `Solution/bin/CommunicationConnectionsSolution_v1.2.0.zip` — OWNER imports): shows the human match reason + record number per row; groups duplicate-named ambiguous candidates into one expandable `Name · N records` row (display-only, no record dedup); "N possible matches — choose one" reflects distinct names; "Accept all" → "Confirm N suggestions" (tooltip; only shown for safely-acceptable non-ambiguous suggestions). Tests: RecordNameMatch/mapper/semantic 46 green. BFF 47.03 MB (§10 ✓).
+
+7. **Phase 2 — attachment-text match signal + invoice index coverage** (merged `52457f442`, BFF deployed): completes the owner matching spec (subject OR body OR **attachment text** → match record number/name/description, across matter/project/**invoice**). (a) `NormalizedMessage.AttachmentText` — the inbound processor extracts bounded plain text from attachments via `ITextExtractor` (PDF/DOCX/TXT) BEFORE association (best-effort/non-fatal, bounded by `AttachmentMatchOptions`: 5 attachments, 10 MB each, 4000 chars), so a record named only in an attachment (e.g. engagement letter) still matches; both rungs include it in their query (RecordNameMatch cap raised to 6000, keyword-only so no embedding cost). (b) `RecordSyncJob` now indexes `sprk_invoice` (name=`sprk_name`, number=`sprk_invoicenumber`) alongside matter/project/contact/account. Tests: Communication 548 green. Package 47.02 MB (§10 ✓). **Operational note**: verify the BFF managed identity has read access to `sprk_invoice` in Dataverse — if not, invoice sync fails non-fatally (logged, other entities continue). Invoices appear in the index within 15 min of the next RecordSync cycle.
+
+6. **Deterministic record-NAME/number match rung (rung 3.5)** (merged `cb018a12f`, BFF deployed): closes the gap where exact-name records (matter/project literally named in the email) fell through to the fuzzy semantic rung and got mis-ranked (the reranker floated "Test New Matter via Workspace" above the exact "Smith v Smith"). New `RecordNameMatchRung` retrieves candidates from `spaarke-records-index` by **keyword (BM25) ranking** (`RecordSearchOptions.PreferKeywordRanking` — skips the Azure semantic reranker) then **deterministically verifies** the record's name (normalized token subsequence) or reference number (normalized alphanumeric) appears verbatim in subject/body. Surfaces EVERY verified type (matter AND project AND invoice). Per owner spec (2026-07-17): **surface-for-review, never auto-file** — excluded from the mapper's auto-file-eligible set + not an AI rung (runs in the deterministic pass but lands Suggested); never auto-dedups. Mapper improvement: a conflict on ONE field (duplicate same-named records) no longer suppresses a clean association on ANOTHER field (Ambiguous now writes non-conflicting winners). `SemanticMatchRung` also switched to keyword-first (fuzzy fallback). Tests: Communication 367 + RecordSearch 30 (+ merged messaging = 535 total green). Package 47.02 MB (§10 ✓). Owner matching spec captured in auto-memory `association-matching-expectation`. **Phase 2 pending**: attachment-text matching + add `sprk_invoice` to RecordSyncJob index coverage.
 
 5. **Semantic rung found no existing records — tenant-filter mismatch** (`RecordSearchService`, merged `3af4571e9`, BFF deployed): the inbound engine (rung 4) runs from a background/job caller with **no user `tid` claim**, so record search filtered on `tenantId eq 'system'`, but `RecordSyncJob` stamps every indexed record with `AzureAd:TenantId` → **0 matches** for all inbound emails. Only rung 5's metadata-only "looks like a new matter" survived. Empirically reproduced vs live `spaarke-records-index`: `system` filter → 0 hits; real-tenant filter → "Smith v Smith" matter @ score 15.5. **Fix**: no-user tenant fallback is now `AzureAd:TenantId` (symmetric with sync side). Regression test `SearchAsync_WhenNoUserContext_FiltersOnConfiguredTenant_NotSystemLiteral`. Tests: RecordSearch 28/28, Communication 355. Package 46.68 MB (§10 ✓). NOTE: RecordSyncJob syncs `sprk_matter`/`sprk_project`/`contact`/`account` only — **invoices are NOT yet indexed**, so invoice semantic-matching remains a known gap.
 

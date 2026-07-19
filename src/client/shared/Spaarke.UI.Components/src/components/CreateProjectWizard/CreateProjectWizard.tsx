@@ -40,6 +40,8 @@ import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IUserBuCascadeDefaults } from '../../services/EntityCreationService';
 import type { IDataService, INavigationService, IUploadService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
+import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
+import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 import { provisionSecureProject } from './provisioningService';
 import { EventService } from '../CreateEventWizard/eventService';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
@@ -238,6 +240,75 @@ export interface ICreateProjectWizardProps {
    * `config.tenantId` in `main.tsx`.
    */
   tenantId?: string;
+  /**
+   * Assistant hand-off pre-seed (spaarkeai-assistant-enhancements-r1 UAT #1 — the
+   * create-project mirror of CreateMatterWizard's `initialFormValues`). When the
+   * wizard was launched from the Assistant's `surface_launch` create flow, the
+   * solution `main.tsx` maps the hand-off seed (`handoffSeed` → `mapProjectHandoffSeed`)
+   * into these initial form values so the wizard opens PRE-FILLED with the drafted
+   * project name / description (and any high-confidence resolved project-type /
+   * practice-area dropdown). Merged over {@link EMPTY_PROJECT_FORM}; omitted keys keep
+   * their empty default. `undefined` when opened directly — the wizard opens empty
+   * exactly as before (no regression).
+   */
+  initialFormValues?: Partial<ICreateProjectFormState>;
+  /**
+   * Assistant hand-off FILE references (UAT #1 create-flow file leg — the project
+   * mirror of CreateMatterWizard's `initialFileRefs`). The solution `main.tsx` passes
+   * the hand-off seed's `{ sessionId, fileIds, fileNames }`. The wizard fetches each
+   * file's binary from the BFF
+   * (`GET /api/ai/chat/sessions/{sessionId}/documents/{fileId}/content`), wraps it as a
+   * browser `File`, and pre-seeds the "Add file(s)" step so the drafted-from document
+   * rides the wizard's EXISTING upload+link+index pipeline into the new project's
+   * container. `undefined` (or no `sessionId`) → nothing fetched; the files step opens
+   * empty exactly as before (no regression for direct opens).
+   */
+  initialFileRefs?: {
+    readonly sessionId?: string;
+    readonly fileIds: ReadonlyArray<string>;
+    readonly fileNames?: ReadonlyArray<string>;
+  };
+  /**
+   * Optional success callback (UAT #1 — the project mirror of CreateMatterWizard's
+   * `onComplete`). Invoked with the created project's record id when the wizard reaches
+   * its success screen and the user closes/views it — INSTEAD of {@link onClose}. The
+   * Assistant surface-launch host wires this to write the committed
+   * `SurfaceHandoffResult` so a launched create reads back as committed (P5 honest-ack)
+   * rather than "cancelled". When omitted, the success screen falls back to
+   * {@link onClose} — behavior is unchanged for every non-launch caller. The CANCEL
+   * path always uses {@link onClose}.
+   */
+  onComplete?: (recordId: string) => void;
+}
+
+// ---------------------------------------------------------------------------
+// Assistant hand-off file leg (UAT #1): fetched-File → IUploadedFile
+// ---------------------------------------------------------------------------
+
+/** Wizard-supported upload types keyed by lowercase extension. */
+const HANDOFF_EXT_TO_FILE_TYPE: Readonly<Record<string, UploadedFileType>> = {
+  '.pdf': 'pdf',
+  '.docx': 'docx',
+  '.xlsx': 'xlsx',
+};
+
+/**
+ * Build an {@link IUploadedFile} from a browser File fetched via the session
+ * document-content endpoint. Returns null for an unsupported extension so unsupported
+ * session files are skipped rather than injected as invalid entries.
+ */
+function handoffFileToUploaded(file: File): IUploadedFile | null {
+  const dot = file.name.lastIndexOf('.');
+  const ext = dot >= 0 ? file.name.slice(dot).toLowerCase() : '';
+  const fileType = HANDOFF_EXT_TO_FILE_TYPE[ext];
+  if (!fileType) return null;
+  return {
+    id: `handoff-${file.name}-${file.size}`,
+    name: file.name,
+    sizeBytes: file.size,
+    fileType,
+    file,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -275,20 +346,77 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   resolveSpeContainerId,
   resolveUserBuDefaults,
   tenantId,
+  initialFormValues,
+  initialFileRefs,
+  onComplete,
 }) => {
+  // Assistant hand-off pre-seed (UAT #1): merge the drafted values over the empty
+  // defaults so the wizard opens PRE-FILLED. Stable per `initialFormValues` identity
+  // (the host memoizes it) — degrades to EMPTY_PROJECT_FORM when nothing was seeded.
+  const seededFormState = React.useMemo<ICreateProjectFormState>(
+    () => ({ ...EMPTY_PROJECT_FORM, ...(initialFormValues ?? {}) }),
+    [initialFormValues]
+  );
+
   // ── Entity-specific form state ──────────────────────────────────────────
   const [formValid, setFormValid] = React.useState(false);
-  const [formValues, setFormValues] = React.useState<ICreateProjectFormState>(EMPTY_PROJECT_FORM);
+  const [formValues, setFormValues] = React.useState<ICreateProjectFormState>(seededFormState);
   const formValuesRef = React.useRef(formValues);
   formValuesRef.current = formValues;
 
-  // Reset form state on open
+  // -- Assistant hand-off file leg (UAT #1) --
+  // Fetch the drafted-from session document(s) from the BFF and pre-seed them into the
+  // Add file(s) step (via `config.initialFiles`) so they ride the wizard's own
+  // upload+link+index pipeline into the new project's container. Fail-soft: a failed
+  // fetch / unsupported type is skipped; nothing carried → the files step is empty
+  // exactly as a direct open. Never inline binary through the URL (envelope invariant).
+  const [handoffFiles, setHandoffFiles] = React.useState<IUploadedFile[]>([]);
+  React.useEffect(() => {
+    if (!open) {
+      setHandoffFiles([]);
+      return;
+    }
+    const sessionId = initialFileRefs?.sessionId;
+    const fileIds = initialFileRefs?.fileIds;
+    if (!sessionId || !fileIds || fileIds.length === 0 || !authFetch || !bffBaseUrl) {
+      return;
+    }
+    const fileNames = initialFileRefs?.fileNames;
+    let cancelled = false;
+    void (async () => {
+      const built: IUploadedFile[] = [];
+      for (let i = 0; i < fileIds.length; i++) {
+        const fileId = fileIds[i];
+        try {
+          const res = await authFetch(
+            `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents/${encodeURIComponent(fileId)}/content`
+          );
+          if (!res.ok) continue;
+          const blob = await res.blob();
+          const name = fileNames?.[i] ?? `document-${i + 1}`;
+          const file = new File([blob], name, { type: blob.type || 'application/octet-stream' });
+          const uploaded = handoffFileToUploaded(file);
+          if (uploaded) built.push(uploaded);
+        } catch {
+          // Non-fatal: a fetch failure (expired binary, network) just means that file
+          // isn't pre-attached; the user can add it manually.
+        }
+      }
+      if (!cancelled && built.length > 0) setHandoffFiles(built);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, initialFileRefs, authFetch, bffBaseUrl]);
+
+  // Reset form state on open (to the seeded values, not bare empties, so a
+  // hand-off-launched wizard re-opens pre-filled).
   React.useEffect(() => {
     if (open) {
       setFormValid(false);
-      setFormValues(EMPTY_PROJECT_FORM);
+      setFormValues(seededFormState);
     }
-  }, [open]);
+  }, [open, seededFormState]);
 
   // ── Search callbacks ────────────────────────────────────────────────────
   const handleSearchContacts = React.useCallback(
@@ -325,6 +453,10 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       finishingLabel: formValues.isSecure
         ? 'Creating project and provisioning secure infrastructure\u2026'
         : 'Creating project\u2026',
+
+      // UAT #1: files the Assistant create-flow drafted from, fetched above and
+      // pre-seeded into the Add file(s) step so they attach to the new project.
+      initialFiles: handoffFiles,
 
       // ── Associate To step (step 1) ──────────────────────────────────────
       // Allows the user to optionally link the new project to an Account or
@@ -653,11 +785,17 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
 
         const hasWarnings = warnings.length > 0;
 
+        // UAT #1 (honest-ack): on SUCCESS a real record exists, so route the close
+        // through `onComplete(projectId)` when the host supplied it (the launch host
+        // writes the committed SurfaceHandoffResult); otherwise fall back to plain
+        // `onClose` (unchanged for non-launch callers). CANCEL always uses `onClose`.
+        const finishSuccess = () => completeOrClose(projectId, onClose, onComplete);
+
         const viewProject = () => {
           if (navigationService) {
             navigationService.openRecord('sprk_project', projectId);
           }
-          onClose();
+          finishSuccess();
         };
 
         return {
@@ -683,7 +821,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               <Button appearance="primary" onClick={viewProject} aria-label={`View project: ${projectName}`}>
                 View Project
               </Button>
-              <Button appearance="secondary" onClick={onClose}>
+              <Button appearance="secondary" onClick={finishSuccess}>
                 Close
               </Button>
             </>
@@ -702,12 +840,14 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       handleSearchMatterTypes,
       handleSearchPracticeAreas,
       onClose,
+      onComplete,
       authFetch,
       bffBaseUrl,
       navigationService,
       resolveSpeContainerId,
       resolveUserBuDefaults,
       webApiAdapter,
+      handoffFiles,
     ]
   );
 

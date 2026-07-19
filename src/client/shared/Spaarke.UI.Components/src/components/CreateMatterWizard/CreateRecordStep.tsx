@@ -382,7 +382,14 @@ export const CreateRecordStep: React.FC<ICreateRecordStepProps> = ({
       assignedOutsideCounselName: v => searchOrganizationsAsLookup(dataService, v),
     },
     onApply: handlePrefillApply,
-    skipIfInitialized: !!hasInitialValues,
+    // Skip the native pre-fill ONLY when the form was seeded (Assistant hand-off draft)
+    // AND there is no file to analyze. When a file IS present — including one carried by
+    // the Assistant create-flow hand-off (W-2/W-5 file leg) — run the native pre-fill so
+    // it profiles the file: fills matter type / practice area + name / description and
+    // shows the "AI Pre-filled" badge + per-field AI tags, exactly like a direct open
+    // (assistant-enhancements-r1 UAT W-3). The file arrives async, so `skipIfInitialized`
+    // flips false once it lands and the (re-evaluated) hook then runs.
+    skipIfInitialized: !!hasInitialValues && uploadedFiles.length === 0,
     logPrefix: 'CreateMatter',
   });
 

@@ -66,6 +66,9 @@ import {
   deriveAiSuggestedTypes,
   mergeFiledConnections,
   topCandidate,
+  groupCandidatesByName,
+  candidateMatchReason,
+  candidateRecordNumber,
 } from './provenance';
 
 export type ReviewLayout = 'summary' | 'card' | 'rail';
@@ -284,6 +287,10 @@ const useStyles = makeStyles({
   createRow: { display: 'flex', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
   suggestedChip: { border: `1px dashed ${tokens.colorBrandStroke1}` },
   ambigNote: { color: tokens.colorPaletteRedForeground1 },
+  // Match reason (why a record matched) + record number, shown subtly under the record name.
+  matchReason: { color: tokens.colorNeutralForeground3, display: 'block', fontStyle: 'italic' },
+  recordNumber: { color: tokens.colorNeutralForeground3, fontVariantNumeric: 'tabular-nums' },
+  dupCount: { color: tokens.colorNeutralForeground3 },
 
   // ── grid layout (the review modal's main surface) ──
   gridWrap: { display: 'flex', flexDirection: 'column', height: '100%', gap: tokens.spacingVerticalS, minHeight: 0 },
@@ -374,12 +381,19 @@ function StatusBadge({
 function SubRow({
   s,
   name,
+  recordNumber,
+  reason,
+  count,
   confidence,
   busy,
   onFile,
 }: {
   s: ReturnType<typeof useStyles>;
   name: string;
+  recordNumber?: string;
+  reason?: string;
+  /** Number of duplicate-named records this group collapses (>1 shows "· N records"). */
+  count?: number;
   confidence: number;
   busy: boolean;
   onFile: () => void;
@@ -387,9 +401,18 @@ function SubRow({
   return (
     <div className={s.subRow}>
       <span />
-      <Text size={200} weight="semibold" className={s.subCell}>
-        {name}
-      </Text>
+      <div className={s.subCell}>
+        <Text size={200} weight="semibold">
+          {name}
+          {recordNumber ? <span className={s.recordNumber}> · {recordNumber}</span> : null}
+          {count && count > 1 ? <span className={s.dupCount}> · {count} records</span> : null}
+        </Text>
+        {reason ? (
+          <Text size={100} className={s.matchReason}>
+            {reason}
+          </Text>
+        ) : null}
+      </div>
       <Text size={200} className={confClass(s, confidence)}>
         {confText(confidence)}
       </Text>
@@ -431,7 +454,10 @@ function ConnectionRow({
   const [showOthers, setShowOthers] = React.useState(false);
   const others = conn.otherCandidates ?? [];
   const hasOthers = conn.status !== 'ambiguous' && !readOnly && others.length > 0;
-  const alternatives = conn.status === 'ambiguous' && !readOnly ? (conn.alternatives ?? []) : [];
+  // Group ambiguous alternatives by display name so duplicate-named records collapse to one expandable
+  // row ("Name · N records") — the reviewer sees the DISTINCT choices, not one row per duplicate.
+  const alternativeGroups =
+    conn.status === 'ambiguous' && !readOnly ? groupCandidatesByName(conn.alternatives ?? []) : [];
   const nameOf = (alt: ProvenanceCandidate) =>
     resolveDisplayName?.(alt.targetEntity, alt.targetId) ?? alt.targetName ?? alt.targetId;
 
@@ -449,12 +475,20 @@ function ConnectionRow({
         <div className={s.target}>
           {conn.status === 'ambiguous' ? (
             <Text className={s.ambigNote} size={300}>
-              Two possible matches — choose one
+              {alternativeGroups.length} possible {alternativeGroups.length === 1 ? 'match' : 'matches'} — choose one
             </Text>
           ) : (
-            <Text className={s.targetName} size={300}>
-              {targetName}
-            </Text>
+            <>
+              <Text className={s.targetName} size={300}>
+                {targetName}
+                {conn.recordNumber ? <span className={s.recordNumber}> · {conn.recordNumber}</span> : null}
+              </Text>
+              {conn.matchReason ? (
+                <Text size={100} className={s.matchReason}>
+                  {conn.matchReason}
+                </Text>
+              ) : null}
+            </>
           )}
           {hasOthers && (
             <Button
@@ -549,18 +583,23 @@ function ConnectionRow({
             s={s}
             busy={busy}
             name={nameOf(alt)}
+            recordNumber={candidateRecordNumber(alt)}
+            reason={candidateMatchReason(alt)}
             confidence={alt.reinforcedConfidence}
             onFile={() => onConfirm(conn, alt)}
           />
         ))}
-      {alternatives.map((alt, i) => (
+      {alternativeGroups.map((g, i) => (
         <SubRow
           key={`a${i}`}
           s={s}
           busy={busy}
-          name={nameOf(alt)}
-          confidence={alt.reinforcedConfidence}
-          onFile={() => onConfirm(conn, alt)}
+          name={resolveDisplayName?.(g.candidates[0].targetEntity, g.candidates[0].targetId) ?? g.targetName}
+          recordNumber={g.recordNumber}
+          reason={g.matchReason}
+          count={g.candidates.length}
+          confidence={g.confidence}
+          onFile={() => onConfirm(conn, g.candidates[0])}
         />
       ))}
     </>
@@ -690,6 +729,10 @@ function EditorBody({
 
   const connReview = connections.filter(c => c.status !== 'confirmed' && !confirmedFields.has(c.field)).length;
   const confirmedCount = connections.length - connReview;
+  // Only 'suggested' slots are safely bulk-confirmable — an 'ambiguous' slot needs the reviewer to pick.
+  const acceptableCount = connections.filter(
+    c => c.status === 'suggested' && !confirmedFields.has(c.field)
+  ).length;
   // AI-suggested types (e.g. "Create Matter") are also review items, so they count toward "to review".
   const toReview = connReview + aiSuggestions.length;
 
@@ -705,16 +748,23 @@ function EditorBody({
           · {confirmedCount} filed · {toReview} to review
         </Text>
         <div className={s.grow} />
-        {!readOnly && connReview > 0 && (
-          <Button
-            size="small"
-            appearance="primary"
-            icon={<CheckmarkCircle20Filled />}
-            disabled={busy}
-            onClick={handleAcceptAll}
+        {!readOnly && acceptableCount > 0 && (
+          <Tooltip
+            content={`Files the ${acceptableCount} clearly-suggested ${
+              acceptableCount === 1 ? 'connection' : 'connections'
+            } at once. Ambiguous matches (where you must choose) are left for you to review.`}
+            relationship="label"
           >
-            Accept all
-          </Button>
+            <Button
+              size="small"
+              appearance="primary"
+              icon={<CheckmarkCircle20Filled />}
+              disabled={busy}
+              onClick={handleAcceptAll}
+            >
+              Confirm {acceptableCount} suggestion{acceptableCount === 1 ? '' : 's'}
+            </Button>
+          </Tooltip>
         )}
       </div>
 

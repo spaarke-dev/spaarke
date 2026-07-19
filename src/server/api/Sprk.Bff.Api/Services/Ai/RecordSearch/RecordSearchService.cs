@@ -109,6 +109,10 @@ public sealed class RecordSearchService : IRecordSearchService
     // ITenantCache wrapper (FR-05 redis remediation r1). Resource name is "record-search".
     private const int CacheExpirationMinutes = 5;
 
+    // Saturation constant for the keyword-ranked (BM25) score→[0,1) transform score/(score+K).
+    // K=20 gives good spread across typical record-index BM25 scores; see ProcessSearchResultsAsync.
+    private const double Bm25NormalizationConstant = 20.0;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="RecordSearchService"/> class.
     /// </summary>
@@ -170,6 +174,9 @@ public sealed class RecordSearchService : IRecordSearchService
         var hybridMode = request.Options?.HybridMode ?? RecordHybridSearchMode.Rrf;
         var limit = request.Options?.Limit ?? 20;
         var offset = request.Options?.Offset ?? 0;
+        // When set (Association Engine record-matching rungs), rank by keyword relevance (BM25) and skip the
+        // semantic reranker so exact-name records are not buried under conceptually-similar ones.
+        var preferKeywordRanking = request.Options?.PreferKeywordRanking ?? false;
 
         _logger.LogDebug(
             "Starting record search: mode={Mode}, query length={QueryLength}, recordTypes=[{RecordTypes}]",
@@ -259,7 +266,8 @@ public sealed class RecordSearchService : IRecordSearchService
                 queryEmbedding,
                 filter,
                 limit,
-                offset);
+                offset,
+                preferKeywordRanking);
 
             // Step 6: Execute search
             var searchText = hybridMode != RecordHybridSearchMode.VectorOnly && !string.IsNullOrWhiteSpace(request.Query)
@@ -272,7 +280,7 @@ public sealed class RecordSearchService : IRecordSearchService
             searchStopwatch.Stop();
 
             // Step 7: Process results
-            var results = await ProcessSearchResultsAsync(searchResults, cancellationToken);
+            var results = await ProcessSearchResultsAsync(searchResults, preferKeywordRanking, cancellationToken);
 
             // Get total count from response
             var totalResults = (int)(searchResults.TotalCount ?? results.Count);
@@ -403,7 +411,8 @@ public sealed class RecordSearchService : IRecordSearchService
         ReadOnlyMemory<float> queryEmbedding,
         string filter,
         int limit,
-        int offset)
+        int offset,
+        bool preferKeywordRanking)
     {
         var searchOptions = new SearchOptions
         {
@@ -448,8 +457,11 @@ public sealed class RecordSearchService : IRecordSearchService
             }
         }
 
-        // Enable semantic ranking for hybrid and keyword modes
-        if (useKeyword)
+        // Enable semantic ranking for hybrid and keyword modes — UNLESS the caller prefers keyword (BM25)
+        // ranking. The semantic reranker orders by conceptual similarity and buries exact-name matches, so
+        // the Association Engine's record-matching rungs opt out (preferKeywordRanking) to rank by name/keyword
+        // relevance. When opted out, results carry the raw BM25 @search.score (no reranker score).
+        if (useKeyword && !preferKeywordRanking)
         {
             searchOptions.QueryType = SearchQueryType.Semantic;
             searchOptions.SemanticSearch = new SemanticSearchOptions
@@ -472,6 +484,7 @@ public sealed class RecordSearchService : IRecordSearchService
     /// </summary>
     private async Task<IReadOnlyList<RecordSearchResult>> ProcessSearchResultsAsync(
         SearchResults<SearchIndexDocument> searchResults,
+        bool preferKeywordRanking,
         CancellationToken cancellationToken)
     {
         var results = new List<RecordSearchResult>();
@@ -483,15 +496,19 @@ public sealed class RecordSearchService : IRecordSearchService
             var doc = result.Document;
             var rawScore = result.Score ?? 0;
 
-            // Use semantic reranker score if available (0-4 range)
-            if (result.SemanticSearch?.RerankerScore.HasValue == true)
+            double normalizedScore;
+            if (!preferKeywordRanking && result.SemanticSearch?.RerankerScore.HasValue == true)
             {
-                rawScore = result.SemanticSearch.RerankerScore.Value;
+                // Semantic reranker scores are 0-4 → divide by 4.
+                normalizedScore = Math.Clamp(result.SemanticSearch.RerankerScore.Value / 4.0, 0.0, 1.0);
             }
-
-            // Normalize score to 0-1 range
-            // Semantic reranker scores are typically 0-4, so divide by 4
-            var normalizedScore = Math.Clamp(rawScore / 4.0, 0.0, 1.0);
+            else
+            {
+                // Keyword-ranked (BM25) path: @search.score is unbounded, so map it to [0,1) with a bounded
+                // saturating transform score/(score+K). K=20 keeps meaningful spread across typical record-index
+                // BM25 scores (e.g. 55→0.73, 48→0.71, 31→0.61) while never reaching 1.0. Preserves ordering.
+                normalizedScore = rawScore / (rawScore + Bm25NormalizationConstant);
+            }
 
             // Build match reasons from highlights and captions
             var matchReasons = BuildMatchReasons(result);
@@ -510,6 +527,7 @@ public sealed class RecordSearchService : IRecordSearchService
                 Organizations = doc.Organizations?.Count > 0 ? doc.Organizations.ToList() : null,
                 People = doc.People?.Count > 0 ? doc.People.ToList() : null,
                 Keywords = keywords.Count > 0 ? keywords : null,
+                ReferenceNumbers = doc.ReferenceNumbers?.Count > 0 ? doc.ReferenceNumbers.ToList() : null,
                 CreatedAt = null, // Not available in records index; requires Dataverse enrichment
                 ModifiedAt = doc.LastModified
             });

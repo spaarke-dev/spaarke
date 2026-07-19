@@ -58,6 +58,15 @@ export const SURFACE_LAUNCH_REGISTRY: Readonly<Record<string, SurfaceLaunchRegis
     surface: 'sprk_creatematterwizard',
     title: 'Create New Matter',
   },
+  // spaarkeai-assistant-enhancements-r1 UAT #1 (2026-07-18): create-project mirrors
+  // create-matter — the Assistant drafts the project (name/description/type/area) and
+  // launches the pre-seeded Create Project wizard. Backed by the create-project Binding
+  // (Surface Launch) + CREATE-PROJECT@v1 Action authored in spaarkedev1.
+  'create-project': {
+    kind: 'wizard',
+    surface: 'sprk_createprojectwizard',
+    title: 'Create New Project',
+  },
   'create-task': {
     kind: 'wizard',
     surface: 'sprk_createeventwizard',

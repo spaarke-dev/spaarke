@@ -19,7 +19,8 @@
 import * as React from "react";
 import { Button, Tooltip } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular } from "@fluentui/react-icons";
-import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, launchSurface } from "@spaarke/ui-components";
+import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, launchSurface, launchSummarizeFilesWizard } from "@spaarke/ui-components";
+import { WelcomeStartCards } from "./WelcomeStartCards";
 import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type {
@@ -185,6 +186,16 @@ export function ConversationPane(): React.JSX.Element {
     fileName?: string;
   } | null>(null);
 
+  // #2 double-classify fix (UAT 2026-07-18) — CROSS-PATH dedup registry keyed by filename. A chat file
+  // upload promotes via useAttachments' auto-promote (`POST /documents` → classify #1). FIX #7 then
+  // auto-loads that SAME file into Compose, and ComposeWorkspace hands the bytes back to
+  // `registerComposeActiveDocument`, whose LOCAL byte-cache never saw the chat promotion → a SECOND
+  // `POST /documents` → classify #2 (~13 s later) + a duplicate ingest ceremony. The chat promotion
+  // records `fileName → sessionFileId` here; `registerComposeActiveDocument` consults it FIRST and
+  // reuses the existing sessionFileId (skipping the re-upload, the re-classify, and the ceremony —
+  // it still establishes the doc-session pointer). Session-scoped; cleared on session-created.
+  const promotedFileIdsByNameRef = React.useRef<Map<string, string>>(new Map());
+
   // Wave 3 Part 1 (Test #1 real repro): a file uploaded to the ASSISTANT (chat) — then "revise this
   // document" → disambiguation → "Open in Compose" — was NEVER mounted in Compose, so the Compose-side
   // registration never fired. Capture the uploaded file's server id when the chat attachment promotes
@@ -194,6 +205,9 @@ export function ConversationPane(): React.JSX.Element {
   const handleSessionFileUploaded = React.useCallback(
     ({ sessionFileId, fileName }: { sessionFileId: string; fileName: string }): void => {
       activeSourceDocRef.current = { sessionFileId, fileName };
+      // #2 double-classify fix: record the chat-promoted id by filename so the Compose auto-load's
+      // `registerComposeActiveDocument` reuses it instead of re-uploading (+ re-classifying) the file.
+      if (fileName) promotedFileIdsByNameRef.current.set(fileName, sessionFileId);
       // R2 (race-safe revise): a chat "revise this document" that arrived BEFORE this upload
       // back-filled `activeSourceDocRef` is BUFFERED (see handleDecorateOutboundBodyWithRevise +
       // the effect below). Bump this token so that buffered-revise effect re-runs the moment the
@@ -383,15 +397,45 @@ export function ConversationPane(): React.JSX.Element {
       const { resolvedLookups: rawResolved, ...draftValues } = draft as Record<string, unknown> & {
         resolvedLookups?: Record<string, ResolvedLookup>;
       };
+      // W-2/W-5 file leg (UAT 2026-07-17): carry the session's active source file (the file the
+      // draft was grounded on) BY REFERENCE — sessionId + the session documentId are all the wizard
+      // needs to fetch the binary (GET .../documents/{id}/content) and attach it to the new record
+      // via its existing upload+link pipeline. Never inline binary (envelope invariant). Absent →
+      // no file carried (the wizard opens with an empty Add-file step, as today).
+      const sessionId = getSessionId();
+      const activeFile = activeSourceDocRef.current;
+      const fileIds = activeFile?.sessionFileId ? [activeFile.sessionFileId] : undefined;
       void launchSurface({
         consumerType: payload.consumerType,
         draftValues,
         resolvedLookups: rawResolved ?? {},
+        fileIds,
+        source: sessionId ? { sessionId } : undefined,
+        provenance: activeFile?.fileName ? { sourceFiles: [activeFile.fileName] } : undefined,
         bffBaseUrl,
       });
     },
-    [bffBaseUrl]
+    [bffBaseUrl, getSessionId]
   );
+
+  // ── P1-1 (UAT 2026-07-18): cold-open get-started cards ────────────────────
+  // Three quick-start actions on the welcome stage, each reusing an EXISTING
+  // launch mechanism (no new launcher — CLAUDE.md §11).
+  const handleWelcomeSummarize = React.useCallback(() => {
+    launchSummarizeFilesWizard({ bffBaseUrl });
+  }, [bffBaseUrl]);
+  const handleWelcomeCreateMatter = React.useCallback(() => {
+    void launchSurface({ consumerType: "create-matter", bffBaseUrl });
+  }, [bffBaseUrl]);
+  const handleWelcomeCompose = React.useCallback(() => {
+    // Open a blank Compose tab (same widget_load contract the add-to-DMS fallback uses).
+    dispatch("workspace", {
+      type: "widget_load",
+      widgetType: "compose",
+      widgetData: { source: "welcome-compose" },
+      displayName: "Compose",
+    } as WorkspacePaneEvent);
+  }, [dispatch]);
 
   // ── Serial action queue (FR-18) ────────────────────────────────────────
   // Rapid, distinct AI actions (e.g. FR-14 toolbar's Compare then Draft) must
@@ -908,7 +952,18 @@ export function ConversationPane(): React.JSX.Element {
         const name = fileName ?? "compose-document.docx";
         // Wave 3 Part 3: dedup the upload so tab_change re-registrations don't re-upload / duplicate.
         const cacheKey = `${name}:${docxBytes.byteLength}`;
-        let sessionFileId = activeDocUploadCacheRef.current.get(cacheKey);
+        // #2 double-classify fix (UAT 2026-07-18): consult the CROSS-PATH registry FIRST. When this
+        // file was already promoted by the chat auto-promote path (FIX #7 auto-load of a chat upload),
+        // reuse that sessionFileId — skipping the re-upload, the server re-classify, AND the ingest
+        // ceremony (all already done by the chat path). Falls through to the byte-cache / fresh upload
+        // for a genuine Browse-mounted file the Assistant never saw. Seed the byte-cache too so later
+        // same-tab re-registrations hit it directly.
+        let sessionFileId =
+          activeDocUploadCacheRef.current.get(cacheKey) ??
+          promotedFileIdsByNameRef.current.get(name);
+        if (sessionFileId) {
+          activeDocUploadCacheRef.current.set(cacheKey, sessionFileId);
+        }
         if (!sessionFileId) {
           // In-flight guard: collapse truly-concurrent same-file registrations into ONE upload so
           // only a single POST /documents fires (see `activeDocUploadInFlightRef` rationale above).
@@ -1196,6 +1251,8 @@ export function ConversationPane(): React.JSX.Element {
       activeSourceDocRef.current = null;
       activeDocUploadCacheRef.current.clear();
       activeDocUploadInFlightRef.current.clear();
+      // #2 double-classify fix: the cross-path promoted-id registry is session-scoped.
+      promotedFileIdsByNameRef.current.clear();
       // spaarkeai-compose-r2: the ingest-ceremony guard is session-scoped (keyed by the session's
       // file ids) — a fresh session must re-run the ceremony for its own re-uploaded files.
       composeIngestCeremonyFiredRef.current.clear();
@@ -1327,15 +1384,14 @@ export function ConversationPane(): React.JSX.Element {
         onCollapse={paneCollapse ? handleHeaderCollapse : undefined}
         expanded={!(paneCollapse?.isCollapsed("assistant") ?? false)}
         rightSlot={
+          // P2-2 (UAT 2026-07-18): header controls reordered to History / New session /
+          // Tools (left→right, Claude-Code style). History is now an icon-only trigger.
           <>
-            {/* Task 040 (FR-F1) — the Assistant tool drop-down (Quick Start +
-                My Assistant). Mirrors HistoryMenu/ContextPaneMenu/
-                WorkspacePaneMenu — a second, independent Menu trigger in this
-                rightSlot (History lists past sessions; this lists Assistant
-                tools). Entry behavior is wired in tasks 041/042; see
-                AssistantToolMenu.tsx for the placeholder-handler contract.
-                task 042 (FR-F3): "My Assistant" opens the stated-profile questionnaire. */}
-            <AssistantToolMenu onMyAssistant={myAssistant.openDialog} />
+            <HistoryMenu
+              onSelectSession={setChatSessionId}
+              bffBaseUrl={bffBaseUrl}
+              authenticatedFetch={authenticatedFetch}
+            />
             {/* R4-5: New session — clears the persisted session id and remounts
                 SprkChat to mint a fresh session. PaneHeader's rightSlot already
                 stops propagation, so the header collapse never fires. */}
@@ -1351,11 +1407,12 @@ export function ConversationPane(): React.JSX.Element {
                 }}
               />
             </Tooltip>
-            <HistoryMenu
-              onSelectSession={setChatSessionId}
-              bffBaseUrl={bffBaseUrl}
-              authenticatedFetch={authenticatedFetch}
-            />
+            {/* Task 040 (FR-F1) — the Assistant tool drop-down (Quick Start +
+                My Assistant). Mirrors HistoryMenu/ContextPaneMenu/
+                WorkspacePaneMenu — a second, independent Menu trigger in this
+                rightSlot. task 042 (FR-F3): "My Assistant" opens the stated-profile
+                questionnaire. */}
+            <AssistantToolMenu onMyAssistant={myAssistant.openDialog} />
           </>
         }
       />
@@ -1369,6 +1426,13 @@ export function ConversationPane(): React.JSX.Element {
 
       <div className={styles.content} role="region" aria-label="AI Chat">
         {showWelcomePanel && <WelcomePanel />}
+        {showWelcomePanel && (
+          <WelcomeStartCards
+            onSummarize={handleWelcomeSummarize}
+            onCreateMatter={handleWelcomeCreateMatter}
+            onCompose={handleWelcomeCompose}
+          />
+        )}
 
         <div className={styles.chatWrapper}>
           <RestoreBanners
@@ -1425,6 +1489,12 @@ export function ConversationPane(): React.JSX.Element {
               playbookId={playbookId}
               onSessionCreated={handleSessionCreated}
               onSessionStale={handleSessionStale}
+              // #2b (UAT 2026-07-18): lock the composer during the upload/classify window so a typed
+              // instruction can't be sent mid-ingest and silently dropped. SprkChat already locks on
+              // its own `streaming`/`extracting` states; this adds the two windows it can't see — the
+              // `/documents` promotion POST (attachments.isPromoting) and the Event classify SSE stream
+              // (eventBatch.isEventInFlight).
+              inputBusy={attachments.isPromoting || eventBatch.isEventInFlight}
               // Click-path chips render INLINE IN THE TRANSCRIPT (G-P2 finding 1); FIX #1a adds the
               // post-mount document-action chips ABOVE them in the SAME footer slot (both beneath the
               // last message). The node is memoized so slot-keyed auto-scroll fires only on change.

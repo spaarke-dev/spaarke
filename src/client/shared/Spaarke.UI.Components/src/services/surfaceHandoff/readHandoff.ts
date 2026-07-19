@@ -64,6 +64,21 @@ export interface HandoffSeed {
   readonly draftValues: Record<string, unknown>;
   readonly resolvedLookups: Record<string, ResolvedLookup>;
   readonly fileIds: ReadonlyArray<string>;
+  /**
+   * The chat session id the draft came from (`envelope.source.sessionId`).
+   * Required to FETCH each `fileIds` entry's binary from the BFF
+   * (`GET /api/ai/chat/sessions/{sessionId}/documents/{fileId}/content`) so a
+   * launched wizard can attach the drafted-from file to the new record
+   * (assistant-enhancements-r1 UAT W-2/W-5 file leg). Undefined when the draft
+   * carried no session origin.
+   */
+  readonly sessionId?: string;
+  /**
+   * Display file names aligned by index with {@link fileIds}
+   * (`envelope.provenance.sourceFiles`), when the host supplied them. Used to
+   * name the fetched File; the BFF's Content-Disposition is the fallback.
+   */
+  readonly fileNames?: ReadonlyArray<string>;
 }
 
 /**
@@ -74,7 +89,7 @@ export interface HandoffSeed {
  */
 export function handoffSeed(ctx: HandoffContext | null): HandoffSeed | null {
   if (!ctx?.envelope) return null;
-  const { draftValues, resolvedLookups, fileIds } = ctx.envelope;
+  const { draftValues, resolvedLookups, fileIds, source, provenance } = ctx.envelope;
   const hasSeed =
     Object.keys(draftValues ?? {}).length > 0 ||
     Object.keys(resolvedLookups ?? {}).length > 0 ||
@@ -84,6 +99,8 @@ export function handoffSeed(ctx: HandoffContext | null): HandoffSeed | null {
     draftValues: draftValues ?? {},
     resolvedLookups: resolvedLookups ?? {},
     fileIds: fileIds ?? [],
+    sessionId: source?.sessionId,
+    fileNames: provenance?.sourceFiles,
   };
 }
 

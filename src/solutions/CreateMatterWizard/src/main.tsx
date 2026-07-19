@@ -65,6 +65,16 @@ function App() {
     [handoff]
   );
 
+  // UAT W-2/W-5 (the create-flow file leg): pass the hand-off's session file
+  // references so the wizard fetches the drafted-from document(s) and attaches
+  // them to the new matter. `undefined` when there's no session file to carry
+  // (direct open, or a draft with no source file) — the files step stays empty.
+  const initialFileRefs = React.useMemo(() => {
+    const seed = computeHandoffSeed(handoff);
+    if (!seed || !seed.sessionId || seed.fileIds.length === 0) return undefined;
+    return { sessionId: seed.sessionId, fileIds: seed.fileIds, fileNames: seed.fileNames };
+  }, [handoff]);
+
   const handleClose = React.useCallback(() => {
     navigationService.closeDialog({ confirmed: true });
   }, [navigationService]);
@@ -132,6 +142,7 @@ function App() {
         resolveUserBuDefaults={resolveUserBuDefaults}
         tenantId={resolvedTenantId}
         initialFormValues={initialFormValues}
+        initialFileRefs={initialFileRefs}
       />
     </FluentProvider>
   );
