@@ -157,6 +157,135 @@ public static class ComposeDraftDisposition
             ?? throw new InvalidOperationException(
                 $"Compose draft '{entry.Key}' payload did not deserialize to a {nameof(ComposeDraftPayload)}.");
     }
+
+    /// <summary>
+    /// FR-13 (task 030): pure server-side derivation of <see cref="ComposeDraftPayload.ConfidenceBand"/>
+    /// from verifiability evidence ALREADY PRESENT on <paramref name="draft"/> — never the model's own
+    /// declaration. This method never reads <see cref="ComposeDraftPayload.ConfidenceBand"/>, so a
+    /// hostile/buggy model output that smuggled a <c>confidence_band</c> key is structurally ignored
+    /// (ADR-039: the frozen <c>compose-draft-alternative</c> / <c>compose-revise-document</c> JPS output
+    /// schema does not declare this field in the first place). Two independent grounding signals
+    /// combine (design §6.2):
+    /// <list type="bullet">
+    ///   <item><description><b>Cited source</b> — <see cref="ComposeDraftPayload.Sources"/> is
+    ///   non-empty.</description></item>
+    ///   <item><description><b>Retained-original support</b> — <see cref="ComposeDraftPayload.ParaId"/>
+    ///   is resolved (the strongest signal — <see cref="ResolveParaIdAnchor"/> anchored the edit to a
+    ///   real paragraph in the E2 substrate), OR a non-empty <see cref="ComposeDraftPayload.TargetText"/>
+    ///   is declared under a non-<c>insert</c> <see cref="ComposeDraftPayload.MatchMode"/> (an unresolved
+    ///   but precision-scoped claim against real document text).</description></item>
+    /// </list>
+    /// Both signals present =&gt; <see cref="ComposeConfidenceBand.High"/>; exactly one =&gt;
+    /// <see cref="ComposeConfidenceBand.Medium"/>; neither (a bare, uncited, unanchored insertion)
+    /// =&gt; <see cref="ComposeConfidenceBand.Low"/> — never guessed, never a false-precision numeric
+    /// score (design §6.2). Deliberately NOT wired into <see cref="BuildDraftOutput"/> /
+    /// <see cref="DeserializePayload"/> / <see cref="MaterializeDraft"/>: those three stay pure
+    /// serialize/deserialize round-trips (the existing <c>ComposeDraftDispositionTests</c> contract) —
+    /// the caller that owns the render/materialize moment invokes this explicitly (e.g. immediately
+    /// before returning a draft to the client) so the band is always freshly computed, never stale or
+    /// silently defaulted.
+    /// </summary>
+    public static ComposeConfidenceBand DeriveConfidenceBand(ComposeDraftPayload draft)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+
+        var citedSource = draft.Sources is { Count: > 0 };
+        var retainedOriginalSupport =
+            !string.IsNullOrWhiteSpace(draft.ParaId)
+            || (!string.IsNullOrWhiteSpace(draft.TargetText)
+                && !string.Equals(draft.MatchMode, "insert", StringComparison.OrdinalIgnoreCase));
+
+        return (citedSource, retainedOriginalSupport) switch
+        {
+            (true, true) => ComposeConfidenceBand.High,
+            (true, false) => ComposeConfidenceBand.Medium,
+            (false, true) => ComposeConfidenceBand.Medium,
+            (false, false) => ComposeConfidenceBand.Low,
+        };
+    }
+
+    /// <summary>
+    /// FR-16 (task 030): resolves <paramref name="draft"/>'s <see cref="ComposeDraftPayload.TargetText"/>
+    /// against the E2 substrate (the load-time <paramref name="paraIdMap"/> + the index-aligned
+    /// <paramref name="paragraphTexts"/> corpus — see <c>ParaIdPreParser</c> /
+    /// <see cref="AnnotationReanchorService.ExtractParagraphTexts"/>), returning <paramref name="draft"/>
+    /// enriched with <see cref="ComposeDraftPayload.ParaId"/> + <see cref="ComposeDraftPayload.StartOffset"/>
+    /// / <see cref="ComposeDraftPayload.EndOffset"/> when a verbatim match is found — the FIRST paragraph
+    /// carrying the text wins (mirrors the <c>first</c>/<c>strict</c> match-mode precedent;
+    /// multi-match disambiguation is out of this method's scope). An insertion-style draft (no
+    /// <see cref="ComposeDraftPayload.TargetText"/>) or an unresolved target returns
+    /// <paramref name="draft"/> UNCHANGED — a floating/unmatched edit is honestly left unanchored,
+    /// never guessed. Pure — no I/O, no AI-internal type (ADR-013).
+    /// </summary>
+    public static ComposeDraftPayload ResolveParaIdAnchor(
+        ComposeDraftPayload draft,
+        IReadOnlyList<ParaIdMapEntry> paraIdMap,
+        IReadOnlyList<string> paragraphTexts)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        ArgumentNullException.ThrowIfNull(paraIdMap);
+        ArgumentNullException.ThrowIfNull(paragraphTexts);
+
+        if (string.IsNullOrEmpty(draft.TargetText))
+        {
+            return draft;
+        }
+
+        for (var i = 0; i < paragraphTexts.Count; i++)
+        {
+            var offset = paragraphTexts[i].IndexOf(draft.TargetText, StringComparison.Ordinal);
+            if (offset < 0)
+            {
+                continue;
+            }
+
+            ParaIdMapEntry? mapped = null;
+            foreach (var candidate in paraIdMap)
+            {
+                if (candidate.Index == i)
+                {
+                    mapped = candidate;
+                    break;
+                }
+            }
+
+            if (mapped is null)
+            {
+                continue;
+            }
+
+            return draft with
+            {
+                ParaId = mapped.ParaId,
+                StartOffset = offset,
+                EndOffset = offset + draft.TargetText.Length,
+            };
+        }
+
+        return draft;
+    }
+}
+
+/// <summary>
+/// FR-13 (task 030) coarse VERIFIABILITY band for a Compose draft — <c>high</c> / <c>medium</c> /
+/// <c>low</c>, serialized lower-case via <see cref="CamelCaseStringEnumConverter"/> (single-word
+/// members camelCase to all-lowercase — same converter as the sibling <c>MatchMode</c> /
+/// <c>EditErrorKind</c> enums in <c>ComposeEditModels.cs</c>). Deliberately NOT a numeric/percentage
+/// score (design §6.2 — a coarse band avoids the over-reliance + false-precision failure mode a raw
+/// confidence number invites).
+/// </summary>
+[JsonConverter(typeof(CamelCaseStringEnumConverter))]
+public enum ComposeConfidenceBand
+{
+    /// <summary>Grounded: a cited source AND a resolved retained-original anchor (paraId, or a
+    /// declared non-insert target-text match).</summary>
+    High,
+
+    /// <summary>Weakly supported: exactly one of {cited source, resolved anchor} is present.</summary>
+    Medium,
+
+    /// <summary>Unsupported: no cited source and no resolvable anchor — never guessed.</summary>
+    Low,
 }
 
 /// <summary>
@@ -192,4 +321,42 @@ public sealed record ComposeDraftPayload
     /// <summary>Citations / source ids the draft was grounded on (ids only — never quoted content).</summary>
     [JsonPropertyName("sources")]
     public IReadOnlyList<string>? Sources { get; init; }
+
+    /// <summary>
+    /// FR-13 (task 030): server-derived, coarse VERIFIABILITY band — never a raw model self-report
+    /// (design §6.2). The frozen JPS output schema for <c>compose-draft-alternative</c> /
+    /// <c>compose-revise-document</c> (ADR-039) does not declare this field, so a freshly-materialized
+    /// draft always deserializes with this <c>null</c> until a caller explicitly computes it via
+    /// <see cref="ComposeDraftDisposition.DeriveConfidenceBand"/>. Additive + optional; never a
+    /// numeric/percentage score (design §6.2 anti-false-precision rule).
+    /// </summary>
+    [JsonPropertyName("confidence_band")]
+    public ComposeConfidenceBand? ConfidenceBand { get; init; }
+
+    /// <summary>
+    /// FR-16 (task 030): the redline's <c>w14:paraId</c> — the exact paragraph in the retained
+    /// original the edit targets (E2 substrate, task 012). Resolved via
+    /// <see cref="ComposeDraftDisposition.ResolveParaIdAnchor"/> against the load-time paraId map +
+    /// paragraph texts; <c>null</c> for an insertion-style draft (no <see cref="TargetText"/> to
+    /// anchor) or an unresolved target. Additive + optional; camelCase (matches the existing
+    /// <c>paraId</c> wire vocabulary on <c>AnchoredAnnotationAnchor</c> / <c>ParaIdMapEntry</c> /
+    /// <c>ComposeEditedParagraph</c> — deliberately NOT snake_case, per that established precedent).
+    /// </summary>
+    [JsonPropertyName("paraId")]
+    public string? ParaId { get; init; }
+
+    /// <summary>
+    /// FR-16 (task 030): the character offset (inclusive, 0-based) of <see cref="TargetText"/>'s
+    /// start within its <see cref="ParaId"/> paragraph's settled text. Additive + optional; null
+    /// unless <see cref="ParaId"/> is also resolved.
+    /// </summary>
+    [JsonPropertyName("start_offset")]
+    public int? StartOffset { get; init; }
+
+    /// <summary>
+    /// FR-16 (task 030): the character offset (exclusive) of <see cref="TargetText"/>'s end within
+    /// its <see cref="ParaId"/> paragraph's settled text. Additive + optional.
+    /// </summary>
+    [JsonPropertyName("end_offset")]
+    public int? EndOffset { get; init; }
 }
