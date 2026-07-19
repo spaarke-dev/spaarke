@@ -10,9 +10,10 @@
 | Field | Value |
 |-------|-------|
 | **Phase** | Post-ship UAT iteration + **W6 task 060 CLOSED** (2026-07-18) — last substantive code task done; only wrap-up (090) + owner PCF import remain |
-| **Branch** | `work/email-communication-solution-r4` · HEAD = origin/master + **uncommitted task-060 diff** (3 files) awaiting commit |
-| **Tree** | task-060 changes staged-in-working-tree; `.claude/worktrees/` untracked scaffold |
+| **Branch** | `work/email-communication-solution-r4` · task-060 committed **`0b4e975c8`** (1 ahead of origin/master; being pushed) — origin/master has 3 newer other-project commits to merge in |
+| **Tree** | clean (`.claude/worktrees/` untracked scaffold) |
 | **BFF** | LIVE on `spaarke-bff-dev` (healthz 200) — all matching fixes deployed + hash-verified (last deploy `7ea2fea02`, 47.03 MB). Task 060 is client-only (no BFF touch). |
+| **App Service config hardened (2026-07-18)** | `Communication__AutoFile__Enabled=true`/`__Threshold=0.85` now **explicit**; `Communication__WebhookSigningKey`+`__WebhookClientState` **moved to Key Vault** (`spaarke-spekvcert`, mirror prod). SemanticMatch/AiClassification kill-switches = true; index tokens resolve. See DEPLOYMENT-CHECKLIST A6. |
 | **Task 060 (W6) — DONE** | SummarizeFilesDialog + FilePreviewDialog migrated to canonical `sendCommunication()`/`SendEmailDialog`; DocumentEmailWizard NO-CHANGE (retracted premise). Shared-lib tsc+eslint clean, 27+5 tests green, ADR-045/019/021/028 clean, body-format regression caught+fixed. See TASK-INDEX row 060. |
 | **Next action** | (1) commit task-060 diff + merge to master; (2) run **task 090 wrap-up** (`/test-diet`, README→Complete, lessons-learned, archive); (3) OWNER still imports PCF `CommunicationConnectionsSolution_v1.2.1.zip` + hard-refresh (UAT verify — unchanged) |
 

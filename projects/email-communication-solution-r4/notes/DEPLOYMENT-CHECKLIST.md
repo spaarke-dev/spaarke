@@ -57,10 +57,11 @@ dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication          # all
 **A6. Configure new App Service settings** (these are config, not code — set per environment)
 | Setting | Value (dev) | Notes |
 |---|---|---|
-| `Communication__SemanticMatch__Enabled` | `true` | rung-4 kill-switch (no redeploy to flip) |
-| `Communication__AiClassification__Enabled` | `true` | rung-5 kill-switch |
-| `Communication__AutoFile__Enabled` / `__Threshold` | `true` / `0.85` | already set (task 015) |
-| `AiSearch` index tokens (`#{SHARED_KNOWLEDGE_INDEX_NAME}#` etc.) | per-env values | 075 tokenized these — supply real index names at deploy |
+| `Communication__SemanticMatch__Enabled` | `true` | rung-4 kill-switch (no redeploy to flip) — ✅ set on `spaarke-bff-dev` |
+| `Communication__AiClassification__Enabled` | `true` | rung-5 kill-switch — ✅ set on `spaarke-bff-dev` |
+| `Communication__AutoFile__Enabled` / `__Threshold` | `true` / `0.85` | ✅ **set explicitly 2026-07-18** (previously relied on `AutoFileOptions` code defaults `true`/`0.85`; now explicit so config is self-documenting + the E-1 kill-switch UAT is a clean toggle) |
+| `AiSearch` index tokens | per-env values | 075 tokenized these — dev resolves to real names (`spaarke-records-index` @ AllowedIndexes__2, `spaarke-invoices-index` @ __6, all 8 populated) |
+| `Communication__WebhookSigningKey` / `__WebhookClientState` | KV refs | ✅ **moved to Key Vault 2026-07-18** (mirror prod) — `@Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=Communication-WebhookSigningKey \| Communication-WebhookClientState)`. Same vault + MI as 6 existing resolving refs. Definitive resolution check = first inbound webhook (UAT D-1). |
 | Graph/Dataverse MI, OpenAI, Search keys | existing | unchanged by r4 |
 
 **A7. Verify**
