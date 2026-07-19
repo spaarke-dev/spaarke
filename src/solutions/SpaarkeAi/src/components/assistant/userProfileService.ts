@@ -288,15 +288,18 @@ export function createDataverseUserProfilePort(deps: UserProfilePortDeps = {}): 
       const select =
         '$select=sprk_userprofileid,sprk_profilecompletedon,sprk_primaryrole,sprk_focusareas,sprk_officelocation,sprk_assistantpreferences,sprk_profileversion';
       const expand = `$expand=${PRACTICEAREA_NAV_PROP}($select=sprk_practicearea_refid)`;
-      const path = `/${USERPROFILE_SET}(${SYSTEMUSER_KEY_ATTR}=${key})?${select}&${expand}`;
-      let response: Response;
-      try {
-        response = await request(path, { method: 'GET' });
-      } catch (err) {
-        if (err instanceof DataverseHttpError && err.status === 404) return null;
-        throw err;
-      }
-      const row = (await response.json()) as Record<string, unknown>;
+      // UAT 2026-07-18 FIX: `sprk_systemuser` is a Lookup alternate key, and Dataverse rejects the
+      // key-URL form `sprk_userprofiles(sprk_systemuser=<guid>)` for lookup keys with a 400 ("The key
+      // in the request URI is not valid"). That 400 was fataling the My Assistant load (it shares a
+      // Promise.all with listPracticeAreas, so the practice-areas dropdown came up empty). Query by the
+      // lookup's `_value` filter instead — verified working. A no-match returns an empty collection
+      // (→ null here), so no 404 special-case is needed.
+      const filter = `$filter=_${SYSTEMUSER_KEY_ATTR}_value eq ${key}`;
+      const path = `/${USERPROFILE_SET}?${select}&${expand}&${filter}&$top=1`;
+      const response = await request(path, { method: 'GET' });
+      const body = (await response.json()) as { value?: Array<Record<string, unknown>> };
+      const row = body.value?.[0];
+      if (!row) return null;
       const related = (row[PRACTICEAREA_NAV_PROP] as Array<Record<string, unknown>> | undefined) ?? [];
       return {
         id: String(row.sprk_userprofileid ?? ''),
@@ -325,9 +328,6 @@ export function createDataverseUserProfilePort(deps: UserProfilePortDeps = {}): 
 
     async upsertProfileByUser(systemUserId, fields): Promise<string> {
       const key = cleanGuid(systemUserId);
-      // TRUE keyed upsert: PATCH to the alternate-key URL creates-if-absent / updates-if-present in one
-      // atomic call. No If-Match/If-None-Match ⇒ default upsert semantics. `Prefer: return=representation`
-      // returns the id so we skip a follow-up read. The `sprk_systemuser` lookup is set by the key on create.
       const body: Record<string, unknown> = {
         sprk_name: fields.name,
         sprk_primaryrole: fields.primaryRole,
@@ -337,22 +337,36 @@ export function createDataverseUserProfilePort(deps: UserProfilePortDeps = {}): 
         sprk_profilecompletedon: fields.profileCompletedOn,
         sprk_profileversion: fields.profileVersion,
       };
-      const response = await request(`/${USERPROFILE_SET}(${SYSTEMUSER_KEY_ATTR}=${key})`, {
-        method: 'PATCH',
+      // UAT 2026-07-18 FIX: the previous TRUE keyed upsert PATCHed `sprk_userprofiles(sprk_systemuser=<key>)`,
+      // but that lookup-alternate-key URL form is rejected by Dataverse (400 — same defect as the read).
+      // Emulate upsert with read-then-write instead: find the existing row by the lookup `_value` filter;
+      // PATCH it by primary id when present, else POST a create binding the `sprk_SystemUser` lookup. Not
+      // atomic, but correct — and the profile is 1:1 per user (Active alternate-key index still guards duplicates).
+      const findPath = `/${USERPROFILE_SET}?$select=sprk_userprofileid&$filter=_${SYSTEMUSER_KEY_ATTR}_value eq ${key}&$top=1`;
+      const findResp = await request(findPath, { method: 'GET' });
+      const found = (await findResp.json()) as { value?: Array<{ sprk_userprofileid?: string }> };
+      const existingId = found.value?.[0]?.sprk_userprofileid;
+      if (existingId) {
+        await request(`/${USERPROFILE_SET}(${cleanGuid(existingId)})`, {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+        });
+        return cleanGuid(existingId);
+      }
+      // Create — bind the systemuser lookup (nav property `sprk_SystemUser`, verified via metadata).
+      const createBody = { ...body, 'sprk_SystemUser@odata.bind': `/systemusers(${key})` };
+      const response = await request(`/${USERPROFILE_SET}`, {
+        method: 'POST',
         headers: { Prefer: 'return=representation' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(createBody),
       });
-      // Prefer id from the representation body; fall back to the OData-EntityId header.
       const repr = (await response.json().catch(() => null)) as Record<string, unknown> | null;
       const fromBody = repr && typeof repr.sprk_userprofileid === 'string' ? repr.sprk_userprofileid : null;
       if (fromBody) return cleanGuid(fromBody);
       const entityId = response.headers.get('OData-EntityId');
       const match = entityId?.match(/\(([0-9a-f-]+)\)/i);
       if (match) return cleanGuid(match[1]);
-      // Last resort: read it back by key.
-      const readback = await this.getProfileByUser(systemUserId);
-      if (readback?.id) return readback.id;
-      throw new Error('upsertProfileByUser: could not resolve the profile id from the upsert response.');
+      throw new Error('upsertProfileByUser: could not resolve the profile id from the create response.');
     },
 
     async associatePracticeArea(profileId, practiceAreaId): Promise<void> {
