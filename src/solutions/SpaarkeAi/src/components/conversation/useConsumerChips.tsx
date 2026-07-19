@@ -49,7 +49,11 @@ import {
 import type { IChatMessage } from "@spaarke/ui-components";
 import { ConsumerChips } from "./ConsumerChips";
 import { reorderChipsForDisplay, type ChipDisplayPreference } from "./chipDisplayOrder";
-import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
+import {
+  formatEventOutputMarkdown,
+  isCorrespondenceDraft,
+  buildCorrespondenceComposeHtml,
+} from "./DocumentUploadedEventStream";
 import { makeLocalAssistantMessage } from "./summarizeRouting";
 
 export interface ConsumerChipsDeps {
@@ -173,7 +177,25 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           // surface-launch; the wizard consumes the draft. Informational capabilities render as before.
           const isSurfaceLaunch =
             dispatched.disposition === "surface_launch" && !!dispatched.consumerType;
-          if (!isSurfaceLaunch && dispatched.result !== undefined && dispatched.result !== null) {
+          // UAT 2026-07-19 (owner: "a Compose tab with the drafted response"): a draft-correspondence
+          // result ("Draft a response" chip) is routed INTO a pre-filled Compose tab via the existing
+          // `compose.draft.html` seed (no shared-lib change — the editor already seeds from draft HTML).
+          // The transcript gets a short confirmation instead of the raw draft.
+          const isCorrespondence = !isSurfaceLaunch && isCorrespondenceDraft(dispatched.result);
+          if (isCorrespondence) {
+            const html = buildCorrespondenceComposeHtml(dispatched.result as Record<string, unknown>);
+            dispatch("workspace", {
+              type: "widget_load",
+              widgetType: "compose",
+              widgetData: { compose: { draft: { html, fileName: "Draft response" } } },
+              displayName: "Compose",
+            } as unknown as WorkspacePaneEvent);
+            enqueueAssistantMessage(
+              makeLocalAssistantMessage(
+                "I've opened a draft response in the Compose tab — review and edit it there."
+              )
+            );
+          } else if (!isSurfaceLaunch && dispatched.result !== undefined && dispatched.result !== null) {
             enqueueAssistantMessage(
               makeLocalAssistantMessage(formatEventOutputMarkdown(dispatched.result))
             );
