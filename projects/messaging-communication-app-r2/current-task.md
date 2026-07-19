@@ -9,12 +9,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Active work** | **R2 = "Communication Workspace"** — draft design done; awaiting owner decisions on 5 questions, then `/design-to-spec` → `/project-pipeline`. |
-| **R2 design** | [`projects/messaging-communication-app-r2/design.md`](design.md) (DRAFT). Investigation archive: [`notes/r2-resource-investigation.md`](notes/r2-resource-investigation.md). NO folder scaffolding beyond design + notes yet (no spec/plan/tasks/README/CLAUDE.md). |
-| **Next action** | **4 of 5 owner decisions LOCKED 2026-07-18** (design §10). Only **Q3 (coordination confirm)** remains — one-line owner answer, then `/design-to-spec` on `design.md` → `/project-pipeline`. |
-| **Locked decisions** | Q1=**build participant junction in R2** · Q2=**no category/tags** · Q4=**ship standalone page** · Q5=**all 11 regarding entities**. R2 is now the *full-breadth* build. |
+| **Active work** | **R2 = "Communication Workspace"** — **`spec.md` GENERATED 2026-07-18** (all owner decisions + all 3 unresolved questions resolved). Next = `/project-pipeline`. |
+| **R2 spec** | [`projects/messaging-communication-app-r2/spec.md`](spec.md) — 12 FR / 8 NFR / 7 ADRs / 3 ADR tensions (all path C) / 7 §11 new-components / Unresolved Questions cleared. Design input: [`design.md`](design.md). Investigation: [`notes/r2-resource-investigation.md`](notes/r2-resource-investigation.md). Still NO plan/tasks/README/CLAUDE-project scaffolding (project-pipeline makes those). |
+| **Next action** | Run **`/project-pipeline projects/messaging-communication-app-r2`** — scaffolds README/PLAN/CLAUDE.md + comprehensive resource discovery + hot-path check + task decomposition (9 waves) + registers on Portfolio #2 under Epic #431. |
+| **Locked decisions** | Q1=**build participant junction** · Q2=**no category/tags** · Q3=**upgrade grid/widget in place** (ai-spaarke-ai-workspace-UI-r2 verified Complete) · Q4=**ship standalone page** · Q5=**all 11 entities**. Junction Q-C=**two typed lookups** · Q-D=**write unresolved-address rows** · Q-E=**stay polling, no spine dependency**. |
 | **R1 status** | **28/29 tasks done, DEPLOYED + MERGED TO MASTER.** Only `090` wrap-up + owner config gates remain. Timeline verified working live. |
-| **Status** | R2 = planning/design; R1 = code-complete + deployed, wrap-up pending. |
+| **Status** | R2 = **spec complete, ready for pipeline**; R1 = code-complete + deployed, wrap-up pending. |
 
 ---
 
