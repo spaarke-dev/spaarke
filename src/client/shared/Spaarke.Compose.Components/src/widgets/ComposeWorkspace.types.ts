@@ -178,7 +178,20 @@ export type ComposeWorkspaceAction =
   // FR-05 (task 100): create-on-save mints a NEW SPE drive-item; `documentSpeId` carries the
   // server-minted id back so a second Save targets the real item (the replace path), not the
   // empty transient pointer (gap 1.7).
-  | { kind: 'saveSucceeded'; sprkDocumentId?: string; documentSpeId?: string; etag: string | null }
+  | {
+      kind: 'saveSucceeded';
+      sprkDocumentId?: string;
+      documentSpeId?: string;
+      etag: string | null;
+      // UAT 2026-07-19 P2: the save response's driveId + versionId. Retained so a SUBSEQUENT
+      // replace-path save of a BORN-IN-EDITOR doc (which holds no retained bytes) can resolve
+      // its baseline by re-fetching the just-saved version (server ResolveSaveBaselineAsync
+      // path b needs BaselineVersionId + DriveId + DocumentSpeId). Without these, the second
+      // save sent content=undefined + baselineVersionId=undefined and the server threw
+      // "no baseline could be resolved — supply the retained original bytes (Content)".
+      driveId?: string;
+      versionId?: string | null;
+    }
   | { kind: 'saveFailed'; errorMessage: string }
   | { kind: 'reset' }
   | { kind: 'importWarnings'; warnings: Array<{ type: string; message: string }> }
@@ -328,6 +341,15 @@ export function composeWorkspaceReducer(
         etag: action.etag,
         // UAT #7: bump the token so the banner stack surfaces a fresh transient "Saved ✓".
         saveSuccessToken: state.saveSuccessToken + 1,
+        // UAT 2026-07-19 P2: adopt the just-saved SPE version id as the baseline ONLY on the
+        // first persist (when we had none). A born-in-editor doc holds no retained bytes
+        // (docxBytes stays null) and had no load-time versionId; its create-on-save minted this
+        // first version, which becomes the FIXED baseline its replace-path saves delta onto.
+        //   CRITICAL — adopt-only-when-null (`state.versionId ??`): a STORED doc's versionId is
+        //   the LOAD-TIME original (set on loadSucceeded) and MUST stay fixed across saves so
+        //   every save is a delta vs the load-time original (FR-01). Advancing it each save would
+        //   re-baseline onto the just-saved version and corrupt the tracked-change accumulation.
+        versionId: state.versionId ?? (action.versionId && action.versionId.length > 0 ? action.versionId : null),
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
@@ -338,6 +360,10 @@ export function composeWorkspaceReducer(
                 action.documentSpeId && action.documentSpeId.length > 0
                   ? action.documentSpeId
                   : state.documentRef.speDriveItemId,
+              // UAT 2026-07-19 P2: carry the server-resolved drive id (a create-on-save doc lands
+              // in the BU container's drive, which the host's `driveId` prop does NOT identify) so
+              // the replace-path save + baseline re-fetch target the correct drive.
+              driveId: action.driveId && action.driveId.length > 0 ? action.driveId : state.documentRef.driveId,
             }
           : state.documentRef,
       };

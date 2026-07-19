@@ -940,6 +940,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     // absence of a real speDriveItemId (mountTransient sets it to '').
     const isTransientCreate = !state.documentRef.speDriveItemId;
     const saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
+    // UAT 2026-07-19 P2: prefer the drive the document actually lives in (captured from the save
+    // response after a create-on-save — the born-in-editor doc lands in the BU container's drive,
+    // which the host `driveId` prop does NOT identify) over the host default. This is the drive the
+    // replace-path save + baseline re-fetch must target.
+    const saveDriveId = state.documentRef.driveId ?? effectiveDriveId;
 
     if (!bffBaseUrl || !tenantId) {
       dispatch({
@@ -961,7 +966,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         });
         return;
       }
-    } else if (!effectiveDriveId) {
+    } else if (!saveDriveId) {
       dispatch({
         kind: 'saveFailed',
         errorMessage: 'Cannot save — SPE drive configuration missing.',
@@ -1032,7 +1037,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         };
       } else {
         requestBody = {
-          driveId: effectiveDriveId,
+          // UAT 2026-07-19 P2: the drive the doc lives in (documentRef.driveId after a create-on-save),
+          // falling back to the host default — so a born-in-editor doc's second save + baseline re-fetch
+          // target the correct drive.
+          driveId: saveDriveId,
           tenantId,
           sessionId: state.sessionId,
           documentRecordId: state.documentRef.sprkDocumentId ?? null,
@@ -1083,6 +1091,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // established field (the `sprk_documentid`); `documentId` is read defensively in case the
         // sibling BFF change names it that. Either drives the Saved ✓ banner's "Open preview" link.
         documentId?: string;
+        // UAT 2026-07-19 P2: driveId + versionId of the just-saved SPE version. Retained via
+        // saveSucceeded so a subsequent replace-path save of a born-in-editor doc (no retained
+        // bytes) resolves its baseline by re-fetching this version. Optional (older BFF omits them).
+        driveId?: string;
+        versionId?: string;
         eTag?: string;
         size: number;
         wasPromotedThisSave: boolean;
@@ -1109,6 +1122,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // Save on this mount takes the replace path (no longer transient).
         documentSpeId: payload.documentSpeId,
         etag: payload.eTag ?? null,
+        // UAT 2026-07-19 P2: retain the just-saved drive id + version id so the replace-path second
+        // save of a born-in-editor doc can resolve its baseline (server re-fetch by versionId).
+        driveId: payload.driveId,
+        versionId: payload.versionId,
       });
       // Clear the local dirty flag so the Save button disables until the
       // next edit. ComposeEditor's internal dirtyRef also resets on the

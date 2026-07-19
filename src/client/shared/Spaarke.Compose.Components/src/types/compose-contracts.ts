@@ -447,6 +447,13 @@ export interface ComposeDocumentRef {
   fileName?: string;
   /** SPE container id (multi-tenant scoping). */
   containerId?: string;
+  /**
+   * SPE drive id the document lives in. Populated from the save response after a create-on-save
+   * (the born-in-editor doc lands in the BU container's drive, which the host's `driveId` prop does
+   * NOT identify). Used by the replace-path save + baseline re-fetch so a SECOND save of a
+   * born-in-editor doc resolves its baseline (UAT 2026-07-19 P2).
+   */
+  driveId?: string;
 }
 
 /**
