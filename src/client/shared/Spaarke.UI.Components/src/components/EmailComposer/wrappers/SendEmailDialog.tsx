@@ -18,9 +18,10 @@ import * as React from 'react';
 import { Dialog, DialogSurface, DialogBody } from '@fluentui/react-components';
 
 import { EmailComposer } from '../EmailComposer';
-import type { EmailComposerMode, IComposerAttachmentSource } from '../EmailComposer.types';
+import type { EmailComposerMode, EmailComposerBodyFormat, IComposerAttachmentSource } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type { ICommunicationAssociation, SendCommunicationError } from '../../../services/communicationApi';
+import type { ILookupItem } from '../../../types/LookupTypes';
 
 export interface ISendEmailDialogProps {
   open: boolean;
@@ -29,8 +30,14 @@ export interface ISendEmailDialogProps {
   mode?: EmailComposerMode;
   initialTo?: string[];
   initialSubject?: string;
+  /** Pre-fill the composer body (e.g. a document summary). Forwarded to the engine. */
+  initialBody?: string;
+  /** Body format for the pre-filled body. Defaults to `'HTML'` in the engine — pass `'PlainText'` for `\n`-delimited plain-text templates. */
+  initialBodyFormat?: EmailComposerBodyFormat;
   associations?: ICommunicationAssociation[];
   attachmentSources?: IComposerAttachmentSource[];
+  /** Recipient directory lookup, forwarded to the engine's `RecipientField`. */
+  onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl: string;
   onSent?: (communicationId: string) => void;

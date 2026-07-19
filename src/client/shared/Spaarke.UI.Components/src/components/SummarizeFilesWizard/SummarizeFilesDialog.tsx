@@ -39,6 +39,7 @@ import { SummarizeCreateProjectStep } from './SummarizeCreateProjectStep';
 import { SummarizeAnalysisStep } from './SummarizeAnalysisStep';
 import { streamSummarize } from './summarizeService';
 import type { AuthenticatedFetchFn } from './summarizeService';
+import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
 import type { ISummarizeResult, SummarizeStatus } from './summarizeTypes';
 import type { LinearRunEvent } from '../../hooks/useLinearRunProgress';
 import type { ICreateProjectFormState } from '../CreateProjectWizard/projectFormTypes';
@@ -449,7 +450,11 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     let createdProjectId: string | undefined;
     let createdProjectName: string | undefined;
 
-    // ── Send Email via BFF ────────────────────────────────────────────
+    // ── Send Email via canonical sendCommunication() (ADR-045) ─────────
+    // Task 060 (W6): replaced the prior inline BFF send fetch with the typed
+    // wrapper so this follow-on shares the single canonical send path +
+    // ProblemDetails error contract (ADR-019). `bodyFormat: 'text'` maps to
+    // the BFF `PlainText` enum inside the wrapper.
     if (currentSelectedActions.includes('send-email') && currentEmailTo.trim()) {
       try {
         if (!authenticatedFetch) {
@@ -457,30 +462,28 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
             '[SummarizeFilesDialog] authenticatedFetch is required — unauthenticated BFF calls are not permitted.'
           );
         }
-        const fetchFn = authenticatedFetch;
-        const baseUrl = bffBaseUrl ?? '';
-        const response = await fetchFn(`${baseUrl}/api/communications/send`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        await sendCommunication(
+          {
             to: currentEmailTo
               .split(/[;,]/)
               .map((a: string) => a.trim())
               .filter(Boolean),
             subject: currentEmailSubject,
             body: currentEmailBody,
-            bodyFormat: 'PlainText', // BFF enum is BodyFormat.{PlainText,HTML} — 'Text' is rejected (2026-05-25)
-          }),
-        });
-
-        if (response.ok) {
-          completedActions.push('Email sent');
-        } else {
-          const errorText = await response.text().catch(() => 'Unknown error');
-          warnings.push(`Email failed: ${errorText}`);
-        }
+            bodyFormat: 'text',
+            sendMode: 'sharedMailbox',
+          },
+          { authenticatedFetch, bffBaseUrl }
+        );
+        completedActions.push('Email sent');
       } catch (err) {
-        warnings.push(`Email failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        const detail =
+          err instanceof SendCommunicationError
+            ? err.detail
+            : err instanceof Error
+              ? err.message
+              : 'Unknown error';
+        warnings.push(`Email failed: ${detail}`);
       }
     }
 
