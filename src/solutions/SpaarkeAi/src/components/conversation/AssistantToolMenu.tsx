@@ -60,7 +60,7 @@ import {
   Tooltip,
 } from "@fluentui/react-components";
 import {
-  ChevronDownRegular,
+  MoreVerticalRegular,
   RocketRegular,
   PersonRegular,
 } from "@fluentui/react-icons";
@@ -187,18 +187,18 @@ export const AssistantToolMenu: React.FC<AssistantToolMenuProps> = ({
     <>
       <Menu open={menuOpen} onOpenChange={handleOpenChange} positioning="below-end">
         <MenuTrigger disableButtonEnhancement>
-          <Tooltip content="Open Assistant tools menu" relationship="label">
+          <Tooltip content="Assistant tools" relationship="label">
+            {/* P2-2 follow-up (UAT 2026-07-18): the "Tools ▾" text trigger is now an
+                icon-only vertical three-dots (⋮) button — matches the Claude-Code-style
+                icon header (History / New session / ⋮). aria-label + tooltip preserved. */}
             <Button
               appearance="subtle"
               size="small"
-              icon={<ChevronDownRegular />}
-              iconPosition="after"
-              aria-label="Open Assistant tools menu"
+              icon={<MoreVerticalRegular />}
+              aria-label="Assistant tools"
               className={styles.trigger}
               data-testid="assistant-tool-menu-trigger"
-            >
-              Tools
-            </Button>
+            />
           </Tooltip>
         </MenuTrigger>
 
