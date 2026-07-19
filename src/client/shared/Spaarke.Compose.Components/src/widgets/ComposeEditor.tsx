@@ -80,16 +80,18 @@ import TaskItem from '@tiptap/extension-task-item';
 import CharacterCount from '@tiptap/extension-character-count';
 import TextAlign from '@tiptap/extension-text-align';
 
-import { makeStyles, mergeClasses, tokens, Spinner, Text, Button } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens, Spinner, Text, Button, Tooltip } from '@fluentui/react-components';
 import {
   ArrowDown20Regular,
   Checkmark16Regular,
+  CommentMultiple20Regular,
   Dismiss16Regular,
   DocumentProhibited24Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
 import { ComposeFindReplace } from './ComposeFindReplace';
+import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
@@ -446,6 +448,13 @@ export interface ComposeEditorProps {
   canSave?: boolean;
   /** True while a save is in flight. */
   isSaving?: boolean;
+
+  /**
+   * FR-23 (task 044) — display name attributed to comment threads/replies the CURRENT user creates
+   * via the comment-thread panel. Resolved by the host (no network call happens here — ADR-028);
+   * defaults to `'You'` when omitted (standalone/library mounts).
+   */
+  commentAuthor?: string;
 }
 
 /**
@@ -765,6 +774,16 @@ const useStyles = makeStyles({
     zIndex: 2,
     boxShadow: tokens.shadow16,
   },
+  // FR-23 (task 044) — floating "Comments" panel toggle, pinned top-right of the editor scroll
+  // region (the top-center/bottom-center positions are taken by the format toolbar / scroll FAB).
+  // Semantic tokens only (ADR-021 dark-mode-correct); mirrors `scrollDownFab`'s elevated-FAB treatment.
+  commentsToggleFab: {
+    position: 'absolute',
+    top: tokens.spacingVerticalM,
+    right: tokens.spacingHorizontalM,
+    zIndex: 2,
+    boxShadow: tokens.shadow16,
+  },
   // DEF-12 — label inside the per-change on-click accept/reject popover (task 033/FR-16 rationale
   // shown truncated, Tier-3-safe). Semantic tokens only (ADR-021 dark-mode-correct). The former
   // fixed `redlineControls`/`redlineItem` bar styles were removed with the bar itself.
@@ -964,6 +983,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onSave,
       canSave,
       isSaving,
+      commentAuthor = 'You',
     } = props;
 
     const styles = useStyles();
@@ -1003,6 +1023,15 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // clears the search state/highlight. Mounted between the format toolbar and the AI BubbleMenu —
     // see the render section below.
     const [findReplaceOpen, setFindReplaceOpen] = React.useState<boolean>(false);
+
+    // ----- Task 044 — FR-23 comment-thread panel toggle + "create on selection" capture -----------
+    // The panel toggle button lives in this file (see the render section below) rather than the
+    // format toolbar (out of this task's file scope — additive-only). Opening the panel captures the
+    // CURRENT selection range + preview text BEFORE focus moves into the panel's composer textbox
+    // (mirrors the redline/context-menu popups' click-time capture above); a collapsed selection
+    // yields `null` and the panel shows a "select text" hint instead of guessing an anchor.
+    const [commentsOpen, setCommentsOpen] = React.useState<boolean>(false);
+    const [pendingCommentRange, setPendingCommentRange] = React.useState<ComposeCommentPendingRange | null>(null);
 
     // ----- FIX #9 — hidden-scrollbar editor surface + "scroll for more" FAB ----
     // The editor scroll region hides its native scrollbar (see `editorSurface`
@@ -1285,6 +1314,23 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // ----- FR-35 Doc Q&A ephemeral highlight (task 072, stretch) -----------
     const qaHighlight = useDocQaHighlight(editor);
 
+    // ----- Task 044 — FR-23 "Comments" panel toggle -------------------------
+    // Toggling OPEN captures the editor's live selection at click time (see the state declaration
+    // above); toggling CLOSED just hides the panel — thread state persists (ComposeCommentThread
+    // stays mounted, its `open` prop only gates its own render, mirroring ComposeFindReplace).
+    const handleToggleComments = React.useCallback((): void => {
+      setCommentsOpen(prevOpen => {
+        const next = !prevOpen;
+        if (next && editor) {
+          const { from, to } = editor.state.selection;
+          setPendingCommentRange(
+            from === to ? null : { from, to, preview: editor.state.doc.textBetween(from, to, ' ') }
+          );
+        }
+        return next;
+      });
+    }, [editor]);
+
     // ----- FIX #9 — track whether the editor surface has more content below ---
     // Show the down-arrow FAB only when NOT scrolled to the bottom. Re-measure on
     // scroll, on content-size changes (ResizeObserver — guarded for jsdom), and on
@@ -1445,6 +1491,23 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             highlight decoration (never leaves a stale highlight behind).
             =================================================================== */}
         <ComposeFindReplace editor={editor} open={findReplaceOpen} onClose={() => setFindReplaceOpen(false)} />
+        {/* ===================================================================
+            FR-23 comment-thread panel — task 044. Toggled by the floating
+            "Comments" button pinned to the editor scroll region (see below);
+            dismissed by its own close button. `pendingCommentRange` is captured
+            at toggle-open time (see handleToggleComments above) so the "new
+            comment" composer anchors to the selection the user had BEFORE
+            focus moved into this panel, not whatever the live selection is by
+            the time they finish typing.
+            =================================================================== */}
+        <ComposeCommentThread
+          editor={editor}
+          open={commentsOpen}
+          onClose={() => setCommentsOpen(false)}
+          author={commentAuthor}
+          pendingRange={pendingCommentRange}
+          onThreadCreated={() => setPendingCommentRange(null)}
+        />
         {editor ? (
           <BubbleMenu
             editor={editor}
@@ -1602,6 +1665,20 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           <div ref={editorScrollRef} className={styles.editorSurface} data-testid="compose-editor-surface">
             <EditorContent editor={editor} />
           </div>
+          {/* FR-23 (task 044) — "Comments" panel toggle, pinned top-right (see `commentsToggleFab`). */}
+          <Tooltip content={commentsOpen ? 'Hide comments' : 'Show comments'} relationship="description" withArrow>
+            <Button
+              appearance={commentsOpen ? 'primary' : 'secondary'}
+              shape="circular"
+              size="large"
+              className={styles.commentsToggleFab}
+              icon={<CommentMultiple20Regular />}
+              aria-label="Toggle comments panel"
+              aria-pressed={commentsOpen}
+              onClick={handleToggleComments}
+              data-testid="compose-comments-toggle"
+            />
+          </Tooltip>
           {showScrollDown ? (
             <Button
               appearance="primary"

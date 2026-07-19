@@ -59,6 +59,21 @@ export type { ComposeEmptyStateProps } from './widgets/ComposeEmptyState';
 export { ComposeConflictDialog } from './widgets/ComposeConflictDialog';
 
 // -------------------------------------------------------------------------
+// Comment threads (FR-23 / task 044) — the render target FR-25 (task 051)
+// projects imported `RecoveredComment` threads into.
+// -------------------------------------------------------------------------
+export { ComposeCommentThread } from './widgets/ComposeCommentThread';
+export type { ComposeCommentThreadProps, ComposeCommentPendingRange } from './widgets/ComposeCommentThread';
+export { composeCommentThreadsToDocxAnnotations } from './widgets/ComposeCommentThread.types';
+export type {
+  ComposeCommentAuthorStamp,
+  ComposeCommentReply,
+  ComposeCommentThreadModel,
+} from './widgets/ComposeCommentThread.types';
+export { useComposeCommentThreads } from './widgets/hooks/useComposeCommentThreads';
+export type { UseComposeCommentThreadsResult, ComposeCommentRange } from './widgets/hooks/useComposeCommentThreads';
+
+// -------------------------------------------------------------------------
 // Return-from-Word re-anchoring (FR-27 / task 054)
 // -------------------------------------------------------------------------
 export { ComposeReanchorBanner } from './widgets/ComposeReanchorBanner';

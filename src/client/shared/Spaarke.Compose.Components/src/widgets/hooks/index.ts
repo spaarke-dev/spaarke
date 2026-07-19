@@ -45,3 +45,8 @@ export {
   marksForReplacement,
 } from './useComposeFindReplace';
 export type { UseComposeFindReplaceResult, FindReplaceSpan } from './useComposeFindReplace';
+
+// task 044 (FR-23) — comment-thread state over CommentAnchorMark: create/reply/resolve + the FR-25
+// import seam.
+export { useComposeCommentThreads } from './useComposeCommentThreads';
+export type { UseComposeCommentThreadsResult, ComposeCommentRange } from './useComposeCommentThreads';
