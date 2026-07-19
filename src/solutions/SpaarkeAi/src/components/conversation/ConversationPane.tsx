@@ -1507,6 +1507,8 @@ export function ConversationPane(): React.JSX.Element {
             onSummarize={handleWelcomeSummarize}
             onCreateMatter={handleWelcomeCreateMatter}
             onCompose={handleWelcomeCompose}
+            // R4-2 (UAT 2026-07-19): "More…" opens the Quick Start modal (same modal the ⋮ menu uses).
+            onMore={() => setQuickStartOpen(true)}
           />
         )}
 
@@ -1590,7 +1592,8 @@ export function ConversationPane(): React.JSX.Element {
               // CHAT-5 (UAT 2026-07-19): a taller, friendlier composer. The placeholder greets on a
               // fresh/empty transcript and reverts to the neutral prompt once the conversation starts.
               inputPlaceholder={chatMessageCount === 0 ? "Let's get started…" : "Type a message…"}
-              inputMinRows={3}
+              // R4-3 (UAT 2026-07-19): taller composer (~2× the prior default).
+              inputMinRows={6}
               // Click-path chips render INLINE IN THE TRANSCRIPT (G-P2 finding 1); FIX #1a adds the
               // post-mount document-action chips ABOVE them in the SAME footer slot (both beneath the
               // last message). The node is memoized so slot-keyed auto-scroll fires only on change.
