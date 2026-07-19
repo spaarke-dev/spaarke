@@ -1,76 +1,65 @@
-# Register the BFF managed identity (mi-bff-api-dev) as a GUEST app on the SPE
-# container type so app-only file writes (email .eml archive + attachment
-# materialization via GraphClientFactory.ForApp()) stop returning 403 Access denied.
+# Register a guest application (e.g. the BFF managed identity) on a SharePoint
+# Embedded container TYPE, so it can do app-only file writes (archive .eml,
+# attachment materialization) without 403 Access denied.
 #
-# ROOT CAUSE (UAT email-r4, 2026-07-19): the archive .eml upload runs as the BFF
-# managed identity (UploadSessionManager -> GraphClientFactory.ForApp() ->
-# mi-bff-api-dev / 5967251e). That identity is NOT registered on SPE container type
-# 8a6ce34c, so its Graph PUT to /drives/{container}/root:/.../file.eml:/content -> 403.
-# Only the OWNING app (170c98e1) has implicit access. Per-container permission grants
-# are user-scoped (they reject application grantees), so the MI must be registered at
-# the CONTAINER TYPE level as a guest application. That is what this script does.
+# WHY (UAT email-r4, 2026-07-19): the archive uploads as the BFF managed identity
+# (mi-bff-api-dev / 5967251e) via GraphClientFactory.ForApp(). That identity was NOT
+# in the container type's applicationPermissionGrants — only the owner app (170c98e1)
+# and 1e40baad were — so its Graph PUT to write a file returned 403. Adding the MI as
+# a grant fixes it. Confirmed working: after this + a BFF restart + a few minutes of
+# SPE propagation, POST /api/communications/{id}/archive returns 200.
 #
-# PREREQUISITE (SharePoint-admin, one-time): the OWNING app (170c98e1) must have the
-# Microsoft Graph application permission FileStorageContainer.Selected AND the
-# SharePoint "Container.Selected" application permission, both admin-consented. If this
-# script returns 401 "invalid token" or 403, that consent is missing — grant it in
-# Azure Portal > App Registrations > (owning app) > API Permissions, then admin-consent.
+# WORKING METHOD (this tenant): the legacy `_api/v2.1/storageContainerTypes/{ct}/
+# applicationPermissions` endpoint returns apiNotFound here. Use the Microsoft Graph
+# beta endpoint instead:
+#   PUT /beta/storage/fileStorage/containerTypeRegistrations/{ct}/applicationPermissionGrants/{appId}
+# authenticated app-only as the container-type OWNER app using a CERTIFICATE
+# (client-secret app-only tokens are rejected as "invalid token" by this tenant).
 #
-# A PUT to /applicationPermissions REPLACES the whole grant list, so this script GETs
-# the current list first and MERGES the MI in (never clobbers existing registrations).
+# PREREQS:
+#  - The guest app (the MI) already holds the Graph app-role FileStorageContainer.Selected.
+#  - The OWNER app (170c98e1) has a VALID certificate (its original expired 2026-03-14;
+#    renew via `az ad app credential reset --id <owner> --cert @cert.cer --append`) that
+#    is present in the CurrentUser cert store on this machine (thumbprint below).
 
 param(
-    [string]$TenantId          = "a221a95e-6abc-4434-aecc-e48338a1b2f2",
-    [string]$ContainerTypeId   = "8a6ce34c-6055-4681-8f87-2f4f9f921c06",
-    [string]$OwningAppId       = "170c98e1-d486-4355-bcbe-170454e0207c",
-    [string]$MiAppId           = "5967251e-171c-46fe-a6c2-ef843c90309d",   # mi-bff-api-dev
-    [string]$SharePointDomain  = "spaarke.sharepoint.com",
-    [string]$KeyVaultName      = "spaarke-spekvcert",
-    [string]$OwningAppSecretName = "spe-owning-app-secret",
-    # SPE container-type app-permission roles for the MI. "full" mirrors the owning app;
-    # tighten later to @("readContent","writeContent","create","delete") if desired.
-    [string[]]$MiAppOnlyRoles  = @("full"),
-    [string[]]$MiDelegatedRoles = @("full")
+    [string]$TenantId        = "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+    [string]$ContainerTypeId = "8a6ce34c-6055-4681-8f87-2f4f9f921c06",
+    [string]$OwnerAppId      = "170c98e1-d486-4355-bcbe-170454e0207c",   # container-type owner (auth as this)
+    [string]$GuestAppId      = "5967251e-171c-46fe-a6c2-ef843c90309d",   # mi-bff-api-dev (the grantee)
+    [Parameter(Mandatory=$true)]
+    [string]$OwnerCertThumbprint,                                        # valid cert on the owner app, in Cert:\CurrentUser\My
+    [string[]]$Permissions   = @("full")                                 # app-only perms for the guest app
 )
-
 $ErrorActionPreference = "Stop"
-Write-Host "Registering MI $MiAppId as guest app on container type $ContainerTypeId" -ForegroundColor Cyan
+function B64Url([byte[]]$b){ [Convert]::ToBase64String($b).TrimEnd('=').Replace('+','-').Replace('/','_') }
 
-# 1) Owning-app SharePoint token (client credentials)
-$secret = az keyvault secret show --vault-name $KeyVaultName --name $OwningAppSecretName --query value -o tsv
-$tok = (Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -Body @{
-    client_id = $OwningAppId; client_secret = $secret
-    scope = "https://$SharePointDomain/.default"; grant_type = "client_credentials"
+# --- cert-based app-only Graph token for the OWNER app (JWT client assertion, RS256) ---
+$cert = Get-Item "Cert:\CurrentUser\My\$OwnerCertThumbprint"
+$tokUri = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+$now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+$hdr = (@{ alg="RS256"; typ="JWT"; x5t=(B64Url ($cert.GetCertHash())) } | ConvertTo-Json -Compress)
+$pl  = (@{ aud=$tokUri; iss=$OwnerAppId; sub=$OwnerAppId; jti=[guid]::NewGuid().ToString(); nbf=$now; exp=($now+600); iat=$now } | ConvertTo-Json -Compress)
+$unsigned = (B64Url ([Text.Encoding]::UTF8.GetBytes($hdr))) + "." + (B64Url ([Text.Encoding]::UTF8.GetBytes($pl)))
+$rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
+$sig = $rsa.SignData([Text.Encoding]::UTF8.GetBytes($unsigned), [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+$assertion = "$unsigned." + (B64Url $sig)
+$tok = (Invoke-RestMethod -Method Post -Uri $tokUri -Body @{
+    client_id=$OwnerAppId; scope="https://graph.microsoft.com/.default"
+    client_assertion_type="urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+    client_assertion=$assertion; grant_type="client_credentials"
 }).access_token
-$headers = @{ Authorization = "Bearer $tok"; "Content-Type" = "application/json"; Accept = "application/json" }
-$uri = "https://$SharePointDomain/_api/v2.1/storageContainerTypes/$ContainerTypeId/applicationPermissions"
+$hdrs = @{ Authorization="Bearer $tok"; "Content-Type"="application/json" }
+$base = "https://graph.microsoft.com/beta/storage/fileStorage/containerTypeRegistrations/$ContainerTypeId"
 
-# 2) GET current registrations (so we merge, not clobber). If GET is unavailable,
-#    fall back to the known-minimal set [owning app: full].
-$existing = @()
-try {
-    $cur = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
-    if ($cur.value) { $existing = @($cur.value | ForEach-Object { @{ appId = $_.appId; delegated = $_.delegated; appOnly = $_.appOnly } }) }
-    Write-Host "Current registrations: $(($existing | ForEach-Object { $_.appId }) -join ', ')" -ForegroundColor Gray
-} catch {
-    Write-Host "GET failed ($($_.Exception.Message)); seeding with owning app only." -ForegroundColor Yellow
-    $existing = @(@{ appId = $OwningAppId; delegated = @("full"); appOnly = @("full") })
-}
+# --- upsert the single guest-app grant by appId (collection PATCH/POST are rejected; per-item PUT works) ---
+Write-Host "Granting $GuestAppId [$($Permissions -join ',')] on container type $ContainerTypeId ..."
+$body = @{ delegatedPermissions=$Permissions; applicationPermissions=$Permissions } | ConvertTo-Json
+Invoke-RestMethod -Uri "$base/applicationPermissionGrants/$GuestAppId" -Method Put -Headers $hdrs -Body $body | Out-Null
+Write-Host "Grant applied. Current grants:"
+(Invoke-RestMethod -Uri "$base/applicationPermissionGrants" -Headers $hdrs -Method Get).value |
+    ForEach-Object { Write-Host ("  {0}  appOnly=[{1}]" -f $_.appId, ($_.applicationPermissions -join ',')) }
 
-# Ensure owning app present + full, then upsert the MI
-if (-not ($existing | Where-Object { $_.appId -eq $OwningAppId })) {
-    $existing += @{ appId = $OwningAppId; delegated = @("full"); appOnly = @("full") }
-}
-$existing = @($existing | Where-Object { $_.appId -ne $MiAppId })   # drop stale MI entry if any
-$existing += @{ appId = $MiAppId; delegated = $MiDelegatedRoles; appOnly = $MiAppOnlyRoles }
-
-# 3) PUT the merged list
-$body = @{ value = $existing } | ConvertTo-Json -Depth 5
-$resp = Invoke-RestMethod -Method Put -Uri $uri -Headers $headers -Body $body
-Write-Host "REGISTRATION SUCCESSFUL. Apps now registered:" -ForegroundColor Green
-$resp.value | ForEach-Object { Write-Host ("  {0}  delegated=[{1}] appOnly=[{2}]" -f $_.appId, ($_.delegated -join ','), ($_.appOnly -join ',')) }
-
-Write-Host ""
-Write-Host "NEXT: restart the BFF to clear its MSAL/app-client cache, then retest archive:" -ForegroundColor Cyan
-Write-Host "  az webapp restart -g rg-spaarke-dev -n spaarke-bff-dev" -ForegroundColor Gray
-Write-Host "  (then click 'Save to SharePoint' in the Actions PCF, or POST /api/communications/{id}/archive)" -ForegroundColor Gray
+Write-Host "`nNEXT: restart the BFF, then allow a few minutes for SPE propagation:"
+Write-Host "  az webapp restart -g rg-spaarke-dev -n spaarke-bff-dev"
+Write-Host "  # then POST /api/communications/{id}/archive should return 200 (not 403)."
