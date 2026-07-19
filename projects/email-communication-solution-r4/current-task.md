@@ -1,7 +1,7 @@
 # Current Task State — email-communication-solution-r4
 
-> **Last Updated**: 2026-07-18 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first. Project is COMPLETE + MERGED + DEPLOYED; this is a live **UAT bug-fix cycle** focused on the **Association Engine matching + review UI**.
+> **Last Updated**: 2026-07-19 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. Project COMPLETE + MERGED + DEPLOYED; live **UAT execution** against `spaarke-bff-dev`. Full UAT run + one real defect FIXED this session.
 
 ---
 
@@ -9,13 +9,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | Post-ship UAT iteration + **W6 task 060 CLOSED** (2026-07-18) — last substantive code task done; only wrap-up (090) + owner PCF import remain |
-| **Branch** | `work/email-communication-solution-r4` · task-060 committed **`0b4e975c8`** (1 ahead of origin/master; being pushed) — origin/master has 3 newer other-project commits to merge in |
-| **Tree** | clean (`.claude/worktrees/` untracked scaffold) |
-| **BFF** | LIVE on `spaarke-bff-dev` (healthz 200) — all matching fixes deployed + hash-verified (last deploy `7ea2fea02`, 47.03 MB). Task 060 is client-only (no BFF touch). |
-| **App Service config hardened (2026-07-18)** | `Communication__AutoFile__Enabled=true`/`__Threshold=0.85` now **explicit**; `Communication__WebhookSigningKey`+`__WebhookClientState` **moved to Key Vault** (`spaarke-spekvcert`, mirror prod). SemanticMatch/AiClassification kill-switches = true; index tokens resolve. See DEPLOYMENT-CHECKLIST A6. |
-| **Task 060 (W6) — DONE** | SummarizeFilesDialog + FilePreviewDialog migrated to canonical `sendCommunication()`/`SendEmailDialog`; DocumentEmailWizard NO-CHANGE (retracted premise). Shared-lib tsc+eslint clean, 27+5 tests green, ADR-045/019/021/028 clean, body-format regression caught+fixed. See TASK-INDEX row 060. |
-| **Next action** | (1) commit task-060 diff + merge to master; (2) run **task 090 wrap-up** (`/test-diet`, README→Complete, lessons-learned, archive); (3) OWNER still imports PCF `CommunicationConnectionsSolution_v1.2.1.zip` + hard-refresh (UAT verify — unchanged) |
+| **Phase** | Post-ship **UAT execution** (2026-07-19). Task 060 done+merged (prior). This session: drove the UAT checklist end-to-end + fixed the one defect found (archive/Save-to-SharePoint). |
+| **Branch/Tree** | `work/email-communication-solution-r4` · HEAD **`fe7375483`** · clean. **6 session commits ahead of origin/master** (UAT-checklist docs + `Register-BffMiWithContainerType.ps1`); origin/master **25 ahead** (other projects) — worktree needs a `git merge origin/master` before any future merge-to-master. |
+| **BFF** | LIVE `spaarke-bff-dev` (healthz 200). App config hardened earlier (AutoFile explicit 0.85, webhook secrets→Key Vault, SemanticMatch/AiClassification=true). |
+| **🔴→✅ Archive FIXED (the big one)** | Root cause: BFF managed identity `mi-bff-api-dev`/`5967251e` was **not in SPE container type `8a6ce34c` applicationPermissionGrants** (only owner `170c98e1` + `1e40baad` were). **Fix (infra, NOT git):** added MI with `full` via Graph beta `PUT /beta/storage/fileStorage/containerTypeRegistrations/8a6ce34c/applicationPermissionGrants/5967251e`. En route: **renewed owner app `170c98e1`'s cert** (expired 2026-03-14 → new cert thumb `A57B48A2…` valid 2027, appended). Verified: archive → **200** (doc `959af325…`), 2nd call → `alreadyArchived:true`. Working method captured in `scripts/Register-BffMiWithContainerType.ps1`. |
+| **⚠ Loose ends** | (1) The renewed cert's `.pfx` is in owner's `%TEMP%\spe-owner.pfx` (pw `Sp@rke-SPE-Reg-2026!`) but **NOT in Key Vault** (my login lacked cert-import RBAC on `spaarke-spekvcert`/RG `sharepointembedded`). BFF doesn't need it; import if wanted for future SPE admin. (2) `sprk_specontainertypeconfig.sprk_isregistered=false` is STALE (Graph shows the CT registered+valid). |
+| **UAT scorecard** | ✅ 1A 7/7 · 1B B-1/2/3 · 1C engine (verified on live provenance) · 1D send+non-fatal · **1F archive 1/2 (FIXED)** · config hardening. ⬚ Remaining: **1E kill-switches** (I can drive), **Tier 2/3 PCF UI** (owner browser), **B-4/B-5** (restricted user / privilege email), **D-1** (owner send 1 fresh inbound → proves post-KV webhook + samples rungs C-1/C-4/C-5), **H-8** owner re-verify Save-to-SharePoint in Actions PCF (should now pass). Full detail: `notes/UAT-CHECKLIST.md` (rows filled in). |
+| **Next action** | Resume UAT: offer to drive **1E kill-switches** (toggle `Communication__SemanticMatch__Enabled` / `__AiClassification__Enabled`, restart, confirm engine response changes via a suggest-associations call + Dataverse provenance). Owner-gated items await owner (fresh inbound email; PCF UI Tiers 2/3; H-8 re-verify). Project wrap-up (task 090) still HELD until UAT closes. |
 
 ### PCF ZIP ready for owner import (Dataverse)
 - `src/client/pcf/CommunicationConnections/Solution/bin/CommunicationConnectionsSolution_v1.2.1.zip` (v1.2.1 — display fix)
