@@ -3,7 +3,7 @@
 > **Status**: 🚧 **Initialized** — pipeline complete; 21 tasks / 9 waves; ready for Wave 0 (task 001).
 > **Created**: 2026-07-18 via `/project-pipeline`
 > **Branch**: `work/messaging-communication-app-r2` (synced to latest master 2026-07-18)
-> **Portfolio**: Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — Project Issue registered at pipeline start.
+> **Portfolio**: [Project #662](https://github.com/spaarke-dev/spaarke/issues/662) · Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Status: **Active** · Start 2026-07-18
 > **Follows**: [`messaging-communication-app-r1`](../messaging-communication-app-r1/) (Complete, merged, archived 2026-07-18).
 
 R2 is the **read / query / organize layer** on top of R1's messaging channel. R1 shipped transport, capture, the thread data model, and a per-thread polling Timeline. R2 makes communications **findable and organized across records and people**: a record-level threads view on all 11 regarding-family entities, a standalone all-communications view, a rich workspace widget, thread regarding-resolution, a queryable participant index, an auto-threading policy, and a richer compose form. The R1 data model already supports the core experience — so R2 is **mostly read surface + UI + two schema deltas**, not a schema migration.
