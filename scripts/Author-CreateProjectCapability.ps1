@@ -94,6 +94,10 @@ if ($existingBinding.value.Count -gt 0) {
     sprk_capturemode              = 100000000  # Loop Elicitation
     sprk_requiresnoattachedrecord = $true
     sprk_tooldescription          = $toolDescription
+    # Next-step chips (mirror create-matter's two-chip pattern): after a project drafts,
+    # offer "Add a related matter" (create-matter 89cd91f6-...) + "Add a task" (create-task
+    # 3d9724e5-...). Fires through the SNS/consumer-chips path like any other transition.
+    sprk_chiptransitions          = '[{"target_binding_id":"89cd91f6-767d-f111-ab0e-70a8a590c51c","chip_label":"Add a related matter"},{"target_binding_id":"3d9724e5-8279-f111-ab0e-7ced8ddc4cc6","chip_label":"Add a task"}]'
     'sprk_Action@odata.bind'      = "/sprk_analysisactions($actionId)"
   }
   $bindingJson = $bindingBody | ConvertTo-Json -Depth 6 -Compress
