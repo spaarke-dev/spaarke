@@ -1685,32 +1685,20 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             anywhere in the pane (see ComposeStylesPane.tsx file-level JSDoc).
             =================================================================== */}
         <ComposeStylesPane editor={editor} open={stylesOpen} onClose={() => setStylesOpen(false)} />
-        {editor ? (
-          <BubbleMenu
-            editor={editor}
-            tippyOptions={{ duration: 100, placement: 'top' }}
-            className={styles.aiBubbleWrap}
-          >
-            {/* ===================================================================
-                AI TOOLBAR MOUNT — task 030 (FR-14), AI-actions-ONLY per task 111
-                (UAT-R2 layout fix): the sibling formatting Toolbar that used to
-                render here was REMOVED (task 111) — ComposeAiToolbar is now the
-                popup's ONLY content, owning its own single Toolbar (no orphaned
-                divider, no double-Toolbar padding). Task 031 (custom marks)
-                edits AFTER this block — keep this region self-contained so that
-                follow-on edits stay a clean insertion.
-                =================================================================== */}
-            <ComposeAiToolbar
-              editor={editor}
-              documentRef={documentRef}
-              sessionId={sessionId}
-              bffBaseUrl={bffBaseUrl}
-              dispatch={dispatch}
-              enqueueComposeAction={enqueueComposeAction}
-            />
-            {/* =================== END AI TOOLBAR MOUNT (task 030) =================== */}
-          </BubbleMenu>
-        ) : null}
+        {/* NOTE (UAT 2026-07-19 P1 fix): the AI-actions <BubbleMenu> was RELOCATED to be
+            the LAST child of this container (see just before the container's closing tag
+            below). Rationale: TipTap's BubbleMenu plugin calls `this.element.remove()` on
+            mount, detaching its wrapper <div> from the DOM while React's fiber still records
+            it as a live child. When ANY earlier conditional sibling (the Comments/Styles
+            panes, the redline banners, the context-menu popup, the importing spinner)
+            toggled null→<div>, React's getHostSibling resolved its insert-anchor to that
+            detached node and called `container.insertBefore(newNode, detachedBubbleDiv)` —
+            which throws "Failed to execute 'insertBefore' … not a child of this node" and
+            trips the WidgetErrorBoundary ("Compose failed to load"). Making the BubbleMenu
+            the LAST child means every conditional sibling anchors on `editorScrollWrap`
+            (always mounted, never detached) instead. tippy positions the popup via popper
+            relative to the selection, so its position in the React child order is purely
+            structural and has no visual effect. */}
 
         {/* ===================================================================
             TASK 111 requirement 2 — right-click (context-menu) AI-toolbar
@@ -1951,6 +1939,35 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             />
           ) : null}
         </div>
+
+        {/* ===================================================================
+            AI-actions <BubbleMenu> — RELOCATED here (UAT 2026-07-19 P1 fix) to be
+            the LAST child of the container. See the NOTE where ComposeStylesPane is
+            rendered above for the full insertBefore-crash rationale. tippy detaches
+            this wrapper on mount and positions it relative to the selection, so its
+            place in the child order is structural only (no visual effect).
+
+            AI TOOLBAR MOUNT — task 030 (FR-14), AI-actions-ONLY per task 111
+            (UAT-R2 layout fix): the sibling formatting Toolbar that used to render
+            here was REMOVED (task 111) — ComposeAiToolbar is now the popup's ONLY
+            content, owning its own single Toolbar.
+            =================================================================== */}
+        {editor ? (
+          <BubbleMenu
+            editor={editor}
+            tippyOptions={{ duration: 100, placement: 'top' }}
+            className={styles.aiBubbleWrap}
+          >
+            <ComposeAiToolbar
+              editor={editor}
+              documentRef={documentRef}
+              sessionId={sessionId}
+              bffBaseUrl={bffBaseUrl}
+              dispatch={dispatch}
+              enqueueComposeAction={enqueueComposeAction}
+            />
+          </BubbleMenu>
+        ) : null}
       </div>
     );
   }

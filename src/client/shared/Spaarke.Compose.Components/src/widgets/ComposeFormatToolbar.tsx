@@ -562,6 +562,19 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
           </MenuTrigger>
           <MenuPopover>
             <div className={styles.dropdownPalette} role="group" aria-label="Word document actions">
+              {/* UX-1 (UAT 2026-07-19): a deliberate DUPLICATE of the right-aligned Save
+                  icon — users instinctively look in the Word menu to save. Same handler
+                  (`onSave`) + same enable predicate (`saveDisabled`); rendered only when
+                  the host wires Save. */}
+              {onSave ? (
+                <PaletteIconButton
+                  icon={<SaveRegular />}
+                  label={isSaving ? 'Saving…' : 'Save'}
+                  disabled={saveDisabled}
+                  onClick={onSave}
+                  testId="compose-format-word-save"
+                />
+              ) : null}
               {onOpenInWord ? (
                 <PaletteIconButton
                   icon={<OpenRegular />}
