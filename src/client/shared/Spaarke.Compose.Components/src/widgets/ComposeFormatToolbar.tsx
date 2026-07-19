@@ -13,6 +13,9 @@
  *   - Body      — block/heading style (unchanged from task 111).
  *   - Paragraph — bullet list, numbered list, blockquote, align left/center/right.
  *   - Font      — bold, italic, underline, strikethrough, link.
+ *   - Table     — insert table (2x2 + header row), add/delete row, add/delete column,
+ *                 delete table (task 041, FR-18). Row/column/delete-table commands are
+ *                 disabled outside a table (`editor.can().<cmd>()` dry-run).
  *   - Word      — Open in Word Web, Open in Word Desktop, Push to Word. These were
  *                 previously top-level actions on the separate `ComposeToolbar`
  *                 command bar (rendered by ComposeWorkspace). The host now binds the
@@ -27,6 +30,16 @@
  * BubbleMenu is AI-actions ONLY now). The active-state highlighting
  * (`isActive('bold')` etc.) and the Link add/edit `window.prompt` flow are preserved
  * byte-for-byte from that relocation — no formatting capability was lost.
+ *
+ * FR-18 (spaarkeai-compose-r3 task 041) — the "Table" dropdown adds a basic-table
+ * affordance on top of the MIT `@tiptap/extension-table` family, which is ALREADY
+ * part of the LOCKED_EXTENSIONS list in ComposeEditor.tsx (Table/TableRow/
+ * TableHeader/TableCell were registered there since the R1 spike; this task adds the
+ * missing UI surface). Insert Table is always reachable; the row/column edit +
+ * delete-table commands are disabled outside a table via `editor.can().<cmd>()`
+ * dry-run checks (the same idiom `compose-format-undo`/`redo` already use). Cell
+ * paragraphs carry `paraId` via the SAME `COMPOSE_R3_PARAID` UniqueID scheme as body
+ * paragraphs (task 011) — no separate cell-identity mechanism (FR-08/FR-10).
  *
  * Extensions consumed here MUST match the LOCKED_EXTENSIONS list in
  * ComposeEditor.tsx. Adding a button here without loading the corresponding
@@ -71,6 +84,12 @@ import {
   DesktopRegular,
   ArrowUploadRegular,
   SaveRegular,
+  TableAdd24Regular,
+  TableInsertRow24Regular,
+  TableInsertColumn24Regular,
+  TableDeleteRow24Regular,
+  TableDeleteColumn24Regular,
+  TableDismiss24Regular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -156,6 +175,23 @@ function currentBlockLabel(editor: Editor | null): string {
   if (editor.isActive('heading', { level: 2 })) return 'Heading 2';
   if (editor.isActive('heading', { level: 3 })) return 'Heading 3';
   return 'Body';
+}
+
+/**
+ * FR-18 (task 041) — dry-run one of the `@tiptap/extension-table` commands via
+ * `editor.can()` WITHOUT executing it, guarding against an `editor.can()` shape that
+ * does not expose the table commands at all (a hand-rolled test double without the
+ * Table extension mounted — see `ComposeFormatToolbar.test.tsx`'s chainable mock).
+ * Production `ComposeEditor` always mounts the MIT table family (LOCKED_EXTENSIONS),
+ * so this only matters for lighter-weight test/host editors.
+ */
+function canRunTableCommand(
+  editor: Editor,
+  cmd: 'addRowAfter' | 'addColumnAfter' | 'deleteRow' | 'deleteColumn' | 'deleteTable'
+): boolean {
+  const can = editor.can() as unknown as Partial<Record<typeof cmd, () => boolean>>;
+  const fn = can[cmd];
+  return typeof fn === 'function' ? fn() : false;
 }
 
 /**
@@ -276,6 +312,47 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     }
     editor.chain().focus().extendMarkRange('link').setLink({ href: url.trim() }).run();
   };
+
+  // FR-18 (task 041) — basic-table insert + edit commands. `insertTable` seeds a
+  // 2x2 table with a header row (matches the ui-test "choose a 2x2 table" flow);
+  // the row/column commands operate on whichever cell the caret is in, mirroring
+  // Word's "insert above/below the current row" semantics.
+  const insertTable = (): void => {
+    if (controlDisabled) return;
+    editor.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run();
+  };
+  const addTableRow = (): void => {
+    if (controlDisabled) return;
+    editor.chain().focus().addRowAfter().run();
+  };
+  const addTableColumn = (): void => {
+    if (controlDisabled) return;
+    editor.chain().focus().addColumnAfter().run();
+  };
+  const deleteTableRow = (): void => {
+    if (controlDisabled) return;
+    editor.chain().focus().deleteRow().run();
+  };
+  const deleteTableColumn = (): void => {
+    if (controlDisabled) return;
+    editor.chain().focus().deleteColumn().run();
+  };
+  const deleteTable = (): void => {
+    if (controlDisabled) return;
+    editor.chain().focus().deleteTable().run();
+  };
+
+  // Row/column/table edit commands only apply inside a table — `can()` dry-runs the
+  // command against the current selection without executing it (same idiom as the
+  // Undo/Redo `editor.can().undo()` disabled checks below). `canRunTableCommand` guards
+  // against an `editor.can()` shape that does not expose the table commands (e.g. a
+  // hand-rolled test double without the Table extension mounted) so the toolbar never
+  // throws — it just reports the command as unavailable.
+  const canAddRow = canRunTableCommand(editor, 'addRowAfter');
+  const canAddColumn = canRunTableCommand(editor, 'addColumnAfter');
+  const canDeleteRow = canRunTableCommand(editor, 'deleteRow');
+  const canDeleteColumn = canRunTableCommand(editor, 'deleteColumn');
+  const canDeleteTable = canRunTableCommand(editor, 'deleteTable');
 
   const showWordMenu = Boolean(onOpenInWord || onOpenInWordDesktop || onPushToWord);
   const openInWordDisabled = controlDisabled || wordActionsDisabled === true;
@@ -419,6 +496,59 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               disabled={controlDisabled}
               onClick={toggleLink}
               testId="compose-format-link"
+            />
+          </div>
+        </MenuPopover>
+      </Menu>
+
+      {/* ---- Table (FR-18, task 041) — insert + basic row/column edit ---- */}
+      <Menu positioning="below-start">
+        <MenuTrigger disableButtonEnhancement>
+          <DropdownButton label="Table" disabled={controlDisabled} testId="compose-format-table-menu" />
+        </MenuTrigger>
+        <MenuPopover>
+          <div className={styles.dropdownPalette} role="group" aria-label="Table">
+            <PaletteIconButton
+              icon={<TableAdd24Regular />}
+              label="Insert table"
+              disabled={controlDisabled}
+              onClick={insertTable}
+              testId="compose-format-table-insert"
+            />
+            <PaletteIconButton
+              icon={<TableInsertRow24Regular />}
+              label="Add row"
+              disabled={controlDisabled || !canAddRow}
+              onClick={addTableRow}
+              testId="compose-format-table-add-row"
+            />
+            <PaletteIconButton
+              icon={<TableInsertColumn24Regular />}
+              label="Add column"
+              disabled={controlDisabled || !canAddColumn}
+              onClick={addTableColumn}
+              testId="compose-format-table-add-column"
+            />
+            <PaletteIconButton
+              icon={<TableDeleteRow24Regular />}
+              label="Delete row"
+              disabled={controlDisabled || !canDeleteRow}
+              onClick={deleteTableRow}
+              testId="compose-format-table-delete-row"
+            />
+            <PaletteIconButton
+              icon={<TableDeleteColumn24Regular />}
+              label="Delete column"
+              disabled={controlDisabled || !canDeleteColumn}
+              onClick={deleteTableColumn}
+              testId="compose-format-table-delete-column"
+            />
+            <PaletteIconButton
+              icon={<TableDismiss24Regular />}
+              label="Delete table"
+              disabled={controlDisabled || !canDeleteTable}
+              onClick={deleteTable}
+              testId="compose-format-table-delete-table"
             />
           </div>
         </MenuPopover>
