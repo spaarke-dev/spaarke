@@ -1244,6 +1244,19 @@ public static class ComposeEndpoints
                 AnchoredAnnotations: result.AnchoredAnnotations,
                 DefinedTermsTracking: result.DefinedTermsTracking,
                 ActionHistory: result.ActionHistory,
+                // task 052 fix (FR-08/FR-24/FR-25 wire gap): ComposeService.LoadAsync has computed
+                // ParaIdMap (task 010)/ImportedRevisions (task 050)/ImportedComments (task 051) on
+                // LoadComposeDocumentResult since those tasks landed, but this response record never
+                // projected them onto the wire — every client Load silently received undefined for
+                // all three, so `ComposeEditor`'s paraIdMap/importedRevisions/importedComments props
+                // (which the client-side unit tests exercise only via direct prop injection, never via
+                // a real Load response) were dead in production. Surfaced by this task's through-the-wire
+                // seam test (ADR-038 "unit-green != done" — exactly the gap the vertical-slice-seam
+                // KEEP category exists to catch). Additive, camelCase, mirrors the existing client
+                // compose-contracts.ts ParaIdMapEntry/ImportedRevision/ImportedComment shapes verbatim.
+                ParaIdMap: result.ParaIdMap,
+                ImportedRevisions: result.ImportedRevisions,
+                ImportedComments: result.ImportedComments,
                 CorrelationId: httpContext.TraceIdentifier));
         }
         catch (ArgumentException ex)
@@ -2067,6 +2080,13 @@ public sealed record LoadComposeDocumentResponse(
     [property: JsonPropertyName("anchoredAnnotations")] IReadOnlyList<AnchoredAnnotation> AnchoredAnnotations,
     [property: JsonPropertyName("definedTermsTracking")] IReadOnlyList<DefinedTerm> DefinedTermsTracking,
     [property: JsonPropertyName("actionHistory")] IReadOnlyList<ComposeActionHistoryEntry> ActionHistory,
+    // task 052 fix: additive wire projection of LoadComposeDocumentResult.ParaIdMap (task 010) /
+    // ImportedRevisions (task 050) / ImportedComments (task 051) — computed server-side since those
+    // tasks landed but never serialized onto this response until this task's seam test surfaced the
+    // gap. Field shapes mirror the client compose-contracts.ts mirrors verbatim (camelCase).
+    [property: JsonPropertyName("paraIdMap")] IReadOnlyList<ParaIdMapEntry> ParaIdMap,
+    [property: JsonPropertyName("importedRevisions")] IReadOnlyList<ImportedRevision> ImportedRevisions,
+    [property: JsonPropertyName("importedComments")] IReadOnlyList<ImportedComment> ImportedComments,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
 /// <summary>Request body for <c>POST /api/compose/sessions/{sessionId}/annotations</c> (FR-29,
