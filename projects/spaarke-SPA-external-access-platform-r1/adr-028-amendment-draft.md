@@ -1,7 +1,7 @@
 # ADR-028 Amendment A1 (DRAFT) — Entra External ID for the External Portal Surface
 
-> **Status**: Proposed (resolution path **B — ADR amendment**, per root CLAUDE.md §6.5)
-> **Date**: 2026-07-18
+> **Status**: **APPLIED** to canonical `.claude/adr/ADR-028-spaarke-auth-architecture.md` (Amendment A1 section) on 2026-07-19. Owner-accepted. (Resolution path **B — ADR amendment**, per root CLAUDE.md §6.5.) Onboarding rule reconciled to the final admin-initiated R1 decision (self-service sign-up deferred, `isSignUpAllowed=false`). No separate full `docs/adr/ADR-028` exists — the concise ADR is canonical.
+> **Date**: 2026-07-18 (applied 2026-07-19)
 > **Amends**: [ADR-028 (concise)](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) + [ADR-028 (full)](../../docs/adr/ADR-028-spaarke-auth-architecture.md)
 > **Driver project**: `spaarke-SPA-external-access-platform-r1`
 > **Requires**: owner sign-off before merge into the canonical ADR (this is a reviewable draft, not yet applied to ADR-028).
