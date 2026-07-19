@@ -17,8 +17,14 @@
  */
 
 import * as React from "react";
-import { Button, Tooltip } from "@fluentui/react-components";
-import { ChatRegular, ChatAddRegular } from "@fluentui/react-icons";
+import {
+  Button,
+  Tooltip,
+  MessageBar,
+  MessageBarBody,
+  MessageBarActions,
+} from "@fluentui/react-components";
+import { ChatRegular, ChatAddRegular, DismissRegular } from "@fluentui/react-icons";
 import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, launchSurface, launchSummarizeFilesWizard } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
@@ -1368,6 +1374,12 @@ export function ConversationPane(): React.JSX.Element {
   // the auth guard below (Rules of Hooks / React #300 — see the transcriptFooter note above).
   const myAssistant = useMyAssistant({ authenticatedFetch, bffBaseUrl });
 
+  // MA-1 (UAT 2026-07-19): the questionnaire no longer auto-opens. When the profile is incomplete we
+  // show a dismissible "complete your profile" nudge instead; dismissal is session-scoped.
+  const [profileNudgeDismissed, setProfileNudgeDismissed] = React.useState(false);
+  const showProfileNudge =
+    myAssistant.available && myAssistant.needsProfile && !profileNudgeDismissed;
+
   // ── Auth loading guard (gate on isAuthenticated — never a token snapshot) ──
   // NOTE (Rules of Hooks): every React.use* call MUST appear ABOVE this early return — see the
   // React #300 note on `transcriptFooter` above. Do not add hooks below this line.
@@ -1430,7 +1442,10 @@ export function ConversationPane(): React.JSX.Element {
                 WorkspacePaneMenu — a second, independent Menu trigger in this
                 rightSlot. task 042 (FR-F3): "My Assistant" opens the stated-profile
                 questionnaire. */}
-            <AssistantToolMenu onMyAssistant={myAssistant.openDialog} />
+            <AssistantToolMenu
+              onMyAssistant={myAssistant.openDialog}
+              highlightMyAssistant={myAssistant.needsProfile}
+            />
           </>
         }
       />
@@ -1443,6 +1458,36 @@ export function ConversationPane(): React.JSX.Element {
       )}
 
       <div className={styles.content} role="region" aria-label="AI Chat">
+        {/* MA-1 (UAT 2026-07-19): dismissible "complete your profile" nudge — replaces the old
+            jarring auto-open of the My Assistant questionnaire. Clicking "Set up" opens the dialog. */}
+        {showProfileNudge && (
+          <MessageBar intent="info" data-testid="assistant-profile-nudge">
+            <MessageBarBody>
+              Personalize your assistant — tell it your role, focus areas, and preferences so it can
+              tailor its help.
+            </MessageBarBody>
+            <MessageBarActions
+              containerAction={
+                <Button
+                  appearance="transparent"
+                  aria-label="Dismiss"
+                  icon={<DismissRegular />}
+                  onClick={() => setProfileNudgeDismissed(true)}
+                  data-testid="assistant-profile-nudge-dismiss"
+                />
+              }
+            >
+              <Button
+                size="small"
+                onClick={myAssistant.openDialog}
+                data-testid="assistant-profile-nudge-setup"
+              >
+                Set up
+              </Button>
+            </MessageBarActions>
+          </MessageBar>
+        )}
+
         {showWelcomePanel && <WelcomePanel />}
         {showWelcomePanel && (
           <WelcomeStartCards
@@ -1606,9 +1651,9 @@ export function ConversationPane(): React.JSX.Element {
           onClose={myAssistant.closeDialog}
           coldStart={myAssistant.coldStart}
           practiceAreas={myAssistant.practiceAreas}
+          workOffices={myAssistant.workOffices}
           initialValues={myAssistant.initialValues}
           onSubmit={myAssistant.onSubmit}
-          onErase={myAssistant.onErase}
           loading={myAssistant.loading}
         />
       ) : null}

@@ -17,6 +17,7 @@ function fakePort(existing: UserProfileRow | null): jest.Mocked<IUserProfilePort
     listPracticeAreas: jest
       .fn()
       .mockResolvedValue([{ id: 'pa-1', name: 'Appellate', code: 'APPL' }]),
+    listWorkOffices: jest.fn().mockResolvedValue([{ id: 'wo-1', name: 'Chicago' }]),
     upsertProfileByUser: jest.fn().mockResolvedValue(PROFILE_ID),
     associatePracticeArea: jest.fn().mockResolvedValue(undefined),
     disassociatePracticeArea: jest.fn().mockResolvedValue(undefined),
@@ -47,24 +48,30 @@ describe('useMyAssistant', () => {
     expect(port.getProfileByUser).not.toHaveBeenCalled();
   });
 
-  it('cold-start: no completed profile → coldStart flagged + auto-opens once', async () => {
+  it('cold-start (MA-1): incomplete profile → coldStart + needsProfile flagged, does NOT auto-open', async () => {
     const port = fakePort(null);
     const { result } = renderHook(() =>
       useMyAssistant({ port, getUserId: () => USER, getDisplayName: () => 'Ada' })
     );
     await waitFor(() => expect(result.current.coldStart).toBe(true));
-    expect(result.current.open).toBe(true);
+    // MA-1: the questionnaire no longer auto-opens — the host shows a dismissible nudge instead.
+    expect(result.current.open).toBe(false);
+    expect(result.current.needsProfile).toBe(true);
     expect(result.current.available).toBe(true);
     expect(port.listPracticeAreas).toHaveBeenCalled();
+    // MA-3: work offices load alongside practice areas.
+    await waitFor(() => expect(result.current.workOffices).toEqual([{ id: 'wo-1', name: 'Chicago' }]));
+    expect(port.listWorkOffices).toHaveBeenCalled();
   });
 
-  it('completed profile → no cold-start, no auto-open, values prefilled', async () => {
+  it('completed profile → no cold-start, no needs-profile, no auto-open, values prefilled', async () => {
     const port = fakePort(completeRow);
     const { result } = renderHook(() =>
       useMyAssistant({ port, getUserId: () => USER })
     );
     await waitFor(() => expect(result.current.initialValues.primaryRole).toBe(100000001));
     expect(result.current.coldStart).toBe(false);
+    expect(result.current.needsProfile).toBe(false);
     expect(result.current.open).toBe(false);
     expect(result.current.initialValues.practiceAreaIds).toEqual(['pa-1']);
   });
@@ -88,6 +95,8 @@ describe('useMyAssistant', () => {
 
     expect(port.upsertProfileByUser).toHaveBeenCalledTimes(1);
     expect(result.current.coldStart).toBe(false);
+    // MA-1: a successful save also clears the needs-profile nudge.
+    expect(result.current.needsProfile).toBe(false);
   });
 
   it('onSubmit seeds User-scope memory via POST /api/memory/user/seed after the profile save', async () => {
