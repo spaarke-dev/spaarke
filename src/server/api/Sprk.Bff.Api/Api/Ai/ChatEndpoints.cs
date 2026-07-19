@@ -1808,11 +1808,18 @@ public static class ChatEndpoints
                 detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
         }
 
-        // Load recent sessions from Cosmos via the persistence service.
-        // SessionPersistenceService doesn't have a list method yet, so we return
-        // an empty list for now. The frontend handles empty gracefully.
-        // TODO: Add ListRecentSessionsAsync to ISessionPersistenceService
-        var sessions = new List<RecentSessionDto>();
+        // R4-8 (UAT 2026-07-19): list the tenant's most-recent sessions from the Cosmos warm tier.
+        // Returns a top-level JSON array (the History dropdown expects `Array.isArray`).
+        var recent = await persistenceService.ListRecentSessionsAsync(tenantId, limit, cancellationToken);
+        var sessions = recent
+            .Select(s => new RecentSessionDto(
+                Id: s.SessionId,
+                Title: s.Title,
+                EntityType: s.EntityType,
+                EntityName: s.EntityName,
+                PlaybookName: s.PlaybookName,
+                UpdatedAt: s.UpdatedAt))
+            .ToList();
 
         return Results.Ok(sessions);
     }
