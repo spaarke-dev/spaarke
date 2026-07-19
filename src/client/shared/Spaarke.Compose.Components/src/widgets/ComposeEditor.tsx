@@ -89,12 +89,14 @@ import {
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
+import { ComposeFindReplace } from './ComposeFindReplace';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { QaHighlightExtension } from './marks/QaHighlightExtension';
 import { usePendingRedline, type MaterializeStatus } from './hooks/usePendingRedline';
 import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighlight';
+import { ComposeFindReplaceExtension } from './hooks/useComposeFindReplace';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the side-effect widget
 // registration (`register-workspace-widgets.ts` transitively pulls in
@@ -217,6 +219,14 @@ const COMPOSE_R2_MARKS = [InsertionMark, DeletionMark, CommentAnchorMark];
  * structurally different kind of extension (plugin-only, no schema mark).
  */
 const COMPOSE_R2_QA_HIGHLIGHT = [QaHighlightExtension];
+
+/**
+ * FR-17 in-editor find/replace (task 040) — another single ProseMirror VIEW-DECORATION plugin (NOT
+ * a Mark, same rationale as {@link COMPOSE_R2_QA_HIGHLIGHT}: find highlighting never appears in
+ * `editor.getHTML()`/`getJSON()` and never serializes to DOCX). Kept as its own additive array for
+ * the same structural reason — a plugin-only extension, no schema mark.
+ */
+const COMPOSE_R3_FIND_REPLACE = [ComposeFindReplaceExtension];
 
 // R3 FR-09/FR-10 paraId identity extension (task 011) — factored into
 // `./paraIdExtension` as a pure headless schema piece (see that module's header).
@@ -655,6 +665,22 @@ const useStyles = makeStyles({
       borderRadius: tokens.borderRadiusSmall,
       transition: 'background-color 0.2s ease-out',
     },
+    // FR-17 find/replace (task 040) — a ProseMirror view decoration (see
+    // ComposeFindReplaceExtension in useComposeFindReplace.ts), NOT a doc Mark: highlighting never
+    // serializes to DOCX. Two tiers: every match gets a subtle highlight; the current
+    // (prev/next-navigated) match gets a stronger brand-colored one so it's visually distinct.
+    // Semantic tokens only (ADR-021 dark-mode-correct).
+    '& .compose-find-match': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      borderRadius: tokens.borderRadiusSmall,
+    },
+    '& .compose-find-match-current': {
+      backgroundColor: tokens.colorBrandBackground2,
+      borderRadius: tokens.borderRadiusSmall,
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorBrandStroke1,
+    },
   },
   loadingState: {
     display: 'flex',
@@ -971,6 +997,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const [contextMenuAnchor, setContextMenuAnchor] = React.useState<{ x: number; y: number } | null>(null);
     const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
 
+    // ----- Task 040 — FR-17 in-editor find/replace panel toggle ------------
+    // Ctrl/Cmd+F (intercepted below via editorProps.handleKeyDown, overriding the browser's native
+    // find) opens the panel; the panel's own Escape handling (ComposeFindReplace.tsx) closes it and
+    // clears the search state/highlight. Mounted between the format toolbar and the AI BubbleMenu —
+    // see the render section below.
+    const [findReplaceOpen, setFindReplaceOpen] = React.useState<boolean>(false);
+
     // ----- FIX #9 — hidden-scrollbar editor surface + "scroll for more" FAB ----
     // The editor scroll region hides its native scrollbar (see `editorSurface`
     // style: `scrollbarWidth: none` + `::-webkit-scrollbar { display: none }`)
@@ -1051,7 +1084,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // LOCKED Spike #1 set + the ADDITIVE R2 custom marks (task 031) + the R3 paraId identity
       // extension (task 011) — the locked list itself is unchanged (spread, not mutated), honoring
       // the "do not touch the locked list" constraint.
-      extensions: [...LOCKED_EXTENSIONS, ...COMPOSE_R2_MARKS, ...COMPOSE_R2_QA_HIGHLIGHT, ...COMPOSE_R3_PARAID],
+      extensions: [
+        ...LOCKED_EXTENSIONS,
+        ...COMPOSE_R2_MARKS,
+        ...COMPOSE_R2_QA_HIGHLIGHT,
+        ...COMPOSE_R3_PARAID,
+        ...COMPOSE_R3_FIND_REPLACE,
+      ],
       content: '<p></p>',
       // editorProps to apply Fluent v9 inherited foreground; semantic-token
       // styling on `.ProseMirror` lives in useStyles above.
@@ -1102,6 +1141,24 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             // Return false: never swallow the click — the caret still moves and normal editing works.
             return false;
           },
+        },
+        // Task 040 (FR-17) — Ctrl/Cmd+F opens the find/replace panel INSTEAD of the browser's native
+        // page-find (which would search the whole page's rendered text, not just this document, and
+        // cannot see ProseMirror decorations). Escape while the panel is open closes it; the panel
+        // itself also handles Escape when focus is inside one of its fields (ComposeFindReplace.tsx) —
+        // this top-level handler is the fallback for when focus is still in the editor body.
+        handleKeyDown: (_view, event) => {
+          const isFindShortcut = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f';
+          if (isFindShortcut) {
+            event.preventDefault();
+            setFindReplaceOpen(true);
+            return true;
+          }
+          if (event.key === 'Escape' && findReplaceOpen) {
+            setFindReplaceOpen(false);
+            return true;
+          }
+          return false;
         },
       },
       onUpdate: () => {
@@ -1381,6 +1438,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           canSave={canSave}
           isSaving={isSaving}
         />
+        {/* ===================================================================
+            FR-17 in-editor find/replace panel — task 040. Toggled by Ctrl/Cmd+F
+            inside the editor (see editorProps.handleKeyDown above) and dismissed
+            by Escape or its own close button; closing clears the search state +
+            highlight decoration (never leaves a stale highlight behind).
+            =================================================================== */}
+        <ComposeFindReplace editor={editor} open={findReplaceOpen} onClose={() => setFindReplaceOpen(false)} />
         {editor ? (
           <BubbleMenu
             editor={editor}

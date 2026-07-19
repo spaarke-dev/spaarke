@@ -35,3 +35,13 @@ export type {
 // task 072 (FR-35 Doc Q&A stretch) — ephemeral highlight over a cited span.
 export { useDocQaHighlight } from './useDocQaHighlight';
 export type { UseDocQaHighlightResult, ActiveQaHighlight, QaHighlightStatus } from './useDocQaHighlight';
+
+// task 040 (FR-17) — in-editor find/replace: match search, decoration highlight, mark-preserving
+// replace/replace-all.
+export {
+  useComposeFindReplace,
+  ComposeFindReplaceExtension,
+  findAllMatches,
+  marksForReplacement,
+} from './useComposeFindReplace';
+export type { UseComposeFindReplaceResult, FindReplaceSpan } from './useComposeFindReplace';

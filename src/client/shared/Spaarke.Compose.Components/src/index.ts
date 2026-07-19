@@ -28,6 +28,8 @@ export type {
 } from './widgets/ComposeEditor';
 export { ComposeFormatToolbar } from './widgets/ComposeFormatToolbar';
 export type { ComposeFormatToolbarProps } from './widgets/ComposeFormatToolbar';
+export { ComposeFindReplace } from './widgets/ComposeFindReplace';
+export type { ComposeFindReplaceProps } from './widgets/ComposeFindReplace';
 export {
   ComposeAiToolbar,
   registerComposeAiToolbarAction,
