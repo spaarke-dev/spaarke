@@ -42,14 +42,10 @@ jest.mock('@spaarke/auth', () => ({
 // FR-34 D-F3 (task 071): capture the render-ack signal ComposeWorkspace emits once the
 // seeded draft actually renders. Prefixed `mock*` so the jest.mock factory may close over it.
 const mockDispatchPaneEvent = jest.fn();
-jest.mock(
-  '@spaarke/ai-widgets/events',
-  () => ({
-    useDispatchPaneEvent: () => mockDispatchPaneEvent,
-    usePaneEvent: () => undefined,
-  }),
-  { virtual: true }
-);
+jest.mock('@spaarke/ai-widgets/events', () => ({
+  useDispatchPaneEvent: () => mockDispatchPaneEvent,
+  usePaneEvent: () => undefined,
+}));
 
 jest.mock('./hooks', () => ({
   useComposeBroadcastChannel: () => ({ postFocusMe: jest.fn(), postForceClosed: jest.fn() }),

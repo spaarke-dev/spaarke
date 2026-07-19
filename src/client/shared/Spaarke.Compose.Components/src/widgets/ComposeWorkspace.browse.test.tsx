@@ -47,14 +47,10 @@ jest.mock('@spaarke/auth', () => ({
 // ── PaneEventBus (no-op in this test) ───────────────────────────────────────
 // `virtual` because the `@spaarke/ai-widgets/events` subpath resolves to the built
 // `dist/events/` at runtime but has no top-level entry the jest resolver can find.
-jest.mock(
-  '@spaarke/ai-widgets/events',
-  () => ({
-    useDispatchPaneEvent: () => jest.fn(),
-    usePaneEvent: () => undefined,
-  }),
-  { virtual: true }
-);
+jest.mock('@spaarke/ai-widgets/events', () => ({
+  useDispatchPaneEvent: () => jest.fn(),
+  usePaneEvent: () => undefined,
+}));
 
 // ── Heavy workspace hooks — inert doubles ───────────────────────────────────
 jest.mock('./hooks', () => ({

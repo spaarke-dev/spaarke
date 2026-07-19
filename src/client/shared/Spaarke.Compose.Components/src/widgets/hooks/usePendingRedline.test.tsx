@@ -35,15 +35,13 @@ jest.mock('@spaarke/auth', () => ({
 }));
 
 // PaneEventBus dispatch — ComposeEditor calls useDispatchPaneEvent() directly; return a no-op.
-// `virtual` because the `/events` subpath is not resolvable under jest's node resolution (the
-// sibling ComposeAiToolbar.test only ever imports it type-only, so it never hit this).
-jest.mock(
-  '@spaarke/ai-widgets/events',
-  () => ({
-    useDispatchPaneEvent: () => jest.fn(),
-  }),
-  { virtual: true }
-);
+// NOT `virtual`: jest.config `moduleNameMapper` maps `@spaarke/ai-widgets/events` to the real
+// source, so a virtual mock (keyed to the raw specifier, not the resolved path) is bypassed once
+// any sibling suite loads the real module in a shared --runInBand registry → the real hook runs
+// with no provider and throws. A resolved (non-virtual) mock binds to the mapped path per-file.
+jest.mock('@spaarke/ai-widgets/events', () => ({
+  useDispatchPaneEvent: () => jest.fn(),
+}));
 
 // BubbleMenu wraps tippy.js (ESM, not in transformIgnorePatterns) and needs a real DOM range —
 // passthrough-render its children so the AI toolbar mounts without tippy. useEditor/EditorContent
