@@ -242,33 +242,43 @@ export function ConversationPane(): React.JSX.Element {
   // per-message affordance below AND the natural-language "revise this document" flow (the mount must
   // precede the revise dispatch so a document session is established — see the decorate hook). Returns
   // true when a mount was dispatched (an active source document exists), false otherwise.
+  // Mount a SPECIFIC session file into Compose via the DIRECT 'compose' widget (the `compose.upload`
+  // seed shape is consumed verbatim by ComposeDirectWidget.buildLaunchFromSeed). WorkspacePane reuses
+  // the single Compose tab per distinct file. Returns true when a mount was dispatched.
+  const mountFileInCompose = React.useCallback(
+    (sessionFileId: string, fileName?: string): boolean => {
+      const sessionId = chatSessionIdRef.current;
+      if (!sessionFileId || !sessionId) return false;
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: "compose",
+        widgetData: { compose: { upload: { sessionId, sessionFileId, fileName } } },
+        displayName: "Compose",
+      } as WorkspacePaneEvent);
+      return true;
+    },
+    [dispatch]
+  );
+
   const mountActiveSourceDocInCompose = React.useCallback((): boolean => {
     const active = activeSourceDocRef.current;
-    const sessionId = chatSessionIdRef.current;
-    if (!active?.sessionFileId || !sessionId) return false;
-    // spaarkeai-compose-r2: mount Compose through the first-class DIRECT
-    // 'compose' widget (ComposeDirectWidget → ComposeWorkspace), NOT the
-    // LegalWorkspace LAYOUT door. The `compose.upload` SEED SHAPE is UNCHANGED
-    // (ComposeDirectWidget.buildLaunchFromSeed consumes it verbatim) — only the
-    // widgetType/envelope flips. This makes ComposeWorkspace mount
-    // UNCONDITIONALLY (never LegalWorkspaceApp/dashboard) with no layout-row
-    // lookup or race. WorkspacePane REUSES the single 'compose' tab (re-seeding).
-    dispatch("workspace", {
-      type: "widget_load",
-      widgetType: "compose",
-      widgetData: {
-        compose: {
-          upload: {
-            sessionId,
-            sessionFileId: active.sessionFileId,
-            fileName: active.fileName,
-          },
-        },
-      },
-      displayName: "Compose",
-    } as WorkspacePaneEvent);
-    return true;
-  }, [dispatch]);
+    if (!active?.sessionFileId) return false;
+    return mountFileInCompose(active.sessionFileId, active.fileName);
+  }, [mountFileInCompose]);
+
+  // R4-4 (UAT 2026-07-19): "Revise the file" on-demand action (replaces the auto-open-on-attach).
+  // Mounts EVERY promoted (indexed) session file into Compose — multiple files open in separate
+  // Compose tabs; the single active file falls back through mountActiveSourceDocInCompose.
+  const handleReviseInCompose = React.useCallback((): void => {
+    const promoted = promotedFileIdsByNameRef.current;
+    if (promoted.size > 0) {
+      for (const [fileName, sessionFileId] of promoted) {
+        mountFileInCompose(sessionFileId, fileName);
+      }
+      return;
+    }
+    mountActiveSourceDocInCompose();
+  }, [mountFileInCompose, mountActiveSourceDocInCompose]);
 
   // FIX #10a: the generic per-message "Open in Compose" affordance was REMOVED (owner decision — it
   // did not reliably work and was not always appropriate). Mounting now happens only via INTENTIONAL
@@ -1223,29 +1233,12 @@ export function ConversationPane(): React.JSX.Element {
     }
   }, [sourceDocReadyToken, pendingReviseThisDocument, mountActiveSourceDocInCompose, injection]);
 
-  // FIX #7 (spaarkeai-compose-r2) — AUTO-LOAD an Assistant-uploaded file into Compose.
-  // Owner decision (settled): when the user uploads a file in the ASSISTANT (a chat attachment), it
-  // should open in the Compose tab automatically — no need to say "revise this document" and no chip
-  // click. When a chat upload finishes promoting, `handleSessionFileUploaded` back-fills
-  // `activeSourceDocRef` and bumps `sourceDocReadyToken`; this effect then dispatches the SAME compose
-  // upload-seed mount the "Open in Compose" / revise flows use (`mountActiveSourceDocInCompose` →
-  // `widget_load{widgetType:'compose', compose:{upload:{…}}}`), so the uploaded doc mounts in the
-  // single Compose tab (WorkspacePane reuses it + keeps it mounted-hidden per Wave A #1).
-  //
-  // Dedup by sessionFileId so repeated token bumps / re-registrations don't re-mount the same file; a
-  // genuinely new upload (new sessionFileId) mounts and the single-tab reuse handles the tab. This does
-  // NOT fight the race-safe revise buffering above: a buffered revise still fires its own mount + the
-  // document-session routing (an idempotent single-tab re-seed) — auto-load only guarantees the doc is
-  // on screen, and a subsequent "revise" still routes correctly through the doc session.
-  const autoLoadedSourceDocIdRef = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    if (sourceDocReadyToken === 0) return; // no upload has back-filled a source doc yet
-    const active = activeSourceDocRef.current;
-    if (!active?.sessionFileId) return;
-    if (autoLoadedSourceDocIdRef.current === active.sessionFileId) return; // already auto-loaded this file
-    autoLoadedSourceDocIdRef.current = active.sessionFileId;
-    mountActiveSourceDocInCompose();
-  }, [sourceDocReadyToken, mountActiveSourceDocInCompose]);
+  // R4-4 (UAT 2026-07-19) — the FIX #7 AUTO-LOAD-on-attach effect was REMOVED. Owner reversed the
+  // earlier decision: attaching files should NOT auto-open Compose (uploading 2 files spawned 2 Compose
+  // tabs, which was jarring). Opening a file in Compose is now an ON-DEMAND action — the "Revise in
+  // Compose" affordance in the files tray (handleReviseInCompose) — plus the existing intentional
+  // natural-language "revise this document" flow. `sourceDocReadyToken` still drives the race-safe
+  // buffered-revise effect above; it no longer triggers an auto-mount.
 
   // ── SprkChat session callbacks ────────────────────────────────────────────
   // R7 12.3a: clear the persisted id BEFORE SprkChat creates a fresh session.
@@ -1551,6 +1544,9 @@ export function ConversationPane(): React.JSX.Element {
               // decision-1 (UAT 2026-07-19): give the files their own collapsible section — a
               // dropdown lists each filename when there's more than one.
               files={attachments.attachmentChips}
+              // R4-4 (UAT 2026-07-19): open the attached file(s) in Compose on demand (replaces the
+              // removed auto-open-on-attach). Only offered once at least one file is indexed/promoted.
+              onRevise={attachments.promotedCount > 0 ? handleReviseInCompose : undefined}
             />
           )}
 
