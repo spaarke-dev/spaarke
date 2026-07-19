@@ -1380,6 +1380,11 @@ export function ConversationPane(): React.JSX.Element {
   const showProfileNudge =
     myAssistant.available && myAssistant.needsProfile && !profileNudgeDismissed;
 
+  // CHAT-4 (UAT 2026-07-19): track the live transcript length so the get-started cards render
+  // whenever the transcript is EMPTY — including a restored-but-empty session (where the old
+  // `chatSessionId === null` gate was false). Kept in sync via SprkChat's onMessagesChange.
+  const [chatMessageCount, setChatMessageCount] = React.useState(0);
+
   // ── Auth loading guard (gate on isAuthenticated — never a token snapshot) ──
   // NOTE (Rules of Hooks): every React.use* call MUST appear ABOVE this early return — see the
   // React #300 note on `transcriptFooter` above. Do not add hooks below this line.
@@ -1394,6 +1399,13 @@ export function ConversationPane(): React.JSX.Element {
   // Welcome heading shows only with no session, no entity, and no playbook.
   const showWelcomePanel =
     chatSessionId === null && entityContext === null && playbookId === undefined;
+
+  // CHAT-4 (UAT 2026-07-19): the get-started CARDS show whenever the transcript is empty (any
+  // session state) and there's no entity/playbook focus — so a restored-but-empty session gets the
+  // suggestions instead of SprkChat's bare "No messages yet". SprkChat's built-in empty state is
+  // suppressed (hideEmptyState) while we render our own.
+  const showWelcomeCards =
+    chatMessageCount === 0 && entityContext === null && playbookId === undefined;
 
   const predefinedPrompts =
     selection.refinementPrompts.length > 0 ? selection.refinementPrompts : undefined;
@@ -1489,7 +1501,7 @@ export function ConversationPane(): React.JSX.Element {
         )}
 
         {showWelcomePanel && <WelcomePanel />}
-        {showWelcomePanel && (
+        {showWelcomeCards && (
           <WelcomeStartCards
             onSummarize={handleWelcomeSummarize}
             onCreateMatter={handleWelcomeCreateMatter}
@@ -1558,6 +1570,16 @@ export function ConversationPane(): React.JSX.Element {
               // `/documents` promotion POST (attachments.isPromoting) and the Event classify SSE stream
               // (eventBatch.isEventInFlight).
               inputBusy={attachments.isPromoting || eventBatch.isEventInFlight}
+              // CHAT-6 (UAT 2026-07-19): the SpaarkeAi Assistant treats slash commands as an
+              // advanced affordance — hide the toolbar Prompt button (slash menu still reachable via `/`).
+              hidePromptMenu
+              // CHAT-4 (UAT 2026-07-19): we render our own WelcomeStartCards on an empty transcript,
+              // so suppress SprkChat's bare "No messages yet".
+              hideEmptyState={showWelcomeCards}
+              // CHAT-5 (UAT 2026-07-19): a taller, friendlier composer. The placeholder greets on a
+              // fresh/empty transcript and reverts to the neutral prompt once the conversation starts.
+              inputPlaceholder={chatMessageCount === 0 ? "Let's get started…" : "Type a message…"}
+              inputMinRows={3}
               // Click-path chips render INLINE IN THE TRANSCRIPT (G-P2 finding 1); FIX #1a adds the
               // post-mount document-action chips ABOVE them in the SAME footer slot (both beneath the
               // last message). The node is memoized so slot-keyed auto-scroll fires only on change.
@@ -1572,7 +1594,12 @@ export function ConversationPane(): React.JSX.Element {
               injectLocalMessage={injection.pendingInjection}
               onLocalMessageInjected={injection.handleLocalMessageInjected}
               onBeforeSendMessage={handleBeforeSendMessage}
-              onMessagesChange={commands.noteMessagesChanged}
+              onMessagesChange={(msgs) => {
+                // CHAT-4: keep the local transcript-length in sync so the get-started cards toggle
+                // with the empty/non-empty state, then defer to the existing command-routing note.
+                setChatMessageCount(msgs.length);
+                commands.noteMessagesChanged(msgs);
+              }}
               onDecorateOutboundBody={handleDecorateOutboundBodyWithRevise}
               onPlaybookOptions={playbookOptions.handlePlaybookOptions}
               onSelectPlaybook={playbookOptions.handleSelectPlaybook}
