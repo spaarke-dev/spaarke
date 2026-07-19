@@ -9,12 +9,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Active work** | **R2 = "Communication Workspace"** — **`spec.md` GENERATED 2026-07-18** (all owner decisions + all 3 unresolved questions resolved). Next = `/project-pipeline`. |
-| **R2 spec** | [`projects/messaging-communication-app-r2/spec.md`](spec.md) — 12 FR / 8 NFR / 7 ADRs / 3 ADR tensions (all path C) / 7 §11 new-components / Unresolved Questions cleared. Design input: [`design.md`](design.md). Investigation: [`notes/r2-resource-investigation.md`](notes/r2-resource-investigation.md). Still NO plan/tasks/README/CLAUDE-project scaffolding (project-pipeline makes those). |
-| **Next action** | Run **`/project-pipeline projects/messaging-communication-app-r2`** — scaffolds README/PLAN/CLAUDE.md + comprehensive resource discovery + hot-path check + task decomposition (9 waves) + registers on Portfolio #2 under Epic #431. |
-| **Locked decisions** | Q1=**build participant junction** · Q2=**no category/tags** · Q3=**upgrade grid/widget in place** (ai-spaarke-ai-workspace-UI-r2 verified Complete) · Q4=**ship standalone page** · Q5=**all 11 entities**. Junction Q-C=**two typed lookups** · Q-D=**write unresolved-address rows** · Q-E=**stay polling, no spine dependency**. |
-| **R1 status** | **28/29 tasks done, DEPLOYED + MERGED TO MASTER.** Only `090` wrap-up + owner config gates remain. Timeline verified working live. |
-| **Status** | R2 = **spec complete, ready for pipeline**; R1 = code-complete + deployed, wrap-up pending. |
+| **Active work** | **R2 = "Communication Workspace"** — **`/project-pipeline` COMPLETE 2026-07-18.** Artifacts + 24-task plan generated; worktree synced to latest master. **Ready for Wave 0 (task 001).** No active task yet. |
+| **Next action** | `work on task 001` (Phase-0 audit spike) — or `continue` to pick up the first 🔲 in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md). All task work via `task-execute`. |
+| **Artifacts** | [`spec.md`](spec.md) (12 FR/8 NFR) · [`plan.md`](plan.md) (9-wave WBS) · [`README.md`](README.md) · [`CLAUDE.md`](CLAUDE.md) · [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) (24 tasks). |
+| **Base** | Branch synced to latest master 2026-07-18 (merge brought assistant-r1 + email-r4 checkpoint work; email-r4 `Services/Communication` merged — R2 builds additively). |
+| **Locked decisions** | Q1=**build participant junction** · Q2=**no category/tags** · Q3=**upgrade grid/widget in place** · Q4=**ship standalone page** · Q5=**all 11 entities** · Q-C=**two typed lookups** · Q-D=**write unresolved-address rows** · Q-E=**stay polling, no spine dependency**. |
+| **Coordination** | `/conflict-check` before every BFF wave. Shared-path edits = **050** (participant write) + **070** (auto-threading) — `parallel-safe:false`. Widget **030** merge-order vs dataset-grid-r2 + PR #508. |
+| **Status** | R2 = **initialized, ready to execute**; R1 = complete + deployed + archived. |
+
+> **⚠️ POML task files**: TASK-INDEX enumerates all 24 tasks, but the individual `tasks/NNN-*.poml` files
+> are **not yet authored** (pipeline paused before Step 3 POML generation + Step 5 wave execution, at owner
+> request). Next pipeline stage: generate the POMLs (via `/task-create` or inline) before `work on task 001`.
 
 ---
 
