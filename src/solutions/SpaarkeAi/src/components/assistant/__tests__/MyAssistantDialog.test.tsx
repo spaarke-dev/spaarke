@@ -60,14 +60,25 @@ function renderDialog(overrides: Partial<MyAssistantDialogProps> = {}, theme: Th
 }
 
 describe('MyAssistantDialog', () => {
-  it('renders the questionnaire fields when open', () => {
+  // P2-4: the questionnaire is a 3-step wizard — advance through steps via "Next".
+  const goNext = async (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(screen.getByTestId('my-assistant-next'));
+
+  it('renders the wizard fields across its three steps (via Next)', async () => {
+    const user = userEvent.setup();
     renderDialog();
+    // Step 1 — role + office.
     expect(screen.getByTestId('my-assistant-dialog')).toBeInTheDocument();
     expect(screen.getByTestId('my-assistant-role')).toBeInTheDocument();
+    expect(screen.getByTestId('my-assistant-office')).toBeInTheDocument();
+    // Step 2 — practice areas + focus.
+    await goNext(user);
     expect(screen.getByTestId('my-assistant-practice-areas')).toBeInTheDocument();
     expect(screen.getByTestId('my-assistant-focus')).toBeInTheDocument();
-    expect(screen.getByTestId('my-assistant-office')).toBeInTheDocument();
+    // Step 3 — preferences + Save.
+    await goNext(user);
     expect(screen.getByTestId('my-assistant-preferences')).toBeInTheDocument();
+    expect(screen.getByTestId('my-assistant-save')).toBeInTheDocument();
   });
 
   it('is not rendered when closed', () => {
@@ -99,6 +110,9 @@ describe('MyAssistantDialog', () => {
       },
     });
 
+    // Save lives on the final step — advance through the wizard first.
+    await goNext(user);
+    await goNext(user);
     await user.click(screen.getByTestId('my-assistant-save'));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
@@ -118,10 +132,13 @@ describe('MyAssistantDialog', () => {
     const onSubmit = jest.fn().mockResolvedValue(undefined);
     renderDialog({ onSubmit, initialValues: { focusAreas: '' } });
 
+    // Focus areas is on step 2. Advance, edit it, advance to step 3, save.
+    await goNext(user);
     // Synchronous change event — deterministic for a controlled textarea (no keystroke batching).
     fireEvent.change(screen.getByTestId('my-assistant-focus'), {
       target: { value: 'Securities litigation' },
     });
+    await goNext(user);
     await user.click(screen.getByTestId('my-assistant-save'));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
@@ -132,6 +149,8 @@ describe('MyAssistantDialog', () => {
     const user = userEvent.setup();
     const onSubmit = jest.fn().mockRejectedValue(new Error('Dataverse 500'));
     const { onClose } = renderDialog({ onSubmit });
+    await goNext(user);
+    await goNext(user);
     await user.click(screen.getByTestId('my-assistant-save'));
     await waitFor(() => expect(screen.getByTestId('my-assistant-error')).toBeInTheDocument());
     expect(onClose).not.toHaveBeenCalled();
@@ -142,25 +161,35 @@ describe('MyAssistantDialog', () => {
     const onErase = jest.fn().mockResolvedValue(undefined);
     renderDialog({ onErase });
 
-    // Step 1: click "Clear my profile" → confirm banner appears, onErase NOT yet called.
+    // The erase affordance lives on the final step (next to Save) — advance there first.
+    await goNext(user);
+    await goNext(user);
+    // Confirm step 1: click "Clear my profile" → confirm banner appears, onErase NOT yet called.
     await user.click(screen.getByTestId('my-assistant-erase'));
     expect(screen.getByTestId('my-assistant-erase-confirm')).toBeInTheDocument();
     expect(onErase).not.toHaveBeenCalled();
 
-    // Step 2: click "Confirm delete" → onErase fires.
+    // Confirm step 2: click "Confirm delete" → onErase fires.
     await user.click(screen.getByTestId('my-assistant-erase-confirm-btn'));
     await waitFor(() => expect(onErase).toHaveBeenCalledTimes(1));
   });
 
-  it('omits the erasure affordance when onErase is not provided', () => {
+  it('omits the erasure affordance when onErase is not provided', async () => {
+    const user = userEvent.setup();
     renderDialog({ onErase: undefined });
+    // Navigate to the final step where the erase affordance would otherwise render.
+    await goNext(user);
+    await goNext(user);
     expect(screen.queryByTestId('my-assistant-erase')).not.toBeInTheDocument();
   });
 
-  it('renders under the dark theme (ADR-021 semantic tokens adapt)', () => {
+  it('renders under the dark theme (ADR-021 semantic tokens adapt)', async () => {
+    const user = userEvent.setup();
     renderDialog({ coldStart: true }, webDarkTheme);
     // Renders without throwing under dark theme; tokens resolve via the host FluentProvider.
     expect(screen.getByTestId('my-assistant-dialog')).toBeInTheDocument();
+    await goNext(user);
+    await goNext(user);
     expect(screen.getByTestId('my-assistant-save')).toBeInTheDocument();
   });
 });
