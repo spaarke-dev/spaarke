@@ -25,14 +25,15 @@ SprkChat + SprkChatInput gained three additive, default-off, context-agnostic pr
 - **CHAT-5 (composer)** ✅ — new `inputPlaceholder` + `inputMinRows` props (→ SprkChatInput `minRows` → Textarea `rows`). ConversationPane greets with "Let's get started…" on an empty transcript, reverts to "Type a message…" once the conversation starts; `minRows=3` (taller default, still user-resizable).
 - **CHAT-6 (slash menu)** ✅ — `hidePromptMenu` prop suppresses the toolbar-strip "Prompt" (slash-command) button; slash menu still reachable by typing `/`. ConversationPane passes it unconditionally. Attach button unaffected.
 
-### Upload feedback
-- **UP-10 (#10)**: while the composer is locked during attach/classify, show explicit progress in the chat — "Attaching file…" then "Classifying file…" with a small circular loader — so the user knows to wait. (The lock already exists via `inputBusy`; add the visible status messages driven by `isPromoting` / `isEventInFlight`.)
+### ✅ Upload feedback — SHIPPED (commit `43d2d64a1`, deployed 2026-07-19)
+- **UP-10 (#10)** ✅ — a live "Attaching file… / Classifying file…" row with a spinner renders above the composer while it's locked during the ingest window (`UploadProgressIndicator` in ConversationPaneChrome, driven by `attachments.isPromoting` / `eventBatch.isEventInFlight`).
 
-### Files + Context pane (#9, per decision 1)
+### Draft a response (#13) — PARTIAL (commit `43d2d64a1`)
+- ✅ **Readable render**: `draft-correspondence` output (`{subject, body, recipients_suggestion, cited_refs}`) no longer dumps raw JSON — `formatCorrespondenceDraft` (DocumentUploadedEventStream.ts) renders **Draft response** / Subject / body / Suggested recipients / Sources. Grounded (ADR-039).
+- ⏳ **OPEN — route to Compose tab**: owner wants the draft pre-loaded into a Compose tab. Blocked on the compose widget accepting SEED content (it currently opens blank via `widget_load{widgetType:"compose"}`). NEEDS DECISION: (a) add seed-content support to the compose widget so `widget_load` can carry `{subject, body}`, then dispatch it from the draft path; or (b) accept the in-chat readable draft as sufficient. Deliberately NOT hacked as a misleading blank-compose launch.
+
+### Files + Context pane (#9, per decision 1) — NEXT
 - Uploaded files → their own collapsible section in the Assistant pane (dropdown when >1 line); Context/Execution-Trace pane default on load + live-updating with session files + Assistant activity. (Larger; touches ConversationPane layout + Context pane.)
-
-### Draft a response (#13)
-- Card "Draft a response" (draft-correspondence, Informational) renders raw JSON (`{subject, body, recipients_suggestion, cited_refs}`) in chat + no Compose tab. Fix: render the draft readably AND/OR route it to a Compose tab (owner wants a Compose tab with the drafted response). Likely needs draft-correspondence output formatting + a compose route.
 
 ## Key facts / anchors
 - Chip dispatch path: `useConsumerChips.runBindingDispatch` (surface_launch handling fixed in cluster 1).
