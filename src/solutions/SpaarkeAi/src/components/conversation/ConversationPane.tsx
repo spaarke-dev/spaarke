@@ -1555,6 +1555,8 @@ export function ConversationPane(): React.JSX.Element {
           <UploadProgressIndicator
             attaching={attachments.isPromoting}
             classifying={eventBatch.isEventInFlight}
+            // R4-10 (UAT 2026-07-19): "Working…" while a chip capability (e.g. Summarize) runs.
+            working={chips.dispatching}
           />
 
           {/* FIX #1a: the post-mount DOCUMENT-LEVEL action chips (Summarize / Add to DMS / Draft
@@ -1578,7 +1580,7 @@ export function ConversationPane(): React.JSX.Element {
               // its own `streaming`/`extracting` states; this adds the two windows it can't see — the
               // `/documents` promotion POST (attachments.isPromoting) and the Event classify SSE stream
               // (eventBatch.isEventInFlight).
-              inputBusy={attachments.isPromoting || eventBatch.isEventInFlight}
+              inputBusy={attachments.isPromoting || eventBatch.isEventInFlight || chips.dispatching}
               // CHAT-6 (UAT 2026-07-19): the SpaarkeAi Assistant treats slash commands as an
               // advanced affordance — hide the toolbar Prompt button (slash menu still reachable via `/`).
               hidePromptMenu

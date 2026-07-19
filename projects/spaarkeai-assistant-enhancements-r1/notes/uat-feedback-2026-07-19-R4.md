@@ -35,11 +35,11 @@
 | R4-2 More card → Quick Start | ✅ shipped `02a7bcd65` |
 | R4-3 composer ×2 height | ✅ shipped `02a7bcd65` (inputMinRows 3→6) |
 | R4-4 revert auto-Compose + "Revise in Compose" tray action | ✅ shipped `db2473558` |
-| R4-5 files in tray | ⏳ partial — Revise action added to tray; NEEDS REPRO (were the 2 files 0-count in the tray, or just collapsed? tray is driven by `attachments.attachmentChips`) |
+| R4-5 files in tray | ✅ RESOLVED — owner confirmed both files show in the tray ("2 files attached … (2 indexed)"). Not a bug. |
 | R4-6 post-Draft next-action cards (Send email / Save / Create matter) | ⏳ TODO — needs the 3 actions to exist as chips/bindings; medium |
-| R4-7 empty "Actions available" header | ⏳ investigate — header renders with no chips; likely the selection-context label with no active chip set |
-| R4-8 no history | ⏳ investigate — durable Redis→Cosmos→Dataverse persistence + list/history/restore endpoints exist; needs the specific symptom (is /sessions returning empty? are sessions being created?) |
-| R4-9 Context inconsistent | ⏳ investigate — execution-trace now default; "consistency" symptom needs repro (trace empties between turns?) |
+| R4-7 empty "Actions available" header | ⏳ deferred — owner will re-capture the repro next session |
+| R4-8 no history | ✅ shipped `1888646ab` (BFF) — root cause: `GET /api/ai/chat/sessions` was a STUB returning `new List<>()`. Implemented `ListRecentSessionsAsync` (Cosmos query, tenant partition, ORDER BY lastActivity DESC, projected title) + wired the endpoint to return a top-level array. BFF deployed to dev + hash-verified + health passed; merged to master. |
+| R4-9 Context inconsistent | ⏳ deferred — owner will re-capture the repro next session |
 | R4-10 summarize spinner | ⏳ TODO — add a progress spinner during the in-chat summarize flow |
 | R4-11 post-summarize cards ("Summarize again" only) | ⏳ TODO — replace with useful next actions (catalog `sprk_chiptransitions` edit or client cards) |
 | R4-12 wizard context (uploaded files) | ⏳ larger — wizards launched from Quick Start carry no conversation context; would need to thread session files into the wizard handoff |

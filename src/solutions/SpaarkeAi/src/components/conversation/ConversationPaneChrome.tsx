@@ -438,11 +438,17 @@ export function RefinementChipBar(props: {
 export function UploadProgressIndicator(props: {
   attaching: boolean;
   classifying: boolean;
+  /** R4-10: a running chip capability (e.g. Summarize) with no upload/classify stage of its own. */
+  working?: boolean;
 }): React.JSX.Element | null {
   const styles = useStyles();
-  if (!props.attaching && !props.classifying) return null;
-  // Attach precedes classify; if both are somehow set, surface the earlier stage.
-  const label = props.attaching ? "Attaching file…" : "Classifying file…";
+  if (!props.attaching && !props.classifying && !props.working) return null;
+  // Attach precedes classify precedes a generic capability run.
+  const label = props.attaching
+    ? "Attaching file…"
+    : props.classifying
+      ? "Classifying file…"
+      : "Working…";
   return (
     <div
       className={styles.uploadProgressIndicator}
