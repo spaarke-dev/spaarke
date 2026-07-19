@@ -42,7 +42,7 @@
 
 import '@testing-library/jest-dom';
 import React, { act } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
@@ -333,6 +333,41 @@ describe('"N files attached" indicator', () => {
     expect(indicator).toHaveTextContent('3 files attached');
   });
 
+  // decision-1 (UAT 2026-07-19): multiple files collapse into an expandable dropdown.
+  it('shows an expand toggle for 2+ files and reveals the file list on click', async () => {
+    renderPane();
+    act(() => {
+      sprkChatPropsRef.current?.onAttachmentsChanged?.([
+        makeChip({ id: 'c1', filename: 'alpha.pdf' }),
+        makeChip({ id: 'c2', filename: 'beta.docx' }),
+      ]);
+    });
+
+    const toggle = await screen.findByTestId('files-attached-toggle');
+    // Collapsed by default — the per-file list is not rendered yet.
+    expect(screen.queryByTestId('attached-files-list')).toBeNull();
+
+    // fireEvent (not userEvent) — this suite runs on fake timers.
+    act(() => {
+      fireEvent.click(toggle);
+    });
+
+    const list = await screen.findByTestId('attached-files-list');
+    expect(list).toHaveTextContent('alpha.pdf');
+    expect(list).toHaveTextContent('beta.docx');
+  });
+
+  it('does not show an expand toggle for a single file (inline name)', async () => {
+    renderPane();
+    act(() => {
+      sprkChatPropsRef.current?.onAttachmentsChanged?.([makeChip({ id: 'c1', filename: 'solo.pdf' })]);
+    });
+    const indicator = await screen.findByTestId('files-attached-indicator');
+    expect(screen.queryByTestId('files-attached-toggle')).toBeNull();
+    // The single filename shows inline within the section.
+    expect(indicator).toHaveTextContent('solo.pdf');
+  });
+
   it('updates reactively when chips are removed', async () => {
     renderPane();
     act(() => {
@@ -449,7 +484,9 @@ describe('inline file-confirmation debounce', () => {
     expect(injection).not.toBeNull();
     expect(injection?.content).toBe('I have your 3 files: a.pdf, b.docx, c.md');
     expect(injection?.role).toBe('Assistant');
-    expect(injection?.metadata?.responseType).toBe('markdown');
+    // P1-5 (prior session): the file-confirmation injection is now a compact collapsible
+    // "file-status" message (was 'markdown'). Assertion realigned to the shipped behavior.
+    expect(injection?.metadata?.responseType).toBe('file-status');
 
     // Simulate SprkChat acknowledging the injection so the prop clears.
     act(() => {

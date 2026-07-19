@@ -1546,6 +1546,9 @@ export function ConversationPane(): React.JSX.Element {
             <FilesAttachedIndicator
               uploadedFileCount={attachments.uploadedFileCount}
               promotedCount={attachments.promotedCount}
+              // decision-1 (UAT 2026-07-19): give the files their own collapsible section — a
+              // dropdown lists each filename when there's more than one.
+              files={attachments.attachmentChips}
             />
           )}
 
