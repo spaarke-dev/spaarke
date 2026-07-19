@@ -9,7 +9,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Active work** | **R2 = "Communication Workspace"** — **`/project-pipeline` COMPLETE 2026-07-18.** Artifacts + 24-task plan generated; worktree synced to latest master. **Ready for Wave 0 (task 001).** No active task yet. |
+| **Active work** | **R2 = "Communication Workspace"** — **`/project-pipeline` COMPLETE 2026-07-18.** Artifacts + 21 POML task files (all validated, `Validate-TaskPoml.ps1` clean) generated; worktree synced to latest master. **Ready for Wave 0 (task 001).** No active task yet. |
 | **Next action** | `work on task 001` (Phase-0 audit spike) — or `continue` to pick up the first 🔲 in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md). All task work via `task-execute`. |
 | **Artifacts** | [`spec.md`](spec.md) (12 FR/8 NFR) · [`plan.md`](plan.md) (9-wave WBS) · [`README.md`](README.md) · [`CLAUDE.md`](CLAUDE.md) · [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) (24 tasks). |
 | **Base** | Branch synced to latest master 2026-07-18 (merge brought assistant-r1 + email-r4 checkpoint work; email-r4 `Services/Communication` merged — R2 builds additively). |
@@ -17,9 +17,9 @@
 | **Coordination** | `/conflict-check` before every BFF wave. Shared-path edits = **050** (participant write) + **070** (auto-threading) — `parallel-safe:false`. Widget **030** merge-order vs dataset-grid-r2 + PR #508. |
 | **Status** | R2 = **initialized, ready to execute**; R1 = complete + deployed + archived. |
 
-> **⚠️ POML task files**: TASK-INDEX enumerates all 24 tasks, but the individual `tasks/NNN-*.poml` files
-> are **not yet authored** (pipeline paused before Step 3 POML generation + Step 5 wave execution, at owner
-> request). Next pipeline stage: generate the POMLs (via `/task-create` or inline) before `work on task 001`.
+> **✅ POML task files**: all 21 `tasks/NNN-*.poml` files authored (6 parallel wave-authors) + validated
+> (`Validate-TaskPoml.ps1` → 21 clean / 0 errors). Pipeline **paused before Step 5 wave execution** at owner
+> request — ready for `work on task 001` (or `continue`).
 
 ---
 

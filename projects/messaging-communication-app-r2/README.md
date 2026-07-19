@@ -1,6 +1,6 @@
 # Communication Workspace — R2
 
-> **Status**: 🚧 **Initialized** — pipeline complete; 24 tasks / 9 waves; ready for Wave 0 (task 001).
+> **Status**: 🚧 **Initialized** — pipeline complete; 21 tasks / 9 waves; ready for Wave 0 (task 001).
 > **Created**: 2026-07-18 via `/project-pipeline`
 > **Branch**: `work/messaging-communication-app-r2` (synced to latest master 2026-07-18)
 > **Portfolio**: Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — Project Issue registered at pipeline start.

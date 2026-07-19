@@ -2,7 +2,7 @@
 
 > **Purpose**: Context for Claude Code when working on messaging-communication-app-r2.
 > **Always load this file first** when working on any task in this project.
-> **Status (2026-07-18)**: IMPLEMENTATION — pipeline complete. 24 tasks / 9 waves. Ready for Wave 0 (task 001).
+> **Status (2026-07-18)**: IMPLEMENTATION — pipeline complete. 21 tasks / 9 waves. Ready for Wave 0 (task 001).
 
 ---
 

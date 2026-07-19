@@ -1,0 +1,140 @@
+<task id="002" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Schema: `sprk_communicationthread` typed-regarding **all-11** lookups (mirror `RegardingFieldMap.All`) + new Lookup discriminator + naming-edited marker + default-thread marker</title>
+    <phase>W0 — Schema + Foundation + ADR</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <deps>001</deps>
+    <blocks>010, 070, 071</blocks>
+    <tags>dataverse, schema</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Adds NEW Dataverse attributes to an existing entity (`sprk_communicationthread`) — no BFF code, no Step 9.5 gates. STANDARD per §8 (new-surface schema creation with constraints). §11 Component Justification REQUIRED (new lookup + marker fields are new surface). Non-breaking is load-bearing (NFR-04) — the existing Text field MUST survive untouched.</rigor-reason>
+    <parallel-group>W0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-06 (supports FR-07, FR-09)</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Add the regarding-resolution + marker schema to the EXISTING `sprk_communicationthread` entity so the thread form can host RegardingResolver (FR-07) and so auto-threading + naming re-derive have their marker fields (FR-09/FR-07). This is ADDITIVE and non-breaking (NFR-04) — the existing Text `sprk_regardingrecordtype` MUST stay exactly as-is (retyping it is breaking and forbidden). Consume task 001's audit note so you add ONLY what is missing.
+
+    Add, via the `dataverse-create-schema` skill patterns:
+
+    1. **Typed `sprk_regarding{...}` lookups — ALL 11** — one Lookup per regarding-family entity, mirroring `src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs` `RegardingFieldMap.All` (same 11 target entities + the same `sprk_regarding{...}` field-name convention it uses for `sprk_communication`). These give the thread the same typed regarding surface `sprk_communication` already has.
+    2. **A NEW Lookup discriminator field** — RegardingResolver requires a **Lookup** binding to write the resolved regarding target; the thread's existing `sprk_regardingrecordtype` is **Text** and MUST NOT be retyped (breaking — ThreadResolver + membership derivation + timeline filters read the Text field). Add a NEW Lookup discriminator field alongside it (the Text field remains the denormalized copy).
+    3. **A naming-edited marker** (Boolean, auto-vs-user-edited) — the flag task 071 uses so `ThreadResolver.BuildTopic()` re-derives `sprk_name` on regarding change only while the marker says "auto"; a user edit flips it to "edited" and is preserved.
+    4. **A default-thread marker** — the field/flag task 070 uses to identify a record's default catch-all thread (so messages never orphan).
+
+    Verify option-set/lookup conventions via Dataverse MCP before creation; do NOT add category/tags/description (Q2). Deploy to the project solution. This is schema ONLY — the resolver/naming LOGIC is 070/071, the RegardingResolver PCF PLACEMENT is 071.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse schema engineer. Fluent in the `dataverse-create-schema` skill (Web API + PowerShell for patterns PAC CLI can't do), the ADR-024 polymorphic regarding family + `RegardingFieldMap`, Lookup vs Text discriminator modeling, and additive/non-breaking schema evolution. You add exactly the fields FR-06 needs — nothing speculative — and you never retype an in-use field.
+  </role>
+
+  <goal>
+    `sprk_communicationthread` gains: the 11 typed `sprk_regarding{...}` lookups (mirroring `RegardingFieldMap.All`), a NEW Lookup discriminator field that RegardingResolver can bind, a naming-edited Boolean marker, and a default-thread marker — all additive, with the existing Text `sprk_regardingrecordtype` untouched. RegardingResolver can attach to the thread form and write the typed lookups + discriminator (verified by binding, task 071); ThreadResolver + membership + timeline filters still read the unchanged Text field. Tasks 010 (reads over the thread), 070 (auto-threading/default marker), and 071 (naming re-derive/resolver placement) can build against real schema.
+  </goal>
+
+  <context>
+    <background>
+      The thread today has a denormalized regarding TEXT quartet (incl. `sprk_regardingrecordtype` as **Text**) and no typed lookups — verified live by task 001 and noted in `notes/r2-resource-investigation.md` §1. `sprk_communication` already has typed `sprk_regarding{...}` lookups (written server-side by the association engine); the thread does not. RegardingResolver (entity-agnostic PCF, 0 code) writes typed lookups + a Lookup discriminator, so the thread needs both to host it — hence FR-06's "new Lookup discriminator" and the all-11 typed lookups. The gotcha is that the thread's `sprk_regardingrecordtype` is **Text** while `sprk_communication`'s namesake is a Lookup; retyping the thread's would break ThreadResolver + membership + timeline filters that read it (`notes/r2-resource-investigation.md` §1; spec Out-of-Scope + NFR-04) — so a NEW Lookup discriminator is added instead.
+
+      §11 Component Justification (new lookup + marker fields = new surface): (1) **Existing overlap** — the thread's `sprk_regardingrecordtype` is Text, not a bindable Lookup, and there are no typed regarding lookups or auto-vs-edited / default-thread markers (task 001 grep/MCP-confirms). (2) **Extension instead** — retyping the Text field was considered and REJECTED (breaking — NFR-04); adding a parallel Lookup discriminator + the typed lookups is the additive path; the markers are new Booleans with no existing home. (3) **Concrete cost-of-doing-nothing** — without the Lookup discriminator + typed lookups, RegardingResolver cannot attach to the thread form and thread regarding stays manual/denormalized (FR-06/FR-07 fail); without the naming-edited marker, name re-derive clobbers user edits (FR-07 fail); without the default-thread marker, messages orphan with no per-record default thread (FR-09 fail). These are named contract failures from spec §New-Components, not "future flexibility."
+    </background>
+    <relevant-files>
+      <file>projects/messaging-communication-app-r2/notes/001-phase0-schema-audit.md (task 001 output — the confirmed column delta + verbatim `RegardingFieldMap.All`; consume it)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs (the 11-entity → typed-lookup map to mirror — same targets + field-name convention)</file>
+      <file>projects/messaging-communication-app-r2/spec.md (FR-06/FR-07/FR-09, NFR-04, Q2, §New-Components)</file>
+      <file>projects/messaging-communication-app-r1/notes/messaging-schema-spec.md (R1 as-built thread schema — the Text `sprk_regardingrecordtype` context)</file>
+      <file>src/client/pcf/RegardingResolver/ (the PCF that will bind the new Lookup discriminator — placement is 071, but confirm its binding contract)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-06 / NFR-04">Additive only. Add the 11 typed lookups + a NEW Lookup discriminator + naming-edited marker + default-thread marker. MUST NOT retype the existing Text `sprk_regardingrecordtype` (breaking — ThreadResolver + membership + timeline filters read it); it stays as the denormalized copy.</constraint>
+    <constraint source="ADR-024">The 11 typed lookups mirror `RegardingFieldMap.All` (same 11 target entities + the same `sprk_regarding{...}` field-name convention). MUST NOT invent a new regarding mechanism or a different field-name scheme.</constraint>
+    <constraint source="ADR-046">No second regarding mechanism — thread regarding is RegardingResolver (via these lookups + the Lookup discriminator), NOT CommunicationConnections or the Field Mapping Framework.</constraint>
+    <constraint source="spec Q2">Do NOT add category / tags / description to the thread — regarding + name only.</constraint>
+    <constraint source="project">Consume task 001's audit note — add ONLY missing columns; verify lookup/option-set conventions via Dataverse MCP `describe`/`read_query` BEFORE creation; do NOT recreate any existing column.</constraint>
+    <constraint source="ADR-027">Author schema into the project's managed solution per subscription-isolation/solution conventions; no direct prod-only unmanaged changes.</constraint>
+    <constraint source="project">Schema ONLY. No resolver/naming logic (that is 070/071), no RegardingResolver PCF placement (that is 071), no BFF code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/001-phase0-schema-audit.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>docs/data-model/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse schema creation" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Web API + PowerShell for attribute/lookup/option-set creation (patterns PAC CLI lacks). Verify conventions via MCP first; add only the missing columns per the 001 audit.
+      </pattern>
+      <pattern name="Regarding field map" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs">
+        `RegardingFieldMap.All` — the 11 target entities + `sprk_regarding{...}` field-name convention to mirror for the thread's typed lookups. Never a new mechanism (ADR-024/ADR-046).
+      </pattern>
+      <pattern name="Lookup discriminator vs Text" location="projects/messaging-communication-app-r2/notes/r2-resource-investigation.md">
+        The thread's `sprk_regardingrecordtype` is Text; RegardingResolver needs a Lookup binding → add a NEW Lookup discriminator, keep the Text field as the denormalized copy (non-breaking).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read task 001's `notes/001-phase0-schema-audit.md` + spec FR-06/FR-07/FR-09/NFR-04/Q2 + `RegardingFieldMap.cs` to fix the exact fields to add and confirm the existing Text field + Q2 exclusions.</step>
+    <step order="2">Via Dataverse MCP `describe`, re-confirm the 11 regarding-family target entities from `RegardingFieldMap.All` and the thread's current attribute set (that the target lookups + markers do not already exist); confirm the Lookup/schema-name convention.</step>
+    <step order="3">Create the 11 typed `sprk_regarding{...}` lookups on `sprk_communicationthread`, mirroring `RegardingFieldMap.All` (same targets + field-name convention).</step>
+    <step order="4">Create the NEW Lookup discriminator field (bindable by RegardingResolver) — do NOT touch the existing Text `sprk_regardingrecordtype`, which remains the denormalized copy.</step>
+    <step order="5">Create the naming-edited marker (Boolean, auto-vs-user-edited; default = auto) for task 071 and the default-thread marker (flag identifying a record's default thread) for task 070.</step>
+    <step order="6">Deploy the schema to the project solution (`dataverse-deploy` / skill patterns). Verify: a thread record accepts a value in a typed lookup + the new Lookup discriminator; the existing Text `sprk_regardingrecordtype` is unchanged and still readable; both markers exist with sane defaults.</step>
+    <step order="7">Document the created schema (logical names, types, target entities, marker defaults) in the task notes for the 081 architecture doc + the §11 justification. Update `tasks/TASK-INDEX.md` (002 ✅) + `current-task.md`; confirm 010 + 070 + 071 unblocked.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Consume the 001 audit + spec + `RegardingFieldMap.cs` + RegardingResolver binding contract</tool>
+    <tool name="mcp-dataverse-describe">Re-confirm the 11 targets + existing thread attributes + conventions (read-only, before create)</tool>
+    <tool name="dataverse-create-schema">Create the 11 typed lookups + Lookup discriminator + two markers</tool>
+    <tool name="dataverse-deploy">Deploy schema to the project solution</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Dataverse: `sprk_communicationthread` — 11 typed `sprk_regarding{...}` lookups (mirror `RegardingFieldMap.All`)</output>
+    <output type="schema">Dataverse: `sprk_communicationthread` — NEW Lookup discriminator field (RegardingResolver-bindable)</output>
+    <output type="schema">Dataverse: `sprk_communicationthread` — naming-edited marker (Boolean) + default-thread marker</output>
+    <output type="docs">Task notes: created-schema inventory (logical names + types + targets + defaults) for the 081 doc + the §11 justification</output>
+    <output type="docs">projects/messaging-communication-app-r2/tasks/TASK-INDEX.md (status update 002 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 11 typed `sprk_regarding{...}` lookups exist on `sprk_communicationthread`, mirroring `RegardingFieldMap.All` (same 11 targets + field-name convention).</criterion>
+    <criterion testable="true">A NEW Lookup discriminator field exists on the thread and RegardingResolver can bind it (Lookup type, verified by the resolver's binding contract; placement itself is 071).</criterion>
+    <criterion testable="true">The existing Text `sprk_regardingrecordtype` is UNTOUCHED (same type + name) and still readable — NOT retyped (NFR-04).</criterion>
+    <criterion testable="true">A naming-edited Boolean marker (auto-vs-user-edited, default auto) and a default-thread marker exist on the thread.</criterion>
+    <criterion testable="true">NEGATIVE: no category / tags / description field was added (Q2), and no existing thread column was recreated (per the 001 audit).</criterion>
+    <criterion testable="true">NEGATIVE: no resolver/naming logic, no RegardingResolver PCF placement, and no BFF code were added (schema only).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 001 (the confirmed delta + verbatim `RegardingFieldMap.All`). Blocks 010 (reads over the thread's regarding), 070 (default-thread marker), 071 (naming-edited marker + RegardingResolver placement binds the new Lookup discriminator).
+
+    The single most important property is non-breaking: the Text `sprk_regardingrecordtype` MUST survive untouched — ThreadResolver, membership derivation, and timeline filters all read it. The Lookup discriminator is a NEW field, not a retype. If any tool pushes toward retyping the Text field, STOP — that is the forbidden breaking change (NFR-04, spec Out-of-Scope).
+
+    Keep it to the fields FR-06 names — no category/tags/description (Q2). The resolver logic (BuildTopic re-derive) and the auto-threading policy that consume these markers are 071 and 070, not this task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor per `&lt;rigor-hint&gt;` — schema creation, Step 9.5 gates SKIPPED. State the §11 Component Justification (new lookup + markers) in the task notes. Verify conventions via MCP before creation; consume the 001 audit; NEVER retype the Text `sprk_regardingrecordtype`. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

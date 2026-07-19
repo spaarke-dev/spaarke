@@ -1,0 +1,144 @@
+<task id="003" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Schema: `sprk_communicationparticipant` junction (message grain) — 6 fields (communication lookup, systemuser, contact, role {From,To,Cc,Bcc}, addresstext, isresolved) + primary name</title>
+    <phase>W0 — Schema + Foundation + ADR</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <deps>001</deps>
+    <blocks>050, 051</blocks>
+    <tags>dataverse, schema</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a NEW Dataverse entity (junction) — no BFF code, no Step 9.5 gates. STANDARD per §8 (new-surface schema creation with a locked field set). §11 Component Justification REQUIRED (a new entity is introduced; spec supplies the concrete cost-of-doing-nothing). The ADR-034 path-C tension is documented by the sibling ADR task (004), not decided here.</rigor-reason>
+    <parallel-group>W0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-08</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Create the NEW `sprk_communicationparticipant` junction that makes participants QUERYABLE at message grain — the structure the `participant=` facet (FR-02) and external-party visibility depend on. Today participant data is unqueryable: `sprk_from`/`sprk_to`/`sprk_cc` are `;`-joined TEXT and no junction exists (`notes/r2-resource-investigation.md` §5). This task creates the table + its 6 locked fields ONLY — the capture/send-time WRITE is task 050, the `participant=` join is task 051.
+
+    Create, via the `dataverse-create-schema` skill patterns, `sprk_communicationparticipant` with EXACTLY these fields (locked 2026-07-18, spec FR-08 — do NOT add, drop, or rename):
+
+    1. **`sprk_communication`** — Lookup → `sprk_communication` (**required**; the message-grain parent, per owner Q-A: message grain only, no thread-grain rows).
+    2. **`sprk_systemuser`** — Lookup → `systemuser` (nullable).
+    3. **`sprk_contact`** — Lookup → `contact` (nullable). **Exactly one of `sprk_systemuser` / `sprk_contact` is set for a resolved person; BOTH null for an unresolved external address.** (Enforced by the write, task 050; schema allows both nullable.)
+    4. **`sprk_role`** — Choice: `From` / `To` / `Cc` / `Bcc` (assign the integer values planned in task 001's audit note).
+    5. **`sprk_addresstext`** — Text (raw email; populated for unresolved external parties and retained for resolved ones as provenance).
+    6. **`sprk_isresolved`** — Boolean (false when no person lookup is set; enables back-fill when a `contact` is later created).
+    7. **`sprk_name`** — primary Text (e.g. `"{personDisplay|address} — {role}"`).
+
+    Two typed nullable person lookups (systemuser/contact), NOT the ADR-034 Guid+type tuple and NOT a polymorphic lookup — this is the owner-approved path-C comply-with-intent (Q-C; only 2 targets, so typed lookups honor ADR-034's intent while adding FK integrity + DataGrid person-chip auto-derivation). Verify the `sprk_role` integers via task 001's plan / MCP before assignment. Deploy to the project solution. Schema ONLY — the write logic is 050.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse schema engineer. Fluent in the `dataverse-create-schema` skill (Web API + PowerShell), junction/intersection modeling, typed-lookup vs polymorphic-lookup trade-offs, the ADR-034 `(personId, personIdType)` tuple intent, and option-set integer conventions. You create exactly the 6-field junction FR-08 locks — nothing more — and you align to ADR-034's intent via two typed lookups.
+  </role>
+
+  <goal>
+    `sprk_communicationparticipant` exists in the project solution as a message-grain junction with exactly: a required `sprk_communication` Lookup, nullable `sprk_systemuser` + `sprk_contact` Lookups (exactly-one-set is a write invariant), an `sprk_role` Choice {From,To,Cc,Bcc} with the planned integers, `sprk_addresstext` Text, `sprk_isresolved` Boolean, and the primary `sprk_name` Text. A row can be created for a resolved person (one person lookup set, `isresolved=true`) and for an unresolved external address (both person lookups null, `addresstext` set, `isresolved=false`). Tasks 050 (participant-index write) and 051 (`participant=` facet join) can build against real schema; the DataGrid can auto-derive a person chip from the typed lookups.
+  </goal>
+
+  <context>
+    <background>
+      Person filtering is impossible today: `sprk_from/to/cc` are `;`-separated TEXT, `ThreadMembershipDerivationService` answers record→people (not person→communications), and `ParticipantCorrelationRung` resolves email→contact at capture time but persists nothing queryable (`notes/r2-resource-investigation.md` §5). The junction is the queryable person→communications structure that powers `participant=` (FR-02) with role precision and keeps external parties filterable + back-fillable.
+
+      §11 Component Justification (a NEW entity is introduced — spec §New-Components supplies the concrete cost): (1) **Existing overlap** — none queryable; `sprk_from/to/cc` are `;`-joined TEXT and `ThreadMembershipDerivationService` is record→people, not person→comms (task 001 grep/MCP-confirms no junction exists). (2) **Extension instead** — no existing structure can be extended into a queryable person→communications index; a text-LIKE person filter over the `;`-joined fields gives wrong results with no role precision and can't surface external parties — rejected. (3) **Concrete cost-of-doing-nothing** — without the junction the `participant=` filter is impossible, the person filter degrades to text-LIKE (wrong results, no role precision), and external parties are invisible (spec §New-Components row). Named contract failures (FR-08 acceptance), not "future flexibility."
+
+      ADR-034 tension (spec §ADR Tensions, owner-approved 2026-07-18, path C comply-with-intent): ADR-034's `(personId, personIdType)` tuple exists to avoid an awkward 6-target polymorphic lookup and to forbid fuzzy text-name matching. This junction has only **2** person targets (systemuser, contact), so it uses **two typed nullable lookups** — honoring ADR-034's intent (typed identity, no text-name matching) while adding FK integrity + DataGrid person-chip auto-derivation the tuple can't. That tension is DOCUMENTED by the sibling ADR (task 004); this task implements the locked schema, it does not re-litigate the decision.
+    </background>
+    <relevant-files>
+      <file>projects/messaging-communication-app-r2/notes/001-phase0-schema-audit.md (task 001 output — confirms NO junction exists yet + the `sprk_role` integer plan; consume it)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/ParticipantReference.cs (the reference type the write (050) maps into rows; align the field semantics to it)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ParticipantCorrelationRung.cs (`QueryContactByEmailAsync` — the resolution the write reuses; confirms the resolved-vs-unresolved shape)</file>
+      <file>projects/messaging-communication-app-r2/spec.md (FR-08 locked schema + §New-Components + §ADR Tensions ADR-034 path C)</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md (the tuple-intent this junction complies with)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-08">Create EXACTLY the 6 locked fields + primary `sprk_name`: `sprk_communication` (required Lookup→sprk_communication), `sprk_systemuser` (nullable Lookup→systemuser), `sprk_contact` (nullable Lookup→contact), `sprk_role` (Choice {From,To,Cc,Bcc}), `sprk_addresstext` (Text), `sprk_isresolved` (Boolean). Do NOT add, drop, or rename fields.</constraint>
+    <constraint source="spec Q-A">Message grain ONLY — the parent lookup is `sprk_communication`. MUST NOT add a thread-grain lookup or thread-grain rows (thread participation is derived by rollup).</constraint>
+    <constraint source="ADR-034 (path C, spec §ADR Tensions)">Two typed nullable person lookups (`sprk_systemuser`/`sprk_contact`), NOT the Guid+type tuple and NOT a polymorphic lookup — only 2 targets, so typed lookups honor ADR-034's intent (typed identity, no text-name matching). The exactly-one-set invariant is enforced by the write (050), not a schema constraint.</constraint>
+    <constraint source="spec Q-D">Support unresolved external rows at the schema level: both person lookups nullable, `sprk_addresstext` present, `sprk_isresolved` Boolean — a row with both person lookups null + addresstext set + isresolved=false MUST be creatable.</constraint>
+    <constraint source="project">Consume task 001's audit — confirm NO junction exists yet; assign the `sprk_role` integers per the 001 plan (verify via MCP before assignment). Do NOT recreate anything.</constraint>
+    <constraint source="ADR-027">Author the junction into the project's managed solution per subscription-isolation/solution conventions; no direct prod-only unmanaged changes.</constraint>
+    <constraint source="project">Schema ONLY. No capture/send-time write (that is 050), no `participant=` join (that is 051), no BFF code. The ADR-034 tension is authored by task 004, not here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/001-phase0-schema-audit.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/ParticipantReference.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ParticipantCorrelationRung.cs</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>docs/data-model/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse schema creation" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Web API + PowerShell for entity/attribute/lookup/option-set creation (patterns PAC CLI lacks). Verify the `sprk_role` integers via MCP first; create exactly the 6 locked fields + primary name.
+      </pattern>
+      <pattern name="Two-typed-lookup identity (ADR-034 path C)" location=".claude/adr/ADR-034-user-record-membership.md">
+        Two typed nullable lookups (systemuser/contact) honor the tuple's intent for a 2-target person identity — no polymorphic lookup, no text-name matching, plus FK integrity + DataGrid chip auto-derivation.
+      </pattern>
+      <pattern name="Participant reference shape" location="src/server/api/Sprk.Bff.Api/Services/Communication/Models/ParticipantReference.cs">
+        The reference type the write (050) maps into junction rows — align `sprk_role` / `sprk_addresstext` / `sprk_isresolved` semantics to it so 050 is a clean map.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read task 001's `notes/001-phase0-schema-audit.md` (confirm NO junction exists + the `sprk_role` integer plan) + spec FR-08 + §ADR Tensions + `ParticipantReference.cs` to fix the exact 6-field shape and the resolved-vs-unresolved semantics.</step>
+    <step order="2">Via Dataverse MCP `describe`, re-confirm no `sprk_communicationparticipant` entity exists and re-confirm the `sprk_role` integer plan against an existing Spaarke option-set convention (read-only, before create).</step>
+    <step order="3">Create the `sprk_communicationparticipant` entity with primary `sprk_name` (Text).</step>
+    <step order="4">Add `sprk_communication` (required Lookup → `sprk_communication`, message-grain parent) + `sprk_systemuser` (nullable Lookup → `systemuser`) + `sprk_contact` (nullable Lookup → `contact`).</step>
+    <step order="5">Add `sprk_role` (Choice {From, To, Cc, Bcc} with the planned integers) + `sprk_addresstext` (Text) + `sprk_isresolved` (Boolean).</step>
+    <step order="6">Deploy the junction to the project solution (`dataverse-deploy` / skill patterns). Verify: a resolved row (one person lookup set, `isresolved=true`, role set) is creatable; an unresolved external row (both person lookups null, `addresstext` set, `isresolved=false`) is creatable; the `sprk_communication` lookup is required; a person typed lookup surfaces a DataGrid-derivable chip.</step>
+    <step order="7">Document the created schema (logical names, types, targets, `sprk_role` integers) in the task notes for the 004 ADR + 081 doc + the §11 justification. Update `tasks/TASK-INDEX.md` (003 ✅) + `current-task.md`; confirm 050 + 051 unblocked.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Consume the 001 audit + spec FR-08 + `ParticipantReference.cs`</tool>
+    <tool name="mcp-dataverse-describe">Confirm no junction exists + verify `sprk_role` integers (read-only, before create)</tool>
+    <tool name="dataverse-create-schema">Create the junction entity + 6 fields + primary name</tool>
+    <tool name="dataverse-deploy">Deploy the junction to the project solution</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Dataverse: `sprk_communicationparticipant` entity (primary `sprk_name`)</output>
+    <output type="schema">Dataverse: 6 fields — `sprk_communication` (req Lookup), `sprk_systemuser` (Lookup), `sprk_contact` (Lookup), `sprk_role` (Choice {From,To,Cc,Bcc}), `sprk_addresstext` (Text), `sprk_isresolved` (Boolean)</output>
+    <output type="docs">Task notes: created-schema inventory (logical names + types + targets + `sprk_role` integers) for the 004 ADR + 081 doc + the §11 justification</output>
+    <output type="docs">projects/messaging-communication-app-r2/tasks/TASK-INDEX.md (status update 003 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_communicationparticipant` exists with EXACTLY the 6 locked fields + primary `sprk_name` — no added/dropped/renamed field.</criterion>
+    <criterion testable="true">`sprk_communication` is a **required** Lookup → `sprk_communication` (message grain); there is NO thread-grain lookup (Q-A).</criterion>
+    <criterion testable="true">`sprk_systemuser` (→systemuser) and `sprk_contact` (→contact) are both nullable typed Lookups — NOT a Guid+type tuple, NOT a polymorphic lookup (ADR-034 path C).</criterion>
+    <criterion testable="true">`sprk_role` is a Choice with members {From, To, Cc, Bcc} at the integers planned in the 001 audit; `sprk_addresstext` is Text; `sprk_isresolved` is Boolean.</criterion>
+    <criterion testable="true">A resolved row (one person lookup set, isresolved=true) AND an unresolved external row (both person lookups null, addresstext set, isresolved=false) are both creatable (Q-D).</criterion>
+    <criterion testable="true">NEGATIVE: no capture/send write logic, no `participant=` join, and no BFF code were added (schema only); the junction was not previously existing (per the 001 audit).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 001 (confirms no junction exists + the `sprk_role` integer plan). Blocks 050 (the capture/send-time write that populates rows, reusing `ParticipantCorrelationRung`) and 051 (the `participant=` facet that joins the junction).
+
+    The field set is LOCKED (spec FR-08, 2026-07-18) — do not extend it. Message grain only (Q-A): the parent is `sprk_communication`; thread participation is derived by rollup, so do NOT add a thread lookup. Unresolved external rows (Q-D) are first-class: both person lookups null + addresstext + isresolved=false MUST be creatable so `participant=` never silently omits external parties.
+
+    The ADR-034 path-C decision (two typed lookups vs the tuple) is DOCUMENTED by task 004's ADR, not decided here — this task builds the owner-approved locked schema. Align the field semantics to `ParticipantReference.cs` so task 050's write is a clean map.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor per `&lt;rigor-hint&gt;` — schema creation, Step 9.5 gates SKIPPED. State the §11 Component Justification (new entity; concrete FR-08 failure modes) in the task notes. Verify the `sprk_role` integers via MCP before assignment; consume the 001 audit; create EXACTLY the 6 locked fields. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

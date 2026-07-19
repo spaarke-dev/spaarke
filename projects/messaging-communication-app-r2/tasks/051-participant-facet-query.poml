@@ -1,0 +1,139 @@
+<task id="051" project="messaging-communication-app-r2">
+  <metadata>
+    <title>`participant=` facet on the filtered `query` endpoint — join the `sprk_communicationparticipant` junction (message grain)</title>
+    <phase>W5 — Participant Index + Person Filter (CC-2)</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <deps>011,050</deps>
+    <blocks>080</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Completes FR-02 by wiring a person→communications facet over the new junction on the impersonation read path; MUST apply the SAME impersonation + 2-rule access filter as R1 (no content bypass) and return role-exact matches (NOT text-LIKE). `.cs` BFF code (publish-size + CVE + Placement Justification); access-parity is security-relevant; code-review + adr-check at Step 9.5.</rigor-reason>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only facet on the filtered `query` endpoint from task 011; adds a join clause + access filter over the junction. Does NOT edit the shared persist path (that is 050). Depends on 011 (the query endpoint) + 050 (the junction is populated). Disjoint from 060/070 file surfaces.</parallel-reason>
+    <fr-refs>FR-02</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Wire the `participant=` facet on the filtered read endpoint `GET /api/communications?thread=&regarding=&channel=&from=&to=&participant=` (the endpoint + other facets shipped in task 011; `participant=` was stubbed there pending the junction). `participant={personId}` MUST return the messages where that person is a participant in ANY role (From/To/Cc/Bcc), by JOINING the `sprk_communicationparticipant` junction (task 003 schema, populated by task 050) at MESSAGE grain — returning the `sprk_communication` rows whose junction rows reference the person.
+
+    Requirements (FR-02 completion):
+    - Resolve `participant=` against the junction's typed person lookups (`sprk_systemuser`/`sprk_contact`) — **exact, role-correct, FK-backed matches**, NOT a `sprk_from/to/cc` text-LIKE scan. An unresolved external party is matchable via its `sprk_addresstext` row (`sprk_isresolved=false`).
+    - Apply the **SAME impersonation + 2-rule (privacy + internal-only) access filter** as every other R1 read facet — the `participant=` join MUST NOT bypass `ICommunicationAccessFilter`. No message a caller cannot see may leak because they matched on a participant.
+    - Extend the existing read path only: `CommunicationThreadReadService` + `IImpersonatedCommunicationQuery` + `ICommunicationAccessFilter`. Do NOT add a second access mechanism or reintroduce membership-union on reads (retired 2026-07-16).
+    - `participant=` composes with the other facets (thread/regarding/channel/from/to) as an AND; unknown/empty `participant=` degrades gracefully (no filter).
+
+    Do NOT build the participant WRITE (that is task 050) or a new endpoint (task 011 owns the route).
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication read path. Authority on `CommunicationThreadReadService`, `IImpersonatedCommunicationQuery`, `Access/CommunicationAccessFilter.cs`, and the task-011 filtered `query` endpoint. Fluent in the R1 impersonation + 2-rule access model (the blessed read mechanism — do not fork), ADR-028 (impersonation), ADR-034 (typed person identity), ADR-038 (seam tests as DoD), §10 BFF Hygiene, §11.
+  </role>
+
+  <goal>
+    `participant={personId}` on the filtered `query` endpoint returns exactly the `sprk_communication` messages where that person participates in any role (From/To/Cc/Bcc), resolved by joining the `sprk_communicationparticipant` junction on its typed person lookups (role-exact, FK-backed — not text-LIKE), with unresolved external parties matchable via `sprk_addresstext`. The facet applies the same impersonation + 2-rule access filter as every other read facet (no bypass, no leak) and composes as an AND with the other facets; empty/unknown `participant=` degrades gracefully. Extends the existing read path only (no second access mechanism, no membership-union). Build clean; publish-size delta + CVE + Placement Justification reported; seam tests cover resolved-person, unresolved-address, and a NEGATIVE access case.
+  </goal>
+
+  <context>
+    <background>
+      Task 011 shipped the filtered `query` endpoint with thread/regarding/channel/from/to reusing the R1 read path; `participant=` was stubbed because no queryable person→communications structure existed. Task 003 adds the `sprk_communicationparticipant` junction; task 050 populates it at message grain (one row per message × person/address × role, resolved persons carrying `sprk_systemuser` XOR `sprk_contact`, unresolved external addresses carrying `sprk_addresstext` + `sprk_isresolved=false`). THIS task consumes that index: `participant={personId}` joins the junction and returns the matching messages — the exact, role-precise person filter FR-02 requires (Success Criterion 3: "role-correct rows from the junction, not text-LIKE").
+
+      Component Justification (§11 — modification, not new surface): this task ONLY modifies the existing task-011 query endpoint + read service to add a join clause + reuse the existing access filter — no new endpoint, service, access mechanism, or package. (Per §11, tasks that only modify existing surface do not require the three-question gate; the junction itself was justified in task 003.)
+
+      Access parity (NFR-03, security-relevant): the `participant=` join MUST run under the same impersonation context and the same `ICommunicationAccessFilter` (privacy + internal-only) as the other facets. A person-match MUST NOT surface a message the caller cannot otherwise see. This is the load-bearing correctness property — the negative access case is a required seam test.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (the task-011 `query` route — wire the `participant=` parameter through)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs (the filtered query method — add the junction join for `participant=`)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IImpersonatedCommunicationQuery.cs (entity-set-agnostic impersonation query — reuse)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessFilter.cs (the 2-rule filter — MUST apply to the participant join, no bypass)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (seam tests: resolved-person, unresolved-address, negative access)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-02">`participant={personId}` resolves against the `sprk_communicationparticipant` junction (FR-08) and returns role-exact, FK-backed matches (any of From/To/Cc/Bcc) — NOT a `sprk_from/to/cc` text-LIKE scan. Unresolved external parties matchable via `sprk_addresstext`. Composes as AND with the other facets; empty/unknown degrades gracefully.</constraint>
+    <constraint source="NFR-03 / ADR-028">Apply the SAME impersonation + 2-rule (privacy + internal-only) access filter as every other read facet via `ICommunicationAccessFilter`. The participant join MUST NOT bypass the filter — no message a caller cannot see may leak on a participant match.</constraint>
+    <constraint source="project (access model)">Extend `CommunicationThreadReadService` + `IImpersonatedCommunicationQuery` + `ICommunicationAccessFilter` ONLY. MUST NOT add a second access mechanism or reintroduce membership-union on reads (retired 2026-07-16 — `../messaging-communication-app-r1/notes/access-model-decision.md`).</constraint>
+    <constraint source="ADR-034">Match on the typed person lookups (`sprk_systemuser`/`sprk_contact`), consistent with the path-C typed-identity model. MUST NOT reintroduce text-name matching.</constraint>
+    <constraint source="ADR-038">Vertical-slice seam tests are the DoD: cover a resolved-person match, an unresolved-address match, the AND-composition with another facet, and a NEGATIVE access case (private/internal-only hidden despite participant match).</constraint>
+    <constraint source="project §10">bff-extensions Placement Justification in the PR; publish-size delta vs ~46.99 MB baseline (expected ≈0, no new package); no new HIGH CVE; `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IImpersonatedCommunicationQuery.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessFilter.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+    </files>
+    <patterns>
+      <pattern name="Impersonation + 2-rule read facet" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs">
+        Every read facet runs under impersonation and passes results through `ICommunicationAccessFilter` (privacy + internal-only). Add `participant=` the same way — the junction join MUST be inside the same access-filtered path, never a bypass.
+      </pattern>
+      <pattern name="Junction join at message grain" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs">
+        `participant={personId}` joins `sprk_communicationparticipant` (task 003/050) on `sprk_systemuser`/`sprk_contact` and returns the parent `sprk_communication` rows — exact, role-precise matches, not a text-LIKE scan of `sprk_from/to/cc`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the task-011 `query` endpoint + filtered method on `CommunicationThreadReadService`, `IImpersonatedCommunicationQuery`, `Access/CommunicationAccessFilter.cs`, and the task-003 junction schema + task-050 write shape. Read `.claude/constraints/bff-extensions.md` §F. Confirm exactly where the `participant=` stub sits.</step>
+    <step order="2">Wire the `participant=` parameter through the endpoint into the filtered query method (compose as AND with thread/regarding/channel/from/to; empty/unknown → no filter).</step>
+    <step order="3">Implement the junction join: `participant={personId}` selects `sprk_communication` rows that have a `sprk_communicationparticipant` row referencing the person via `sprk_systemuser` or `sprk_contact` (any role). Do NOT text-LIKE `sprk_from/to/cc`.</step>
+    <step order="4">Ensure the join runs INSIDE the impersonation + `ICommunicationAccessFilter` path — the participant match MUST NOT bypass the 2-rule filter. Reuse the existing filter; add no second access mechanism; do not reintroduce membership-union.</step>
+    <step order="5">Write seam tests (ADR-038): (a) resolved-person `participant={systemuserId}` returns the messages where they are From/To/Cc/Bcc (role-exact, from the junction); (b) an unresolved external party is matchable (via its `sprk_addresstext` row / `isresolved=false`); (c) `participant=` composes as AND with a second facet (e.g. `channel=`); (d) NEGATIVE ACCESS: a private/internal-only message the caller cannot see is NOT returned despite a participant match; (e) empty/unknown `participant=` degrades gracefully (no filter, no error).</step>
+    <step order="6">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~46.99 MB baseline (expected ≈0).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus: access-filter parity / no bypass, role-exact join not text-LIKE, reuse-not-fork of the read path); `adr-check` against `spec.md` (focus FR-02, NFR-03, ADR-028, ADR-034, ADR-038). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; read-path edit — coordinate with 050's merge-order since both touch `Services/Communication/`).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (051 ✅) + `current-task.md`; record decisions (join shape, where the access filter is applied over the join).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect the task-011 query endpoint + read service + access filter + junction schema</tool>
+    <tool name="edit">Wire the `participant=` parameter + junction join inside the access-filtered read path</tool>
+    <tool name="bash">Seam tests, build, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (UPDATED — `participant=` wired through the task-011 query route)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs (UPDATED — junction join for `participant=` inside the access-filtered path)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ — resolved-person + unresolved-address + AND-composition + negative-access + graceful-degrade seam tests</output>
+    <output type="docs">PR description with bff-extensions Placement Justification + publish-size delta + CVE result + `/conflict-check` outcome</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`participant={personId}` returns the `sprk_communication` messages where the person is a participant in any role (From/To/Cc/Bcc), resolved by joining `sprk_communicationparticipant` on `sprk_systemuser`/`sprk_contact` — role-exact, FK-backed, NOT a `sprk_from/to/cc` text-LIKE scan.</criterion>
+    <criterion testable="true">An unresolved external party is matchable via its `sprk_addresstext` row (`sprk_isresolved=false`).</criterion>
+    <criterion testable="true">The participant join runs under impersonation + `ICommunicationAccessFilter` (privacy + internal-only); NEGATIVE: a message the caller cannot see is NOT returned despite a participant match (no bypass, no leak).</criterion>
+    <criterion testable="true">`participant=` composes as AND with the other facets; empty/unknown `participant=` degrades gracefully (no filter, no error).</criterion>
+    <criterion testable="true">Extends `CommunicationThreadReadService`/`IImpersonatedCommunicationQuery`/`ICommunicationAccessFilter` only — no second access mechanism, no membership-union reintroduced.</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta reported vs ~46.99 MB (expected ≈0); no new HIGH CVE; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 011 (the `query` endpoint + other facets) + 050 (the junction must be populated to match against). Blocks 080 (the `participant=` seam tests + 11-entity/access-parity pass). This is a read-only facet add — it does NOT edit the shared persist path (that is 050), so it is `parallel-safe:true`; still `/conflict-check` for merge-order since it shares `Services/Communication/` files. The negative access case is the load-bearing property: a person match must never bypass the 2-rule filter.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED. Reuse the R1 impersonation + 2-rule read path; MUST NOT fork it or reintroduce membership-union. Per CLAUDE.md §10: publish-size delta (baseline ~46.99 MB, expected ≈0) + CVE + bff-extensions Placement Justification in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

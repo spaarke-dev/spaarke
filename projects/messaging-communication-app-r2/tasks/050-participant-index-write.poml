@@ -1,0 +1,156 @@
+<task id="050" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Participant-index write at capture/send — populate `sprk_communicationparticipant` junction rows (message grain)</title>
+    <phase>W5 — Participant Index + Person Filter (CC-2)</phase>
+    <status>not-started</status>
+    <estimated-hours>9</estimated-hours>
+    <deps>003,004</deps>
+    <blocks>051,060</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits the SHARED `Services/Communication/` persist path (`CommunicationService.cs` send + the inbound capture persist) that email-r4 shipped and R1 extended — a frozen, correctness-critical write seam. Adds a new Dataverse write (junction rows) that MUST be best-effort/non-fatal and must not double-write or orphan. `.cs` BFF code (publish-size + CVE + Placement Justification); `parallel-safe:false` (serializes the shared edit); code-review + adr-check at Step 9.5 UNCONDITIONALLY.</rigor-reason>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the shared `Services/Communication/` persist path (`CommunicationService.cs` outbound persist ~lines 689-727 + the inbound capture persist) that email-r4 owns and R1 extended. MUST NOT run concurrently with 070 (auto-threading, same shared area) or any other BFF writer. Characterization-test existing email/messaging send + capture flows and keep them green BEFORE extending. `/conflict-check` before the PR.</parallel-reason>
+    <fr-refs>FR-08</fr-refs>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Populate the `sprk_communicationparticipant` junction (schema from task 003; ADR from task 004) at the point every `sprk_communication` message is persisted — both **outbound send** (`CommunicationService.cs` persist ~lines 689-727) and **inbound capture** (the ingestor/normalizer persist). For each persisted message, write **one junction row per (message × person/address × role)** where role ∈ {`From`, `To`, `Cc`, `Bcc`}:
+
+    - `sprk_communication` → the message (required, message-grain parent).
+    - Resolved person → **exactly one** of `sprk_systemuser` / `sprk_contact` set, `sprk_isresolved=true`, `sprk_addresstext` retained as provenance. Resolve email→person by REUSING `ParticipantCorrelationRung`'s email→contact resolution (`QueryContactByEmailAsync`) — do NOT add a second resolver.
+    - Unresolved external address (owner Q-D) → row with **both** person lookups null, `sprk_isresolved=false`, `sprk_addresstext` = the raw email, so `participant=` (task 051) still surfaces the external party and it is back-fillable when a contact is later created.
+    - `sprk_role` = the choice integer for {From,To,Cc,Bcc} (from task 003 schema); `sprk_name` = `"{personDisplay|address} — {role}"`.
+
+    **The junction write is best-effort / non-fatal (mirror R1 enrichment discipline): a junction-write failure MUST NOT fail the send or drop the captured message** — the `sprk_communication` record is the source of truth; participant rows are a derived index. **The write must be idempotent per message** — re-processing the same message (e.g. inbound echo/retry) MUST NOT duplicate rows.
+
+    This is a WRITE on the shared persist path. Characterization-test the existing email + messaging send/capture flows and keep them green BEFORE extending. `parallel-safe:false`. `/conflict-check` before the PR.
+  </prompt>
+
+  <role>
+    Spaarke BFF architect for the Communication subsystem. Authority on the shared `Services/Communication/` persist path (`CommunicationService.cs` send + the inbound capture persist), the `Engine/Rungs/ParticipantCorrelationRung.cs` email→person resolution, and `Models/ParticipantReference.cs`. Fluent in ADR-034 (person-identity tuple intent → the R2 path-C 2-typed-lookup form), ADR-028 (impersonation / no `new` credential), ADR-032 (Null-Object kill-switch + symmetric registration for any feature-gated write), the best-effort/non-fatal enrichment discipline (R1 NFR-02), §10 BFF Hygiene, §11 Component Justification.
+  </role>
+
+  <goal>
+    Every persisted `sprk_communication` message — outbound send and inbound capture — emits `sprk_communicationparticipant` junction rows at message grain: one row per (message × person/address × role {From,To,Cc,Bcc}), resolved persons carrying exactly one typed lookup (`sprk_systemuser` XOR `sprk_contact`) + `sprk_isresolved=true`, unresolved external addresses carrying `sprk_isresolved=false` + `sprk_addresstext` (Q-D). Email→person resolution reuses `ParticipantCorrelationRung` (`QueryContactByEmailAsync`) — no second resolver. The write is best-effort/non-fatal (never fails the send or drops a captured message) and idempotent per message (no duplicate rows on re-processing). Existing email/messaging send + capture flows stay green (characterization tests). Build clean; publish-size delta + CVE + bff-extensions Placement Justification reported; `/conflict-check` run before the PR.
+  </goal>
+
+  <context>
+    <background>
+      R1/email-r4 store participants as `;`-separated TEXT (`sprk_from`/`sprk_to`/`sprk_cc`) on `sprk_communication` — not queryable by person or role. `ParticipantCorrelationRung.cs` resolves email→contact→memberships at capture time but persists nothing queryable (investigation §5). Task 003 adds the `sprk_communicationparticipant` junction (message-grain parent lookup + `sprk_systemuser`/`sprk_contact` typed nullable lookups + `sprk_role` choice {From,To,Cc,Bcc} + `sprk_addresstext` + `sprk_isresolved`); task 004 authors its schema ADR (ADR-034 path-C tension). THIS task is the write side: populate those rows at the persist point so FR-02's `participant=` facet (task 051) has an exact, role-precise, FK-backed index — replacing the wrong-results text-LIKE fallback.
+
+      Component Justification (§11): (1) Existing — `ParticipantCorrelationRung.QueryContactByEmailAsync` already resolves email→person; `CommunicationService` already persists the message; `ThreadMembershipDerivationService` answers record→people, NOT person→communications (investigation §5). No queryable person→communications structure exists. (2) Extension — this task adds NO new service and NO new resolver: it reuses the existing resolution and writes rows into the task-003 junction at the existing persist point. (3) Cost-of-doing-nothing (concrete, spec-cited): without the junction the `participant=` filter is impossible, person filter degrades to text-LIKE (wrong results, no role precision), and external parties are invisible/unfilterable — named FR-02/FR-08 contract failures, not "future flexibility."
+
+      Best-effort discipline (mirror R1 NFR-02): the `sprk_communication` record is the source of truth; junction rows are a derived index. A junction-write exception is logged/deferred and MUST NOT fail an outbound send or drop an inbound-captured message. Idempotency: re-processing the same message (inbound echo/retry per the R1 echo-dedup seam) MUST NOT create duplicate rows — key the write on (communication × person/address × role).
+
+      Shared-path discipline (root §10 F.3): this edits `CommunicationService.cs` (outbound persist ~lines 689-727) and the inbound capture persist — the same shared `Services/Communication/` surface as 070 and the frozen email/messaging flows. Characterization-test the existing flows and keep them green BEFORE extending; `parallel-safe:false`; hand-trace + reproduce before trusting the wiring.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (outbound persist ~lines 689-727 — write junction rows after the message persists; inbound capture persist path)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ParticipantCorrelationRung.cs (REUSE `QueryContactByEmailAsync` email→person resolution; do NOT fork)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/ParticipantReference.cs (reuse the resolved-person reference shape)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessFilter.cs (context — the read-side filter task 051 applies over these rows)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/ (CommunicationModule DI — symmetric/unconditional registration for any new writer service, ADR-032)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (characterization tests for existing send/capture + new junction-write tests)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-08">One junction row per (message × person/address × role {From,To,Cc,Bcc}) at MESSAGE grain (parent = `sprk_communication` lookup; owner Q-A — no thread-grain rows). Resolved person = exactly one of `sprk_systemuser`/`sprk_contact` set + `sprk_isresolved=true`. Populated at BOTH capture and send.</constraint>
+    <constraint source="FR-08 / Q-D">Unresolved external address writes a row: both person lookups null, `sprk_isresolved=false`, `sprk_addresstext` = raw email. `participant=` MUST still surface it; it is back-fillable when a contact is later created. MUST NOT silently skip external parties.</constraint>
+    <constraint source="ADR-034 (path-C, spec §ADR Tensions)">Person identity uses the two typed nullable lookups (`sprk_systemuser`/`sprk_contact`, exactly one set for a resolved person) — honoring ADR-034's intent (typed identity, no text-name matching, no polymorphic parent). MUST NOT reintroduce fuzzy text-name matching or a Guid+type text tuple. Reuse `ParticipantCorrelationRung` resolution; add no second resolver.</constraint>
+    <constraint source="NFR-02 discipline (R1)">The junction write is best-effort / non-fatal: a write failure is logged/deferred and MUST NOT fail an outbound send or drop an inbound-captured message. The `sprk_communication` record remains the source of truth.</constraint>
+    <constraint source="idempotency">Re-processing the same message (inbound echo/retry) MUST NOT duplicate rows — key the write on (communication × person/address × role).</constraint>
+    <constraint source="ADR-028">Writes go through the canonical impersonation/Dataverse interfaces; MUST NOT `new` a credential / `ConfidentialClientApplication`; inject central `TokenCredential` + canonical Dataverse interfaces.</constraint>
+    <constraint source="ADR-032 / ADR-018">If the junction write is feature-gated, use the Null-Object kill-switch with SYMMETRIC/unconditional registration — no asymmetric `if (flag)` registration.</constraint>
+    <constraint source="project §10">Shared `Services/Communication/` edit — characterization-test existing email/messaging send + capture flows and keep them green BEFORE extending (F.3 empirical-reproduction-first). `parallel-safe:false`; never concurrent with 070. `/conflict-check` before the PR. bff-extensions Placement Justification in the PR; publish-size delta vs ~46.99 MB baseline (expected ≈0, no new package); no new HIGH CVE.</constraint>
+    <constraint source="project §11">State the concrete FR-02/FR-08 failure modes prevented (no `participant=`, text-LIKE wrong results, invisible external parties). No new resolver, no new access mechanism, no new package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ParticipantCorrelationRung.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/ParticipantReference.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+    <patterns>
+      <pattern name="Email→person resolution (reuse)" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ParticipantCorrelationRung.cs">
+        `QueryContactByEmailAsync` resolves an email address to a contact/person. Reuse it to decide resolved (typed lookup + `isresolved=true`) vs unresolved (`isresolved=false` + `addresstext`). Do NOT fork a second resolver.
+      </pattern>
+      <pattern name="Persist-point write (message grain)" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs">
+        After the `sprk_communication` message persists (outbound ~lines 689-727; inbound capture persist), enumerate From/To/Cc/Bcc, resolve each, and write one junction row per (message × person/address × role). Best-effort/non-fatal, idempotent per message.
+      </pattern>
+      <pattern name="Best-effort/non-fatal derived write" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs">
+        Mirror R1 enrichment discipline: the derived write is wrapped so a failure is logged/deferred and never surfaces as a send failure or drops a captured message.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `CommunicationService.cs` (outbound persist ~lines 689-727 + the inbound capture persist), `ParticipantCorrelationRung.QueryContactByEmailAsync`, `Models/ParticipantReference.cs`, the task-003 junction schema, and the task-004 ADR. Read `.claude/constraints/bff-extensions.md` §F + §11. Map the exact persist points (outbound + inbound) where the message id is known.</step>
+    <step order="2">CHARACTERIZATION FIRST (root §10 F.3): write/confirm characterization tests over the existing email + messaging send AND inbound-capture persist flows; run them green BEFORE any edit. These are the regression guard for the shared-path change.</step>
+    <step order="3">Add the junction-write logic: after a message persists, enumerate the From/To/Cc/Bcc addresses; for each, reuse `ParticipantCorrelationRung` resolution (`QueryContactByEmailAsync`) → resolved (exactly one of `sprk_systemuser`/`sprk_contact` + `sprk_isresolved=true` + `sprk_addresstext` provenance) or unresolved (both null + `sprk_isresolved=false` + `sprk_addresstext`). Write one row per (message × person/address × role) with `sprk_role` = the task-003 choice integer and `sprk_name` = `"{personDisplay|address} — {role}"`.</step>
+    <step order="4">Wire the write at BOTH persist points (outbound send + inbound capture) so `participant=` is complete regardless of direction (spec: "populated at capture/send").</step>
+    <step order="5">Make the write best-effort/non-fatal (mirror R1 enrichment): wrap so a junction-write exception is logged/deferred and does NOT fail the send or drop the captured message.</step>
+    <step order="6">Make the write idempotent per message: key on (communication × person/address × role) so re-processing (inbound echo/retry) does not duplicate rows.</step>
+    <step order="7">If the write is feature-gated, register via ADR-032 Null-Object with symmetric/unconditional registration (no asymmetric `if (flag)`); otherwise register unconditionally. Confirm ADR-028 (no `new` credential; canonical interfaces).</step>
+    <step order="8">Write tests: (a) send with resolved To + Cc → rows with the correct typed lookup (`sprk_systemuser` XOR `sprk_contact`) + role + `isresolved=true`; (b) UNRESOLVED external To → row with both lookups null, `isresolved=false`, `addresstext` set (Q-D); (c) inbound capture writes rows on the capture path too; (d) BEST-EFFORT: a junction-write exception does NOT fail the send / does NOT drop the captured message (message still persisted); (e) IDEMPOTENT: re-processing the same message yields NO duplicate rows; (f) NEGATIVE: no row ever sets BOTH `sprk_systemuser` and `sprk_contact`; (g) characterization: existing send/capture flows still green.</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm the characterization tests still pass.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~46.99 MB baseline (expected ≈0 — no new package).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus: best-effort/non-fatal, idempotency-no-duplicates, resolved XOR unresolved invariant, reuse-not-fork of the resolver, symmetric registration); `adr-check` against `spec.md` (focus FR-08, ADR-034 path-C, ADR-028, ADR-032, §10/§11). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; shared `Services/Communication/` persist path; MUST NOT overlap with 070 or other BFF writers; coordinate merge-order).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (050 ✅) + `current-task.md`; record decisions (where the write hooks on each persist path, the idempotency key, the feature-gate/registration choice).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect the send + capture persist points, the resolver, the participant-reference model, and the task-003/004 schema+ADR</tool>
+    <tool name="edit">Add the junction-write logic at both persist points; best-effort/non-fatal + idempotent</tool>
+    <tool name="bash">Characterization + junction-write tests, build, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (UPDATED — junction-write at outbound send + inbound capture persist; best-effort/non-fatal; idempotent)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (any new participant-writer helper + its symmetric DI registration, ADR-032 if gated)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ — resolved-lookup + unresolved-address + capture-path + best-effort + idempotent + XOR-invariant + characterization tests</output>
+    <output type="docs">PR description with §11 Component Justification (FR-02/FR-08 failure modes) + bff-extensions Placement Justification + publish-size delta + CVE result + `/conflict-check` outcome</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A persisted message (send AND capture) writes one `sprk_communicationparticipant` row per (message × person/address × role {From,To,Cc,Bcc}) with the message as the required `sprk_communication` parent (message grain).</criterion>
+    <criterion testable="true">A resolved person's row sets EXACTLY ONE of `sprk_systemuser`/`sprk_contact`, `sprk_isresolved=true`, and retains `sprk_addresstext` as provenance; resolution reuses `ParticipantCorrelationRung` (`QueryContactByEmailAsync`) — no second resolver.</criterion>
+    <criterion testable="true">An unresolved external address writes a row with BOTH person lookups null, `sprk_isresolved=false`, and `sprk_addresstext` = the raw email (Q-D) — never silently skipped.</criterion>
+    <criterion testable="true">NEGATIVE: no row ever sets both `sprk_systemuser` and `sprk_contact`.</criterion>
+    <criterion testable="true">BEST-EFFORT: a junction-write exception does NOT fail an outbound send and does NOT drop an inbound-captured message — the `sprk_communication` record still persists (NFR-02 discipline).</criterion>
+    <criterion testable="true">IDEMPOTENT: re-processing the same message (inbound echo/retry) creates NO duplicate rows.</criterion>
+    <criterion testable="true">Registration is symmetric/unconditional (ADR-032 Null-Object if gated); no `new` credential (ADR-028); existing email/messaging send + capture characterization tests stay green.</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta reported vs ~46.99 MB (expected ≈0); no new HIGH CVE; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 003 (junction schema) + 004 (junction ADR). Blocks 051 (the `participant=` facet reads these rows) + 060 (the enriched compose form's structured recipients feed this write). `opus` @ `xhigh` because it edits the shared, frozen `Services/Communication/` persist path across two directions (send + capture) with a best-effort + idempotency invariant — hand-trace + empirically reproduce the send→persist→junction-write and capture→persist→junction-write sequences before trusting the wiring (§10 F.3). The idempotency key MUST match on re-processing or the inbound echo double-writes rows.
+
+    `parallel-safe:false` — serialize against 070 (auto-threading, same shared area) and any other BFF writer. `/conflict-check` before the PR; coordinate merge-order.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED. Shared-path edit: characterization-test existing send + capture flows green FIRST, then extend (§10 F.3 empirical-reproduction-first). Per CLAUDE.md §10 + §11: publish-size delta (baseline ~46.99 MB, expected ≈0) + CVE + bff-extensions Placement Justification + Component Justification (FR-02/FR-08 failure modes) in the PR. `parallel-safe:false` — never concurrent with 070 or other BFF writers; run `/conflict-check` before the PR. Model tier `opus` @ effort `xhigh`.
+    </protocol>
+  </execution>
+</task>

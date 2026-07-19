@@ -1,0 +1,154 @@
+<task id="022" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Place the regarding-mode `CommunicationTimeline` PCF on ALL 11 regarding-family entity forms + form config + 11-entity smoke pass</title>
+    <phase>W2 — Record Threads View (Surface 1)</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <deps>021</deps>
+    <blocks>080</blocks>
+    <tags>dataverse, deploy, e2e-test</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Places a form-bound PCF on 11 live model-driven-app forms via solution import + form customization — a host-affecting, hard-to-reverse deploy across a broad matrix; the acceptance is a closed set of 11 named entity forms + an 11-entity smoke pass. ADR-006 (form binding), ADR-026 (Path-A exception), ADR-022 (platform libs verified on the deployed control) bind; UI tests gate the render on representative forms. FULL required.</rigor-reason>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Form-customization + solution import work against Dataverse form definitions for the 11 regarding entities — disjoint from the shared TypeScript (020), the PCF pack (021), and the BFF/schema tracks. It consumes the 021 solution ZIP; it edits no shared source. (Deploy serialization, if any, is an environment concern, not a source-file conflict.)</parallel-reason>
+    <fr-refs>FR-04</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Place the regarding-mode `CommunicationTimeline` PCF (task 021) on **all 11 regarding-family entity forms** and verify it across the matrix. The 11 entities are exactly those in `RegardingFieldMap.All` (`src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs`) — READ that file; do NOT hardcode a guessed list:
+
+    1. `sprk_matter` · 2. `sprk_project` · 3. `sprk_invoice` · 4. `sprk_servicerequest` · 5. `sprk_workassignment` · 6. `sprk_event` · 7. `sprk_budget` · 8. `sprk_analysis` · 9. `sprk_organization` · 10. `account` · 11. `contact`
+
+    Requirements (FR-04 all-11):
+    - **Place the control on each of the 11 entities' main form** — bind its `anchorField` to that entity's primary Name field, configure the input properties (apiBaseUrl/tenant/clientApp/bffApp per the R1 Timeline PCF config convention), and publish. The control resolves the host record's `(entityType, id)` from context and renders that record's threads-as-groups.
+    - **`by-regarding` is entity-set-agnostic** — the endpoint (task 010) inherits R1's impersonation + 2-rule filter and works across all 11 families with flat server cost. The work here is **11 form placements + an 11-entity smoke pass**, NOT 11 endpoints or 11 code variants.
+    - **Import the solution ZIP** (from task 021) and do the form customization via the `dataverse-deploy` skill / PAC, OR hand the `pac import` + form-config to the owner if environment auth blocks it (mirror the R1/email-r4 split) — document whichever path is taken. The 11 placements + smoke evidence are the deliverable.
+    - **11-entity smoke pass** — confirm the control renders on each of the 11 forms (grouped regarding view, no console errors). UI tests cover ≥2 representative forms in depth (e.g. `sprk_matter` + one non-`sprk_` entity like `contact`); the remaining 9 get a render/no-error smoke check.
+
+    Do NOT modify the PCF code or the shared component here (tasks 020/021) — this task is form placement + config + verification only.
+  </prompt>
+
+  <role>
+    Dataverse deployment engineer fluent in solution import + model-driven-app form customization (adding a code component to a form, binding its `anchorField`, setting input properties, publishing) across many entities, and the `dataverse-deploy` / PAC workflow. Familiar with the 11-entity regarding family (ADR-024) and the R1 Timeline PCF form-config convention.
+  </role>
+
+  <goal>
+    The regarding-mode `CommunicationTimeline` PCF is placed on all 11 regarding-family entity forms (the exact set in `RegardingFieldMap.All`), each with `anchorField` bound to that entity's primary Name and input properties configured, published, and verified: an 11-entity smoke pass confirms the grouped regarding view renders on every form with no console errors, with ≥2 representative forms covered in depth by UI tests (incl. an ADR-021 dark-mode check). Placement/import is done via `dataverse-deploy` or handed to the owner (documented). Acceptance is a closed set enumerating the 11 forms.
+  </goal>
+
+  <context>
+    <background>
+      Surface 1 requires the regarding-mode Timeline on **all 11** regarding-family entity forms from day one (spec Q5 / FR-04). The entity set is authoritative in `RegardingFieldMap.All` — the same map the BFF uses to write typed regarding lookups (ADR-024). Because the `by-regarding` endpoint (task 010) is entity-set-agnostic, there is no per-entity server work; the cost is a flat, broad **form-placement matrix** (spec §High-Risk: "022 — larger deploy/test matrix; server cost is flat, but all 11 forms must be placed + smoke-tested").
+
+      §11 — no new component. This task places the already-built PCF (021) on forms and configures it; it adds no new surface. Cost-of-doing-nothing: without the 11 placements, FR-04's "on all 11 forms" is unmet and Surface 1 exists only on paper. Reuse the R1 Timeline PCF's form-config convention (input-property values, anchor binding).
+
+      Bound `anchorField` (R1 lesson, verified in 021): each placement binds the control to that entity's primary Name field so it appears in the form component library and anchors to the form; the control reads `(entityType, id)` from context. Each of the 11 entities has a primary Name (`sprk_name` for the `sprk_` entities; `account`/`contact` use their OOB primary name — confirm per entity).
+
+      ADR-026 Path-A exception (R1 precedent): the surface is the OOB form + PCF, not a Code Page. Cite in the deploy PR. Access parity (NFR-03) is enforced server-side by the endpoint; nothing on the form re-derives privacy.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs (READ — the authoritative 11-entity list; do NOT hardcode a guess)</file>
+      <file>src/client/pcf/CommunicationTimeline/ (CONSUME — the solution ZIP + control from task 021)</file>
+      <file>src/client/pcf/CommunicationTimeline/CommunicationTimeline/ControlManifest.Input.xml (READ — bound `anchorField` + input properties to configure per form)</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md (READ — solution import + form-config workflow)</file>
+      <file>src/client/pcf/CLAUDE.md (READ — PCF module rules)</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md (READ — the 11-entity regarding family)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-04">The regarding-mode PCF is placed + form-configured on ALL 11 regarding-family entity forms (the exact set in `RegardingFieldMap.All`); each resolves the host record's `(entityType, id)`; deployed + smoke-verified on all 11. Scope: form placement/config/verification — no code change.</constraint>
+    <constraint source="ADR-024">The 11-entity set is exactly `RegardingFieldMap.All` — read it; MUST NOT invent or omit entities, and MUST NOT introduce a second regarding mechanism.</constraint>
+    <constraint source="ADR-006">Each placement binds the control (via `anchorField` → the entity's primary Name) to the form record (PCF for form binding).</constraint>
+    <constraint source="ADR-026">Path-A exception — OOB form + PCF, NOT a Code Page. Cite in the deploy PR.</constraint>
+    <constraint source="ADR-022">The deployed control uses React 16/17 platform libraries (verified in 021) — no per-form change; confirm the control loads under platform React on the forms.</constraint>
+    <constraint source="project">Place via the `dataverse-deploy` skill / PAC; if environment auth/import blocks it, hand `pac import` + form-config to the owner and document the split. Deliverable = 11 placements + smoke evidence.</constraint>
+    <constraint source="project">No BFF publish-size / CVE obligation — deploy/config only, no BFF code (root §10 N/A). No shared-code or PCF-code edits here (020/021 own those).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs</file>
+      <file>src/client/pcf/CommunicationTimeline/CommunicationTimeline/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Authoritative 11-entity list" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs">
+        `RegardingFieldMap.All` = matter, project, invoice, servicerequest, workassignment, event, budget, analysis, organization, account, contact. Place on each entity's main form; do NOT hardcode a guessed list.
+      </pattern>
+      <pattern name="Solution import + form config" location="docs/guides/PCF-DEPLOYMENT-GUIDE.md">
+        Import the 021 solution ZIP; add the code component to each entity's main form, bind `anchorField` to the entity's primary Name, set input properties (apiBaseUrl/tenant/clientApp/bffApp), publish. Via `dataverse-deploy` or handed to the owner.
+      </pattern>
+      <pattern name="11-entity smoke via ui-test" location=".claude/skills/ui-test/SKILL.md">
+        Open ≥2 representative forms in depth (matter + a non-sprk entity like contact) incl. dark mode; render/no-error smoke on the remaining 9.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `RegardingFieldMap.cs` to lock the exact 11-entity list + primary-Name field per entity (confirm `account`/`contact` OOB primary name vs `sprk_name` for the `sprk_` entities). Read the 021 `ControlManifest.Input.xml` for the bound `anchorField` + input properties, `PCF-DEPLOYMENT-GUIDE.md`, and ADR-024/ADR-006.</step>
+    <step order="2">Import the task-021 solution ZIP to the target environment via the `dataverse-deploy` skill / PAC. If environment auth/import blocks it, prepare the import package + a written form-config runbook and hand to the owner — document the split in `current-task.md`.</step>
+    <step order="3">For EACH of the 11 entities, add the regarding-mode `CommunicationTimeline` code component to the entity's main form: bind `anchorField` to that entity's primary Name, set the input properties (apiBaseUrl/tenant/clientApp/bffApp per the R1 config convention), position the control in a form section, and publish. Track a checklist row per entity.</step>
+    <step order="4">Run the 11-entity smoke pass: open a record of each entity and confirm the control renders the grouped regarding view (threads-as-groups) with no console errors. Record pass/fail per entity.</step>
+    <step order="5">Run UI tests via the `ui-test` skill in depth on ≥2 representative forms — `sprk_matter` (a `sprk_` entity) + `contact` (a non-`sprk_` OOB entity) — covering render, the grouped regarding view resolving the host record, and an ADR-021 dark-mode check.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on any form-config artifacts / deploy notes (focus: exactly 11 entities placed, each `anchorField` bound to the correct primary Name, input properties correct, no second regarding mechanism); `adr-check` against ADR-024/ADR-006/ADR-026 + `spec.md` (FR-04 all-11, NFR-03 parity preserved — nothing on the form re-derives access). Address Critical + High findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (022 ✅) + `current-task.md`; record decisions (per-entity primary-Name field used, form/section placement, input-property values, the 11-row smoke matrix result, UI-test evidence for the 2 deep forms, and any import-vs-owner split).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">RegardingFieldMap.cs (11-entity list), 021 manifest, PCF-DEPLOYMENT-GUIDE, ADR-024/006</tool>
+    <tool name="dataverse-deploy">Import the 021 solution ZIP + form customization across the 11 entities (or prepare the owner runbook)</tool>
+    <tool name="ui-test">Deep verification on 2 representative forms + smoke on the remaining 9</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">The regarding-mode `CommunicationTimeline` PCF placed + configured on all 11 regarding-family entity main forms (anchorField bound to each primary Name; input properties set)</output>
+    <output type="docs">11-row smoke matrix (entity → placed → renders → no console errors) + UI-test evidence for the 2 deep forms + any import-vs-owner split (in current-task.md / PR)</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test>`sprk_matter` form (deep): open a Matter with ≥2 threads across ≥2 months; the control renders threads-as-collapsible-groups, expanding a group shows the interleaved email+chat timeline; no console errors.</ui-test>
+    <ui-test>`contact` form (deep, non-`sprk_` entity): open a Contact record; the control resolves `(entityType='contact', id)` from context and renders that contact's threads-as-groups — confirming the entity-set-agnostic path works for an OOB entity.</ui-test>
+    <ui-test>Dark mode (ADR-021): on at least one of the deep forms, switch the model-driven app to dark theme; the grouped view, group headers, and count badges render correctly (Fluent v9 tokens pass through).</ui-test>
+    <ui-test>11-entity smoke: opening a record on each of the remaining 9 forms (project, invoice, servicerequest, workassignment, event, budget, analysis, organization, account) renders the control with no console errors.</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">The regarding-mode `CommunicationTimeline` PCF is placed + form-configured on ALL 11 forms, exactly the set in `RegardingFieldMap.All`: sprk_matter, sprk_project, sprk_invoice, sprk_servicerequest, sprk_workassignment, sprk_event, sprk_budget, sprk_analysis, sprk_organization, account, contact.</criterion>
+    <criterion testable="true">On each of the 11 forms the control's `anchorField` is bound to that entity's primary Name and its input properties (apiBaseUrl/tenant/clientApp/bffApp) are configured; the form is published.</criterion>
+    <criterion testable="true">The 11-entity smoke pass confirms the grouped regarding view renders on every one of the 11 forms with no console errors (11-row matrix recorded).</criterion>
+    <criterion testable="true">UI tests cover ≥2 representative forms in depth (sprk_matter + contact) including an ADR-021 dark-mode check; both resolve the host record's `(entityType, id)` and render threads-as-groups.</criterion>
+    <criterion testable="true">No second regarding mechanism, no PCF/shared-code change, and no second endpoint were introduced — form placement + config only (ADR-024, §11); NFR-03 access parity is untouched (nothing on the form re-derives access).</criterion>
+    <criterion testable="true">Placement was done via `dataverse-deploy`/PAC, or the `pac import` + form-config was handed to the owner with a runbook — the split is documented; the 11 placements + smoke evidence are recorded either way.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on task 021 (the packed PCF variant). Blocks task 080 (the 11-entity seam-test pass verifies the endpoint side; this task verifies the form side). Because `by-regarding` is entity-set-agnostic, all 11 forms share one control + one endpoint — the risk is purely the breadth of the placement matrix (spec §High-Risk 022), so track a per-entity checklist and do not declare done until all 11 rows pass.
+
+    Confirm the primary Name field per entity: the `sprk_` entities use `sprk_name`; `account` and `contact` use their OOB primary name attributes — bind `anchorField` to the correct one on each form (a wrong binding hides the control from the component library or breaks anchoring).
+
+    If the environment blocks import/auth, split packaging (done in 021) from owner-run import + form-config — hand the owner a per-entity runbook and record which forms the owner still needs to configure.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 (code-review + adr-check) MANDATORY. Deploy via the `dataverse-deploy` skill (or hand `pac import` + form-config to the owner, documented). Verify via `ui-test` (2 deep forms + 9-form smoke). No BFF publish-size/CVE (root §10 N/A). Cite the ADR-026 Path-A exception in the deploy PR. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

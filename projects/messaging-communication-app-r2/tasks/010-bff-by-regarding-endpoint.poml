@@ -1,0 +1,158 @@
+<task id="010" project="messaging-communication-app-r2">
+  <metadata>
+    <title>BFF by-regarding read endpoint (entity-set-agnostic, impersonation + 2-rule filter per FR-01)</title>
+    <phase>W1 — BFF Reads (CC-3)</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <deps>002</deps>
+    <blocks>020,080</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a NEW read endpoint to `Sprk.Bff.Api` that is the sole data source for the record-level regarding-mode Timeline (Surface 1, all 11 entity-sets) and MUST enforce NFR-03 access parity (impersonation + 2-rule privacy/internal-only filter) on every read — no message content may bypass the BFF filter. BFF-touching: publish-size + CVE + bff-extensions Placement Justification required; access-filter no-leak correctness demands code-review + adr-check at Step 9.5. Modifies `.cs` in shared `Services/Communication/` (additive).</rigor-reason>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-01, NFR-03</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Add a single new read route to the EXISTING communication endpoint group and a single new method to the EXISTING read service:
+
+    • **Route** — `GET /api/communications/by-regarding/{entityType}/{id}` on `src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs` (add to the existing `MapGroup("/api/communications")` — NO new endpoint group).
+    • **Service method** — `ReadByRegardingAsync(entityType, id, ...)` on `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs`.
+
+    The endpoint returns **all threads + their messages** for a regarding record, in the **same DTO shape as the existing R1 thread-id-scoped read** (reuse the models in `CommunicationThreadReadModels.cs`). It is **entity-set-agnostic across all 11 regarding families** (matter, contact, … per `RegardingFieldMap.All`): resolve the regarding record → find its `sprk_communicationthread` rows by regarding → fetch the `sprk_communication` messages for those threads via an `or`-filter on thread id → run them through the SAME access filter the R1 read path uses.
+
+    **NFR-03 access parity is the load-bearing correctness property.** The read MUST route through `IImpersonatedCommunicationQuery` (the blessed impersonation read path) + `Access/CommunicationAccessFilter.cs` (the 2-rule privacy + internal-only filter). Do **NOT** author a new access mechanism, a bespoke ACL, or reintroduce **membership-union on reads** (retired 2026-07-16 — `../messaging-communication-app-r1/notes/access-model-decision.md`). Privacy + internal-only filtering is composed exactly as the existing thread-id read composes it; a private thread the caller has no grant for, and an internal-only message the caller may not see, MUST be absent from the result.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication subsystem. Authority on `src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs` + `Services/Communication/` reads. Fluent in ADR-028 (the impersonation read path is the blessed mechanism — do not fork), ADR-008 (endpoint filters), ADR-019 (ProblemDetails), ADR-024 (11-entity regarding family / `RegardingFieldMap.All`), the R1 impersonation + 2-rule access model (`CommunicationAccessFilter`), NFR-03 access parity, `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`, §10 BFF Hygiene, and §11 Component Justification.
+  </role>
+
+  <goal>
+    A `GET /api/communications/by-regarding/{entityType}/{id}` endpoint exists on the existing communication group, backed by a new `ReadByRegardingAsync` on `CommunicationThreadReadService`, returning a regarding record's threads + messages in the R1 DTO shape, entity-set-agnostic across all 11 families. Every read routes through `IImpersonatedCommunicationQuery` + `CommunicationAccessFilter` (impersonation + 2-rule) — no new access logic, no membership-union — so a caller sees ONLY authorized messages and private/internal-only content never leaks. The endpoint carries the ADR-008 authorization filter + ADR-019 ProblemDetails and is registered unconditionally. Build clean; endpoint + access-filter tests pass (incl. ≥3 of the 11 entity-sets + negative private/internal-only cases); publish-size delta + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      Surface 1 (the record-level regarding-mode Timeline PCF placed on all 11 regarding-family entity forms, task 020/021/022) renders a record's threads as collapsible groups → per-thread interleaved email+chat timelines. Its ONLY data source is this endpoint. Today the communication read surface is **thread-id-scoped only** (`CommunicationEndpoints.cs` exposes send / status / direct-thread; the R1 read path in `CommunicationThreadReadService` reads a single thread's messages). There is no way to list "all threads for a record" — task 010 adds it.
+
+      Component Justification (§11): (1) **Existing** — grep-verified: `CommunicationEndpoints.cs` is thread-id-scoped; no route returns a regarding record's threads. But `CommunicationThreadReadService` + `IImpersonatedCommunicationQuery` + `CommunicationAccessFilter` already own the impersonation read + 2-rule filter, and `RegardingFieldMap` already owns the 11-entity map. (2) **Extension** — this is ONE additive route + ONE additive service method reusing all four existing pieces; it introduces **no new service, no new access mechanism, no second filter**. The route is new only because REST needs a new path; the logic is reuse. (3) **Cost-of-doing-nothing (concrete)** — without `by-regarding` the regarding-mode Timeline (FR-03/04) has no data source and Surface 1 renders nothing (FR-01 acceptance fails); if the read bypassed the access filter, a private-thread or internal-only message would leak to an unauthorized caller (NFR-03 security failure). Named contract failures, not "future flexibility."
+
+      NFR-03 access parity (binding): the new read surface MUST apply R1's impersonation + 2-rule (privacy + internal-only) filter and MUST NOT reintroduce membership-union on reads (retired 2026-07-16). The query is entity-set-agnostic: the regarding lookup varies by family (per `RegardingFieldMap`) but the message fetch (`or`-filter on thread id) and the access filter are identical across all 11 — server cost is flat regardless of entity type.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (ADD `by-regarding` route to the existing `/api/communications` group)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs (ADD `ReadByRegardingAsync`)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IImpersonatedCommunicationQuery.cs (REUSE — impersonated Dataverse query seam)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessFilter.cs + ICommunicationAccessFilter.cs (REUSE — 2-rule privacy + internal-only filter)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs (REUSE — R1 read DTO shape)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs (REUSE — 11-entity → typed-lookup map; entity-set-agnostic resolution)</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md (BFF read for the timeline vs Xrm.WebApi)</file>
+      <file>../messaging-communication-app-r1/notes/access-model-decision.md (membership-union retired 2026-07-16 — binding)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-01">Scope: the `by-regarding` endpoint returns ALL threads + messages for a regarding record, entity-set-agnostic across all 11 families; returns the SAME DTO shape as the R1 thread-id read (reuse `CommunicationThreadReadModels`); applies the impersonation + 2-rule filter.</constraint>
+    <constraint source="NFR-03">Scope: this read surface MUST apply R1's impersonation + 2-rule (privacy + internal-only) filter via `IImpersonatedCommunicationQuery` + `CommunicationAccessFilter`; no message content may bypass the BFF access filter. MUST NOT reintroduce membership-union on reads (retired 2026-07-16). Do NOT author a second/divergent filter.</constraint>
+    <constraint source="ADR-028">Scope: the impersonation read path is the blessed mechanism — extend `CommunicationThreadReadService` / `IImpersonatedCommunicationQuery`; MUST NOT fork it, MUST NOT `new` a credential; inject the central `TokenCredential` + canonical Dataverse interfaces.</constraint>
+    <constraint source="ADR-008">Scope: the new route carries the standard communication authorization endpoint filter; auth posture consistent with the existing `/api/communications` group.</constraint>
+    <constraint source="ADR-019">Scope: errors on this route (regarding record not found, forbidden, bad `entityType`) return RFC 7807 ProblemDetails.</constraint>
+    <constraint source="ADR-024">Scope: regarding resolution uses the existing 11-entity family via `RegardingFieldMap.All`; MUST NOT add a second regarding mechanism.</constraint>
+    <constraint source="ADR-032 / ADR-010">Scope: the route is registered unconditionally on the existing group; any feature-gated dependency uses the Null-Object pattern (no asymmetric registration); interfaces are test seams over concretes.</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md` before designing; state the Placement Justification in the PR (extends the existing `CommunicationEndpoints` group + read service — no new group/mechanism); report publish-size delta vs ~46.99 MB baseline (expected ≈0, no new packages); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/`.</constraint>
+    <constraint source="project §11">Scope: Component Justification — the route is new only because REST needs a new path; state the concrete FR-01/NFR-03 failure modes prevented (Surface 1 has no data source; private/internal-only leak) with grep evidence that no existing route returns a regarding record's threads.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IImpersonatedCommunicationQuery.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/ICommunicationAccessFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>../messaging-communication-app-r1/notes/access-model-decision.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Impersonation + 2-rule read" location="src/server/api/Sprk.Bff.Api/Services/Communication/">
+        Route the read through `IImpersonatedCommunicationQuery.QueryAsync` (impersonated Dataverse retrieve) then compose privacy + internal-only via `CommunicationAccessFilter` — the endpoint NEVER re-derives access and NEVER unions membership.
+      </pattern>
+      <pattern name="Entity-set-agnostic regarding resolution" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs">
+        Regarding record → `sprk_communicationthread` rows by regarding (family lookup varies per `RegardingFieldMap.All`); messages fetched by an `or`-filter over the resolved thread ids; identical fetch + filter across all 11 entity-sets.
+      </pattern>
+      <pattern name="ProblemDetails communication endpoint" location="src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs">
+        Add the route to the existing `MapGroup("/api/communications")`; ADR-008 authorization endpoint filter; ADR-019 ProblemDetails on error; unconditional mapping (ADR-032).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md` §F/§G + §11 Component Justification + `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` (confirms BFF read for the Timeline, not `Xrm.WebApi`) + `../messaging-communication-app-r1/notes/access-model-decision.md` (no membership-union) before adding the endpoint.</step>
+    <step order="2">Read `CommunicationThreadReadService.cs`, `IImpersonatedCommunicationQuery.cs`, `CommunicationAccessFilter.cs`, `CommunicationThreadReadModels.cs`, and `RegardingFieldMap.cs` to identify the exact impersonation-query entry point + the access-filter call + the DTO shape to reuse, and the 11-entity regarding lookup names.</step>
+    <step order="3">Grep the existing `CommunicationEndpoints.cs` + read service to confirm no `by-regarding` / regarding-scoped read route exists (§11 existing-question evidence).</step>
+    <step order="4">Implement `ReadByRegardingAsync(entityType, id, ...)` on `CommunicationThreadReadService`: resolve the regarding thread rows via `RegardingFieldMap` (entity-set-agnostic) → fetch `sprk_communication` messages for those threads via an `or`-filter on thread id through `IImpersonatedCommunicationQuery` → compose privacy + internal-only via `CommunicationAccessFilter` → project into the R1 DTO shape (`CommunicationThreadReadModels`). No new filter, no membership-union.</step>
+    <step order="5">Add `GET /api/communications/by-regarding/{entityType}/{id}` to the existing `/api/communications` group in `CommunicationEndpoints.cs`: bind `entityType` + `id`, call `ReadByRegardingAsync`, apply the ADR-008 authorization filter + ADR-019 ProblemDetails (not-found / forbidden / bad `entityType`); register unconditionally (ADR-032/ADR-010).</step>
+    <step order="6">Write tests in `tests/unit/Sprk.Bff.Api.Tests/`: (a) endpoint returns a regarding record's threads + messages in the R1 DTO shape; (b) coverage across **≥3 of the 11 entity-sets** (e.g. matter, contact, one more) confirming entity-set-agnostic behavior; (c) NEGATIVE — a caller WITHOUT a grant to a private thread receives NONE of its messages; (d) NEGATIVE — an internal-only message is absent for a caller who may not see it; (e) the read routes through the impersonation query + `CommunicationAccessFilter` and introduces NO second filter and NO membership-union (grep/diff-verifiable assertion).</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm existing communication tests still pass (characterization green).</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~46.99 MB baseline. Expected ≈ 0 (no new packages).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus access-filter no-leak / no second mechanism / no membership-union); `adr-check` against `spec.md` (focus FR-01/NFR-03 filtering, ADR-028 impersonation-path reuse, ADR-008/019/024, §11 justification). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; shared `Services/Communication/`; coordinate with `spaarke-notification-spine-r1` + email-r4 merged state).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (010 ✅) + `current-task.md`; record decisions (regarding-resolution entry point, DTO reuse, access-filter reuse point, entity-sets covered by tests).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect the read service, impersonation query, access filter, read models, RegardingFieldMap, existing endpoints</tool>
+    <tool name="grep">Confirm no existing by-regarding / regarding-scoped read route (§11 evidence); verify no membership-union reintroduced</tool>
+    <tool name="edit">Add the route to `CommunicationEndpoints.cs`; add `ReadByRegardingAsync` to the read service</tool>
+    <tool name="bash">Build, endpoint/access-filter tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (UPDATED — `GET /api/communications/by-regarding/{entityType}/{id}` added to the existing group, access-filtered, unconditional)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs (UPDATED — `ReadByRegardingAsync` routing through the impersonation query + `CommunicationAccessFilter`; no second filter)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ — by-regarding tests incl. ≥3-of-11 entity-set coverage + private-thread-hidden + internal-only-hidden negative cases + no-second-filter/no-membership-union assertion</output>
+    <output type="docs">PR description with §11 Component Justification (FR-01/NFR-03 failure modes + grep evidence) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GET /api/communications/by-regarding/{entityType}/{id}` exists on the existing `/api/communications` group and returns a regarding record's threads + messages in the same DTO shape as the R1 thread-id read (reuses `CommunicationThreadReadModels`).</criterion>
+    <criterion testable="true">`ReadByRegardingAsync` on `CommunicationThreadReadService` resolves threads entity-set-agnostically via `RegardingFieldMap.All` and fetches messages via an `or`-filter on thread id.</criterion>
+    <criterion testable="true">The read routes through `IImpersonatedCommunicationQuery` + `CommunicationAccessFilter` — no new access mechanism, no second/divergent filter, and NO membership-union is reintroduced (grep/diff-verifiable).</criterion>
+    <criterion testable="true">Tests cover ≥3 of the 11 regarding entity-sets and confirm identical fetch + filter behavior across them.</criterion>
+    <criterion testable="true">NEGATIVE: a caller without a grant to a private thread receives NONE of that thread's messages from `by-regarding`.</criterion>
+    <criterion testable="true">NEGATIVE: an internal-only message is absent from `by-regarding` for a caller who may not see it (2-rule filter honored).</criterion>
+    <criterion testable="true">The route carries the ADR-008 authorization filter + ADR-019 ProblemDetails (not-found / forbidden / bad entityType) and is registered unconditionally (ADR-032).</criterion>
+    <criterion testable="true">`dotnet build` clean; existing communication tests still pass; publish-size delta ≈ 0 vs ~46.99 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 002 (thread typed-regarding lookups + Lookup discriminator — the regarding resolution this endpoint reads over). Blocks 020 (the regarding-mode Timeline component consumes this endpoint) and 080 (access-parity seam tests). The single most important correctness property is no-leak: the negative private-thread + internal-only cases are non-negotiable (NFR-03, security-sensitive). Reuse is the whole point — if reusing the R1 read path would force a change to `CommunicationAccessFilter` or `IImpersonatedCommunicationQuery`, coordinate; do NOT fork a parallel filter or reintroduce membership-union. `participant=` is NOT part of this endpoint (it is a filtered-query facet — task 011/051).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED (access-filter no-leak is security-sensitive per NFR-03). Per CLAUDE.md §10 + §11: publish-size delta (baseline ~46.99 MB) + CVE + bff-extensions Placement Justification + Component Justification (FR-01/NFR-03 failure modes + grep evidence) in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/`). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

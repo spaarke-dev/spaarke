@@ -1,7 +1,7 @@
 # TASK-INDEX — messaging-communication-app-r2 (Communication Workspace)
 
 > **Generated**: 2026-07-18 via `/project-pipeline`
-> **Total tasks**: 24 (23 work + 1 wrap-up)
+> **Total tasks**: 21 (20 work + 1 wrap-up)
 > **Legend**: 🔲 not-started · 🔄 in-progress/needs-retry · ✅ complete · ⛔ blocked/gated
 
 ---
@@ -32,7 +32,7 @@
 | 081 | Architecture doc: extend communication architecture with Workspace read endpoints + participant index + regarding-mode + widget | W8 | docs | — | 010,050,070 | — | true | STANDARD | sonnet/high | 🔲 |
 | 090 | Project wrap-up (README Complete, lessons-learned, `/test-diet`, archive) | Wrap | wrapup | — | (all) | — | **false** | STANDARD | sonnet/high | 🔲 |
 
-> **Note**: 22 numbered work tasks above (001–004, 010–011, 020–023, 030, 040–041, 050–051, 060, 070–071, 080–081) + 090 wrap-up = **23 tasks authored**. (Header count 24 includes an intentional reserve slot; adjust as decomposition firms.)
+> **Note**: 20 numbered work tasks (001–004, 010–011, 020–023, 030, 040–041, 050–051, 060, 070–071, 080–081) + 090 wrap-up = **21 tasks**. All 21 POML files authored + validated (`Validate-TaskPoml.ps1` clean).
 
 ---
 
