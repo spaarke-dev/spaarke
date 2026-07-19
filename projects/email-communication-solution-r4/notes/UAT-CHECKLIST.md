@@ -12,15 +12,15 @@ UAT splits into two tiers. **Tier 1 (API) can run now** — the BFF is deployed 
 
 | ID | Prerequisite | Done? | Notes |
 |----|--------------|:---:|-------|
-| P-1 | BFF deployed to `spaarke-bff-dev`; `GET /healthz` → 200 | ☐ | |
-| P-2 | App settings set: `Communication__SemanticMatch__Enabled=true`, `Communication__AiClassification__Enabled=true`, `Communication__AutoFile__Enabled=true` / `__Threshold=0.85`, tokenized `AiSearch` index names populated | ☐ | |
-| P-3 | Connections PCF **v1.0.1** imported (`CommunicationConnectionsSolution_v1.0.1.zip`) | ☐ | |
-| P-4 | Actions PCF **v1.0.1** imported (`CommunicationActionsSolution_v1.0.1.zip`) | ☐ | |
-| P-5 | Both PCFs placed on OOB `sprk_communication` form (Connections in accessories column bound to `sprk_associationprovenance`+`sprk_associationstatus`; Actions bound to `sprk_communicationtype`) | ☐ | |
-| P-6 | Legacy `sprk_communication_send.js` web resource + Send button removed; **Create-To-Do button KEPT** | ☐ | |
-| P-7 | "Communications Awaiting Association" system view published | ☐ | |
-| P-8 | Dataverse env vars present: `sprk_MsalClientId`=`170c98e1…`, `sprk_BffApiAppId`=`1e40baad…`, `sprk_BffApiBaseUrl` | ☐ | |
-| P-9 | A test mailbox is monitored by a live Graph subscription (for inbound tests) | ☐ | |
+| P-1 | BFF deployed to `spaarke-bff-dev`; `GET /healthz` → 200 | ✅ | Verified 2026-07-18 — healthz 200 |
+| P-2 | App settings set: `Communication__SemanticMatch__Enabled=true`, `Communication__AiClassification__Enabled=true`, `Communication__AutoFile__Enabled=true` / `__Threshold=0.85`, tokenized `AiSearch` index names populated | ✅ | Verified 2026-07-18 — SemanticMatch/AiClassification=true; AutoFile set explicit (was code-default true/0.85); index tokens resolve (`spaarke-records-index` @2, `spaarke-invoices-index` @6). Webhook secrets moved to Key Vault (mirror prod) |
+| P-3 | Connections PCF imported | ✅ | Verified in Dataverse `customcontrol` — **v1.2.1** (supersedes the v1.0.1 named here) |
+| P-4 | Actions PCF imported | ✅ | Verified in Dataverse `customcontrol` — **v1.1.1** (supersedes the v1.0.1 named here) |
+| P-5 | Both PCFs placed on OOB `sprk_communication` form (Connections in accessories column bound to `sprk_associationprovenance`+`sprk_associationstatus`; Actions bound to `sprk_communicationtype`) | ☐ | OWNER to confirm (maker UI — not machine-verifiable from here) |
+| P-6 | Legacy `sprk_communication_send.js` web resource + Send button removed; **Create-To-Do button KEPT** | ☐ | OWNER to confirm |
+| P-7 | "Communications Awaiting Association" system view published | ☐ | OWNER to confirm |
+| P-8 | Dataverse env vars present: `sprk_MsalClientId`=`170c98e1…`, `sprk_BffApiAppId`=`1e40baad…`, `sprk_BffApiBaseUrl` | ☐ | OWNER to confirm |
+| P-9 | A test mailbox is monitored by a live Graph subscription (for inbound tests) | ☐ | OWNER to confirm (needed for D-1 inbound + the definitive webhook-KV resolution proof) |
 
 ---
 
@@ -32,13 +32,13 @@ UAT splits into two tiers. **Tier 1 (API) can run now** — the BFF is deployed 
 
 | ID | Test | Steps | Expected | Pass/Fail | Notes |
 |----|------|-------|----------|:---:|-------|
-| A-1 | Health | `GET /healthz` | 200 | ☐ | |
-| A-2 | Suggest — route registered | `POST /api/communications/{guid}/suggest-associations` **without** token | 401 (not 404) | ☐ | |
-| A-3 | Archive — route registered | `POST /api/communications/{guid}/archive` **without** token | 401 (not 404) | ☐ | |
-| A-4 | Send — route registered | `POST /api/communications/send` **without** token | 401 (not 404) | ☐ | |
-| A-5 | Status — route registered | `GET /api/communications/{guid}/status` without token | 401 | ☐ | |
-| A-6 | Webhook anonymous validation handshake | `POST /api/communications/incoming-webhook?validationToken=abc123` | 200, body echoes `abc123` as text/plain | ☐ | |
-| A-7 | Webhook rejects bad HMAC | `POST /api/communications/incoming-webhook` with a change-notification body and a wrong/absent `X-Hub-Signature-256` | 401/400 (rejected; no job enqueued) | ☐ | |
+| A-1 | Health | `GET /healthz` | 200 | ✅ | 200 (2026-07-18) |
+| A-2 | Suggest — route registered | `POST /api/communications/{guid}/suggest-associations` **without** token | 401 (not 404) | ✅ | 401 → route registered |
+| A-3 | Archive — route registered | `POST /api/communications/{guid}/archive` **without** token | 401 (not 404) | ✅ | 401 |
+| A-4 | Send — route registered | `POST /api/communications/send` **without** token | 401 (not 404) | ✅ | 401 |
+| A-5 | Status — route registered | `GET /api/communications/{guid}/status` without token | 401 | ✅ | 401 |
+| A-6 | Webhook anonymous validation handshake | `POST /api/communications/incoming-webhook?validationToken=abc123` | 200, body echoes `abc123` as text/plain | ✅ | 200, body `abc123`, `text/plain` |
+| A-7 | Webhook rejects bad HMAC | `POST /api/communications/incoming-webhook` with a change-notification body and a wrong/absent `X-Hub-Signature-256` | 401/400 (rejected; no job enqueued) | ✅ | 401 rejected. NOTE: proves rejection but not KV-key resolution — definitive proof = D-1 (real signed notification accepted) |
 
 ### 1B. Suggestion preview endpoint (read-only — the review surface's data source)
 
@@ -56,18 +56,18 @@ UAT splits into two tiers. **Tier 1 (API) can run now** — the BFF is deployed 
 
 | ID | Test | Steps | Expected | Pass/Fail | Notes |
 |----|------|-------|----------|:---:|-------|
-| C-1 | Rung 0 — explicit ref | Inbound/caller-supplied explicit regarding | Matched at rung 0; provenance names rung 0 | ☐ | |
-| C-2 | Rung 1 — thread continuity | Reply to a prior email already associated to a matter (`inReplyTo`/`references`/`conversationId`) | Same matter matched via thread rung; provenance cites thread | ☐ | |
-| C-3 | Rung 2 — participant/domain | Sender is a known contact / sender domain matches `sprk_organization` (via `sprk_domain`) | Contact/org matched; **org writes `sprk_regardingorganization`→`sprk_organization`, NOT `account`** | ☐ | |
-| C-4 | Rung 3 — structural detector | Email that is a calendar invite / e-sign completion / has an invoice # / court-filing marker | Detector fires; correct target type surfaced | ☐ | |
-| C-5 | Rung 4 — semantic (AI) | Fuzzy matter/project/invoice reference (no deterministic hit) | Lands as **Suggested** with match reasons in provenance; **never auto-filed** | ☐ | |
-| C-6 | Rung 5 — classify (AI) | Ambiguous email with no record match | Category/urgency/obligations surfaced as **Suggested/Ambiguous**; never auto-filed | ☐ | |
-| C-7 | Auto-file threshold | Deterministic match ≥0.85 | Status → **Resolved**, regarding auto-filed | ☐ | |
-| C-8 | Suggest band | Deterministic match 0.50–0.85 | Status → **Suggested** (not auto-filed) | ☐ | |
-| C-9 | Pending band | No/low match (<0.50) | Status → **Pending Review** | ☐ | |
-| C-10 | Ambiguous | Two conflicting high-confidence targets | Status → **Ambiguous** | ☐ | |
-| C-11 | Provenance recorded | Any of the above | `sprk_associationprovenance` JSON records rung + per-attribute confidence for each match | ☐ | |
-| C-12 | Per-rung telemetry | Trigger inbound processing; check App logs | `EventId 4501/4502` per-rung telemetry present | ☐ | |
+| C-1 | Rung 0 — explicit ref | Inbound/caller-supplied explicit regarding | Matched at rung 0; provenance names rung 0 | ⬚ | Not exercised in the 2026-07-18 sample (rung exists; no explicit-ref email in set) |
+| C-2 | Rung 1 — thread continuity | Reply to a prior email already associated to a matter (`inReplyTo`/`references`/`conversationId`) | Same matter matched via thread rung; provenance cites thread | ✅ | Verified via real data (`048e7239`, `d58fd828`) — provenance cites `thread:ancestor:<msgid>→parent:{guid}:sprk_regardingperson`, confidence 1.0 |
+| C-3 | Rung 2 — participant/domain | Sender is a known contact / sender domain matches `sprk_organization` (via `sprk_domain`) | Contact/org matched; **org writes `sprk_regardingorganization`→`sprk_organization`, NOT `account`** | ✅ | Participant→contact verified (`participant:sender:ralph.schroeder@spaarke.com→contact` @0.7). Org-by-domain not in sample |
+| C-4 | Rung 3 — structural detector | Email that is a calendar invite / e-sign completion / has an invoice # / court-filing marker | Detector fires; correct target type surfaced | ⬚ | Not exercised in sample |
+| C-5 | Rung 4 — semantic (AI) | Fuzzy matter/project/invoice reference (no deterministic hit) | Lands as **Suggested** with match reasons in provenance; **never auto-filed** | ⬚ | Deterministic RecordNameMatch hit on both sample records so semantic rung not the resolver; rung present |
+| C-6 | Rung 5 — classify (AI) | Ambiguous email with no record match | Category/urgency/obligations surfaced as **Suggested/Ambiguous**; never auto-filed | ✅ | `AiClassification` signal present (metadata-only) in both records: category/urgency/obligations/types — never auto-filed |
+| C-7 | Auto-file threshold | Deterministic match ≥0.85 | Status → **Resolved**, regarding auto-filed | ✅ | `048e7239` → Resolved, `autoFiled:true`, `autoFileThreshold:0.85`, `killSwitchEnabled:true` (confirms AutoFile config live) |
+| C-8 | Suggest band | Deterministic match 0.50–0.85 | Status → **Suggested** (not auto-filed) | ✅ | `6edc948a` → Suggested (deterministic-eligible 0.7 in band). NOTE: reason string interpolates 0.97 not 0.7 — cosmetic |
+| C-9 | Pending band | No/low match (<0.50) | Status → **Pending Review** | ✅ | 2 records at status Pending Review in the set (Mailbox Verification Test, Inbound Test) |
+| C-10 | Ambiguous | Two conflicting high-confidence targets | Status → **Ambiguous** | ✅ | `d58fd828` → Ambiguous: two duplicate "Smith v. Smith" projects @0.95 conflict on `sprk_regardingproject` (written:false); clean siblings (matter, person) still written:true |
+| C-11 | Provenance recorded | Any of the above | `sprk_associationprovenance` JSON records rung + per-attribute confidence for each match | ✅ | Rich JSON verified — version/direction/decision/rungsFired/candidates[field,target,confidence,written,conflict,contributors]/signals |
+| C-12 | Per-rung telemetry | Trigger inbound processing; check App logs | `EventId 4501/4502` per-rung telemetry present | ⬚ | Needs App log access — not verified from Dataverse |
 
 ### 1D. Direction symmetry & enrichment (FR-08/09)
 
