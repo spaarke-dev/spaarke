@@ -4,7 +4,34 @@
 > **Last Updated**: 2026-07-18 (tasks 026 + 023 ✅ COMPLETE; next = 027 client cutover)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
-## ▶️ RESUME HERE — parallel wave in flight (2026-07-18): client lane 044→042→043→041 + E3 030 residual
+## ▶️ RESUME HERE — parallel wave COMPLETE (2026-07-18). Next: task 031 (E3 UI + 030 live-wiring) or 025 (deploy).
+
+**PARALLEL WAVE DONE + COMMITTED (2026-07-18, autonomous). 8 tasks landed, 8 clean local commits, ZERO pushes.**
+
+| Task | State | Commit | Verify |
+|---|---|---|---|
+| 024 E1 fidelity seam | ✅ | `11696f4ac` | Compose 465✅ (BFF) |
+| 030 E3 confidence-band | 🔄 **foundation** (live-wiring → 031) | `11696f4ac` | 14 unit+3 seam, ADR013 2/2 |
+| 040 find/replace FR-17 | ✅ | `105f8c521` | client jest |
+| 044 comment-thread FR-23 | ✅ | `62cb980f7` | client jest |
+| 042 toolbar/bubble/banner FR-19/20/21 | ✅ | `00490f5ca` | client jest |
+| 043 styles pane FR-22 | ✅ (built-in styles only; custom-style-name pre-parse = follow-up) | `4564d5102` | client jest |
+| 041 basic tables FR-18 | ✅ (toolbar affordance; table family already present) | `1b3690ecf` | client jest |
+
+**AUTHORITATIVE client verify: `npx jest` (parallel, CI-equivalent) = 286/286 ✅, 33/33 suites.** BFF Compose = 465/465 ✅ (024+030).
+
+**⚠️ PRE-EXISTING test-infra issue (NOT from this wave — follow-up):** under `npx jest --runInBand` (single process) ~11 suites/41 tests fail with `PaneEventBusProvider` errors from cross-suite state pollution. CONFIRMED pre-existing: reproduces with ALL of this wave's new test files EXCLUDED (identical 11/41), and every suite passes in isolation + under default parallel workers. Likely a module-level `PaneEventBus` singleton / unmocked global not reset between suites. Does NOT block (CI runs parallel). **Follow-up:** harden per-suite isolation (teardown the shared PaneEventBus / editor instances; `beforeEach` reset).
+
+**RESIDUALS folded forward:**
+- **Task 031** now also carries **030's live band-wiring** (server derive in `ChatEndpoints.GetComposeOutputsAsync` + mirror into the real `ComposeDraftPayload` in `ComposeEditor.tsx` + a LIVE seam assertion) — see 030/031 rows in TASK-INDEX.
+- **043 follow-up:** server-side OOXML style-name pre-parse (task-010 paraId pattern) to surface true custom named styles (e.g. "Recital") + `rStyle` character styles.
+- **044 follow-up:** wire `composeCommentThreadsToDocxAnnotations()` into the live `ComposeWorkspace.triggerSave` annotation flow.
+
+**⚠️ BFF DEPLOY DIRECTIVE (owner 2026-07-18, memory `bff-deploy-sync-worktree-first`):** before ANY `Sprk.Bff.Api` deploy from this worktree (025/081), FIRST sync `origin/master` in → rebuild → re-run publish-size/CVE on the synced tree → then deploy. Do not deploy a stale worktree.
+
+**REMAINING TASK GRAPH:** E1 → 025 (deploy, deps 024✅ — but see deploy directive). E3 → 031 (deps 030🔄 met; carries 030 live-wiring) → 032. Import → 050/051/052 (dep 022✅/044✅). Wrap → 080/081/082/090. Client toolset wave (040/041/042/043/044) DONE.
+
+### ⬇️ (superseded) parallel wave in flight — client lane 044→042→043→041 + E3 030 residual
 
 **AUTONOMOUS PARALLEL ORCHESTRATION (2026-07-18).** Owner asked to run task 024 + task-execute other tasks in parallel, autonomously. Lanes: server-test + server-contract (both drained) + a SERIAL client lane (all W4 toolset tasks mount into the single `ComposeEditor.tsx`, so they cannot run concurrently — one at a time). Sub-agents run `task-execute` FULL rigor but do NOT touch `.claude/`, git, or the trackers — the MAIN SESSION owns commits + `TASK-INDEX.md`/`current-task.md` (avoids concurrent-write conflicts).
 
