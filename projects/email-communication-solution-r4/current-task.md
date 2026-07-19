@@ -1,7 +1,7 @@
 # Current Task State — email-communication-solution-r4
 
-> **Last Updated**: 2026-07-17 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first. Project is COMPLETE + MERGED + DEPLOYED; this is a live **UAT bug-fix cycle**.
+> **Last Updated**: 2026-07-18 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. Project is COMPLETE + MERGED + DEPLOYED; this is a live **UAT bug-fix cycle** focused on the **Association Engine matching + review UI**.
 
 ---
 
@@ -9,19 +9,25 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | Post-ship UAT iteration (owner testing on spaarkedev1) |
-| **Branch** | `work/email-communication-solution-r4` · HEAD = **`3af4571e9`** = origin/master (everything merged) |
+| **Phase** | Post-ship UAT iteration (owner testing on spaarkedev1) — association-matching + review-UI polish |
+| **Branch** | `work/email-communication-solution-r4` · HEAD = **`9062ef34b`** = origin/master (everything merged; the 7-ahead were OTHER projects' commits, worktree fast-forwarded) |
 | **Tree** | clean (only `.claude/worktrees/` untracked scaffold) |
-| **BFF** | LIVE on `spaarke-bff-dev` (healthz 200) — all UAT fixes deployed + hash-verified |
-| **Next action** | OWNER imports the 2 PCF ZIPs + re-sends the "Smith v Smith" test email; verify status=Suggested, contact Filed, "Create Matter (AI)" row surfaces |
+| **BFF** | LIVE on `spaarke-bff-dev` (healthz 200) — all matching fixes deployed + hash-verified (last deploy `7ea2fea02`, 47.03 MB) |
+| **Next action** | **OWNER imports PCF `CommunicationConnectionsSolution_v1.2.1.zip` + hard-refresh (Ctrl+Shift+R)**; verify the match reason shows on the collapsed card AND on every modal row, record number next to each name, and duplicate-named projects grouped |
 
-### PCF ZIPs ready for owner import (Dataverse)
-- `src/client/pcf/CommunicationConnections/Solution/bin/CommunicationConnectionsSolution_v1.1.4.zip`
-- `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.1.1.zip`
-- Import via `pac solution import --path <zip> --publish-changes` (temp-rename `Directory.Packages.props` if CPM blocks).
+### PCF ZIP ready for owner import (Dataverse)
+- `src/client/pcf/CommunicationConnections/Solution/bin/CommunicationConnectionsSolution_v1.2.1.zip` (v1.2.1 — display fix)
+- Import via `pac solution import --path <zip> --publish-changes`. Footer must read **v1.2.1** after hard-refresh; the instant tell it loaded = button says **"Confirm N suggestions"** (not "Accept all").
+- NOTE: v1.2.0 is ALREADY imported/deployed (confirmed via Dataverse `customcontrols` = 1.2.0). v1.2.1 is the follow-up that shows the match reason on Primary/Filed rows (v1.2.0 wrongly gated it to `suggested` only) + surfaces reason/number on the collapsed card.
 
-### Critical context
-The project shipped (W0–W8, merged to master, BFF + SpaarkeAi deployed) earlier. This session was an **owner UAT loop** that found + fixed real bugs. All code is committed + on master (`2ce3ed416`). Only remaining = owner-side PCF import + re-test.
+### Critical context — this session's arc (association matching + review UI)
+The project shipped (W0–W8) earlier. This UAT cycle iterated the **Association Engine matching** end-to-end. Everything is committed + on master (`9062ef34b`); only owner-side PCF v1.2.1 import remains. Key fixes, newest first — see the numbered "What was fixed" log below for detail:
+1. **Match-ranking by location + review-UI legibility** (`7ea2fea02` + PCF v1.2.0/v1.2.1): confidence tiered by WHERE a name matched — number 0.97 / subject 0.95 / body 0.88 / attachment 0.75 — so the exact subject match wins over incidental attachment noise (which drops below the 0.85 conflict floor, clearing spurious Ambiguous). Provenance carries `where=/matched=/name=/number=/reason=`. PCF shows the reason + record number per row + on the card, groups duplicate-named candidates, relabels "Accept all"→"Confirm N".
+2. **Phase 2** (`52457f442`): attachment text as a match signal (ITextExtractor, bounded/non-fatal, before association) + `sprk_invoice` added to `RecordSyncJob` index coverage.
+3. **Deterministic record-NAME/number match rung 3.5** (`cb018a12f`): the core gap — no deterministic rung matched on record NAMES. New `RecordNameMatchRung` (retrieve via keyword index then verify exact name/number in subject/body/attachment); surface-for-review, never auto-files; runs in the deterministic pass but excluded from auto-file eligibility.
+4. **No-user tenant fallback** (`3af4571e9`): the inbound engine had no user `tid` → record search filtered `tenantId eq 'system'` while records are indexed under `AzureAd:TenantId` → 0 matches. Fixed the fallback.
+
+**Verified working in prod (owner screenshots):** Smith v Smith matter → 95% Primary (subject match); a second email's matter → 97% (reference-number match). Engine correctness confirmed; the only open item is the v1.2.1 display import.
 
 ---
 

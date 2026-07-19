@@ -396,6 +396,19 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   const messageListRef = React.useRef<HTMLDivElement>(null);
   const highlightContainerRef = externalContentRef || messageListRef;
 
+  // P1-4 (UAT 2026-07-18): Copilot-style sticky-bottom auto-scroll. The viewport
+  // pins to the newest entry, BUT only while the user is already at (near) the
+  // bottom — if they scroll up to read history, new messages/streaming no longer
+  // yank them back down. `isPinnedToBottomRef` tracks that intent; the onScroll
+  // handler recomputes it on every user scroll; the auto-scroll effect honors it.
+  const isPinnedToBottomRef = React.useRef(true);
+  const handleMessageListScroll = React.useCallback(() => {
+    const el = messageListRef.current;
+    if (!el) return;
+    // Pinned when within 80px of the bottom (tolerant of sub-pixel + fast streams).
+    isPinnedToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
+
   // Ref to the root container — passed to QuickActionChips for width-based visibility (NFR-04)
   const rootContainerRef = React.useRef<HTMLDivElement>(null);
 
@@ -1254,7 +1267,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // the scroll must re-anchor when the slot's node changes for the chips to land
   // visible. Hosts memoize the slot node so unrelated re-renders don't retrigger.
   React.useEffect(() => {
-    if (messageListRef.current) {
+    // P1-4: only re-anchor when the user is pinned to the bottom (Copilot-style).
+    // If they've scrolled up to read history, don't fight them.
+    if (messageListRef.current && isPinnedToBottomRef.current) {
       messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
     }
   }, [messages, streamedContent, transcriptFooterSlot]);
@@ -2371,6 +2386,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       <div
         className={styles.messageList}
         ref={messageListRef}
+        onScroll={handleMessageListScroll}
         role="list"
         aria-label="Chat messages"
         data-testid="chat-message-list"

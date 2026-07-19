@@ -603,8 +603,16 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
   // selection/cursor (routed by the host through the cross-pane bridge to the existing redline
   // engine). Distinct from the legacy `onInsert` BroadcastChannel path. Shared into both the
   // structured-markdown branch and the plain-text branch below.
+  // P1-3 (UAT 2026-07-18): the button used to appear after EVERY completed assistant
+  // message whenever a Compose editor was open — far too noisy. Gate it to messages that
+  // are genuinely a DRAFT / substantial passage worth inserting: a long single paragraph
+  // (>=240 chars) OR multi-line substantial content (>=120 chars with a line break). Short
+  // conversational replies ("Yes, I can help…") no longer offer it (the ask: "rare — only
+  // when there's truly something to insert").
+  const isInsertableDraft = (content: string): boolean =>
+    content.length >= 240 || (content.includes('\n') && content.length >= 120);
   const renderInsertToComposeButton = (content: string): React.ReactNode =>
-    isAssistant && !isStreaming && !!onInsertToCompose && !!content ? (
+    isAssistant && !isStreaming && !!onInsertToCompose && !!content && isInsertableDraft(content) ? (
       <div className={styles.messageActions}>
         <Button
           appearance="subtle"

@@ -6,8 +6,9 @@ import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmUploadService } from "@spaarke/ui-components/utils/adapters/xrmUploadServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
-import { CreateProjectWizard } from "@spaarke/ui-components/components/CreateProjectWizard";
+import { CreateProjectWizard, mapProjectHandoffSeed } from "@spaarke/ui-components/components/CreateProjectWizard";
 import { EntityCreationService, type IUserBuCascadeDefaults } from "@spaarke/ui-components/services";
+import { readHandoffFromUrl, handoffSeed as computeHandoffSeed, completeHandoff as writeCompleteHandoff } from "@spaarke/ui-components/services/surfaceHandoff";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
 function App() {
@@ -51,9 +52,38 @@ function App() {
   const uploadService = React.useMemo(() => createXrmUploadService(resolvedBffBaseUrl), [resolvedBffBaseUrl]);
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
 
+  // Assistant → surface hand-off pre-seed (spaarkeai-assistant-enhancements-r1 UAT #1):
+  // when this wizard was launched from the Assistant's surface_launch create flow
+  // (`launchSurface`), read this page's own hand-off envelope from the launch URL and
+  // map the drafted seed onto the wizard's initial form values. `undefined` when opened
+  // directly (no `handoffId`) — the wizard opens empty. Read once (URL static per mount).
+  const handoff = React.useMemo(() => readHandoffFromUrl(), []);
+  const initialFormValues = React.useMemo(
+    () => mapProjectHandoffSeed(computeHandoffSeed(handoff)),
+    [handoff]
+  );
+
+  // UAT #1 (the create-flow file leg): pass the hand-off's session file references so
+  // the wizard fetches the drafted-from document(s) and attaches them to the new
+  // project. `undefined` when there's no session file to carry — the files step stays empty.
+  const initialFileRefs = React.useMemo(() => {
+    const seed = computeHandoffSeed(handoff);
+    if (!seed || !seed.sessionId || seed.fileIds.length === 0) return undefined;
+    return { sessionId: seed.sessionId, fileIds: seed.fileIds, fileNames: seed.fileNames };
+  }, [handoff]);
+
   const handleClose = React.useCallback(() => {
     navigationService.closeDialog({ confirmed: true });
   }, [navigationService]);
+
+  // UAT #1 honest-ack: on a SUCCESSFUL create, write the committed SurfaceHandoffResult
+  // (record id) for the active hand-off, then close. No-op (just closes) when opened
+  // directly. Cancellation is INFERRED from the absence of a written result, so the
+  // cancel path (handleClose) intentionally writes nothing.
+  const handleComplete = React.useCallback((recordId?: string) => {
+    if (handoff?.handoffId) writeCompleteHandoff(handoff.handoffId, recordId);
+    navigationService.closeDialog({ confirmed: true });
+  }, [handoff, navigationService]);
 
   const resolveSpeContainerId = React.useCallback(async (): Promise<string> => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -94,11 +124,14 @@ function App() {
         navigationService={navigationService}
         embedded={true}
         onClose={handleClose}
+        onComplete={handleComplete}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={resolvedBffBaseUrl}
         resolveSpeContainerId={resolveSpeContainerId}
         resolveUserBuDefaults={resolveUserBuDefaults}
         tenantId={resolvedTenantId}
+        initialFormValues={initialFormValues}
+        initialFileRefs={initialFileRefs}
       />
     </FluentProvider>
   );
