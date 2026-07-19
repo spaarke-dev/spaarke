@@ -64,9 +64,11 @@ const STORAGE_KEY = "spaarke:context:pinned-tool";
  * `useContextTool.ts`. Centralised here to keep validation logic colocated
  * with the storage layer.
  */
+// decision-1 (2026-07-19): 'quick-start' removed; kept in sync with ContextToolId.
 const VALID_CONTEXT_TOOL_IDS: ReadonlySet<string> = new Set<ContextToolId>([
-  "quick-start",
+  "execution-trace",
   "semantic-search",
+  "pinned-memory",
 ]);
 
 // ---------------------------------------------------------------------------

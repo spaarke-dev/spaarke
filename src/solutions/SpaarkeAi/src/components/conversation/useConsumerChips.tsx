@@ -73,6 +73,13 @@ export interface ConsumerChipsDeps {
    */
   openLibraryModal?: () => void;
   /**
+   * UAT 2026-07-19 (create-matter-from-chip file leg): returns the session's active source
+   * file ({ sessionFileId, fileName }) so a surface-launch chip (e.g. the post-classify
+   * "Create a matter" chip) carries the uploaded file into the wizard — parity with the
+   * TEXT path (ConversationPane.handleSurfaceLaunch). Null when no file is active.
+   */
+  getActiveSourceFile?: () => { sessionFileId: string; fileName?: string } | null;
+  /**
    * task 043 / FR-G1: the deterministic, preference-keyed DISPLAY reorder
    * input (see `chipDisplayOrder.ts`). Omitted/absent → the chips render in
    * the server-declared order (the documented GAP — no client-accessible
@@ -115,6 +122,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
     enqueueAssistantMessage,
     inject,
     openLibraryModal,
+    getActiveSourceFile,
     chipDisplayPreference,
   } = deps;
 
@@ -159,9 +167,13 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
         attachmentCount: sessionAttachmentCount,
       })
         .then((dispatched) => {
-          // Render the STORED output (ADR-040) + re-arm the strip from the
-          // stream's next-step chips (G-P1 Defect-1 fix).
-          if (dispatched.result !== undefined && dispatched.result !== null) {
+          // UAT 2026-07-19: a surface-launch capability (create-matter / create-project) hands its
+          // drafted output to the WIZARD — rendering that draft in the transcript dumped raw JSON
+          // ("{matter_name:…, resolvedLookups:…}") into the chat. Suppress the transcript render for
+          // surface-launch; the wizard consumes the draft. Informational capabilities render as before.
+          const isSurfaceLaunch =
+            dispatched.disposition === "surface_launch" && !!dispatched.consumerType;
+          if (!isSurfaceLaunch && dispatched.result !== undefined && dispatched.result !== null) {
             enqueueAssistantMessage(
               makeLocalAssistantMessage(formatEventOutputMarkdown(dispatched.result))
             );
@@ -176,7 +188,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           // shared launchSurface (task 012) — a static-registry lookup on
           // consumerType, ZERO intent detection (ADR-039). Fire-and-forget: it
           // never throws and it does NOT block the transcript render above.
-          if (dispatched.disposition === "surface_launch" && dispatched.consumerType) {
+          if (isSurfaceLaunch && dispatched.consumerType) {
             const draft =
               dispatched.result && typeof dispatched.result === "object"
                 ? (dispatched.result as Record<string, unknown>)
@@ -187,10 +199,18 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
             const { resolvedLookups: rawResolved, ...draftValues } = draft as Record<string, unknown> & {
               resolvedLookups?: Record<string, ResolvedLookup>;
             };
+            // UAT 2026-07-19 (file leg): carry the session's active source file so the wizard opens
+            // with it pre-attached — parity with the TEXT path. Null → no file (as before).
+            const activeFile = getActiveSourceFile?.() ?? null;
+            const sessionId = getSessionId();
+            const fileIds = activeFile?.sessionFileId ? [activeFile.sessionFileId] : undefined;
             void launchSurface({
               consumerType: dispatched.consumerType,
               draftValues,
               resolvedLookups: rawResolved ?? {},
+              fileIds,
+              source: sessionId ? { sessionId } : undefined,
+              provenance: activeFile?.fileName ? { sourceFiles: [activeFile.fileName] } : undefined,
               bffBaseUrl,
             });
           }
@@ -201,7 +221,15 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           );
         });
     },
-    [sessionAttachmentCount, dispatchConsumer, enqueueAssistantMessage, inject, bffBaseUrl]
+    [
+      sessionAttachmentCount,
+      dispatchConsumer,
+      enqueueAssistantMessage,
+      inject,
+      bffBaseUrl,
+      getActiveSourceFile,
+      getSessionId,
+    ]
   );
 
   /**

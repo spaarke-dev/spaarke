@@ -362,6 +362,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // existing consumers ignore — generic shared-lib hooks per ADR-012).
   onAttachmentsChanged,
   inputBusy,
+  // CHAT-4/5/6 (UAT 2026-07-19) — host-tunable composer + empty-state chrome.
+  hidePromptMenu,
+  hideEmptyState,
+  inputPlaceholder,
+  inputMinRows,
   onAttachmentRemoved,
   injectLocalMessage,
   onLocalMessageInjected,
@@ -2424,7 +2429,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           />
         )}
 
-        {!isSessionLoading && messages.length === 0 && !showPredefinedPrompts && (
+        {!isSessionLoading && messages.length === 0 && !showPredefinedPrompts && !hideEmptyState && (
           <div className={styles.emptyState}>
             <Text size={300}>No messages yet</Text>
             <Text size={200}>Send a message to start the conversation</Text>
@@ -2726,15 +2731,19 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           aria-label="Chat input actions"
           data-testid="chat-input-controls-strip"
         >
-          <Button
-            appearance="subtle"
-            icon={<PromptRegular />}
-            onClick={handlePromptMenuButtonClick}
-            disabled={isStreaming}
-            aria-label="Open slash commands"
-            title="Open slash commands (/)"
-            data-testid="strip-prompt-menu-button"
-          />
+          {/* CHAT-6 (UAT 2026-07-19): the slash-command ("Prompt") button is
+              suppressible per host — the slash menu is still reachable via `/`. */}
+          {!hidePromptMenu && (
+            <Button
+              appearance="subtle"
+              icon={<PromptRegular />}
+              onClick={handlePromptMenuButtonClick}
+              disabled={isStreaming}
+              aria-label="Open slash commands"
+              title="Open slash commands (/)"
+              data-testid="strip-prompt-menu-button"
+            />
+          )}
           <Button
             appearance="subtle"
             icon={<AttachRegular />}
@@ -2758,6 +2767,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           // classify/summarize). Re-enables when all clear.
           disabled={isStreaming || isTyping || !!inputBusy || attachmentFiles.some(f => f.status === 'extracting')}
           maxCharCount={maxCharCount}
+          placeholder={inputPlaceholder}
+          minRows={inputMinRows}
           dynamicSlashCommands={dynamicSlashCommands}
           hideSlashButton
         />

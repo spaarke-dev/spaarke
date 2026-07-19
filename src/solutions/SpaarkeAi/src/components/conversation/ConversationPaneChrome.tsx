@@ -15,6 +15,9 @@ import {
   DismissRegular,
   ArrowResetRegular,
   CheckmarkCircleRegular,
+  ChevronRightRegular,
+  ChevronDownRegular,
+  DocumentRegular,
 } from "@fluentui/react-icons";
 import type { SelectionChipState } from "./useSelectionChip";
 
@@ -153,12 +156,13 @@ const useStyles = makeStyles({
     },
   },
 
-  // ── "N files attached" indicator (R5 task 020 / D2-11) ───────────────────
+  // ── "N files attached" indicator (R5 task 020 / D2-11; collapsible section — UAT 2026-07-19) ─
   filesAttachedIndicator: {
     flexShrink: 0,
     display: "flex",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalXS,
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: tokens.spacingVerticalXXS,
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalXS,
@@ -168,14 +172,76 @@ const useStyles = makeStyles({
     borderTopColor: tokens.colorNeutralStroke2,
     backgroundColor: tokens.colorNeutralBackground2,
   },
+  filesAttachedHeaderRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    minWidth: 0,
+  },
+  filesExpandToggle: {
+    minWidth: "auto",
+    flexShrink: 0,
+  },
   filesAttachedIndicatorText: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
     fontWeight: tokens.fontWeightSemibold,
+    flexShrink: 0,
   },
   filesAttachedIndicatorHint: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground3,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    minWidth: 0,
+  },
+  filesList: {
+    listStyleType: "none",
+    margin: 0,
+    paddingLeft: tokens.spacingHorizontalXL,
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXXS,
+  },
+  filesListItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    minWidth: 0,
+  },
+  filesListIcon: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    flexShrink: 0,
+  },
+  filesListName: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    minWidth: 0,
+  },
+
+  // ── Upload/classify progress row (UP-10, UAT 2026-07-19) ─────────────────
+  uploadProgressIndicator: {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  uploadProgressText: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
   },
 
   // ── Conversation restore summary block (AIPU2-106) ────────────────────────
@@ -359,16 +425,61 @@ export function RefinementChipBar(props: {
 }
 
 /**
- * "N files attached" indicator (R5 task 020 / D2-11) — rendered above the
- * SprkChat input zone whenever the session has uploaded files. `role="status"`
- * + `aria-live="polite"` so screen readers announce count changes.
+ * Upload/classify progress row (UP-10, UAT 2026-07-19) — rendered above the
+ * SprkChat input zone WHILE the composer is locked during the ingest window, so
+ * the user knows to wait. Shows "Attaching file…" during the `/documents`
+ * promotion POST, then "Classifying file…" during the Event classify SSE stream.
+ * Returns null when idle. `role="status"` + `aria-live="polite"` for a11y.
+ */
+export function UploadProgressIndicator(props: {
+  attaching: boolean;
+  classifying: boolean;
+}): React.JSX.Element | null {
+  const styles = useStyles();
+  if (!props.attaching && !props.classifying) return null;
+  // Attach precedes classify; if both are somehow set, surface the earlier stage.
+  const label = props.attaching ? "Attaching file…" : "Classifying file…";
+  return (
+    <div
+      className={styles.uploadProgressIndicator}
+      role="status"
+      aria-live="polite"
+      data-testid="upload-progress-indicator"
+    >
+      <Spinner size="tiny" />
+      <Text className={styles.uploadProgressText}>{label}</Text>
+    </div>
+  );
+}
+
+/** Minimal per-file shape the attached-files section renders (subset of AttachmentChip). */
+export interface AttachedFileSummary {
+  id: string;
+  filename: string;
+  status?: string;
+}
+
+/**
+ * Attached-files section (R5 task 020 / D2-11; collapsible — decision-1, UAT 2026-07-19) — rendered
+ * above the SprkChat input zone whenever the session has uploaded files. A SINGLE file shows inline
+ * with its name; MULTIPLE files collapse into a dropdown (default collapsed) that expands to the file
+ * list, so the files get their own tidy section instead of one crowded line. `role="status"` +
+ * `aria-live="polite"` so screen readers announce count changes. The "N file(s) attached" header text
+ * + `files-attached-indicator` testid are preserved (existing R5 assertions).
  */
 export function FilesAttachedIndicator(props: {
   uploadedFileCount: number;
   promotedCount: number;
+  /** Per-file details for the expandable list (optional; when absent, header-only as before). */
+  files?: ReadonlyArray<AttachedFileSummary>;
 }): React.JSX.Element {
   const styles = useStyles();
-  const { uploadedFileCount, promotedCount } = props;
+  const { uploadedFileCount, promotedCount, files } = props;
+  const [expanded, setExpanded] = React.useState(false);
+  const canExpand = !!files && files.length > 1;
+  const headerText =
+    uploadedFileCount === 1 ? "1 file attached" : `${uploadedFileCount} files attached`;
+
   return (
     <div
       className={styles.filesAttachedIndicator}
@@ -376,19 +487,51 @@ export function FilesAttachedIndicator(props: {
       aria-live="polite"
       data-testid="files-attached-indicator"
     >
-      <Text className={styles.filesAttachedIndicatorText}>
-        {uploadedFileCount === 1 ? "1 file attached" : `${uploadedFileCount} files attached`}
-      </Text>
-      <Text className={styles.filesAttachedIndicatorHint}>
-        {uploadedFileCount === 1
-          ? "available for this session"
-          : "available for this session — combined Summarize will fold all into one"}
-      </Text>
-      {/* R5 task 036: Held vs Indexed visibility without opening the workspace pane. */}
-      {promotedCount > 0 && (
-        <Text className={styles.filesAttachedIndicatorHint} data-testid="files-promoted-indicator">
-          {`(${promotedCount} indexed)`}
-        </Text>
+      <div className={styles.filesAttachedHeaderRow}>
+        {canExpand && (
+          <Button
+            appearance="subtle"
+            size="small"
+            className={styles.filesExpandToggle}
+            icon={expanded ? <ChevronDownRegular /> : <ChevronRightRegular />}
+            onClick={() => setExpanded((e) => !e)}
+            aria-expanded={expanded}
+            aria-label={expanded ? "Hide file list" : "Show file list"}
+            data-testid="files-attached-toggle"
+          />
+        )}
+        <Text className={styles.filesAttachedIndicatorText}>{headerText}</Text>
+        {uploadedFileCount === 1 && files && files[0] ? (
+          <Text className={styles.filesAttachedIndicatorHint} title={files[0].filename}>
+            {files[0].filename}
+          </Text>
+        ) : (
+          <Text className={styles.filesAttachedIndicatorHint}>available for this session</Text>
+        )}
+        {/* R5 task 036: Held vs Indexed visibility without opening the workspace pane. */}
+        {promotedCount > 0 && (
+          <Text className={styles.filesAttachedIndicatorHint} data-testid="files-promoted-indicator">
+            {`(${promotedCount} indexed)`}
+          </Text>
+        )}
+      </div>
+      {canExpand && expanded && (
+        <ul className={styles.filesList} data-testid="attached-files-list">
+          {files!.map((f) => (
+            <li key={f.id} className={styles.filesListItem}>
+              <DocumentRegular className={styles.filesListIcon} />
+              <Text className={styles.filesListName} title={f.filename}>
+                {f.filename}
+              </Text>
+              {f.status === "extracting" && (
+                <Text className={styles.filesAttachedIndicatorHint}>· extracting…</Text>
+              )}
+              {f.status === "error" && (
+                <Text className={styles.filesAttachedIndicatorHint}>· error</Text>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

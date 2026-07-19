@@ -105,12 +105,13 @@ afterEach(() => {
 });
 
 describe('ContextPaneController — Compose tab auto-opens Execution Trace (FIX D)', () => {
-  it('does NOT show Execution Trace at rest (default Quick Start tool)', () => {
+  it('shows Execution Trace at rest (the default tool — decision-1, 2026-07-19)', () => {
     const bus = new PaneEventBus();
     renderController(bus);
 
-    expect(screen.getByTestId('context-pane-welcome')).toBeInTheDocument();
-    expect(screen.queryByTestId('context-pane-execution-trace')).not.toBeInTheDocument();
+    // decision-1: execution-trace is now the AT-REST default (Quick Start removed).
+    expect(screen.getByTestId('context-pane-execution-trace')).toBeInTheDocument();
+    expect(screen.queryByTestId('context-pane-welcome')).not.toBeInTheDocument();
   });
 
   it('auto-selects Execution Trace when a Compose tab (widgetData.compose) becomes active', async () => {
@@ -178,9 +179,14 @@ describe('ContextPaneController — Compose tab auto-opens Execution Trace (FIX 
     ).toBeInTheDocument();
   });
 
-  it('does NOT force Execution Trace for a non-Compose tab_change', async () => {
+  it('does NOT force Execution Trace for a non-Compose tab_change (leaves the current tool)', async () => {
+    // decision-1: execution-trace is now the DEFAULT, so "doesn't force" is verified by seeding a
+    // DIFFERENT tool first (semantic-search) and confirming a non-Compose tab_change leaves it there.
+    window.sessionStorage.setItem('spaarke:context:selected-tool', JSON.stringify('semantic-search'));
     const bus = new PaneEventBus();
     renderController(bus);
+
+    expect(screen.getByTestId('context-pane-semantic-search')).toBeInTheDocument();
 
     act(() => {
       bus.dispatch('workspace', {
@@ -193,11 +199,12 @@ describe('ContextPaneController — Compose tab auto-opens Execution Trace (FIX 
       });
     });
 
-    // Give any async widget resolution a chance to settle, then confirm the
-    // trace tool was NOT force-selected.
+    // A non-Compose tab must NOT one-shot-switch to Execution Trace — the user's
+    // semantic-search selection stays put.
     await waitFor(() => {
       expect(screen.getByTestId('context-pane-controller')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('context-pane-semantic-search')).toBeInTheDocument();
     expect(screen.queryByTestId('context-pane-execution-trace')).not.toBeInTheDocument();
   });
 });
