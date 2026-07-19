@@ -87,11 +87,13 @@ import {
   CommentMultiple20Regular,
   Dismiss16Regular,
   DocumentProhibited24Regular,
+  TextEditStyle20Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
 import { ComposeFindReplace } from './ComposeFindReplace';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
+import { ComposeStylesPane } from './ComposeStylesPane';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
@@ -99,6 +101,7 @@ import { QaHighlightExtension } from './marks/QaHighlightExtension';
 import { usePendingRedline, type MaterializeStatus } from './hooks/usePendingRedline';
 import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighlight';
 import { ComposeFindReplaceExtension } from './hooks/useComposeFindReplace';
+import { COMPOSE_R3_STYLES } from './hooks/useComposeDocumentStyles';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the side-effect widget
 // registration (`register-workspace-widgets.ts` transitively pulls in
@@ -229,6 +232,12 @@ const COMPOSE_R2_QA_HIGHLIGHT = [QaHighlightExtension];
  * the same structural reason — a plugin-only extension, no schema mark.
  */
 const COMPOSE_R3_FIND_REPLACE = [ComposeFindReplaceExtension];
+
+// R3 FR-22 styles pane (task 043) — the `pStyle` hidden node attribute extension
+// (`COMPOSE_R3_STYLES`, imported above from `./hooks/useComposeDocumentStyles`) is factored into the
+// hook file alongside the hook that reads/applies it (same file-organization precedent as
+// `COMPOSE_R3_FIND_REPLACE` above: schema + hook co-located). Registered additively below, same as
+// every other array here — never mutates the LOCKED Spike #1 list.
 
 // R3 FR-09/FR-10 paraId identity extension (task 011) — factored into
 // `./paraIdExtension` as a pure headless schema piece (see that module's header).
@@ -784,6 +793,16 @@ const useStyles = makeStyles({
     zIndex: 2,
     boxShadow: tokens.shadow16,
   },
+  // FR-22 (task 043) — floating "Styles" pane toggle, pinned top-LEFT of the editor scroll region
+  // (the top-right corner is taken by `commentsToggleFab`). Semantic tokens only (ADR-021
+  // dark-mode-correct); mirrors `commentsToggleFab`'s elevated-FAB treatment.
+  stylesToggleFab: {
+    position: 'absolute',
+    top: tokens.spacingVerticalM,
+    left: tokens.spacingHorizontalM,
+    zIndex: 2,
+    boxShadow: tokens.shadow16,
+  },
   // DEF-12 — label inside the per-change on-click accept/reject popover (task 033/FR-16 rationale
   // shown truncated, Tier-3-safe). Semantic tokens only (ADR-021 dark-mode-correct). The former
   // fixed `redlineControls`/`redlineItem` bar styles were removed with the bar itself.
@@ -1033,6 +1052,12 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const [commentsOpen, setCommentsOpen] = React.useState<boolean>(false);
     const [pendingCommentRange, setPendingCommentRange] = React.useState<ComposeCommentPendingRange | null>(null);
 
+    // ----- Task 043 — FR-22 styles-pane toggle -----------------------------------------------------
+    // Additive sibling toggle to the comments panel above (mirrors its own independent open/close
+    // state; the two panels are never coupled). Its FAB is pinned to the OPPOSITE (top-left) corner of
+    // the editor scroll region — see `stylesToggleFab` — so it never collides with `commentsToggleFab`.
+    const [stylesOpen, setStylesOpen] = React.useState<boolean>(false);
+
     // ----- FIX #9 — hidden-scrollbar editor surface + "scroll for more" FAB ----
     // The editor scroll region hides its native scrollbar (see `editorSurface`
     // style: `scrollbarWidth: none` + `::-webkit-scrollbar { display: none }`)
@@ -1119,6 +1144,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ...COMPOSE_R2_QA_HIGHLIGHT,
         ...COMPOSE_R3_PARAID,
         ...COMPOSE_R3_FIND_REPLACE,
+        ...COMPOSE_R3_STYLES,
       ],
       content: '<p></p>',
       // editorProps to apply Fluent v9 inherited foreground; semantic-token
@@ -1508,6 +1534,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           pendingRange={pendingCommentRange}
           onThreadCreated={() => setPendingCommentRange(null)}
         />
+        {/* ===================================================================
+            FR-22 styles pane — task 043. Lists the loaded document's EXISTING paragraph styles and
+            applies a chosen one to the current selection. Toggled by the floating "Styles" button
+            pinned top-left of the editor scroll region (see below); dismissed by its own close
+            button. SCOPE GUARD: apply-existing-only — no create/rename/delete/manage affordance
+            anywhere in the pane (see ComposeStylesPane.tsx file-level JSDoc).
+            =================================================================== */}
+        <ComposeStylesPane editor={editor} open={stylesOpen} onClose={() => setStylesOpen(false)} />
         {editor ? (
           <BubbleMenu
             editor={editor}
@@ -1677,6 +1711,20 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               aria-pressed={commentsOpen}
               onClick={handleToggleComments}
               data-testid="compose-comments-toggle"
+            />
+          </Tooltip>
+          {/* FR-22 (task 043) — "Styles" pane toggle, pinned top-left (see `stylesToggleFab`). */}
+          <Tooltip content={stylesOpen ? 'Hide styles' : 'Show styles'} relationship="description" withArrow>
+            <Button
+              appearance={stylesOpen ? 'primary' : 'secondary'}
+              shape="circular"
+              size="large"
+              className={styles.stylesToggleFab}
+              icon={<TextEditStyle20Regular />}
+              aria-label="Toggle styles pane"
+              aria-pressed={stylesOpen}
+              onClick={() => setStylesOpen(prev => !prev)}
+              data-testid="compose-styles-toggle"
             />
           </Tooltip>
           {showScrollDown ? (

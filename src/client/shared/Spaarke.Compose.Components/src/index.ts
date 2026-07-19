@@ -30,6 +30,19 @@ export { ComposeFormatToolbar } from './widgets/ComposeFormatToolbar';
 export type { ComposeFormatToolbarProps } from './widgets/ComposeFormatToolbar';
 export { ComposeFindReplace } from './widgets/ComposeFindReplace';
 export type { ComposeFindReplaceProps } from './widgets/ComposeFindReplace';
+
+// FR-22 styles pane (task 043) — apply-existing-document-styles-only (SCOPE GUARD: no
+// create/rename/delete/manage affordance; see ComposeStylesPane.tsx file-level JSDoc).
+export { ComposeStylesPane } from './widgets/ComposeStylesPane';
+export type { ComposeStylesPaneProps } from './widgets/ComposeStylesPane';
+export {
+  useComposeDocumentStyles,
+  ComposePStyleExtension,
+  COMPOSE_R3_STYLES,
+  deriveDocumentStyles,
+  applyComposeDocumentStyle,
+} from './widgets/hooks/useComposeDocumentStyles';
+export type { ComposeDocumentStyle, UseComposeDocumentStylesResult } from './widgets/hooks/useComposeDocumentStyles';
 export {
   ComposeAiToolbar,
   registerComposeAiToolbarAction,
