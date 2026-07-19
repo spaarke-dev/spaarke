@@ -32,3 +32,49 @@
 
 ## Fix priority
 P1 (mount crash — blocks everything) → P2 (save — blocks the round-trip + P3) → P3 (Word open) → UX-1 (Word-dropdown Save). All are client-side (`Spaarke.Compose.Components`), no BFF change expected (contract already deployed). Re-deploy `sprk_spaarkeai` after fixes (BFF unchanged).
+
+---
+
+## RESOLUTION (2026-07-19 — all fixed, client-only, no BFF change)
+
+**P1 — `insertBefore` crash on Styles/Comments FAB — FIXED (commit e31f99cf2).**
+Root cause was NOT the imported marks (import-independent; agent reproduced with zero imports).
+"Compose failed to load" is the `WidgetErrorBoundary` fallback → the error is a React commit-phase
+DOM error. TipTap's `BubbleMenu` plugin calls `this.element.remove()` on mount, detaching its
+wrapper `<div>` from the DOM while React's fiber still records it as a live child. The `<BubbleMenu>`
+rendered as a sibling BETWEEN the toggleable Comments/Styles panes (which `return null` when closed)
+and the always-mounted editor scroll region; toggling a pane `null`→`<div>` made React's
+`getHostSibling` resolve the insert-anchor to the DETACHED BubbleMenu node → `insertBefore` throws.
+Latent since tasks 043/044; the imports wire-fix (8f2cec4a6) only made the stored-Word-doc UAT path
+reachable. **Fix:** relocated the `<BubbleMenu>` to be the LAST child of the editor container, so
+every conditional sibling anchors on the always-mounted `editorScrollWrap`. Regression test:
+`ComposeEditor.paneToggleCrash.test.tsx` (3).
+
+**P2 — born-in-editor Save "content is required" — FIXED (commit c1f57cb54).**
+The message was a paraphrase of the server replace-path guard "Provide the retained-original
+'content' bytes, or 'editedParagraphs' + 'baselineVersionId'…". A born-in-editor draft (mountDraftHtml)
+saved fine the FIRST time (create-on-save → contentModel) but the SECOND save failed: the
+save-response's `driveId` + `versionId` were discarded, so `saveSucceeded` set `speDriveItemId`
+(→ second save takes the replace path) but left `versionId` null and `documentRef.driveId` undefined
+→ replace body sent content=undefined + baselineVersionId=undefined → server couldn't resolve a
+baseline (born-in-editor holds no docxBytes). **Fix (client-only):** retain the response's `driveId`
++ `versionId`; adopt versionId ADOPT-ONLY-WHEN-NULL (born-in-editor first version = fixed baseline;
+stored doc's load-time versionId never advanced — FR-01); replace-save prefers `documentRef.driveId`.
+Verified the paraId round-trip holds (renderer preserves client paraIds) and the synthesizer emits
+nothing for unchanged paragraphs (no redundant tracked-changes, no snapshot reset needed).
+Regression test: `ComposeWorkspace.saveBaseline.test.ts` (4, reducer-level).
+
+**P3 — Word "Open in Web/Desktop" inactive — RESOLVED by P2 (no separate code change).**
+`wordActionsDisabled = isSavingNow || !hasWordDocument || isWordActing`; `hasWordDocument` needs a
+persisted `sprkDocumentId`/`speDriveItemId`. A born-in-editor draft has neither until saved
+(correctly disabled — no SPE doc to open). The user couldn't save (P2), so the doc never got a
+persisted id and Word-open stayed grey. With P2 fixed, the first save populates both ids via
+`saveSucceeded` → Word-open activates. Re-verify in the next UAT after saving the draft.
+
+**UX-1 — Save in the Word dropdown — DONE (commit e31f99cf2).**
+Added a Save item inside the Word dropdown (`ComposeFormatToolbar.tsx`, testid
+`compose-format-word-save`) — a deliberate duplicate of the right-aligned Save icon.
+
+**Verify:** tsc green; jest 348/348 parallel AND --runInBand. Client-only; BFF unchanged.
+**Next:** rebuild + re-deploy `sprk_spaarkeai` (clear Vite cache — the SpaarkeAi vite.config aliases
+`@spaarke/compose-components` to SOURCE), then re-UAT P1→P2→P3→UX-1.
