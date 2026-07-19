@@ -37,20 +37,11 @@ import {
   mergeClasses,
 } from "@fluentui/react-components";
 import { DocumentRegular } from "@fluentui/react-icons";
-import {
-  PaneHeader,
-  launchCreateMatterWizard,
-  launchCreateProjectWizard,
-  launchSummarizeFilesWizard,
-  launchFindSimilarWizard,
-  launchAssignWorkWizard,
-  launchPlaybookIntent,
-} from "@spaarke/ui-components";
+import { PaneHeader } from "@spaarke/ui-components";
 import {
   usePaneEvent,
   resolveContextWidget,
   getContextWidgetForTab,
-  GetStartedCardsWidget,
   // R6 Pillar 7 / task 096 — Pinned Memory affordance for the Context pane.
   PinnedMemoryListWidget,
 } from "@spaarke/ai-widgets";
@@ -58,11 +49,9 @@ import type {
   ContextWidgetComponent,
   ContextPaneEvent,
   WorkspacePaneEvent,
-  GetStartedCardId,
 } from "@spaarke/ai-widgets";
 import { useShellStage, usePaneCollapseContext } from "../shell/ThreePaneShell";
 import type { ShellStage } from "../shell/ThreePaneShell";
-import { getBffBaseUrl } from "../../config/runtimeConfig";
 import { useContextTool } from "../../hooks/useContextTool";
 import { ContextPaneMenu } from "./ContextPaneMenu";
 import { SemanticSearchCriteriaTool } from "./SemanticSearchCriteriaTool";
@@ -169,21 +158,6 @@ const useStyles = makeStyles({
   // the Workspace pane's PaneHeader. The `stageLabelMap` is kept for
   // potential ARIA / debug use but is no longer visually rendered, so the
   // CSS class for it is gone with this task.
-
-  // Task 099 — "Quick Start" section title shown above the
-  // GetStartedCardsWidget body. Uses Text size 400 semibold (one Fluent v9
-  // step below the PaneHeader title from Wave 1's size 400 bump) so the
-  // section title is clearly secondary to the pane title but still bold.
-  quickStartHeader: {
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-  },
-  quickStartTitle: {
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground1,
-  },
 
   // Task 104 — Compose three-pane coordination surface (Flow 1 selection +
   // Flow 6 derived insights). Read-only (audit-only pane). Sits directly under
@@ -661,59 +635,10 @@ export function ContextPaneController(): React.JSX.Element {
   // welcome-state CARD CLICK routing changes here.
   // ---------------------------------------------------------------------------
 
-  /**
-   * onCardClick handler for {@link GetStartedCardsWidget} (FR-19 mapping).
-   *
-   * All seven cards route directly to the shared wizard launchers — the exact
-   * Xrm.Navigation.navigateTo shape used by LegalWorkspace's WorkspaceGrid. No
-   * tab-mount intermediate, no widget_load dispatch, no parallel implementation.
-   */
-  const handleGetStartedCardClick = React.useCallback(
-    (cardId: GetStartedCardId): void => {
-      const bffBaseUrl = getBffBaseUrl();
-
-      switch (cardId) {
-        case "create-matter-wizard":
-          launchCreateMatterWizard({ bffBaseUrl });
-          return;
-
-        case "create-project-wizard":
-          launchCreateProjectWizard({ bffBaseUrl });
-          return;
-
-        case "assign-work":
-          launchAssignWorkWizard({ bffBaseUrl });
-          return;
-
-        case "document-upload-wizard":
-          // GetStartedCardsWidget labels this "Summarize Files" — route to the
-          // same Summarize Files wizard LegalWorkspace uses.
-          launchSummarizeFilesWizard({ bffBaseUrl });
-          return;
-
-        case "find-similar-wizard":
-          launchFindSimilarWizard({ bffBaseUrl });
-          return;
-
-        case "email-compose":
-          launchPlaybookIntent({ bffBaseUrl, intent: "email-compose" });
-          return;
-
-        case "meeting-schedule":
-          launchPlaybookIntent({ bffBaseUrl, intent: "meeting-schedule" });
-          return;
-
-        default: {
-          // Exhaustiveness check — TypeScript will flag this if a new
-          // GetStartedCardId is added without a matching case.
-          const _exhaustive: never = cardId;
-          void _exhaustive;
-          return;
-        }
-      }
-    },
-    []
-  );
+  // decision-1 (2026-07-19): the GetStartedCardsWidget "Quick Start" tool was removed from the
+  // Context pane (the pane now opens on the execution-trace view), so its `onCardClick` wizard-launch
+  // handler was removed here. The workspace wizard widgets remain registered in WorkspaceWidgetRegistry
+  // for server-initiated `widget_load` events; only this welcome-card routing is gone.
 
   // ---------------------------------------------------------------------------
   // Derive header stage label for debugging / accessibility
@@ -800,61 +725,16 @@ export function ContextPaneController(): React.JSX.Element {
     // subscription). AUDIT-ONLY: read-only surface, no input control (project
     // CLAUDE.md). ADR-015 identifier/count-only rendering is enforced in the
     // widget; ADR-028 `@spaarke/auth` is used by the host's read fn.
-    if (selectedTool === "execution-trace") {
+    // execution-trace (decision-1, 2026-07-19 — the AT-REST default; "quick-start" removed): the
+    // resting "what's happening" view. A server-pushed context widget (findings/citations/entity-info)
+    // during active analysis still takes the pane BELOW — it is ALSO "what's happening" — so show the
+    // trace only when no such widget is live and nothing is resolving. On cold load this is the pane's
+    // default content (ComposeTraceHost mounts useAiSession lazily; the shell always wraps it in
+    // AiSessionProvider). The old GetStartedCardsWidget "Quick Start" branch was removed here.
+    if (selectedTool === "execution-trace" && activeWidget === null && !isResolving) {
       return (
         <div className={styles.content} data-testid="context-pane-execution-trace">
           <ComposeTraceHost />
-        </div>
-      );
-    }
-
-    // selectedTool === "quick-start" — fall through to the existing logic.
-
-    // Stage 1 — welcome (or Quick Start tool selected on any stage): render the
-    // GetStartedCardsWidget (FR-18, FR-19, FR-21).
-    //
-    // The widget shows 7 action cards in a 2-column grid. Each card click
-    // routes through `handleGetStartedCardClick` (defined above):
-    //   - 'assign-work'    → launchAssignWorkWizard({ bffBaseUrl }) (task 045)
-    //   - any other cardId → dispatch widget_load on the `workspace` channel,
-    //                        which opens the corresponding widget in the
-    //                        Workspace pane as a new top-tab.
-    //
-    // PlaybookGalleryWidget remains REGISTERED in ContextWidgetRegistry (see
-    // @spaarke/ai-widgets/src/index.ts) so any future server-driven
-    // context_update that requests 'playbook-gallery' on a non-welcome stage
-    // resolves correctly. We do NOT auto-load it here anymore — the welcome
-    // stage is now the GetStarted entry point per FR-18 / the R3 design.
-    //
-    // Task 095: on the welcome stage, Quick Start always wins. On non-welcome
-    // stages, Quick Start ALSO wins UNLESS the server has dispatched a
-    // context_update event that resolved to a real widget (activeWidget !==
-    // null) — that path is preserved so the existing Stage 3 (active-chat) /
-    // Stage 4 (review) widgets (FindingsWidget, ProgressTrackerWidget, etc.)
-    // continue to surface when the AI orchestrator drives them. When no
-    // server-driven widget is loaded, Quick Start's GetStartedCardsWidget
-    // appears as the default — which is the uniform fix for the "pane goes
-    // blank after modal close" bug (a wizard launch doesn't change
-    // selectedTool, so the pane returns to GetStartedCardsWidget when the
-    // modal closes).
-    if (currentStage === "welcome" || (selectedTool === "quick-start" && activeWidget === null && !isResolving)) {
-      // Task 099 — wrap the GetStartedCardsWidget in a small section header
-      // showing "Quick Start" so the user can SEE which Context tool is
-      // currently active inside the pane body. We do NOT modify
-      // GetStartedCardsWidget itself (it's in `@spaarke/ai-widgets` shared
-      // lib — out of scope for this SpaarkeAi-local revision).
-      return (
-        <div className={styles.content} data-testid="context-pane-welcome">
-          <div className={styles.quickStartHeader}>
-            <Text
-              className={styles.quickStartTitle}
-              size={400}
-              data-testid="context-quick-start-title"
-            >
-              Quick Start
-            </Text>
-          </div>
-          <GetStartedCardsWidget onCardClick={handleGetStartedCardClick} />
         </div>
       );
     }
