@@ -1384,15 +1384,14 @@ export function ConversationPane(): React.JSX.Element {
         onCollapse={paneCollapse ? handleHeaderCollapse : undefined}
         expanded={!(paneCollapse?.isCollapsed("assistant") ?? false)}
         rightSlot={
+          // P2-2 (UAT 2026-07-18): header controls reordered to History / New session /
+          // Tools (left→right, Claude-Code style). History is now an icon-only trigger.
           <>
-            {/* Task 040 (FR-F1) — the Assistant tool drop-down (Quick Start +
-                My Assistant). Mirrors HistoryMenu/ContextPaneMenu/
-                WorkspacePaneMenu — a second, independent Menu trigger in this
-                rightSlot (History lists past sessions; this lists Assistant
-                tools). Entry behavior is wired in tasks 041/042; see
-                AssistantToolMenu.tsx for the placeholder-handler contract.
-                task 042 (FR-F3): "My Assistant" opens the stated-profile questionnaire. */}
-            <AssistantToolMenu onMyAssistant={myAssistant.openDialog} />
+            <HistoryMenu
+              onSelectSession={setChatSessionId}
+              bffBaseUrl={bffBaseUrl}
+              authenticatedFetch={authenticatedFetch}
+            />
             {/* R4-5: New session — clears the persisted session id and remounts
                 SprkChat to mint a fresh session. PaneHeader's rightSlot already
                 stops propagation, so the header collapse never fires. */}
@@ -1408,11 +1407,12 @@ export function ConversationPane(): React.JSX.Element {
                 }}
               />
             </Tooltip>
-            <HistoryMenu
-              onSelectSession={setChatSessionId}
-              bffBaseUrl={bffBaseUrl}
-              authenticatedFetch={authenticatedFetch}
-            />
+            {/* Task 040 (FR-F1) — the Assistant tool drop-down (Quick Start +
+                My Assistant). Mirrors HistoryMenu/ContextPaneMenu/
+                WorkspacePaneMenu — a second, independent Menu trigger in this
+                rightSlot. task 042 (FR-F3): "My Assistant" opens the stated-profile
+                questionnaire. */}
+            <AssistantToolMenu onMyAssistant={myAssistant.openDialog} />
           </>
         }
       />
