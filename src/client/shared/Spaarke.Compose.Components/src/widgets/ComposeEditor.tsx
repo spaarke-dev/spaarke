@@ -117,7 +117,13 @@ import {
   buildContentModel,
 } from '../utils/docxBridge';
 import { COMPOSE_R3_PARAID } from './paraIdExtension';
-import type { ParaIdMapEntry, ComposeEditedParagraph, ComposeContentModel } from '../types/compose-contracts';
+import { applyImportedRevisions } from './importedRevisions';
+import type {
+  ParaIdMapEntry,
+  ComposeEditedParagraph,
+  ComposeContentModel,
+  ImportedRevision,
+} from '../types/compose-contracts';
 // Redline → Word save fidelity (UAT-R7 #2/#3/#4): the redline→annotation bridge + its wire type.
 import { redlineMarksToDocxAnnotations, type DocxAnnotationInput } from './useComposeWordShuttle';
 
@@ -382,6 +388,18 @@ export interface ComposeEditorProps {
    * only (Tier 1 safe).
    */
   paraIdMap?: readonly ParaIdMapEntry[];
+
+  /**
+   * FR-24 (spaarkeai-compose-r3 task 050, import round-trip) — the existing Word revisions
+   * (`w:ins`/`w:del`, any authorship) recovered server-side on Load and projected onto the Load
+   * response (`ImportedRevision[]`), in document order. On a `docxBytes` mount these are rendered as
+   * first-class, author/date-attributed, accept/reject-able insertion/deletion marks anchored by
+   * `paraId` (see {@link applyImportedRevisions}) — instead of the mammoth-flattened prose the editor
+   * would otherwise show. Absent/empty for an AI-drafted seed (`initialHtml`) or a document with no
+   * existing revisions. Set atomically with `docxBytes` + `paraIdMap` by the host (same mount contract).
+   * Privacy: `text`/`anchorText` are Tier 3 (document content) — carried in-memory only, never logged.
+   */
+  importedRevisions?: readonly ImportedRevision[];
 
   /**
    * Document pointer used by PaneEventBus events + heartbeat endpoint URL.
@@ -1043,6 +1061,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       docxBytes,
       initialHtml,
       paraIdMap,
+      importedRevisions,
       documentRef,
       bffBaseUrl,
       sessionId = '',
@@ -1342,6 +1361,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // server-owned (the paraId extension's own minting only fills ids the server did
           // not supply + re-mints on split). No-op when the map is absent (empty stamp).
           stampParaIds(editor, paraIdMap);
+          // FR-24 (task 050, import round-trip): render the EXISTING Word revisions (recovered server-side
+          // by DocxAnnotationReader, projected onto the Load response) as first-class insertion/deletion
+          // marks — instead of the mammoth-flattened prose. Applied AFTER stampParaIds so paraId anchoring
+          // is exact, and BEFORE captureParaIdSnapshot so an imported revision's marks are folded into the
+          // load-time reject-state baseline (an untouched imported revision then reads as NOT edited on the
+          // next save — it rides the retained original, per task 052). Marks apply with addToHistory:false
+          // and the dirty flag is reset just below, so this render is not a user edit.
+          applyImportedRevisions(editor, importedRevisions);
           // FR-01 (task 027): snapshot the load-time reject-state text per paraId — the diff baseline for
           // collectEditedParagraphs. Captured AFTER the stamp so every block carries its server paraId.
           paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
@@ -1383,6 +1410,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // `paraIdMap` is likewise read-but-not-a-dep for the same reason: the host sets it
       // atomically with `docxBytes` per mount, so the captured value is the map for THESE
       // bytes; adding it as a dep would risk a re-import (edit clobber) on an identity change.
+      // `importedRevisions` (FR-24, task 050) follows the identical mount contract — set atomically
+      // with `docxBytes` + `paraIdMap`, read here but intentionally not a dep for the same reason.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [editor, docxBytes, initialHtml, onDirtyChange, onImportWarnings]);
 

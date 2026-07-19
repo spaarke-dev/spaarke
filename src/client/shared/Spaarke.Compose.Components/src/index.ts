@@ -206,7 +206,16 @@ export type {
   AnchoredAnnotationProvenance,
   AnchoredAnnotation,
   DefinedTerm,
+  // R3 FR-24 — import round-trip: existing Word revisions projected on Load (task 050)
+  ImportedRevision,
+  ImportedRevisionKind,
 } from './types/compose-contracts';
+
+// R3 FR-24 import round-trip (task 050) — render recovered Word revisions as first-class,
+// accept/reject-able insertion/deletion marks anchored by paraId (design §7). Exported for the
+// ComposeEditor mount + direct tests; most consumers pass `importedRevisions` to <ComposeEditor>.
+export { applyImportedRevisions, IMPORTED_LEDGER_PREFIX } from './widgets/importedRevisions';
+export type { ApplyImportedRevisionsResult } from './widgets/importedRevisions';
 
 // DOCX bridge helpers — exported for advanced consumers + tests. Most consumers should use ComposeEditor
 // (which orchestrates these internally). R3 task 027: the `docx.js` byte-authoring exporters

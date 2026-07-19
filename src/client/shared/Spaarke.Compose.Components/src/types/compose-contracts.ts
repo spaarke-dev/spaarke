@@ -248,6 +248,53 @@ export interface ParaIdMapEntry {
 }
 
 // ---------------------------------------------------------------------------
+// R3 FR-24 — import round-trip: existing Word revisions projected on Load (design §7)
+// ---------------------------------------------------------------------------
+//
+// Client mirror of `Sprk.Bff.Api.Services.Compose.ImportedRevision` (spaarkeai-compose-r3 task 050) —
+// itself a mirror-first projection of the server `RecoveredRevision` shape (kind/id/author/date/text/
+// anchorText/paragraphHint) + the E2 `paraId`. On Load the server runs the EXISTING `DocxAnnotationReader`
+// on the load-time `.docx` and projects every native `w:ins`/`w:del` (any authorship) here, because the
+// mammoth convert (`docxBridge.ts`) FLATTENS those marks to prose. The client renders each as a first-class
+// accept/reject-able insertion/deletion mark anchored by `paraId` (primary) with a fuzzy `anchorText` +
+// `paragraphHint` fallback for the cross-Word-session case (Word regenerates paraIds on external edits).
+// Field names are camelCase per the Web serializer; do NOT fork this shape (reuse `RecoveredRevision`'s
+// vocabulary, not a parallel schema).
+//
+// Privacy: `text` / `anchorText` carry document content (Tier 3) — carried in-memory to the editor render
+// only, never on an SSE frame / PaneEventBus payload / log surface (ADR-015). `author` is Word attribution
+// (a display name); `id` / `paraId` are opaque identifiers (Tier 1).
+
+/** Native Word tracked-change kind recovered on import — mirrors the server `RecoveredAnnotationKind` (camelCase). */
+export type ImportedRevisionKind = 'insertion' | 'deletion';
+
+/**
+ * One existing Word revision (`w:ins` / `w:del`) recovered on Load and projected for the editor render
+ * (FR-24). `text` is the inserted (or deleted) text itself; `anchorText` is the containing paragraph's
+ * settled (non-tracked) text — the fuzzy re-anchor context; `paragraphHint` is the 0-based document-order
+ * paragraph index; `paraId` is the E2 `w14:paraId` of that paragraph (the PRIMARY anchor), absent when the
+ * server could not resolve one (the client then fuzzy-anchors by `anchorText` + `paragraphHint`).
+ */
+export interface ImportedRevision {
+  /** Tracked-change kind — `insertion` (`w:ins`) or `deletion` (`w:del`). */
+  kind: ImportedRevisionKind;
+  /** The revision's native OOXML id (`w:ins`/`w:del` `w:id`); may be empty. Tier 1 (opaque id). */
+  id: string;
+  /** Revision author (Word attribution — a display name). */
+  author: string;
+  /** ISO-8601 UTC timestamp the revision was authored (`w:date`, normalized to UTC). */
+  date: string;
+  /** The inserted (or deleted) text itself. Tier 3 (document content). */
+  text: string;
+  /** The containing paragraph's settled (non-tracked) text — the fuzzy re-anchor context. Tier 3. */
+  anchorText: string;
+  /** 0-based document-order paragraph index of the containing paragraph (`-1` when unlocated). Tier 1. */
+  paragraphHint: number;
+  /** PRIMARY anchor — the containing paragraph's E2 `w14:paraId`; absent when unresolved server-side. Tier 1. */
+  paraId?: string;
+}
+
+// ---------------------------------------------------------------------------
 // R3 FR-01 / FR-01a — the client content-model save contract (task 027)
 // ---------------------------------------------------------------------------
 //

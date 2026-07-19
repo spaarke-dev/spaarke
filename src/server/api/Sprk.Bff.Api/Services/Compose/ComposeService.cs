@@ -138,6 +138,13 @@ public class ComposeService : IComposeService
     // Optional + defaults to a fresh instance (stateless, thread-safe) so existing test constructors compile
     // unchanged; DI resolves the registered singleton (ComposeModule) in every host.
     private readonly ComposeDocumentRenderer _documentRenderer;
+    // FR-24 (task 050, import round-trip): the EXISTING read-direction OOXML annotation parser, REUSED
+    // VERBATIM. On Load it recovers every native w:ins/w:del (any authorship) so the client can render them
+    // as first-class tracked changes instead of the mammoth-flattened prose (design §7). Pure byte[]-in /
+    // record-out — no Microsoft.Graph type (ADR-007), no AI-internal type (ADR-013); the SPE download stays
+    // behind the SpeFileStore facade. Optional + defaults to a fresh instance (stateless, thread-safe) so
+    // existing test constructors compile unchanged; DI resolves the registered singleton in every host.
+    private readonly DocxAnnotationReader _annotationReader;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -153,7 +160,8 @@ public class ComposeService : IComposeService
         IComposeMemoryCapture? memoryCapture = null,
         ParaIdPreParser? paraIdPreParser = null,
         ComposeParagraphRedlineSynthesizer? redlineSynthesizer = null,
-        ComposeDocumentRenderer? documentRenderer = null)
+        ComposeDocumentRenderer? documentRenderer = null,
+        DocxAnnotationReader? annotationReader = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -166,6 +174,9 @@ public class ComposeService : IComposeService
         _paraIdPreParser = paraIdPreParser ?? new ParaIdPreParser();
         _redlineSynthesizer = redlineSynthesizer ?? new ComposeParagraphRedlineSynthesizer();
         _documentRenderer = documentRenderer ?? new ComposeDocumentRenderer();
+        // FR-24 (task 050): reuse the existing reader verbatim — stateless singleton-shaped, so a fresh
+        // instance is functionally identical to the DI-registered one (mirrors _paraIdPreParser above).
+        _annotationReader = annotationReader ?? new DocxAnnotationReader();
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
         // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
@@ -250,6 +261,41 @@ public class ComposeService : IComposeService
             paraIdMap = Array.Empty<ParaIdMapEntry>();
         }
 
+        // FR-24 (task 050, import round-trip): run the EXISTING DocxAnnotationReader on the SAME load-time
+        // bytes, alongside the paraId pre-parse + the (client-side) mammoth convert — which FLATTENS
+        // w:ins/w:del to prose before the editor sees them (docxBridge.ts). Each RecoveredRevision is
+        // projected onto the Load response WITH the E2 w14:paraId of its containing paragraph (resolved from
+        // the paraIdMap above by the reader's document-order ParagraphHint — both walk body.Descendants
+        // <Paragraph>() so the indices align), so the client renders it as a first-class accept/reject-able
+        // insertion/deletion mark anchored by paraId (design §7). REUSE ONLY — the reader is unmodified.
+        // Best-effort + empty (NOT null): a malformed/unreadable source degrades to no imported revisions and
+        // NEVER fails Load, matching the paraId pre-parse contract above (the client still edits the doc).
+        IReadOnlyList<ImportedRevision> importedRevisions;
+        try
+        {
+            var recovered = _annotationReader.Read(content.ToArray()).Revisions;
+            importedRevisions = recovered.Count == 0
+                ? Array.Empty<ImportedRevision>()
+                : recovered
+                    .Select(r => new ImportedRevision(
+                        Kind: r.Kind,
+                        Id: r.Id,
+                        Author: r.Author,
+                        Date: r.Date,
+                        Text: r.Text,
+                        AnchorText: r.AnchorText,
+                        ParagraphHint: r.ParagraphHint,
+                        ParaId: ResolveParaIdForHint(paraIdMap, r.ParagraphHint)))
+                    .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose load: existing-revision read failed for drive={DriveId} item={DocumentSpeId}; returning no imported revisions",
+                request.DriveId, request.DocumentSpeId);
+            importedRevisions = Array.Empty<ImportedRevision>();
+        }
+
         // FR-06 (E1, task 027): capture the LOAD-TIME SPE version id so a later dirty save that no longer
         // holds the client bytes (e.g. after a page refresh) can re-fetch THIS baseline by versionId
         // (DownloadFileVersionAsUserAsync). Best-effort behind the SpeFileStore facade (ADR-007) — a null
@@ -329,7 +375,35 @@ public class ComposeService : IComposeService
             DefinedTermsTracking = session.DefinedTermsTracking ?? Array.Empty<DefinedTerm>(),
             ActionHistory = actionHistory,
             ParaIdMap = paraIdMap,
+            ImportedRevisions = importedRevisions,
         };
+    }
+
+    /// <summary>
+    /// FR-24 (task 050): resolves the E2 <c>w14:paraId</c> for a recovered revision's document-order
+    /// paragraph index (<see cref="RecoveredRevision.ParagraphHint"/>) from the Load-time
+    /// <paramref name="paraIdMap"/>. Both the reader and <see cref="ParaIdPreParser"/> enumerate
+    /// <c>body.Descendants&lt;Paragraph&gt;()</c> (recursive, document-ordered, incl. table-cell +
+    /// nested-table paragraphs), so the hint index maps directly to <see cref="ParaIdMapEntry.Index"/>.
+    /// Returns <c>null</c> when the hint is out of range (e.g. <c>-1</c> for a revision whose paragraph
+    /// could not be located) — the client then falls back to fuzzy anchoring (anchorText + hint).
+    /// </summary>
+    private static string? ResolveParaIdForHint(IReadOnlyList<ParaIdMapEntry> paraIdMap, int paragraphHint)
+    {
+        if (paragraphHint < 0)
+        {
+            return null;
+        }
+
+        foreach (var entry in paraIdMap)
+        {
+            if (entry.Index == paragraphHint)
+            {
+                return entry.ParaId;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

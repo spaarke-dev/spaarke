@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -390,7 +391,42 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     /// pre-parse could not read the source (best-effort; Load still returns the content bytes).
     /// </summary>
     public IReadOnlyList<ParaIdMapEntry> ParaIdMap { get; init; } = Array.Empty<ParaIdMapEntry>();
+
+    /// <summary>
+    /// FR-24 (task 050, import round-trip): the existing native Word tracked changes (<c>w:ins</c>/
+    /// <c>w:del</c>, any authorship) recovered from the load-time <c>.docx</c> by the EXISTING
+    /// <see cref="DocxAnnotationReader"/> (reused verbatim), run server-side ALONGSIDE the mammoth
+    /// convert — which flattens those marks to prose before the editor sees them (<c>docxBridge.ts</c>).
+    /// Each recovered <see cref="RecoveredRevision"/> is projected here with the E2 <c>w14:paraId</c>
+    /// of its containing paragraph (resolved from <see cref="ParaIdMap"/> by the reader's document-order
+    /// <c>ParagraphHint</c>), so the client renders it as a first-class accept/reject-able insertion/
+    /// deletion mark anchored by paraId (design §7 — the reader is not the gap, the editor mount is).
+    /// Empty (never null) when the document has no revisions, or when the read could not run (best-effort;
+    /// a malformed source degrades to no imported revisions, never fails Load).
+    /// </summary>
+    public IReadOnlyList<ImportedRevision> ImportedRevisions { get; init; } = Array.Empty<ImportedRevision>();
 }
+
+/// <summary>
+/// FR-24 (task 050) — one native Word revision recovered on Load, projected for the editor render.
+/// A mirror-first projection of <see cref="RecoveredRevision"/> (same field vocabulary +
+/// <see cref="RecoveredAnnotationKind"/>, NOT a parallel schema) PLUS the E2 <see cref="ParaId"/> of the
+/// containing paragraph — the primary anchor the client uses to render the revision as a first-class
+/// insertion/deletion mark (with the <see cref="ParaIdPreParser"/> fuzzy fallback retained for the
+/// cross-Word-session case where Word regenerated paraIds). <see cref="ParaId"/> is <c>null</c> when the
+/// reader's paragraph index falls outside the paraId map (best-effort; the client then fuzzy-anchors).
+/// Wire shape is camelCase, matching the client <c>ImportedRevision</c> mirror in
+/// <c>compose-contracts.ts</c>.
+/// </summary>
+public sealed record ImportedRevision(
+    [property: JsonPropertyName("kind")] RecoveredAnnotationKind Kind,
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("author")] string Author,
+    [property: JsonPropertyName("date")] DateTimeOffset Date,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("anchorText")] string AnchorText,
+    [property: JsonPropertyName("paragraphHint")] int ParagraphHint,
+    [property: JsonPropertyName("paraId")] string? ParaId);
 
 /// <summary>Save request payload.</summary>
 /// <remarks>
