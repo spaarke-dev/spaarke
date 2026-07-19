@@ -59,11 +59,11 @@ describe("AssistantToolMenu", () => {
   // Rendering
   // -------------------------------------------------------------------------
 
-  it("renders a 'Tools' trigger button", () => {
+  it("renders the tools (⋮) trigger button", () => {
     renderMenu();
     expect(screen.getByTestId("assistant-tool-menu-trigger")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /open assistant tools menu/i }),
+      screen.getByRole("button", { name: /assistant tools/i }),
     ).toBeInTheDocument();
   });
 
