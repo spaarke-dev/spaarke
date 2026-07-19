@@ -114,26 +114,35 @@ export function useMyAssistant(options: UseMyAssistantOptions = {}): UseMyAssist
     let cancelled = false;
     setLoading(true);
     (async () => {
-      try {
-        const [areas, profile] = await Promise.all([
-          port.listPracticeAreas(),
-          port.getProfileByUser(systemUserId),
-        ]);
-        if (cancelled) return;
-        setPracticeAreas(areas);
-        setExisting(profile);
-        if (!isProfileComplete(profile)) {
-          setColdStart(true);
-          if (!autoOpenedRef.current) {
-            autoOpenedRef.current = true;
-            setOpen(true);
-          }
-        }
-      } catch {
-        // Degrade silently — never auto-open on a failed read.
-      } finally {
-        if (!cancelled) setLoading(false);
+      // UAT 2026-07-18: settle each read INDEPENDENTLY. Previously a single Promise.all meant a
+      // failure in the profile read (the lookup-alternate-key 400) also discarded the successfully
+      // loaded practice areas → an empty dropdown. allSettled lets the practice-areas list populate
+      // even if the profile read fails, and vice-versa.
+      const [areasResult, profileResult] = await Promise.allSettled([
+        port.listPracticeAreas(),
+        port.getProfileByUser(systemUserId),
+      ]);
+      if (cancelled) return;
+      if (areasResult.status === 'fulfilled') {
+        setPracticeAreas(areasResult.value);
+      } else {
+        console.warn('[useMyAssistant] practice-area load failed:', areasResult.reason);
       }
+      const profile = profileResult.status === 'fulfilled' ? profileResult.value : null;
+      if (profileResult.status === 'rejected') {
+        console.warn('[useMyAssistant] profile load failed:', profileResult.reason);
+      }
+      setExisting(profile);
+      // Only auto-open the cold-start questionnaire when the profile read SUCCEEDED and is incomplete
+      // (a failed read must not spuriously treat the user as brand-new).
+      if (profileResult.status === 'fulfilled' && !isProfileComplete(profile)) {
+        setColdStart(true);
+        if (!autoOpenedRef.current) {
+          autoOpenedRef.current = true;
+          setOpen(true);
+        }
+      }
+      setLoading(false);
     })();
     return () => {
       cancelled = true;
