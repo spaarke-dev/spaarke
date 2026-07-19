@@ -248,69 +248,6 @@ export interface ParaIdMapEntry {
 }
 
 // ---------------------------------------------------------------------------
-// R3 FR-13/FR-16 — server-derived confidence band + redline paraId/offset anchor
-// (spaarkeai-compose-r3 task 030)
-// ---------------------------------------------------------------------------
-//
-// Wire-shape mirror of the additive fields task 030 added to the server
-// `ComposeDraftPayload` record (`Services/Compose/ComposeDraftDisposition.cs`):
-// `confidence_band` (server-derived from grounding evidence — cited-source
-// presence + retained-original/paraId anchor support; NEVER a numeric score,
-// NEVER a raw model self-report — design §6.2), plus `paraId` / `start_offset` /
-// `end_offset` locating the redline against the E2 substrate (task 012).
-//
-// SCOPE NOTE (binding — read before wiring): the CANONICAL client-side
-// `ComposeDraftPayload` interface does NOT live in this file. It is declared in
-// `widgets/ComposeEditor.tsx` (FR-04, spaarkeai-compose-r2 task 016) — the editor
-// performs the materialize/insertion and owns the type; `ComposeWorkspace.tsx`
-// re-imports it from there (workspace → editor dependency direction, established
-// at task 016). Task 030's file scope is `Services/Compose/*.cs` +
-// `types/compose-contracts.ts` only (coordination boundary — a concurrent task
-// owns `ComposeEditor.tsx`), so this block documents the WIRE SHAPE + is the
-// mirror-first source of truth; it is NOT itself imported by `ComposeEditor.tsx`.
-// The consumer of `confidence_band` (task 031, FR-14 rationale-first accept/reject
-// UI) is responsible for adding these fields to that `ComposeDraftPayload`
-// interface as part of wiring them into the popover — e.g.
-// `export interface ComposeDraftPayload extends ComposeDraftConfidenceFields { ... }`.
-// Keep any such extension IDENTICAL in shape to this block and to the server
-// record (snake_case `start_offset`/`end_offset`; camelCase `paraId`, matching
-// the `AnchoredAnnotationAnchor.paraId` / `ParaIdMapEntry.paraId` precedent above
-// — deliberately NOT `para_id`).
-//
-// Privacy: Tier 1 safe — `confidence_band` is a coarse enum, `paraId` is an
-// opaque identifier, and the offsets are numeric positions. None carry document
-// content.
-
-/**
- * Additive fields task 030 (FR-13/FR-16) added to the server `ComposeDraftPayload`
- * wire shape. See the SCOPE NOTE above for why this is a standalone documented
- * fragment rather than a change to an existing local interface in this file.
- */
-export interface ComposeDraftConfidenceFields {
-  /**
-   * Server-derived, coarse verifiability band — `high` when the draft is BOTH
-   * cited (`sources` non-empty) AND anchored (`paraId` resolved, or a
-   * non-`insert` `match_mode` target claim); `medium` when exactly one signal
-   * is present; `low` (or absent) when neither is — never guessed, never a
-   * numeric/percentage score (design §6.2 anti-false-precision rule). The
-   * accept/reject surface (task 031) renders this as a SECONDARY cue —
-   * rationale leads, this never does — and MUST NOT pre-select or auto-accept
-   * a `low`-band edit.
-   */
-  confidence_band?: 'high' | 'medium' | 'low';
-  /**
-   * The redline's `w14:paraId` — the exact paragraph in the retained original
-   * the edit targets (E2 substrate, task 012). Absent for an insertion-style
-   * draft (no `target_text` to anchor) or an unresolved target.
-   */
-  paraId?: string;
-  /** Character offset (inclusive, 0-based) of `target_text`'s start within its `paraId` paragraph's settled text. */
-  start_offset?: number;
-  /** Character offset (exclusive) of `target_text`'s end within its `paraId` paragraph's settled text. */
-  end_offset?: number;
-}
-
-// ---------------------------------------------------------------------------
 // R3 FR-01 / FR-01a — the client content-model save contract (task 027)
 // ---------------------------------------------------------------------------
 //

@@ -66,4 +66,6 @@ mapping above) · ADR-030 (PaneEventBus carries ledger-keyed events; widget
 user-actions append `WidgetEvent` entries) · ADR-039 (tool chains + gates are
 ledger entries) · ADR-028 (restore contract).
 
+**Compose redline derived-views** ([docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md](../../docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md)) — render-follows-store applied to redlines: the ledger ships the opaque compose payload; the visual diff, `confidence_band`, and character offsets are **client-derived projections** recomputed on every materialize, never stored in the ledger.
+
 **Full ADR**: [docs/adr/ADR-040-session-ledger.md](../../docs/adr/ADR-040-session-ledger.md)
