@@ -75,75 +75,69 @@ const PROFILE_ID = '22222222-2222-2222-2222-222222222222';
 // Port: keyed upsert (no find-then-create)
 // ---------------------------------------------------------------------------
 
-describe('createDataverseUserProfilePort — keyed upsert', () => {
-  it('issues a PATCH to the alternate-key URL (never a POST create) and returns the id', async () => {
-    const { fetchImpl, calls } = makeFetch(() => ({
-      ok: true,
-      status: 200,
-      jsonBody: { sprk_userprofileid: PROFILE_ID },
-    }));
+describe('createDataverseUserProfilePort — find-then-write upsert', () => {
+  const FIELDS = {
+    name: 'Ada Lovelace',
+    primaryRole: 100000001,
+    focusAreas: 'M&A',
+    officeLocation: 'London',
+    assistantPreferences: 'Concise',
+    profileCompletedOn: '2026-07-16T00:00:00.000Z',
+    profileVersion: 1,
+  };
+
+  it('PATCHes by primary id when a profile already exists (found via the lookup _value filter)', async () => {
+    // UAT 2026-07-18: the lookup-alternate-key URL 400s, so upsert finds by `_value` filter then writes.
+    const { fetchImpl, calls } = makeFetch((call) =>
+      call.method === 'GET'
+        ? { ok: true, status: 200, jsonBody: { value: [{ sprk_userprofileid: PROFILE_ID }] } }
+        : { ok: true, status: 204, jsonBody: null }
+    );
     const port = createDataverseUserProfilePort(portDeps(fetchImpl));
 
-    const id = await port.upsertProfileByUser(USER, {
-      name: 'Ada Lovelace',
-      primaryRole: 100000001,
-      focusAreas: 'M&A',
-      officeLocation: 'London',
-      assistantPreferences: 'Concise',
-      profileCompletedOn: '2026-07-16T00:00:00.000Z',
-      profileVersion: 1,
-    });
+    const id = await port.upsertProfileByUser(USER, FIELDS);
 
     expect(id).toBe(PROFILE_ID);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].method).toBe('PATCH');
-    // Keyed by the alternate key — the whole point of "no find-then-create race".
-    expect(calls[0].url).toBe(`${BASE}/${USERPROFILE_SET}(${SYSTEMUSER_KEY_ATTR}=${USER})`);
-    // NEVER a plain-collection POST (that would be find-then-create).
-    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+    expect(calls[0].method).toBe('GET');
+    expect(calls[0].url).toContain(`$filter=_${SYSTEMUSER_KEY_ATTR}_value eq ${USER}`);
+    expect(calls[1].method).toBe('PATCH');
+    expect(calls[1].url).toBe(`${BASE}/${USERPROFILE_SET}(${PROFILE_ID})`);
+    // No lookup bind on an UPDATE (the row already belongs to the user).
+    expect((calls[1].body as Record<string, unknown>)['sprk_SystemUser@odata.bind']).toBeUndefined();
   });
 
-  it('is idempotent — repeated upserts PATCH the SAME keyed URL, no duplicate create', async () => {
-    const { fetchImpl, calls } = makeFetch(() => ({
-      ok: true,
-      status: 200,
-      jsonBody: { sprk_userprofileid: PROFILE_ID },
-    }));
+  it('POSTs a create binding the systemuser lookup when no profile exists yet', async () => {
+    const { fetchImpl, calls } = makeFetch((call) =>
+      call.method === 'GET'
+        ? { ok: true, status: 200, jsonBody: { value: [] } }
+        : { ok: true, status: 201, jsonBody: { sprk_userprofileid: PROFILE_ID } }
+    );
     const port = createDataverseUserProfilePort(portDeps(fetchImpl));
-    const fields = {
-      name: 'Ada',
-      primaryRole: 100000001,
-      focusAreas: null,
-      officeLocation: null,
-      assistantPreferences: null,
-      profileCompletedOn: '2026-07-16T00:00:00.000Z',
-      profileVersion: 1,
-    };
-    await port.upsertProfileByUser(USER, fields);
-    await port.upsertProfileByUser(USER, fields);
 
-    expect(calls).toHaveLength(2);
-    expect(calls.every((c) => c.method === 'PATCH')).toBe(true);
-    expect(new Set(calls.map((c) => c.url)).size).toBe(1); // same keyed URL both times
+    const id = await port.upsertProfileByUser(USER, FIELDS);
+
+    expect(id).toBe(PROFILE_ID);
+    expect(calls[0].method).toBe('GET');
+    expect(calls[1].method).toBe('POST');
+    expect(calls[1].url).toBe(`${BASE}/${USERPROFILE_SET}`);
+    expect((calls[1].body as Record<string, unknown>)['sprk_SystemUser@odata.bind']).toBe(
+      `/systemusers(${USER})`
+    );
   });
 
-  it('falls back to the OData-EntityId header when no representation body id is present', async () => {
-    const { fetchImpl } = makeFetch(() => ({
-      ok: true,
-      status: 204,
-      jsonBody: null,
-      entityIdHeader: `${BASE}/${USERPROFILE_SET}(${PROFILE_ID})`,
-    }));
+  it('falls back to the OData-EntityId header on create when no representation body id is present', async () => {
+    const { fetchImpl } = makeFetch((call) =>
+      call.method === 'GET'
+        ? { ok: true, status: 200, jsonBody: { value: [] } }
+        : {
+            ok: true,
+            status: 204,
+            jsonBody: null,
+            entityIdHeader: `${BASE}/${USERPROFILE_SET}(${PROFILE_ID})`,
+          }
+    );
     const port = createDataverseUserProfilePort(portDeps(fetchImpl));
-    const id = await port.upsertProfileByUser(USER, {
-      name: 'x',
-      primaryRole: null,
-      focusAreas: null,
-      officeLocation: null,
-      assistantPreferences: null,
-      profileCompletedOn: '2026-07-16T00:00:00.000Z',
-      profileVersion: 1,
-    });
+    const id = await port.upsertProfileByUser(USER, { ...FIELDS, focusAreas: null });
     expect(id).toBe(PROFILE_ID);
   });
 });
@@ -153,27 +147,33 @@ describe('createDataverseUserProfilePort — keyed upsert', () => {
 // ---------------------------------------------------------------------------
 
 describe('createDataverseUserProfilePort — read / N:N / delete', () => {
-  it('returns null on 404 (no profile yet = cold start)', async () => {
-    const { fetchImpl } = makeFetch(() => ({ ok: false, status: 404 }));
+  it('returns null when the lookup _value filter matches no profile (cold start)', async () => {
+    // UAT 2026-07-18: reads by `$filter=_sprk_systemuser_value eq …` → a no-match is an empty
+    // collection, not a 404.
+    const { fetchImpl } = makeFetch(() => ({ ok: true, status: 200, jsonBody: { value: [] } }));
     const port = createDataverseUserProfilePort(portDeps(fetchImpl));
     await expect(port.getProfileByUser(USER)).resolves.toBeNull();
   });
 
-  it('parses the keyed GET + expands the N:N practice-area ids', async () => {
+  it('parses the filtered GET + expands the N:N practice-area ids', async () => {
     const { fetchImpl, calls } = makeFetch(() => ({
       ok: true,
       status: 200,
       jsonBody: {
-        sprk_userprofileid: PROFILE_ID,
-        sprk_profilecompletedon: '2026-07-16T00:00:00Z',
-        sprk_primaryrole: 100000001,
-        sprk_focusareas: 'M&A',
-        sprk_officelocation: 'London',
-        sprk_assistantpreferences: 'Concise',
-        sprk_profileversion: 3,
-        [PRACTICEAREA_NAV_PROP]: [
-          { sprk_practicearea_refid: 'aaa' },
-          { sprk_practicearea_refid: 'bbb' },
+        value: [
+          {
+            sprk_userprofileid: PROFILE_ID,
+            sprk_profilecompletedon: '2026-07-16T00:00:00Z',
+            sprk_primaryrole: 100000001,
+            sprk_focusareas: 'M&A',
+            sprk_officelocation: 'London',
+            sprk_assistantpreferences: 'Concise',
+            sprk_profileversion: 3,
+            [PRACTICEAREA_NAV_PROP]: [
+              { sprk_practicearea_refid: 'aaa' },
+              { sprk_practicearea_refid: 'bbb' },
+            ],
+          },
         ],
       },
     }));
@@ -181,7 +181,7 @@ describe('createDataverseUserProfilePort — read / N:N / delete', () => {
     const row = await port.getProfileByUser(USER);
     expect(row?.id).toBe(PROFILE_ID);
     expect(row?.practiceAreaIds).toEqual(['aaa', 'bbb']);
-    expect(calls[0].url).toContain(`(${SYSTEMUSER_KEY_ATTR}=${USER})`);
+    expect(calls[0].url).toContain(`$filter=_${SYSTEMUSER_KEY_ATTR}_value eq ${USER}`);
     expect(calls[0].url).toContain(`$expand=${PRACTICEAREA_NAV_PROP}`);
   });
 
