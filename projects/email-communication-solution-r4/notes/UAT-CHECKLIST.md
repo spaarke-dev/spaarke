@@ -44,11 +44,11 @@ UAT splits into two tiers. **Tier 1 (API) can run now** — the BFF is deployed 
 
 | ID | Test | Steps | Expected | Pass/Fail | Notes |
 |----|------|-------|----------|:---:|-------|
-| B-1 | Suggest returns candidates | Pick a real `sprk_communication` GUID; `POST …/{id}/suggest-associations` with token | 200 with target(s) + confidence + provenance rationale | ☐ | |
-| B-2 | **Read-only invariant** | Before/after B-1, read the record's `sprk_associationprovenance` + `sprk_associationstatus` | **Unchanged** — suggest never writes | ☐ | |
-| B-3 | Unknown ID | Suggest with a random GUID | 404 ProblemDetails | ☐ | |
-| B-4 | Auth scoping (NFR-07) | As a user WITHOUT access to the matter, suggest on a communication regarding that matter | Denied/empty per matter-level scope — no cross-matter leakage | ☐ | |
-| B-5 | Privilege is flagged, not decided (ADR-015) | Use a communication whose content trips privilege signals | Response *flags* privilege as a signal; does not auto-decide/auto-file on it | ☐ | |
+| B-1 | Suggest returns candidates | Pick a real `sprk_communication` GUID; `POST …/{id}/suggest-associations` with token | 200 with target(s) + confidence + provenance rationale | ✅ | `6edc948a` → 200, `status:Suggested`, `autoFileEligible:false`, candidates = contact@0.7 (ParticipantCorrelation) + matter@0.97 (RecordNameMatch:number) — matches written provenance |
+| B-2 | **Read-only invariant** | Before/after B-1, read the record's `sprk_associationprovenance` + `sprk_associationstatus` | **Unchanged** — suggest never writes | ✅ | `modifiedon`=2026-07-18T16:16:33 (original processing); multiple suggest calls a day later did NOT change it → read-only confirmed |
+| B-3 | Unknown ID | Suggest with a random GUID | 404 ProblemDetails | ✅ | 404 RFC 7807: `type=.../COMMUNICATION_NOT_FOUND`, title/detail/status/correlationId present |
+| B-4 | Auth scoping (NFR-07) | As a user WITHOUT access to the matter, suggest on a communication regarding that matter | Denied/empty per matter-level scope — no cross-matter leakage | ⬚ | OWNER — needs a restricted-access test user (my token identity is privileged; can't prove scoping alone) |
+| B-5 | Privilege is flagged, not decided (ADR-015) | Use a communication whose content trips privilege signals | Response *flags* privilege as a signal; does not auto-decide/auto-file on it | ⬚ | Pending a privilege-content email (sample records = privilege None) |
 
 ### 1C. Association Engine — 6-rung ladder & status mapping
 
@@ -73,10 +73,10 @@ UAT splits into two tiers. **Tier 1 (API) can run now** — the BFF is deployed 
 
 | ID | Test | Steps | Expected | Pass/Fail | Notes |
 |----|------|-------|----------|:---:|-------|
-| D-1 | Inbound enrichment | Send a test email INTO the monitored mailbox | New `sprk_communication` created; runs association → status + provenance | ☐ | |
-| D-2 | **Outbound enrichment (the fixed gap)** | Send an outbound email via the Actions PCF / `/send` | Outbound communication **auto-associates** AND is **RAG-indexed** (both previously missing) | ☐ | |
-| D-3 | Best-effort / non-fatal (NFR-06) | Force an enrichment sub-step to fail (e.g., temporarily flip a kill-switch mid-flow) | Send/inbound-capture still succeeds; failure is logged, not fatal | ☐ | |
-| D-4 | Reply stamps thread cols | Reply from Actions PCF | `sprk_inreplyto` / `sprk_internetmessageid` populated | ☐ | |
+| D-1 | Inbound enrichment | Send a test email INTO the monitored mailbox | New `sprk_communication` created; runs association → status + provenance | ✅ | Verified via the 2026-07-18 inbound records — each created with `sprk_associationstatus` + `sprk_associationprovenance` (see Tier 1C). **CAVEAT**: those inbounds predate today's (2026-07-19) webhook→Key-Vault migration, so the definitive *post-migration* webhook-KV resolution proof still needs ONE fresh inbound email today (a new record appearing ⇒ KV refs resolved). |
+| D-2 | **Outbound enrichment** | Send an outbound email via the Actions PCF / `/send` | Outbound communication auto-associates AND is RAG-indexed | ⚠️ | **PARTIAL / expectation corrected.** `/send` → 200, real email sent from `mailbox-central@spaarke.com` (`97e5b972`, direction Outgoing). **(a) engine auto-associate = deferred BY DESIGN** — `CommunicationEnrichmentService.RunAssociationAsync` is a documented no-op for outbound (associations are client-supplied only; engine-over-outbound deferred to direction-symmetry). No `associations` passed → none written (correct). **(b) RAG-index = BLOCKED by F-1** — `archivedDocumentId:null`, `archivalWarning:"...archival failed: Access denied"` (same SPE-container 403). Outbound archival has NO mailbox fetch ⇒ definitively pins F-1 to the container write. |
+| D-3 | Best-effort / non-fatal (NFR-06) | Force an enrichment sub-step to fail (e.g., temporarily flip a kill-switch mid-flow) | Send/inbound-capture still succeeds; failure is logged, not fatal | ✅ | Demonstrated organically — outbound send succeeded + `sprk_communication` created despite archival "Access denied" (surfaced as `archivalWarning`, non-fatal) |
+| D-4 | Reply stamps thread cols | Reply from Actions PCF | `sprk_inreplyto` / `sprk_internetmessageid` populated | ⚠️ | `sprk_internetmessageid` populated (verified on inbound `048e7239`). Reply-specific `sprk_inreplyto` needs a reply via Actions PCF (owner/H-4) |
 
 ### 1E. Kill-switches (ADR-018 / ADR-032) — no redeploy
 
@@ -91,8 +91,8 @@ UAT splits into two tiers. **Tier 1 (API) can run now** — the BFF is deployed 
 
 | ID | Test | Steps | Expected | Pass/Fail | Notes |
 |----|------|-------|----------|:---:|-------|
-| F-1 | Archive creates docs | `POST …/{id}/archive` on an un-archived communication with attachments | 200; `.eml` Document + one Document per attachment; `attachmentDocumentsCreated` reflects count | ☐ | |
-| F-2 | Idempotent | Archive the same communication again | 200 `alreadyArchived: true`; no duplicate Documents | ☐ | |
+| F-1 | Archive creates docs | `POST …/{id}/archive` on an un-archived communication with attachments | 200; `.eml` Document + one Document per attachment; `attachmentDocumentsCreated` reflects count | ❌ | **FAIL 2026-07-19** — HTTP 403 `graph_error` "Access denied" (correlationId `0HNN5JFAAO3G5:0000000C`). **Confirmed MI-side, not a caller-token artifact**: `SpeFileStore.UploadSmallAsync` is app-only (`IGraphClientFactory.ForApp()`), and archive reconstructs the `.eml` from the stored record (no mailbox re-fetch). Root cause = BFF **managed identity denied at a Graph op in the archive path** — most likely write to the SPE Archive container `Communication__ArchiveContainerId` (`b!yLRdWEO…`), possibly attachment re-fetch. **Blocks H-8 (Save-to-SharePoint) + the archive leg of D-2.** ACTION: pull App Insights trace for the correlationId to pin the exact Graph request, then grant the MI `FileStorageContainer.Selected` write on that container (or verify container id / container-type app grant). |
+| F-2 | Idempotent | Archive the same communication again | 200 `alreadyArchived: true`; no duplicate Documents | ⬚ | Blocked by F-1 — cannot verify idempotency until archive succeeds (2nd call also 403) |
 
 ---
 
