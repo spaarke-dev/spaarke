@@ -32,8 +32,9 @@ SprkChat + SprkChatInput gained three additive, default-off, context-agnostic pr
 - ✅ **Readable render**: `draft-correspondence` output (`{subject, body, recipients_suggestion, cited_refs}`) no longer dumps raw JSON — `formatCorrespondenceDraft` (DocumentUploadedEventStream.ts) renders **Draft response** / Subject / body / Suggested recipients / Sources. Grounded (ADR-039).
 - ⏳ **OPEN — route to Compose tab**: owner wants the draft pre-loaded into a Compose tab. Blocked on the compose widget accepting SEED content (it currently opens blank via `widget_load{widgetType:"compose"}`). NEEDS DECISION: (a) add seed-content support to the compose widget so `widget_load` can carry `{subject, body}`, then dispatch it from the draft path; or (b) accept the in-chat readable draft as sufficient. Deliberately NOT hacked as a misleading blank-compose launch.
 
-### Files + Context pane (#9, per decision 1) — NEXT
-- Uploaded files → their own collapsible section in the Assistant pane (dropdown when >1 line); Context/Execution-Trace pane default on load + live-updating with session files + Assistant activity. (Larger; touches ConversationPane layout + Context pane.)
+### Files + Context pane (#9, per decision 1)
+- ✅ **Part A — Files own section** (commit `e5f447fec`, deployed 2026-07-19): the "N files attached" one-liner is now a collapsible section — single file shows inline; 2+ files collapse into a dropdown (default collapsed) that expands to a per-file list. `FilesAttachedIndicator` evolved in ConversationPaneChrome; ConversationPane passes `files={attachments.attachmentChips}`.
+- ⏳ **Part B — Context/Execution-Trace pane default on load + live-update**: cross-cutting (workspace layout + Context pane data). Scoping the default-pane-state config + PaneEventBus live-update path before touching (changing the default visible pane may be a shared-lib change affecting other consumers — verify blast radius first).
 
 ## Key facts / anchors
 - Chip dispatch path: `useConsumerChips.runBindingDispatch` (surface_launch handling fixed in cluster 1).
