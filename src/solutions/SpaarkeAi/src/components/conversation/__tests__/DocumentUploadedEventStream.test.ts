@@ -326,6 +326,32 @@ describe('formatters (pure)', () => {
     expect(formatEventOutputMarkdown(null)).toBe('Analysis complete.');
   });
 
+  // Draft-a-response (draft-correspondence) rendering fix — UAT 2026-07-19.
+  it('formatEventOutputMarkdown renders a draft-correspondence payload readably (not raw JSON)', () => {
+    const md = formatEventOutputMarkdown({
+      subject: 'Re: NDA revisions',
+      body: 'Thanks for sending the draft.\n\nWe accept clauses 1–3.',
+      recipients_suggestion: ['counsel@acme.com', 'Jane Roe'],
+      cited_refs: [{ title: 'NDA v3' }, 'Engagement letter'],
+    });
+    expect(md).not.toContain('```json');
+    expect(md).toContain('**Draft response**');
+    expect(md).toContain('**Subject:** Re: NDA revisions');
+    expect(md).toContain('We accept clauses 1–3.');
+    expect(md).toContain('**Suggested recipients:** counsel@acme.com, Jane Roe');
+    expect(md).toContain('**Sources:** NDA v3, Engagement letter');
+  });
+
+  it('formatEventOutputMarkdown treats a body-only correspondence payload as a draft, and does not hijack summary shapes', () => {
+    // body + subject → draft
+    expect(formatEventOutputMarkdown({ subject: 'Hi', body: 'A short note.' })).toContain('**Draft response**');
+    // tldr/summary payloads still render as a summary, never as a draft
+    const summary = formatEventOutputMarkdown({ summary: 'A summary.', body: 'ignored' });
+    // `body` with no subject/recipients/cited_refs is NOT a correspondence draft → summary branch wins
+    expect(summary).toContain('A summary.');
+    expect(summary).not.toContain('**Draft response**');
+  });
+
   it('formatNoticeMessage renders the server message subtly (italic) with a defensive fallback', () => {
     expect(formatNoticeMessage({ reason: 'daily-cap', message: 'Daily limit reached.' })).toBe('_Daily limit reached._');
     expect(formatNoticeMessage({ reason: 'no-rule' })).toBe('_The automatic document workflow did not run._');
