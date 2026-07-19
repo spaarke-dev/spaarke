@@ -4,7 +4,26 @@
 > **Last Updated**: 2026-07-18 (tasks 026 + 023 ✅ COMPLETE; next = 027 client cutover)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
-## ▶️ RESUME HERE — `work on task 024` (E1 seam) — tasks 022/023/026/027 all ✅ DONE
+## ▶️ RESUME HERE — parallel wave in flight (2026-07-18): client lane 044→042→043→041 + E3 030 residual
+
+**AUTONOMOUS PARALLEL ORCHESTRATION (2026-07-18).** Owner asked to run task 024 + task-execute other tasks in parallel, autonomously. Lanes: server-test + server-contract (both drained) + a SERIAL client lane (all W4 toolset tasks mount into the single `ComposeEditor.tsx`, so they cannot run concurrently — one at a time). Sub-agents run `task-execute` FULL rigor but do NOT touch `.claude/`, git, or the trackers — the MAIN SESSION owns commits + `TASK-INDEX.md`/`current-task.md` (avoids concurrent-write conflicts).
+
+**DONE + COMMITTED this wave:**
+- **024** (E1 fidelity seam) ✅ — `11696f4ac`. NEW `tests/integration/seam/Ai/ComposeFidelitySeamTests.cs` (2 tests): loaded byte-identity + born-in-editor numbering golden-file. Compose 465✅.
+- **030** (E3 confidence-band) 🔄 FOUNDATION committed `11696f4ac`. Derivation engine + additive contract + client-mirror fragment + 14 unit/3 seam tests. **LIVE-WIRING RESIDUAL folded into task 031** (grep-verified §6.5 Path-C: `ComposeService.cs` never touches `ComposeDraftPayload`; live path is `ChatEndpoints.GetComposeOutputsAsync`, payload stored opaque → `DeriveConfidenceBand` not yet invoked live; the real client `ComposeDraftPayload` lives in `ComposeEditor.tsx` not `compose-contracts.ts`).
+- **040** (find/replace FR-17) ✅ — `105f8c521`. Mark-safe (nodesBetween union, avoids `marksAcross` drop). jest 230/230.
+
+**IN FLIGHT:** **044** (comment-thread UI) — client lane, running as delegated agent on top of 040's committed `ComposeEditor.tsx`.
+
+**CLIENT LANE QUEUE (serial, launch next as ComposeEditor.tsx frees):** 044 → 042 (toolbar/bubble/warning) → 043 (styles pane) → 041 (basic tables, deps 011✅). Per client task: verify tsc+jest, commit its files + flip TASK-INDEX row, then launch the next.
+
+**TASK 031 now carries 030's live-wiring** (server derive in `GetComposeOutputsAsync` + mirror into the real `ComposeDraftPayload` in `ComposeEditor.tsx` + a LIVE seam assertion). 031 deps 030 (🔄 foundation met).
+
+**⚠️ BFF DEPLOY DIRECTIVE (owner 2026-07-18, memory `bff-deploy-sync-worktree-first`):** before ANY `Sprk.Bff.Api` deploy from this worktree (tasks 025/081), FIRST sync `origin/master` into the worktree so all other projects' merged changes ship. Do not deploy a stale worktree.
+
+**Pushes NOT done** — local commits only; owner batches pushes/deploys.
+
+### ⬇️ (prior) `work on task 024` (E1 seam) — tasks 022/023/026/027 all ✅ DONE
 
 **Task 027 ✅ COMPLETE (2026-07-18) — the client no longer authors `.docx` bytes.** Server half `ff9576278`; client half this session. `docx.js` (`tipTapToDocxBytes`/`tipTapJsonToDocxBytes`/`buildRejectBaselineJson`) + the `docx` npm dependency REMOVED. `docxBridge` now exposes `captureParaIdSnapshot`/`collectEditedParagraphs`(reject-state diff)/`buildContentModel`; `ComposeEditor` handle exposes `collectEditedParagraphs`/`buildContentModel`/`getRedlineAnnotations` + captures the load-time snapshot after `stampParaIds`; `triggerSave` sends the 4-case structured payload (loaded+dirty→`{editedParagraphs, baselineVersionId, content?}` / loaded+clean→`{content}` / born-in-editor→`{contentModel}` / unedited-browse-local→`{content}`; annotations ride every case); `versionId` threaded through workspace state (Load response → state → save). Client **205✅** (NEW `docxBridge.contentModel.test.ts`; fixed `dirtyOnMount`/`referenceOnly` mocks + `redlineDocxAnnotations` reject-state block moved); tsc clean. **Known E1 limitation (inherited from 022, documented):** a brand-new/split paraId is NOT emitted as an EditedParagraph (the synthesizer fails-fast on an unmatched paraId) — structural insert/split/delete is a future synthesizer extension.
 
