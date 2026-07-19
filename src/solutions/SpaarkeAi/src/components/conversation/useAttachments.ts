@@ -35,6 +35,7 @@ import {
   buildFileConfirmationMessage,
   buildMultiFileSummarizeInterjection,
   makeLocalAssistantMessage,
+  makeFileStatusMessage,
 } from "./summarizeRouting";
 
 const READY_CONFIRMATION_DEBOUNCE_MS = 250;
@@ -201,7 +202,8 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
           readyConfirmationTimerRef.current = null;
           const body = buildFileConfirmationMessage(filenames);
           if (body !== null) {
-            inject(makeLocalAssistantMessage(body));
+            // P1-5: compact, collapsed-by-default file entry (was a full chat bubble).
+            inject(makeFileStatusMessage(body, filenames.length === 1 ? "File attached" : `${filenames.length} files attached`));
           }
         }, READY_CONFIRMATION_DEBOUNCE_MS);
       }

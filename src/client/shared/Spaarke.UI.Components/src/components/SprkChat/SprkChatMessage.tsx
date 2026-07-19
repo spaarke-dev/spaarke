@@ -670,6 +670,48 @@ export const SprkChatMessage: React.FC<ISprkChatMessageExtendedProps> = ({
     }
   }
 
+  // ── P1-5 (UAT 2026-07-18): compact, collapsed-by-default file-status entry ──────────────
+  // The per-file "I have your file: …" + "Classified … as … (N%)" messages were dominating the
+  // transcript. Render them as a lightweight `<details>` row: a muted one-line summary that the
+  // user can expand for the full text. Native `<details>` needs no React state and keeps the
+  // detail available (the ask: "collapse under a drop-down — keep them, hide by default").
+  if (responseType === 'file-status') {
+    const fileStatusSummary = message.metadata?.fileStatusSummary ?? 'File update';
+    return (
+      <div
+        role="listitem"
+        data-testid="file-status-message"
+        style={{ marginTop: tokens.spacingVerticalXXS, marginBottom: tokens.spacingVerticalXXS }}
+      >
+        <details>
+          <summary
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: tokens.spacingHorizontalXS,
+              cursor: 'pointer',
+              color: tokens.colorNeutralForeground3,
+              fontSize: tokens.fontSizeBase200,
+            }}
+          >
+            {React.createElement(DocumentRegular)}
+            <span>{fileStatusSummary}</span>
+          </summary>
+          <div
+            style={{
+              color: tokens.colorNeutralForeground2,
+              fontSize: tokens.fontSizeBase200,
+              paddingLeft: tokens.spacingHorizontalL,
+              paddingTop: tokens.spacingVerticalXXS,
+            }}
+          >
+            {message.content}
+          </div>
+        </details>
+      </div>
+    );
+  }
+
   // PlanPreviewCard gate — only when not currently streaming the plan
   if (isStructured && responseType === 'plan_preview' && !isStreaming) {
     const planSteps: PlanStep[] = (message.metadata?.plan ?? []).map(s => ({
