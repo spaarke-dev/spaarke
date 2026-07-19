@@ -178,6 +178,26 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
 
+  // ── Upload/classify progress row (UP-10, UAT 2026-07-19) ─────────────────
+  uploadProgressIndicator: {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  uploadProgressText: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+  },
+
   // ── Conversation restore summary block (AIPU2-106) ────────────────────────
   restoreSummaryBlock: {
     flexShrink: 0,
@@ -354,6 +374,34 @@ export function RefinementChipBar(props: {
         aria-label="Dismiss refinement suggestion"
         onClick={props.onDismiss}
       />
+    </div>
+  );
+}
+
+/**
+ * Upload/classify progress row (UP-10, UAT 2026-07-19) — rendered above the
+ * SprkChat input zone WHILE the composer is locked during the ingest window, so
+ * the user knows to wait. Shows "Attaching file…" during the `/documents`
+ * promotion POST, then "Classifying file…" during the Event classify SSE stream.
+ * Returns null when idle. `role="status"` + `aria-live="polite"` for a11y.
+ */
+export function UploadProgressIndicator(props: {
+  attaching: boolean;
+  classifying: boolean;
+}): React.JSX.Element | null {
+  const styles = useStyles();
+  if (!props.attaching && !props.classifying) return null;
+  // Attach precedes classify; if both are somehow set, surface the earlier stage.
+  const label = props.attaching ? "Attaching file…" : "Classifying file…";
+  return (
+    <div
+      className={styles.uploadProgressIndicator}
+      role="status"
+      aria-live="polite"
+      data-testid="upload-progress-indicator"
+    >
+      <Spinner size="tiny" />
+      <Text className={styles.uploadProgressText}>{label}</Text>
     </div>
   );
 }

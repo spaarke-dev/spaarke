@@ -96,6 +96,7 @@ import {
   RestoreBanners,
   RefinementChipBar,
   FilesAttachedIndicator,
+  UploadProgressIndicator,
   useConversationPaneLayoutStyles,
 } from "./ConversationPaneChrome";
 
@@ -1547,6 +1548,13 @@ export function ConversationPane(): React.JSX.Element {
               promotedCount={attachments.promotedCount}
             />
           )}
+
+          {/* UP-10 (UAT 2026-07-19): live "Attaching file… / Classifying file…" progress with a
+              spinner while the composer is locked during the ingest window, so the user knows to wait. */}
+          <UploadProgressIndicator
+            attaching={attachments.isPromoting}
+            classifying={eventBatch.isEventInFlight}
+          />
 
           {/* FIX #1a: the post-mount DOCUMENT-LEVEL action chips (Summarize / Add to DMS / Draft
               reporting email) moved BELOW the ask message — they now render inside SprkChat's
