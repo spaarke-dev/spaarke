@@ -21,6 +21,7 @@ import { Button, Tooltip } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular } from "@fluentui/react-icons";
 import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, launchSurface, launchSummarizeFilesWizard } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
+import { QuickStartModal } from "./QuickStartModal";
 import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type {
@@ -72,7 +73,7 @@ import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession"
 import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-components/types/compose-contracts";
 import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
 import { formatComposeActionResultMarkdown } from "./composeResultFormat";
-import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage } from "./summarizeRouting";
+import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
 import {
   detectReviseThisDocumentIntent,
@@ -366,6 +367,10 @@ export function ConversationPane(): React.JSX.Element {
   // here), so the SNS cards' "More" affordance reaches it through a ref
   // rather than reordering hook declarations.
   const openLibraryModalRef = React.useRef<() => void>(() => undefined);
+  // P1-8 (UAT 2026-07-18): the chips' trailing "More…" affordance now opens Quick Start
+  // (the playbook library is retired). Owned here so the `openLibraryModalRef` the chips
+  // reach through (below) points at this modal instead of the library modal.
+  const [quickStartOpen, setQuickStartOpen] = React.useState(false);
   const chips = useConsumerChips({
     bffBaseUrl,
     getAccessToken,
@@ -1015,7 +1020,8 @@ export function ConversationPane(): React.JSX.Element {
             composeIngestCeremonyFiredRef.current.add(sessionFileId);
             const confirmation = buildFileConfirmationMessage([name]);
             if (confirmation !== null) {
-              injection.enqueue(makeLocalAssistantMessage(confirmation));
+              // P1-5: compact, collapsed-by-default file entry (was a full chat bubble).
+              injection.enqueue(makeFileStatusMessage(confirmation, "File attached"));
             }
             eventBatch.fireForPromotedFile(sessionFileId);
           }
@@ -1095,7 +1101,8 @@ export function ConversationPane(): React.JSX.Element {
   // ids: the SNS "More" entry is a generic library browse, not tied to a
   // specific candidate-confidence flow (mirrors useCommandRouting's
   // `openLibraryModal([])` call for the same reason).
-  openLibraryModalRef.current = () => playbookOptions.handleOpenLibraryModal([]);
+  // P1-8: the SNS/post-upload "More…" card opens Quick Start (was the retired playbook library).
+  openLibraryModalRef.current = () => setQuickStartOpen(true);
   const commands = useCommandRouting({
     bffBaseUrl,
     authenticatedFetch,
@@ -1553,6 +1560,9 @@ export function ConversationPane(): React.JSX.Element {
           </div>
         </div>
       </div>
+
+      {/* P1-8: Quick Start opened from the chips' "More…" card (see openLibraryModalRef). */}
+      <QuickStartModal open={quickStartOpen} onClose={() => setQuickStartOpen(false)} />
 
       {playbook.toastPlaybookName !== null && <PlaybookToast name={playbook.toastPlaybookName} />}
 

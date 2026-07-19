@@ -136,6 +136,15 @@ export interface IChatMessageMetadata {
     /** Display name for the preview modal title. */
     fileName?: string;
   };
+
+  /**
+   * P1-5 (assistant-enhancements-r1 UAT 2026-07-18) — short collapsed label for a
+   * `responseType: 'file-status'` message ("I have your file…" / "Classified … as …").
+   * These per-file processing entries were dominating the transcript; SprkChatMessage
+   * renders them as a compact, collapsed-by-default `<details>` row whose summary is this
+   * label and whose expanded body is the full `content`. Absent → a generic label.
+   */
+  fileStatusSummary?: string;
 }
 
 /** A single chat message, matching ChatSessionMessageInfo from the history endpoint. */

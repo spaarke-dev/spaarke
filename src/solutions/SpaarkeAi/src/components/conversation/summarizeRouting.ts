@@ -179,6 +179,22 @@ export function makeLocalAssistantMessage(content: string): IChatMessage {
 }
 
 /**
+ * P1-5 (UAT 2026-07-18) — a compact, collapsed-by-default per-file processing entry
+ * ("I have your file: …", "Classified … as …"). SprkChatMessage renders `file-status`
+ * messages as a `<details>` row whose summary is `summary` (short label) and whose
+ * expanded body is `content` (the full text). Keeps the detail available while
+ * reclaiming the transcript space these entries used to take.
+ */
+export function makeFileStatusMessage(content: string, summary: string): IChatMessage {
+  return {
+    role: "Assistant",
+    content,
+    timestamp: new Date().toISOString(),
+    metadata: { responseType: "file-status", fileStatusSummary: summary },
+  };
+}
+
+/**
  * DEF-12 — build the CONFIRMATION Assistant message for an applied Compose AI edit, carrying the
  * `composeEdit` metadata that makes SprkChat render the per-message Accept / Reject / Try-another
  * controls (the Assistant is the AI↔user interaction surface). `content` stays SUMMARY-ONLY (a brief

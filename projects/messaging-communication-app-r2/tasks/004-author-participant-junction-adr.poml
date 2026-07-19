@@ -1,0 +1,157 @@
+<task id="004" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Author the participant-junction **schema ADR** (concise + full; ADR-034 path-C comply-with-intent tension; INDEX → Accepted)</title>
+    <phase>W0 — Schema + Foundation + ADR</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <deps>none</deps>
+    <blocks>050</blocks>
+    <tags>adr, docs</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Authors a binding schema ADR (concise + full) that the participant-index write (050) + `participant=` facet (051) cite — a governance artifact, not code implementation. STANDARD per CLAUDE.md §8, but `/adr-check` is invoked explicitly. Model tier opus (architectural authoring + the ADR-034 tension must be argued precisely).</rigor-reason>
+    <parallel-group>W0-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `.claude/adr/` + `.claude/adr/INDEX.md` + `.claude/CHANGELOG.md` — sub-agent write boundary (main-session-only per CLAUDE.md §3). Sub-agents CANNOT write to `.claude/` paths.</parallel-reason>
+    <fr-refs>FR-08 (support)</fr-refs>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Author the participant-junction **schema ADR** — the binding record for the `sprk_communicationparticipant` design (task 003) and the ADR-034 path-C comply-with-intent tension the spec surfaces (spec §ADR Tensions, owner-approved 2026-07-18). This ADR DOCUMENTS a locked design; it does not re-open it. Write BOTH forms — concise in `.claude/adr/` (MUST/MUST NOT, ~120–160 lines) and full history in `docs/adr/` (rationale + alternatives + consequences) — and flip both ADR INDEX rows to Accepted.
+
+    **ADR number**: ADR-047 is RESERVED for `spaarke-notification-spine-r1` (do NOT claim it). Re-verify the next free slot at execution (expected **ADR-048**) via `ls .claude/adr/ADR-04*` + `.claude/adr/INDEX.md`; claim the lowest unreserved number.
+
+    Codify, at minimum (spec FR-08 + §ADR Tensions + §New-Components lock the content):
+
+    1. **Message-grain participant index.** `sprk_communicationparticipant` is a junction at **message grain** — parent lookup to `sprk_communication` only (Q-A); thread-level participation is DERIVED by rollup, never written as thread-grain rows. It makes participants queryable (powers `participant=`, FR-02) where the legacy `sprk_from/to/cc` `;`-joined TEXT cannot.
+    2. **Two typed nullable person lookups (ADR-034 path-C comply-with-intent).** Identity is `sprk_systemuser` (→systemuser) + `sprk_contact` (→contact), **exactly one set** for a resolved person, **both null** for an unresolved external address. This is the load-bearing decision: document WHY two typed lookups honor ADR-034's *intent* (the tuple exists to avoid an awkward **6-target** polymorphic lookup + to forbid fuzzy text-name matching) — here there are only **2** person targets, so typed lookups give typed identity + no text-name matching PLUS FK integrity + DataGrid person-chip auto-derivation the Guid+type tuple can't. Path C (comply-with-intent), NOT a path-B amendment of ADR-034.
+    3. **Unresolved external rows are first-class (Q-D).** `sprk_addresstext` (raw email) + `sprk_isresolved=false` (both person lookups null) so external parties stay filterable + back-fillable when a `contact` is later created; `participant=` never silently omits them.
+    4. **Role precision.** `sprk_role` Choice {From, To, Cc, Bcc} gives per-role precision the text fields lack.
+    5. **Populated by reuse, not a new mechanism.** Rows are written at capture/send (task 050) reusing `ParticipantCorrelationRung.QueryContactByEmailAsync` — no new resolution mechanism, no new AI dependency, no new external SDK.
+
+    Write the concise form at `.claude/adr/ADR-0NN-communication-participant-index.md` and the full form at `docs/adr/ADR-0NN-communication-participant-index.md` (NN = the claimed slot). Update `.claude/adr/INDEX.md` (add the row, Accepted) + `docs/adr/INDEX.md`; add the required `.claude/CHANGELOG.md` entry; confirm reachability via the ADR INDEX row (root `CLAUDE.md` §17 already points at the INDEX). Mirror how ADR-046 was authored (messaging-r1 task 007). **MAIN-SESSION ONLY (§3 write boundary).**
+  </prompt>
+
+  <role>
+    Spaarke platform architect. Authoritative on the Communication data model (ADR-045/ADR-046) and the ADR-034 membership/identity precedent. Fluent in the project's concise ADR conventions (`.claude/adr/`, MUST/MUST NOT, ~120–160 lines) and the full-history form (`docs/adr/`). You author a binding schema ADR whose central job is to argue the ADR-034 path-C comply-with-intent decision precisely, so `adr-check` and future readers see the tension resolved on the record.
+  </role>
+
+  <goal>
+    The participant-junction ADR exists in both concise (`.claude/adr/`) and full (`docs/adr/`) forms, codifying the five-part decision with MUST/MUST NOT rules and a precise ADR-034 path-C comply-with-intent argument; both ADR INDEXes show it Accepted; reachable via the ADR INDEX row (root `CLAUDE.md` §17); `.claude/CHANGELOG.md` has the entry; passes `/adr-check` against `spec.md` with no contradiction against ADR-034/ADR-046/ADR-024. `ADR-047` is NOT claimed (reserved for notification-spine). Task 050 (participant-index write) builds against a landed governance anchor.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-08 requires the schema ADR as an acceptance item ("schema ADR authored (§11 + the ADR-034 path-C tension)"). The junction (task 003) is a NEW entity whose identity modeling deliberately deviates from ADR-034's `(personId, personIdType)` tuple — that deviation is owner-approved via the CLAUDE.md §6.5 path-C (comply-with-intent) mechanism and MUST be documented at the point of decision (§6.5 forbids deferring the exception). This ADR is that documentation: it records why 2 typed lookups honor ADR-034's intent for a 2-target identity, so the deviation is on the record and `adr-check` validates against a landed anchor rather than flagging an undocumented divergence.
+
+      §11 Component Justification (a NEW ADR): (1) **Existing overlap** — ADR-034 covers person↔record membership via the tuple, and ADR-045/046 cover the communication/thread model, but NONE documents a message-grain queryable participant index or the 2-typed-lookup identity choice; the decision is net-new. (2) **Extension instead** — this ADR EXTENDS the ADR-034 identity precedent (comply-with-intent) rather than amending it (path B) or forking a parallel identity mechanism; it cites ADR-034 as the intent it honors. (3) **Concrete cost-of-doing-nothing** — without the ADR, the junction's deviation from ADR-034 is an undocumented silent violation (§6.5 forbidden), `adr-check` on task 050 has no anchor to validate the participant write against, and future work could re-litigate the tuple-vs-typed-lookup choice or reintroduce text-name matching. Named governance failure, not "future flexibility."
+
+      The ADR must correctly cite its neighbors: **ADR-034** (the identity intent it complies with — the central citation), **ADR-024** (regarding family — the junction is orthogonal, message-grain, not a regarding mechanism), **ADR-045/ADR-046** (the communication/thread model it indexes), **ADR-032** (Null-Object kill-switch / `Lazy<>` — if the participant-write path is feature-gated in 050, it uses symmetric registration), **ADR-038** (seam tests are the DoD for the write/query — task 080), **ADR-027** (the junction lives in the project managed solution). It documents the message-grain (Q-A), two-typed-lookup (Q-C), and unresolved-row (Q-D) owner decisions.
+    </background>
+    <relevant-files>
+      <file>.claude/adr/INDEX.md (add the new ADR row, Accepted; re-verify ADR-047 is still notification-spine's)</file>
+      <file>docs/adr/INDEX.md (add the new ADR row)</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md (the sibling authored by messaging-r1 — structural exemplar + the communication/thread model this indexes)</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md (the identity intent this ADR complies with — the central citation)</file>
+      <file>projects/messaging-communication-app-r1/tasks/007-author-adr-046.poml (the ADR-authoring workflow to mirror exactly)</file>
+      <file>projects/messaging-communication-app-r2/spec.md (FR-08 + §ADR Tensions ADR-034 path C + §New-Components)</file>
+      <file>projects/messaging-communication-app-r2/notes/003-participant-junction-schema.md (task 003's created-schema inventory, if available — the concrete field set to document)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">ADR-047 is RESERVED for `spaarke-notification-spine-r1` — MUST NOT claim it. Re-verify the next free slot (expected ADR-048) before writing; claim the lowest unreserved number.</constraint>
+    <constraint source="project (§3 write boundary)">MAIN-SESSION ONLY. Sub-agents cannot write to `.claude/`. Execute from the main session — an "Edit denied on `.claude/...`" from a sub-agent is the boundary working correctly.</constraint>
+    <constraint source="project">Author BOTH forms: concise (`.claude/adr/`, MUST/MUST NOT, ~120–160 lines) AND full (`docs/adr/`, rationale + alternatives + consequences). Mirror ADR-046's structure (Status / Context / Decision (MUST/MUST NOT) / Consequences / Related).</constraint>
+    <constraint source="CLAUDE.md §6.5 / ADR-034">Document the ADR-034 tension as **path C (comply-with-intent)**, NOT a path-B amendment: 2 typed lookups honor the tuple's intent (typed identity, no text-name matching) for a 2-target identity, adding FK integrity + chip auto-derivation. MUST NOT propose amending ADR-034.</constraint>
+    <constraint source="spec Q-A / Q-C / Q-D">Codify: message grain only (parent = `sprk_communication`; no thread-grain rows); two typed nullable lookups (exactly one set for resolved); unresolved external rows first-class (`isresolved=false` + `addresstext`).</constraint>
+    <constraint source="ADR-024 / ADR-046">MUST NOT frame the junction as a regarding mechanism or a second communication pipeline — it is a message-grain participant INDEX orthogonal to the regarding family; cite ADR-024/046 as neighbors it does not replace.</constraint>
+    <constraint source="project">Add the row to BOTH ADR INDEXes (Accepted); confirm reachability via the ADR INDEX row (root `CLAUDE.md` §17 already points at the INDEX — do NOT edit root CLAUDE.md, hot-path root-claude-md=N); add the required `.claude/CHANGELOG.md` entry.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>docs/adr/INDEX.md</file>
+      <file>projects/messaging-communication-app-r1/tasks/007-author-adr-046.poml</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/ParticipantReference.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Concise ADR form" location=".claude/adr/ADR-046-acs-messaging-channel.md">
+        The sibling authored by messaging-r1 — structural exemplar: Status / Context / Decision (MUST / MUST NOT) / Consequences / Related; ~120–160 lines.
+      </pattern>
+      <pattern name="ADR authoring workflow" location="projects/messaging-communication-app-r1/tasks/007-author-adr-046.poml">
+        The exact mirror: verify slot → read spec/§ADR-Tensions → author concise + full → update both INDEXes + CHANGELOG → /adr-check.
+      </pattern>
+      <pattern name="Path-C comply-with-intent framing" location="CLAUDE.md">
+        §6.5 path C: the ADR remains correct; this design honors its intent with a documented, reviewer-approved narrow deviation — NOT an amendment. The ADR-034 argument is the exemplar of this framing.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Re-verify the ADR slot: `ls .claude/adr/ADR-04*` + read `.claude/adr/INDEX.md` — confirm ADR-047 is still reserved for notification-spine and claim the lowest unreserved number (expected ADR-048).</step>
+    <step order="2">Read spec FR-08 + §ADR Tensions (ADR-034 path C) + §New-Components (participant-junction row) + Owner Clarifications (Q-A/Q-C/Q-D) for the scope inputs. Read the messaging-r1 task 007 POML as the authoring mirror. Consume task 003's created-schema inventory (the concrete field set) if available.</step>
+    <step order="3">Read `ADR-034` (the identity intent — the central citation) + `ADR-046`/`ADR-045` (the model this indexes; structural exemplar) + neighbors (ADR-024, ADR-032, ADR-038, ADR-027) so the Related section cites them correctly, and `ParticipantReference.cs` for the resolved-vs-unresolved shape.</step>
+    <step order="4">Author `.claude/adr/ADR-0NN-communication-participant-index.md` (concise): Status (Accepted, dated), Context (participants unqueryable today; junction needed for `participant=`), Decision covering the five parts with MUST/MUST NOT (message grain / two typed lookups exactly-one-set / unresolved rows first-class / role precision / populated by `ParticipantCorrelationRung` reuse), a dedicated **ADR-034 path-C** subsection arguing the 2-vs-6-target intent, Consequences, Related.</step>
+    <step order="5">Author `docs/adr/ADR-0NN-communication-participant-index.md` (full): same decision + Alternatives Considered (ADR-034 Guid+type tuple; a single polymorphic person lookup; text-index over `sprk_from/to/cc`; thread-grain rows / both-grain) each with the reason rejected + fuller rationale + consequences + revision log.</step>
+    <step order="6">Add the ADR row to `.claude/adr/INDEX.md` (Accepted, with a concise five-part summary + the ADR-034 path-C note) and to `docs/adr/INDEX.md`.</step>
+    <step order="7">Confirm reachability via the ADR INDEX row (root `CLAUDE.md` §17 already points at the INDEX; do NOT edit root CLAUDE.md). Add the required `.claude/CHANGELOG.md` entry.</step>
+    <step order="8">Run `/adr-check` against `spec.md` — confirm the new ADR has no contradiction with ADR-034 (path-C, not amendment), ADR-046/045 (indexes, not a second pipeline), ADR-024 (orthogonal to regarding); confirm cross-references resolve and ADR-047 was not claimed.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md` (004 ✅) + `current-task.md`; confirm dependent 050 unblocked. Record decisions (the claimed ADR number, the final ADR-034 argument, any alternative explicitly rejected).</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Verify the ADR slot + cross-reference resolution</tool>
+    <tool name="read">Spec §ADR-Tensions + ADR-034/046/045 + the messaging-r1 007 mirror + task 003 inventory</tool>
+    <tool name="edit">Author both ADR forms + update both INDEXes + `.claude/CHANGELOG.md`</tool>
+    <tool name="adr-check">Validate the new ADR against spec + neighbors (esp. ADR-034 path C)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-0NN-communication-participant-index.md (AUTHORED — concise Accepted ADR, ~120–160 lines)</output>
+    <output type="docs">docs/adr/ADR-0NN-communication-participant-index.md (AUTHORED — full form with Alternatives Considered + revision log)</output>
+    <output type="docs">.claude/adr/INDEX.md (UPDATED — new ADR row, Accepted)</output>
+    <output type="docs">docs/adr/INDEX.md (UPDATED — new ADR row)</output>
+    <output type="docs">.claude/CHANGELOG.md (entry for the new ADR)</output>
+    <output type="docs">projects/messaging-communication-app-r2/tasks/TASK-INDEX.md (status update 004 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A concise Accepted ADR (~120–160 lines) exists at `.claude/adr/ADR-0NN-communication-participant-index.md` with Status / Context / Decision (MUST + MUST NOT) / Consequences / Related — at the lowest unreserved slot (ADR-047 NOT claimed).</criterion>
+    <criterion testable="true">A full-form ADR exists at `docs/adr/ADR-0NN-communication-participant-index.md` with Alternatives Considered (Guid+type tuple, single polymorphic lookup, text-index, thread-grain/both-grain) + a revision log.</criterion>
+    <criterion testable="true">The Decision codifies all five parts: message grain (parent = `sprk_communication`, no thread-grain rows); two typed nullable lookups (exactly one set for resolved); unresolved external rows first-class (`isresolved=false` + `addresstext`); role precision {From,To,Cc,Bcc}; populated by `ParticipantCorrelationRung` reuse.</criterion>
+    <criterion testable="true">A dedicated subsection argues the ADR-034 tension as **path C (comply-with-intent)** — 2 typed lookups honor the tuple's intent for a 2-target identity — and does NOT propose amending ADR-034 (no path B).</criterion>
+    <criterion testable="true">Related cites ADR-034 (central), ADR-024, ADR-045, ADR-046, ADR-032, ADR-038, ADR-027; the junction is framed as a message-grain index, NOT a regarding mechanism or a second pipeline.</criterion>
+    <criterion testable="true">Both ADR INDEXes show the new ADR Accepted; it is reachable via the ADR INDEX row (root `CLAUDE.md` §17); `.claude/CHANGELOG.md` has the entry.</criterion>
+    <criterion testable="true">`/adr-check` passes against `spec.md` with the new ADR included; no existing cross-reference regresses; ADR-047 was not claimed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    MAIN-SESSION ONLY (§3): do not delegate to an Agent-tool sub-agent — the `.claude/adr/` write would be denied. If a parallel agent reports "Edit denied on `.claude/...`" that is the boundary working correctly.
+
+    Mirror messaging-r1 task 007 (ADR-046) exactly in workflow + structure — this is the participant-index sibling for the same subsystem. The central job of this ADR is the ADR-034 path-C argument: be precise that ADR-034's tuple exists to avoid a 6-target polymorphic lookup + forbid text-name matching, and that a 2-target identity honors that intent with typed lookups. This is comply-with-intent (path C), not an amendment.
+
+    This ADR DOCUMENTS a locked design (spec FR-08, owner-approved 2026-07-18) — it does not re-open the field set or the grain. Blocks 050 (the participant-index write cites this ADR). Land it early in W0 so 050's `adr-check` has the anchor.
+
+    ADR-047 is reserved for `spaarke-notification-spine-r1` — cite it as the reserved sibling; do not claim it. The claimed number is expected to be ADR-048 but MUST be re-verified against the live INDEX at execution.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor per `&lt;rigor-hint&gt;` — Step 9.5 gates SKIPPED, but the explicit `/adr-check` in step 8 is REQUIRED. Execute from the MAIN SESSION (§3 write boundary — this task is `parallel-safe: false`). State the §11 Component Justification (new ADR) in the ADR Context. Model tier `opus` @ effort `high` (architectural authoring + the ADR-034 argument must be precise).
+    </protocol>
+  </execution>
+</task>

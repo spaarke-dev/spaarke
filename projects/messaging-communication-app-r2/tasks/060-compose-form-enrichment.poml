@@ -1,0 +1,143 @@
+<task id="060" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Compose-form enrichment — Subject/topic + structured To/Cc/Bcc recipient picker (reuse `RecipientField`) feeding the participant index</title>
+    <phase>W6 — Compose-Form Enrichment (CC-5)</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <deps>050</deps>
+    <blocks></blocks>
+    <tags>pcf, frontend, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Enriches the R1 compose surface (`TimelineComposeBox`) that feeds the live send path; `.tsx` shared-lib UI wired to the BFF; the structured recipients drive the task-050 participant index at capture, so the emitted record-id/type contract is correctness-relevant. ADR-021 (Fluent v9 / dark mode), ADR-028 (auth at boundary only), §11 (reuse `RecipientField`, no new picker) bind. FR-10 acceptance is a closed set. FULL.</rigor-reason>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits the shared-lib compose surface (`TimelineComposeBox` + `RecipientField`) — a client file surface disjoint from the BFF (050/051) and the widget (030). Depends on 050 only for the participant-contract shape (what resolved record id/type the picker must emit); no shared BFF file overlap.</parallel-reason>
+    <fr-refs>FR-10</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Enrich the R1 compose surface (`TimelineComposeBox`) so a composed message carries a Subject and structured recipients (FR-10):
+
+    - **Subject/topic field** — populates `sprk_subject` AND drives a meaningful `sprk_name` (no more "(No Subject)" — the server default the send path falls back to today).
+    - **Structured recipient picker (To / Cc / Bcc)** — resolves each recipient to a `contact`/`systemuser` **record id + type**, so the resolved recipients feed the task-050 participant index at capture (exactly one typed person lookup per resolved recipient; role = the field it was entered in). **Expose Cc and Bcc** on the form (the send path DTO `SendCommunicationRequest` already carries `sprk_cc`/`sprk_bcc`/`Subject` — only the FORM omits them today).
+    - **Free-text fallback** — an external address that does not resolve is still accepted and sent (it becomes an unresolved participant row via task 050, Q-D).
+
+    **REUSE the existing `RecipientField` component** — extend its selection so the resolved `ILookupItem` id + entity type surface to the caller (today `IRecipient.sourceId` is "audit/debug only"); do NOT build a new picker (§11). `RecipientField` already resolves free-text against the directory via `onSearch`, splits `;`/`,` paste, and renders removable tags — reuse all of it.
+
+    Do NOT change the BFF send path or the participant WRITE (task 050 owns the write; the DTO already supports Subject/Cc/Bcc). This task is the compose FORM only.
+  </prompt>
+
+  <role>
+    Spaarke frontend engineer for the Communication compose surface. Authority on `TimelineComposeBox` and the `EmailComposer` sub-components (`RecipientField`, `IRecipient`), Fluent v9 (ADR-021), and the `authenticatedFetch`/`@spaarke/auth`-at-the-boundary contract (ADR-028). Fluent in reusing `RecipientField` as the ONE canonical recipient-normalization implementation (its module contract forbids caller-local parsing).
+  </role>
+
+  <goal>
+    The `TimelineComposeBox` compose surface captures a Subject (populating `sprk_subject` + a meaningful `sprk_name`) and structured To/Cc/Bcc recipients that resolve to `contact`/`systemuser` record id + type — feeding the task-050 participant index at capture — with Cc/Bcc exposed (the DTO already supports them) and a free-text fallback retained for external addresses. The recipient UI reuses the existing `RecipientField` (its selection extended to emit resolved id + entity type); no new picker is built. Renders correctly in Fluent v9 light/dark; `@spaarke/auth` stays at the boundary; ui-tests cover Subject/Cc/Bcc rendering + dark mode + resolved-vs-free-text emission.
+  </goal>
+
+  <context>
+    <background>
+      R1's `TimelineComposeBox` is a minimal composer; the send path (`SendCommunicationRequest`, `CommunicationService.cs`) already supports `Subject`/`Cc`/`Bcc` — the FORM just omits them, so messages persist "(No Subject)" and Cc/Bcc are unreachable, and recipients arrive as free text (no resolved person ids). FR-10 closes that: add Subject + structured To/Cc/Bcc so (1) threads name meaningfully (feeds CC-1 `BuildTopic` naming), and (2) resolved recipients drive the CC-2 participant index (task 050) with exact typed-person identity + role instead of unresolved text.
+
+      Component Justification (§11 — reuse, not new): `RecipientField` is THE canonical recipient-normalization component (its header forbids caller-local parsing; it already resolves free-text via `onSearch`, splits `;`/`,` paste, renders removable Fluent tags, and carries `IRecipient.sourceId` = the originating `ILookupItem.id`). (1) Existing — `RecipientField` fully overlaps the recipient-input need. (2) Extension — extend its selection so the resolved record id + ENTITY TYPE (contact vs systemuser) surface to the caller (today `sourceId` is "audit/debug only" and type is not carried) so task 050 can set the correct typed lookup. (3) Cost-of-doing-nothing (concrete): without structured resolution the participant index (task 050) gets only free text → every recipient is an unresolved row, `participant=` (FR-02) loses person precision, and threads keep persisting "(No Subject)". Building a NEW picker would duplicate the one canonical implementation — forbidden by §11 and by `RecipientField`'s own module contract.
+
+      Boundary discipline (ADR-028): the shared compose components take an injected `authenticatedFetch` / directory-search callback; they never import `@spaarke/auth` — the PCF host binds it at the boundary. Keep that contract; add no auth import to the shared lib.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/TimelineComposeBox.tsx (PRIMARY — add Subject + To/Cc/Bcc via RecipientField; expose Cc/Bcc)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/RecipientField.tsx (REUSE + extend selection to emit resolved id + entity type; do NOT clone)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts (`IRecipient` — `email`/`displayName`/`resolved`/`sourceId`; extend to carry entity type)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/ (the compose-box API/service that posts to the BFF send path — thread Subject/Cc/Bcc/structured recipients through)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/RecipientField.test.tsx (reference test pattern)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-10">Add Subject/topic (populates `sprk_subject` + a meaningful `sprk_name` — no "(No Subject)"), a structured To/Cc/Bcc recipient picker resolving to `contact`/`systemuser` record id + type (drives the participant index, task 050), and EXPOSE Cc/Bcc (DTO already has `sprk_cc`/`sprk_bcc`). Free-text fallback retained for external addresses.</constraint>
+    <constraint source="project §11">REUSE `RecipientField` — extend its selection to emit resolved id + entity type; MUST NOT build a new picker. `RecipientField` is the ONE canonical recipient-normalization implementation; no caller-local parsing.</constraint>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens; dark mode via the host `FluentProvider`. Subject/Cc/Bcc fields + tags render correctly light and dark.</constraint>
+    <constraint source="ADR-028">The shared compose components take an injected `authenticatedFetch` / directory-search callback; they MUST NOT import `@spaarke/auth` — the PCF host binds auth at the boundary.</constraint>
+    <constraint source="scope">Do NOT change the BFF send path or the participant WRITE (task 050). The DTO already supports `Subject`/`Cc`/`Bcc`; this is the compose FORM only. No BFF publish-size/CVE (client-only; root §10 N/A).</constraint>
+    <constraint source="build">Shared-lib change consumed by a PCF — build via the shared-lib build + the consuming PCF's `npm run build:prod` (NOT `npm run build` — AP-1). Dual-consumer awareness: `RecipientField` is shared by `EmailComposer` — MUST NOT break existing email compose callers.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/TimelineComposeBox.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/RecipientField.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+    <patterns>
+      <pattern name="RecipientField reuse (canonical recipient input)" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/RecipientField.tsx">
+        The ONE recipient-normalization component: `;`/`,` paste split, directory resolution via `onSearch`, removable Fluent tags, free-text accepted + validated. Reuse for To/Cc/Bcc; extend selection so the resolved `ILookupItem` id + entity type surface (today `IRecipient.sourceId` is audit-only). Do NOT add caller-local parsing.
+      </pattern>
+      <pattern name="Boundary-injected fetch/search" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/TimelineComposeBox.tsx">
+        The compose surface takes injected `authenticatedFetch` / directory-search callbacks; the PCF host binds `@spaarke/auth` at the boundary. The shared components never import auth (ADR-028).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `TimelineComposeBox.tsx` in full, `RecipientField.tsx` + `IRecipient` (`EmailComposer.types.ts`), the compose-box API/service that posts to the BFF send path, and the existing `RecipientField` test. Confirm how the send request maps to `SendCommunicationRequest` (`Subject`/`Cc`/`Bcc` already supported server-side).</step>
+    <step order="2">Extend the recipient contract minimally: add the resolved entity type (contact vs systemuser) alongside the existing `IRecipient.sourceId` so a resolved recipient carries {email, displayName, resolved, sourceId, entityType}. Keep it backward-compatible for existing `EmailComposer` callers (additive/optional).</step>
+    <step order="3">Add the Subject/topic field to `TimelineComposeBox`; wire it to `sprk_subject` and a meaningful `sprk_name` derivation (no "(No Subject)"). Add To/Cc/Bcc rows using `RecipientField` (reuse, not clone) — expose Cc and Bcc (collapsible if the R1 UI warrants). Free-text fallback retained.</step>
+    <step order="4">Thread the Subject + structured To/Cc/Bcc (resolved ids + type, plus free-text remainder) through the compose-box send call into `SendCommunicationRequest` so the resolved recipients reach the task-050 participant write at capture and Cc/Bcc populate `sprk_cc`/`sprk_bcc`.</step>
+    <step order="5">Verify no `@spaarke/auth` import is added to the shared lib (boundary-injected `authenticatedFetch`/search only). Verify the existing `EmailComposer` callers of `RecipientField` still compile + behave (dual-consumer safety).</step>
+    <step order="6">Build the shared lib + the consuming PCF (`npm run build:prod` — NOT `npm run build`, AP-1). Resolve type errors; run the ui-tests below.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` (focus: `RecipientField` reused not cloned, resolved id+type emission, no auth import in shared lib, `EmailComposer` callers unbroken, Fluent v9 dark mode); `adr-check` against ADR-021/028/022 + `spec.md` (FR-10, §11). Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (060 ✅) + `current-task.md`; record decisions (the extended recipient contract shape, how resolved id+type flows to `SendCommunicationRequest`, Subject→`sprk_name` derivation).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">TimelineComposeBox, RecipientField, IRecipient types, compose-box send service, existing tests</tool>
+    <tool name="edit">Add Subject + To/Cc/Bcc (reuse RecipientField); extend the recipient contract; thread values to the send request</tool>
+    <tool name="bash">Shared-lib + PCF `npm run build:prod`; run the ui-tests</tool>
+    <tool name="ui-test">Compose renders Subject/Cc/Bcc; resolved-vs-free-text; dark mode</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/TimelineComposeBox.tsx (UPDATED — Subject + To/Cc/Bcc via RecipientField)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts + RecipientField.tsx (UPDATED — resolved id + entity type surfaced; backward-compatible)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/ (send-call wiring: Subject/Cc/Bcc/structured recipients → SendCommunicationRequest)</output>
+    <output type="test">ui-tests (below) — Subject/Cc/Bcc render, resolved-vs-free-text emission, dark mode</output>
+    <output type="docs">§11 reuse justification (RecipientField extended, not cloned) + the extended recipient contract (in PR / current-task.md)</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test>The compose surface renders a Subject field and To/Cc/Bcc rows; sending populates `sprk_subject` + a meaningful `sprk_name` (never "(No Subject)") and `sprk_cc`/`sprk_bcc` — no console errors.</ui-test>
+    <ui-test>A recipient resolved via the directory emits a `contact`/`systemuser` record id + entity type (drives the task-050 participant index); an unresolved free-text address is still accepted and sent (free-text fallback).</ui-test>
+    <ui-test>Dark mode (ADR-021): the Subject field, To/Cc/Bcc `RecipientField` rows, and recipient tags render correctly under the host `FluentProvider` dark theme (semantic tokens).</ui-test>
+    <ui-test>The existing `EmailComposer` callers of `RecipientField` still render + behave (dual-consumer regression — the shared component was extended, not forked).</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">The compose form captures a Subject that populates `sprk_subject` + a meaningful `sprk_name` — no message persists "(No Subject)".</criterion>
+    <criterion testable="true">To/Cc/Bcc are exposed; Cc/Bcc populate `sprk_cc`/`sprk_bcc` (already in the DTO); a structured recipient resolves to a `contact`/`systemuser` record id + entity type that feeds the task-050 participant index at capture.</criterion>
+    <criterion testable="true">A free-text external address that does not resolve is still accepted and sent (becomes an unresolved participant row via task 050, Q-D).</criterion>
+    <criterion testable="true">The recipient UI REUSES `RecipientField` (grep confirms reuse, not a cloned picker); `IRecipient` is extended additively so existing `EmailComposer` callers stay unbroken.</criterion>
+    <criterion testable="true">No `@spaarke/auth` import is added to the shared lib (boundary-injected `authenticatedFetch`/search only, ADR-028); Fluent v9 dark mode renders correctly (ADR-021).</criterion>
+    <criterion testable="true">Shared-lib + consuming PCF build clean via `npm run build:prod` (NOT `npm run build`); ui-tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 050 for the participant-contract shape (what resolved record id + entity type the picker must emit so the write can set the correct typed lookup and role). No BFF change here — the send path DTO already supports Subject/Cc/Bcc (`CommunicationService.cs` reads `sprk_subject`/`sprk_cc`; falls back to "(No Subject)"). Watch the dual-consumer surface: `RecipientField` is shared with `EmailComposer` — extend the contract additively so email compose is not broken. `parallel-safe:true` (client file surface disjoint from BFF/widget).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 (code-review + adr-check) MANDATORY. Build via `npm run build:prod` (NOT `npm run build` — AP-1). No BFF publish-size/CVE (client-only, root §10 N/A). REUSE `RecipientField` — extend, do not clone (§11); keep the `@spaarke/auth`-at-boundary contract (ADR-028); Fluent v9 dark mode (ADR-021). Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,153 @@
+<task id="040" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Standalone All-Communications page `src/solutions/sprk_communicationspage/` (~50-line shell copying `sprk_invoicespage/src/main.tsx`) bound to grid config `e1826c4c-…`; register in `Deploy-AllDataGridConsumers.ps1`; widget/launcher only — NO permanent sitemap entry in R2</title>
+    <phase>W4 — Standalone Page + Grid Polish (Surface 2) — ship it</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <deps></deps>
+    <blocks></blocks>
+    <tags>frontend, deploy</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New file creation (a ~50-line Code Page shell that copies an existing pattern verbatim except configId + title) plus a deploy-script registration. It reuses the shipped DataGrid framework + `DataGridPageShell` + the existing grid config `e1826c4c-…` — no new component, no new access mechanism, no shared-path edit. STANDARD (Step 9.5 skipped) is correct; the surface is a thin copy of `sprk_invoicespage`, not a load-bearing new component.</rigor-reason>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>A NEW `src/solutions/sprk_communicationspage/` folder + one additive entry in `scripts/Deploy-AllDataGridConsumers.ps1` — disjoint by file from the BFF (C#) tracks, the schema tracks, and the widget task (030). Reads via `Xrm.WebApi` through the shipped DataGrid framework; touches no shared source.</parallel-reason>
+    <fr-refs>FR-11</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Create the standalone **All-Communications page** (FR-11) — Surface 2 of R2. It is a thin ~50-line Code Page shell at `src/solutions/sprk_communicationspage/` that copies `src/solutions/sprk_invoicespage/src/main.tsx` verbatim except for the config GUID and title, mounting the shipped `<DataGridPageShell>` from `@spaarke/ui-components` pointed at the existing "Active Communications" grid config.
+
+    Requirements:
+    - **~50-line shell** — copy `sprk_invoicespage/src/main.tsx`: import `DataGridPageShell` from `@spaarke/ui-components`, set `CONFIG_ID` to the communications grid config, render the shell inside `createRoot(...).render(<React.StrictMode><App/></React.StrictMode>)`. Unlike the invoices page (which is a matter-scoped drill-through), the All-Communications page is GLOBAL — it needs no `parentContext` (omit the matter-id parsing, or pass `parentContext={undefined}`). No business logic lives here.
+    - **Bind to grid config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`** — the shipped "Active Communications" `sprk_gridconfiguration` (entity `sprk_communication`). REUSE it; do NOT create a second default config for `sprk_communication` (NFR-05). Copy the GUID exactly from `spec.md` (FR-11 / §Scope Surface 2).
+    - **Register in `scripts/Deploy-AllDataGridConsumers.ps1`** — add the new page to the deploy script's consumer list alongside `sprk_invoicespage` and the other DataGrid Code Pages, so it builds + deploys with the rest.
+    - **Widget/launcher only — NO permanent sitemap entry in R2** (owner Q-B). Ship the shell + the deploy-script registration; the page is reached via the widget/launcher/deep link. Do NOT add a sitemap/app-navigation entry — that is deferred to a later config pass.
+
+    §11: no communications standalone page exists today (investigation §3) — this is a new ~50-line shell that copies the invoicespage pattern; the only concrete cost-of-doing-nothing is that there is no standalone All-Communications entry point (spec req 4, the grid half). Do NOT rebuild the grid framework or add a colliding second grid config.
+  </prompt>
+
+  <role>
+    Spaarke Code Page developer fluent in the DataGrid framework host contract (`DataGridPageShell` from `@spaarke/ui-components`), the `src/solutions/*` Vite/React Code Page pattern, and the `Deploy-AllDataGridConsumers.ps1` build/deploy registration. Familiar with `sprk_invoicespage` as the ~50-line shell precedent.
+  </role>
+
+  <goal>
+    A new `src/solutions/sprk_communicationspage/` Code Page exists — a ~50-line shell copying `sprk_invoicespage/src/main.tsx` (mounting `<DataGridPageShell configId="e1826c4c-9575-f111-ab0e-7ced8ddc4a05">` with no `parentContext`, global scope) — registered in `scripts/Deploy-AllDataGridConsumers.ps1`. It renders the DataGrid with auto-derived channel/person/date/regarding chips off the reused config (no second default). NO permanent sitemap entry (Q-B). Builds + deploys via the DataGrid consumers script.
+  </goal>
+
+  <context>
+    <background>
+      Surface 2 of R2 is the standalone All-Communications view. The DataGrid framework + the "Active Communications" grid config are ALREADY BUILT (from `ai-spaarke-ai-workspace-UI-r2`): config record `sprk_gridconfiguration` GUID `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`, entity `sprk_communication`; framework at `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/` (+ `DataGridPageShell.tsx`); views + filter chips auto-derived (`filterChips/chipDiscovery.ts`) — channel/person/date/regarding appear OOB when the column is in the view's layoutXml (investigation §3). So the standalone page is a ~50-line shell: copy `src/solutions/sprk_invoicespage/src/main.tsx`, swap the configId + title, and register in the deploy script.
+
+      §11 Component Justification: no communications standalone page exists today (investigation §3). Existing overlap (grep): none — `sprk_invoicespage` is matter-scoped invoices, not communications. Extension test: the shell IS the copy-the-pattern approach; there is no page to extend. Cost-of-doing-nothing: there is no standalone All-Communications entry point (spec req 4, grid half). The shell is a thin copy, not a new load-bearing component.
+
+      Owner Q-B (LOCKED 2026-07-18): the page is **widget/launcher only for R2 — no permanent sitemap entry**. Ship the shell + the `Deploy-AllDataGridConsumers.ps1` registration; defer permanent sitemap/app placement to a later config pass. Reach the page via the widget/launcher/deep link.
+
+      The invoices page mounts the shell with a matter-scoped `parentContext` (drill-through). The All-Communications page is GLOBAL — omit the matter-id parsing and pass no `parentContext` (or `undefined`). No BFF changes — the grid reads via `Xrm.WebApi` through `XrmDataverseClient` (`docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`); root §10 (BFF hygiene, publish-size, CVE) does NOT apply.
+    </background>
+    <relevant-files>
+      <file>src/solutions/sprk_communicationspage/ (NEW — Vite/React Code Page: src/main.tsx ~50-line shell, index.html, package.json, vite config, mirroring `sprk_invoicespage` layout)</file>
+      <file>src/solutions/sprk_invoicespage/src/main.tsx (COPY — the ~50-line `DataGridPageShell` shell to mirror; swap configId + title; drop matter-scoped parentContext for global scope)</file>
+      <file>src/solutions/sprk_invoicespage/ (READ — full folder layout: index.html, package.json, vite/tsconfig, deploy metadata to mirror)</file>
+      <file>scripts/Deploy-AllDataGridConsumers.ps1 (EDIT — register the new page in the consumer list)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/ (CONSUME — `DataGridPageShell`; `filterChips/chipDiscovery.ts` auto-derives chips)</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md (READ — grid config + Code Page host wiring)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-11">Standalone `src/solutions/sprk_communicationspage/` ~50-line shell copying `sprk_invoicespage/src/main.tsx`, bound to grid config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`; registered in `Deploy-AllDataGridConsumers.ps1`; renders the DataGrid with auto-derived channel/person/date/regarding chips.</constraint>
+    <constraint source="NFR-05">MUST reuse grid config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` (single default) — MUST NOT create a second `sprk_gridconfiguration` default for `sprk_communication`.</constraint>
+    <constraint source="project">Owner Q-B — widget/launcher only for R2; NO permanent sitemap/app-navigation entry. Ship the shell + deploy-script registration only.</constraint>
+    <constraint source="project">The page is GLOBAL (all communications) — omit the matter-scoped `parentContext` used by `sprk_invoicespage`; pass no `parentContext` (or `undefined`).</constraint>
+    <constraint source="ADR-026">Code Page standard — the standalone page is a Code Page (`DataGridPageShell` host contract); mirror the shipped `sprk_invoicespage` Code Page pattern.</constraint>
+    <constraint source="ADR-012">Consume `DataGridPageShell` from `@spaarke/ui-components` (shared lib); no cross-package source-path imports; no business logic in the shell.</constraint>
+    <constraint source="project">No BFF publish-size / CVE obligations — client-only Code Page, reads via `Xrm.WebApi`/`XrmDataverseClient` (root §10 N/A). Build via the Code Page toolchain (`npm install --legacy-peer-deps` per root §12), NOT dotnet or `npm ci`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>src/solutions/sprk_invoicespage/src/main.tsx</file>
+      <file>scripts/Deploy-AllDataGridConsumers.ps1</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/filterChips/chipDiscovery.ts</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="DataGridPageShell ~50-line Code Page" location="src/solutions/sprk_invoicespage/src/main.tsx">
+        Copy verbatim except configId + title: import `DataGridPageShell` from `@spaarke/ui-components`, set `CONFIG_ID`, render inside `createRoot(...).render(<React.StrictMode><App/></React.StrictMode>)`. The shell owns FluentProvider + theme listener + box-sizing + `XrmDataverseClient`.
+      </pattern>
+      <pattern name="Global (no parentContext) vs matter-scoped" location="src/solutions/sprk_invoicespage/src/main.tsx">
+        The invoices page parses `matterId` → `parentContext` (drill-through). The All-Communications page is global — drop `parseMatterId`/`buildParentContext` and pass no `parentContext`.
+      </pattern>
+      <pattern name="Deploy-script consumer registration" location="scripts/Deploy-AllDataGridConsumers.ps1">
+        Add the new `sprk_communicationspage` to the DataGrid consumers list so it builds + deploys alongside `sprk_invoicespage` and the other Code Pages.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `src/solutions/sprk_invoicespage/` in full (`src/main.tsx`, `index.html`, `package.json`, vite/tsconfig, any deploy metadata) and `scripts/Deploy-AllDataGridConsumers.ps1`. Confirm the reused config GUID `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` from `spec.md` (FR-11).</step>
+    <step order="2">Scaffold `src/solutions/sprk_communicationspage/` mirroring the invoicespage folder layout (index.html, package.json, vite config, tsconfig). Set the page name/title to "All Communications".</step>
+    <step order="3">Author `src/main.tsx` (~50 lines): copy the invoicespage shell, set `CONFIG_ID = "e1826c4c-9575-f111-ab0e-7ced8ddc4a05"`, render `<DataGridPageShell configId={CONFIG_ID} onBack={() => window.close()} />` with NO `parentContext` (global scope — drop the matter-id parsing). No business logic.</step>
+    <step order="4">Edit `scripts/Deploy-AllDataGridConsumers.ps1`: register `sprk_communicationspage` in the consumer list alongside `sprk_invoicespage` and the other Code Pages (mirror the existing entry shape).</step>
+    <step order="5">Build the page: `npm install --legacy-peer-deps --no-audit --no-fund` (NOT `npm ci`) + the Code Page build. Resolve type/lint errors. Confirm it points at the reused config and creates NO second grid default.</step>
+    <step order="6">Deploy via the `code-page-deploy` skill (or run `Deploy-AllDataGridConsumers.ps1` for the new consumer). Confirm the page renders the DataGrid with auto-derived channel/person/date/regarding chips. Do NOT add a sitemap entry (Q-B).</step>
+    <step order="7">Update `tasks/TASK-INDEX.md` (040 ✅) + `current-task.md`; record decisions (reused configId, global-scope/no-parentContext choice, deploy-script registration, no-sitemap per Q-B, launch path = widget/launcher/deep link).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">`sprk_invoicespage` folder, `Deploy-AllDataGridConsumers.ps1`, DataGrid chipDiscovery, DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE</tool>
+    <tool name="write">`sprk_communicationspage/` shell (main.tsx, index.html, package.json, vite/tsconfig)</tool>
+    <tool name="edit">`scripts/Deploy-AllDataGridConsumers.ps1` (register the new consumer)</tool>
+    <tool name="bash">npm install --legacy-peer-deps + Code Page build</tool>
+    <tool name="code-page-deploy">Build + deploy the standalone page consumer</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/sprk_communicationspage/src/main.tsx (NEW — ~50-line `DataGridPageShell` shell, global scope, config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`)</output>
+    <output type="code">src/solutions/sprk_communicationspage/ (NEW — index.html, package.json, vite/tsconfig mirroring `sprk_invoicespage`)</output>
+    <output type="code">scripts/Deploy-AllDataGridConsumers.ps1 (UPDATED — registers the new page consumer)</output>
+    <output type="docs">Deploy record: page renders the grid + auto-derived chips; no sitemap entry (Q-B); launch path (in current-task.md / PR)</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test>The standalone page loads and renders the `<DataGridPageShell>` bound to config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` with NO console errors (verified via the `ui-test` skill / harness).</ui-test>
+    <ui-test>The auto-derived filter chips (channel / date / regarding / person) appear in the grid toolbar and filter rows on selection.</ui-test>
+    <ui-test>Dark mode (ADR-021): the page shell, grid, and chips render correctly in the dark theme (Fluent v9 tokens pass through).</ui-test>
+    <ui-test>No sitemap entry is created in R2 (Q-B) — the page is reachable via the deploy/launch path only, not a permanent nav node.</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">A new `src/solutions/sprk_communicationspage/` Code Page exists — a ~50-line shell copying `sprk_invoicespage/src/main.tsx`, mounting `<DataGridPageShell configId="e1826c4c-9575-f111-ab0e-7ced8ddc4a05">` with NO `parentContext` (global scope).</criterion>
+    <criterion testable="true">The page binds to the existing grid config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` and renders the DataGrid with auto-derived channel/person/date/regarding chips.</criterion>
+    <criterion testable="true">No second `sprk_gridconfiguration` default for `sprk_communication` was created (NFR-05, single default).</criterion>
+    <criterion testable="true">The page is registered in `scripts/Deploy-AllDataGridConsumers.ps1` and builds + deploys alongside the other DataGrid Code Pages.</criterion>
+    <criterion testable="true">NO permanent sitemap/app-navigation entry was added (Q-B) — the page is reachable via widget/launcher/deep link only.</criterion>
+    <criterion testable="true">The page build is clean; no business logic lives in the shell (the `DataGridPageShell` owns FluentProvider + theme + `XrmDataverseClient`).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Copies `sprk_invoicespage`'s build/deploy pattern verbatim EXCEPT the config GUID, the title, and dropping the matter-scoped `parentContext` (this page is global). The grid config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` is the shipped "Active Communications" record from `ai-spaarke-ai-workspace-UI-r2` — REUSE, no second default.
+
+    Task 041 curates the views/columns on that same config so the chips auto-derive correctly — 040 and 041 are the two parallel W4 grid-half tracks (this page renders whatever 041 curates). The rich workspace widget (task 030) reads the same config from the SpaarkeAi/LegalWorkspace surfaces.
+
+    Q-B: no sitemap entry in R2 — deferred to a later config pass. Do not add app-navigation placement here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. STANDARD rigor — Step 9.5 (code-review + adr-check) SKIPPED per `&lt;rigor-hint&gt;`. Client-only Code Page: build via the Code Page toolchain (`npm install --legacy-peer-deps`, NOT dotnet / NOT `npm ci`); no publish-size/CVE step (root §10 N/A). Deploy via `code-page-deploy` / `Deploy-AllDataGridConsumers.ps1`. Reuse config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`; NO sitemap entry (Q-B). Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

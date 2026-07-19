@@ -1,0 +1,162 @@
+<task id="071" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Thread naming re-derive (`BuildTopic` re-derives `sprk_name` unless user-edited, marker-gated) + place RegardingResolver PCF on the thread form (0 code)</title>
+    <phase>W7 — Auto-Threading + Thread Naming</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <deps>002, 070</deps>
+    <blocks></blocks>
+    <tags>bff-api, pcf, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits shared `Services/Communication/ThreadResolver.cs` (`BuildTopic` re-derive) on the persist/resolve path AND places a PCF on the shared thread form; touches `.cs` + a `pcf` config surface. FULL protocol + Step 9.5 gates required. `parallel-safe: true` because it lands strictly AFTER 070 (its blocker) serializes the shared-resolver edit — but it still runs `/conflict-check` before the PR (shared `Services/Communication/` hot-path).</rigor-reason>
+    <parallel-group>W7</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Depends on 070 (same file), which serializes the shared-resolver edit; 071 lands after 070 so there is no concurrent shared-path writer. The PCF placement is a form-config change on `sprk_communicationthread` (0 code in RegardingResolver). Still `/conflict-check` before the PR.</parallel-reason>
+    <fr-refs>FR-06, FR-07, NFR-01, NFR-02, NFR-04</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Two coupled deliverables completing thread regarding-resolution + naming (FR-07, building on the FR-06 schema from task 002):
+
+    **(1) Naming re-derive (BFF).** Add "re-derive `sprk_name` UNLESS user-edited" logic to `ThreadResolver.BuildTopic()` (`src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs` ~line 175), gated by the **naming-edited marker** field added in task 002. Today `BuildTopic` runs ONCE at thread create (`sprk_name` line 101) and is never revisited; `sprk_name` is user-editable but a later regarding change never refreshes it. FR-07: when a thread's regarding changes AND the marker says "auto", re-run `BuildTopic` and update `sprk_name`; when the marker says "edited" (a user changed the name), preserve the user's name on subsequent regarding changes. The marker flips to "edited" on user edit.
+
+    **(2) RegardingResolver PCF on the thread form (0 code).** Place the EXISTING entity-agnostic RegardingResolver PCF (`src/client/pcf/RegardingResolver/`, FR-22 — attaches to any form via its `entity` prop, **zero code change**) on the `sprk_communicationthread` main form with `entity="sprk_communicationthread"`, binding the **new Lookup discriminator** field added in task 002. The PCF writes the typed `sprk_regarding{...}` lookups + the discriminator (its standard `applyResolverFields` / `PolymorphicResolverService` behavior) — giving the thread the same regarding-resolution `sprk_communication` already has, WITHOUT a second regarding mechanism (ADR-046 path-C: reuse the PCF, add a bindable Lookup).
+
+    The thread regarding change (from the PCF write) is the trigger for the re-derive in (1). Keep the naming-edited marker + discriminator writes ADDITIVE (NFR-04 — the existing Text `sprk_regardingrecordtype` is NOT retyped and stays the denormalized copy). This is BFF (`BuildTopic` re-derive + marker read) + PCF config (0 code); `/conflict-check` before the PR (shared resolver file, after 070).
+  </prompt>
+
+  <role>
+    Spaarke BFF + PCF integrator for the Communication subsystem. Authority on `Services/Communication/ThreadResolver.cs` and on the entity-agnostic RegardingResolver PCF placement pattern. Fluent in ADR-046 (no second regarding mechanism — reuse RegardingResolver + a bindable Lookup), ADR-024 (11-entity regarding family mirrored by `RegardingFieldMap.All`), ADR-028 (read path untouched), §10 BFF Hygiene, §11 Component Justification. You add the smallest marker-gated re-derive to the resolver and place a shipped PCF via form config — no new component.
+  </role>
+
+  <goal>
+    `ThreadResolver.BuildTopic()` re-derives `sprk_name` on a regarding change ONLY while the naming-edited marker (task 002) says "auto"; a user edit flips the marker to "edited" and is preserved on subsequent regarding changes. The existing RegardingResolver PCF is placed on the `sprk_communicationthread` form (`entity="sprk_communicationthread"`, 0 code) binding the new Lookup discriminator and writing the typed regarding lookups + discriminator. Both marker + discriminator writes are additive (NFR-04). Build clean; publish-size (≈0) + CVE + Placement Justification reported; Step 9.5 FULL gates run; `/conflict-check` clean before PR.
+  </goal>
+
+  <context>
+    <background>
+      Task 002 adds to `sprk_communicationthread`: typed `sprk_regarding{...}` lookups (all 11, mirroring `RegardingFieldMap.All`), a NEW Lookup discriminator field, a naming-edited marker (boolean auto-vs-edited), and the default-thread marker (consumed by 070). This task consumes the naming-edited marker + the Lookup discriminator.
+
+      Current naming: `ThreadResolver.CreateThreadAsync` sets `sprk_name = TruncateTo(BuildTopic(...), 200)` once at create (line 101). `BuildTopic` (line 175) prefers the message subject, then the anchor record name, then a channel-typed fallback ("Conversation" / "(No Subject)"). There is NO re-derive on regarding change and no auto-vs-edited flag — a user rename is silently clobbered if re-derive were added naively, which is exactly what the marker gate prevents.
+
+      Regarding on the thread: R1 wrote only the denormalized regarding text quartet (`sprk_regardingrecordid/type/name/url`). The thread's `sprk_regardingrecordtype` is **Text** (not a Lookup), so RegardingResolver — which requires a Lookup binding — cannot attach until task 002 adds the Lookup discriminator. `sprk_communication`'s regarding is written server-side by the association engine; the THREAD's regarding is what this PCF resolves on the form.
+
+      **Component Justification (§11):** no NEW component. The re-derive EXTENDS `BuildTopic` (existing method). RegardingResolver is REUSED via config (0 code — it is already entity-agnostic per FR-22). The only new surface (the naming-edited marker + Lookup discriminator) belongs to task 002. Cost-of-doing-nothing: without the marker gate, either the name never refreshes on a regarding change (stale thread names — Success Criterion 4 fails) OR a naive re-derive clobbers user edits (data loss); without the PCF placement + Lookup discriminator, thread regarding stays manual/denormalized and RegardingResolver cannot attach.
+
+      **Scope discipline:** extend `BuildTopic`'s call path with a marker gate; place the PCF via form config. Do NOT modify RegardingResolver's code (0 code change). Do NOT add a second regarding mechanism (ADR-046 — no CommunicationConnections / Field Mapping Framework). Do NOT retype the Text `sprk_regardingrecordtype` (NFR-04). Do NOT touch the read path (ADR-028).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs (BuildTopic ~line 175; CreateThreadAsync ~line 95; sprk_name ~line 101)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs (the 11-entity typed-lookup map)</file>
+      <file>src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml (entity-agnostic manifest — 0 code)</file>
+      <file>src/client/pcf/RegardingResolver/ (applyResolverFields / PolymorphicResolverService — standard write behavior)</file>
+      <file>projects/messaging-communication-app-r2/tasks/002-schema-thread-regarding-lookups.poml (naming-edited marker + Lookup discriminator + typed lookups source schema)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (ThreadResolver tests — extend for the re-derive gate)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-07">Add "re-derive `sprk_name` unless user-edited" to `ThreadResolver.BuildTopic()` gated by the naming-edited marker; name re-derives on regarding change ONLY while the marker says "auto"; a user edit sets the marker to "edited" and is preserved. Place the existing RegardingResolver PCF (`entity="sprk_communicationthread"`, 0 code) on the thread form binding the new Lookup discriminator; it writes typed lookups + discriminator.</constraint>
+    <constraint source="FR-06 / ADR-024">The typed `sprk_regarding{...}` lookups the PCF writes mirror `RegardingFieldMap.All` (all 11). The re-derive reads the thread's resolved regarding (the same ADR-024 family), not a new mechanism.</constraint>
+    <constraint source="ADR-046">Path-C comply — REUSE RegardingResolver (0 code) + a bindable Lookup discriminator (task 002). MUST NOT use CommunicationConnections PCF or the Field Mapping Framework for thread regarding; MUST NOT introduce a second regarding mechanism.</constraint>
+    <constraint source="NFR-04">The naming-edited marker + Lookup discriminator writes are ADDITIVE. MUST NOT retype the existing Text `sprk_regardingrecordtype` (breaking — ThreadResolver + membership + timeline filters still read it).</constraint>
+    <constraint source="NFR-02">The re-derive path stays best-effort / non-fatal — a re-derive/marker read failure MUST NOT throw to the caller (log + keep the existing name).</constraint>
+    <constraint source="ADR-028 / NFR-03">Write/resolve-side + form-config only. MUST NOT touch the impersonation read path or add any access logic.</constraint>
+    <constraint source="project">Depends on 070 (same file, landed first). Run `/conflict-check` before the PR (shared `Services/Communication/` hot-path). RegardingResolver placement is form config on `sprk_communicationthread` — 0 PCF code change.</constraint>
+    <constraint source="root-§10">bff-extensions Placement Justification in the PR; publish-size delta vs ~46.99 MB baseline (expect ≈0); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs</file>
+      <file>src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="One-shot BuildTopic to gate" location="src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs">
+        `BuildTopic` (line 175) currently runs once at create (line 101). Add a re-derive call path that checks the naming-edited marker before overwriting `sprk_name`; skip the overwrite when the marker says "edited".
+      </pattern>
+      <pattern name="Entity-agnostic RegardingResolver placement (0 code)" location="src/client/pcf/RegardingResolver/">
+        RegardingResolver attaches to ANY form via its `entity` prop (FR-22). Place on `sprk_communicationthread` with `entity="sprk_communicationthread"` binding the task-002 Lookup discriminator; it writes typed lookups + discriminator via `applyResolverFields` — no PCF code change.
+      </pattern>
+      <pattern name="Regarding map mirror (all 11)" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs">
+        The typed lookups the PCF binds mirror `RegardingFieldMap.All` (the 11-entity map). The re-derive reads the resolved regarding via the same map fallback the resolver already uses.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `ThreadResolver.cs` (`BuildTopic` line 175, `CreateThreadAsync` line 95, `ReadRegardingAnchorAsync` line 128), the task-002 naming-edited marker + Lookup discriminator schema (exact field names + types), and the RegardingResolver manifest + `applyResolverFields` write behavior. Confirm the trigger: a regarding change on the thread (PCF write) is what should refresh the name.</step>
+    <step order="2">Read `.claude/constraints/bff-extensions.md` §F + root §11 + ADR-046 (path-C reuse) + ADR-024 + ADR-028 (read path untouched) before editing.</step>
+    <step order="3">Implement the marker-gated re-derive: add a re-derive path that, on a thread regarding change while the naming-edited marker = "auto", re-runs `BuildTopic` and updates `sprk_name`; when the marker = "edited", leaves `sprk_name` untouched. Ensure the create path stamps the marker = "auto" initially. Keep the re-derive best-effort/non-fatal (NFR-02).</step>
+    <step order="4">Define the marker flip: a user edit to `sprk_name` sets the marker to "edited". If the flip is enforced by a plugin/flow rather than the BFF, DOCUMENT the exact mechanism + where it lives in the PR/notes; if the BFF owns it on its write path, implement it there. State the chosen mechanism explicitly (root §6 — surface ambiguity rather than guessing).</step>
+    <step order="5">Place the RegardingResolver PCF on the `sprk_communicationthread` main form: `entity="sprk_communicationthread"`, bound to the task-002 Lookup discriminator; verify it writes the typed `sprk_regarding{...}` lookups + discriminator (mirrors `sprk_communication`'s resolution). Confirm 0 RegardingResolver code change. Declare the bound field (per R1 lesson — a code component only appears in the form component library if it binds a field).</step>
+    <step order="6">Confirm additivity (NFR-04): the marker + discriminator writes touch only the new task-002 fields; the Text `sprk_regardingrecordtype` is untouched and still the denormalized copy read by ThreadResolver/membership/timeline filters.</step>
+    <step order="7">Write tests for the re-derive gate: (a) regarding change while marker=auto → `sprk_name` re-derives; (b) user edits name → marker=edited → a SUBSEQUENT regarding change PRESERVES the edited name; (c) a re-derive failure is non-fatal (NFR-02, existing name kept). Re-run 070's characterization + tier tests — confirm STILL GREEN (naming change does not disturb the ladder).</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + the targeted ThreadResolver tests — all green.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-r2-071-publish/`; report compressed size + delta vs ~46.99 MB baseline. Expected ≈ 0 (no new package).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.</step>
+    <step order="9.5">FULL-rigor quality gates (REQUIRED — shared-resolver edit + form surface): `code-review` on the diff (focus: marker gate correct [user edits preserved], no second regarding mechanism ADR-046, additive NFR-04, NFR-02 non-fatal, PCF 0-code + bound field, read path untouched); `adr-check` against `spec.md`. Address Critical findings; cite Placement Justification. Per root §6.5, surface any ADR tension.</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/` hot-path — after 070). Then update `tasks/TASK-INDEX.md` (071 ✅) + reset `current-task.md`; record decisions (marker-flip mechanism, re-derive trigger, PCF binding field, form placement).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect `ThreadResolver.cs`, task-002 marker/discriminator schema, RegardingResolver manifest</tool>
+    <tool name="edit">`BuildTopic` re-derive + marker gate; tests</tool>
+    <tool name="pcf-deploy">Place/deploy the RegardingResolver PCF on the thread form (0 code) if a solution repack is needed</tool>
+    <tool name="dataverse-deploy">Thread form config (RegardingResolver placement binding the Lookup discriminator)</tool>
+    <tool name="bash">Build, tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs (UPDATED — marker-gated `BuildTopic` re-derive)</output>
+    <output type="config">`sprk_communicationthread` main form (UPDATED — RegardingResolver PCF placed, `entity="sprk_communicationthread"`, bound to the Lookup discriminator; 0 PCF code change)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (re-derive-gate tests: auto→re-derive, edited→preserved, non-fatal)</output>
+    <output type="docs">PR description with §11 (extend-only + config reuse) + Placement Justification + publish-size delta + CVE result + the chosen marker-flip mechanism</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test>The RegardingResolver PCF renders on the `sprk_communicationthread` form (entity="sprk_communicationthread") with NO console errors (verified via the `ui-test` skill / harness); it is 0-code-change placement.</ui-test>
+    <ui-test>Setting/changing the thread's regarding via the resolver writes the typed regarding lookups + the new Lookup discriminator (task 002), and the denormalized Text `sprk_regardingrecordtype` remains populated.</ui-test>
+    <ui-test>Naming behavior: on a regarding change while the naming-edited marker is "auto", `sprk_name` re-derives; after a manual name edit (marker → "edited"), a subsequent regarding change preserves the user's name.</ui-test>
+    <ui-test>Dark mode (ADR-021): the resolver control renders correctly in the dark theme (Fluent v9 tokens pass through).</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ThreadResolver.BuildTopic()` re-derives `sprk_name` on a regarding change ONLY while the naming-edited marker says "auto" — verified by test.</criterion>
+    <criterion testable="true">A user edit to `sprk_name` sets the marker to "edited"; a SUBSEQUENT regarding change PRESERVES the user's name (no clobber) — verified by test.</criterion>
+    <criterion testable="true">The RegardingResolver PCF is placed on the `sprk_communicationthread` form with `entity="sprk_communicationthread"`, binds the new Lookup discriminator (task 002), and writes typed `sprk_regarding{...}` lookups + discriminator — with ZERO RegardingResolver code change.</criterion>
+    <criterion testable="true">The PCF declares a bound field (R1 lesson — a code component only appears in the form component library if it binds a field).</criterion>
+    <criterion testable="true">Marker + discriminator writes are ADDITIVE (NFR-04): the Text `sprk_regardingrecordtype` is NOT retyped and remains the denormalized copy.</criterion>
+    <criterion testable="true">The re-derive is best-effort/non-fatal (NFR-02); no second regarding mechanism introduced (ADR-046 — no CommunicationConnections / Field Mapping Framework); the read path is untouched (ADR-028).</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta ≈ 0 vs ~46.99 MB; no new HIGH CVE; Step 9.5 gates run; `/conflict-check` clean before PR; 070's tier + characterization tests STILL GREEN.</criterion>
+    <criterion testable="true">NEGATIVE: a naive unconditional re-derive that clobbers a user-edited name is NOT shipped (the marker gate is mandatory); no new component or NuGet package added.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 002 (naming-edited marker + Lookup discriminator + typed lookups) + 070 (same-file shared-resolver edit landed first). The marker-flip mechanism (who sets "edited" on a user rename — BFF write path vs a plugin/flow) is the one execution-time ambiguity: DECIDE it explicitly and document it (root §6), do not leave it implicit.
+
+    ADR-046 path-C is already the project's chosen resolution (reuse RegardingResolver + a bindable Lookup discriminator). If placement surfaces a new tension, use the §6.5 protocol rather than introducing a second mechanism.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 quality gates REQUIRED (shared-resolver edit + form surface). Lands after 070 (same file). Per root §10 + §11: publish-size delta + CVE + Placement Justification + extend-only/config-reuse justification in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

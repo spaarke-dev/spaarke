@@ -1,0 +1,156 @@
+<task id="080" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Vertical-slice seam tests: `by-regarding` + filtered `query` + `participant=` facet + auto-threading 3 tiers; 11-entity pass; access-parity negatives; preserve email/messaging characterization</title>
+    <phase>W8 — Tests + Docs + Wrap</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <deps>010, 011, 022, 050, 051, 070</deps>
+    <blocks></blocks>
+    <tags>bff-api, testing</tags>
+    <rigor>TEST-MODIFYING</rigor>
+    <rigor-reason>Modifies `tests/**` and tags include `testing` → per root §8 TEST-MODIFYING override row, code-review + adr-check at Step 9.5 run UNCONDITIONALLY (binding ≥6 months from 2026-06-26, ADR-038 / spec FR-B07). Authors integration-heavy vertical-slice seam tests for the R2 read/query/participant/auto-threading surfaces + access-parity negatives + characterization guards on the shared email/messaging flows; ADR-038 KEEP-path categories bind (esp. `tests/integration/seam/**`).</rigor-reason>
+    <parallel-group>W8</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Authors test files under `tests/**` disjoint from 081 (docs). Depends on the shipped R2 spine (010/011 reads, 022 11-form placement, 050/051 participant, 070 auto-threading) so the seams under test are real.</parallel-reason>
+    <fr-refs>NFR-03, FR-01, FR-02, FR-08, FR-09</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Author the **integration-heavy vertical-slice seam tests** for the R2 read/query/organize surfaces per ADR-038, and PRESERVE the existing email/messaging behavior under characterization tests. Per ADR-038 the seam-level end-to-end tests live under `tests/integration/seam/**` (the vertical-slice-seam category is the DoD for dispatch-spine changes — here the new read endpoints + resolver policy). **Reuse-first / no-clone**: extend the R1 `tests/integration/seam/Communication/` harness/fixtures rather than standing up a parallel harness (§11).
+
+    Cover these vertical slices (each a real end-to-end path through the shipped code, boundary-mocked only at true external edges per ADR-038):
+
+    1. **`by-regarding` read slice** (FR-01/010) — `GET /api/communications/by-regarding/{entityType}/{id}` returns a record's threads + messages through `CommunicationThreadReadService` + `IImpersonatedCommunicationQuery` + `ICommunicationAccessFilter`. Assert it applies the R1 impersonation + 2-rule (privacy + internal-only) filter and returns the R1 DTO shape. **11-entity pass**: parameterize across ALL 11 regarding-family entity-sets (or ≥3 explicitly + a data-driven loop asserting entity-set-agnostic behavior for the rest) — the spec requires ≥3 covered; cover the full 11 as a parameterized matrix.
+    2. **Filtered `query` slice** (FR-02/011/051) — `GET /api/communications?thread=&regarding=&channel=&from=&to=&participant=` — one assertion per facet (thread, regarding, channel, date-range) reusing the read path, PLUS the **`participant=` facet** (051) resolving against the `sprk_communicationparticipant` junction (role-correct rows, NOT text-LIKE), including an unresolved-external-party row (`sprk_isresolved=false`) surfacing via `participant=`. Unknown/empty filters degrade gracefully.
+    3. **Auto-threading 3-tier slice** (FR-09/070) — the resolver ladder: Tier 1 (subject/conversation JOIN), Tier 2 (per-record default thread — lazy + one-per-record), Tier 3 (per-user master catch-all). Assert every message resolves to a non-null thread and the per-record default / per-user master are idempotent (a second orphan joins the same default/master).
+    4. **Access-parity NEGATIVES** (NFR-03) — a **private-thread-hidden** case (a private thread's messages are invisible to a user without a grant) and an **internal-only-hidden** case (an `internal-only` message invisible to a non-internal user) on BOTH new read surfaces. **MUST verify no membership-union crept back in** (retired 2026-07-16): a user who would ONLY be authorized by the old membership-union path sees NOTHING — reads stay impersonation + 2-rule filter.
+
+    **Characterization guard (mandatory, NFR-03):** BEFORE the 050/070 shared-path extensions are exercised, ensure the EXISTING email/messaging capture + thread-resolution behavior is pinned green (extend/reference the R1 characterization tests — do NOT clone). Assert they stay green after.
+
+    Follow ADR-038 strictly: NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor null-check tests; boundary mocks only (Dataverse client / impersonation seam at their true edges); `TimeProvider` over `Stopwatch`. Tests are the deliverable — no product code change.
+  </prompt>
+
+  <role>
+    Spaarke test engineer authoritative on ADR-038 (integration-heavy pyramid, 7 KEEP-path categories, `tests/integration/seam/**` vertical-slice-seam DoD, banned mock patterns), ADR-028 (impersonation read path), ADR-034 (participant tuple intent), and the R1+R2 Communication read/resolve spine (read service, access filter, participant junction, thread resolver). Writes vertical-slice seam tests + access-parity negatives + characterization guards; does not modify product code.
+  </role>
+
+  <goal>
+    Vertical-slice seam tests exist (under `tests/integration/seam/Communication/` where end-to-end, `tests/unit/Sprk.Bff.Api.Tests/` where unit-appropriate) covering `by-regarding` (11-entity pass + access filter), filtered `query` (per-facet + `participant=` junction incl. unresolved external), auto-threading (3 tiers + idempotency), and access-parity NEGATIVES (private-thread-hidden, internal-only-hidden, no-membership-union-regression). Existing email/messaging capture + resolution is characterization-pinned and stays green. All tests follow ADR-038 (no banned mock patterns; boundary mocks only; `TimeProvider`). `dotnet test` green; no product code changed.
+  </goal>
+
+  <context>
+    <background>
+      NFR-03 (access parity) is the load-bearing obligation: EVERY new read surface (FR-01/02/03/04) MUST enforce R1's impersonation + 2-rule filter and MUST NOT reintroduce membership-union on reads (retired 2026-07-16 — `../messaging-communication-app-r1/notes/access-model-decision.md`). This task proves that with explicit negatives. R1's task 080 established the pattern: seam tests under `tests/integration/seam/Communication/` + per-rung tests by reference (no clone). This R2 task ADDS the read/query/participant/auto-threading slices to that harness.
+
+      §11 (test surface): reuse the R1 seam-test fixtures/harness rather than standing up a parallel harness; add R2 cases to it. The characterization guard is the load-bearing obligation for the shared `Services/Communication/` edits (050 participant write + 070 auto-threading) — the existing email/messaging behavior MUST be pinned green before/after.
+
+      ADR-038 bans (enforced by code-review at Step 9.5): no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration-only tests, no ctor null-check tests; use `TimeProvider` not `Stopwatch`; boundary mocks only (the Dataverse/impersonation client at its true seam).
+
+      Access-parity is security-sensitive: the negatives are not optional. A private-thread-hidden test AND an internal-only-hidden test on both new endpoints, PLUS a regression guard asserting a user authorized only by the old membership-union sees nothing — this is what keeps the retired union from silently returning.
+    </background>
+    <relevant-files>
+      <file>tests/integration/seam/Communication/ (EXTEND — R1 spine seam tests; add R2 read/query/participant/auto-threading slices here)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (EXTEND — unit-appropriate resolver-tier/facet/participant cases)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs (by-regarding + filtered query — under test)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessFilter.cs + IImpersonatedCommunicationQuery.cs (2-rule filter — under test)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs (3-tier auto-threading — under test)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ParticipantCorrelationRung.cs (participant resolution — participant-write seam)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md (KEEP-path categories + banned patterns)</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md (7 KEEP categories, mock-boundary rules)</file>
+      <file>../messaging-communication-app-r1/notes/access-model-decision.md (reads = impersonation + 2-rule; membership-union retired)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-03">Access parity — all new read surfaces (FR-01/02) enforce R1's impersonation + 2-rule filter (privacy + internal-only). Explicit negatives: private-thread-hidden + internal-only-hidden on both endpoints; a regression guard that a user authorized ONLY by the retired membership-union sees nothing.</constraint>
+    <constraint source="ADR-038">Seam end-to-end tests live under `tests/integration/seam/**` (vertical-slice-seam KEEP category = DoD for the new read endpoints + resolver policy). NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor null-check tests; boundary mocks only; `TimeProvider` over `Stopwatch`.</constraint>
+    <constraint source="FR-01 / project">`by-regarding` seam test covers the **11-entity pass** — parameterize across all 11 regarding-family entity-sets (spec requires ≥3 explicitly; cover the full 11 via a data-driven matrix) + a private-thread-hidden case.</constraint>
+    <constraint source="FR-02 / FR-08">`query` seam test has one case per facet (thread/regarding/channel/date) + the `participant=` facet joining `sprk_communicationparticipant` (role-correct, NOT text-LIKE), including an unresolved-external row (`sprk_isresolved=false`) surfaced via `participant=`.</constraint>
+    <constraint source="FR-09">Auto-threading slice asserts all 3 tiers resolve to a non-null thread; per-record default is lazy + one-per-record; per-user master is one-per-user (idempotency verified).</constraint>
+    <constraint source="project (NFR-03)">§11 — EXTEND the R1 seam-test harness/fixtures; do NOT clone a parallel harness. Characterization-reference existing email/messaging tests rather than duplicating (ADR-038). The shared-path edits (050/070) MUST be pinned green before + after.</constraint>
+    <constraint source="root §8 TEST-MODIFYING">code-review + adr-check run UNCONDITIONALLY at Step 9.5 (override row; binding).</constraint>
+    <constraint source="project">Tests-only deliverable — no product code change. Touches the BFF test project: run the build + targeted test run; publish-size/CVE unchanged (test-only) — state so.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>../messaging-communication-app-r1/notes/access-model-decision.md</file>
+    </files>
+    <patterns>
+      <pattern name="R1 spine seam tests (precedent)" location="tests/integration/seam/Communication/">
+        R1 task 080 added spine seam tests here; extend the SAME harness with the R2 read/query/participant/auto-threading slices — one harness, additive cases, no clone.
+      </pattern>
+      <pattern name="Access-parity negative" location="src/server/api/Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessFilter.cs">
+        Drive a private thread + an internal-only message through the read endpoint as an unauthorized/non-internal caller and assert INVISIBILITY; add a regression case that a user authorized only by the retired membership-union sees nothing.
+      </pattern>
+      <pattern name="Participant junction facet" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ParticipantCorrelationRung.cs">
+        Seed junction rows (resolved systemuser/contact + an unresolved external `sprk_addresstext` row) and assert `participant=` returns role-correct rows including the unresolved external — not a text-LIKE match.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read ADR-038 (KEEP-path categories, `tests/integration/seam/**`, banned patterns), `TEST-ARCHITECTURE.md`, `tests/CLAUDE.md`, the R1 `tests/integration/seam/Communication/` harness, and the access-model-decision note. Read the shipped R2 surfaces under test (010/011 reads, 050/051 participant, 070 auto-threading, 022 11-form placement).</step>
+    <step order="2">Characterization guard FIRST: locate the existing email/messaging capture + thread-resolution tests. If they pin the behavior the 050/070 extensions touch, reference/extend them; if a gap exists, add characterization tests. Run them green as the baseline (NFR-03 / Success Criteria 2/5).</step>
+    <step order="3">Author the `by-regarding` slice (FR-01): parameterized 11-entity pass (data-driven across all 11 regarding-family entity-sets) asserting entity-set-agnostic behavior + the impersonation + 2-rule filter + R1 DTO shape; include a private-thread-hidden case.</step>
+    <step order="4">Author the filtered `query` slice (FR-02/051): one case per facet (thread/regarding/channel/date) reusing the read path + the `participant=` facet joining the junction (role-correct rows, including an unresolved-external `sprk_isresolved=false` row); unknown/empty filters degrade gracefully.</step>
+    <step order="5">Author the auto-threading 3-tier slice (FR-09/070): Tier 1 JOIN, Tier 2 per-record default (lazy + one-per-record — a second orphan joins the same default), Tier 3 per-user master (one-per-user); every message resolves non-null.</step>
+    <step order="6">Author the access-parity NEGATIVES (NFR-03): private-thread-hidden + internal-only-hidden on BOTH new endpoints; a regression guard asserting a user authorized ONLY by the retired membership-union sees nothing (no union regression). Security-sensitive — these are mandatory.</step>
+    <step order="7">Verify NO banned patterns (grep for `Mock&lt;HttpMessageHandler&gt;`, DI-registration-only tests, ctor null-check tests); place seam end-to-end tests under `tests/integration/seam/**`, unit-appropriate cases under `tests/unit/Sprk.Bff.Api.Tests/`; `TimeProvider` for any timing.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test` (targeted: Communication + seam filters, then the broad Communication suite) — all green, including the characterization baseline before + after.</step>
+    <step order="9.5">Step 9.5 (UNCONDITIONAL per TEST-MODIFYING): `code-review` on the new tests (focus: ADR-038 compliance, no banned mocks, boundary-only, 11-entity pass present, access-parity negatives + no-union regression present, characterization guard present); `adr-check` against ADR-038 + ADR-028 + ADR-034 + `spec.md` (NFR-03, FR-01/02/08/09). Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (080 ✅) + `current-task.md`; record decisions (which slices are seam vs unit, 11-entity matrix approach, characterization approach [extend vs new], boundary mocks used, test count) — feed task 090's `/test-diet` (note MAINTAIN-class seam/characterization vs any scaffolding).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">ADR-038, TEST-ARCHITECTURE, R1 seam harness, access-model-decision, shipped R2 surfaces</tool>
+    <tool name="write">Vertical-slice seam tests + access-parity negatives + characterization tests</tool>
+    <tool name="edit">Extend the R1 seam-test harness/fixtures</tool>
+    <tool name="bash">dotnet build + targeted/broad dotnet test; grep for banned patterns</tool>
+    <tool name="code-review">Step 9.5 (UNCONDITIONAL — TEST-MODIFYING)</tool>
+    <tool name="adr-check">Step 9.5 (UNCONDITIONAL — TEST-MODIFYING)</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Communication/ (EXTENDED — by-regarding [11-entity], filtered query [per-facet + participant=], auto-threading [3 tiers], access-parity negatives)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (EXTENDED — unit-appropriate resolver-tier / facet / participant cases)</output>
+    <output type="test">Email/messaging characterization tests (referenced or added; green before + after 050/070)</output>
+    <output type="docs">Test-diet-relevant notes: which tests are MAINTAIN-class vs scaffolding (feeds task 090 `/test-diet`)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`by-regarding` slice: parameterized across the 11 regarding-family entity-sets (≥3 explicit + data-driven matrix), asserts the impersonation + 2-rule filter and R1 DTO shape; a private-thread-hidden case passes.</criterion>
+    <criterion testable="true">Filtered `query` slice: one case per facet (thread/regarding/channel/date) + the `participant=` facet returns role-correct junction rows (NOT text-LIKE), including an unresolved-external `sprk_isresolved=false` row; unknown/empty filters degrade gracefully.</criterion>
+    <criterion testable="true">Auto-threading slice: all 3 tiers resolve to a non-null thread; per-record default is lazy + one-per-record; per-user master is one-per-user (idempotency asserted).</criterion>
+    <criterion testable="true">Access-parity NEGATIVES: private-thread-hidden + internal-only-hidden on BOTH new endpoints; a regression guard asserts a user authorized ONLY by the retired membership-union sees nothing (NFR-03 — no union regression).</criterion>
+    <criterion testable="true">Existing email/messaging capture + resolution is characterization-pinned and stays green before + after the 050/070 shared-path extensions.</criterion>
+    <criterion testable="true">No banned patterns (`Mock&lt;HttpMessageHandler&gt;`, DI-registration, ctor null-check); seam end-to-end tests under `tests/integration/seam/**`; `TimeProvider` over `Stopwatch`; `dotnet test` green; no product code changed.</criterion>
+    <criterion testable="true">NEGATIVE: the harness is EXTENDED not cloned (§11 — no parallel harness); publish-size/CVE unchanged (test-only) and stated so.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    TEST-MODIFYING rigor (root §8 override row) — Step 9.5 code-review + adr-check are UNCONDITIONAL. Depends on the shipped R2 spine (010/011/022/050/051/070) so the seams are real. The access-parity negatives + no-membership-union regression guard are the NFR-03 load-bearing obligation — they are security-sensitive and mandatory.
+
+    Feed task 090's `/test-diet`: as you add tests, note which are MAINTAIN-class (seam + characterization + access-parity → KEEP) vs any scaffolding, so project-close reconciliation is straightforward.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. TEST-MODIFYING rigor — Step 9.5 (code-review + adr-check) UNCONDITIONAL per root §8. Touches the BFF test project: run `dotnet build` + `dotnet test`; publish-size/CVE unchanged (test-only) — state so. No product code change. EXTEND the R1 harness (no clone, §11). Dispatch at model-tier `sonnet` @ effort `xhigh`.
+    </protocol>
+  </execution>
+</task>
