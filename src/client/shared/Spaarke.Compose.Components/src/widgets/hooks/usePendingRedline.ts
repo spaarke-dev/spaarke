@@ -42,6 +42,35 @@ import type { ComposeDraftPayload, ComposeDraftProvenance } from '../ComposeEdit
 /** How the client resolves `target_text` in the document (adeu `match_mode`, Spike 2). */
 export type RedlineMatchMode = 'strict' | 'first' | 'all';
 
+/**
+ * FR-13 (spaarkeai-compose-r3 task 031, amendment 2026-07-18 §6.5 Path B) — coarse, qualitative
+ * confidence cue for a pending redline. NEVER a numeric/percentage score (design §6.2 anti-false-
+ * precision; ADR-039). Rendered as a SECONDARY badge behind the rationale (the primary trust cue).
+ */
+export type ConfidenceBand = 'high' | 'medium' | 'low';
+
+/**
+ * FR-13 (client-derived) — deterministic confidence-band derivation, ported from the retired server
+ * `ComposeDraftDisposition.DeriveConfidenceBand` (task 030, removed per §6.5 Path B / commit
+ * `675d2d161`). Same both/one/neither truth table as the server version, over two grounding signals:
+ *
+ *  - `hasSources` — the payload cited grounding sources (`sources` non-empty).
+ *  - `targetResolves` — the redline's target anchor actually resolves against the LIVE editor
+ *    document RIGHT NOW (stronger than the retired server check, which could only see a match_mode
+ *    "claim" — the server never had the live document; the client does, so it verifies for real).
+ *
+ * `high` when BOTH signals hold, `medium` when exactly one holds, `low` when neither holds. A pure
+ * function over these two booleans — NOT a model self-report, and structurally incapable of reading
+ * any `confidence_band` value a hostile/buggy model payload might smuggle in (this function never
+ * sees the raw payload, only the two derived signals `usePendingRedline` computes from real grounding
+ * evidence + a real live-document resolution check).
+ */
+export function deriveConfidenceBand(hasSources: boolean, targetResolves: boolean): ConfidenceBand {
+  if (hasSources && targetResolves) return 'high';
+  if (hasSources || targetResolves) return 'medium';
+  return 'low';
+}
+
 /** A resolved document range in ProseMirror positions. */
 export interface RedlineSpan {
   from: number;
@@ -75,6 +104,18 @@ export interface PendingRedline {
   rationale?: string;
   /** True when the suggestion replaced existing text (has a deletion half); false for a pure insertion. */
   hasDeletion: boolean;
+  /**
+   * FR-13 (client-derived, §6.5 Path B) — coarse confidence cue, secondary to the rationale.
+   * See {@link deriveConfidenceBand}. Recomputed REACTIVELY as the document changes (a target the
+   * user deletes outside accept/reject drops this redline out of the live-resolves signal).
+   */
+  confidenceBand: ConfidenceBand;
+  /**
+   * Whether the source payload cited grounding sources at materialize time (retained, alongside the
+   * live doc, to support the reactive {@link confidenceBand} recompute — `sources` is a durable payload
+   * field, so this half of the signal never changes after materialize; only `targetResolves` does).
+   */
+  hasSources: boolean;
 }
 
 /** Surfaced when a `target_text` cannot be resolved to a unique span — FR-19 "do not guess" rule. */
@@ -377,6 +418,9 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
       if (!editor) return 'noop';
       const { ledgerRef, bindingId, turn } = provenance;
       const newText = payload?.new_text ?? '';
+      // FR-13 (client-derived, §6.5 Path B) — grounding signal 1: the payload cites sources. Durable
+      // payload field; does not change after materialize (only the live-doc resolve signal does).
+      const hasSources = Array.isArray(payload?.sources) && payload.sources.length > 0;
 
       // Idempotent: a re-signal for content already rendered (e.g. a duplicate Flow-5 event) is a no-op.
       if (isPresent(editor, ledgerRef)) {
@@ -385,12 +429,21 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
         // the doc still holds a deletion mark for this ledgerRef. Hardcoding false mislabeled every
         // strike+replace redline as insertion-only.
         const reconstructedHasDeletion = collectMarkedRanges(editor, DELETION, ledgerRef).length > 0;
+        const reconstructedHasSources = hasSources;
         setPending(prev =>
           prev.some(p => p.ledgerRef === ledgerRef)
             ? prev
             : [
                 ...prev,
-                { ledgerRef, bindingId, turn, rationale: payload?.rationale, hasDeletion: reconstructedHasDeletion },
+                {
+                  ledgerRef,
+                  bindingId,
+                  turn,
+                  rationale: payload?.rationale,
+                  hasDeletion: reconstructedHasDeletion,
+                  hasSources: reconstructedHasSources,
+                  confidenceBand: deriveConfidenceBand(reconstructedHasSources, reconstructedHasDeletion),
+                },
               ]
         );
         return 'already_present';
@@ -496,7 +549,18 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
       setError(null);
       setPending(prev => {
         const kept = prev.filter(p => !superseded.some(s => s.ledgerRef === p.ledgerRef));
-        return [...kept, { ledgerRef, bindingId, turn, rationale: payload?.rationale, hasDeletion }];
+        return [
+          ...kept,
+          {
+            ledgerRef,
+            bindingId,
+            turn,
+            rationale: payload?.rationale,
+            hasDeletion,
+            hasSources,
+            confidenceBand: deriveConfidenceBand(hasSources, hasDeletion),
+          },
+        ];
       });
       return 'applied';
     },
@@ -528,6 +592,9 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
         const subRef = `${baseRef}#${i}`;
         const newText = payload?.new_text ?? '';
         const targetText = payload?.target_text ?? '';
+        // FR-13 (client-derived, §6.5 Path B) — per-edit grounding signal 1 (each change-list entry
+        // is its own PendingRedline with its own confidence band).
+        const editHasSources = Array.isArray(payload?.sources) && payload.sources.length > 0;
 
         if (targetText.length === 0) {
           // Insertion-style edit (no target) — insert at the current caret as a pending insertion.
@@ -537,7 +604,15 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
           }
           const insertionHtml = buildInsertionHtml(newText, bindingId, subRef);
           editor.chain().insertContentAt(editor.state.selection.to, insertionHtml).run();
-          newPending.push({ ledgerRef: subRef, bindingId, turn, rationale: payload?.rationale, hasDeletion: false });
+          newPending.push({
+            ledgerRef: subRef,
+            bindingId,
+            turn,
+            rationale: payload?.rationale,
+            hasDeletion: false,
+            hasSources: editHasSources,
+            confidenceBand: deriveConfidenceBand(editHasSources, false),
+          });
           statuses.push('applied');
           return;
         }
@@ -565,7 +640,15 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
         const insertPoints = resolved.spans.map(s => s.to).sort((a, b) => b - a);
         for (const at of insertPoints) chain = chain.insertContentAt(at, insertionHtml);
         chain.run();
-        newPending.push({ ledgerRef: subRef, bindingId, turn, rationale: payload?.rationale, hasDeletion: true });
+        newPending.push({
+          ledgerRef: subRef,
+          bindingId,
+          turn,
+          rationale: payload?.rationale,
+          hasDeletion: true,
+          hasSources: editHasSources,
+          confidenceBand: deriveConfidenceBand(editHasSources, true),
+        });
         statuses.push('applied');
       });
 
@@ -610,6 +693,37 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
     },
     [editor]
   );
+
+  // FR-13 (client-derived confidence band, §6.5 Path B) — REACTIVE recompute. `deriveConfidenceBand`'s
+  // second signal (does the target still resolve?) is a live-document fact, so it can go stale the
+  // instant the user edits the doc OUTSIDE accept/reject (e.g. manually deleting a redline's struck
+  // original). Re-derive every pending item's band on every editor transaction against the CURRENT
+  // doc state; `pendingRef` lets the listener stay registered once per editor instance instead of
+  // re-subscribing on every `pending` change (mirrors the FIX #9 scroll-measure effect's `editor.on`
+  // pattern above). A no-op update (no band actually changed) skips the `setPending` call.
+  const pendingRef = React.useRef(pending);
+  pendingRef.current = pending;
+
+  React.useEffect(() => {
+    if (!editor) return undefined;
+    const recomputeConfidenceBands = (): void => {
+      const current = pendingRef.current;
+      if (current.length === 0) return;
+      let changed = false;
+      const next = current.map(p => {
+        const targetResolves = collectMarkedRanges(editor, DELETION, p.ledgerRef).length > 0;
+        const band = deriveConfidenceBand(p.hasSources, targetResolves);
+        if (band === p.confidenceBand) return p;
+        changed = true;
+        return { ...p, confidenceBand: band };
+      });
+      if (changed) setPending(next);
+    };
+    editor.on('update', recomputeConfidenceBands);
+    return () => {
+      editor.off('update', recomputeConfidenceBands);
+    };
+  }, [editor]);
 
   // Memoize the result object so consumers (ComposeEditor's useImperativeHandle keys on `redline`)
   // get a STABLE reference across renders that don't change the underlying values — without this the

@@ -80,7 +80,7 @@ import TaskItem from '@tiptap/extension-task-item';
 import CharacterCount from '@tiptap/extension-character-count';
 import TextAlign from '@tiptap/extension-text-align';
 
-import { makeStyles, mergeClasses, tokens, Spinner, Text, Button, Tooltip } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens, Spinner, Text, Button, Tooltip, Badge } from '@fluentui/react-components';
 import {
   ArrowDown20Regular,
   Checkmark16Regular,
@@ -98,7 +98,7 @@ import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { QaHighlightExtension } from './marks/QaHighlightExtension';
-import { usePendingRedline, type MaterializeStatus } from './hooks/usePendingRedline';
+import { usePendingRedline, type MaterializeStatus, type ConfidenceBand } from './hooks/usePendingRedline';
 import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighlight';
 import { ComposeFindReplaceExtension } from './hooks/useComposeFindReplace';
 import { COMPOSE_R3_STYLES } from './hooks/useComposeDocumentStyles';
@@ -803,16 +803,42 @@ const useStyles = makeStyles({
     zIndex: 2,
     boxShadow: tokens.shadow16,
   },
-  // DEF-12 — label inside the per-change on-click accept/reject popover (task 033/FR-16 rationale
-  // shown truncated, Tier-3-safe). Semantic tokens only (ADR-021 dark-mode-correct). The former
-  // fixed `redlineControls`/`redlineItem` bar styles were removed with the bar itself.
-  redlineLabel: {
-    flex: 1,
-    minWidth: 0,
+  // FR-14 (task 031) — rationale-first popover restructure: the rationale is the visual HEADLINE
+  // (bold, full foreground weight), the confidence band a SECONDARY row underneath (design §6.2 —
+  // never a numeric score; coarse band only). Semantic tokens only (ADR-021 dark-mode-correct).
+  redlineHeadline: {
+    display: 'block',
+    width: '100%',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    color: tokens.colorNeutralForeground2,
+    color: tokens.colorNeutralForeground1,
+  },
+  redlineSecondaryRow: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalXS,
+  },
+  // The explicit-review affordance a low-band redline carries (design §6.2 anti-rubber-stamp —
+  // never pre-selected/auto-accepted; each low-band edit surfaces this cue).
+  redlineNeedsReview: {
+    color: tokens.colorStatusWarningForeground1,
+  },
+  // FR-14 (task 031) — the pending-redlines summary bar: count + "Accept all" (excludes low-band by
+  // construction) + the SEPARATE, always-explicit "include low-confidence" action (design §6.2 —
+  // accept-all MUST NOT silently include low-band edits; including them is a deliberate second click).
+  redlineSummaryBar: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+    padding: tokens.spacingHorizontalS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    color: tokens.colorNeutralForeground1,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  redlineSummaryText: {
+    flex: 1,
+    minWidth: 0,
   },
   redlineError: {
     display: 'flex',
@@ -845,6 +871,36 @@ function redlineLabelText(rationale: string | undefined, ledgerRef: string): str
   const base = rationale && rationale.trim().length > 0 ? rationale.trim() : 'Suggested edit';
   const label = base.length > 80 ? `${base.slice(0, 80)}…` : base;
   return `${label} (${ledgerRef})`;
+}
+
+/**
+ * FR-14 (task 031) — coarse, qualitative confidence label for the SECONDARY band badge (design §6.2
+ * anti-false-precision: NEVER a numeric/percentage score). Mirrors {@link deriveConfidenceBand}'s
+ * three-value output verbatim.
+ */
+function confidenceBandLabel(band: ConfidenceBand): string {
+  switch (band) {
+    case 'high':
+      return 'High confidence';
+    case 'medium':
+      return 'Medium confidence';
+    case 'low':
+    default:
+      return 'Low confidence';
+  }
+}
+
+/** Fluent v9 semantic `Badge` color per band (design tokens under the hood — no hard-coded hex, ADR-021). */
+function confidenceBandColor(band: ConfidenceBand): 'success' | 'informative' | 'warning' {
+  switch (band) {
+    case 'high':
+      return 'success';
+    case 'medium':
+      return 'informative';
+    case 'low':
+    default:
+      return 'warning';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1337,6 +1393,28 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // Owns materialize-from-ledger → FR-15 marks + accept/reject + supersession.
     const redline = usePendingRedline(editor);
 
+    // ----- FR-14 (task 031) — anti-rubber-stamp accept-all gating ----------
+    // "Accept all" MUST NOT include low-band edits without an explicit confirmation step (design
+    // §6.2). Splitting the pending set here — rather than inside usePendingRedline's accept/reject
+    // (the mark/range apply layer, left untouched) — keeps the gating a UI/selection-layer concern:
+    // `acceptAllEligible` is what the primary "Accept all" button commits; `lowBandPending` is NEVER
+    // touched by it and only moves on the SEPARATE, always-visible "include low-confidence" action.
+    const acceptAllEligible = React.useMemo(
+      () => redline.pending.filter(p => p.confidenceBand !== 'low'),
+      [redline.pending]
+    );
+    const lowBandPending = React.useMemo(
+      () => redline.pending.filter(p => p.confidenceBand === 'low'),
+      [redline.pending]
+    );
+    const handleAcceptAllExcludingLowBand = React.useCallback(() => {
+      for (const p of acceptAllEligible) redline.accept(p.ledgerRef);
+    }, [acceptAllEligible, redline]);
+    const handleIncludeLowBandInAcceptAll = React.useCallback(() => {
+      // The deliberate SECOND action (design §6.2) — never bundled into handleAcceptAllExcludingLowBand.
+      for (const p of lowBandPending) redline.accept(p.ledgerRef);
+    }, [lowBandPending, redline]);
+
     // ----- FR-35 Doc Q&A ephemeral highlight (task 072, stretch) -----------
     const qaHighlight = useDocQaHighlight(editor);
 
@@ -1630,6 +1708,42 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           </div>
         ) : null}
         {/* ===================================================================
+            FR-14 (task 031) — pending-redlines summary bar: count + "Accept
+            all" (built ONLY from acceptAllEligible — low-band items are never
+            in that set, so this button structurally cannot include them) + the
+            SEPARATE, always-explicit "include low-confidence" action (design
+            §6.2 anti-rubber-stamp — a deliberate second click, never a silent
+            inclusion). Semantic tokens only (ADR-021 dark-mode-correct).
+            =================================================================== */}
+        {redline.pending.length > 0 ? (
+          <div className={styles.redlineSummaryBar} role="status" data-testid="compose-redline-summary">
+            <Text size={200} className={styles.redlineSummaryText}>
+              {redline.pending.length} suggested edit{redline.pending.length === 1 ? '' : 's'} pending
+              {lowBandPending.length > 0 ? ` — ${lowBandPending.length} low-confidence, needs review` : ''}
+            </Text>
+            {acceptAllEligible.length > 0 ? (
+              <Button
+                size="small"
+                appearance="primary"
+                onClick={handleAcceptAllExcludingLowBand}
+                data-testid="compose-redline-accept-all"
+              >
+                Accept all ({acceptAllEligible.length})
+              </Button>
+            ) : null}
+            {lowBandPending.length > 0 ? (
+              <Button
+                size="small"
+                appearance="subtle"
+                onClick={handleIncludeLowBandInAcceptAll}
+                data-testid="compose-redline-accept-all-include-low"
+              >
+                Also accept {lowBandPending.length} low-confidence edit{lowBandPending.length === 1 ? '' : 's'}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {/* ===================================================================
             DEF-12 — per-change on-click accept/reject POPOVER. Replaces the
             removed fixed `compose-redline-controls` bar (the primary control is
             now the Assistant confirmation message). Opens at the click point on
@@ -1637,10 +1751,20 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             usePendingRedline.accept/reject handlers, scoped to the clicked
             change's ledgerRef. Reuses `styles.bubbleMenu`'s dark-mode-correct
             treatment (semantic tokens; ADR-021).
+            FR-14 (task 031) — RESTRUCTURED so the cited rationale is the
+            visual HEADLINE (primary trust cue, design §6.2) and the derived
+            `confidenceBand` renders as a SECONDARY coarse badge underneath —
+            never a numeric/percentage score. A low-band redline additionally
+            carries an explicit "Needs review" cue and its Accept button is
+            demoted from `primary` to `secondary` appearance (never visually
+            pushed as the default fast action) — the per-edit explicit-review
+            affordance design §6.2 requires; it does NOT block the click, an
+            explicit single-item accept is still the user's call.
             =================================================================== */}
         {redlineClickAnchor
           ? (() => {
               const clicked = redline.pending.find(p => p.ledgerRef === redlineClickAnchor.ledgerRef);
+              const isLowBand = clicked?.confidenceBand === 'low';
               return (
                 <div
                   ref={redlinePopoverRef}
@@ -1651,14 +1775,36 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
                   data-testid="compose-redline-onclick"
                   data-ledger-ref={redlineClickAnchor.ledgerRef}
                 >
-                  {clicked?.rationale ? (
-                    <Text size={200} className={styles.redlineLabel} title={clicked.rationale}>
-                      {redlineLabelText(clicked.rationale, clicked.ledgerRef)}
-                    </Text>
+                  {clicked ? (
+                    <>
+                      <Text
+                        size={300}
+                        weight="semibold"
+                        className={styles.redlineHeadline}
+                        title={clicked.rationale}
+                        data-testid="compose-redline-rationale"
+                      >
+                        {redlineLabelText(clicked.rationale, clicked.ledgerRef)}
+                      </Text>
+                      <div className={styles.redlineSecondaryRow} data-testid="compose-redline-confidence-band">
+                        <Badge size="small" appearance="tint" color={confidenceBandColor(clicked.confidenceBand)}>
+                          {confidenceBandLabel(clicked.confidenceBand)}
+                        </Badge>
+                        {isLowBand ? (
+                          <Text
+                            size={100}
+                            className={styles.redlineNeedsReview}
+                            data-testid="compose-redline-needs-review"
+                          >
+                            Needs review before accepting
+                          </Text>
+                        ) : null}
+                      </div>
+                    </>
                   ) : null}
                   <Button
                     size="small"
-                    appearance="primary"
+                    appearance={isLowBand ? 'secondary' : 'primary'}
                     icon={<Checkmark16Regular />}
                     onClick={() => {
                       redline.accept(redlineClickAnchor.ledgerRef);

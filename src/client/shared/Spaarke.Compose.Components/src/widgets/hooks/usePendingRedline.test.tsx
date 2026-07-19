@@ -21,7 +21,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { InsertionMark } from '../marks/InsertionMark';
 import { DeletionMark } from '../marks/DeletionMark';
 import { CommentAnchorMark } from '../marks/CommentAnchorMark';
-import { usePendingRedline, resolveTargetSpans } from './usePendingRedline';
+import { usePendingRedline, resolveTargetSpans, deriveConfidenceBand, collectMarkedRanges } from './usePendingRedline';
 
 // `@spaarke/auth`'s useAuth throws outside a real MSAL bootstrap — mocked (see ComposeAiToolbar.test).
 jest.mock('@spaarke/auth', () => ({
@@ -617,6 +617,155 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
 });
 
 // ---------------------------------------------------------------------------
+// deriveConfidenceBand — FR-13 (task 031, amendment §6.5 Path B). Client-derived, deterministic,
+// ported from the retired server `ComposeDraftDisposition.DeriveConfidenceBand` unit cases
+// (ComposeConfidenceBandTests, removed commit `675d2d161`): grounded+resolves=>high, one
+// signal=>medium, neither=>low.
+// ---------------------------------------------------------------------------
+describe('deriveConfidenceBand (FR-13, client-derived — ported from retired ComposeConfidenceBandTests)', () => {
+  it('cited source AND live-doc target resolves => high', () => {
+    expect(deriveConfidenceBand(true, true)).toBe('high');
+  });
+
+  it('cited source only (target does not resolve) => medium', () => {
+    expect(deriveConfidenceBand(true, false)).toBe('medium');
+  });
+
+  it('live-doc target resolves only (no cited source) => medium', () => {
+    expect(deriveConfidenceBand(false, true)).toBe('medium');
+  });
+
+  it('neither signal (ungrounded, unresolved) => low', () => {
+    expect(deriveConfidenceBand(false, false)).toBe('low');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// usePendingRedline — confidence band derivation through materialize/materializeMany (task 031,
+// amendment §6.5 Path B). The band is computed CLIENT-SIDE at materialize time from (a) the
+// payload's `sources` and (b) whether the target actually resolves against the LIVE doc — never a
+// model self-report, never a numeric score, and recomputed REACTIVELY as the doc changes.
+// ---------------------------------------------------------------------------
+describe('usePendingRedline — confidence band derivation (client-side, FR-13 amendment §6.5 Path B)', () => {
+  it('materialize: cited sources + resolvable target => high', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ target_text: 'quick', new_text: 'nimble', sources: ['doc:precedent-123'] }, PROV);
+    });
+
+    expect(result.current.pending[0]).toMatchObject({ confidenceBand: 'high', hasSources: true, hasDeletion: true });
+    editor.destroy();
+  });
+
+  it('materialize: cited sources but a pure insertion (no target to resolve) => medium', () => {
+    const editor = makeEditor('<p>Intro.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ new_text: 'Appended clause.', sources: ['doc:precedent-123'] }, PROV);
+    });
+
+    expect(result.current.pending[0]).toMatchObject({ confidenceBand: 'medium', hasSources: true, hasDeletion: false });
+    editor.destroy();
+  });
+
+  it('materialize: resolvable target but no cited sources => medium', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ target_text: 'quick', new_text: 'nimble' }, PROV);
+    });
+
+    expect(result.current.pending[0]).toMatchObject({ confidenceBand: 'medium', hasSources: false, hasDeletion: true });
+    editor.destroy();
+  });
+
+  it('materialize: no sources, no target (bare pure insertion) => low', () => {
+    const editor = makeEditor('<p>Intro.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ new_text: 'Appended clause.' }, PROV);
+    });
+
+    expect(result.current.pending[0]).toMatchObject({ confidenceBand: 'low', hasSources: false, hasDeletion: false });
+    editor.destroy();
+  });
+
+  it('ignores a confidence_band value smuggled onto the payload (never a model self-report)', () => {
+    const editor = makeEditor('<p>Intro.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      // A hostile/buggy model output claiming "high" on an otherwise ungrounded bare insertion.
+      // ComposeDraftPayload carries no such field — `as any` simulates a smuggled extra key.
+      result.current.materialize(
+        { new_text: 'Appended clause.', confidence_band: 'high' } as unknown as Parameters<
+          typeof result.current.materialize
+        >[0],
+        PROV
+      );
+    });
+
+    expect(result.current.pending[0].confidenceBand).toBe(
+      'low' // the smuggled "high" is ignored — derivation reads grounding evidence only
+    );
+    editor.destroy();
+  });
+
+  it('materializeMany: each whole-document-revision edit gets its OWN band (per-edit sources)', () => {
+    const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+    const BASE = { ledgerRef: 'rev@t1', bindingId: 'rev', turn: 1 };
+
+    act(() => {
+      result.current.materializeMany(
+        [
+          { target_text: 'quick', new_text: 'swift', sources: ['doc:1'] }, // grounded + resolves => high
+          { target_text: 'brown', new_text: 'auburn' }, // resolves only => medium
+          { target_text: 'lazy', new_text: 'idle', sources: [] }, // empty sources array => ungrounded; resolves => medium
+        ],
+        BASE
+      );
+    });
+
+    const bands = result.current.pending.reduce<Record<string, string>>((acc, p) => {
+      acc[p.ledgerRef] = p.confidenceBand;
+      return acc;
+    }, {});
+    expect(bands['rev@t1#0']).toBe('high');
+    expect(bands['rev@t1#1']).toBe('medium');
+    expect(bands['rev@t1#2']).toBe('medium');
+    editor.destroy();
+  });
+
+  it('reactive recompute: manually deleting a redline target OUTSIDE accept/reject drops its band', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ target_text: 'quick', new_text: 'nimble', sources: ['doc:precedent-123'] }, PROV);
+    });
+    expect(result.current.pending[0].confidenceBand).toBe('high');
+
+    // The user deletes the struck (deletion-marked) original directly — NOT via accept/reject — e.g.
+    // selecting past it and pressing Delete. The redline's target no longer resolves in the live doc.
+    act(() => {
+      const delRange = collectMarkedRanges(editor, 'deletion', 'b1@t1')[0];
+      editor.chain().deleteRange(delRange).run();
+    });
+
+    // Sources are still cited (durable payload field) but the live-doc target signal is now false —
+    // exactly one signal remains => medium (NOT still high — this is the "recompute reactively" rule).
+    expect(result.current.pending[0].confidenceBand).toBe('medium');
+    editor.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ComposeEditor pending-redline UI (dark mode; controls render + wire)
 // ---------------------------------------------------------------------------
 describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => {
@@ -679,5 +828,145 @@ describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => 
     expect(banner).toHaveTextContent(/not found/i);
     // Nothing was rendered as a pending suggestion.
     expect(screen.queryByTestId('compose-redline-controls')).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-14 (task 031) — rationale-first, anti-rubber-stamp accept/reject surface. The cited rationale
+// is the visual HEADLINE; the client-derived confidenceBand renders as a SECONDARY coarse badge
+// (never a numeric score); low-band redlines are never pre-selected/auto-accepted and carry an
+// explicit-review affordance; "Accept all" excludes low-band edits unless the user takes a SEPARATE,
+// deliberate second action. Rendered under the dark theme (ADR-021).
+// ---------------------------------------------------------------------------
+describe('ComposeEditor rationale-first accept/reject surface (FR-14, task 031, ADR-021 dark mode)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { ComposeEditor } = require('../ComposeEditor');
+
+  function renderEditorWithText(html: string) {
+    const ref = React.createRef<import('../ComposeEditor').ComposeEditorHandle>();
+    render(
+      <FluentProvider theme={webDarkTheme}>
+        <ComposeEditor ref={ref} docxBytes={null} initialHtml={html} />
+      </FluentProvider>
+    );
+    return ref;
+  }
+
+  it('the cited rationale is the visual HEADLINE; the confidence band renders SECONDARY, after it', async () => {
+    const ref = renderEditorWithText('<p>The quick brown fox.</p>');
+    await screen.findByRole('region');
+
+    act(() => {
+      ref.current!.materializePendingRedline(
+        {
+          target_text: 'quick',
+          new_text: 'nimble',
+          rationale: 'Standard playbook term is 60 days notice.',
+          sources: ['doc:precedent-123'],
+        },
+        PROV
+      );
+    });
+
+    const markSpan = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-compose-mark="deletion"][data-ledger-ref="b1@t1"]');
+      if (!el) throw new Error('deletion mark not materialized');
+      return el;
+    });
+    act(() => {
+      fireEvent.click(markSpan);
+    });
+
+    const popover = await screen.findByTestId('compose-redline-onclick');
+    const rationale = await screen.findByTestId('compose-redline-rationale');
+    const band = await screen.findByTestId('compose-redline-confidence-band');
+    expect(popover).toContainElement(rationale);
+    expect(popover).toContainElement(band);
+    expect(rationale).toHaveTextContent(/Standard playbook term is 60 days notice/);
+    // A coarse qualitative band, never a numeric/percentage score.
+    expect(band).toHaveTextContent(/High confidence/i);
+    expect(band).not.toHaveTextContent(/%|0\.\d/);
+
+    // Rationale is the HEADLINE — it precedes the confidence band in DOM order.
+    // eslint-disable-next-line no-bitwise
+    expect(rationale.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('a low-confidence redline is never pre-selected or auto-accepted, and carries an explicit "needs review" affordance', async () => {
+    const ref = renderEditorWithText('<p>Intro paragraph.</p>');
+    await screen.findByRole('region');
+
+    act(() => {
+      // Bare, ungrounded pure insertion — no sources, no target => low band.
+      ref.current!.materializePendingRedline({ new_text: 'An unverified suggestion.' }, PROV);
+    });
+
+    // Never auto-accepted: the redline mark is still rendered (pending), untouched, after materialize.
+    const markSpan = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-compose-mark="insertion"][data-ledger-ref="b1@t1"]');
+      if (!el) throw new Error('insertion mark not materialized');
+      return el;
+    });
+    expect(markSpan).toBeInTheDocument();
+    expect(markSpan.textContent).toContain('An unverified suggestion.');
+
+    act(() => {
+      fireEvent.click(markSpan);
+    });
+    const band = await screen.findByTestId('compose-redline-confidence-band');
+    expect(band).toHaveTextContent(/Low confidence/i);
+    // The explicit-review affordance (design §6.2) — a low-band redline is flagged, not silently offered.
+    const needsReview = await screen.findByTestId('compose-redline-needs-review');
+    expect(needsReview).toBeInTheDocument();
+    // Nothing was pre-selected/pre-checked — accepting still requires the user's own explicit click.
+    expect(screen.getByTestId('compose-redline-accept-b1@t1')).toBeInTheDocument();
+  });
+
+  it('"Accept all" excludes low-band edits by default; including them requires a SEPARATE explicit action', async () => {
+    const ref = renderEditorWithText('<p>The quick brown fox.</p>');
+    await screen.findByRole('region');
+
+    act(() => {
+      // High-band: cited source + a target that resolves in the live doc.
+      ref.current!.materializePendingRedline(
+        { target_text: 'quick', new_text: 'nimble', sources: ['doc:precedent-123'] },
+        PROV
+      );
+    });
+    act(() => {
+      // Low-band: ungrounded pure insertion, an INDEPENDENT redline (different binding).
+      ref.current!.materializePendingRedline(
+        { new_text: 'An unverified suggestion.' },
+        { ledgerRef: 'b2@t1', bindingId: 'b2', turn: 1 }
+      );
+    });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-ledger-ref="b1@t1"]')).toBeInTheDocument();
+      expect(document.querySelector('[data-ledger-ref="b2@t1"]')).toBeInTheDocument();
+    });
+
+    const summary = await screen.findByTestId('compose-redline-summary');
+    expect(summary).toHaveTextContent('2 suggested edits pending');
+    expect(summary).toHaveTextContent('1 low-confidence, needs review');
+
+    // "Accept all" commits the high-band edit but MUST NOT silently include the low-band one.
+    await userEvent.click(screen.getByTestId('compose-redline-accept-all'));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-compose-mark][data-ledger-ref="b1@t1"]')).toBeNull();
+    });
+    expect(document.querySelector('[data-compose-mark="insertion"][data-ledger-ref="b2@t1"]')).toBeInTheDocument();
+
+    // Including the low-band edit is a SEPARATE, always-explicit second action.
+    const includeLowButton = screen.getByTestId('compose-redline-accept-all-include-low');
+    expect(includeLowButton).toBeInTheDocument();
+    await userEvent.click(includeLowButton);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-compose-mark][data-ledger-ref="b2@t1"]')).toBeNull();
+    });
+    // Every pending redline resolved — the summary bar is gone.
+    expect(screen.queryByTestId('compose-redline-summary')).not.toBeInTheDocument();
   });
 });
