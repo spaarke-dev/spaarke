@@ -44,21 +44,34 @@
 
 ---
 
-## #5 — Archived email not run through the Document Profile pipeline  ·  **P2 (regression) — CONFIRM**
+## #5 — Archived email not run through the Document Profile pipeline  ·  **P2 — root cause CONFIRMED (NOT the suspected regression)**
 
 **Symptom (owner)**: the email/attachments are not being processed through the Document Profile like other files; *"this was being done previously"* → suspected regression.
 
-**Where to look**: the archive path creates the `.eml` Document + a Document per attachment, but does not appear to enqueue Document Profile processing. Confirm against the prior R2/R3 behavior what "Document Profile" processing entailed (classification / profiling job) and whether the archive path should enqueue it. Determine whether this regressed during the R4 `Services/Email` retirement (task 007) or was never wired on the new archive path.
+**Investigation (CONFIRMED — contradicts the regression suspicion)**:
+- "Document Profile" = the `AppOnlyDocumentAnalysis` Service Bus job running the "Document Profile" playbook ([`AppOnlyAnalysisService.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs), [`AppOnlyDocumentAnalysisJobHandler.cs`](../../../src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/AppOnlyDocumentAnalysisJobHandler.cs)).
+- It **is** wired on **auto-inbound** ([`IncomingCommunicationProcessor.cs:775,889`](../../../src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs#L775)) and **outbound-send** ([`CommunicationService.cs:1100,1396`](../../../src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs#L1100)).
+- **Confirmed gap**: the **on-demand "Save to SharePoint"** path (`ArchiveExistingAsync`) creates the `.eml` Document at [`CommunicationService.cs:195`](../../../src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs#L195) but does **not** enqueue profiling for it (attachments on that path DO). → fix: add the enqueue.
+- **NOT a task-007 regression**: task 007 is `not-started`; the retired OOB `email` subsystem never owned Document Profile (inbound was already 100% Graph). No code change removed the enqueue.
+- **Why received emails showed no profile in UAT**: the archive itself was **403-broken until 2026-07-19** (F-1/F-2). The `.eml` never reached SPE, so the best-effort (failure-swallowing) profiler had no file to read. Now that archive works, the auto path must be **re-verified** with a fresh inbound email (UAT D-1) — not assumed broken.
+
+**Fix**: task **092** — add the on-demand `EnqueueDocumentAnalysisAsync` for the .eml + re-verify the auto path via D-1.
 
 ---
 
-## Status
+## Owner decisions (2026-07-20)
 
-| # | Title | Severity | State |
-|---|-------|:---:|---|
-| 7 | Body-embedded reference numbers not matched | P1 | **Root cause CONFIRMED** — fix is a follow-up task |
-| 2 | Attachment subgrid → Document Preview modal | P2 | Logged (new PCF) |
-| 4 | `.eml` format/extension in SPE | P1 | Logged — needs confirm on now-working archive path |
-| 5 | Document Profile processing of archived email | P2 | Logged — suspected regression, needs confirm |
+- **#7** → **Suggest-only**: body/attachment references surface as Suggested review candidates and never auto-file (email 1 → Ambiguous, both matters surfaced, user picks). Aligns with owner spec 2026-07-17; requires ZERO mapper/ladder change (RecordNameMatch already non-auto-file).
+- **#4** → **Embed attachments**: the archived `.eml` becomes a faithful original (body + embedded attachments, openable in Outlook), while each attachment is STILL archived as a separate `sprk_document`.
+- **Delivery**: all four fixed/planned **in this project** (owner: no deferral). Wrap-up (090) HELD until W9 closes.
 
-None of these block the Association Engine tie/ladder logic (verified correct). #7 and #4 are the two that warrant a follow-up work item before this is considered production-clean.
+## Status → tracked tasks (Wave 9)
+
+| # | Title | Sev | Task | State |
+|---|-------|:---:|:---:|---|
+| 7 | Body-embedded reference numbers not matched | P1 | **091** | Root cause CONFIRMED · decision locked (Suggest-only) · POML authored |
+| 4 | `.eml` faithful original + extension/content-type | P1 | **092** | Scoped · decision locked (embed attachments) · POML authored |
+| 5 | Document Profile on-demand archive gap | P2 | **092** | Root cause CONFIRMED (on-demand enqueue gap; not a regression) · POML authored |
+| 2 | Attachment subgrid → Document Preview PCF | P2 | **093** | Buildable plan (reuse `RichFilePreviewDialog`) · POML authored |
+
+None of these affect the Association Engine tie/ladder logic (verified correct — the ladder refuses to guess on 2+ ≥0.85; #7 is upstream candidate *recall*).

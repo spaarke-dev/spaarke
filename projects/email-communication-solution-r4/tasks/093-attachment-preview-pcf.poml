@@ -1,0 +1,81 @@
+<task id="093" project="email-communication-solution-r4">
+  <metadata>
+    <title>Communication Attachments preview PCF — replace OOB subgrid, open Document Preview modal (UAT #2)</title>
+    <phase>Wave 9 — Post-UAT remediation</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <dependencies>042,043,044</dependencies>
+    <blocks>—</blocks>
+    <tags>pcf, frontend, dataverse, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New PCF control (new client surface, §11 justification), consumes shared lib + BFF, deploys to Dataverse. Code-review + adr-check mandatory.</rigor-reason>
+    <parallel-group>W9-pcf</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-17</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    UAT #2 (`notes/UAT-DEFECTS.md`): on the OOB `sprk_communication` form, the attachment subgrid is the native
+    subgrid bound to `sprk_communicationattachment`; clicking a row navigates to the raw intersection/Document
+    record. Owner expects a click to open the existing Document Preview modal with easy file access.
+
+    Build a NEW PCF, `CommunicationAttachments`, that replaces the OOB attachment subgrid: it lists the
+    communication's attachments and, on click, opens the shared `RichFilePreviewDialog` for that attachment's
+    `sprk_document`.
+
+    REUSE (do not rebuild — §11):
+      - Preview modal: `RichFilePreviewDialog` from `@spaarke/ui-components`
+        (`src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx`; barrel
+        `components/FilePreview/index.ts`). Consume via the deep `@spaarke/ui-components/dist/...` import + the
+        `ensure-dist-fresh` prebuild convention (see the 9 PCFs already on it).
+      - Preview URL: BFF `GET /api/documents/{documentId}/preview-url` (mirror
+        `SemanticSearchControl/services/SemanticSearchApiService.ts` `fetchPreviewUrl`); auth via `@spaarke/auth`
+        `initAuth`/`authenticatedFetch`.
+      - Host/manifest skeleton + form auth env-vars: mirror the SIBLING `CommunicationConnections` PCF
+        (virtual control on this same form; `CommunicationConnectionsHost.tsx`).
+      - Data: attachments = `sprk_communicationattachment` filtered by the current communication; the file
+        identity is its `sprk_document` lookup (`_sprk_document_value`).
+
+    OWNER DECISION context (#4): `.eml`/`message/rfc822` cannot render in Graph inline preview — for a `.eml`
+    Document the row action must be download / open-in-Outlook, not inline preview. (This PCF surfaces the
+    attachment files, which are normal docs; but if the archived `.eml` Document is ever surfaced here, route it
+    to download.)
+  </prompt>
+
+  <goal>
+    A deployed `CommunicationAttachments` PCF on the `sprk_communication` form lists the communication's
+    attachments and opens `RichFilePreviewDialog` (preview + open/download) on click, replacing the OOB subgrid's
+    navigate-to-record behavior. Auth via `@spaarke/auth`; preview URL via the BFF.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">New PCF at `src/client/pcf/CommunicationAttachments/` — virtual control, React 16.14.0 + Fluent 9 per the sibling PCFs on this form; `ensure-dist-fresh` prebuild wired.</criterion>
+    <criterion testable="true">Reads the current communication's `sprk_communicationattachment` rows (dataset-bound to the attachment view is preferred; else `context.webAPI.retrieveMultipleRecords` filtered by the page record id) and renders name + type.</criterion>
+    <criterion testable="true">Row click opens `RichFilePreviewDialog` for that attachment's `sprk_document`, resolving the preview URL via BFF `GET /api/documents/{id}/preview-url` with `authenticatedFetch`.</criterion>
+    <criterion testable="true">`RichFilePreviewDialog` callbacks wired: `onOpenFile` (desktop/web), `onOpenRecord` (→ `sprk_document`), `onClose`; inline-image attachment types (`sprk_attachmenttype`=100000001) filtered out.</criterion>
+    <criterion testable="true">A `.eml`/`message-rfc822` document row routes to download/open (not Graph inline preview).</criterion>
+    <criterion testable="true">Auth bootstrap gates render on `authReady` (ADR-028 async-init-in-component); no direct `PublicClientApplication` new (INV-7); BFF base URL + app Ids from manifest input props.</criterion>
+    <criterion testable="true">`npm run build:prod` clean (bundle ≤ ~2MB, in line with `CommunicationConnections`); unit tests for the list + click→open wiring pass.</criterion>
+    <criterion testable="true">Solution ZIP packed via `pack.ps1` (version-bump ALL 5 locations); import-validated. Deployment REMAINDER (import to spaarkedev1 + place on form + retire OOB subgrid) documented for the owner in a completion note.</criterion>
+    <criterion testable="true">§11 Component Justification: three-question template answered in the PR/design (Existing / Extension / Cost-of-doing-nothing) — a new control is warranted because the OOB subgrid cannot open the preview modal and no existing PCF reads communication attachments.</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>Prefer `RichFilePreviewDialog` (the canonical rich modal) over the single-column `FilePreviewDialog` for this new surface (per shared-lib guidance).</constraint>
+    <constraint>Do NOT author a new preview modal or a new BFF endpoint — reuse the shared component + existing `/api/documents/{id}/preview-url` (root §11).</constraint>
+    <constraint>Follow `pcf-deploy`: `build:prod` (production webpack), copy build output, `pack.ps1` (not `Compress-Archive`), unmanaged solution, publisher `Spaarke`/`sprk_` (ADR-022).</constraint>
+    <constraint>PCF solution contains ONLY the PCF control (type 66) — no web resources.</constraint>
+    <constraint>Match the sibling PCFs' theme/readonly/FluentProvider host wiring (`CommunicationConnectionsHost`).</constraint>
+  </constraints>
+
+  <notes>
+    Structural exemplar = `CommunicationConnections` (host/manifest on this exact form). Preview-wiring exemplar =
+    `SemanticSearchControl` (only PCF already mounting `RichFilePreviewDialog` + `fetchPreviewUrl`). Open design
+    question to settle at start: dataset-bound (bind to the attachment subgrid/view — cleanest subgrid
+    replacement, but net-new pattern here) vs field/context PCF that queries `sprk_communicationattachment` by the
+    page record id. Recommend dataset-bound; confirm the dataset exposes `_sprk_document_value`. Owner performs
+    the final form placement + OOB subgrid removal (deploy remainder), consistent with task 043.
+  </notes>
+</task>

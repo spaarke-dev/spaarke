@@ -56,7 +56,10 @@
 | 080 | Author `communication-intelligence-architecture.md` | W8 | docs | FR-27 | (W1–W7) | — | true | STANDARD | ✅ (authored canonical R4 substrate doc; absorbed idempotency/.eml/attachment→Document/RAG from the retired `email-processing-architecture.md`, which was then DELETED; grounded in shipped code; OOB-form+PCF surface per W4 pivot; RI framed as re-homed/out-of-scope) |
 | 081 | Update data-model + processing/service arch docs; mark OOB RETIRED | W8 | docs | FR-27 | (W1–W7) | — | true | STANDARD | ✅ (data-model already R4-current [task 001/002] → added 080 pointer; rewrote `communication-service-architecture.md` send/inbound to R4 [Internet-Message-Id capture, EmailComposer consolidation, Actions PCF replaces ribbon, 6-rung engine replaces 3-level cascade, fragmented-send+ribbon RETIRED]; DELETED `email-processing-architecture.md` + `email-to-document-{architecture,automation}.md` after absorbing into 080; fixed 6 inbound links. NOTE: shipped DTO field is `AttachmentDocumentIds`; `AttachmentDriveItemIds` rename deferred/unshipped — documented per source-of-truth) |
 | 082 | ~~Update `EMAIL-TRIAGE-MODULE-DESIGN.md` per DEC-10~~ | W8 | docs | FR-27 | (W1–W7) | — | true | STANDARD | ⛔ N/A — target doc never existed (glob-confirmed); email-triage/Responsive-Intelligence design re-homed to `spaarke-notification-spine-r1` (see `notes/W5-responsive-intelligence-and-shared-notification-spine.md`). Nothing to author. |
-| 090 | Project wrap-up (README Complete, lessons-learned, `/test-diet`, archive) | Wrap | wrapup | — | (all) | — | **false** | STANDARD | 🔲 |
+| 091 | Association Engine — deterministic body/attachment reference-number extraction (UAT #7) | W9 | bff-api, communication | FR-10,14 | 015,030 | 090 | true | FULL | 🔲 |
+| 092 | Archive: faithful .eml (embed attachments) + on-demand Document-Profile enqueue + display-name/content-type (UAT #4,#5) | W9 | bff-api, communication | FR-06,07 | 044 | 090 | true | FULL | 🔲 |
+| 093 | Communication Attachments preview PCF — replace OOB subgrid, open Document Preview modal (UAT #2) | W9 | pcf, frontend, dataverse, deploy | FR-17 | 042,043,044 | 090 | true | FULL | 🔲 |
+| 090 | Project wrap-up (README Complete, lessons-learned, `/test-diet`, archive) | Wrap | wrapup | — | (all)+091,092,093 | — | **false** | STANDARD | 🔲 (HELD until W9 remediation closes) |
 
 ---
 
@@ -75,6 +78,7 @@
 | **W6** | 060, 061 → 062 | W2 (021/022) + W4 (043) | Caller migration |
 | **W7** | 070, 071, 072, 073, 075, 076 (‖); 074 after 072 | W0 | *Parallel track, deadline-driven; runs alongside W1–W6* |
 | **W8** | 080, 081, 082 | W1–W7 substantially complete | Per-file doc targets parallel |
+| **W9** (post-UAT remediation) | 091, 092 (‖ BFF); 093 (PCF) | ship + owner UAT | 091/092 disjoint-ish in `CommunicationService`/Engine — sequence to avoid churn; 093 independent. All FULL rigor. |
 
 **Max concurrency**: 6 agents/wave. `.claude/`-touching tasks (005) + gate (050) + wrap-up (090) run main-session, sequential.
 

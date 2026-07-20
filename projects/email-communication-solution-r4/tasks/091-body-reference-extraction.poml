@@ -1,0 +1,81 @@
+<task id="091" project="email-communication-solution-r4">
+  <metadata>
+    <title>Association Engine — deterministic body/attachment reference-number extraction (UAT #7)</title>
+    <phase>Wave 9 — Post-UAT remediation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>015,030</dependencies>
+    <blocks>—</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies Association Engine correctness (a rung + candidate recall); BFF-touching; adds a regression eval-case. Code-review + adr-check mandatory.</rigor-reason>
+    <parallel-group>W9-bff</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-10, FR-14</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    UAT root-cause CONFIRMED (see `notes/UAT-DEFECTS.md` #7, evidenced by persisted `sprk_associationprovenance`
+    on communications `7ed6f45b-e483-f111-8076-7ced8ddc4cc6` [REAL# in BODY, missed] vs
+    `47ddc191-e883-f111-8076-70a8a590c51c` [both #s in SUBJECT, both matched]):
+
+    A matter/record reference number that appears ONLY in the email BODY (or an attachment) is not matched.
+    Cause = the deterministic `RecordNameMatchRung` (rung 3.5) is retrieve-then-verify: it pulls the top
+    `Limit`(=25) keyword candidates from `spaarke-records-index` using the WHOLE noisy subject+body+attachment
+    text as one query, THEN verifies name/number containment. When a number is buried in body prose, its record
+    does not rank into the top-25, so it is never verified — even though verification checks the body and would
+    have matched (`NumberConfidence`=0.97 is flat across locations). Rung 0 (`ExplicitReferenceRung`) does NOT
+    cover this — it scans SUBJECT ONLY and only knows `MAT-/Matter #/SPRK-/[MATTER:]` formats, not free-text
+    client refs like `PAT-942665` / `REAL-2026-123456.02`.
+
+    OWNER DECISION (2026-07-20): body/attachment references are SUGGEST-ONLY — they surface as Suggested review
+    candidates and MUST NOT auto-file. (This already holds structurally: `RecordNameMatch` is deliberately
+    excluded from the mapper's auto-file-eligible set, so emitting these as `RecordNameMatch`-kind matches
+    preserves "never auto-file" with ZERO mapper change.)
+
+    FIX: make deterministic reference-number matching independent of the noisy-full-text keyword ranking. Add a
+    reference-number EXTRACTION pass over subject + body + attachment text that, for EACH extracted candidate
+    number, resolves its record via a FOCUSED/EXACT lookup (a targeted per-number index query where that number
+    ranks #1, and/or the existing direct Dataverse `QueryMatterByReferenceNumberAsync`-style number lookup),
+    bypassing the top-25 whole-text funnel. Extraction is a permissive regex (candidate generator); the exact
+    number-field match is the precision gate — a token that is not a real reference number resolves to nothing.
+    Emit hits as `RecordNameMatch`-kind matches at `NumberConfidence` with `where=body|attachment|subject` in
+    provenance. Do NOT change the auto-file eligibility rules or the ladder.
+  </prompt>
+
+  <goal>
+    A reference number present ANYWHERE in the normalized envelope (subject/body/attachment) resolves its record
+    and surfaces as a Suggested-eligible candidate, regardless of keyword-retrieval ranking. The email-1
+    scenario (subject #A + body #B, two distinct matters) now yields Ambiguous (both matters surfaced), matching
+    the email-2 (both-in-subject) behavior. No auto-file behavior change; no mapper/ladder change.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">The deterministic pass extracts reference-number candidates from subject AND body AND attachment text (not subject-only).</criterion>
+    <criterion testable="true">For each extracted number, resolution uses an exact/focused lookup that does NOT depend on the whole-text keyword ranking (a number buried in body prose still resolves its record).</criterion>
+    <criterion testable="true">A body-located reference emits a `RecordNameMatch`-kind `RungMatch` at `NumberConfidence` with `where=body` in provenance; an attachment-located one with `where=attachment`.</criterion>
+    <criterion testable="true">Body/attachment reference matches are NEVER auto-file-eligible — `AssociationStatusMapper.IsAutoFileEligible` still excludes `RecordNameMatch`; no mapper edit. A single body reference on a substantive field lands Suggested, not Resolved.</criterion>
+    <criterion testable="true">Regression test (ADR-038 KEEP-path, boundary mocks only): an envelope with matter #A in the subject and a DIFFERENT matter #B in the body produces two distinct `sprk_regardingmatter` candidates each ≥0.85 ⇒ Ambiguous (conflict), both written to provenance candidates.</criterion>
+    <criterion testable="true">Extraction precision: a non-reference token (e.g. a phone number, a date like `7/19/2026`, an order id not in any record) resolves to no record and emits no match (exact-lookup gate). Covered by a unit test.</criterion>
+    <criterion testable="true">`dotnet build` clean; Communication test suite green (no regression); new tests pass.</criterion>
+    <criterion testable="true">§10: publish-size measured + reported (absolute + delta vs ~45.30MB incl-PDBs baseline; ceiling ≤60MB); `dotnet list package --vulnerable --include-transitive` shows no NEW High; Placement Justification stated (extends existing rung, no new service).</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>Operate over the `NormalizedMessage` envelope only — never `Microsoft.Graph.Message` (ADR-045).</constraint>
+    <constraint>Reuse existing lookup surfaces: `IRecordMatchingAi` (focused per-number query) and/or `ICommunicationDataverseService` number-lookup methods. Do NOT add a new service (root §11) — extend `RecordNameMatchRung` (or add a private helper within it / the deterministic pass). If a generalized "query record by reference number across record types" method is genuinely absent, add it to the EXISTING `ICommunicationDataverseService`, justified in ≤2 sentences.</constraint>
+    <constraint>Keep the regex extraction bounded with a `RegexMatchTimeout` (mirror `ExplicitReferenceRung`'s per-pattern `TimeSpan.FromSeconds(1)` guard).</constraint>
+    <constraint>Best-effort/non-fatal (NFR-06): a throw in extraction/lookup is a non-match, never fatal to association.</constraint>
+    <constraint>New/changed options bind via `IOptionsMonitor` (kill-switch parity with the rung's existing `Enabled`).</constraint>
+  </constraints>
+
+  <notes>
+    Preferred mechanism (directional): keep the existing whole-text retrieval AND add a per-extracted-number
+    focused retrieval (query = the single number token) so the target record ranks #1 in its own search, then
+    verify + emit. This maximizes recall with minimal new surface and no ranking fragility. Confirm the actual
+    reference-number field/formats used by `sprk_matter` (PAT-…, MAT-…) and the other record types before
+    finalizing the extraction regex.
+  </notes>
+</task>
