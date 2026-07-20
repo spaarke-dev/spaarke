@@ -3,7 +3,8 @@
     <title>Add second "Ciam" JwtBearer scheme to AuthorizationModule</title>
     <phase>2 Identity + provisioning + document content</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE. Appended AuthSchemes.Ciam ("Ciam") JwtBearer scheme to the EXISTING workforce authentication builder in AuthorizationModule.cs (no new AddAuthentication — still exactly 2 calls; workforce default preserved). Authority built as {Instance}{TenantId}/v2.0 (*.ciamlogin.com) from a new "Ciam" config section in appsettings.template.json (non-secret #{CIAM_*}# placeholders). ValidateIssuer/Audience/Lifetime/IssuerSigningKey all true. Default-scheme PostConfigure audience-merge is named to JwtBearerDefaults ("Bearer") only, so it does not apply to "Ciam" (no extra guard needed). Build 0 errors; publish 47.03 MB (<=60). code-review + adr-check clean. Live-token tests deferred to task 030. Task 021 pins AuthSchemes.Ciam on /api/v1/external.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Auth-sensitive scheme wiring on the BFF (tags: auth); modifies shared AuthorizationModule</rigor-reason>
     <model-tier>opus</model-tier>

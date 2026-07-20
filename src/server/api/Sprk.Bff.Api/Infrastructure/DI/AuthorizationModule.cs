@@ -29,9 +29,32 @@ public static class AuthorizationModule
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // Azure AD JWT Bearer Token Validation
-        services.AddAuthentication(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme)
-            .AddMicrosoftIdentityWebApi(configuration.GetSection("AzureAd"));
+        // Azure AD JWT Bearer Token Validation (workforce tenant — sets the DEFAULT scheme)
+        var authenticationBuilder = services
+            .AddAuthentication(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme);
+        authenticationBuilder.AddMicrosoftIdentityWebApi(configuration.GetSection("AzureAd"));
+
+        // External Identity (CIAM) JwtBearer scheme (external-access-platform-r1 task 020 · ADR-028 Amendment A1).
+        // External users authenticate against the Entra External ID (CIAM) authority (*.ciamlogin.com) —
+        // a DISTINCT issuer/audience from the workforce tenant that the default scheme cannot validate.
+        // Appended to the EXISTING workforce authentication builder: NO new AddAuthentication is introduced,
+        // so the workforce default scheme is preserved (spec FR-07). Task 021 pins AuthSchemes.Ciam onto the
+        // /api/v1/external group. NOTE: the default-scheme PostConfigure<JwtBearerOptions> audience-merge below
+        // is registered for JwtBearerDefaults.AuthenticationScheme ONLY, so it does NOT apply to this "Ciam"
+        // named-options instance (spec FR-07 negative criterion — no additional guard required).
+        authenticationBuilder.AddJwtBearer(AuthSchemes.Ciam, options =>
+        {
+            var ciam = configuration.GetSection("Ciam");
+            var instance = ciam["Instance"]?.TrimEnd('/');
+            var ciamTenantId = ciam["TenantId"];
+            // External ID v2 authority: https://{subdomain}.ciamlogin.com/{tenantId}/v2.0
+            options.Authority = $"{instance}/{ciamTenantId}/v2.0";
+            options.Audience = ciam["Audience"];
+            options.TokenValidationParameters.ValidateIssuer = true;
+            options.TokenValidationParameters.ValidateAudience = true;
+            options.TokenValidationParameters.ValidateLifetime = true;
+            options.TokenValidationParameters.ValidateIssuerSigningKey = true;
+        });
 
         // Named API key authentication schemes (task AUTHV2-045).
         // Replaces ad-hoc header validation on /api/ai/rag/enqueue-indexing. Each scheme binds

@@ -17,4 +17,14 @@ public static class AuthSchemes
     /// Backed by configuration key <c>Rag:ApiKey</c>.
     /// </summary>
     public const string RagApiKey = "RagApiKey";
+
+    /// <summary>
+    /// JwtBearer scheme validating Entra External ID (CIAM) tokens for external users
+    /// (external-access-platform-r1 task 020 · ADR-028 Amendment A1). Authority is the
+    /// CIAM tenant (<c>*.ciamlogin.com</c>) — a distinct issuer from the workforce
+    /// <see cref="Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme"/>.
+    /// Appended to the existing workforce authentication builder, so it does NOT change the
+    /// default scheme. Pinned onto the <c>/api/v1/external</c> endpoint group in task 021.
+    /// </summary>
+    public const string Ciam = "Ciam";
 }

@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — **Phase 0 COMPLETE (001/002/003/004) + Phase-2 leaves 024/026**. 6 tasks ✅, gates passed. **NOT yet committed.** |
-| **Step** | Phase 0 done; ready to commit + begin Phase 1/2 code |
-| **Status** | 6 ✅ (001, 002, 003, 004, 024, 026); ready to commit |
-| **Next Action** | (1) **Commit** this session (uncommitted: BFF code + config manifests + SWA workflow + 6 task statuses). (2) Start **020** (BFF `Ciam` JwtBearer scheme — pure code, unblocked; CIAM authority in `config/environments.json` dev.ciam). Then **022** (cross-tenant Graph client — loads cert `ciam-graph-provisioner-cert` from KV `spaarke-spekvcert`, app client `e63e6eb1-...`) → 021/023/025/027. |
+| **Task** | none active — **Phase 0 (001/002/003/004) + 024/026 + 020 COMPLETE**. 7 tasks ✅. Phase 0 batch committed+pushed (2d959782a); **020 committed separately below**. |
+| **Step** | 020 done; ready for 021/022 |
+| **Status** | 7 ✅ (001, 002, 003, 004, 020, 024, 026) |
+| **Next Action** | Continue Phase 2 auth chain: **022** (cross-tenant CIAM Graph client — model on SpeAdminTokenProvider; loads cert `ciam-graph-provisioner-cert` from KV `spaarke-spekvcert`, CIAM app client `e63e6eb1-...`, authority in config dev.ciam) and **021** (pin AuthSchemes.Ciam on `/api/v1/external` group — deps 020 ✅). Then 023 → 025/027 → 030 (tests) → 031. |
 
 ### Completed this session (2026-07-19)
 - **004** — `contact.sprk_externalobjectid` (String/100) created live on `spaarkedev1`, in SpaarkeCore + SpaarkeMaster, published, queryable. Doc: `notes/data-model-sprk_externalobjectid.md`. MetadataId `b28603f2-bd83-f111-8076-7ced8ddc4cc6`.
