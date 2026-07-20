@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-20 (task 010 COMPLETE via parallel subagent = 15 tasks ✅; 030 planned in notes/task-030-plan.md — needs fresh-context integration-fixture session)
+> **Last Updated**: 2026-07-20 (tasks 010 + 013 COMPLETE + DI-028-01 resolved (CIAM app IDs wired) = 16 tasks ✅; 030 planned/needs fresh context; next 011/012 or 030)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,9 +10,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — 15 tasks ✅. All Phase-2 **feature code** done (020-029); **010** done (Phase-1 SWA config). |
-| **Step** | 010 done; **030 planned (not started)** — needs a fresh-context integration-fixture session |
-| **Status** | 15 ✅ (001, 002, 003, 004, 010, 020, 021, 022, 023, 024, 025, 026, 027, 028, 029) |
+| **Task** | none active — 16 tasks ✅. All Phase-2 feature code (020-029) + Phase-1 010/013 done; DI-028-01 (CIAM app regs) RESOLVED + wired. |
+| **Step** | 013 done; **030 planned (not started)** — needs a fresh-context integration-fixture session |
+| **Status** | 16 ✅ (001, 002, 003, 004, 010, 013, 020, 021, 022, 023, 024, 025, 026, 027, 028, 029) |
 | **Next Action** | **030** — CIAM external-access **integration/contract** test suite. NOT quick-unit-testable: ADR-038's 17 bans preclude the shortcuts (BuildCiamUser is `internal`→B8; ctor/DI→B3/B4; collaborator mocks→B5; `Mock<HttpMessageHandler>`→B1), so it must run through the HTTP surface via a CIAM `WebApplicationFactory` fixture + small module-boundary seams. **Full actionable plan: [`notes/task-030-plan.md`](../notes/task-030-plan.md)** (fixture, 3 seams, 6 tests incl. the 027 authz-before-stream 403/no-Graph centerpiece). TEST-MODIFYING → Step 9.5 gates MANDATORY. Recommend a dedicated fresh-context session. Then **031** (deploy BFF; deps 030). **Other ready Phase-1 tasks**: 013 (BFF CORS+SPA redirect, deps 003 — BFF-source, serialize vs 030's test build), 011/012 (BrowserRouter, deps 010 ✅→011 now ready). **OPEN ESCALATIONS (notes/defer-issues.md)**: DI-028-01 CIAM app regs (needs your portal work — blocks live auth + 031 substitution); DI-028-02 external-spa build (blocks 014); DI-025-01/DI-029-01 (post-R1/UI). Runtime prereq for 031: BFF MI needs KV 'Secrets User' on spaarke-spekvcert. |
 
 ### Completed this session (2026-07-19)

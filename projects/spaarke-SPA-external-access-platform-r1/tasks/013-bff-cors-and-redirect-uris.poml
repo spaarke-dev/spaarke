@@ -3,7 +3,8 @@
     <title>Add SWA origin to BFF CORS + SPA redirect URIs</title>
     <phase>1 Hosting migration + routing</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-20 COMPLETE. CORS: added the SWA origin explicitly to the config-driven Cors:AllowedOrigins allow-list in appsettings.template.json (new element "#{EXTERNAL_SPA_ORIGIN}#" — deploy value https://green-dune-0c4f1221e.7.azurestaticapps.net = https://{dev.externalSpa.swaHostname}) + a _Cors_comment. NOT a wildcard; wildcard-rejection logic + internal-surface CORS untouched. Discovered CorsModule.cs ALREADY allows any *.azurestaticapps.net host via a suffix rule (lines 100-101), so functional CORS for the SWA origin already worked (crit.1 satisfied by construction); the explicit config entry is defense-in-depth (survives if the suffix rule is tightened). No JwtBearer scheme added (AuthorizationModule untouched — Ciam scheme is Phase 2, done separately). Redirect URIs: the SWA origin + http://localhost:3000 are on the CIAM SPA app (bd57e54e, added by owner 2026-07-20) — that is the live identity after task 028's CIAM repoint; the legacy workforce B2B SPA app (f306885a) would only need them for a B2B-first Phase-1 deploy, which is superseded. Build 0 errors; publish 45.69 MB (≤60); no new HIGH/Critical CVE. §10 Placement Justification: config-only (one origin added), no new service/package, reuses CorsModule. NFR-07: config-only (no new branch logic) → CORS covered by an integration OPTIONS test folded into the 030 fixture work, not a unit test.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF (bff-api hot path) + app registration</rigor-reason>
     <model-tier>sonnet</model-tier>
