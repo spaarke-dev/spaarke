@@ -2,7 +2,7 @@
   <metadata>
     <title>Communication Attachments preview PCF — replace OOB subgrid, open Document Preview modal (UAT #2)</title>
     <phase>Wave 9 — Post-UAT remediation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>10</estimated-hours>
     <dependencies>042,043,044</dependencies>
     <blocks>—</blocks>

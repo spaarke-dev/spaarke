@@ -72,6 +72,6 @@
 | 7 | Body-embedded reference numbers not matched | P1 | **091** | ✅ FIXED (`d6d03f6cb`) — extraction + exact `referenceNumbers` filter; Suggest-only; +4 regression tests; gate clean. Non-blocking follow-ups: (a) escape embedded `"` in the RecordNameMatch provenance payload; (b) relocate #7 split-index regression tests to `tests/integration/regression/` at the eventual test-path reorg (task 050). |
 | 4 | `.eml` faithful original + extension/content-type | P1 | **092** | ✅ FIXED (`070e6e663`) — embeds attachments (faithful original) + `.eml` display-name + `message/rfc822`; +5 tests; gate clean. Bonus M2 hardening: empty Message-Id no longer 500s. |
 | 5 | Document Profile on-demand archive gap | P2 | **092** | ✅ FIXED (`070e6e663`) — on-demand `ArchiveExistingAsync` now enqueues Document Profile at parity w/ send/inbound. Auto path to be re-verified via D-1. NOT a task-007 regression. |
-| 2 | Attachment subgrid → Document Preview PCF | P2 | **093** | Buildable plan (reuse `RichFilePreviewDialog`) · POML authored |
+| 2 | Attachment subgrid → Document Preview PCF | P2 | **093** | ✅ BUILT (`2d56cf8e0`) — new `CommunicationAttachments` PCF (reuses `RichFilePreviewDialog`); build:prod 442KiB, 25/25 jest, solution ZIP v1.0.0; gate clean. **Owner deploy remainder**: import ZIP + swap OOB subgrid on the form. |
 
 None of these affect the Association Engine tie/ladder logic (verified correct — the ladder refuses to guess on 2+ ≥0.85; #7 is upstream candidate *recall*).
