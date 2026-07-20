@@ -64,3 +64,17 @@
 - **Hardening (post-R1)**: on `POST /users` conflict, look up the existing CIAM user by email identity to
   recover its oid and continue (persist + email) — makes the flow self-healing. Consider an optional
   "resend onboarding" affordance for the already-provisioned path. Out of 025's prescriptive scope.
+
+## DI-029-01 — core-user "Invite to Secure Workspace" UI (ribbon/MDA button) + dark-mode test
+
+- **Discovered**: 2026-07-19 (task 029).
+- **Concrete deliverable delivered**: the SERVER action `POST /api/v1/external-access/invite-and-grant`
+  (one atomic onboard+grant, grantee=Contact, audited) is built + verified. Acceptance criteria 1/3/4
+  are met server-side.
+- **Remaining (frontend/ops — not buildable/verifiable in a .NET session)**: the actual core-user
+  command surface — a Dataverse command-bar (ribbon) button OR model-driven-app command on the
+  Matter/Project form that collects Project + attorney Contact + access level and calls the endpoint
+  above. This is what acceptance criterion 5 (renders in Fluent v9 dark mode, ADR-021) tests, and what
+  criterion 2's live sign-in exercises end-to-end. Requires ribbon XML + web-resource JS + solution
+  import (Dataverse deploy). Track alongside the external-spa work / a UI task.
+- **Also gated on**: DI-028-01 (CIAM app registrations) for the live sign-in half of criterion 2.

@@ -77,23 +77,17 @@ public static class GrantExternalAccessEndpoint
                 $"AccessLevel must be one of: {string.Join(", ", Enum.GetNames<ExternalAccessLevel>())}.");
 
         // ── Resolve caller identity for granted-by reference ─────────────────
-        var callerSystemUserId = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var callerSystemUserId = ResolveCallerSystemUserId(httpContext);
 
         logger.LogInformation(
             "[EXT-GRANT] Granting {AccessLevel} access to Contact {ContactId} for Project {ProjectId}",
             request.AccessLevel, request.ContactId, request.ProjectId);
 
-        // ── Step 1: Create sprk_externalrecordaccess in Dataverse ────────────
+        // ── Create the access record (Dataverse) + invalidate cache ──────────
         Guid accessRecordId;
         try
         {
-            var payload = BuildGrantPayload(request, callerSystemUserId);
-            accessRecordId = await dataverseClient.CreateAsync(EntitySet, payload, ct);
-
-            logger.LogInformation(
-                "[EXT-GRANT] Created access record {AccessRecordId} for Contact {ContactId} / Project {ProjectId}",
-                accessRecordId, request.ContactId, request.ProjectId);
+            accessRecordId = await CreateGrantAsync(request, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
         }
         catch (Exception ex)
         {
@@ -107,15 +101,44 @@ public static class GrantExternalAccessEndpoint
                 extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
         }
 
-        // ── Step 2: Invalidate Redis cache ───────────────────────────────────
+        // Broker-only: no synthetic SPE container membership is granted on the external path.
+        return TypedResults.Ok(new GrantAccessResponse(accessRecordId, SpeContainerMembershipGranted: false));
+    }
+
+    // =========================================================================
+    // Reusable core (shared with the invite-and-grant orchestration, task 029)
+    // =========================================================================
+
+    /// <summary>
+    /// Creates a <c>sprk_externalrecordaccess</c> grant (grantee = the Contact, audited via
+    /// <c>sprk_grantedby</c>) and invalidates the Contact's Redis participation cache. Throws on the
+    /// Dataverse create failure; cache invalidation failure is non-fatal. Shared by <c>/grant</c> and
+    /// <c>/invite-and-grant</c> (task 029) so both write an identical, audited grant.
+    /// </summary>
+    internal static async Task<Guid> CreateGrantAsync(
+        GrantAccessRequest request,
+        string? callerSystemUserId,
+        DataverseWebApiClient dataverseClient,
+        ITenantCache cache,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var payload = BuildGrantPayload(request, callerSystemUserId);
+        var accessRecordId = await dataverseClient.CreateAsync(EntitySet, payload, ct);
+
+        logger.LogInformation(
+            "[EXT-GRANT] Created access record {AccessRecordId} for Contact {ContactId} / Project {ProjectId}",
+            accessRecordId, request.ContactId, request.ProjectId);
+
+        // Invalidate Redis participation cache (non-fatal).
         try
         {
             var tenantId = ExtractTenantId(httpContext);
             if (!string.IsNullOrEmpty(tenantId))
             {
                 await cache.RemoveAsync(
-                    tenantId, ExternalAccessResource, request.ContactId.ToString(), CacheVersion,
-                    ct: ct);
+                    tenantId, ExternalAccessResource, request.ContactId.ToString(), CacheVersion, ct: ct);
                 logger.LogDebug("[EXT-GRANT] Invalidated cache for Contact {ContactId}", request.ContactId);
             }
             else
@@ -132,9 +155,13 @@ public static class GrantExternalAccessEndpoint
                 request.ContactId);
         }
 
-        // Broker-only: no synthetic SPE container membership is granted on the external path.
-        return TypedResults.Ok(new GrantAccessResponse(accessRecordId, SpeContainerMembershipGranted: false));
+        return accessRecordId;
     }
+
+    /// <summary>Resolves the caller's systemuser id (oid) for the audited <c>sprk_grantedby</c>.</summary>
+    internal static string? ResolveCallerSystemUserId(HttpContext httpContext)
+        => httpContext.User.FindFirst("oid")?.Value
+            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
     // =========================================================================
     // Helpers

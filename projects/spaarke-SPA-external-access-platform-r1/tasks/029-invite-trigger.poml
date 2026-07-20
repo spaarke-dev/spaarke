@@ -3,7 +3,8 @@
     <title>Core-user "Invite to Secure Workspace" trigger</title>
     <phase>2 Identity + provisioning + document content</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE (server deliverable). §11 placement DECISION: added a thin server-side orchestration endpoint POST /api/v1/external-access/invite-and-grant (the "thin command that calls invite+grant" the task permits) rather than a client that orchestrates two calls — rationale: atomic one-action, server-enforced invariants (Contact grantee + audited grant), unit-testable (030). Reuses invite (025) + grant (026) cores via EXTRACTION (DRY, no duplication): extracted InviteExternalUserEndpoint.ProvisionAsync (resolve/create Contact + idempotent CIAM provision + persist oid + email → (contactId,status)) and GrantExternalAccessEndpoint.CreateGrantAsync (audited sprk_externalrecordaccess + cache invalidation) + ResolveCallerSystemUserId; /invite and /grant now delegate to these. New endpoint composes ProvisionAsync → CreateGrantAsync(grantee=contactId, NOT sprk_assignedoutsidecounsel; AccountId is record-keeping only). Grant audited (sprk_grantedby from caller oid), fired only by the explicit action. Broker-only onboard (no B2B guest). Partial-failure handled (onboard-ok/grant-fail → 500 + contactId + safe re-run). New DTO InviteAndGrantResponse. Registered on the internal management group. Build 0 errors; publish 45.69 MB (≤60, no new package). code-review+adr-check clean. Criteria 1/3/4 met server-side; #2 live sign-in + #5 dark-mode ribbon UI DEFERRED (DI-029-01: needs a Dataverse ribbon/MDA button — not buildable in a .NET session — + DI-028-01 CIAM app regs). Negative cases asserted in task 030.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Wires an internal action to the CIAM provisioner + grant; onboarding blast radius</rigor-reason>
     <model-tier>sonnet</model-tier>

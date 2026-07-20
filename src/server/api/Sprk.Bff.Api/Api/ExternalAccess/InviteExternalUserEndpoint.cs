@@ -74,67 +74,83 @@ public static class InviteExternalUserEndpoint
         if (request.ProjectId == Guid.Empty)
             return ProblemDetailsHelper.ValidationError("ProjectId is required and must be a valid GUID.");
 
-        logger.LogInformation(
-            "[EXT-INVITE] Onboarding external user {Email} to Project {ProjectId}",
-            request.Email, request.ProjectId);
-
-        // ── Step 1: Create or resolve Contact (and read any existing oid binding) ──
-        var (contactId, existingOid) = await ResolveOrCreateContactAsync(dataverseClient, request, logger, ct);
-        if (contactId == Guid.Empty)
-        {
-            return Results.Problem(
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "Internal Server Error",
-                detail: "Failed to create or resolve Contact record in Dataverse.",
-                extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
-        }
+        logger.LogInformation("[EXT-INVITE] Onboarding external user {Email}", request.Email);
 
         var portalUrl = configuration["ExternalAccess:PortalUrl"]
             ?? throw new InvalidOperationException("ExternalAccess:PortalUrl is not configured.");
 
-        // ── Step 2: Idempotency gate ──────────────────────────────────────────
-        // If the Contact already has an oid bound, the CIAM account already exists — do NOT create
-        // a second account (and do not re-send the onboarding email).
+        try
+        {
+            var (contactId, status) = await ProvisionAsync(
+                request, dataverseClient, ciamProvisioner, emailService, portalUrl, logger, ct);
+            return TypedResults.Ok(new InviteExternalUserResponse(contactId, portalUrl, status));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[EXT-INVITE] Failed to onboard external user {Email}", request.Email);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "Failed to onboard the external user.",
+                extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
+        }
+    }
+
+    // =========================================================================
+    // Reusable core (shared with the invite-and-grant orchestration, task 029)
+    // =========================================================================
+
+    /// <summary>
+    /// Resolves-or-creates the Dataverse Contact by email and — if not already provisioned — creates a
+    /// CIAM local account, persists the returned oid to <c>Contact.sprk_externalobjectid</c>, and sends
+    /// the onboarding email. <b>Idempotent</b>: when the Contact already has an oid bound, NO second
+    /// account is created (returns "AlreadyProvisioned"). Throws on a hard failure (Contact resolve or
+    /// CIAM create). Shared by <c>/invite</c> and <c>/invite-and-grant</c> (task 029).
+    /// </summary>
+    /// <returns>The resolved Contact id and a status ("Provisioned" | "AlreadyProvisioned").</returns>
+    internal static async Task<(Guid ContactId, string Status)> ProvisionAsync(
+        InviteExternalUserRequest request,
+        DataverseWebApiClient dataverseClient,
+        CiamUserProvisioningService ciamProvisioner,
+        RegistrationEmailService emailService,
+        string portalUrl,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var (contactId, existingOid) = await ResolveOrCreateContactAsync(dataverseClient, request, logger, ct);
+        if (contactId == Guid.Empty)
+        {
+            throw new InvalidOperationException($"Failed to create or resolve Contact for '{request.Email}'.");
+        }
+
+        // Idempotency gate: an existing oid means the CIAM account already exists — do NOT create a
+        // second account (and do not re-send the onboarding email).
         if (!string.IsNullOrWhiteSpace(existingOid))
         {
             logger.LogInformation(
                 "[EXT-INVITE] Contact {ContactId} ({Email}) already has an oid bound — skipping CIAM account creation (idempotent).",
                 contactId, request.Email);
-            return TypedResults.Ok(new InviteExternalUserResponse(contactId, portalUrl, "AlreadyProvisioned"));
+            return (contactId, "AlreadyProvisioned");
         }
 
-        // ── Step 3: Create the CIAM local account (broker-only; no B2B guest) ─────
-        string oid;
-        try
-        {
-            oid = await ciamProvisioner.CreateCiamUserAsync(request.Email, request.FirstName, request.LastName, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "[EXT-INVITE] Failed to create CIAM account for {Email}", request.Email);
-            return Results.Problem(
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "Internal Server Error",
-                detail: "Failed to create the external identity.",
-                extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
-        }
+        // Create the CIAM local account (broker-only; no B2B guest).
+        var oid = await ciamProvisioner.CreateCiamUserAsync(request.Email, request.FirstName, request.LastName, ct);
 
-        // ── Step 4: Persist the oid to Contact.sprk_externalobjectid ──────────
+        // Persist the oid to Contact.sprk_externalobjectid.
         await dataverseClient.UpdateAsync(
             ContactEntitySet,
             contactId,
             new Dictionary<string, object?> { ["sprk_externalobjectid"] = oid },
             ct);
 
-        // ── Step 5: Send the onboarding email (task 024) ──────────────────────
-        // portalUrl is inserted un-encoded into the template — it MUST be trusted server config.
+        // Send the onboarding email (task 024). portalUrl is inserted un-encoded — trusted server config.
+        // Non-fatal: the account + oid are persisted; admin can re-send out-of-band on failure.
         try
         {
             await emailService.SendCiamOnboardingEmailAsync(request.Email, request.FirstName ?? string.Empty, portalUrl, ct);
         }
         catch (Exception ex)
         {
-            // Non-fatal: the account + oid are persisted. Admin can re-send onboarding out-of-band.
             logger.LogWarning(ex, "[EXT-INVITE] CIAM account created for {Email} but onboarding email failed to send.", request.Email);
         }
 
@@ -142,7 +158,7 @@ public static class InviteExternalUserEndpoint
             "[EXT-INVITE] Provisioned CIAM user {Oid} for {Email} — Contact: {ContactId}",
             oid, request.Email, contactId);
 
-        return TypedResults.Ok(new InviteExternalUserResponse(contactId, portalUrl, "Provisioned"));
+        return (contactId, "Provisioned");
     }
 
     // =========================================================================

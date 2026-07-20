@@ -78,8 +78,12 @@ public static class ExternalAccessEndpoints
         // POST /api/v1/external-access/revoke — Revoke Contact access from a Secure Project
         adminGroup.MapRevokeExternalAccessEndpoint();
 
-        // POST /api/v1/external-access/invite — Create Power Pages portal invitation
+        // POST /api/v1/external-access/invite — Onboard an external user via CIAM (idempotent)
         adminGroup.MapInviteExternalUserEndpoint();
+
+        // POST /api/v1/external-access/invite-and-grant — core-user "Invite to Secure Workspace"
+        // action (FR-11 / task 029): onboard (idempotent) + grant the Contact in one action.
+        adminGroup.MapInviteAndGrantExternalUserEndpoint();
 
         // POST /api/v1/external-access/close-project — Close project and cascade revocation
         adminGroup.MapPost("/close-project", ProjectClosureEndpoint.Handle)
