@@ -69,6 +69,23 @@ public class EmlGenerationServiceTests
     }
 
     [Fact]
+    public void GenerateEml_WhenMessageIdAndCorrelationEmpty_DoesNotThrow_AndSetsFallbackMessageId()
+    {
+        // task 092 (UAT #4/#5) hardening: the on-demand archive path reconstructs GraphMessageId as
+        // `sprk_graphmessageid ?? string.Empty`, so a communication with no stored message id (e.g. a draft)
+        // yields "". MimeKit's MessageId setter rejects an empty string with ArgumentException — the generator
+        // must EMPTY-coalesce to a fresh id (not just null-coalesce), so the .eml is generatable for any comm.
+        var request = CreateRequest();
+        var response = CreateResponse(graphMessageId: "", correlationId: "");
+
+        var result = _sut.GenerateEml(request, response);   // must not throw
+
+        using var ms = new MemoryStream(result.Content);
+        var parsed = MimeMessage.Load(ms);
+        parsed.MessageId.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
     public void GenerateEml_FileName_FollowsExpectedPattern()
     {
         // Arrange

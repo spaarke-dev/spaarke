@@ -203,6 +203,11 @@ public sealed class CommunicationService
                 statusCode: 500);
         }
 
+        // 6. Enqueue Document Profile (AppOnlyDocumentAnalysis) for the on-demand archived .eml, at parity
+        // with the outbound-send path (SendAsync) and the auto-inbound path (UAT #5). Best-effort/non-fatal —
+        // EnqueueDocumentAnalysisAsync swallows and logs any failure internally.
+        await EnqueueDocumentAnalysisAsync(archiveDocumentId, Guid.NewGuid().ToString(), ct);
+
         return new ArchiveCommunicationResult
         {
             CommunicationId = communicationId,
@@ -1776,12 +1781,20 @@ public sealed class CommunicationService
         CancellationToken ct,
         int emailDirection = 100000001) // default Sent — send-path callers are always outbound
     {
-        // 1. Generate the archival artifact via the channel archiver seam (dispatch by
-        // CommunicationType — ADR-045 rule 4). Email resolves to .eml generation.
-        var emlResult = _channelDispatcher.ResolveArchiver(request.CommunicationType)
-            .GenerateEml(request, partialResponse);
+        // 1. Fetch the communication's attachment bytes from SPE (best-effort per attachment; NFR-06)
+        // and generate the archival artifact via the channel archiver seam (dispatch by CommunicationType
+        // — ADR-045 rule 4) WITH those attachments embedded, so opening the .eml reproduces the original
+        // email intact (UAT #4 — faithful original). The attachments are STILL archived separately as
+        // sprk_document records elsewhere; both copies exist by design.
+        var emlAttachments = await FetchEmlAttachmentsForEmbedAsync(communicationId, ct);
 
-        // 2. Upload to SPE at /communications/{commId:N}/{fileName}.eml
+        var emlResult = _channelDispatcher.ResolveArchiver(request.CommunicationType)
+            .GenerateEml(request, partialResponse, emlAttachments);
+
+        // 2. Upload to SPE at /communications/{commId:N}/{fileName}.eml.
+        // Content-type: UploadSmallAsync does not accept an explicit content-type; Graph/SPE infers it
+        // from the object's ".eml" path extension → message/rfc822 (mirrors InferContentType's mapping),
+        // so the archived object downloads/opens as an email file in Outlook (UAT #4c).
         var driveId = _options.ArchiveContainerId;
         if (string.IsNullOrWhiteSpace(driveId))
         {
@@ -1800,7 +1813,9 @@ public sealed class CommunicationService
         // 3. Create sprk_document record linking to the archived file
         var document = new DataverseEntity("sprk_document")
         {
-            ["sprk_documentname"] = $"Archived: {TruncateTo(request.Subject, 180)}",
+            // Display name carries the generated .eml file name (not a bare "Archived: {subject}" with no
+            // extension) so it reads as an email file in the DMS (UAT #4b). sprk_filename is unchanged.
+            ["sprk_documentname"] = TruncateTo(emlResult.FileName, 200),
             ["sprk_filename"] = emlResult.FileName, // AI analyzer reads this for file type detection
             ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
             ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
@@ -1822,6 +1837,88 @@ public sealed class CommunicationService
             documentId, communicationId);
 
         return documentId;
+    }
+
+    /// <summary>
+    /// Fetches each attachment's bytes from SPE — via its own <c>sprk_graphdriveid</c>/<c>sprk_graphitemid</c>,
+    /// through the <see cref="SpeFileStore"/> facade (ADR-007, never a raw Graph client) — and projects them to
+    /// <see cref="EmlAttachment"/> for embedding in the archived .eml (UAT #4 faithful original). Best-effort per
+    /// attachment (NFR-06): a single attachment that lacks an SPE reference or fails to download is logged and
+    /// skipped; the .eml still archives with the body plus the attachments that succeeded, and the send/receive
+    /// flow never fails on it. Independent of the SEPARATE per-attachment <c>sprk_document</c> archival (which is
+    /// unchanged) — both copies exist by design.
+    /// </summary>
+    private async Task<List<EmlAttachment>> FetchEmlAttachmentsForEmbedAsync(Guid communicationId, CancellationToken ct)
+    {
+        var result = new List<EmlAttachment>();
+
+        EntityCollection attachments;
+        try
+        {
+            var query = new QueryExpression("sprk_communicationattachment")
+            {
+                ColumnSet = new ColumnSet("sprk_name", "sprk_graphitemid", "sprk_graphdriveid"),
+                Criteria =
+                {
+                    Conditions = { new ConditionExpression("sprk_communication", ConditionOperator.Equal, communicationId) },
+                },
+            };
+            attachments = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to query attachments for .eml embedding (non-fatal) | CommunicationId: {CommunicationId}",
+                communicationId);
+            return result;
+        }
+
+        foreach (var att in attachments.Entities)
+        {
+            // Embed EVERY attachment that is stored in SPE, regardless of whether it also has a separate
+            // sprk_document — the embed is independent of the standalone archival.
+            var itemId = att.GetAttributeValue<string>("sprk_graphitemid");
+            if (string.IsNullOrEmpty(itemId)) continue;
+
+            // Prefer the attachment's own drive id; fall back to the archive container.
+            var driveId = att.GetAttributeValue<string>("sprk_graphdriveid");
+            if (string.IsNullOrEmpty(driveId)) driveId = _options.ArchiveContainerId;
+            if (string.IsNullOrEmpty(driveId)) continue;
+
+            var fileName = att.GetAttributeValue<string>("sprk_name") ?? "attachment";
+
+            try
+            {
+                await using var content = await _speFileStore.DownloadFileAsync(driveId, itemId, ct);
+                if (content is null)
+                {
+                    _logger.LogWarning(
+                        "Attachment '{FileName}' returned no content for .eml embedding (skipped) | CommunicationId: {CommunicationId}, ItemId: {ItemId}",
+                        fileName, communicationId, itemId);
+                    continue;
+                }
+
+                using var ms = new MemoryStream();
+                await content.CopyToAsync(ms, ct);
+
+                result.Add(new EmlAttachment
+                {
+                    FileName = fileName,
+                    Content = ms.ToArray(),
+                    ContentType = InferContentType(fileName),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to download attachment '{FileName}' for .eml embedding (skipped, non-fatal) | CommunicationId: {CommunicationId}, ItemId: {ItemId}",
+                    fileName, communicationId, itemId);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
