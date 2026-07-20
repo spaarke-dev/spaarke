@@ -45,7 +45,12 @@ public sealed class EmlGenerationService
         // Set headers
         message.Subject = request.Subject;
         message.Date = response.SentAt;
-        message.MessageId = response.GraphMessageId ?? response.CorrelationId ?? Guid.NewGuid().ToString("N");
+        // Message-Id: prefer the Graph id, then the correlation id, else a fresh id. Coalesce EMPTY (not just
+        // null) — MimeKit's MessageId setter rejects an empty string with ArgumentException, and the on-demand
+        // archive path reconstructs GraphMessageId as `sprk_graphmessageid ?? string.Empty` (a record with no
+        // stored message id, e.g. a draft, yields ""). Empty-tolerance keeps the .eml generatable for any comm.
+        message.MessageId = FirstNonEmpty(response.GraphMessageId, response.CorrelationId)
+                            ?? Guid.NewGuid().ToString("N");
 
         // Build body
         var bodyPart = request.BodyFormat == BodyFormat.HTML
@@ -100,6 +105,10 @@ public sealed class EmlGenerationService
     private static readonly HashSet<char> s_invalidFileNameChars = new(
         Path.GetInvalidFileNameChars()
             .Concat(new[] { '<', '>', ':', '"', '/', '\\', '|', '?', '*' }));
+
+    /// <summary>Returns the first non-null, non-empty value, or null when both are empty (empty-tolerant coalesce).</summary>
+    private static string? FirstNonEmpty(string? a, string? b) =>
+        !string.IsNullOrEmpty(a) ? a : !string.IsNullOrEmpty(b) ? b : null;
 
     private static string SanitizeFileName(string input)
     {
