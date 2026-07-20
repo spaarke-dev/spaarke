@@ -46,14 +46,10 @@ jest.mock('@spaarke/auth', () => ({
 }));
 
 // ── PaneEventBus (no-op) ────────────────────────────────────────────────────
-jest.mock(
-  '@spaarke/ai-widgets/events',
-  () => ({
-    useDispatchPaneEvent: () => jest.fn(),
-    usePaneEvent: () => undefined,
-  }),
-  { virtual: true }
-);
+jest.mock('@spaarke/ai-widgets/events', () => ({
+  useDispatchPaneEvent: () => jest.fn(),
+  usePaneEvent: () => undefined,
+}));
 
 // ── Active-document registrar bridge — SPY (the hand-off under test) ─────────
 const registerActiveDocumentSpy = jest.fn();

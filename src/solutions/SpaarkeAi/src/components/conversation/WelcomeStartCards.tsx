@@ -25,6 +25,7 @@ import {
   DocumentTextRegular,
   BriefcaseRegular,
   DocumentAddRegular,
+  AppsAddInRegular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -35,7 +36,10 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalM,
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalXL,
-    paddingBottom: tokens.spacingVerticalL,
+    // R4-1 (UAT 2026-07-19): breathing room so the cards read as their own band,
+    // separated from the WelcomePanel heading above and the chat/composer below.
+    paddingTop: tokens.spacingVerticalXL,
+    paddingBottom: tokens.spacingVerticalXXL,
     flexShrink: 0,
   },
   card: {
@@ -96,13 +100,16 @@ export interface WelcomeStartCardsProps {
   onCreateMatter: () => void;
   /** Compose a document — opens a blank Compose tab. */
   onCompose: () => void;
+  /** R4-2: "More" — opens the Quick Start modal (the full 7-card grid). Omitted → no More card. */
+  onMore?: () => void;
 }
 
-/** The three cold-open quick-start cards. */
+/** The cold-open quick-start cards (+ an optional "More" card → Quick Start modal). */
 export const WelcomeStartCards: React.FC<WelcomeStartCardsProps> = ({
   onSummarize,
   onCreateMatter,
   onCompose,
+  onMore,
 }) => {
   const styles = useStyles();
 
@@ -134,6 +141,18 @@ export const WelcomeStartCards: React.FC<WelcomeStartCardsProps> = ({
       subtitle: 'Start a new document in the editor.',
       onClick: onCompose,
     },
+    // R4-2 (UAT 2026-07-19): a "More" card that opens the full Quick Start grid.
+    ...(onMore
+      ? [
+          {
+            key: 'more',
+            icon: <AppsAddInRegular className={styles.icon} />,
+            title: 'More…',
+            subtitle: 'Browse all quick-start actions.',
+            onClick: onMore,
+          },
+        ]
+      : []),
   ];
 
   return (

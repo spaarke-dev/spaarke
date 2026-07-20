@@ -50,6 +50,11 @@ public sealed class ComposeServiceLoadParaIdTests
 
     public ComposeServiceLoadParaIdTests()
     {
+        // FR-06 (task 027): LoadAsync resolves the load-time version id best-effort. A class-wide default
+        // keeps the strict SPE mock happy for every test; the formatted-doc test asserts it is surfaced.
+        _spe.Setup(s => s.GetCurrentVersionIdAsUserAsync(It.IsAny<HttpContext>(), DriveId, DocumentSpeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("v-load-1");
+
         // CreateSessionAsync is not virtual — the real method runs; its cache write lands in _store so
         // GetSessionAsync stays consistent (mirrors CrossVersionSessionPersistenceTests).
         _cache
@@ -138,6 +143,8 @@ public sealed class ComposeServiceLoadParaIdTests
         result.ParaIdMap[0].ParaId.Should().Be("AAAA0001", "an existing paraId is collected verbatim");
         result.ParaIdMap[0].IsMinted.Should().BeFalse();
         result.ParaIdMap.Skip(1).Should().OnlyContain(e => e.IsMinted, "the id-less paragraphs are minted");
+        result.VersionId.Should().Be("v-load-1",
+            "the load-time SPE version id is surfaced so a later dirty save can re-fetch this baseline (FR-06)");
     }
 
     [Fact]

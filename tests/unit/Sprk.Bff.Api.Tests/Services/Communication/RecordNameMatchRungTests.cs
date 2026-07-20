@@ -218,6 +218,119 @@ public class RecordNameMatchRungTests
             Times.Never);
     }
 
+    // ── email-r4 UAT #7 regression: body/attachment reference numbers must resolve regardless of ranking ──
+    // The defect: rung 3.5 was retrieve-then-verify over ONE noisy whole-text query, so a reference number
+    // buried in the body never ranked into the top-N retrieval window and was never verified. The fix adds an
+    // EXACT `referenceNumbers` server-side filter. These tests model that split: the whole-text call (no
+    // Filters) MISSES the record; the exact-filter call (Filters.ReferenceNumbers set) FINDS it.
+
+    private static bool IsExactRefFilter(RecordSearchRequest r) =>
+        r.Filters?.ReferenceNumbers is { Count: > 0 };
+
+    private void SetupSplitIndex(RecordSearchResult[] wholeText, RecordSearchResult[] exactFilter)
+    {
+        _matcher.Setup(m => m.SearchAsync(It.Is<RecordSearchRequest>(r => !IsExactRefFilter(r)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RungTestSupport.SearchResponse(wholeText));
+        _matcher.Setup(m => m.SearchAsync(It.Is<RecordSearchRequest>(r => IsExactRefFilter(r)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RungTestSupport.SearchResponse(exactFilter));
+    }
+
+    private static RecordSearchResult RefHit(string recordType, Guid id, string name, string referenceNumber) =>
+        new()
+        {
+            RecordId = id.ToString(),
+            RecordType = recordType,
+            RecordName = name,
+            ReferenceNumbers = new[] { referenceNumber },
+            ConfidenceScore = 0.5,
+        };
+
+    [Fact]
+    public async Task Evaluate_WhenReferenceNumberOnlyInBody_AndWholeTextRetrievalMisses_ExactFilterResolvesIt()
+    {
+        // The core #7 scenario: the reference number is in the BODY only, and the whole-text keyword retrieval
+        // does NOT surface the record (ranking miss). The exact referenceNumbers filter must recover it.
+        var matterId = Guid.NewGuid();
+        SetupSplitIndex(
+            wholeText: Array.Empty<RecordSearchResult>(),                                  // ranking miss
+            exactFilter: new[] { RefHit(RecordEntityType.Matter, matterId, "Smith v Smith", "REAL-2026-123456.02") });
+
+        var matches = await Build().EvaluateAsync(
+            RungTestSupport.Envelope(
+                subject: "Fwd: paperwork",
+                bodyText: "It also involves real estate matter Smith & Smith REAL-2026-123456.02, thanks."),
+            new AssociationContext(), CancellationToken.None);
+
+        var match = matches.Should().ContainSingle().Subject;
+        match.RegardingFieldName.Should().Be("sprk_regardingmatter");
+        match.Target!.Id.Should().Be(matterId);
+        match.Confidence.Should().Be(0.97);                     // NumberConfidence (flat across locations)
+        match.Rung.Should().Be(RungKind.RecordNameMatch);       // Suggest-only — never auto-file-eligible
+        match.Provenance.Should().Contain("where=body");
+        match.Provenance.Should().Contain("REAL-2026-123456.02");
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenSubjectRefAndDifferentBodyRef_EmitsBothMatterCandidates()
+    {
+        // The email-1 UAT scenario: matter #A in the subject, a DIFFERENT matter #B in the body. Both must
+        // surface as sprk_regardingmatter candidates each ≥ 0.85 so the mapper flags Ambiguous (user picks).
+        var patentId = Guid.NewGuid();
+        var smithId = Guid.NewGuid();
+        SetupSplitIndex(
+            wholeText: new[] { RefHit(RecordEntityType.Matter, patentId, "Patent Application 19183531 - Elisa Liardo", "PAT-942665") },
+            exactFilter: new[] { RefHit(RecordEntityType.Matter, smithId, "Smith v Smith", "REAL-2026-123456.02") });
+
+        var matches = await Build().EvaluateAsync(
+            RungTestSupport.Envelope(
+                subject: "PAT-942665 Patent Application 19183531 - Elisa Liardo",
+                bodyText: "It also involves real estate matter Smith & Smith REAL-2026-123456.02"),
+            new AssociationContext(), CancellationToken.None);
+
+        matches.Should().HaveCount(2);
+        matches.Should().OnlyContain(m => m.RegardingFieldName == "sprk_regardingmatter");
+        matches.Should().OnlyContain(m => m.Confidence == 0.97);            // both reference numbers ≥ threshold
+        matches.Select(m => m.Target!.Id).Should().BeEquivalentTo(new[] { patentId, smithId });
+        matches.Should().Contain(m => m.Provenance.Contains("where=subject") && m.Provenance.Contains("PAT-942665"));
+        matches.Should().Contain(m => m.Provenance.Contains("where=body") && m.Provenance.Contains("REAL-2026-123456.02"));
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenExtractedTokenMatchesNoRecord_EmitsNothing()
+    {
+        // Precision gate: a reference-shaped token that resolves to NO record (the exact filter returns empty)
+        // emits nothing — the permissive extraction regex never produces a false positive on its own.
+        SetupSplitIndex(
+            wholeText: Array.Empty<RecordSearchResult>(),
+            exactFilter: Array.Empty<RecordSearchResult>());               // "ABC-9999" matches no record
+
+        var matches = await Build().EvaluateAsync(
+            RungTestSupport.Envelope(
+                subject: "Order update",
+                bodyText: "Call me at 555-1234 about order ABC-9999 by 7/19/2026."),
+            new AssociationContext(), CancellationToken.None);
+
+        matches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Evaluate_WhenBodyHasReference_QueriesExactReferenceNumberFilter()
+    {
+        // Proves the exact-filter search is actually issued with the extracted number (the ranking-independent
+        // recall path), not just the whole-text query.
+        var captured = new List<RecordSearchRequest>();
+        _matcher.Setup(m => m.SearchAsync(It.IsAny<RecordSearchRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<RecordSearchRequest, CancellationToken>((req, _) => captured.Add(req))
+            .ReturnsAsync(RungTestSupport.SearchResponse());
+
+        await Build().EvaluateAsync(
+            RungTestSupport.Envelope(subject: "hi", bodyText: "re: REAL-2026-123456.02 please action"),
+            new AssociationContext(), CancellationToken.None);
+
+        captured.Should().Contain(r => IsExactRefFilter(r)
+            && r.Filters!.ReferenceNumbers!.Any(n => n.Equals("REAL-2026-123456.02", StringComparison.OrdinalIgnoreCase)));
+    }
+
     [Fact]
     public async Task Evaluate_RequestsKeywordRanking_OverSearchableTypes()
     {

@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -340,6 +341,17 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     /// <summary>SPE ETag (used for staleness detection on next Save).</summary>
     public string? ETag { get; init; }
 
+    /// <summary>
+    /// FR-06 (E1, task 022/027): the LOAD-TIME SPE version id — the drive-item's CURRENT version at the
+    /// moment of Load, resolved via <c>ISpeFileOperations.GetCurrentVersionIdAsUserAsync</c>. The client
+    /// carries it back on a later dirty save as <see cref="SaveComposeDocumentRequest.BaselineVersionId"/>
+    /// so the server can re-fetch this exact baseline even after the client no longer holds the retained
+    /// bytes (e.g. a save after a page refresh) — the load-time version stays addressable after the save
+    /// advances the item's current version. Null (best-effort) when the item has no version history or the
+    /// version lookup was unavailable; the client then relies on the retained-bytes <c>Content</c> fast-path.
+    /// </summary>
+    public string? VersionId { get; init; }
+
     /// <summary>File name from SPE metadata.</summary>
     public string? FileName { get; init; }
 
@@ -379,7 +391,80 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     /// pre-parse could not read the source (best-effort; Load still returns the content bytes).
     /// </summary>
     public IReadOnlyList<ParaIdMapEntry> ParaIdMap { get; init; } = Array.Empty<ParaIdMapEntry>();
+
+    /// <summary>
+    /// FR-24 (task 050, import round-trip): the existing native Word tracked changes (<c>w:ins</c>/
+    /// <c>w:del</c>, any authorship) recovered from the load-time <c>.docx</c> by the EXISTING
+    /// <see cref="DocxAnnotationReader"/> (reused verbatim), run server-side ALONGSIDE the mammoth
+    /// convert — which flattens those marks to prose before the editor sees them (<c>docxBridge.ts</c>).
+    /// Each recovered <see cref="RecoveredRevision"/> is projected here with the E2 <c>w14:paraId</c>
+    /// of its containing paragraph (resolved from <see cref="ParaIdMap"/> by the reader's document-order
+    /// <c>ParagraphHint</c>), so the client renders it as a first-class accept/reject-able insertion/
+    /// deletion mark anchored by paraId (design §7 — the reader is not the gap, the editor mount is).
+    /// Empty (never null) when the document has no revisions, or when the read could not run (best-effort;
+    /// a malformed source degrades to no imported revisions, never fails Load).
+    /// </summary>
+    public IReadOnlyList<ImportedRevision> ImportedRevisions { get; init; } = Array.Empty<ImportedRevision>();
+
+    /// <summary>
+    /// FR-25 (task 051, import round-trip): the existing native Word comment threads (<c>w:comment</c>,
+    /// any authorship) recovered from the load-time <c>.docx</c> by the SAME EXISTING
+    /// <see cref="DocxAnnotationReader"/> (reused verbatim) that projects <see cref="ImportedRevisions"/>
+    /// above, run alongside the mammoth convert — which flattens comment anchors to plain prose before
+    /// the editor sees them (<c>docxBridge.ts</c>). Each recovered <see cref="RecoveredComment"/> is
+    /// projected here with the E2 <c>w14:paraId</c> of its containing paragraph (resolved from
+    /// <see cref="ParaIdMap"/> by the reader's document-order <c>ParagraphHint</c>, the identical
+    /// <c>ResolveParaIdForHint</c> resolver the revisions projection uses), so the client
+    /// groups same-anchor comments into a thread (first = root, rest = flat replies — the reader carries no
+    /// modern-comments 4-part structure, so a deeper reply tree is never representable here by construction)
+    /// and renders it via the FR-23 <c>ComposeCommentThread</c> UI (task 044) instead of the mammoth-flattened
+    /// prose. Empty (never null) when the document has no comments, or when the read could not run
+    /// (best-effort; a malformed source degrades to no imported comments, never fails Load).
+    /// </summary>
+    public IReadOnlyList<ImportedComment> ImportedComments { get; init; } = Array.Empty<ImportedComment>();
 }
+
+/// <summary>
+/// FR-25 (task 051) — one native Word comment recovered on Load, projected for the editor render. A
+/// mirror-first projection of <see cref="RecoveredComment"/> (same field vocabulary, NOT a parallel
+/// schema) PLUS the E2 <see cref="ParaId"/> of the containing paragraph — the primary anchor the client
+/// uses to group same-span comments into a <c>ComposeCommentThreadModel</c> (first recovered comment on a
+/// span = thread root, the rest = flat replies) and render it through the FR-23 thread UI. <see cref="AnchorText"/>
+/// is the anchored document range the comment is about (NOT the comment's own body — that is
+/// <see cref="CommentText"/>). <see cref="ParaId"/> is <c>null</c> when the reader's paragraph index falls
+/// outside the paraId map (best-effort; the client then fuzzy-anchors by <see cref="AnchorText"/> +
+/// <see cref="ParagraphHint"/>, mirroring <see cref="ImportedRevision"/>'s fallback). Wire shape is
+/// camelCase, matching the client <c>ImportedComment</c> mirror in <c>compose-contracts.ts</c>.
+/// </summary>
+public sealed record ImportedComment(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("author")] string Author,
+    [property: JsonPropertyName("date")] DateTimeOffset Date,
+    [property: JsonPropertyName("commentText")] string CommentText,
+    [property: JsonPropertyName("anchorText")] string AnchorText,
+    [property: JsonPropertyName("paragraphHint")] int ParagraphHint,
+    [property: JsonPropertyName("paraId")] string? ParaId);
+
+/// <summary>
+/// FR-24 (task 050) — one native Word revision recovered on Load, projected for the editor render.
+/// A mirror-first projection of <see cref="RecoveredRevision"/> (same field vocabulary +
+/// <see cref="RecoveredAnnotationKind"/>, NOT a parallel schema) PLUS the E2 <see cref="ParaId"/> of the
+/// containing paragraph — the primary anchor the client uses to render the revision as a first-class
+/// insertion/deletion mark (with the <see cref="ParaIdPreParser"/> fuzzy fallback retained for the
+/// cross-Word-session case where Word regenerated paraIds). <see cref="ParaId"/> is <c>null</c> when the
+/// reader's paragraph index falls outside the paraId map (best-effort; the client then fuzzy-anchors).
+/// Wire shape is camelCase, matching the client <c>ImportedRevision</c> mirror in
+/// <c>compose-contracts.ts</c>.
+/// </summary>
+public sealed record ImportedRevision(
+    [property: JsonPropertyName("kind")] RecoveredAnnotationKind Kind,
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("author")] string Author,
+    [property: JsonPropertyName("date")] DateTimeOffset Date,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("anchorText")] string AnchorText,
+    [property: JsonPropertyName("paragraphHint")] int ParagraphHint,
+    [property: JsonPropertyName("paraId")] string? ParaId);
 
 /// <summary>Save request payload.</summary>
 /// <remarks>
@@ -412,8 +497,60 @@ public sealed record SaveComposeDocumentRequest
     /// </summary>
     public string? ContainerId { get; init; }
 
-    /// <summary>DOCX bytes to save. Required.</summary>
-    public required ReadOnlyMemory<byte> Content { get; init; }
+    /// <summary>
+    /// E1 (FR-01/FR-06, task 022): the retained load-time original <c>.docx</c> bytes, supplied as the
+    /// same-session FAST-PATH baseline. This is the pristine mount payload the client still holds
+    /// (<c>state.docxBytes</c>) — NOT a TipTap reconstruction (<c>docx.js</c> is dropped from the export
+    /// path; a dirty save never rebuilds the whole document). <see cref="SaveAsync"/> applies
+    /// <see cref="EditedParagraphs"/> as a delta ONTO these bytes.
+    /// <para>
+    /// OPTIONAL (was <c>required</c> pre-R3): when the client no longer holds the original (e.g. a save
+    /// after a page refresh), it omits <see cref="Content"/> and instead supplies
+    /// <see cref="BaselineVersionId"/> so the BFF re-fetches the load-time SPE version (FR-06 primary).
+    /// A transient create-on-save (Browse/Upload/AI-draft with no <see cref="DocumentSpeId"/>) still
+    /// supplies <see cref="Content"/> as the document bytes. When present with no
+    /// <see cref="EditedParagraphs"/> and no <see cref="Annotations"/>, the baseline is persisted
+    /// byte-identical (a clean Save is unchanged; FR-06a — see <c>ComposeServiceUploadFidelityTests</c>).
+    /// </para>
+    /// </summary>
+    public ReadOnlyMemory<byte> Content { get; init; }
+
+    /// <summary>
+    /// E1 (FR-06, task 022): the LOAD-TIME SPE version id captured when the document was loaded
+    /// (<see cref="LoadComposeDocumentResult.VersionId"/> via <c>ComposeService.LoadAsync</c>). Used to
+    /// re-fetch the retained original baseline via <c>ISpeFileOperations.DownloadFileVersionAsUserAsync</c>
+    /// (task 002) when <see cref="Content"/> is absent (the client-bytes fast-path is unavailable, e.g. a
+    /// save after a page refresh). The load-time version stays addressable even after later dirty saves
+    /// advance the item's CURRENT version, so the delta always applies onto the correct baseline. Null on a
+    /// same-session save (the <see cref="Content"/> fast-path is used) or a transient create-on-save.
+    /// </summary>
+    public string? BaselineVersionId { get; init; }
+
+    /// <summary>
+    /// E1 (FR-01/FR-02, task 022, Option C — design §4.2): the editor paragraphs the user CHANGED, each
+    /// keyed by its <c>w14:paraId</c> (E2 splice key) with its new settled text. When non-empty,
+    /// <see cref="SaveAsync"/> drives <see cref="ComposeParagraphRedlineSynthesizer"/> to rewrite exactly
+    /// these paragraphs in the resolved baseline as native <c>w:ins</c>/<c>w:del</c> tracked changes (a
+    /// word-level diff old→new), preserving every untouched paragraph + all structure by construction —
+    /// the "delta onto the retained original" that replaces the R2 whole-document reconstruction. Null/empty
+    /// on a clean Save or a create-on-save (nothing to splice; the baseline persists as-is). An unmatched
+    /// paraId is a handled synthesis error (<c>ComposeRedlineException</c>), never a silent wrong write.
+    /// </summary>
+    public IReadOnlyList<ComposeEditedParagraph>? EditedParagraphs { get; init; }
+
+    /// <summary>
+    /// E1 born-in-editor (FR-01a, task 026): the paraId-keyed editor CONTENT MODEL — the authoring source for
+    /// a document BORN IN THE EDITOR (AI-drafted from a <c>initialHtml</c> seed, blank-new, or browse-local)
+    /// that has NO retained load-time original to delta against. When present, <see cref="SaveAsync"/> renders
+    /// a high-fidelity <c>.docx</c> server-side via <see cref="ComposeDocumentRenderer"/> (real styles +
+    /// style-linked multi-level numbering + native tables + minted <c>w14:paraId</c>) — the deterministic
+    /// replacement for the removed client <c>docx.js</c> exporter (task 027). Mutually exclusive with
+    /// <see cref="Content"/> / <see cref="BaselineVersionId"/> / <see cref="EditedParagraphs"/> (a born-in-editor
+    /// first Save authors the whole document; there is no baseline to delta onto). Null on every loaded-document
+    /// save (the E1 edit path). Server-side render-from-a-content-model is deterministic OOXML authoring, NOT an
+    /// AI dispatch (ADR-039 complied — design §11).
+    /// </summary>
+    public ComposeContentModel? ContentModel { get; init; }
 
     /// <summary>Bound session id (required to keep the session's <c>DocumentId</c> in sync
     /// across the ephemeral → promoted transition).</summary>

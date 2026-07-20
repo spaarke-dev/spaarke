@@ -43,10 +43,11 @@ jest.mock('@spaarke/auth', () => ({
 const docxToTipTapHtml = jest.fn(async () => ({ html: '<p>Loaded document body</p>', messages: [] }));
 jest.mock('../utils/docxBridge', () => ({
   docxToTipTapHtml: (...args: unknown[]) => docxToTipTapHtml(...(args as [])),
-  tipTapToDocxBytes: jest.fn(async () => new ArrayBuffer(0)),
   // task 011: ComposeEditor imports stampParaIds (called after a real docx import);
   // a no-op keeps this reference-only suite's mock complete.
   stampParaIds: jest.fn(),
+  // task 027: snapshot capture after stampParaIds — no-op returning an empty map.
+  captureParaIdSnapshot: jest.fn(() => new Map()),
 }));
 
 /** Build an ArrayBuffer from a leading signature followed by filler bytes. */

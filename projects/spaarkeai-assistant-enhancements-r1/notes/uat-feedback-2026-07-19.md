@@ -37,8 +37,12 @@ SprkChat + SprkChatInput gained three additive, default-off, context-agnostic pr
 - ✅ **Part B — Context pane opens on Execution Trace; quick-start removed** (commit `9f78b2874`, deployed 2026-07-19). Owner: "we are removing the quick start from the Context - you can remove it." `DEFAULT_TOOL`→`execution-trace`; quick-start removed from `ContextToolId`/menu/`ContextPaneController` (branch + handler + 8 imports + styles); execution-trace still yields to a server-pushed context widget during active analysis. ComposeTraceHost stubbed in the provider-less test suite; 24/24 Context tests pass. The Assistant-pane ⋮ → Quick Start modal is a SEPARATE surface (unchanged). Finding: the Context pane was ALREADY visible on load (right 25% col) — the real change was its default CONTENT.
 - ⏳ **Part B.2 — session files live IN the Context pane** (OPTIONAL): `context.files_staged` is dispatched (ids only) but the Context pane has no consumer. Lower priority now — files already show in the Assistant pane (Part A) and the trace shows Assistant activity. Would need `files_staged` enriched with filenames + a render home in the trace view.
 
-### Draft-a-response → Compose tab (owner: YES, 2026-07-19)
-- Route the drafted `{subject, body}` into a pre-filled Compose tab. Needs the compose widget to accept SEED content via `widget_load` widgetData, then dispatch it from the draft path. IN PROGRESS.
+### ✅ Draft-a-response → Compose tab — SHIPPED (commit `2653e6506`, deployed 2026-07-19)
+Owner: "Yes — route to a pre-filled Compose tab." The "Draft a response" chip now OPENS a Compose tab seeded with the draft via the EXISTING `compose.draft.html` seam (no shared-lib change). Subject + suggested recipients + sources are folded into the seed HTML (`buildCorrespondenceComposeHtml`, reusing `assistantTextToDraftHtml`); the transcript gets a short "opened in Compose" confirmation. `isCorrespondenceDraft` shared detector in `DocumentUploadedEventStream.ts`; wired in `useConsumerChips.runBindingDispatch`. 20/20 helper tests pass.
+- NOTE: `useConsumerChips.surface-launch` + `ConsumerChips` test suites are PRE-EXISTING broken in this worktree (a `.tsx` `jest.fn<…>()` babel-parse failure — fails identically with changes stashed), so the dispatch wiring is covered by typecheck + the `DocumentUploadedEventStream` helper tests. Worth a separate fix pass.
+
+### OPTIONAL remaining — session files live IN the Context pane (Part B.2)
+- `context.files_staged` is dispatched (ids only) but the Context pane has no consumer. LOW priority: files already show in the Assistant pane (Part A) and the Context pane now shows the execution trace (Assistant activity). Would need `files_staged` enriched with filenames + a render home in the trace view.
 
 ## Key facts / anchors
 - Chip dispatch path: `useConsumerChips.runBindingDispatch` (surface_launch handling fixed in cluster 1).

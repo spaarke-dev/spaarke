@@ -11,7 +11,7 @@
 **Purpose**: Make the Compose Word round-trip faithful — a dirty save applies edits as a delta onto the retained load-time original OOXML instead of rebuilding the whole `.docx` from the editor's simplified view.
 
 **Scope**:
-- **E1** — Retained-original delta save (drop `docx.js`; adopt `Docxodus` `WmlComparer`).
+- **E1** — Retained-original delta save (drop `docx.js`; self-synthesized redline via `ComposeParagraphRedlineSynthesizer`, Option C — no external diff engine).
 - **E2** — `w14:paraId` identity substrate (server pre-parse/mint; TipTap carry; paraId-primary anchoring).
 - **E3** — Grounding-tied confidence band + formatted AI insertions (additive `ComposeDraftPayload`).
 - **Editing toolset** — find/replace, basic tables, sticky toolbar, one-line bubble menu, dismissible warning, styles pane, richer comment threads.
@@ -40,7 +40,7 @@
 
 **From Spec**:
 - MUST derive dirty-save output from the retained load-time original (FR-01); MUST NOT reconstruct the whole doc from TipTap.
-- MUST exclude SkiaSharp assets when adding Docxodus; MUST NOT invoke Docxodus `HtmlToWml`/`FormattingAssembler`.
+- E1 redline synthesis is pure OpenXML via `ComposeParagraphRedlineSynthesizer` (Option C) — no external diff engine, no new NuGet, hence no SkiaSharp/Docxodus packaging concern.
 - MUST anchor primarily by `paraId`; MUST retain fuzzy re-anchor as cross-Word-session fallback.
 - MUST derive E3 confidence server-side from grounding; MUST NOT auto-accept low-confidence edits.
 - MUST NOT add any TipTap product feature or any AGPL code.
@@ -49,11 +49,11 @@
 
 | Decision | Rationale | Impact |
 |----------|-----------|--------|
-| E1 = hybrid (retained-original + Docxodus redline + existing writer, D1) | Untouched paragraphs preserved; max reuse of R2 pipeline | Tracks A/B; FR-01..07 |
+| E1 = hybrid (retained-original + Option C self-synthesized redline via `ComposeParagraphRedlineSynthesizer` + existing writer, D1) | Untouched paragraphs preserved byte-identical; max reuse of R2 pipeline | Tracks A/B; FR-01..07 |
 | Baseline = load-time SPE version by `versionId` (S4) | Authoritative, refresh-safe, zero new storage | FR-06; new `SpeFileStore` version fetch |
 | paraId carried via MIT `@tiptap/extension-unique-id`, no custom plugin (S2) | Built-in split dedup; server owns load-time ids | FR-08..12 |
 | E3 confidence = grounding-tied qualitative band, rationale-first (D3) | 2026 HCI research: numeric scores drive over-reliance | FR-13/14 |
-| MVP = Approach A (WmlComparer re-serialized output) | Cosmetic-lossless; Approach B splice-back deferred | FR-07/NFR-07 |
+| Option C edits changed paragraphs in place (no external comparer) | Untouched paragraphs byte-identical by construction; no re-serialization / no Approach A/B distinction | FR-07/NFR-07 |
 
 ### Discovered Resources
 
@@ -88,14 +88,14 @@
 
 ```
 Phase 0: Packaging + baseline foundations (front-loaded, small)
-└─ Docxodus + OpenXml 3.5.1 (SkiaSharp excluded); publish-size/CVE baseline
+└─ OpenXml 3.5.1 bump (no external diff engine — Option C uses OpenXML already referenced); publish-size/CVE baseline
 └─ Confirm SpeFileStore version-content fetch capability (FR-06 de-risk)
 
 Phase 1: E2 — w14:paraId identity substrate (Track B)   ◄── the substrate E1 needs
 └─ Server pre-parse/mint; explicit load-time carry; UniqueID split-minting; paraId-primary anchoring
 
 Phase 2: E1 — retained-original delta save (Track A)     ◄── the keystone; depends on Phase 1
-└─ Baseline retrieval; edited-paragraph rebuild+splice; Docxodus WmlComparer redline; drop docx.js; run-level fidelity; slice test
+└─ Baseline retrieval; edited-paragraph rebuild+splice; ComposeParagraphRedlineSynthesizer (Option C) redline; drop docx.js; run-level fidelity; slice test
 
 Phase 3: E3 — grounding-tied confidence + formatted insertions (Track C)   ◄── parallel after E2 contract shape
 └─ Server-derived confidence band; rationale-first UI; formatted new_text; paraId+offsets anchor
@@ -124,8 +124,8 @@ Phase 6: Hardening + wrap-up
 - Phase 3 (E3) can parallelize with Phase 4 once the E2 anchor shape lands.
 
 **High-risk items:**
-- Docxodus on real firm templates (nested tables, deep numbering, cross-refs) — Mitigation: NFR-09 gate.
-- SkiaSharp exclusion holding at publish time — Mitigation: measure per BFF task; never touch `HtmlToWml`/`FormattingAssembler`.
+- ComposeParagraphRedlineSynthesizer (Option C) on real firm templates (nested tables, deep numbering, cross-refs) — Mitigation: NFR-09 gate.
+- Publish-size discipline on the OpenXml bump — Mitigation: measure per BFF task (Option C adds no external diff engine / NuGet, so no SkiaSharp exclusion needed).
 - Hot-path overlap with `spaarkeai-compose-r2` + `spaarke-ai-architecture-redesign-r2` — Mitigation: consume `PublicContracts` seams, no fork; `/conflict-check` before each BFF PR.
 
 ---
@@ -135,11 +135,11 @@ Phase 6: Hardening + wrap-up
 ### Phase 0: Packaging + Baseline Foundations
 
 **Objectives:**
-1. Add `Docxodus` 7.1.0 (SkiaSharp assets excluded) + bump `DocumentFormat.OpenXml` 3.4.1 → 3.5.1; establish publish-size + CVE baseline.
+1. Bump `DocumentFormat.OpenXml` 3.4.1 → 3.5.1 (Option C uses OpenXML already referenced — no external diff engine / NuGet); establish publish-size + CVE baseline.
 2. Confirm `SpeFileStore` can fetch a specific driveItem version's content (FR-06 de-risk) — validate the Graph route.
 
 **Deliverables:**
-- [ ] Docxodus + OpenXml 3.5.1 referenced; SkiaSharp excluded; publish-size measured vs ~49.63 MB baseline; no new HIGH CVE.
+- [ ] OpenXml 3.5.1 referenced (no external diff-engine NuGet — Option C); publish-size measured vs ~49.63 MB baseline; no new HIGH CVE.
 - [ ] `SpeFileStore` version-content fetch validated (or Redis-cache fallback decision recorded).
 
 **Outputs**: `Sprk.Bff.Api.csproj`, a `SpeFileStore` version-content method (or spike note), Phase-0 measurement note.
@@ -164,7 +164,7 @@ Phase 6: Hardening + wrap-up
 **Objectives:**
 1. Baseline = load-time SPE version by `versionId`; client fast-path + Redis fallback (FR-06).
 2. Rebuild only edited paragraphs' OOXML, splice into a copy of the original by paraId (FR-02).
-3. Docxodus `WmlComparer` synthesizes minimal `w:ins`/`w:del` incl. format-change (FR-03, FR-05).
+3. `ComposeParagraphRedlineSynthesizer` (Option C — word-level LCS diff) synthesizes minimal `w:ins`/`w:del` in place incl. format-change (FR-03, FR-05).
 4. Invert the save baseline; drop `docx.js` from export (FR-01). AI redlines reuse existing writer (FR-04).
 5. Through-the-wire fidelity slice test — untouched OOXML preserved (FR-07 / NFR-06).
 
@@ -174,7 +174,7 @@ Phase 6: Hardening + wrap-up
 - [ ] Bolding a word yields `rPr`/`pPrChange`, not full-run del+ins.
 - [ ] `WebApplicationFactory` slice test asserts untouched OOXML preserved on a dirty save.
 
-**Outputs**: NEW paraId-splice orchestration + Docxodus adapter in `Services/Compose/`, `ComposeService.SaveAsync` inversion, `docxBridge.ts` (docx.js export removed), seam slice test under `tests/integration/seam/**`.
+**Outputs**: NEW paraId-splice orchestration + `ComposeParagraphRedlineSynthesizer` (Option C) in `Services/Compose/`, `ComposeService.SaveAsync` inversion, `docxBridge.ts` (docx.js export removed), seam slice test under `tests/integration/seam/**`.
 
 ### Phase 3: E3 — Grounding-Tied Confidence + Formatted Insertions (Track C)
 
@@ -234,10 +234,10 @@ Phase 6: Hardening + wrap-up
 
 | Dependency | Status | Risk | Mitigation |
 |------------|--------|------|------------|
-| `Docxodus` 7.1.0 (NuGet, MIT) | GA | Low | SkiaSharp excluded (S3); Codeuctivity fork = fallback |
-| `@tiptap/extension-unique-id` 3.28.0 (npm, MIT) | GA | Low | Verify resolves to `@tiptap/extension-*`, not `@tiptap-pro/*` |
-| SPE driveItem version-content fetch (Graph) | GA | Low | Validate route Phase 0; Redis-cache fallback |
-| `.NET 10` SDK | Ready | Low | Verified S1 |
+| ~~`Docxodus` 7.1.0 (NuGet)~~ **REMOVED — Option C self-synthesizes (pure OpenXML, no external diff engine)** | n/a | none | No NuGet; `DocumentFormat.OpenXml` 3.5.1 already referenced |
+| `DocumentFormat.OpenXml` 3.5.1 (NuGet, MIT) | GA | Low | Already referenced; both Option C engines (synthesizer + `ComposeDocumentRenderer`) use it — 0 pkg delta |
+| `@tiptap/extension-unique-id` 2.27.2 (npm, MIT) | GA | Low | v2-latest (NOT 3.x/v3, NOT `@tiptap-pro/*`); resolved + validated (task 011) |
+| SPE driveItem version-content fetch (Graph) | GA | Low | Validated (task 002); `LoadAsync` must surface `VersionId` (task 022 completion) |
 
 ### Internal Dependencies
 
@@ -258,7 +258,7 @@ Phase 6: Hardening + wrap-up
 
 **Unit:**
 - Every new/changed `Services/Compose/` service ships matching tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`.
-- paraId minting/collision, WmlComparer adapter behavior, confidence derivation.
+- paraId minting/collision, `ComposeParagraphRedlineSynthesizer` word-diff + `ComposeDocumentRenderer` (styles/numbering golden-file/paraId), confidence derivation.
 
 **Real-template hardening (NFR-09):** re-run the S1/S1b harness on 2–3 real firm templates before the E1 cutover.
 
@@ -288,8 +288,8 @@ Phase 6: Hardening + wrap-up
 
 | ID | Risk | Probability | Impact | Mitigation |
 |----|------|------------|---------|------------|
-| R1 | WmlComparer fails on real firm templates | Med | High | NFR-09 hardening gate before cutover |
-| R2 | Docxodus pulls SkiaSharp into publish | Low | Med | Exclude assets; never call HtmlToWml/FormattingAssembler; measure per task |
+| R1 | ~~WmlComparer fails on real firm templates~~ **REALIZED → resolved**: NFR-09 gate proved WmlComparer strips paraId/drops tables on real docs → §6.5 pivot to Option C (`ComposeParagraphRedlineSynthesizer`), now certified on the real CSA | — | — | Closed (task 003 gate PASS; Docxodus removed) |
+| R2 | **`ComposeDocumentRenderer` multi-level numbering incorrect at birth** (double/ghost numbering, or corrupts a later tracked edit) | Med | High | Style-linked numbering discipline (FR-27); numbering golden-file test + tracked-edit-after-render test (task 024); validate against the real CSA fixture's numbering.xml |
 | R3 | SPE version-content fetch unavailable | Low | Med | Validate Phase 0; Redis-cache fallback |
 | R4 | BFF hot-path collision with compose-r2 / ai-redesign-r2 | Med | Med | Consume PublicContracts seams, no fork; `/conflict-check` per PR |
 | R5 | E3 confidence band read as false precision | Low | Med | Rationale-first; coarse band only; no auto-accept low-band |

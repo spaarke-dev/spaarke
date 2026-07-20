@@ -157,7 +157,9 @@ public static class ComposeDraftDisposition
             ?? throw new InvalidOperationException(
                 $"Compose draft '{entry.Key}' payload did not deserialize to a {nameof(ComposeDraftPayload)}.");
     }
+
 }
+
 
 /// <summary>
 /// The Compose-owned structured-edit payload (handoff §1 shape) that rides inside the opaque
@@ -192,4 +194,18 @@ public sealed record ComposeDraftPayload
     /// <summary>Citations / source ids the draft was grounded on (ids only — never quoted content).</summary>
     [JsonPropertyName("sources")]
     public IReadOnlyList<string>? Sources { get; init; }
+
+    /// <summary>
+    /// The redline's <c>w14:paraId</c> — the exact paragraph in the retained original the edit
+    /// targets (E2 substrate, task 012), when the authored payload declares it. Optional; the CLIENT
+    /// resolves/refines anchoring against its LIVE editor document at render, and likewise derives
+    /// the confidence band + character offsets there — those are client-side derived VIEWS of this
+    /// opaque payload, never server payload fields (ADR-013/ADR-040 envelope-only: the platform ships
+    /// this payload opaquely and never parses it). See
+    /// <c>docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md</c>. camelCase, matching the existing
+    /// <c>paraId</c> wire vocabulary on <c>AnchoredAnnotationAnchor</c> / <c>ParaIdMapEntry</c> /
+    /// <c>ComposeEditedParagraph</c> (deliberately NOT snake_case, per that established precedent).
+    /// </summary>
+    [JsonPropertyName("paraId")]
+    public string? ParaId { get; init; }
 }

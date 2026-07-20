@@ -18,10 +18,18 @@ import { renderHook } from '@testing-library/react';
 import { FluentProvider, webDarkTheme } from '@fluentui/react-components';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
+import Underline from '@tiptap/extension-underline';
 import { InsertionMark } from '../marks/InsertionMark';
 import { DeletionMark } from '../marks/DeletionMark';
 import { CommentAnchorMark } from '../marks/CommentAnchorMark';
-import { usePendingRedline, resolveTargetSpans } from './usePendingRedline';
+import {
+  usePendingRedline,
+  resolveTargetSpans,
+  deriveConfidenceBand,
+  collectMarkedRanges,
+  sanitizeInlineMarkup,
+  buildInsertionHtml,
+} from './usePendingRedline';
 
 // `@spaarke/auth`'s useAuth throws outside a real MSAL bootstrap — mocked (see ComposeAiToolbar.test).
 jest.mock('@spaarke/auth', () => ({
@@ -35,15 +43,13 @@ jest.mock('@spaarke/auth', () => ({
 }));
 
 // PaneEventBus dispatch — ComposeEditor calls useDispatchPaneEvent() directly; return a no-op.
-// `virtual` because the `/events` subpath is not resolvable under jest's node resolution (the
-// sibling ComposeAiToolbar.test only ever imports it type-only, so it never hit this).
-jest.mock(
-  '@spaarke/ai-widgets/events',
-  () => ({
-    useDispatchPaneEvent: () => jest.fn(),
-  }),
-  { virtual: true }
-);
+// NOT `virtual`: jest.config `moduleNameMapper` maps `@spaarke/ai-widgets/events` to the real
+// source, so a virtual mock (keyed to the raw specifier, not the resolved path) is bypassed once
+// any sibling suite loads the real module in a shared --runInBand registry → the real hook runs
+// with no provider and throws. A resolved (non-virtual) mock binds to the mapped path per-file.
+jest.mock('@spaarke/ai-widgets/events', () => ({
+  useDispatchPaneEvent: () => jest.fn(),
+}));
 
 // BubbleMenu wraps tippy.js (ESM, not in transformIgnorePatterns) and needs a real DOM range —
 // passthrough-render its children so the AI toolbar mounts without tippy. useEditor/EditorContent
@@ -460,6 +466,248 @@ describe('usePendingRedline (materialize from ledger)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// FR-15 formatted AI insertions (task 032, client-only per §6.5 Path B amendment) —
+// sanitizeInlineMarkup: the allow-list sanitizer, unit-tested in isolation (pure, no editor needed).
+// ---------------------------------------------------------------------------
+describe('sanitizeInlineMarkup (FR-15 allow-list, task 032)', () => {
+  it('passes through the canonical bold/italic/underline tags unchanged', () => {
+    expect(sanitizeInlineMarkup('<strong>bold</strong>')).toBe('<strong>bold</strong>');
+    expect(sanitizeInlineMarkup('<em>italic</em>')).toBe('<em>italic</em>');
+    expect(sanitizeInlineMarkup('<u>underline</u>')).toBe('<u>underline</u>');
+  });
+
+  it('normalizes <b> to <strong> and <i> to <em> (StarterKit-deterministic output)', () => {
+    expect(sanitizeInlineMarkup('<b>bold</b>')).toBe('<strong>bold</strong>');
+    expect(sanitizeInlineMarkup('<i>italic</i>')).toBe('<em>italic</em>');
+  });
+
+  it('is case-insensitive on the tag name', () => {
+    expect(sanitizeInlineMarkup('<STRONG>bold</STRONG>')).toBe('<strong>bold</strong>');
+  });
+
+  it('handles nested allowed tags (bold+italic together)', () => {
+    expect(sanitizeInlineMarkup('<strong><em>both</em></strong>')).toBe('<strong><em>both</em></strong>');
+  });
+
+  it('a plain string with no markup round-trips unchanged (backward compatible)', () => {
+    const plain = 'Payment is due within 30 days of invoice.';
+    expect(sanitizeInlineMarkup(plain)).toBe(plain);
+  });
+
+  it('HTML-escapes plain text that happens to contain & < > (no markup present)', () => {
+    expect(sanitizeInlineMarkup('Fees & costs < $500 > threshold')).toBe('Fees &amp; costs &lt; $500 &gt; threshold');
+  });
+
+  it('auto-closes an unclosed allowed tag at the end of the string', () => {
+    expect(sanitizeInlineMarkup('<strong>bold and never closed')).toBe('<strong>bold and never closed</strong>');
+  });
+
+  it('auto-closes nested unclosed tags in reverse (well-nested) order', () => {
+    expect(sanitizeInlineMarkup('<strong><em>both, unclosed')).toBe('<strong><em>both, unclosed</em></strong>');
+  });
+
+  it('SECURITY: <script>…</script> is neutralized to inert literal text, never a real tag', () => {
+    const out = sanitizeInlineMarkup('before <script>alert(1)</script> after');
+    expect(out).not.toMatch(/<script/i);
+    expect(out).not.toMatch(/<\/script/i);
+    expect(out).toContain('&lt;script&gt;');
+    expect(out).toContain('alert(1)');
+  });
+
+  it('SECURITY: <a href="…"> is neutralized to inert literal text, never a real anchor tag', () => {
+    const out = sanitizeInlineMarkup('<a href="javascript:alert(1)">click me</a>');
+    expect(out).not.toMatch(/<a[\s>]/i);
+    expect(out).not.toMatch(/<\/a>/i);
+    expect(out).toContain('click me');
+  });
+
+  it('SECURITY: an allowed tag NAME carrying an attribute is rejected (not passed through as markup)', () => {
+    const out = sanitizeInlineMarkup('<strong onclick="evil()">bad</strong>');
+    // Never a REAL <strong ...> element (no live attribute) — the whole tag is neutralized to
+    // escaped literal text instead, so "onclick" (if present at all) is inert visible text, not a
+    // parseable HTML attribute.
+    expect(out).not.toMatch(/<strong\s/i);
+    expect(out).toContain('&lt;strong onclick="evil()"&gt;');
+  });
+
+  it('SECURITY: an unknown/arbitrary tag is neutralized to inert literal text', () => {
+    const out = sanitizeInlineMarkup('<marquee>spam</marquee><iframe src="evil"></iframe>');
+    expect(out).not.toMatch(/<marquee/i);
+    expect(out).not.toMatch(/<iframe/i);
+    expect(out).toContain('spam');
+  });
+
+  it('SECURITY: a stray/mismatched closing tag does not desync well-formedness', () => {
+    const out = sanitizeInlineMarkup('</strong>plain text');
+    expect(out).not.toMatch(/^<\/strong>/);
+    expect(out).toContain('plain text');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-15 formatted AI insertions (task 032) — buildInsertionHtml: the insertion-HTML boundary that
+// feeds the mark-over-range apply layer (UNTOUCHED by this task — usePendingRedline.ts ~461-465).
+// ---------------------------------------------------------------------------
+describe('buildInsertionHtml (FR-15, task 032)', () => {
+  it('wraps sanitized+formatted body in the insertion span carrying provenance', () => {
+    const html = buildInsertionHtml('<strong>bold suggestion</strong>', 'b1', 'b1@t1');
+    expect(html).toBe(
+      '<span data-compose-mark="insertion" data-binding="b1" data-ledger-ref="b1@t1">' +
+        '<strong>bold suggestion</strong></span>'
+    );
+  });
+
+  it('a plain-string new_text still round-trips unchanged inside the insertion span (backward-compat)', () => {
+    const html = buildInsertionHtml('plain suggestion', 'b1', 'b1@t1');
+    expect(html).toBe(
+      '<span data-compose-mark="insertion" data-binding="b1" data-ledger-ref="b1@t1">plain suggestion</span>'
+    );
+  });
+
+  it('newline handling still applies after sanitization', () => {
+    const html = buildInsertionHtml('line one\nline two', 'b1', 'b1@t1');
+    expect(html).toContain('line one<br>line two');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-15 formatted AI insertions (task 032) — end-to-end through usePendingRedline.materialize: a
+// bold/italic-bearing new_text renders with the corresponding StarterKit mark ON TOP of the insertion
+// mark in the live TipTap document (the actual acceptance criterion — not just string-building).
+// ---------------------------------------------------------------------------
+function findMarkedText(editor: Editor, text: string, markName: string): boolean {
+  let found = false;
+  editor.state.doc.descendants(node => {
+    if (node.isText && node.text === text && node.marks.some(m => m.type.name === markName)) {
+      found = true;
+    }
+    return true;
+  });
+  return found;
+}
+
+describe('usePendingRedline.materialize — formatted AI insertions render formatted (FR-15, task 032)', () => {
+  it('a bold-bearing new_text yields a bold insertion mark in the rendered redline', () => {
+    const editor = makeEditor('<p>Intro.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ new_text: '<strong>bold suggestion</strong>' }, PROV);
+    });
+
+    expect(findMarkedText(editor, 'bold suggestion', 'bold')).toBe(true);
+    expect(findMarkedText(editor, 'bold suggestion', 'insertion')).toBe(true);
+    editor.destroy();
+  });
+
+  it('an italic-bearing new_text yields an italic insertion mark in the rendered redline', () => {
+    const editor = makeEditor('<p>Intro.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ new_text: '<em>italic suggestion</em>' }, PROV);
+    });
+
+    expect(findMarkedText(editor, 'italic suggestion', 'italic')).toBe(true);
+    expect(findMarkedText(editor, 'italic suggestion', 'insertion')).toBe(true);
+    editor.destroy();
+  });
+
+  it('an underline-bearing new_text yields an underline insertion mark (Underline extension registered)', () => {
+    const editor = new Editor({
+      extensions: [StarterKit, Underline, InsertionMark, DeletionMark, CommentAnchorMark],
+      content: '<p>Intro.</p>',
+    });
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ new_text: '<u>underlined suggestion</u>' }, PROV);
+    });
+
+    expect(findMarkedText(editor, 'underlined suggestion', 'underline')).toBe(true);
+    expect(findMarkedText(editor, 'underlined suggestion', 'insertion')).toBe(true);
+    editor.destroy();
+  });
+
+  it('a bold-bearing REPLACEMENT (with target_text) renders bold on the inserted alternative', () => {
+    const editor = makeEditor('<p>The quick fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ target_text: 'quick', new_text: '<strong>swift</strong>' }, PROV);
+    });
+
+    expect(findMarkedText(editor, 'swift', 'bold')).toBe(true);
+    expect(findMarkedText(editor, 'swift', 'insertion')).toBe(true);
+    // The original struck text carries the deletion mark, unaffected by the new_text enrichment.
+    expect(findMarkedText(editor, 'quick', 'deletion')).toBe(true);
+    editor.destroy();
+  });
+
+  it('a plain-string new_text (no markup) still renders unformatted — backward compatible', () => {
+    const editor = makeEditor('<p>Intro.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ new_text: 'plain suggestion' }, PROV);
+    });
+
+    expect(findMarkedText(editor, 'plain suggestion', 'insertion')).toBe(true);
+    expect(findMarkedText(editor, 'plain suggestion', 'bold')).toBe(false);
+    expect(findMarkedText(editor, 'plain suggestion', 'italic')).toBe(false);
+    const html = editor.getHTML();
+    expect(html).not.toContain('<strong>');
+    expect(html).not.toContain('<em>');
+    editor.destroy();
+  });
+
+  it('SECURITY: a new_text with disallowed markup (<script>) is sanitized — never injected as a real element', () => {
+    const editor = makeEditor('<p>Intro.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ new_text: '<script>alert(1)</script>suggested text' }, PROV);
+    });
+
+    // No <script> element anywhere in the live DOM the editor mounted.
+    expect(editor.view.dom.querySelector('script')).toBeNull();
+    expect(editor.getHTML()).not.toMatch(/<script/i);
+    // The inert text content is still visible (sanitized to plain text, not silently dropped).
+    expect(editor.getText()).toContain('suggested text');
+    editor.destroy();
+  });
+
+  it('SECURITY: a new_text with an <a href> anchor is sanitized — never a real link (Link extension is live in ComposeEditor)', () => {
+    // The FULL ComposeEditor stack (LOCKED_EXTENSIONS) loads @tiptap/extension-link, so an
+    // unsanitized `<a href>` in `new_text` would parse into a REAL link mark carrying an
+    // attacker-controlled href. Use an editor that also registers the Link extension to prove the
+    // sanitizer — not incidental schema gaps — is what keeps the anchor from ever materializing.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Link = require('@tiptap/extension-link').default;
+    const editor = new Editor({
+      extensions: [
+        StarterKit,
+        Link.configure({ openOnClick: false, autolink: true }),
+        InsertionMark,
+        DeletionMark,
+        CommentAnchorMark,
+      ],
+      content: '<p>Intro.</p>',
+    });
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ new_text: '<a href="javascript:alert(1)">click me</a>' }, PROV);
+    });
+
+    expect(editor.view.dom.querySelector('a')).toBeNull();
+    expect(editor.getHTML()).not.toMatch(/<a[\s>]/i);
+    expect(editor.getText()).toContain('click me');
+    editor.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // usePendingRedline.materialize — selection fallback (round-3 UAT Test #4)
 // When the (normalize-tolerant) target still can't be located verbatim, anchor at the user's live
 // selection instead of dead-ending — but ONLY for not_found + a non-empty selection.
@@ -619,6 +867,155 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
 });
 
 // ---------------------------------------------------------------------------
+// deriveConfidenceBand — FR-13 (task 031, amendment §6.5 Path B). Client-derived, deterministic,
+// ported from the retired server `ComposeDraftDisposition.DeriveConfidenceBand` unit cases
+// (ComposeConfidenceBandTests, removed commit `675d2d161`): grounded+resolves=>high, one
+// signal=>medium, neither=>low.
+// ---------------------------------------------------------------------------
+describe('deriveConfidenceBand (FR-13, client-derived — ported from retired ComposeConfidenceBandTests)', () => {
+  it('cited source AND live-doc target resolves => high', () => {
+    expect(deriveConfidenceBand(true, true)).toBe('high');
+  });
+
+  it('cited source only (target does not resolve) => medium', () => {
+    expect(deriveConfidenceBand(true, false)).toBe('medium');
+  });
+
+  it('live-doc target resolves only (no cited source) => medium', () => {
+    expect(deriveConfidenceBand(false, true)).toBe('medium');
+  });
+
+  it('neither signal (ungrounded, unresolved) => low', () => {
+    expect(deriveConfidenceBand(false, false)).toBe('low');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// usePendingRedline — confidence band derivation through materialize/materializeMany (task 031,
+// amendment §6.5 Path B). The band is computed CLIENT-SIDE at materialize time from (a) the
+// payload's `sources` and (b) whether the target actually resolves against the LIVE doc — never a
+// model self-report, never a numeric score, and recomputed REACTIVELY as the doc changes.
+// ---------------------------------------------------------------------------
+describe('usePendingRedline — confidence band derivation (client-side, FR-13 amendment §6.5 Path B)', () => {
+  it('materialize: cited sources + resolvable target => high', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ target_text: 'quick', new_text: 'nimble', sources: ['doc:precedent-123'] }, PROV);
+    });
+
+    expect(result.current.pending[0]).toMatchObject({ confidenceBand: 'high', hasSources: true, hasDeletion: true });
+    editor.destroy();
+  });
+
+  it('materialize: cited sources but a pure insertion (no target to resolve) => medium', () => {
+    const editor = makeEditor('<p>Intro.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ new_text: 'Appended clause.', sources: ['doc:precedent-123'] }, PROV);
+    });
+
+    expect(result.current.pending[0]).toMatchObject({ confidenceBand: 'medium', hasSources: true, hasDeletion: false });
+    editor.destroy();
+  });
+
+  it('materialize: resolvable target but no cited sources => medium', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ target_text: 'quick', new_text: 'nimble' }, PROV);
+    });
+
+    expect(result.current.pending[0]).toMatchObject({ confidenceBand: 'medium', hasSources: false, hasDeletion: true });
+    editor.destroy();
+  });
+
+  it('materialize: no sources, no target (bare pure insertion) => low', () => {
+    const editor = makeEditor('<p>Intro.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ new_text: 'Appended clause.' }, PROV);
+    });
+
+    expect(result.current.pending[0]).toMatchObject({ confidenceBand: 'low', hasSources: false, hasDeletion: false });
+    editor.destroy();
+  });
+
+  it('ignores a confidence_band value smuggled onto the payload (never a model self-report)', () => {
+    const editor = makeEditor('<p>Intro.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      // A hostile/buggy model output claiming "high" on an otherwise ungrounded bare insertion.
+      // ComposeDraftPayload carries no such field — `as any` simulates a smuggled extra key.
+      result.current.materialize(
+        { new_text: 'Appended clause.', confidence_band: 'high' } as unknown as Parameters<
+          typeof result.current.materialize
+        >[0],
+        PROV
+      );
+    });
+
+    expect(result.current.pending[0].confidenceBand).toBe(
+      'low' // the smuggled "high" is ignored — derivation reads grounding evidence only
+    );
+    editor.destroy();
+  });
+
+  it('materializeMany: each whole-document-revision edit gets its OWN band (per-edit sources)', () => {
+    const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+    const BASE = { ledgerRef: 'rev@t1', bindingId: 'rev', turn: 1 };
+
+    act(() => {
+      result.current.materializeMany(
+        [
+          { target_text: 'quick', new_text: 'swift', sources: ['doc:1'] }, // grounded + resolves => high
+          { target_text: 'brown', new_text: 'auburn' }, // resolves only => medium
+          { target_text: 'lazy', new_text: 'idle', sources: [] }, // empty sources array => ungrounded; resolves => medium
+        ],
+        BASE
+      );
+    });
+
+    const bands = result.current.pending.reduce<Record<string, string>>((acc, p) => {
+      acc[p.ledgerRef] = p.confidenceBand;
+      return acc;
+    }, {});
+    expect(bands['rev@t1#0']).toBe('high');
+    expect(bands['rev@t1#1']).toBe('medium');
+    expect(bands['rev@t1#2']).toBe('medium');
+    editor.destroy();
+  });
+
+  it('reactive recompute: manually deleting a redline target OUTSIDE accept/reject drops its band', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materialize({ target_text: 'quick', new_text: 'nimble', sources: ['doc:precedent-123'] }, PROV);
+    });
+    expect(result.current.pending[0].confidenceBand).toBe('high');
+
+    // The user deletes the struck (deletion-marked) original directly — NOT via accept/reject — e.g.
+    // selecting past it and pressing Delete. The redline's target no longer resolves in the live doc.
+    act(() => {
+      const delRange = collectMarkedRanges(editor, 'deletion', 'b1@t1')[0];
+      editor.chain().deleteRange(delRange).run();
+    });
+
+    // Sources are still cited (durable payload field) but the live-doc target signal is now false —
+    // exactly one signal remains => medium (NOT still high — this is the "recompute reactively" rule).
+    expect(result.current.pending[0].confidenceBand).toBe('medium');
+    editor.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ComposeEditor pending-redline UI (dark mode; controls render + wire)
 // ---------------------------------------------------------------------------
 describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => {
@@ -681,5 +1078,145 @@ describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => 
     expect(banner).toHaveTextContent(/not found/i);
     // Nothing was rendered as a pending suggestion.
     expect(screen.queryByTestId('compose-redline-controls')).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-14 (task 031) — rationale-first, anti-rubber-stamp accept/reject surface. The cited rationale
+// is the visual HEADLINE; the client-derived confidenceBand renders as a SECONDARY coarse badge
+// (never a numeric score); low-band redlines are never pre-selected/auto-accepted and carry an
+// explicit-review affordance; "Accept all" excludes low-band edits unless the user takes a SEPARATE,
+// deliberate second action. Rendered under the dark theme (ADR-021).
+// ---------------------------------------------------------------------------
+describe('ComposeEditor rationale-first accept/reject surface (FR-14, task 031, ADR-021 dark mode)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { ComposeEditor } = require('../ComposeEditor');
+
+  function renderEditorWithText(html: string) {
+    const ref = React.createRef<import('../ComposeEditor').ComposeEditorHandle>();
+    render(
+      <FluentProvider theme={webDarkTheme}>
+        <ComposeEditor ref={ref} docxBytes={null} initialHtml={html} />
+      </FluentProvider>
+    );
+    return ref;
+  }
+
+  it('the cited rationale is the visual HEADLINE; the confidence band renders SECONDARY, after it', async () => {
+    const ref = renderEditorWithText('<p>The quick brown fox.</p>');
+    await screen.findByRole('region');
+
+    act(() => {
+      ref.current!.materializePendingRedline(
+        {
+          target_text: 'quick',
+          new_text: 'nimble',
+          rationale: 'Standard playbook term is 60 days notice.',
+          sources: ['doc:precedent-123'],
+        },
+        PROV
+      );
+    });
+
+    const markSpan = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-compose-mark="deletion"][data-ledger-ref="b1@t1"]');
+      if (!el) throw new Error('deletion mark not materialized');
+      return el;
+    });
+    act(() => {
+      fireEvent.click(markSpan);
+    });
+
+    const popover = await screen.findByTestId('compose-redline-onclick');
+    const rationale = await screen.findByTestId('compose-redline-rationale');
+    const band = await screen.findByTestId('compose-redline-confidence-band');
+    expect(popover).toContainElement(rationale);
+    expect(popover).toContainElement(band);
+    expect(rationale).toHaveTextContent(/Standard playbook term is 60 days notice/);
+    // A coarse qualitative band, never a numeric/percentage score.
+    expect(band).toHaveTextContent(/High confidence/i);
+    expect(band).not.toHaveTextContent(/%|0\.\d/);
+
+    // Rationale is the HEADLINE — it precedes the confidence band in DOM order.
+    // eslint-disable-next-line no-bitwise
+    expect(rationale.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('a low-confidence redline is never pre-selected or auto-accepted, and carries an explicit "needs review" affordance', async () => {
+    const ref = renderEditorWithText('<p>Intro paragraph.</p>');
+    await screen.findByRole('region');
+
+    act(() => {
+      // Bare, ungrounded pure insertion — no sources, no target => low band.
+      ref.current!.materializePendingRedline({ new_text: 'An unverified suggestion.' }, PROV);
+    });
+
+    // Never auto-accepted: the redline mark is still rendered (pending), untouched, after materialize.
+    const markSpan = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-compose-mark="insertion"][data-ledger-ref="b1@t1"]');
+      if (!el) throw new Error('insertion mark not materialized');
+      return el;
+    });
+    expect(markSpan).toBeInTheDocument();
+    expect(markSpan.textContent).toContain('An unverified suggestion.');
+
+    act(() => {
+      fireEvent.click(markSpan);
+    });
+    const band = await screen.findByTestId('compose-redline-confidence-band');
+    expect(band).toHaveTextContent(/Low confidence/i);
+    // The explicit-review affordance (design §6.2) — a low-band redline is flagged, not silently offered.
+    const needsReview = await screen.findByTestId('compose-redline-needs-review');
+    expect(needsReview).toBeInTheDocument();
+    // Nothing was pre-selected/pre-checked — accepting still requires the user's own explicit click.
+    expect(screen.getByTestId('compose-redline-accept-b1@t1')).toBeInTheDocument();
+  });
+
+  it('"Accept all" excludes low-band edits by default; including them requires a SEPARATE explicit action', async () => {
+    const ref = renderEditorWithText('<p>The quick brown fox.</p>');
+    await screen.findByRole('region');
+
+    act(() => {
+      // High-band: cited source + a target that resolves in the live doc.
+      ref.current!.materializePendingRedline(
+        { target_text: 'quick', new_text: 'nimble', sources: ['doc:precedent-123'] },
+        PROV
+      );
+    });
+    act(() => {
+      // Low-band: ungrounded pure insertion, an INDEPENDENT redline (different binding).
+      ref.current!.materializePendingRedline(
+        { new_text: 'An unverified suggestion.' },
+        { ledgerRef: 'b2@t1', bindingId: 'b2', turn: 1 }
+      );
+    });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-ledger-ref="b1@t1"]')).toBeInTheDocument();
+      expect(document.querySelector('[data-ledger-ref="b2@t1"]')).toBeInTheDocument();
+    });
+
+    const summary = await screen.findByTestId('compose-redline-summary');
+    expect(summary).toHaveTextContent('2 suggested edits pending');
+    expect(summary).toHaveTextContent('1 low-confidence, needs review');
+
+    // "Accept all" commits the high-band edit but MUST NOT silently include the low-band one.
+    await userEvent.click(screen.getByTestId('compose-redline-accept-all'));
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-compose-mark][data-ledger-ref="b1@t1"]')).toBeNull();
+    });
+    expect(document.querySelector('[data-compose-mark="insertion"][data-ledger-ref="b2@t1"]')).toBeInTheDocument();
+
+    // Including the low-band edit is a SEPARATE, always-explicit second action.
+    const includeLowButton = screen.getByTestId('compose-redline-accept-all-include-low');
+    expect(includeLowButton).toBeInTheDocument();
+    await userEvent.click(includeLowButton);
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-compose-mark][data-ledger-ref="b2@t1"]')).toBeNull();
+    });
+    // Every pending redline resolved — the summary bar is gone.
+    expect(screen.queryByTestId('compose-redline-summary')).not.toBeInTheDocument();
   });
 });

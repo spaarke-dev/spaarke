@@ -903,6 +903,61 @@ public class DriveItemOperations
         }
     }
 
+    public async Task<string?> GetCurrentVersionIdAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+    {
+        using var activity = Activity.Current;
+        activity?.SetTag("operation", "GetCurrentVersionIdAsUser");
+        activity?.SetTag("driveId", driveId);
+        activity?.SetTag("itemId", itemId);
+
+        try
+        {
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
+
+            var versions = await graphClient.Drives[driveId].Items[itemId]
+                .Versions.GetAsync(cancellationToken: ct);
+
+            // Graph lists versions newest-first; take the most-recently-modified as the CURRENT version.
+            // Best-effort: a null/empty list yields null (the caller degrades to the client-bytes fast-path).
+            var current = versions?.Value?
+                .OrderByDescending(v => v.LastModifiedDateTime ?? DateTimeOffset.MinValue)
+                .FirstOrDefault();
+
+            if (current?.Id is null)
+            {
+                _logger.LogWarning(
+                    "No versions returned for file {ItemId} in drive {DriveId} — current version id unavailable",
+                    itemId, driveId);
+                return null;
+            }
+
+            return current.Id;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning(
+                "Drive-item {ItemId} not found in drive {DriveId} when resolving current version id",
+                itemId, driveId);
+            return null;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
+        {
+            _logger.LogWarning(
+                "Access denied resolving current version id for file {ItemId}: {Error}",
+                itemId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
+        }
+        catch (ServiceException ex)
+        {
+            _logger.LogError(ex, "Graph API error resolving current version id: {Error}", ex.Message);
+            throw new InvalidOperationException($"Failed to resolve current version id: {ex.Message}", ex);
+        }
+    }
+
     /// <summary>
     /// Get preview URL for a file using app-only authentication.
     /// Returns ephemeral URL that expires in ~10 minutes.

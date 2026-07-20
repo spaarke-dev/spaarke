@@ -49,7 +49,11 @@ import {
 import type { IChatMessage } from "@spaarke/ui-components";
 import { ConsumerChips } from "./ConsumerChips";
 import { reorderChipsForDisplay, type ChipDisplayPreference } from "./chipDisplayOrder";
-import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
+import {
+  formatEventOutputMarkdown,
+  isCorrespondenceDraft,
+  buildCorrespondenceComposeHtml,
+} from "./DocumentUploadedEventStream";
 import { makeLocalAssistantMessage } from "./summarizeRouting";
 
 export interface ConsumerChipsDeps {
@@ -91,6 +95,8 @@ export interface ConsumerChipsDeps {
 export interface ConsumerChipsController {
   /** Memoized strip node for SprkChat's `transcriptFooterSlot`. */
   consumerChipsSlot: React.ReactNode;
+  /** R4-10: true while a chip capability (e.g. Summarize) is running — drives a "Working…" spinner. */
+  dispatching: boolean;
   /**
    * Accept a raw chip wire array from any carrier (Event stream `chips`
    * events, `consumer_chips` context events). Tolerant parse; a non-empty
@@ -127,6 +133,8 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
   } = deps;
 
   const [consumerChips, setConsumerChips] = React.useState<ReadonlyArray<ConsumerChip>>([]);
+  // R4-10: true while a chip capability is running (surfaced as a "Working…" spinner + input lock).
+  const [dispatching, setDispatching] = React.useState(false);
 
   // The bound dispatcher. Stable per (bffBaseUrl, auth, bus) — the helper
   // re-reads the session id per dispatch via the getter.
@@ -157,6 +165,9 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
     ): void => {
       // Single dispatch decision per turn: consume the chip set on click.
       setConsumerChips([]);
+      // R4-10 (UAT 2026-07-19): surface a "Working…" spinner while the capability runs (the
+      // summarize chip in particular had no visible progress). Cleared in .finally().
+      setDispatching(true);
 
       // ADR-015: structural signal only — never the label/binding values.
       console.log("[ConversationPane] consumer chip dispatched");
@@ -173,7 +184,25 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           // surface-launch; the wizard consumes the draft. Informational capabilities render as before.
           const isSurfaceLaunch =
             dispatched.disposition === "surface_launch" && !!dispatched.consumerType;
-          if (!isSurfaceLaunch && dispatched.result !== undefined && dispatched.result !== null) {
+          // UAT 2026-07-19 (owner: "a Compose tab with the drafted response"): a draft-correspondence
+          // result ("Draft a response" chip) is routed INTO a pre-filled Compose tab via the existing
+          // `compose.draft.html` seed (no shared-lib change — the editor already seeds from draft HTML).
+          // The transcript gets a short confirmation instead of the raw draft.
+          const isCorrespondence = !isSurfaceLaunch && isCorrespondenceDraft(dispatched.result);
+          if (isCorrespondence) {
+            const html = buildCorrespondenceComposeHtml(dispatched.result as Record<string, unknown>);
+            dispatch("workspace", {
+              type: "widget_load",
+              widgetType: "compose",
+              widgetData: { compose: { draft: { html, fileName: "Draft response" } } },
+              displayName: "Compose",
+            } as unknown as WorkspacePaneEvent);
+            enqueueAssistantMessage(
+              makeLocalAssistantMessage(
+                "I've opened a draft response in the Compose tab — review and edit it there."
+              )
+            );
+          } else if (!isSurfaceLaunch && dispatched.result !== undefined && dispatched.result !== null) {
             enqueueAssistantMessage(
               makeLocalAssistantMessage(formatEventOutputMarkdown(dispatched.result))
             );
@@ -219,6 +248,9 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           inject(
             makeLocalAssistantMessage("Sorry — I couldn't run that action. Please try again.")
           );
+        })
+        .finally(() => {
+          setDispatching(false);
         });
     },
     [
@@ -291,7 +323,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
 
   // Stable controller identity (Step 9.5 review) — changes only with the slot.
   return React.useMemo(
-    () => ({ consumerChipsSlot, acceptChips, dispatchBinding, resetForSession }),
-    [consumerChipsSlot, acceptChips, dispatchBinding, resetForSession]
+    () => ({ consumerChipsSlot, dispatching, acceptChips, dispatchBinding, resetForSession }),
+    [consumerChipsSlot, dispatching, acceptChips, dispatchBinding, resetForSession]
   );
 }

@@ -12,15 +12,15 @@ UAT splits into two tiers. **Tier 1 (API) can run now** — the BFF is deployed 
 
 | ID | Prerequisite | Done? | Notes |
 |----|--------------|:---:|-------|
-| P-1 | BFF deployed to `spaarke-bff-dev`; `GET /healthz` → 200 | ☐ | |
-| P-2 | App settings set: `Communication__SemanticMatch__Enabled=true`, `Communication__AiClassification__Enabled=true`, `Communication__AutoFile__Enabled=true` / `__Threshold=0.85`, tokenized `AiSearch` index names populated | ☐ | |
-| P-3 | Connections PCF **v1.0.1** imported (`CommunicationConnectionsSolution_v1.0.1.zip`) | ☐ | |
-| P-4 | Actions PCF **v1.0.1** imported (`CommunicationActionsSolution_v1.0.1.zip`) | ☐ | |
-| P-5 | Both PCFs placed on OOB `sprk_communication` form (Connections in accessories column bound to `sprk_associationprovenance`+`sprk_associationstatus`; Actions bound to `sprk_communicationtype`) | ☐ | |
-| P-6 | Legacy `sprk_communication_send.js` web resource + Send button removed; **Create-To-Do button KEPT** | ☐ | |
-| P-7 | "Communications Awaiting Association" system view published | ☐ | |
-| P-8 | Dataverse env vars present: `sprk_MsalClientId`=`170c98e1…`, `sprk_BffApiAppId`=`1e40baad…`, `sprk_BffApiBaseUrl` | ☐ | |
-| P-9 | A test mailbox is monitored by a live Graph subscription (for inbound tests) | ☐ | |
+| P-1 | BFF deployed to `spaarke-bff-dev`; `GET /healthz` → 200 | ✅ | Verified 2026-07-18 — healthz 200 |
+| P-2 | App settings set: `Communication__SemanticMatch__Enabled=true`, `Communication__AiClassification__Enabled=true`, `Communication__AutoFile__Enabled=true` / `__Threshold=0.85`, tokenized `AiSearch` index names populated | ✅ | Verified 2026-07-18 — SemanticMatch/AiClassification=true; AutoFile set explicit (was code-default true/0.85); index tokens resolve (`spaarke-records-index` @2, `spaarke-invoices-index` @6). Webhook secrets moved to Key Vault (mirror prod) |
+| P-3 | Connections PCF imported | ✅ | Verified in Dataverse `customcontrol` — **v1.2.1** (supersedes the v1.0.1 named here) |
+| P-4 | Actions PCF imported | ✅ | Verified in Dataverse `customcontrol` — **v1.1.1** (supersedes the v1.0.1 named here) |
+| P-5 | Both PCFs placed on OOB `sprk_communication` form (Connections in accessories column bound to `sprk_associationprovenance`+`sprk_associationstatus`; Actions bound to `sprk_communicationtype`) | ☐ | OWNER to confirm (maker UI — not machine-verifiable from here) |
+| P-6 | Legacy `sprk_communication_send.js` web resource + Send button removed; **Create-To-Do button KEPT** | ☐ | OWNER to confirm |
+| P-7 | "Communications Awaiting Association" system view published | ☐ | OWNER to confirm |
+| P-8 | Dataverse env vars present: `sprk_MsalClientId`=`170c98e1…`, `sprk_BffApiAppId`=`1e40baad…`, `sprk_BffApiBaseUrl` | ☐ | OWNER to confirm |
+| P-9 | A test mailbox is monitored by a live Graph subscription (for inbound tests) | ☐ | OWNER to confirm (needed for D-1 inbound + the definitive webhook-KV resolution proof) |
 
 ---
 
@@ -32,23 +32,23 @@ UAT splits into two tiers. **Tier 1 (API) can run now** — the BFF is deployed 
 
 | ID | Test | Steps | Expected | Pass/Fail | Notes |
 |----|------|-------|----------|:---:|-------|
-| A-1 | Health | `GET /healthz` | 200 | ☐ | |
-| A-2 | Suggest — route registered | `POST /api/communications/{guid}/suggest-associations` **without** token | 401 (not 404) | ☐ | |
-| A-3 | Archive — route registered | `POST /api/communications/{guid}/archive` **without** token | 401 (not 404) | ☐ | |
-| A-4 | Send — route registered | `POST /api/communications/send` **without** token | 401 (not 404) | ☐ | |
-| A-5 | Status — route registered | `GET /api/communications/{guid}/status` without token | 401 | ☐ | |
-| A-6 | Webhook anonymous validation handshake | `POST /api/communications/incoming-webhook?validationToken=abc123` | 200, body echoes `abc123` as text/plain | ☐ | |
-| A-7 | Webhook rejects bad HMAC | `POST /api/communications/incoming-webhook` with a change-notification body and a wrong/absent `X-Hub-Signature-256` | 401/400 (rejected; no job enqueued) | ☐ | |
+| A-1 | Health | `GET /healthz` | 200 | ✅ | 200 (2026-07-18) |
+| A-2 | Suggest — route registered | `POST /api/communications/{guid}/suggest-associations` **without** token | 401 (not 404) | ✅ | 401 → route registered |
+| A-3 | Archive — route registered | `POST /api/communications/{guid}/archive` **without** token | 401 (not 404) | ✅ | 401 |
+| A-4 | Send — route registered | `POST /api/communications/send` **without** token | 401 (not 404) | ✅ | 401 |
+| A-5 | Status — route registered | `GET /api/communications/{guid}/status` without token | 401 | ✅ | 401 |
+| A-6 | Webhook anonymous validation handshake | `POST /api/communications/incoming-webhook?validationToken=abc123` | 200, body echoes `abc123` as text/plain | ✅ | 200, body `abc123`, `text/plain` |
+| A-7 | Webhook rejects bad HMAC | `POST /api/communications/incoming-webhook` with a change-notification body and a wrong/absent `X-Hub-Signature-256` | 401/400 (rejected; no job enqueued) | ✅ | 401 rejected. NOTE: proves rejection but not KV-key resolution — definitive proof = D-1 (real signed notification accepted) |
 
 ### 1B. Suggestion preview endpoint (read-only — the review surface's data source)
 
 | ID | Test | Steps | Expected | Pass/Fail | Notes |
 |----|------|-------|----------|:---:|-------|
-| B-1 | Suggest returns candidates | Pick a real `sprk_communication` GUID; `POST …/{id}/suggest-associations` with token | 200 with target(s) + confidence + provenance rationale | ☐ | |
-| B-2 | **Read-only invariant** | Before/after B-1, read the record's `sprk_associationprovenance` + `sprk_associationstatus` | **Unchanged** — suggest never writes | ☐ | |
-| B-3 | Unknown ID | Suggest with a random GUID | 404 ProblemDetails | ☐ | |
-| B-4 | Auth scoping (NFR-07) | As a user WITHOUT access to the matter, suggest on a communication regarding that matter | Denied/empty per matter-level scope — no cross-matter leakage | ☐ | |
-| B-5 | Privilege is flagged, not decided (ADR-015) | Use a communication whose content trips privilege signals | Response *flags* privilege as a signal; does not auto-decide/auto-file on it | ☐ | |
+| B-1 | Suggest returns candidates | Pick a real `sprk_communication` GUID; `POST …/{id}/suggest-associations` with token | 200 with target(s) + confidence + provenance rationale | ✅ | `6edc948a` → 200, `status:Suggested`, `autoFileEligible:false`, candidates = contact@0.7 (ParticipantCorrelation) + matter@0.97 (RecordNameMatch:number) — matches written provenance |
+| B-2 | **Read-only invariant** | Before/after B-1, read the record's `sprk_associationprovenance` + `sprk_associationstatus` | **Unchanged** — suggest never writes | ✅ | `modifiedon`=2026-07-18T16:16:33 (original processing); multiple suggest calls a day later did NOT change it → read-only confirmed |
+| B-3 | Unknown ID | Suggest with a random GUID | 404 ProblemDetails | ✅ | 404 RFC 7807: `type=.../COMMUNICATION_NOT_FOUND`, title/detail/status/correlationId present |
+| B-4 | Auth scoping (NFR-07) | As a user WITHOUT access to the matter, suggest on a communication regarding that matter | Denied/empty per matter-level scope — no cross-matter leakage | ⬚ | OWNER — needs a restricted-access test user (my token identity is privileged; can't prove scoping alone) |
+| B-5 | Privilege is flagged, not decided (ADR-015) | Use a communication whose content trips privilege signals | Response *flags* privilege as a signal; does not auto-decide/auto-file on it | ⬚ | Pending a privilege-content email (sample records = privilege None) |
 
 ### 1C. Association Engine — 6-rung ladder & status mapping
 
@@ -56,43 +56,43 @@ UAT splits into two tiers. **Tier 1 (API) can run now** — the BFF is deployed 
 
 | ID | Test | Steps | Expected | Pass/Fail | Notes |
 |----|------|-------|----------|:---:|-------|
-| C-1 | Rung 0 — explicit ref | Inbound/caller-supplied explicit regarding | Matched at rung 0; provenance names rung 0 | ☐ | |
-| C-2 | Rung 1 — thread continuity | Reply to a prior email already associated to a matter (`inReplyTo`/`references`/`conversationId`) | Same matter matched via thread rung; provenance cites thread | ☐ | |
-| C-3 | Rung 2 — participant/domain | Sender is a known contact / sender domain matches `sprk_organization` (via `sprk_domain`) | Contact/org matched; **org writes `sprk_regardingorganization`→`sprk_organization`, NOT `account`** | ☐ | |
-| C-4 | Rung 3 — structural detector | Email that is a calendar invite / e-sign completion / has an invoice # / court-filing marker | Detector fires; correct target type surfaced | ☐ | |
-| C-5 | Rung 4 — semantic (AI) | Fuzzy matter/project/invoice reference (no deterministic hit) | Lands as **Suggested** with match reasons in provenance; **never auto-filed** | ☐ | |
-| C-6 | Rung 5 — classify (AI) | Ambiguous email with no record match | Category/urgency/obligations surfaced as **Suggested/Ambiguous**; never auto-filed | ☐ | |
-| C-7 | Auto-file threshold | Deterministic match ≥0.85 | Status → **Resolved**, regarding auto-filed | ☐ | |
-| C-8 | Suggest band | Deterministic match 0.50–0.85 | Status → **Suggested** (not auto-filed) | ☐ | |
-| C-9 | Pending band | No/low match (<0.50) | Status → **Pending Review** | ☐ | |
-| C-10 | Ambiguous | Two conflicting high-confidence targets | Status → **Ambiguous** | ☐ | |
-| C-11 | Provenance recorded | Any of the above | `sprk_associationprovenance` JSON records rung + per-attribute confidence for each match | ☐ | |
-| C-12 | Per-rung telemetry | Trigger inbound processing; check App logs | `EventId 4501/4502` per-rung telemetry present | ☐ | |
+| C-1 | Rung 0 — explicit ref | Inbound/caller-supplied explicit regarding | Matched at rung 0; provenance names rung 0 | ⬚ | Not exercised in the 2026-07-18 sample (rung exists; no explicit-ref email in set) |
+| C-2 | Rung 1 — thread continuity | Reply to a prior email already associated to a matter (`inReplyTo`/`references`/`conversationId`) | Same matter matched via thread rung; provenance cites thread | ✅ | Verified via real data (`048e7239`, `d58fd828`) — provenance cites `thread:ancestor:<msgid>→parent:{guid}:sprk_regardingperson`, confidence 1.0 |
+| C-3 | Rung 2 — participant/domain | Sender is a known contact / sender domain matches `sprk_organization` (via `sprk_domain`) | Contact/org matched; **org writes `sprk_regardingorganization`→`sprk_organization`, NOT `account`** | ✅ | Participant→contact verified (`participant:sender:ralph.schroeder@spaarke.com→contact` @0.7). Org-by-domain not in sample |
+| C-4 | Rung 3 — structural detector | Email that is a calendar invite / e-sign completion / has an invoice # / court-filing marker | Detector fires; correct target type surfaced | ⬚ | Not exercised in sample |
+| C-5 | Rung 4 — semantic (AI) | Fuzzy matter/project/invoice reference (no deterministic hit) | Lands as **Suggested** with match reasons in provenance; **never auto-filed** | ⬚ | Deterministic RecordNameMatch hit on both sample records so semantic rung not the resolver; rung present |
+| C-6 | Rung 5 — classify (AI) | Ambiguous email with no record match | Category/urgency/obligations surfaced as **Suggested/Ambiguous**; never auto-filed | ✅ | `AiClassification` signal present (metadata-only) in both records: category/urgency/obligations/types — never auto-filed |
+| C-7 | Auto-file threshold | Deterministic match ≥0.85 | Status → **Resolved**, regarding auto-filed | ✅ | `048e7239` → Resolved, `autoFiled:true`, `autoFileThreshold:0.85`, `killSwitchEnabled:true` (confirms AutoFile config live) |
+| C-8 | Suggest band | Deterministic match 0.50–0.85 | Status → **Suggested** (not auto-filed) | ✅ | `6edc948a` → Suggested (deterministic-eligible 0.7 in band). NOTE: reason string interpolates 0.97 not 0.7 — cosmetic |
+| C-9 | Pending band | No/low match (<0.50) | Status → **Pending Review** | ✅ | 2 records at status Pending Review in the set (Mailbox Verification Test, Inbound Test) |
+| C-10 | Ambiguous | Two conflicting high-confidence targets | Status → **Ambiguous** | ✅ | `d58fd828` → Ambiguous: two duplicate "Smith v. Smith" projects @0.95 conflict on `sprk_regardingproject` (written:false); clean siblings (matter, person) still written:true |
+| C-11 | Provenance recorded | Any of the above | `sprk_associationprovenance` JSON records rung + per-attribute confidence for each match | ✅ | Rich JSON verified — version/direction/decision/rungsFired/candidates[field,target,confidence,written,conflict,contributors]/signals |
+| C-12 | Per-rung telemetry | Trigger inbound processing; check App logs | `EventId 4501/4502` per-rung telemetry present | ⬚ | Needs App log access — not verified from Dataverse |
 
 ### 1D. Direction symmetry & enrichment (FR-08/09)
 
 | ID | Test | Steps | Expected | Pass/Fail | Notes |
 |----|------|-------|----------|:---:|-------|
-| D-1 | Inbound enrichment | Send a test email INTO the monitored mailbox | New `sprk_communication` created; runs association → status + provenance | ☐ | |
-| D-2 | **Outbound enrichment (the fixed gap)** | Send an outbound email via the Actions PCF / `/send` | Outbound communication **auto-associates** AND is **RAG-indexed** (both previously missing) | ☐ | |
-| D-3 | Best-effort / non-fatal (NFR-06) | Force an enrichment sub-step to fail (e.g., temporarily flip a kill-switch mid-flow) | Send/inbound-capture still succeeds; failure is logged, not fatal | ☐ | |
-| D-4 | Reply stamps thread cols | Reply from Actions PCF | `sprk_inreplyto` / `sprk_internetmessageid` populated | ☐ | |
+| D-1 | Inbound enrichment | Send a test email INTO the monitored mailbox | New `sprk_communication` created; runs association → status + provenance | ✅ | Verified via the 2026-07-18 inbound records — each created with `sprk_associationstatus` + `sprk_associationprovenance` (see Tier 1C). **CAVEAT**: those inbounds predate today's (2026-07-19) webhook→Key-Vault migration, so the definitive *post-migration* webhook-KV resolution proof still needs ONE fresh inbound email today (a new record appearing ⇒ KV refs resolved). |
+| D-2 | **Outbound enrichment** | Send an outbound email via the Actions PCF / `/send` | Outbound communication auto-associates AND is RAG-indexed | ⚠️ | **PARTIAL / expectation corrected.** `/send` → 200, real email sent from `mailbox-central@spaarke.com` (`97e5b972`, direction Outgoing). **(a) engine auto-associate = deferred BY DESIGN** — `CommunicationEnrichmentService.RunAssociationAsync` is a documented no-op for outbound (associations are client-supplied only; engine-over-outbound deferred to direction-symmetry). No `associations` passed → none written (correct). **(b) RAG-index = BLOCKED by F-1** — `archivedDocumentId:null`, `archivalWarning:"...archival failed: Access denied"` (same SPE-container 403). Outbound archival has NO mailbox fetch ⇒ definitively pins F-1 to the container write. |
+| D-3 | Best-effort / non-fatal (NFR-06) | Force an enrichment sub-step to fail (e.g., temporarily flip a kill-switch mid-flow) | Send/inbound-capture still succeeds; failure is logged, not fatal | ✅ | Demonstrated organically — outbound send succeeded + `sprk_communication` created despite archival "Access denied" (surfaced as `archivalWarning`, non-fatal) |
+| D-4 | Reply stamps thread cols | Reply from Actions PCF | `sprk_inreplyto` / `sprk_internetmessageid` populated | ⚠️ | `sprk_internetmessageid` populated (verified on inbound `048e7239`). Reply-specific `sprk_inreplyto` needs a reply via Actions PCF (owner/H-4) |
 
 ### 1E. Kill-switches (ADR-018 / ADR-032) — no redeploy
 
 | ID | Test | Steps | Expected | Pass/Fail | Notes |
 |----|------|-------|----------|:---:|-------|
-| E-1 | Auto-file off | Set `Communication__AutoFile__Enabled=false` (restart/refresh config) | A ≥0.85 deterministic match now lands as **Suggested**, NOT auto-filed — no redeploy | ☐ | |
-| E-2 | Semantic rung off | `Communication__SemanticMatch__Enabled=false` | Rung 4 no longer contributes; engine still runs 0–3 + 5 | ☐ | |
-| E-3 | Classify rung off | `Communication__AiClassification__Enabled=false` | Rung 5 no longer contributes; no errors on unconditional endpoints (Null-Object) | ☐ | |
-| E-4 | Restore | Re-enable all three | Behavior returns to baseline | ☐ | |
+| E-1 | Auto-file off | Set `Communication__AutoFile__Enabled=false` (restart/refresh config) | A ≥0.85 deterministic match now lands as **Suggested**, NOT auto-filed — no redeploy | ◑ | **Mechanism ✅ (2026-07-19)**: flipped off in compound-off sweep → App Service restarts on config-set (no redeploy) → healthz=200. Options are `IOptionsMonitor`-bound (CommunicationModule.cs:31) so the flip reloads without redeploy. **Behavioral half owner-gated**: proving a ≥0.85 match lands Suggested-not-Resolved needs a live inbound/suggest call with a user token (I can't mint BFF-audience token headless — SPA/PKCE). Fold into owner's D-1 or PCF session. |
+| E-2 | Semantic rung off | `Communication__SemanticMatch__Enabled=false` | Rung 4 no longer contributes; engine still runs 0–3 + 5 | ◑ | **Mechanism ✅**: rung 4 (`SemanticMatchRung`) is registered **unconditionally** and **self-gates** on `Communication:SemanticMatch:Enabled` via IOptionsMonitor (CommunicationModule.cs:168-169) — flipping off cannot change the DI graph or break startup. Compound-off confirmed healthz=200 + route intact. **Behavioral half owner-gated** (rung-4 signal disappears from a live suggestion). |
+| E-3 | Classify rung off | `Communication__AiClassification__Enabled=false` | Rung 5 no longer contributes; no errors on unconditional endpoints (Null-Object) | ◑ | **Mechanism ✅ (the DI-safety assertion)**: rung 5 (`AiClassificationRung`, consumes `ICommunicationClassificationAi` facade) is registered **unconditionally** + self-gates via IOptionsMonitor (CommunicationModule.cs:173-175) — NOT an asymmetric conditional registration, so no Null-Object mirror is even needed at this layer. With AiClassification=false (compound-off), `POST /suggest-associations` returned **401 (auth), not 500** → route registered, DI resolved cleanly, no error on the unconditional endpoint. **Behavioral half owner-gated**. |
+| E-4 | Restore | Re-enable all three | Behavior returns to baseline | ✅ | Restored 2026-07-19: SemanticMatch/AiClassification/AutoFile all `true`, Threshold `0.85`, healthz=200. Verified live values via `az webapp config appsettings list`. Pristine baseline confirmed before owner UAT resumes. |
 
 ### 1F. Archive to SharePoint (FR — on-demand)
 
 | ID | Test | Steps | Expected | Pass/Fail | Notes |
 |----|------|-------|----------|:---:|-------|
-| F-1 | Archive creates docs | `POST …/{id}/archive` on an un-archived communication with attachments | 200; `.eml` Document + one Document per attachment; `attachmentDocumentsCreated` reflects count | ☐ | |
-| F-2 | Idempotent | Archive the same communication again | 200 `alreadyArchived: true`; no duplicate Documents | ☐ | |
+| F-1 | Archive creates docs | `POST …/{id}/archive` on an un-archived communication with attachments | 200; `.eml` Document + one Document per attachment; `attachmentDocumentsCreated` reflects count | ✅ | **FIXED + PASS (2026-07-19).** Was a real defect (owner reproduced via H-8): the archive uploads as the BFF managed identity `mi-bff-api-dev`/`5967251e` (`UploadSessionManager.ForApp()`), which was **not in the SPE container type `8a6ce34c` applicationPermissionGrants** — only `170c98e1` (owner) + `1e40baad` were. **Root fix:** added `5967251e` with `full` app-only permission to the container-type registration. Two hurdles resolved en route: (a) the container-type owner app `170c98e1`'s cert had **expired 2026-03-14** → renewed (valid to 2027, appended non-destructively); (b) the repo's `_api/v2.1/storageContainerTypes/.../applicationPermissions` endpoint returns `apiNotFound` in this tenant — the working path is Graph beta `PUT /beta/storage/fileStorage/containerTypeRegistrations/{ct}/applicationPermissionGrants/{appId}`. MI already had the `FileStorageContainer.Selected` Graph app-role. After grant + BFF restart + ~3 min SPE propagation: archive → **200**, `archiveDocumentId=959af325-…`, `alreadyArchived:false`. |
+| F-2 | Idempotent | Archive the same communication again | 200 `alreadyArchived: true`; no duplicate Documents | ✅ | 2nd call → 200, same `archiveDocumentId=959af325-…`, `alreadyArchived:true` — idempotent, no duplicate. |
 
 ---
 

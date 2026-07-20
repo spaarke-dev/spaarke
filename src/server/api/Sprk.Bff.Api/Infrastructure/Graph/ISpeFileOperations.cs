@@ -67,6 +67,25 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
+    /// Resolve the CURRENT (most-recent) version id of a drive-item using the caller's OBO identity.
+    /// Graph route <c>drives/{driveId}/items/{itemId}/versions</c> → the newest version's id. Returns
+    /// <c>null</c> when the item has no version history or is not found (facade-translated — no
+    /// <c>Microsoft.Graph</c> exception type crosses this boundary, ADR-007).
+    /// </summary>
+    /// <remarks>
+    /// Compose R3 E1 baseline retrieval (FR-06): captured at Load and surfaced on
+    /// <c>LoadComposeDocumentResult.VersionId</c> so a later dirty save that no longer holds the client
+    /// bytes (e.g. after a page refresh) can re-fetch this LOAD-TIME version via
+    /// <see cref="DownloadFileVersionAsUserAsync"/> — the load-time version stays addressable even after
+    /// the save advances the item's current version. Additive; best-effort (Load never fails on a null).
+    /// </remarks>
+    Task<string?> GetCurrentVersionIdAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Create a NEW small (&lt;4 MB) drive-item in a container/drive under the user's OBO
     /// identity. PUTs the stream to <c>drives/{driveId}/root:/{path}:/content</c>, minting a
     /// fresh drive-item, and returns its <see cref="FileHandleDto"/> (id + name + size + etag +

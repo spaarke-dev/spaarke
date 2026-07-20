@@ -35,6 +35,14 @@ const TWO_WARNINGS = [
 ];
 
 describe('ComposeBannerStack — DEF-15 dismissible simplification warning', () => {
+  // FR-21 (R3 carry-in): dismissal is now content-signature-keyed sessionStorage (see
+  // ComposeBannerStack.tsx). Several `it`s below reuse the SAME `TWO_WARNINGS` content, so the
+  // sentinel must be cleared between tests or an earlier test's dismissal would leak into a later
+  // one (sessionStorage persists for the whole jsdom test-file lifetime, not per-`it`).
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
   it('renders the simplification warning with a dismiss control', () => {
     renderStack({ importWarnings: TWO_WARNINGS });
 

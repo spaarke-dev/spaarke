@@ -739,6 +739,122 @@ public class SessionPersistenceService : ISessionPersistenceService
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<RecentSessionInfo>> ListRecentSessionsAsync(
+        string tenantId,
+        int limit,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Array.Empty<RecentSessionInfo>();
+        }
+
+        var capped = Math.Clamp(limit, 1, 50);
+
+        try
+        {
+            var container = GetContainer();
+
+            // Project ONLY the fields the History list needs (never the full messages array) — the
+            // first message's content is the title seed. ORDER BY lastActivity DESC uses the default
+            // range index; ISO-8601 timestamps sort chronologically as strings.
+            var query = new QueryDefinition(
+                "SELECT TOP @limit c.id, c.sessionId, c.lastActivity, c.conversationSummary, " +
+                "c.entityRefs, c.messages[0].content AS firstMessage " +
+                "FROM c WHERE c.tenantId = @tenantId ORDER BY c.lastActivity DESC")
+                .WithParameter("@limit", capped)
+                .WithParameter("@tenantId", tenantId);
+
+            using var iterator = container.GetItemQueryIterator<RecentSessionProjection>(
+                query,
+                requestOptions: new QueryRequestOptions
+                {
+                    PartitionKey = new PartitionKey(tenantId),
+                    MaxItemCount = capped,
+                });
+
+            var results = new List<RecentSessionInfo>(capped);
+            while (iterator.HasMoreResults)
+            {
+                var page = await iterator.ReadNextAsync(ct);
+                foreach (var p in page)
+                {
+                    var sessionId = !string.IsNullOrEmpty(p.SessionId) ? p.SessionId : p.Id;
+                    if (string.IsNullOrEmpty(sessionId))
+                    {
+                        continue;
+                    }
+
+                    var entity = p.EntityRefs is { Count: > 0 } ? p.EntityRefs[0] : null;
+                    results.Add(new RecentSessionInfo(
+                        SessionId: sessionId,
+                        Title: BuildSessionTitle(p, entity),
+                        EntityType: entity?.EntityType,
+                        EntityName: entity?.DisplayName,
+                        PlaybookName: null,
+                        UpdatedAt: p.LastActivity));
+                }
+            }
+
+            return results;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "SessionPersistenceService: Cosmos list-recent-sessions failed (tenant={TenantId}) — returning empty",
+                tenantId);
+            return Array.Empty<RecentSessionInfo>();
+        }
+    }
+
+    /// <summary>Derive a short, single-line display title for the History list from the cheapest signal.</summary>
+    private static string BuildSessionTitle(RecentSessionProjection p, SessionEntityRef? entity)
+    {
+        var seed = FirstNonWhitespace(p.FirstMessage, p.ConversationSummary, entity?.DisplayName);
+        if (!string.IsNullOrWhiteSpace(seed))
+        {
+            var oneLine = seed.Replace('\r', ' ').Replace('\n', ' ').Trim();
+            return oneLine.Length > 80 ? oneLine[..77] + "…" : oneLine;
+        }
+        // No content yet — a stable, human-readable fallback.
+        return $"Conversation · {p.LastActivity.UtcDateTime:MMM d, HH:mm} UTC";
+    }
+
+    private static string? FirstNonWhitespace(params string?[] candidates)
+    {
+        foreach (var c in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(c))
+            {
+                return c;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Cosmos projection for <see cref="ListRecentSessionsAsync"/> — never the full message list.</summary>
+    private sealed class RecentSessionProjection
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public string Id { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("sessionId")]
+        public string SessionId { get; set; } = string.Empty;
+
+        [System.Text.Json.Serialization.JsonPropertyName("lastActivity")]
+        public DateTimeOffset LastActivity { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("conversationSummary")]
+        public string? ConversationSummary { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("entityRefs")]
+        public List<SessionEntityRef>? EntityRefs { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("firstMessage")]
+        public string? FirstMessage { get; set; }
+    }
+
     /// <summary>
     /// Fire-and-forget Cosmos DB upsert. Uses retry via Polly-style backoff is not needed here
     /// because CosmosClient has built-in retry policy. Any remaining failure is logged and swallowed

@@ -49,8 +49,10 @@ public class SpeFileStore : ISpeFileOperations
     public Task<IList<ContainerDto>?> ListContainersAsync(Guid containerTypeId, CancellationToken ct = default)
         => _containerOps.ListContainersAsync(containerTypeId, ct);
 
-    // Upload Operations - delegate to UploadSessionManager
-    public Task<FileHandleDto?> UploadSmallAsync(
+    // Upload Operations - delegate to UploadSessionManager.
+    // `virtual` enables module-boundary test doubles (Moq) of this concrete facade — the established
+    // codebase idiom for non-mockable facades (cf. DocumentCheckoutService, ChatSessionManager seams).
+    public virtual Task<FileHandleDto?> UploadSmallAsync(
         string driveId,
         string path,
         Stream content,
@@ -78,7 +80,8 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _driveItemOps.ListChildrenAsync(driveId, itemId, ct);
 
-    public Task<Stream?> DownloadFileAsync(
+    // `virtual` enables module-boundary test doubles (Moq) of this concrete facade (see UploadSmallAsync).
+    public virtual Task<Stream?> DownloadFileAsync(
         string driveId,
         string itemId,
         CancellationToken ct = default)
@@ -117,6 +120,13 @@ public class SpeFileStore : ISpeFileOperations
         string versionId,
         CancellationToken ct = default)
         => _driveItemOps.DownloadFileVersionAsUserAsync(ctx, driveId, itemId, versionId, ct);
+
+    public Task<string?> GetCurrentVersionIdAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+        => _driveItemOps.GetCurrentVersionIdAsUserAsync(ctx, driveId, itemId, ct);
 
     public Task<FilePreviewDto> GetPreviewUrlAsync(
         string driveId,
