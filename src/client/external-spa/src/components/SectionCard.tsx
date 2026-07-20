@@ -1,12 +1,10 @@
 import * as React from 'react';
-import { Card, CardHeader, CardFooter, makeStyles, tokens, Text } from '@fluentui/react-components';
+import { Card, CardHeader, CardFooter, makeStyles, shorthands, tokens, Text } from '@fluentui/react-components';
 
 const useStyles = makeStyles({
   card: {
     backgroundColor: tokens.colorNeutralBackground2,
-    borderColor: tokens.colorNeutralStroke2,
-    borderWidth: '1px',
-    borderStyle: 'solid',
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
     width: '100%',
     boxSizing: 'border-box',

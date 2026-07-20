@@ -54,12 +54,11 @@ import {
   ArrowClockwiseRegular,
   CheckmarkCircleRegular,
   InfoRegular,
-  AlertBadgeRegular,
 } from '@fluentui/react-icons';
 
 import { useExternalContext } from '../hooks/useExternalContext';
 import { getProjects, getEvents, getDocuments } from '../api/web-api-client';
-import type { ODataEvent, ODataProject, ODataDocument } from '../api/web-api-client';
+import type { ODataProject, ODataDocument } from '../api/web-api-client';
 import { PageContainer } from '../components/PageContainer';
 import { SectionCard } from '../components/SectionCard';
 

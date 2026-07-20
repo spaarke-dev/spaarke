@@ -25,6 +25,7 @@
 import * as React from 'react';
 import {
   makeStyles,
+  shorthands,
   tokens,
   Button,
   Input,
@@ -89,14 +90,12 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: tokens.colorNeutralStroke2,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground1,
     ':hover': {
       backgroundColor: tokens.colorNeutralBackground2,
-      borderColor: tokens.colorNeutralStroke1,
+      ...shorthands.borderColor(tokens.colorNeutralStroke1),
     },
   },
   resultHeader: {
