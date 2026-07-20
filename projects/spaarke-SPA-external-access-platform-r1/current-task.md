@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-20 (task 029 COMPLETE = 14 tasks ✅; invite-and-grant orchestration landed; only 030 tests + 031 deploy remain in Phase 2)
+> **Last Updated**: 2026-07-20 (task 010 COMPLETE via parallel subagent = 15 tasks ✅; 030 planned in notes/task-030-plan.md — needs fresh-context integration-fixture session)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — **Phase 0 + 020/024/026 + 022/021/023/028/025/027/029 COMPLETE**. 14 tasks ✅. All Phase-2 feature code done. |
-| **Step** | 029 done; next 030 (tests) |
-| **Status** | 14 ✅ (001, 002, 003, 004, 020, 021, 022, 023, 024, 025, 026, 027, 028, 029) |
-| **Next Action** | **030** (unit tests for the whole CIAM external-access surface, TEST rigor — asserts: 021 scheme-pin negatives, **023 oid-resolution matrix** (oid-bound/first-login-bind/no-email-hijack/unknown-403), 025 idempotency gate + `BuildCiamUser` payload shape, 026, **027 authz-before-stream 403-no-bytes-no-Graph** (highest-consequence — verify resolver/store never invoked when unauthorized), 029 invite-and-grant compose + grantee-is-Contact; deps 020/021/022/023/025/026/027 ✅). **NOTE**: 030 is TEST-MODIFYING → Step 9.5 gates MANDATORY; follow ADR-038 KEEP-path + no `Mock<HttpMessageHandler>`. Then **031** (deploy BFF + verify size/CVE; deps 030). **OPEN ESCALATIONS (notes/defer-issues.md)**: DI-028-01 CIAM SPA+BFF-API app regs (ops — blocks live auth + 031 substitution); DI-028-02 external-spa build (blocks 014); DI-025-01 + DI-029-01 (post-R1/UI follow-ups). Runtime prereq for 031: BFF MI needs KV 'Secrets User' on spaarke-spekvcert. |
+| **Task** | none active — 15 tasks ✅. All Phase-2 **feature code** done (020-029); **010** done (Phase-1 SWA config). |
+| **Step** | 010 done; **030 planned (not started)** — needs a fresh-context integration-fixture session |
+| **Status** | 15 ✅ (001, 002, 003, 004, 010, 020, 021, 022, 023, 024, 025, 026, 027, 028, 029) |
+| **Next Action** | **030** — CIAM external-access **integration/contract** test suite. NOT quick-unit-testable: ADR-038's 17 bans preclude the shortcuts (BuildCiamUser is `internal`→B8; ctor/DI→B3/B4; collaborator mocks→B5; `Mock<HttpMessageHandler>`→B1), so it must run through the HTTP surface via a CIAM `WebApplicationFactory` fixture + small module-boundary seams. **Full actionable plan: [`notes/task-030-plan.md`](../notes/task-030-plan.md)** (fixture, 3 seams, 6 tests incl. the 027 authz-before-stream 403/no-Graph centerpiece). TEST-MODIFYING → Step 9.5 gates MANDATORY. Recommend a dedicated fresh-context session. Then **031** (deploy BFF; deps 030). **Other ready Phase-1 tasks**: 013 (BFF CORS+SPA redirect, deps 003 — BFF-source, serialize vs 030's test build), 011/012 (BrowserRouter, deps 010 ✅→011 now ready). **OPEN ESCALATIONS (notes/defer-issues.md)**: DI-028-01 CIAM app regs (needs your portal work — blocks live auth + 031 substitution); DI-028-02 external-spa build (blocks 014); DI-025-01/DI-029-01 (post-R1/UI). Runtime prereq for 031: BFF MI needs KV 'Secrets User' on spaarke-spekvcert. |
 
 ### Completed this session (2026-07-19)
 - **004** — `contact.sprk_externalobjectid` (String/100) created live on `spaarkedev1`, in SpaarkeCore + SpaarkeMaster, published, queryable. Doc: `notes/data-model-sprk_externalobjectid.md`. MetadataId `b28603f2-bd83-f111-8076-7ced8ddc4cc6`.
