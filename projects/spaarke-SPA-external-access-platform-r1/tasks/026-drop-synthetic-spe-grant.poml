@@ -3,7 +3,7 @@
     <title>Remove vestigial synthetic SPE container grant from GrantExternalAccessEndpoint</title>
     <phase>2 Identity + provisioning + document content</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the grant path on the external access surface; broker-only correctness matters</rigor-reason>
     <model-tier>sonnet</model-tier>

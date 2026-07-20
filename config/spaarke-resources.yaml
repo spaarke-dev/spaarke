@@ -22,6 +22,19 @@ $schema-doc: |
 # Manifest changelog (top-level chronology of significant changes)
 # ============================================================================
 _changelog:
+  - 2026-07-19:
+      action: external-access-platform-r1-phase0
+      summary: |
+        spaarke-SPA-external-access-platform-r1 Phase 0 — three NEW resources added:
+          - external_identity: NEW top-level section — the SEPARATE Entra External ID
+            (CIAM) tenant `spaarkeextid.onmicrosoft.com` (7052feba-...) for external users
+            (broker-only, ADR-028 A1), + the `Spaarke CIAM Graph Provisioner` app reg
+            (e63e6eb1-...) registered IN that tenant for cross-tenant Graph user provisioning.
+          - environments.dev.external_spa: NEW — Azure Static Web App
+            `swa-spaarke-external-spa-dev` hosting the external SPA (task 003).
+        Pending admin-consent portal steps (SSPR Email OTP + isSignUpAllowed=false flow) noted
+        under external_identity.ciam_tenant.provisioning_pending.
+      author: Claude Code
   - 2026-06-26:
       action: ai-search-setup-r1-alignment
       summary: |
@@ -124,6 +137,65 @@ app_registrations:
       app_name: Spaarke DMS-SPE Dev 1
       client_id: fd1325aa-a709-4f15-b1f5-600f30d28875
       object_id: 8b867837-a546-4407-86c7-cf0b22925db6
+
+# ============================================================================
+# External Identity (Entra External ID / CIAM) — SEPARATE tenant for external users
+# ============================================================================
+# NOT the workforce `tenant:` above. Holds ONLY external users (outside counsel / clients)
+# for the external Secure Project Workspace. Broker-only per ADR-028 Amendment A1: the BFF
+# (workforce tenant) validates CIAM-issued tokens via a 2nd JwtBearer scheme; all downstream
+# Dataverse/SPE access is app-only. Project: spaarke-SPA-external-access-platform-r1.
+# This is the dev-stage CIAM tenant; demo/prod will each get their own separate CIAM tenant.
+
+external_identity:
+  ciam_tenant:
+    id: 7052feba-bfc4-43e0-b09e-65014b429131
+    name: spaarkeextid.onmicrosoft.com
+    display_name: Spaarke External Access
+    authority: https://spaarkeextid.ciamlogin.com/7052feba-bfc4-43e0-b09e-65014b429131
+    authority_host: spaarkeextid.ciamlogin.com
+    billing: MAU
+    arm:
+      subscription_ref: subscriptions.spe
+      resource_group: rg-spaarke-dev
+      resource_type: Microsoft.AzureActiveDirectory/ciamDirectories
+      resource_name: spaarkeextid
+    _meta:
+      status: active
+      created: 2026-07-19
+      history:
+        - 2026-07-19: Provisioned via ARM (task 001, spaarke-SPA-external-access-platform-r1).
+    user_flow:
+      name: SpaarkeExternalSignIn
+      id: 046a0529-1fb5-45d2-a91f-65a3b3ccdc64
+      type: sign-up-and-sign-in # identity provider: Email with password
+      is_sign_up_allowed: false # DONE 2026-07-19 via Graph — admin-initiated-only (R1); associate SPA app in task 028
+    sspr:
+      email_otp: enabled # 2026-07-19 owner enabled Email OTP (Protection > Authentication methods) — unlocks "Forgot password" self-set
+  app_registrations:
+    ciam_graph_provisioner:
+      app_name: Spaarke CIAM Graph Provisioner
+      client_id: e63e6eb1-be25-4214-80a8-a6d609034bb9
+      home_tenant_ref: external_identity.ciam_tenant # lives IN the CIAM tenant (single-tenant), NOT the workforce tenant
+      sign_in_audience: AzureADMyOrg
+      graph_app_permissions:
+        - User.ReadWrite.All # admin-consented in the CIAM tenant
+      purpose: Cross-tenant Graph user provisioning — the BFF authenticates AS this app (client-credentials against the CIAM authority) to create/manage external CIAM users (tasks 002/022/025).
+      credential:
+        type: certificate
+        status: active # 2026-07-19: private key in KV; public .cer uploaded to the app reg (owner)
+        keyvault: spaarke-spekvcert
+        keyvault_cert_name: ciam-graph-provisioner-cert
+        secret_ref: kv:ciam-graph-provisioner-cert # BFF loads the cert (incl. private key) from KV at runtime (task 022)
+        thumbprint: 938A0ECE160B3D6BE07751638F1B5B282B524F92
+        app_key_credential_id: f3e09e97-f34f-4872-ad0f-3a48a4d37d3c # keyCredential id on the app registration
+        subject: CN=Spaarke CIAM Graph Provisioner
+        expires: 2028-07-20 # manual renewal — re-upload public key to the app reg on rotation (no auto-renew)
+      _meta:
+        status: active
+        created: 2026-07-19
+        history:
+          - 2026-07-19: Registered single-tenant in the CIAM tenant; User.ReadWrite.All admin-consented (task 002).
 
 # ============================================================================
 # SharePoint Embedded (tenant-level, region eastus)
@@ -326,6 +398,23 @@ environments:
         certificate_password: kv:spe-app-cert-pass
         owning_app_secret: kv:spe-owning-app-secret # SPE owning app (170c98e1-...) client secret
 
+    external_spa:
+      # External Secure Project Workspace SPA — Azure Static Web App (task 003).
+      # Replaces the Power Pages web-resource host (Deploy-ExternalWorkspaceSpa.ps1, retired Phase 3).
+      swa_name: swa-spaarke-external-spa-dev
+      hostname: green-dune-0c4f1221e.7.azurestaticapps.net
+      resource_group: rg-spaarke-dev
+      sku: Free
+      app_source: src/client/external-spa
+      deploy_workflow: .github/workflows/deploy-external-spa.yml
+      deploy_token_github_secret: AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV # stored as a GitHub Actions secret, never here
+      ciam_authority_ref: external_identity.ciam_tenant.authority # SPA points at CIAM authority in Phase 2 (task 028)
+      _meta:
+        status: active
+        created: 2026-07-19
+        history:
+          - 2026-07-19: Provisioned (task 003, spaarke-SPA-external-access-platform-r1).
+
     # -----------------------------------------------------------------------
     # Dev Key Vault inventory snapshot — every secret known to exist in
     # `spaarke-spekvcert` as of 2026-06-26 (via `az keyvault secret list`).
@@ -349,6 +438,7 @@ environments:
         - spe-app-cert
         - spe-app-cert-pass
         - spe-owning-app-secret
+        - ciam-graph-provisioner-cert # CIAM graph-provisioner app cert (added 2026-07-19, external-access-platform-r1 task 002)
       not_secret_but_stored_as_secret: # These are GUIDs/URLs — should live in YAML, not KV
         - bff-api-tenant-id # = tenant.id
         - DATAVERSE-URL # = environments.dev.dataverse.env_url
@@ -441,9 +531,9 @@ github_actions:
 # ============================================================================
 
 _metadata:
-  version: 2
+  version: 3
   source_of_truth: Spaarke non-secret manifest
-  last_updated: 2026-06-26 # v2: spaarke-ai-azure-setup-dev-r1 alignment — 8-index catalog + 2 new KV secrets
+  last_updated: 2026-07-19 # v3: external-access-platform-r1 Phase 0 — external_identity (CIAM tenant + graph-provisioner app) + dev.external_spa (SWA)
   replaces:
     - config/azure-config.local.json
     - config/app-registrations.local.json

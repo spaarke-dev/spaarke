@@ -3,7 +3,7 @@
     <title>Provision Azure Static Web Apps resource + CI/CD scaffold</title>
     <phase>0 Foundations</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Config/infra task with explicit constraints</rigor-reason>
     <model-tier>sonnet</model-tier>

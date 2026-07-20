@@ -7,10 +7,10 @@
 
 | ID | Title | Phase | Rigor | Tier/Effort | Deps | Parallel | Status |
 |----|-------|-------|-------|-------------|------|----------|--------|
-| 001 | Provision Entra External ID (CIAM) tenant + user-flow config | 0 | STANDARD | sonnet/high | none | ✗ (ops, irreversible) | 🔲 |
-| 002 | Register CIAM-tenant app for Graph user management | 0 | STANDARD | sonnet/high | 001 | ✗ (auth-sensitive) | 🔲 |
-| 003 | Provision Azure Static Web Apps resource + CI/CD scaffold | 0 | STANDARD | sonnet/high | none | ✓ Group A | 🔲 |
-| 004 | Add `Contact.sprk_externalobjectid` Dataverse field | 0 | STANDARD | sonnet/high | none | ✓ Group A | 🔲 |
+| 001 | Provision Entra External ID (CIAM) tenant + user-flow config | 0 | STANDARD | sonnet/high | none | ✗ (ops, irreversible) | ✅ |
+| 002 | Register CIAM-tenant app for Graph user management | 0 | STANDARD | sonnet/high | 001 | ✗ (auth-sensitive) | ✅ |
+| 003 | Provision Azure Static Web Apps resource + CI/CD scaffold | 0 | STANDARD | sonnet/high | none | ✓ Group A | ✅ |
+| 004 | Add `Contact.sprk_externalobjectid` Dataverse field | 0 | STANDARD | sonnet/high | none | ✓ Group A | ✅ |
 | 010 | Author `staticwebapp.config.json` + SWA deploy workflow | 1 | FULL | sonnet/high | 003 | ✗ (shared workflow/config) | 🔲 |
 | 011 | Migrate HashRouter → BrowserRouter + in-app 404 | 1 | FULL | sonnet/high | 010 | ✗ (shares App.tsx) | 🔲 |
 | 012 | Preserve deep link through the login redirect | 1 | FULL | sonnet/high | 011 | ✗ (shares App.tsx/auth) | 🔲 |
@@ -20,9 +20,9 @@
 | 021 | Pin "Ciam" scheme on `/api/v1/external` group | 2 | FULL | **opus**/high | 020 | ✗ (shares ExternalAccessEndpoints) | 🔲 |
 | 022 | Build cross-tenant CIAM Graph client | 2 | FULL | **opus**/high | 002 | ✗ (new client + DI) | 🔲 |
 | 023 | Resolve Contact by CIAM `oid` | 2 | FULL | **opus**/high | 004,020 | ✗ (shares filter/participation) | 🔲 |
-| 024 | Add CIAM onboarding email template + method | 2 | STANDARD | sonnet/high | none | ✓ Group B | 🔲 |
+| 024 | Add CIAM onboarding email template + method | 2 | STANDARD | sonnet/high | none | ✓ Group B | ✅ |
 | 025 | Implement admin-initiated CIAM provisioner | 2 | FULL | **opus**/**xhigh** | 022,004,024 | ✗ (multi-file wiring) | 🔲 |
-| 026 | Remove vestigial synthetic SPE container grant | 2 | FULL | sonnet/high | none | ✗ (shares GrantEndpoint) | 🔲 |
+| 026 | Remove vestigial synthetic SPE container grant | 2 | FULL | sonnet/high | none | ✗ (shares GrantEndpoint) | ✅ |
 | 027 | Add app-only external document download endpoint | 2 | FULL | sonnet/**xhigh** | 021,023 | ✗ (shares ExternalProjectDataEndpoints) | 🔲 |
 | 028 | Point external-spa at the CIAM authority | 2 | FULL | sonnet/high | 020 | ✗ (SPA auth config) | 🔲 |
 | 029 | Core-user "Invite to Secure Workspace" trigger | 2 | FULL | sonnet/high | 025 | ✗ (new command + wiring) | 🔲 |

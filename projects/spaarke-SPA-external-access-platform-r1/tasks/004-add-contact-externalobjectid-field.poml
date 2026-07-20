@@ -3,7 +3,7 @@
     <title>Add Contact.sprk_externalobjectid Dataverse field</title>
     <phase>0 Foundations</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Single Dataverse column via documented schema skill</rigor-reason>
     <model-tier>sonnet</model-tier>

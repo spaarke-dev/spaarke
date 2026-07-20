@@ -240,7 +240,8 @@ public class ExternalAccessEndpointTests
     [Fact]
     public void GrantAccessResponse_ContainerMembershipFalse_IsValid()
     {
-        // SPE step is non-fatal; response may report false even on success.
+        // Broker-only (ADR-028 A1): the grant path writes no synthetic SPE container
+        // permission, so the endpoint always reports SpeContainerMembershipGranted = false.
         var response = new GrantAccessResponse(Guid.NewGuid(), false);
         response.SpeContainerMembershipGranted.Should().BeFalse();
     }

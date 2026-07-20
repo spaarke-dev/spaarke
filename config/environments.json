@@ -36,6 +36,22 @@
         "searchServiceName": "spaarke-search-dev",
         "docIntelName": "spaarke-docintel-dev"
       },
+      "externalSpa": {
+        "swaName": "swa-spaarke-external-spa-dev",
+        "swaHostname": "green-dune-0c4f1221e.7.azurestaticapps.net",
+        "resourceGroup": "rg-spaarke-dev",
+        "sku": "Free",
+        "deployTokenSecret": "AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV",
+        "$comment": "External Secure Project Workspace SPA on Azure Static Web Apps (task 003). Deploy token stored as GitHub Actions secret (name above) — never in this file. BrowserRouter + staticwebapp.config.json + BFF CORS + CIAM authority wired in Phase 1/2."
+      },
+      "ciam": {
+        "tenantId": "7052feba-bfc4-43e0-b09e-65014b429131",
+        "domain": "spaarkeextid.onmicrosoft.com",
+        "authority": "https://spaarkeextid.ciamlogin.com/7052feba-bfc4-43e0-b09e-65014b429131",
+        "authorityHost": "spaarkeextid.ciamlogin.com",
+        "graphProvisionerClientId": "e63e6eb1-be25-4214-80a8-a6d609034bb9",
+        "$comment": "Entra External ID (CIAM) external tenant for the external Secure Project Workspace (task 001). Non-secret identifiers only (NFR-06). Sign-up user flow 'SpaarkeExternalSignIn' (046a0529-1fb5-45d2-a91f-65a3b3ccdc64) created with isSignUpAllowed=false — DONE 2026-07-19 via Graph (admin-initiated-only, R1). PENDING: SSPR Email OTP (enable in Entra admin center > Protection > Authentication methods) to unlock 'Forgot password' self-set."
+      },
       "dataverseRegion": "unitedstates",
       "isLegacyNaming": false,
       "$comment_migration": "Dev migrated 2026-05-24 from Windows spe-api-dev-67e2xz to Linux spaarke-bff-dev (canonical naming). Old env scheduled for decommission after stability period. See projects/sdap-bff-api-remediation-fix/baseline/linux-dev-migration.md."

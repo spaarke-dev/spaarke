@@ -10,10 +10,29 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — full pipeline complete; 25 tasks generated; **all committed + pushed** to `origin/work/spaarke-SPA-external-access-platform-r1` |
-| **Step** | Pipeline paused BEFORE execution (Step 5) — deliberate |
-| **Status** | none (awaiting execution go-ahead) |
-| **Next Action** | Two paths (owner to choose): **(A)** provision Phase 0 live resources externally (CIAM tenant+app, SWA resource, `Contact.sprk_externalobjectid`) then run tasks 010+ ; **(B)** start the two code-only leaf tasks that need NO live resources first — **024** (CIAM onboarding email template) and **026** (drop synthetic SPE grant) — via `task-execute`. Recommended: B for momentum while A is provisioned. |
+| **Task** | none active — **Phase 0 COMPLETE (001/002/003/004) + Phase-2 leaves 024/026**. 6 tasks ✅, gates passed. **NOT yet committed.** |
+| **Step** | Phase 0 done; ready to commit + begin Phase 1/2 code |
+| **Status** | 6 ✅ (001, 002, 003, 004, 024, 026); ready to commit |
+| **Next Action** | (1) **Commit** this session (uncommitted: BFF code + config manifests + SWA workflow + 6 task statuses). (2) Start **020** (BFF `Ciam` JwtBearer scheme — pure code, unblocked; CIAM authority in `config/environments.json` dev.ciam). Then **022** (cross-tenant Graph client — loads cert `ciam-graph-provisioner-cert` from KV `spaarke-spekvcert`, app client `e63e6eb1-...`) → 021/023/025/027. |
+
+### Completed this session (2026-07-19)
+- **004** — `contact.sprk_externalobjectid` (String/100) created live on `spaarkedev1`, in SpaarkeCore + SpaarkeMaster, published, queryable. Doc: `notes/data-model-sprk_externalobjectid.md`. MetadataId `b28603f2-bd83-f111-8076-7ced8ddc4cc6`.
+- **024** — `SendCiamOnboardingEmailAsync` + `CiamOnboardingTemplate.html` (auto-embedded via existing `*.html` wildcard; no .csproj change). Reuses shared-mailbox app-only pipeline.
+- **026** — removed synthetic `contact_{guid}` SPE grant + dead helpers/DTO/usings/`IGraphClientFactory` param from `GrantExternalAccessEndpoint.cs`; preserved `sprk_externalrecordaccess` create + ADR-009 cache invalidation.
+- **Gates:** build 0 errors; 133 tests pass; publish **47.03 MB** compressed (−2.60 MB vs 49.63 baseline, ≤60 ✓); code-review + adr-check both clean (0 critical/0 warnings).
+- **003** — SWA `swa-spaarke-external-spa-dev` (rg-spaarke-dev, westus2, Free) provisioned, host `green-dune-0c4f1221e.7.azurestaticapps.net` (HTTP 200). Deploy token → GitHub secret `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV`. Scaffold workflow `.github/workflows/deploy-external-spa.yml` (workflow_dispatch only). Hostname in config `dev.externalSpa`.
+- **001 (PARTIAL)** — CIAM tenant `spaarkeextid.onmicrosoft.com` / tenantId `7052feba-bfc4-43e0-b09e-65014b429131` created (MAU billing); RP `Microsoft.AzureActiveDirectory` registered; authority in config `dev.ciam`. SSPR + `isSignUpAllowed=false` flow ESCALATED (403 under headless CLI token — needs admin consent). No user flow exists yet ⇒ sign-up ABSENT (safe interim).
+
+### ✅ RESOLVED — CIAM tenant admin bootstrap (was 001 tail + 002)
+Owner completed the interactive portal steps 2026-07-19: app reg + `User.ReadWrite.All` admin consent, SSPR Email OTP, and (I set via Graph) `isSignUpAllowed=false`. Cert created in KV + public uploaded to app. Phase 0 fully done.
+
+### ⚠️ CLI note for next session
+The Azure CLI token cache is polluted for `az role assignment` / Graph-resolve ops (side effect of `az account get-access-token --tenant <ciam>` calls) — those return `MissingSubscription`. ARM resource ops + KV data-plane work fine. If a future step needs role-assignment/`az ad` ops, run a fresh `az login` first. Does NOT affect the code tasks (020/022/etc.).
+
+### ⚠️ Carry-forward for TASK 025 (provisioner, which calls 024's method)
+- Pass a **config-derived `portalUrl`** to `SendCiamOnboardingEmailAsync` — it is inserted into HTML **un-encoded** (like existing `{{AccessUrl}}`); MUST be trusted server config, never user input.
+- `SendCiamOnboardingEmailAsync(recipientEmail, firstName, portalUrl, ct)` is minimal — 025 may need an extra field (org / display-name); extend the signature then, not speculatively.
+- **026 follow-up:** `GrantAccessResponse.SpeContainerMembershipGranted` is now always `false` (vestigial). Deferred dropping it from the public DTO (touches contract + 2 DTO tests + external-spa consumer) — track if the field is confirmed unused.
 
 ### Where things stand (fresh-session summary)
 - **Design → Spec → Pipeline all DONE and committed + pushed.** No PR opened yet (branch is planning-only; open one when implementation code lands, or a draft for visibility).

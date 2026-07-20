@@ -3,7 +3,7 @@
     <title>Add CIAM onboarding email template + send method</title>
     <phase>2 Identity + provisioning + document content</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Extends the existing email pipeline with one template + method; no auth surface</rigor-reason>
     <model-tier>sonnet</model-tier>

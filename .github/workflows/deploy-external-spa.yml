@@ -1,0 +1,45 @@
+name: Deploy External SPA (Static Web App)
+
+# Phase 0 scaffold — task 003 (spaarke-SPA-external-access-platform-r1).
+# Provisions the deploy pipeline for the external Secure Project Workspace SPA onto
+# Azure Static Web Apps (swa-spaarke-external-spa-dev), replacing the Power Pages
+# web-resource path (scripts/Deploy-ExternalWorkspaceSpa.ps1, retired in Phase 3).
+#
+# MANUAL-ONLY for now (workflow_dispatch): Phase 1 (tasks 010/011/014) flips the SPA to
+# BrowserRouter, adds staticwebapp.config.json (navigationFallback + security headers),
+# and only then adds the push/path trigger so pushes to master auto-deploy.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    name: Build and deploy external-spa
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Vite solution: use npm install --legacy-peer-deps (NOT npm ci) per root CLAUDE.md §12.
+      - name: Install dependencies
+        working-directory: src/client/external-spa
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build (Vite production)
+        working-directory: src/client/external-spa
+        run: npm run build
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV }}
+          action: upload
+          # Pre-built by the step above; upload the dist output as-is.
+          app_location: src/client/external-spa/dist
+          skip_app_build: true
+          output_location: ""

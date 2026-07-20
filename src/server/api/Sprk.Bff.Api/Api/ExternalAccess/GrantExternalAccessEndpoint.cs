@@ -1,12 +1,9 @@
 using System.Security.Claims;
-using System.Text.Json.Serialization;
-using Microsoft.Graph.Models;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
-using Sprk.Bff.Api.Infrastructure.Graph;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -15,8 +12,11 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///
 /// Grants an external Contact access to a Secure Project by:
 ///   1. Creating a sprk_externalrecordaccess record in Dataverse.
-///   2. Adding the Contact to the SPE container as Reader or Writer.
-///   3. Invalidating the contact's participation cache in Redis.
+///   2. Invalidating the contact's participation cache in Redis.
+///
+/// Broker-only (ADR-028 Amendment A1): external users never authenticate to SPE
+/// directly — all external SPE access is app-only via the BFF — so no synthetic
+/// SPE container permission is written on grant.
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Endpoint filter for internal caller check (RequireAuthorization).
@@ -41,8 +41,8 @@ public static class GrantExternalAccessEndpoint
             .WithName("GrantExternalAccess")
             .WithSummary("Grant external access to a Contact for a Secure Project")
             .WithDescription(
-                "Creates a sprk_externalrecordaccess record and adds the Contact to the SPE container. " +
-                "Invalidates the contact's Redis participation cache after granting.")
+                "Creates a sprk_externalrecordaccess record and invalidates the contact's Redis " +
+                "participation cache after granting. External SPE access is app-only (broker-only).")
             .Produces<GrantAccessResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -59,7 +59,6 @@ public static class GrantExternalAccessEndpoint
     private static async Task<IResult> GrantAccessAsync(
         GrantAccessRequest request,
         DataverseWebApiClient dataverseClient,
-        IGraphClientFactory graphClientFactory,
         ITenantCache cache,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -108,40 +107,7 @@ public static class GrantExternalAccessEndpoint
                 extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
         }
 
-        // ── Step 2: Add Contact to SPE container ─────────────────────────────
-        // Resolve the container ID by looking up the project's SPE container
-        var containerMembershipGranted = false;
-        try
-        {
-            var containerId = await ResolveProjectContainerIdAsync(
-                dataverseClient, request.ProjectId, ct);
-
-            if (!string.IsNullOrEmpty(containerId))
-            {
-                var roles = request.AccessLevel == ExternalAccessLevel.ViewOnly
-                    ? new[] { "reader" }
-                    : new[] { "writer" };
-
-                containerMembershipGranted = await AddContactToSpeContainerAsync(
-                    graphClientFactory, containerId, request.ContactId, roles, logger, ct);
-            }
-            else
-            {
-                logger.LogWarning(
-                    "[EXT-GRANT] No SPE container found for Project {ProjectId} — skipping container membership",
-                    request.ProjectId);
-            }
-        }
-        catch (Exception ex)
-        {
-            // Non-fatal: Dataverse record was created, log and continue
-            logger.LogError(ex,
-                "[EXT-GRANT] Failed to add Contact {ContactId} to SPE container for Project {ProjectId}. " +
-                "Access record {AccessRecordId} exists but container membership was not granted.",
-                request.ContactId, request.ProjectId, accessRecordId);
-        }
-
-        // ── Step 3: Invalidate Redis cache ───────────────────────────────────
+        // ── Step 2: Invalidate Redis cache ───────────────────────────────────
         try
         {
             var tenantId = ExtractTenantId(httpContext);
@@ -166,7 +132,8 @@ public static class GrantExternalAccessEndpoint
                 request.ContactId);
         }
 
-        return TypedResults.Ok(new GrantAccessResponse(accessRecordId, containerMembershipGranted));
+        // Broker-only: no synthetic SPE container membership is granted on the external path.
+        return TypedResults.Ok(new GrantAccessResponse(accessRecordId, SpeContainerMembershipGranted: false));
     }
 
     // =========================================================================
@@ -202,75 +169,6 @@ public static class GrantExternalAccessEndpoint
         return payload;
     }
 
-    private static async Task<string?> ResolveProjectContainerIdAsync(
-        DataverseWebApiClient dataverseClient,
-        Guid projectId,
-        CancellationToken ct)
-    {
-        try
-        {
-            var rows = await dataverseClient.QueryAsync<ProjectContainerRow>(
-                "sprk_projects",
-                filter: $"sprk_projectid eq {projectId}",
-                select: "sprk_projectid,sprk_specontainerid",
-                top: 1,
-                cancellationToken: ct);
-
-            return rows.FirstOrDefault()?.sprk_specontainerid;
-        }
-        catch (Exception)
-        {
-            return null;
-        }
-    }
-
-    private static async Task<bool> AddContactToSpeContainerAsync(
-        IGraphClientFactory graphClientFactory,
-        string containerId,
-        Guid contactId,
-        string[] roles,
-        ILogger logger,
-        CancellationToken ct)
-    {
-        try
-        {
-            var graphClient = graphClientFactory.ForApp();
-
-            // Resolve the Contact's email to grant permission
-            // Note: SPE container permissions use email-based identity for external users
-            // The permission entry uses a guest/external user reference
-            var permission = new Permission
-            {
-                Roles = roles.ToList(),
-                GrantedToV2 = new SharePointIdentitySet
-                {
-                    User = new SharePointIdentity
-                    {
-                        // Use Contact ID as the login name for SPE external access
-                        // In practice the caller should pass the user's email/UPN
-                        LoginName = $"i:0#.f|membership|contact_{contactId}"
-                    }
-                }
-            };
-
-            await graphClient.Storage.FileStorage.Containers[containerId].Permissions
-                .PostAsync(permission, cancellationToken: ct);
-
-            logger.LogInformation(
-                "[EXT-GRANT] Added Contact {ContactId} to SPE container {ContainerId} with roles [{Roles}]",
-                contactId, containerId, string.Join(", ", roles));
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "[EXT-GRANT] Failed to add Contact {ContactId} to SPE container {ContainerId}",
-                contactId, containerId);
-            return false;
-        }
-    }
-
     /// <summary>
     /// Extracts the Azure AD tenant ID ('tid' claim) from the authenticated HttpContext.
     /// Returns null when no claim is present (in which case cache invalidation is skipped).
@@ -278,15 +176,4 @@ public static class GrantExternalAccessEndpoint
     private static string? ExtractTenantId(HttpContext httpContext)
         => httpContext.User.FindFirst("tid")?.Value
             ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-
-    // ── Dataverse row DTO ────────────────────────────────────────────────────
-
-    private sealed class ProjectContainerRow
-    {
-        [JsonPropertyName("sprk_projectid")]
-        public Guid sprk_projectid { get; set; }
-
-        [JsonPropertyName("sprk_specontainerid")]
-        public string? sprk_specontainerid { get; set; }
-    }
 }

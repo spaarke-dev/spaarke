@@ -3,7 +3,8 @@
     <title>Register CIAM-tenant app for Graph user management</title>
     <phase>0 Foundations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE. App 'Spaarke CIAM Graph Provisioner' (client e63e6eb1-be25-4214-80a8-a6d609034bb9) registered single-tenant in the CIAM tenant; Graph app permission User.ReadWrite.All admin-consented (owner). Credential = certificate: private key in Key Vault spaarke-spekvcert (cert 'ciam-graph-provisioner-cert', thumbprint 938A0ECE160B3D6BE07751638F1B5B282B524F92, expires 2028-07-20); public .cer uploaded to the app (keyCredential id f3e09e97-f34f-4872-ad0f-3a48a4d37d3c). No plaintext secret in repo. Recorded in config/spaarke-resources.yaml (external_identity) + config/environments.json (dev.ciam.graphProvisionerClientId). BFF loads the cert from KV at runtime in task 022.</status-note>
     <rigor>STANDARD</rigor>
     <rigor-reason>Config/infra task with explicit constraints</rigor-reason>
     <model-tier>sonnet</model-tier>
