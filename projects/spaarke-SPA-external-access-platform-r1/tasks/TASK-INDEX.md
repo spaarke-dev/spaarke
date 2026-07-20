@@ -17,7 +17,7 @@
 | 013 | Add SWA origin to BFF CORS + SPA redirect URIs | 1 | FULL | sonnet/high | 003 | ✗ (shares Program/AuthModule) | 🔲 |
 | 014 | Deploy external-spa to SWA on existing B2B + verify parity | 1 | STANDARD | sonnet/high | 010,011,012,013 | ✗ (deploy gate) | 🔲 |
 | 020 | Add second "Ciam" JwtBearer scheme | 2 | FULL | **opus**/high | 001 | ✗ (shares AuthModule) | ✅ |
-| 021 | Pin "Ciam" scheme on `/api/v1/external` group | 2 | FULL | **opus**/high | 020 | ✗ (shares ExternalAccessEndpoints) | 🔲 |
+| 021 | Pin "Ciam" scheme on `/api/v1/external` group | 2 | FULL | **opus**/high | 020 | ✗ (shares ExternalAccessEndpoints) | ✅ |
 | 022 | Build cross-tenant CIAM Graph client | 2 | FULL | **opus**/high | 002 | ✗ (new client + DI) | ✅ |
 | 023 | Resolve Contact by CIAM `oid` | 2 | FULL | **opus**/high | 004,020 | ✗ (shares filter/participation) | 🔲 |
 | 024 | Add CIAM onboarding email template + method | 2 | STANDARD | sonnet/high | none | ✓ Group B | ✅ |

@@ -3,7 +3,8 @@
     <title>Pin the "Ciam" scheme on the /api/v1/external endpoint group</title>
     <phase>2 Identity + provisioning + document content</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE. Added AuthPolicies.CiamExternal ("CiamExternal") + registered the policy in AuthorizationModule (AuthenticationSchemes=[AuthSchemes.Ciam] + RequireAuthenticatedUser) — mirrors the existing RagApiKey named-policy precedent. Pinned it on the /api/v1/external group via .RequireAuthorization(AuthPolicies.CiamExternal) in ExternalAccessEndpoints.cs. Internal /api/v1/external-access group LEFT on workforce default .RequireAuthorization() (no CIAM pin) — verified. Child project-data endpoints only .AddExternalCallerAuthorizationFilter() (no stacked RequireAuthorization), so the group CIAM pin applies cleanly + additively to the filter (ADR-008). Refreshed stale "B2B guest"/"Power Pages" comments to CIAM. Negative cases (workforce→external 401, CIAM→internal 401) are by-construction; asserted in task 030. Build 0 errors; publish 45.69 MB compressed (≤60, no package delta). code-review + adr-check clean.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Auth routing change on the external surface (tags: auth)</rigor-reason>
     <model-tier>opus</model-tier>

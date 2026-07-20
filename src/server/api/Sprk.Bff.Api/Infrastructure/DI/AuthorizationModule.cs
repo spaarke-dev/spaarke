@@ -238,6 +238,17 @@ public static class AuthorizationModule
                 p.RequireAuthenticatedUser();
             });
 
+            // External Secure Project Workspace policy (task 021 · ADR-028 Amendment A1).
+            // Pins the "Ciam" JwtBearer scheme (task 020) onto the /api/v1/external group so ONLY
+            // CIAM-issued tokens authenticate there — a workforce token (default scheme) does NOT,
+            // and a CIAM token does NOT reach the workforce-default /api/v1/external-access group.
+            // RequireAuthenticatedUser enforces a 401 rather than falling back to the default scheme.
+            options.AddPolicy(AuthPolicies.CiamExternal, p =>
+            {
+                p.AuthenticationSchemes = new[] { AuthSchemes.Ciam };
+                p.RequireAuthenticatedUser();
+            });
+
             // Admin Policies
             options.AddPolicy("SystemAdmin", p =>
             {
