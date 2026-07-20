@@ -9,10 +9,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | W9 post-UAT remediation — **ALL 4 DEFECTS FIXED/BUILT + committed** (091/092/093, all gates clean). Awaiting owner go-ahead on DEPLOY. |
-| **Active** | **DEPLOY** the remediated BFF + hand off PCF/UAT remainder. NOT started (needs owner OK — merge origin/master 25 commits + App Service deploy is outward-facing). |
-| **Done (W9)** | 091 #7 `d6d03f6cb`; 092 #4/#5 `070e6e663` (+M2 empty-message-id hardening); 093 #2 PCF `2d56cf8e0`. Bookkeeping `29f6a619c`/`c5e2edc75`/`6e1813d95`. |
-| **Deploy plan** | (1) `git merge origin/master` into worktree (resolve conflicts), (2) build+`dotnet test --filter Communication` green, (3) §10 publish-size+CVE, (4) `/merge-to-master` (protected → auto-merge PR), (5) App Service deploy `spaarke-bff-dev` + healthz. THEN owner: import `CommunicationAttachmentsSolution_v1.0.0.zip` + swap OOB subgrid; UAT re-verify (D-1 fresh email proves #5 auto-profile + webhook-KV; #7 subject-PAT/body-REAL→Ambiguous; #4 open archived .eml). |
+| **Phase** | W9 remediation SHIPPED — all 4 defects fixed/built, merged to master (PR #663 `9000fe2c3`), **BFF DEPLOYED to spaarke-bff-dev** (hash-verify 4/4, healthz 200, routes live). Awaiting owner UAT re-verify + PCF import. |
+| **Active** | OWNER runbook: import `CommunicationAttachmentsSolution_v1.0.0.zip` + swap OOB subgrid; UAT re-verify #7/#4/#5 + D-1 fresh email (webhook-KV) + Tier 2/3, B-4/5, H-8. |
+| **Done (W9)** | 091 #7 `d6d03f6cb`; 092 #4/#5 `070e6e663` (+M2 hardening); 093 #2 PCF `2d56cf8e0`. Synced origin/master (72 commits, 0 conflicts) `dd57cb659`. Merged PR #663. Deployed BFF (build 47MB pkg, hash-verified). |
+| **Owner UAT re-verify (all live on dev)** | #7: email subject=matter#A + body=DIFFERENT matter#B → expect **Ambiguous** (both surfaced). #4: Save-to-SharePoint → open archived Document → opens as .eml with attachments, name ends `.eml`. #5+webhook-KV: one fresh inbound email (D-1) → archived .eml Document gains Document-Profile fields + first HMAC webhook validates. Plus Tier 2/3 PCF UI, B-4/B-5, H-8. |
+| **Open decisions** | Cert 170c98e1 pfx in %TEMP% → KV or leave (owner). PCF `CommunicationAttachments` import + form swap (owner maker). |
+| **Held** | Task 090 wrap-up until UAT closes. |
 
 ### W9 remediation tasks (POMLs + decisions locked)
 - **091** #7 — Suggest-only (body refs never auto-file; email-1 → Ambiguous). ✅ implemented (gate pending).
