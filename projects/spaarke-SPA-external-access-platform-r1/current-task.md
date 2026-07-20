@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-19 (context-handoff — Phase 0 + 020/024/026 complete = 7 tasks ✅; tree clean, all pushed to origin @ d7a70bcb5)
+> **Last Updated**: 2026-07-19 (task 022 COMPLETE = 8 tasks ✅; CIAM Graph client landed; next 021)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — **Phase 0 (001/002/003/004) + 024/026 + 020 COMPLETE**. 7 tasks ✅. Phase 0 batch committed+pushed (2d959782a); **020 committed separately below**. |
-| **Step** | 020 done; ready for 021/022 |
-| **Status** | 7 ✅ (001, 002, 003, 004, 020, 024, 026) |
-| **Next Action** | Continue Phase 2 auth chain: **022** (cross-tenant CIAM Graph client — model on SpeAdminTokenProvider; loads cert `ciam-graph-provisioner-cert` from KV `spaarke-spekvcert`, CIAM app client `e63e6eb1-...`, authority in config dev.ciam) and **021** (pin AuthSchemes.Ciam on `/api/v1/external` group — deps 020 ✅). Then 023 → 025/027 → 030 (tests) → 031. |
+| **Task** | none active — **Phase 0 + 020/024/026 + 022 COMPLETE**. 8 tasks ✅. |
+| **Step** | 022 done; ready for 021/023/028 (Wave 2.2) |
+| **Status** | 8 ✅ (001, 002, 003, 004, 020, 022, 024, 026) |
+| **Next Action** | Continue Phase 2 auth chain (Wave 2.2, all deps met): **021** (pin `AuthSchemes.Ciam` on `/api/v1/external` group — deps 020 ✅), **023** (resolve Contact by CIAM `oid` via `sprk_externalobjectid`; extend `ExternalCallerAuthorizationFilter`/`ExternalParticipationService` — deps 004+020 ✅), **028** (external-spa → CIAM authority — deps 020 ✅). These are `parallel-safe:false` (share endpoint/filter files); run sequentially. Then 025 (provisioner, xhigh, consumes 022's `CiamGraphClientFactory`) → 027 (download authz, xhigh) → 030 (tests) → 031 (deploy). |
 
 ### Completed this session (2026-07-19)
 - **004** — `contact.sprk_externalobjectid` (String/100) created live on `spaarkedev1`, in SpaarkeCore + SpaarkeMaster, published, queryable. Doc: `notes/data-model-sprk_externalobjectid.md`. MetadataId `b28603f2-bd83-f111-8076-7ced8ddc4cc6`.

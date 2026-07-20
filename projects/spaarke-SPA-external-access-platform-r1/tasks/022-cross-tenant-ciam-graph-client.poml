@@ -3,7 +3,8 @@
     <title>Build cross-tenant CIAM Graph client (app-only)</title>
     <phase>2 Identity + provisioning + document content</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE. New `Infrastructure/Graph/CiamGraphClientFactory.cs` (concrete sealed singleton, no interface per ADR-010 — mirrors SpeAdminTokenProvider). App-only client-credentials against the CIAM authority ({Ciam:Instance}/{Ciam:TenantId}) via a cached per-authority MSAL ConfidentialClientApplication built WithCertificate + WithAuthority; AcquireTokenForClient(["graph/.default"]) — NO OBO, NO UserAssertion (broker-only, ADR-028 A1). Cert loaded at runtime from Key Vault via the shared SecretClient (KV cert PFX exposed as same-named secret; exportable RSA-2048 confirmed via az); EphemeralKeySet (in-memory, never on disk); only the non-secret cert NAME + provisioner clientId placeholders live in config (NFR-06). Exposes AcquireAppOnlyTokenAsync (token seam) + CreateClientForAppAsync (GraphServiceClient v1.0 over the resilient "GraphApiClient" HttpClient). Registered `services.AddSingleton<CiamGraphClientFactory>()` in ExternalAccessModule. Config: added Ciam:GraphProvisioner {ClientId, CertificateName} sub-section to appsettings.template.json (#{CIAM_GRAPH_PROVISIONER_APP_ID}# / #{CIAM_GRAPH_PROVISIONER_CERT_NAME}#) + comment. Build 0 errors; publish 45.69 MB compressed (≤60); no new packages; no new HIGH CVE. code-review + adr-check clean. Runtime prereq for task 031: BFF MI needs KV 'Secrets User' on spaarke-spekvcert to read the cert PFX. Consumed by task 025 (provisioner).</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>New cross-tenant auth component reaching a second tenant's Graph (tags: auth)</rigor-reason>
     <model-tier>opus</model-tier>
